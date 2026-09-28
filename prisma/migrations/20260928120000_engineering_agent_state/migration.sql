@@ -104,12 +104,16 @@ DECLARE
     decision_limit CONSTANT INTEGER := 3;
     -- setting: ENGINEERING_AGENT_MODE_SETTING_KEY
     mode_key CONSTANT TEXT := 'feature.engineeringAgentMode';
+    -- setting: ENGINEERING_AGENT_FREEZE_SETTING_KEY
+    freeze_key CONSTANT TEXT := 'feature.engineeringAgentFreeze';
     effective_pr_limit INTEGER;
     attempt_matches BOOLEAN;
     mode_value TEXT;
+    freeze_value TEXT;
     t1_started TIMESTAMP(3);
-    open_prs INTEGER;
-    pending_decisions INTEGER;
+    open_prs BIGINT;
+    pending_decisions BIGINT;
+    active_runs BIGINT;
 BEGIN
     -- Ended runs are the circuit's input (§12): none is ever removed.
     IF TG_OP = 'DELETE' THEN
@@ -132,25 +136,55 @@ BEGIN
             RAISE EXCEPTION 'EngineeringAgentRun must bind an attempt to that attempt''s card'
                 USING ERRCODE = 'check_violation';
         END IF;
-        -- The owner queues (policy §12): a new run is a new claim, and none is
-        -- taken while either queue is full. Runs are counted one at a time.
+        -- Runs are admitted one at a time.
         PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('engineering-agent:owner-queue'));
 
-        -- Every run records the mode it started under, read here and not
-        -- taken from the caller; an unset or unknown value is `off`, as in
-        -- lib/engineeringAgentCore.ts. The first T1 window starts with the
-        -- first run that saw `t1`, which is never earlier than the mode
-        -- change itself, so the window read here is never shorter than the
-        -- policy's. Runs are never deleted, so that start never moves.
+        -- A run is a claim, and there is none while the mode is off or the
+        -- agent is frozen (§12). The mode a run started under is read here,
+        -- never taken from the caller; an unset or unknown value is `off`,
+        -- as lib/engineeringAgentCore.ts reads it. A deferred check below
+        -- holds that reading to the settings the transaction commits with.
+        -- The environment kill switch is not in the database: the app reads
+        -- it, with the halt and the circuit, before it claims.
         EXECUTE pg_catalog.format(
-            'SELECT s."value" FROM %I."AppSetting" s WHERE s."key" = $1',
+            'SELECT max(s."value") FILTER (WHERE s."key" = $1), max(s."value") FILTER (WHERE s."key" = $2)'
+            ' FROM %I."AppSetting" s WHERE s."key" = ANY (ARRAY[$1, $2])',
             TG_TABLE_SCHEMA
-        ) INTO mode_value USING mode_key;
+        ) INTO mode_value, freeze_value USING mode_key, freeze_key;
         NEW."modeAtStart" := CASE WHEN mode_value IN ('shadow', 't1') THEN mode_value ELSE 'off' END;
+        IF NEW."modeAtStart" = 'off' THEN
+            RAISE EXCEPTION 'EngineeringAgentRun refused: the mode is off' USING ERRCODE = 'check_violation';
+        END IF;
+        IF freeze_value = 'true' THEN
+            RAISE EXCEPTION 'EngineeringAgentRun refused: the agent is frozen' USING ERRCODE = 'check_violation';
+        END IF;
+
+        -- The owner queues (§12), counted in one statement so that a change
+        -- committing in between is seen once, not in neither count. What a
+        -- run can become is counted before it exists: an active run may
+        -- still produce a pull request or a decision, and a publish item not
+        -- yet settled may still produce a binding. Every binding and every
+        -- draft comes from an admitted run, so refusing the run is the cap.
+        -- Decision items opened for a mismatch, an unknown outcome or a
+        -- partial registration are counted and never refused: recording a
+        -- problem is not a claim.
         EXECUTE pg_catalog.format(
-            'SELECT min(r."startedAt") FROM %I."EngineeringAgentRun" r WHERE r."modeAtStart" = $1',
+            'SELECT'
+            ' (SELECT count(*) FROM %1$I."EngineeringAgentBinding" b WHERE b."state" = ANY ($1) AND b."supersededAt" IS NULL)'
+            ' + (SELECT count(*) FROM %1$I."EngineeringAgentWorkItem" w WHERE w."kind" = $2 AND w."state" = ANY ($3)),'
+            ' (SELECT count(*) FROM %1$I."EngineeringAgentWorkItem" w WHERE w."kind" = ANY ($4) AND w."state" = $5),'
+            ' (SELECT count(*) FROM %1$I."EngineeringAgentRun" r WHERE r."status" = $6),'
+            ' (SELECT min(r."startedAt") FROM %1$I."EngineeringAgentRun" r WHERE r."modeAtStart" = $7)',
             TG_TABLE_SCHEMA
-        ) INTO t1_started USING 't1';
+        ) INTO open_prs, pending_decisions, active_runs, t1_started
+        USING ARRAY['open', 'closed'], 'publish', ARRAY['queued', 'claimed', 'needs_lookup', 'outcome_unknown'],
+              ARRAY['t2_draft', 'decision', 'state_mismatch'], 'open', 'active', 't1';
+
+        -- The first T1 window starts with the first run in this database
+        -- that started under `t1`: never earlier than the mode change, so the
+        -- window is never shorter than the policy's. Runs are never deleted,
+        -- so the start never moves; a later return to `t1` after `off` opens
+        -- no second window, because §12 names only the first.
         IF t1_started IS NULL AND NEW."modeAtStart" = 't1' THEN
             t1_started := now_utc;
         END IF;
@@ -159,21 +193,11 @@ BEGIN
                 THEN first_t1_pr_limit
             ELSE pr_limit
         END;
-
-        EXECUTE pg_catalog.format(
-            'SELECT count(*) FROM %I."EngineeringAgentBinding" b WHERE b."state" = ANY ($1) AND b."supersededAt" IS NULL',
-            TG_TABLE_SCHEMA
-        ) INTO open_prs USING ARRAY['open', 'closed'];
-        -- Every decision the owner owes is an open work item: T2 drafts,
-        -- mismatches, and decision items -- including the one each unknown
-        -- write outcome and each partial registration must open (below).
-        EXECUTE pg_catalog.format(
-            'SELECT count(*) FROM %I."EngineeringAgentWorkItem" w WHERE w."kind" = ANY ($1) AND w."state" = $2',
-            TG_TABLE_SCHEMA
-        ) INTO pending_decisions USING ARRAY['t2_draft', 'decision', 'state_mismatch'], 'open';
-        IF open_prs >= effective_pr_limit OR pending_decisions >= decision_limit THEN
+        IF open_prs + active_runs >= effective_pr_limit OR pending_decisions + active_runs >= decision_limit THEN
             RAISE EXCEPTION 'EngineeringAgentRun refused: the owner queue is full' USING ERRCODE = 'check_violation';
         END IF;
+        -- The daily run cap (§12) waits for its number (§16); none is made
+        -- up here.
         NEW."startedAt" := now_utc;
         RETURN NEW;
     END IF;
@@ -233,6 +257,42 @@ CREATE TRIGGER "engineering_agent_run_guard_update"
 CREATE TRIGGER "engineering_agent_run_guard_delete"
     BEFORE DELETE ON "EngineeringAgentRun"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_run_guard"();
+
+-- The mode a run records is the mode the transaction commits with. Setting
+-- `t1`, starting a run and setting it back inside one transaction would
+-- otherwise record a run under a mode that was never in force, and open the
+-- first T1 window without a committed mode change.
+CREATE OR REPLACE FUNCTION "engineering_agent_run_mode_committed"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    -- setting: ENGINEERING_AGENT_MODE_SETTING_KEY
+    mode_key CONSTANT TEXT := 'feature.engineeringAgentMode';
+    -- setting: ENGINEERING_AGENT_FREEZE_SETTING_KEY
+    freeze_key CONSTANT TEXT := 'feature.engineeringAgentFreeze';
+    mode_value TEXT;
+    freeze_value TEXT;
+BEGIN
+    EXECUTE pg_catalog.format(
+        'SELECT max(s."value") FILTER (WHERE s."key" = $1), max(s."value") FILTER (WHERE s."key" = $2)'
+        ' FROM %I."AppSetting" s WHERE s."key" = ANY (ARRAY[$1, $2])',
+        TG_TABLE_SCHEMA
+    ) INTO mode_value, freeze_value USING mode_key, freeze_key;
+    IF (CASE WHEN mode_value IN ('shadow', 't1') THEN mode_value ELSE 'off' END) <> NEW."modeAtStart"
+        OR freeze_value = 'true' THEN
+        RAISE EXCEPTION 'EngineeringAgentRun % started under a mode the transaction does not commit with', NEW."id"
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "engineering_agent_run_mode_committed"
+    AFTER INSERT ON "EngineeringAgentRun"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION "engineering_agent_run_mode_committed"();
 
 -- ---------------------------------------------------------------------------
 -- EngineeringAgentWorkItem: T2 drafts, the three GitHub writes, decisions and
@@ -476,27 +536,31 @@ BEGIN
                 RAISE EXCEPTION 'EngineeringAgentWorkItem % lease has passed; only a lookup follows', OLD."id"
                     USING ERRCODE = 'check_violation';
             END IF;
-            -- A publish is the consumption of the item's one capability.
-            -- A write claim publishes on its own consumption; a lookup claim
-            -- publishes only on finding what an earlier write claim consumed.
-            -- A consumed capability stays consumed (§10), so an item whose
-            -- capability was consumed -- by any claim -- never returns to
-            -- the queue; a new attempt is a new item with a new capability.
-            IF OLD."kind" = 'publish' AND OLD."state" = 'claimed' AND NEW."state" IN ('published', 'queued') THEN
-                EXECUTE pg_catalog.format(
-                    'SELECT c."claimFencingToken" FROM %I."EngineeringAgentCapability" c'
-                    ' WHERE c."workItemId" = $1 AND c."consumedAt" IS NOT NULL FOR UPDATE',
-                    TG_TABLE_SCHEMA
-                ) INTO consumed_token USING OLD."id";
-                IF NEW."state" = 'queued' AND consumed_token IS NOT NULL THEN
-                    RAISE EXCEPTION 'EngineeringAgentWorkItem % consumed its capability and cannot be requeued', OLD."id"
-                        USING ERRCODE = 'check_violation';
+            -- A publish is the consumption of a capability: a write claim
+            -- publishes on the one it consumed itself, a lookup claim only on
+            -- finding one an earlier write claim consumed. A consumed
+            -- capability stays consumed (§10). When a write claim is refused
+            -- before writing, or a lookup proves no earlier write happened, the
+            -- item returns to the queue and its next write claim is judged
+            -- again under a new capability (§10), so an item holds several
+            -- capabilities over its life, at most one of them unconsumed.
+            IF OLD."kind" = 'publish' AND OLD."state" = 'claimed' AND NEW."state" = 'published' THEN
+                IF OLD."claimMode" = 'write' THEN
+                    EXECUTE pg_catalog.format(
+                        'SELECT c."claimFencingToken" FROM %I."EngineeringAgentCapability" c'
+                        ' WHERE c."workItemId" = $1 AND c."consumedAt" IS NOT NULL AND c."claimFencingToken" = $2'
+                        ' LIMIT 1 FOR UPDATE',
+                        TG_TABLE_SCHEMA
+                    ) INTO consumed_token USING OLD."id", OLD."fencingToken";
+                ELSE
+                    EXECUTE pg_catalog.format(
+                        'SELECT c."claimFencingToken" FROM %I."EngineeringAgentCapability" c'
+                        ' WHERE c."workItemId" = $1 AND c."consumedAt" IS NOT NULL AND c."claimFencingToken" < $2'
+                        ' LIMIT 1 FOR UPDATE',
+                        TG_TABLE_SCHEMA
+                    ) INTO consumed_token USING OLD."id", OLD."fencingToken";
                 END IF;
-                IF NEW."state" = 'published' AND (
-                    consumed_token IS NULL
-                    OR (OLD."claimMode" = 'write' AND consumed_token <> OLD."fencingToken")
-                    OR (OLD."claimMode" = 'lookup' AND consumed_token >= OLD."fencingToken")
-                ) THEN
+                IF consumed_token IS NULL THEN
                     RAISE EXCEPTION 'EngineeringAgentWorkItem % publishes only on a consumed capability', OLD."id"
                         USING ERRCODE = 'check_violation';
                 END IF;
@@ -675,13 +739,18 @@ CREATE CONSTRAINT TRIGGER "engineering_agent_approval_closes_draft"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_approval_closes_draft"();
 
 -- ---------------------------------------------------------------------------
--- EngineeringAgentCapability: permission for one publish (§11). Issued once,
--- consumed at most once and irrevocably, immutable after.
+-- EngineeringAgentCapability: permission for one publish (§11). Issued to a
+-- queued publish item, consumed at most once and irrevocably, immutable after.
+-- An item has at most one unconsumed capability at a time; one that expired
+-- unconsumed may lapse, and then it can never be consumed.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE "EngineeringAgentCapability" (
     "id" TEXT NOT NULL,
     "workItemId" TEXT NOT NULL,
+    -- The work item while this capability is unconsumed and unlapsed, else
+    -- NULL; its unique constraint is "one live capability per item".
+    "unconsumedWorkItemId" TEXT,
     "baseSha" TEXT NOT NULL,
     "patchDigest" TEXT NOT NULL,
     "expectedTreeId" TEXT NOT NULL,
@@ -698,8 +767,10 @@ CREATE TABLE "EngineeringAgentCapability" (
 );
 
 ALTER TABLE "EngineeringAgentCapability"
-    -- One capability per publish item: issuing is a single conditional write.
-    ADD CONSTRAINT "EngineeringAgentCapability_workItemId_key" UNIQUE ("workItemId"),
+    -- One live capability per publish item: issuing is a single conditional write.
+    ADD CONSTRAINT "EngineeringAgentCapability_unconsumedWorkItemId_key" UNIQUE ("unconsumedWorkItemId"),
+    ADD CONSTRAINT "EngineeringAgentCapability_unconsumed_check"
+        CHECK ("unconsumedWorkItemId" IS NULL OR ("unconsumedWorkItemId" = "workItemId" AND "consumedAt" IS NULL)),
     ADD CONSTRAINT "EngineeringAgentCapability_hash_check"
         CHECK (
             "baseSha" ~ '^[0-9a-f]{40}$' AND "expectedTreeId" ~ '^[0-9a-f]{40}$'
@@ -711,6 +782,8 @@ ALTER TABLE "EngineeringAgentCapability"
         CHECK ("verifierVersion" >= 1 AND "policyVersion" >= 1),
     ADD CONSTRAINT "EngineeringAgentCapability_consumed_check"
         CHECK (("consumedAt" IS NULL) = ("claimFencingToken" IS NULL));
+
+CREATE INDEX "EngineeringAgentCapability_workItemId_idx" ON "EngineeringAgentCapability"("workItemId");
 
 ALTER TABLE "EngineeringAgentCapability"
     ADD CONSTRAINT "EngineeringAgentCapability_workItemId_fkey"
@@ -747,11 +820,12 @@ BEGIN
                 USING ERRCODE = 'check_violation';
         END IF;
         NEW."issuedAt" := now_utc;
+        NEW."unconsumedWorkItemId" := NEW."workItemId";
         RETURN NEW;
     END IF;
 
-    IF OLD."consumedAt" IS NOT NULL THEN
-        RAISE EXCEPTION 'EngineeringAgentCapability % is consumed and immutable', OLD."id"
+    IF OLD."consumedAt" IS NOT NULL OR OLD."unconsumedWorkItemId" IS NULL THEN
+        RAISE EXCEPTION 'EngineeringAgentCapability % is consumed or lapsed, and immutable', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
     IF NEW."id" IS DISTINCT FROM OLD."id"
@@ -768,11 +842,22 @@ BEGIN
         RAISE EXCEPTION 'EngineeringAgentCapability % binds what it was issued for', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
-    -- The only change is consumption: once, before expiry, by the claim that
-    -- holds the publish item's current fencing token while its lease lives.
+    -- Two changes, each once. A capability that expired unconsumed may
+    -- lapse, which frees its item for a new one and never allows consumption.
     IF NEW."consumedAt" IS NULL AND NEW."claimFencingToken" IS NULL THEN
+        IF NEW."unconsumedWorkItemId" IS NULL THEN
+            IF OLD."expiresAt" > now_utc THEN
+                RAISE EXCEPTION 'EngineeringAgentCapability % lapses only after it expires', OLD."id"
+                    USING ERRCODE = 'check_violation';
+            END IF;
+        ELSIF NEW."unconsumedWorkItemId" IS DISTINCT FROM OLD."unconsumedWorkItemId" THEN
+            RAISE EXCEPTION 'EngineeringAgentCapability % binds what it was issued for', OLD."id"
+                USING ERRCODE = 'check_violation';
+        END IF;
         RETURN NEW;
     END IF;
+    -- Otherwise consumption: before expiry, by the claim that holds the
+    -- publish item's current fencing token while its lease lives.
     IF OLD."expiresAt" <= now_utc THEN
         RAISE EXCEPTION 'EngineeringAgentCapability % has expired', OLD."id" USING ERRCODE = 'check_violation';
     END IF;
@@ -788,6 +873,7 @@ BEGIN
             USING ERRCODE = 'check_violation';
     END IF;
     NEW."consumedAt" := now_utc;
+    NEW."unconsumedWorkItemId" := NULL;
     RETURN NEW;
 END;
 $$;
@@ -820,6 +906,9 @@ CREATE TABLE "EngineeringAgentBinding" (
     "reviewerLogin" TEXT,
     "reviewerRecordedAt" TIMESTAMP(3),
     "supersededAt" TIMESTAMP(3),
+    -- The pull request number while this row is current, else NULL; its
+    -- unique constraint is "one current row per pull request".
+    "currentPrNumber" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -841,10 +930,95 @@ ALTER TABLE "EngineeringAgentBinding"
         CHECK (
             ("reviewerGithubId" IS NULL) = ("reviewerLogin" IS NULL)
             AND ("reviewerGithubId" IS NULL OR "reviewerRecordedAt" IS NOT NULL)
+        ),
+    ADD CONSTRAINT "EngineeringAgentBinding_currentPrNumber_key" UNIQUE ("currentPrNumber"),
+    ADD CONSTRAINT "EngineeringAgentBinding_current_check"
+        CHECK (
+            ("supersededAt" IS NULL) = ("currentPrNumber" IS NOT NULL)
+            AND ("currentPrNumber" IS NULL OR "currentPrNumber" = "prNumber")
+        ),
+    -- The JSON columns hold digests, enums, review ids and instants: no free
+    -- text, and no person (the reviewer has its own columns, which retention
+    -- clears). Key sets are exact, and each value has its shape and a size.
+    ADD CONSTRAINT "EngineeringAgentBinding_snapshot_check"
+        CHECK (
+            jsonb_typeof("snapshot") = 'object'
+            AND octet_length("snapshot"::text) <= 4096
+            AND "snapshot" ?& ARRAY['baseSha', 'diffDigest', 'treeId', 'invalidatedReviewIds']
+            AND "snapshot" - ARRAY['baseSha', 'diffDigest', 'treeId', 'invalidatedReviewIds'] = '{}'::jsonb
+            AND jsonb_typeof("snapshot"->'baseSha') = 'string' AND "snapshot"->>'baseSha' ~ '^[0-9a-f]{40}$'
+            AND jsonb_typeof("snapshot"->'diffDigest') = 'string' AND "snapshot"->>'diffDigest' ~ '^[0-9a-f]{64}$'
+            AND jsonb_typeof("snapshot"->'treeId') = 'string' AND "snapshot"->>'treeId' ~ '^[0-9a-f]{40}$'
+            AND jsonb_typeof("snapshot"->'invalidatedReviewIds') = 'array'
+            AND jsonb_array_length("snapshot"->'invalidatedReviewIds') <= 100
+            AND NOT jsonb_path_exists(
+                "snapshot", '$.invalidatedReviewIds[*] ? (@.type() != "number" || @ < 1 || @.floor() != @)')
+        ),
+    ADD CONSTRAINT "EngineeringAgentBinding_approvalObservation_check"
+        CHECK (
+            "approvalObservation" IS NULL OR (
+                jsonb_typeof("approvalObservation") = 'object'
+                AND octet_length("approvalObservation"::text) <= 1024
+                AND jsonb_typeof("approvalObservation"->'observedAt') = 'string'
+                AND "approvalObservation"->>'observedAt'
+                    ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$'
+                AND (
+                    (
+                        "approvalObservation"->>'verdict' = 'approved'
+                        AND "approvalObservation" ?& ARRAY['verdict', 'reviewId', 'reviewCommitId', 'submittedAt', 'observedAt']
+                        AND "approvalObservation"
+                            - ARRAY['verdict', 'reviewId', 'reviewCommitId', 'submittedAt', 'observedAt'] = '{}'::jsonb
+                        AND jsonb_typeof("approvalObservation"->'reviewId') = 'number'
+                        AND jsonb_typeof("approvalObservation"->'reviewCommitId') = 'string'
+                        AND "approvalObservation"->>'reviewCommitId' ~ '^[0-9a-f]{40}$'
+                        AND jsonb_typeof("approvalObservation"->'submittedAt') = 'string'
+                        AND "approvalObservation"->>'submittedAt'
+                            ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$'
+                    )
+                    OR (
+                        "approvalObservation"->>'verdict' = 'not_approved'
+                        AND "approvalObservation" ?& ARRAY['verdict', 'reason', 'observedAt']
+                        AND "approvalObservation" - ARRAY['verdict', 'reason', 'observedAt'] = '{}'::jsonb
+                        -- reasons: ENGINEERING_AGENT_NOT_APPROVED_REASONS
+                        AND "approvalObservation"->>'reason' IN (
+                            'base_not_develop', 'head_not_verified', 'required_check_failed', 'no_authorised_review',
+                            'review_not_valid', 'snapshot_changed', 'review_before_snapshot', 'merged_without_approval'
+                        )
+                    )
+                )
+            )
+        ),
+    ADD CONSTRAINT "EngineeringAgentBinding_mergeObservation_check"
+        CHECK (
+            "mergeObservation" IS NULL OR (
+                jsonb_typeof("mergeObservation") = 'object'
+                AND octet_length("mergeObservation"::text) <= 1024
+                AND "mergeObservation" ?& ARRAY['merged', 'mergeCommitSha', 'mergedAt', 'mergedByKind', 'observedAt']
+                AND "mergeObservation"
+                    - ARRAY['merged', 'mergeCommitSha', 'mergedAt', 'mergedByKind', 'observedAt'] = '{}'::jsonb
+                -- mergers: ENGINEERING_AGENT_MERGER_KINDS
+                AND "mergeObservation"->>'mergedByKind' IN ('user', 'bot', 'app', 'unknown')
+                AND jsonb_typeof("mergeObservation"->'observedAt') = 'string'
+                AND "mergeObservation"->>'observedAt'
+                    ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$'
+                AND (
+                    (
+                        "mergeObservation"->'merged' = 'true'::jsonb
+                        AND jsonb_typeof("mergeObservation"->'mergeCommitSha') = 'string'
+                        AND "mergeObservation"->>'mergeCommitSha' ~ '^[0-9a-f]{40}$'
+                        AND jsonb_typeof("mergeObservation"->'mergedAt') = 'string'
+                        AND "mergeObservation"->>'mergedAt'
+                            ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$'
+                    )
+                    OR (
+                        "mergeObservation"->'merged' = 'false'::jsonb
+                        AND jsonb_typeof("mergeObservation"->'mergeCommitSha') = 'null'
+                        AND jsonb_typeof("mergeObservation"->'mergedAt') = 'null'
+                    )
+                )
+            )
         );
 
-CREATE UNIQUE INDEX "EngineeringAgentBinding_current_prNumber_key"
-    ON "EngineeringAgentBinding"("prNumber") WHERE "supersededAt" IS NULL;
 CREATE INDEX "EngineeringAgentBinding_runId_idx" ON "EngineeringAgentBinding"("runId");
 CREATE INDEX "EngineeringAgentBinding_state_idx" ON "EngineeringAgentBinding"("state");
 
@@ -867,6 +1041,7 @@ BEGIN
             OR NEW."reviewerGithubId" IS NOT NULL OR NEW."reviewerLogin" IS NOT NULL OR NEW."reviewerRecordedAt" IS NOT NULL THEN
             RAISE EXCEPTION 'EngineeringAgentBinding starts open, current and unobserved' USING ERRCODE = 'check_violation';
         END IF;
+        NEW."currentPrNumber" := NEW."prNumber";
         NEW."createdAt" := now_utc;
         NEW."updatedAt" := now_utc;
         RETURN NEW;
@@ -897,6 +1072,13 @@ BEGIN
     IF OLD."supersededAt" IS NULL AND NEW."supersededAt" IS NOT NULL THEN
         NEW."supersededAt" := now_utc;
     END IF;
+    -- A row is current exactly while it is not superseded, and the database
+    -- keeps that slot: a caller does not write it.
+    IF NEW."currentPrNumber" IS DISTINCT FROM OLD."currentPrNumber" THEN
+        RAISE EXCEPTION 'EngineeringAgentBinding currentPrNumber is written by the database'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    NEW."currentPrNumber" := CASE WHEN NEW."supersededAt" IS NULL THEN OLD."currentPrNumber" ELSE NULL END;
     IF NEW."state" IS DISTINCT FROM OLD."state" AND (OLD."state", NEW."state") NOT IN (
         -- transitions: EngineeringAgentBinding binding
         ('open', 'closed'),
@@ -943,7 +1125,8 @@ CREATE TRIGGER "engineering_agent_binding_guard_change"
     FOR EACH ROW EXECUTE FUNCTION "engineering_agent_binding_guard"();
 
 -- A superseded binding leaves a current one for the same pull request by
--- commit, so an open PR never drops out of the owner queue's count.
+-- commit, and that one is still counted -- open or closed, not already
+-- pruned -- so an open PR never drops out of the owner queue's count.
 CREATE OR REPLACE FUNCTION "engineering_agent_binding_superseded_has_replacement"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -954,9 +1137,9 @@ DECLARE
 BEGIN
     EXECUTE pg_catalog.format(
         'SELECT EXISTS (SELECT 1 FROM %I."EngineeringAgentBinding" b'
-        ' WHERE b."prNumber" = $1 AND b."supersededAt" IS NULL AND b."id" <> $2)',
+        ' WHERE b."currentPrNumber" = $1 AND b."id" <> $2 AND b."state" = ANY ($3))',
         TG_TABLE_SCHEMA
-    ) INTO replaced USING NEW."prNumber", NEW."id";
+    ) INTO replaced USING NEW."prNumber", NEW."id", ARRAY['open', 'closed'];
     IF NOT replaced THEN
         RAISE EXCEPTION 'EngineeringAgentBinding % was superseded without a current replacement', NEW."id"
             USING ERRCODE = 'check_violation';

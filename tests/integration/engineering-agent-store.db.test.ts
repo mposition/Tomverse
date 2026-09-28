@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 
 import type { Session } from "next-auth";
 
@@ -53,8 +53,17 @@ const requireDedicatedDatabase = () => {
 requireDedicatedDatabase();
 
 const fixtureTaskIds: string[] = [];
+const MODE_KEY = "feature.engineeringAgentMode";
+const FREEZE_KEY = "feature.engineeringAgentFreeze";
+
+// A run is a claim, and there is none while the mode is off (the run trigger).
+before(async () => {
+  await prisma.appSetting.upsert({ where: { key: MODE_KEY }, create: { key: MODE_KEY, value: "shadow" }, update: { value: "shadow" } });
+  await prisma.appSetting.deleteMany({ where: { key: FREEZE_KEY } });
+});
 
 after(async () => {
+  await prisma.appSetting.deleteMany({ where: { key: MODE_KEY } });
   if (fixtureTaskIds.length > 0) {
     await prisma.amuxWorkItem.updateMany({ where: { id: { in: fixtureTaskIds } }, data: { archivedAt: new Date() } });
   }
@@ -159,7 +168,7 @@ test("a request is recorded before its work and answered from its record after",
 
 test("a run starts and ends with its audit entries, under the runner", async () => {
   const run = await startRun();
-  assert.equal(run.modeAtStart, "off");
+  assert.equal(run.modeAtStart, "shadow");
   const extended = await inTx((tx) => heartbeatEngineeringAgentRun(tx, { runId: run.runId, leaseMs: 120_000 }));
   assert.ok(extended.getTime() > run.leaseExpiresAt.getTime());
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
@@ -218,9 +227,10 @@ test("a publish consumes its one capability on the write claim, and settles wher
 
   const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
   assert.equal(claim.fencingToken, BigInt(1));
-  const capability = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { workItemId } });
+  const capability = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: issued.capabilityId } });
   assert.ok(capability.consumedAt, "the write claim consumed the capability");
   assert.equal(capability.claimFencingToken, BigInt(1));
+  assert.equal(capability.unconsumedWorkItemId, null, "a consumed capability is no longer the item's live one");
 
   await refusedWith(
     inTx((tx) =>
@@ -457,5 +467,53 @@ test("a binding records its observations once, its reviewer as a pair, and a re-
   const observers = (await auditFor(current)).map((entry) => systemActorOf(entry));
   assert.ok(observers.includes("engineering-agent-observer"));
   assert.ok(observers.includes("engineering-agent-retention"));
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+});
+
+test("work proven unwritten returns to the queue, and its next claim runs on a new capability", async () => {
+  const run = await startRun();
+  const patchDigest = sha256("patch");
+  const issue = (workItemId: string) =>
+    inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1("base"),
+          patchDigest,
+          expectedTreeId: sha1("tree"),
+          commit: commitFields(run.runId, run.cardId),
+        },
+      }),
+    );
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:requeue`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest,
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const first = await issue(workItemId);
+  await refusedWith(issue(workItemId), "capability_already_live");
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  // The last look refused before anything was written: back to the queue.
+  const requeued = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: claim.fencingToken, outcome: "refused_before_write" }),
+  );
+  assert.equal(requeued.state, "queued");
+  const spent = await prisma.engineeringAgentCapability.findUniqueOrThrow({ where: { id: first.capabilityId } });
+  assert.ok(spent.consumedAt, "the first capability stays consumed");
+
+  const second = await issue(workItemId);
+  assert.notEqual(second.capabilityId, first.capabilityId);
+  const again = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+  assert.equal(again.fencingToken, BigInt(2));
+  const settled = await inTx((tx) =>
+    settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: again.fencingToken, outcome: "confirmed" }),
+  );
+  assert.equal(settled.state, "published");
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
 });

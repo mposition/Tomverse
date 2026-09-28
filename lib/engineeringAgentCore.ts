@@ -96,9 +96,10 @@ export const writeItemTerminalStates = <K extends WriteItemKind>(kind: K) => {
  *   consume no capability.
  * - A lease expiry sends `claimed` to `needs_lookup`, never back to `queued`.
  * - `claimed -> queued` is a write claim's refusal before any GitHub write, or
- *   a lookup that proved no earlier write happened. A publish item whose one
- *   capability was consumed never takes it: a consumed capability stays
- *   consumed (§10), so that item ends refused and a new attempt is a new item.
+ *   a lookup that proved no earlier write happened. A consumed capability
+ *   stays consumed (§10); the returned item's next write claim is judged
+ *   again under a new capability, so a publish item holds several over its
+ *   life, at most one of them live.
  * - Only an unclaimed publish item expires by TTL; the maintenance kinds are
  *   created when they are due and are not left waiting.
  */
@@ -231,8 +232,9 @@ export type WriteTransitionContext =
       fencingMatches: boolean;
       outcome: WriteResultOutcome;
       /**
-       * Whether the item's capability has been consumed, by this claim or an
-       * earlier one. Only a publish item has one; for the others it is false.
+       * Whether the capability this result rests on has been consumed: for a
+       * write claim, by this claim; for a lookup claim, by an earlier write
+       * claim. Only a publish item has capabilities; for the others it is false.
        */
       capabilityConsumed: boolean;
     };
@@ -250,10 +252,9 @@ const resultTarget = (
   const target = unconditionalResultTarget(kind, mode, outcome);
   if (kind !== "publish" || target === null) return target;
   const terminals = WRITE_ITEM_TERMINALS.publish;
-  // Nothing is published without the capability being consumed, and a
-  // consumed capability is never handed back to the queue.
+  // Nothing is published without a consumed capability. A return to the
+  // queue leaves a consumed one consumed; the next claim needs a new one.
   if (target === terminals.success && !capabilityConsumed) return null;
-  if (target === "queued" && capabilityConsumed) return terminals.refused;
   return target;
 };
 
@@ -504,6 +505,24 @@ export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[]
  * policy header, so a new policy version cannot go unnoticed.
  */
 export const ENGINEERING_AGENT_POLICY_VERSION = 1;
+
+/**
+ * Why an approval observation is not an approval (§9-10). The binding's JSON
+ * CHECK lists the same values; tests/engineeringAgentSchema.test.mjs compares.
+ */
+export const ENGINEERING_AGENT_NOT_APPROVED_REASONS = [
+  "base_not_develop",
+  "head_not_verified",
+  "required_check_failed",
+  "no_authorised_review",
+  "review_not_valid",
+  "snapshot_changed",
+  "review_before_snapshot",
+  "merged_without_approval",
+] as const;
+
+/** Who merged, as a kind and never as an identity (§9-10: the merger is an observation only). */
+export const ENGINEERING_AGENT_MERGER_KINDS = ["user", "bot", "app", "unknown"] as const;
 
 export const ENGINEERING_AGENT_MODE_SETTING_KEY = "feature.engineeringAgentMode";
 export const ENGINEERING_AGENT_FREEZE_SETTING_KEY = "feature.engineeringAgentFreeze";

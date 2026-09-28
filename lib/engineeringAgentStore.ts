@@ -54,7 +54,9 @@ import {
 import {
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
+  ENGINEERING_AGENT_MERGER_KINDS,
   ENGINEERING_AGENT_MODE_SETTING_KEY,
+  ENGINEERING_AGENT_NOT_APPROVED_REASONS,
   ENGINEERING_AGENT_POLICY_VERSION,
   ENGINEERING_AGENT_REGISTRATION_SETTING_KEY,
   QUEUE_TTL_DAYS,
@@ -455,17 +457,41 @@ type LockedCapability = {
   claimFencingToken: bigint | null;
 };
 
-const lockCapability = async (
+/** The item's live capability -- unconsumed and not lapsed -- if it has one. */
+const lockLiveCapability = async (
   tx: EngineeringAgentTransaction,
   workItemId: string,
 ): Promise<LockedCapability | null> => {
   const rows = await tx.$queryRaw<LockedCapability[]>`
     SELECT "id", "verifierVersion", "policyVersion", "expiresAt", "consumedAt", "claimFencingToken"
     FROM "EngineeringAgentCapability"
-    WHERE "workItemId" = ${workItemId}
+    WHERE "unconsumedWorkItemId" = ${workItemId}
     FOR UPDATE
   `;
   return rows[0] ?? null;
+};
+
+/**
+ * Whether a capability this claim's result may rest on was consumed: by this
+ * write claim itself, or -- for a lookup claim -- by an earlier write claim.
+ */
+const consumedForClaim = async (
+  tx: EngineeringAgentTransaction,
+  item: LockedWorkItem,
+): Promise<boolean> => {
+  const rows =
+    item.claimMode === "write"
+      ? await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "EngineeringAgentCapability"
+          WHERE "workItemId" = ${item.id} AND "consumedAt" IS NOT NULL AND "claimFencingToken" = ${item.fencingToken}
+          FOR UPDATE
+        `
+      : await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id" FROM "EngineeringAgentCapability"
+          WHERE "workItemId" = ${item.id} AND "consumedAt" IS NOT NULL AND "claimFencingToken" < ${item.fencingToken}
+          FOR UPDATE
+        `;
+  return rows.length > 0;
 };
 
 const asWriteKind = (kind: string): WriteItemKind =>
@@ -513,8 +539,8 @@ export async function claimEngineeringAgentWorkItem(
   if (input.mode === "lookup") {
     context = { event: "claim", mode: "lookup", capabilityConsumed: false };
   } else if (kind === "publish") {
-    capability = await lockCapability(tx, item.id);
-    if (!capability || capability.consumedAt !== null) refuse("capability_unavailable");
+    capability = await lockLiveCapability(tx, item.id);
+    if (!capability) refuse("capability_unavailable");
     if (capability!.expiresAt.getTime() <= now.getTime()) refuse("capability_expired");
     if (capability!.verifierVersion !== ENGINEERING_AGENT_VERIFIER_VERSION) refuse("verifier_changed");
     if (capability!.policyVersion !== ENGINEERING_AGENT_POLICY_VERSION) refuse("policy_changed");
@@ -562,13 +588,13 @@ export async function settleEngineeringAgentWorkItem(
   const item = await lockWorkItem(tx, input.workItemId);
   const kind = asWriteKind(item.kind);
   if (item.state !== "claimed" || item.claimMode === null) refuse("work_item_not_claimed");
-  const capability = kind === "publish" ? await lockCapability(tx, item.id) : null;
+  const capabilityConsumed = kind === "publish" ? await consumedForClaim(tx, item) : false;
   const to = resultTarget(kind, {
     event: "result",
     claimMode: item.claimMode as WriteClaimMode,
     fencingMatches: item.fencingToken === input.fencingToken,
     outcome: input.outcome,
-    capabilityConsumed: capability !== null && capability.consumedAt !== null,
+    capabilityConsumed,
   });
   await tx.engineeringAgentWorkItem.update({
     where: { id: item.id },
@@ -650,9 +676,10 @@ export async function expireEngineeringAgentWorkItem(
 /* ------------------------------------------------------------------------- */
 
 /**
- * Issues the one capability of a queued publish item, at the database's time,
- * under the current verifier and policy versions. The commit fields are bound
- * by digest: whoever later claims must reproduce the same commit object.
+ * Issues a queued publish item's live capability, at the database's time,
+ * under the current verifier and policy versions. A live one that has expired
+ * lapses first; a live one that has not is a refusal. The commit fields are
+ * bound by digest: whoever later claims must reproduce the same commit object.
  */
 export async function issueEngineeringAgentCapability(
   tx: EngineeringAgentTransaction,
@@ -665,6 +692,12 @@ export async function issueEngineeringAgentCapability(
   }
   if (item.runId !== input.capability.commit.runId) refuse("capability_run_mismatch");
   const now = await databaseNow(tx);
+  const live = await lockLiveCapability(tx, item.id);
+  if (live) {
+    if (live.expiresAt.getTime() > now.getTime()) refuse("capability_already_live");
+    // The trigger allows a lapse only after expiry, and a lapsed one is never consumed.
+    await tx.engineeringAgentCapability.update({ where: { id: live.id }, data: { unconsumedWorkItemId: null } });
+  }
   const capability = issueCapability({
     ...input.capability,
     verifierVersion: ENGINEERING_AGENT_VERIFIER_VERSION,
@@ -791,17 +824,6 @@ export const engineeringAgentBindingSnapshotSchema = z
   })
   .strict();
 
-export const ENGINEERING_AGENT_APPROVAL_VERDICTS = ["approved", "not_approved"] as const;
-export const ENGINEERING_AGENT_NOT_APPROVED_REASONS = [
-  "base_not_develop",
-  "head_not_verified",
-  "required_check_failed",
-  "no_authorised_review",
-  "review_not_valid",
-  "snapshot_changed",
-  "review_before_snapshot",
-  "merged_without_approval",
-] as const;
 
 /**
  * The approval verdict, recorded once, before merge (§9-10). An undetermined
@@ -827,8 +849,6 @@ export const engineeringAgentApprovalObservationSchema = z.discriminatedUnion("v
     })
     .strict(),
 ]);
-
-export const ENGINEERING_AGENT_MERGER_KINDS = ["user", "bot", "app", "unknown"] as const;
 
 /** Whether and how the pull request was merged. The merger is a kind, never an identity. */
 export const engineeringAgentMergeObservationSchema = z

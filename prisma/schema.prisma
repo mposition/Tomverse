@@ -7926,7 +7926,7 @@ model EngineeringAgentWorkItem {
 
   run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   approval   EngineeringAgentApproval?
-  capability EngineeringAgentCapability?
+  capabilities EngineeringAgentCapability[]
 
   @@index([kind, state])
   @@index([runId])
@@ -7950,8 +7950,11 @@ model EngineeringAgentApproval {
 
 /// Permission for one publish: issued once, consumed at most once, then immutable.
 model EngineeringAgentCapability {
-  id                String    @id
-  workItemId        String    @unique
+  id                   String    @id
+  workItemId           String
+  /// The work item while this capability is live (unconsumed, unlapsed); the
+  /// unique constraint is one live capability per item. Written by the trigger.
+  unconsumedWorkItemId String?   @unique
   baseSha           String
   patchDigest       String
   expectedTreeId    String
@@ -7965,11 +7968,13 @@ model EngineeringAgentCapability {
   claimFencingToken BigInt?
 
   workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workItemId])
 }
 
 /// A published pull request as the app bound it. The snapshot never changes; a
-/// replacement is a new row, and a partial unique index keeps one current row
-/// per pull request.
+/// replacement is a new row, and `currentPrNumber` (set by the trigger while a
+/// row is not superseded) keeps one current row per pull request.
 model EngineeringAgentBinding {
   id                  String    @id
   runId               String
@@ -7985,6 +7990,7 @@ model EngineeringAgentBinding {
   reviewerLogin       String?
   reviewerRecordedAt  DateTime?
   supersededAt        DateTime?
+  currentPrNumber     Int?      @unique
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

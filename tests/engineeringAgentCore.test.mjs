@@ -242,7 +242,7 @@ test("claimed -> queued rests only on a refusal before writing or a proven absen
   }
 });
 
-test("a consumed capability is never handed back to the queue, and nothing publishes without one", () => {
+test("proven unwritten work returns to the queue whatever was consumed, and nothing publishes without a consumption", () => {
   const publish = (to, claimMode, outcome, capabilityConsumed) =>
     decideWriteItemTransition("publish", "claimed", to, {
       event: "result",
@@ -251,13 +251,13 @@ test("a consumed capability is never handed back to the queue, and nothing publi
       fencingMatches: true,
       capabilityConsumed,
     }).allowed;
-  // Refused before writing, or proven not written: the item cannot go back,
-  // because its one capability is spent; it ends refused.
-  assert.equal(publish("queued", "write", "refused_before_write", true), false);
-  assert.equal(publish("publish_refused", "write", "refused_before_write", true), true);
-  assert.equal(publish("queued", "lookup", "lookup_no_prior_write", true), false);
-  assert.equal(publish("publish_refused", "lookup", "lookup_no_prior_write", true), true);
-  // Before consumption the queue is still open.
+  // Refused before writing, or proven not written: the work returns to the
+  // queue (docs/policy/engineering-agent.md §10). The consumed capability stays consumed; the next write claim
+  // is judged again under a new one. It never ends as a refusal.
+  assert.equal(publish("queued", "write", "refused_before_write", true), true);
+  assert.equal(publish("publish_refused", "write", "refused_before_write", true), false);
+  assert.equal(publish("queued", "lookup", "lookup_no_prior_write", true), true);
+  assert.equal(publish("publish_refused", "lookup", "lookup_no_prior_write", true), false);
   assert.equal(publish("queued", "write", "refused_before_write", false), true);
   assert.equal(publish("queued", "lookup", "lookup_no_prior_write", false), true);
   // A publish, by the write or by the lookup that finds it, rests on consumption.

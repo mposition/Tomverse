@@ -5,8 +5,11 @@ import test from "node:test";
 import {
   BINDING_STATES,
   BINDING_TRANSITIONS,
+  ENGINEERING_AGENT_FREEZE_SETTING_KEY,
+  ENGINEERING_AGENT_MERGER_KINDS,
   ENGINEERING_AGENT_MODE_SETTING_KEY,
   ENGINEERING_AGENT_MODES,
+  ENGINEERING_AGENT_NOT_APPROVED_REASONS,
   ENGINEERING_AGENT_WORK_ITEM_KINDS,
   FIRST_T1_WINDOW_DAYS,
   HALT_VALUES,
@@ -147,8 +150,19 @@ test("every string the database matches on is the string the code holds", () => 
   );
   assert.deepEqual(Object.fromEntries(strings), {
     ENGINEERING_AGENT_MODE_SETTING_KEY,
+    ENGINEERING_AGENT_FREEZE_SETTING_KEY,
     UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX,
     PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX,
+  });
+});
+
+test("every enum a JSON CHECK lists is the core list", () => {
+  const lists = new Map(
+    [...sql.matchAll(/-- (?:reasons|mergers): ([A-Z_]+)\n[^\n]*IN \(([^)]*)\)/g)].map((m) => [m[1], sorted(quoted(m[2]))]),
+  );
+  assert.deepEqual(Object.fromEntries(lists), {
+    ENGINEERING_AGENT_NOT_APPROVED_REASONS: sorted(ENGINEERING_AGENT_NOT_APPROVED_REASONS),
+    ENGINEERING_AGENT_MERGER_KINDS: sorted(ENGINEERING_AGENT_MERGER_KINDS),
   });
 });
 
