@@ -593,6 +593,107 @@ export async function claimEngineeringAgentWorkItem(
   return { fencingToken, leaseExpiresAt };
 }
 
+/** Proposed: how long a publisher's claim may run before only a lookup may follow. */
+export const ENGINEERING_AGENT_PUBLISH_CLAIM_LEASE_MS = 10 * 60 * 1000;
+
+export type EngineeringAgentPublishWork =
+  | {
+      mode: "lookup";
+      workItemId: string;
+      runId: string;
+      branch: string;
+      fencingToken: bigint;
+      leaseExpiresAt: Date;
+    }
+  | {
+      mode: "write";
+      workItemId: string;
+      runId: string;
+      branch: string;
+      fencingToken: bigint;
+      leaseExpiresAt: Date;
+      cardRef: string;
+      baseSha: string;
+      patchBody: string;
+      patchDigest: string;
+      expectedTreeId: string;
+      commitDigest: string;
+      capabilityExpiresAt: Date;
+    };
+
+/**
+ * The publisher's next piece of work, claimed. Lookups come first -- a claim
+ * whose lease passed, then an outcome nobody knows (§10) -- and a queued item
+ * with a live capability only while publishing is allowed. A write claim
+ * returns the patch the publisher applies and the capability it must match;
+ * a lookup returns only what it needs to look. Nothing to do is `null`.
+ */
+export async function claimNextEngineeringAgentPublishWork(
+  tx: EngineeringAgentTransaction,
+  input: { leaseMs: number },
+): Promise<EngineeringAgentPublishWork | null> {
+  await requireSwitch(tx, "maintenanceAllowed");
+  const { publishAllowed } = await readEngineeringAgentSwitches(tx);
+  const now = await databaseNow(tx);
+  const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
+    SELECT w."id", w."state"
+    FROM "EngineeringAgentWorkItem" w
+    WHERE w."kind" = 'publish'
+      AND (
+        w."state" IN ('needs_lookup', 'outcome_unknown')
+        OR (
+          ${publishAllowed} AND w."state" = 'queued'
+          AND EXISTS (
+            SELECT 1 FROM "EngineeringAgentCapability" c
+            WHERE c."unconsumedWorkItemId" = w."id" AND c."expiresAt" > ${now}
+          )
+        )
+      )
+    ORDER BY CASE w."state" WHEN 'needs_lookup' THEN 0 WHEN 'outcome_unknown' THEN 1 ELSE 2 END, w."createdAt", w."id"
+    LIMIT 1
+    FOR UPDATE OF w SKIP LOCKED
+  `;
+  const candidate = candidates[0];
+  if (!candidate) return null;
+  const mode = candidate.state === "queued" ? "write" : "lookup";
+  const claim = await claimEngineeringAgentWorkItem(tx, { workItemId: candidate.id, mode, leaseMs: input.leaseMs });
+  const item = await tx.engineeringAgentWorkItem.findUniqueOrThrow({
+    where: { id: candidate.id },
+    select: {
+      runId: true,
+      patchBody: true,
+      patchDigest: true,
+      baseSha: true,
+      expectedTreeId: true,
+      run: { select: { cardId: true } },
+    },
+  });
+  const runId = item.runId ?? refuse("publish_item_without_run");
+  const common = {
+    workItemId: candidate.id,
+    runId,
+    branch: engineeringBranchName(runId),
+    fencingToken: claim.fencingToken,
+    leaseExpiresAt: claim.leaseExpiresAt,
+  };
+  if (mode === "lookup") return { mode, ...common };
+  const capability = await tx.engineeringAgentCapability.findFirstOrThrow({
+    where: { workItemId: candidate.id, claimFencingToken: claim.fencingToken },
+    select: { commitDigest: true, expiresAt: true },
+  });
+  return {
+    mode,
+    ...common,
+    cardRef: item.run?.cardId ?? refuse("publish_item_without_run"),
+    baseSha: item.baseSha ?? refuse("publish_item_without_base"),
+    patchBody: item.patchBody ?? refuse("publish_item_without_patch"),
+    patchDigest: item.patchDigest ?? refuse("publish_item_without_patch"),
+    expectedTreeId: item.expectedTreeId ?? refuse("publish_item_without_tree"),
+    commitDigest: capability.commitDigest,
+    capabilityExpiresAt: capability.expiresAt,
+  };
+}
+
 /**
  * Records a claim's result. The target state is the core's answer to the
  * outcome, the claim mode and whether the item's capability is consumed; a

@@ -12,6 +12,7 @@ import {
   acceptEngineeringAgentRequest,
   acknowledgeEngineeringAgentDecision,
   claimEngineeringAgentWorkItem,
+  claimNextEngineeringAgentPublishWork,
   decideEngineeringAgentT2Draft,
   endEngineeringAgentRun,
   heartbeatEngineeringAgentRun,
@@ -27,6 +28,7 @@ import {
   runEngineeringAgentTransaction,
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
+import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for the engineering agent's single writer
@@ -580,4 +582,59 @@ test("the switches refuse claims, capabilities and publishes, but never the reco
   }
   // Ending the run records what happened; no switch refuses it.
   await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "no_change", halt: "none" }));
+});
+
+test("the publisher claims its next work, and the last look can only refuse", async () => {
+  const run = await startRun();
+  const { workItemId } = await inTx((tx) =>
+    openEngineeringAgentWorkItem(tx, {
+      kind: "publish",
+      causeKey: `publish:${run.runId}:route`,
+      runId: run.runId,
+      patchBody: "patch",
+      patchDigest: sha256("patch"),
+      baseSha: sha1("base"),
+      expectedTreeId: sha1("tree"),
+    }),
+  );
+  const issued = await inTx((tx) =>
+    issueEngineeringAgentCapability(tx, {
+      workItemId,
+      capability: { baseSha: sha1("base"), patchDigest: sha256("patch"), expectedTreeId: sha1("tree"), commit: commitFields(run.runId, run.cardId) },
+    }),
+  );
+  await inTx((tx) => endEngineeringAgentRun(tx, { runId: run.runId, outcome: "t1_queued", halt: "none" }));
+
+  const work = await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 }));
+  assert.ok(work && work.mode === "write", "a queued item with a live capability is claimed to write");
+  assert.equal(work.workItemId, workItemId);
+  assert.equal(work.patchBody, "patch");
+  assert.equal(work.commitDigest, issued.commitDigest);
+  assert.equal(work.branch, `agent/engineering/${run.runId}`);
+  assert.equal(await inTx((tx) => claimNextEngineeringAgentPublishWork(tx, { leaseMs: 60_000 })), null, "nothing else to do");
+
+  const look = (fencingToken: bigint, commitDigest: string) =>
+    readEngineeringAgentLastLook(prisma, { workItemId, fencingToken, commitDigest });
+  const incidentKey = "amux.incidentMode";
+  const previous = await prisma.appSetting.findUnique({ where: { key: incidentKey } });
+  try {
+    await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+    assert.deepEqual(await look(work.fencingToken, work.commitDigest), { verdict: "refuse", reason: "amux_incident" }, "no incident reading blocks");
+    const normal = JSON.stringify({
+      version: 1,
+      state: "normal",
+      transition_id: null,
+      changed_at: new Date().toISOString(),
+      reason: "engineering agent store fixture",
+      ticket: "TEST",
+    });
+    await prisma.appSetting.create({ data: { key: incidentKey, value: normal } });
+    assert.deepEqual(await look(work.fencingToken + BigInt(1), work.commitDigest), { verdict: "refuse", reason: "stale_fencing_token" });
+    assert.deepEqual(await look(work.fencingToken, sha256("another commit")), { verdict: "refuse", reason: "commit_digest_mismatch" });
+    assert.deepEqual(await look(work.fencingToken, work.commitDigest), { verdict: "no_objection" });
+  } finally {
+    await prisma.appSetting.deleteMany({ where: { key: incidentKey } });
+    if (previous) await prisma.appSetting.create({ data: { key: incidentKey, value: previous.value } });
+  }
+  await inTx((tx) => settleEngineeringAgentWorkItem(tx, { workItemId, fencingToken: work.fencingToken, outcome: "confirmed" }));
 });

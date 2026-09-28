@@ -567,15 +567,14 @@ export type EffectiveSwitches = {
   maintenanceAllowed: boolean;
 };
 
+/** Anything set other than empty, `0` or `false` engages the kill switch. */
+export const killSwitchEngaged = (raw: string | null | undefined): boolean =>
+  raw !== undefined && raw !== null && raw !== "" && raw !== "0" && raw.toLowerCase() !== "false";
+
 export const resolveEngineeringAgentSwitches = (
   reading: SwitchReading,
 ): EffectiveSwitches => {
-  const killed =
-    reading.killSwitch !== undefined &&
-    reading.killSwitch !== null &&
-    reading.killSwitch !== "" &&
-    reading.killSwitch !== "0" &&
-    reading.killSwitch.toLowerCase() !== "false";
+  const killed = killSwitchEngaged(reading.killSwitch);
   const mode =
     reading.readFailed || killed ? "off" : parseEngineeringAgentMode(reading.mode);
   // A freeze that cannot be read is a freeze.

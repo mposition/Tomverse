@@ -633,26 +633,26 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentWorkItem",
-    tableMentions: 1,
-    writeVerbs: 9,
+    tableMentions: 2,
+    writeVerbs: 10,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentCapability",
-    tableMentions: 4,
-    writeVerbs: 9,
+    tableMentions: 5,
+    writeVerbs: 10,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentBinding",
     tableMentions: 1,
-    writeVerbs: 9,
+    writeVerbs: 10,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
