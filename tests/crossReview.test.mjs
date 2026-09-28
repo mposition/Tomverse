@@ -1455,6 +1455,9 @@ test("Claude packages pin Max first-party auth and reject API-only provenance", 
       `^refusing review round 0: tree changed outside the writable scope after packaging: ${launcherName.replace(".", "\\.")}\\r?$`,
       "mu"
     ));
+    // On Windows this also guards against cwd command lookup. POSIX resolves
+    // only PATH entries; there the rejection above verifies the scope guard,
+    // while marker absence is only a side-effect check, not lookup evidence.
     assert.equal(existsSync(marker), false, "a repository-root command shim is never invoked");
     rmSync(shadowPath);
 
