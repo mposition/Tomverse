@@ -96,10 +96,24 @@ test("both sides of a rename are checked", () => {
   assert.equal(slice([change("lib/moved.ts", { previousPath: "lib/deep.ts", status: "renamed" })]).status, "failed");
 });
 
+test("a file that registers into code the control plane runs joins the slice", () => {
+  const files = tree({
+    "lib/registry.ts": "export const handlers = [];\nexport const register = (h) => handlers.push(h);\n",
+    "lib/amux/gate.ts": 'import { handlers } from "@/lib/registry";\nexport const gate = () => handlers.forEach((h) => h());\n',
+  });
+  const result = slice(
+    [change("lib/feature.ts", { status: "added", newText: 'import { register } from "./registry";\nregister(() => 1);\n' })],
+    files,
+  );
+  assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
+  assert.deepEqual([...result.slicePaths], ["lib/feature.ts"]);
+});
+
 test("code that cannot be followed moves the changed file into the slice", () => {
   const cases = {
     "a computed loader": 'export const load = (n) => import(`@/lib/amux/${n}`);\n',
     "a computed member call": "export const run = (table, name) => table[name]();\n",
+    "a literal member call": 'export const run = (table) => table["gate"]();\n',
     "a computed environment key": "export const read = (k) => process.env[k];\n",
     "a direct AppSetting access": "export const read = (db) => db.appSetting.findMany();\n",
   };
@@ -156,7 +170,7 @@ test("imports come from the syntax tree, not from text that looks like one", () 
     }).sort(),
     ["./barrel", "./lazy", "./typeOnly", "./types", "node:fs"],
   );
-  assert.deepEqual(codeFacts(tsParse("export const x = obj['literal']();")).computedCall, false);
+  assert.deepEqual(codeFacts(tsParse("export const x = obj['literal']();")).computedCall, true);
 });
 
 test("resolution follows TypeScript: .js names the .ts source, @/ maps to the root, workspaces through their manifests", () => {

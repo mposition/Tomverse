@@ -84,7 +84,9 @@ export const codeFacts = (source: ts.SourceFile): CodeFacts => {
       if (ts.isIdentifier(callee) && callee.text === "require" && !isStringLiteral(node.arguments[0])) {
         facts.runtimeLoader = true;
       }
-      if (ts.isElementAccessExpression(callee) && !isStringLiteral(callee.argumentExpression)) {
+      // A call through an element access -- `table[name]()` or `table["gate"]()`
+      // -- is reflection this does not resolve to a symbol, literal key or not.
+      if (ts.isElementAccessExpression(callee)) {
         facts.computedCall = true;
       }
     }
@@ -500,6 +502,7 @@ export const computeControlPlaneSlice = (input: {
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
   const resultCallers = callersOf(result);
+  const resultDependencies = dependenciesOf(result);
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
@@ -508,6 +511,16 @@ export const computeControlPlaneSlice = (input: {
     }
     if (change.status !== "deleted") {
       if (resultCallers.has(change.path)) slicePaths.add(change.path);
+      // A changed file that imports code the control plane runs can hand it a
+      // callback, register into it or mutate what it holds -- none of which an
+      // import edge shows. Following that is beyond this analysis, so the file
+      // joins the slice instead.
+      for (const target of result.edges.get(change.path) ?? []) {
+        if (resultDependencies.has(target)) {
+          slicePaths.add(change.path);
+          break;
+        }
+      }
       const changeFacts = result.facts.get(change.path);
       if (
         changeFacts !== undefined &&
