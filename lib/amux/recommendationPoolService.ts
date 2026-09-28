@@ -368,6 +368,31 @@ const selectionFor = async (db: Db, now: Date) => {
   return selectRecommendationRows({ cards, capacity, occupied, blocksAdmission, now });
 };
 
+/**
+ * The included rows carry what an approve item must repeat (revision and
+ * source digest), and the excluded rows carry their exclusion code, so the
+ * owner can build a decision from the screen instead of a database read.
+ * Titles, source keys and briefs stay out of this view.
+ */
+const includedView = (rows: readonly RecommendationRow[]) =>
+  rows
+    .filter((row) => row.disposition === "included")
+    .map((row) => ({
+      cardId: row.cardId,
+      scoreTotal: row.scoreTotal,
+      expectedRevision: row.expectedRevision,
+      sourceDigest: row.sourceDigest,
+    }));
+
+const excludedView = (rows: readonly RecommendationRow[]) =>
+  rows
+    .filter((row) => row.disposition !== "included")
+    .map((row) => ({
+      cardId: row.cardId,
+      scoreTotal: row.scoreTotal,
+      exclusionCode: row.exclusionCode,
+    }));
+
 const viewOf = (
   selection: ReturnType<typeof selectRecommendationRows>,
   applyPermitted: boolean,
@@ -379,13 +404,8 @@ const viewOf = (
   wipLimit: selection.wipLimit,
   includedCount: selection.includedCount,
   excludedCount: selection.rows.length - selection.includedCount,
-  included: selection.rows
-    .filter((row) => row.disposition === "included")
-    .map((row) => ({
-      cardId: row.cardId,
-      scoreTotal: row.scoreTotal,
-      expectedRevision: row.expectedRevision,
-    })),
+  included: includedView(selection.rows),
+  excluded: excludedView(selection.rows),
   workerCapacity: "closed" as const,
   classificationCapacity: "closed" as const,
 });
@@ -413,6 +433,7 @@ export async function previewRecommendation(raw: string) {
         includedCount: 0,
         excludedCount: 0,
         included: [],
+        excluded: [],
         workerCapacity: "closed" as const,
         classificationCapacity: "closed" as const,
       };
@@ -484,6 +505,7 @@ export async function commitRecommendationSnapshot(
     includedCount: selection.includedCount,
     rowCount: selection.rows.length,
     applyPermitted: true,
+    included: includedView(selection.rows),
   };
 }
 

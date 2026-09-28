@@ -255,6 +255,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "AMUX 추천 풀",
     description: "owner 전용 backlog 추천 snapshot, 꺼진 운영 적용",
   },
+  "amux-cards": {
+    label: "AMUX 카드",
+    description: "owner 전용 AMUX 카드와 실행 상태 읽기 전용 목록",
+  },
   "amux-intake": {
     label: "AMUX 등록",
     description: "owner 전용 명시적 등록 미리보기, 꺼진 운영 적용",
