@@ -150,6 +150,7 @@ export const ENGINEERING_AGENT_AUDIT_ACTIONS = Object.freeze({
   bindingMoved: "engineering_agent.binding_moved",
   bindingObserved: "engineering_agent.binding_observed",
   reviewerRemoved: "engineering_agent.reviewer_removed",
+  switchChanged: "engineering_agent.switch_changed",
 } as const);
 
 const humanActorId = (session: Session): string =>
@@ -919,6 +920,44 @@ export async function acknowledgeEngineeringAgentDecision(
     targetId: item.id,
     summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.decisionAcknowledged} ${item.id}`,
     metadata: { kind: "decision" },
+    tx,
+  });
+  return { auditLogId };
+}
+
+/** The modes a person may set from the console. */
+export const ENGINEERING_AGENT_CONSOLE_MODES = ["off", "shadow"] as const;
+
+/**
+ * A person sets the mode or the freeze (§11), with the audit entry in the
+ * same transaction. `t1` is not settable here: publishing waits on the
+ * person-only approval evidence the policy requires before t1 (§9-10, §14),
+ * and a console button would be that procedure's last step offered without
+ * the rest. Turning the agent off or freezing it is always allowed -- stopping
+ * should be easy.
+ */
+export async function setEngineeringAgentSwitch(
+  tx: EngineeringAgentTransaction,
+  input: { session: Session; request?: Request; name: "mode" | "freeze"; value: string },
+): Promise<{ auditLogId: string }> {
+  humanActorId(input.session);
+  if (input.name === "mode" && !(ENGINEERING_AGENT_CONSOLE_MODES as readonly string[]).includes(input.value)) {
+    refuse("mode_not_settable_here");
+  }
+  if (input.name === "freeze" && input.value !== "true" && input.value !== "false") refuse("freeze_value_invalid");
+  const key = input.name === "mode" ? ENGINEERING_AGENT_MODE_SETTING_KEY : ENGINEERING_AGENT_FREEZE_SETTING_KEY;
+  const previous = await tx.appSetting.findUnique({ where: { key }, select: { value: true } });
+  await tx.appSetting.upsert({ where: { key }, update: { value: input.value }, create: { key, value: input.value } });
+  const known = (value: string | undefined) =>
+    value === undefined ? null : ["off", "shadow", "t1", "true", "false"].includes(value) ? value : "unrecognised";
+  const auditLogId = await writeAdminAuditLog({
+    session: input.session,
+    request: input.request,
+    action: ENGINEERING_AGENT_AUDIT_ACTIONS.switchChanged,
+    targetType: "AppSetting",
+    targetId: key,
+    summary: `${ENGINEERING_AGENT_AUDIT_ACTIONS.switchChanged} ${input.name}`,
+    metadata: { name: input.name, from: known(previous?.value), to: input.value },
     tx,
   });
   return { auditLogId };

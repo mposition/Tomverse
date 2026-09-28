@@ -506,6 +506,47 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "engineering-agent",
+    label: "Engineering agent",
+    href: "/admin/engineering-agent",
+    description:
+      "T2 drafts waiting on a decision, runs, the pull requests the agent opened, and its mode",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "engineering",
+      "agent",
+      "t2 draft",
+      "patch",
+      "pull request",
+      "publisher",
+      "runner",
+      "freeze",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Owner queue",
+        description: "T2 drafts, decisions and state mismatches waiting on a person",
+      },
+      {
+        id: "runs",
+        label: "Runs",
+        description: "Each run, the mode it started under, how it ended and any halt",
+      },
+      {
+        id: "pull-requests",
+        label: "Pull requests",
+        description: "What the agent bound: pull request, snapshot, approval and merge observations",
+      },
+      {
+        id: "settings",
+        label: "Mode",
+        description: "Mode, freeze, the kill switch and the owner queue against its caps",
+      },
+    ],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",
