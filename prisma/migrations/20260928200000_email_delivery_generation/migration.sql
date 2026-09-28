@@ -88,6 +88,12 @@ CREATE TRIGGER "email_delivery_root"
 
 ALTER TABLE "EmailDelivery" ALTER COLUMN "rootDeliveryId" SET NOT NULL;
 
+-- The empty string is the "fill me" value the trigger above recognises, and it is
+-- the default schema.prisma declares, so the generated client may omit the column
+-- on insert. Without it here the migrated schema and schema.prisma disagree and
+-- every DB integration suite stops at the drift check before running anything.
+ALTER TABLE "EmailDelivery" ALTER COLUMN "rootDeliveryId" SET DEFAULT '';
+
 ALTER TABLE "EmailDelivery"
     ADD CONSTRAINT "EmailDelivery_supersedes_fkey"
     FOREIGN KEY ("supersedesDeliveryId") REFERENCES "EmailDelivery"("id")
