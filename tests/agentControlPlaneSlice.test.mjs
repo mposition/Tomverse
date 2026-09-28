@@ -6,6 +6,7 @@ import test from "node:test";
 import ts from "typescript";
 
 import {
+  DEPLOY_EXCLUDED_PREFIXES,
   codeFacts,
   computeControlPlaneSlice,
   createResolver,
@@ -64,7 +65,10 @@ const change = (path, overrides = {}) => ({
   ...overrides,
 });
 
-const slice = (changes, files = tree()) => computeControlPlaneSlice({ baseFiles: files, changes });
+/** With the tests and docs trees left out of the image, so what the floor adds back can be seen. */
+const EXCLUDED = ["tests", "docs"];
+const slice = (changes, files = tree(), deployExcludedPrefixes = EXCLUDED) =>
+  computeControlPlaneSlice({ baseFiles: files, changes, deployExcludedPrefixes });
 
 test("every app runtime file is in the slice, whether or not an import connects it to the control plane", () => {
   const result = slice([
@@ -115,6 +119,30 @@ test("data the running application reads is in the slice, whether imported, unde
   );
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.deepEqual([...result.slicePaths].sort(), [...paths].sort());
+});
+
+test("every product file the deployed image contains is in the slice", () => {
+  const changes = [change("docs/notes.md", { status: "added" }), change("tests/leaf.test.mjs", { status: "added" })];
+  assert.deepEqual([...slice(changes, tree(), DEPLOY_EXCLUDED_PREFIXES).slicePaths].sort(), [
+    "docs/notes.md",
+    "tests/leaf.test.mjs",
+  ]);
+});
+
+test("a prefix leaves the slice only when the deploy leaves it out of the image too", () => {
+  const root = new URL("..", import.meta.url);
+  const tracked = new Set(
+    execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+      .split("\0")
+      .filter(Boolean),
+  );
+  const ignored = tracked.has(".dockerignore") ? readFileSync(new URL(".dockerignore", root), "utf8").split(/\r?\n/) : [];
+  for (const prefix of DEPLOY_EXCLUDED_PREFIXES) {
+    assert.ok(
+      ignored.some((line) => line.trim().replace(/^\/|\/$/g, "") === prefix),
+      `${prefix} is excluded from the slice but not from the image`,
+    );
+  }
 });
 
 test("a new barrel and a new caller added together are both in the slice", () => {

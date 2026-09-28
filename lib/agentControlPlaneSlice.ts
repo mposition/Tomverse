@@ -458,31 +458,43 @@ const isProduct = (path: string) => classifyPath(path) === "product";
 const RUNTIME_DIRECTORY = /^(?:app|components|lib|locales|packages|types|hooks|public)\//;
 
 /**
- * Every product file the running application may read: every file under the
- * runtime directories and every root runtime file, whatever its extension;
- * every file runtime code imports; and every file runtime code names by path.
- *
- * The control plane runs inside the same application. A runtime file can
- * reach it without any import: the framework registers routes and pages by
- * convention and they are called by URL, the database and process-global
- * state are shared, a callback can be handed over through any number of
- * files, and data -- JSON, locales, generated files, documents read by path --
- * is read without being code. No analysis here proves a runtime file cannot
- * change what the control plane does, so none is attempted
- * (docs/policy/engineering-agent.md §4: a file that cannot be analysed makes
- * the patch T2). The import graph is still built in full, because an import
- * that does not resolve, or a file that does not parse, fails the analysis.
+ * Path prefixes the deployed application does not contain. Empty: the image is
+ * built from the whole tree (Railpack's node provider, no ignore file), so
+ * every tracked file is present at runtime. A prefix may be added only in the
+ * same reviewed change that removes it from the image, because the point of
+ * this list is that a file absent from the image cannot be read by it.
  */
-const appRuntimeSlice = (graph: Graph, paths: Iterable<string>) => {
+export const DEPLOY_EXCLUDED_PREFIXES: readonly string[] = [];
+
+/**
+ * Every product file the running application can read.
+ *
+ * Runtime code reads files by paths it assembles at runtime -- from
+ * parameters, constants held in variables, the working directory -- so no
+ * analysis here can prove that a file in the deployed image is never read,
+ * and docs/policy/engineering-agent.md §4 sends what cannot be analysed to T2.
+ * The slice is therefore every product file the image contains. Beyond that
+ * floor, a file stays in the slice even under an excluded prefix when it is
+ * under a runtime directory or a root runtime file, when runtime code imports
+ * it (the build bundles it whatever the image holds), or when runtime code
+ * names it by path.
+ *
+ * The control plane runs inside the same application: a runtime file reaches
+ * it by framework-registered route, shared database or process state, or a
+ * callback handed through other files, with no import between them. The
+ * import graph is still built in full, because an import that does not
+ * resolve, or a file that does not parse, fails the analysis.
+ */
+const appRuntimeSlice = (graph: Graph, paths: Iterable<string>, excluded: readonly string[]) => {
   const imported = new Set([...graph.edges.values()].flatMap((targets) => [...targets]));
+  const under = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
   const slice = new Set<string>();
   for (const path of paths) {
     if (!isProduct(path)) continue;
+    const deployed = !excluded.some((prefix) => under(path, prefix));
     const runtime = RUNTIME_ROOT_FILES.has(path) || RUNTIME_DIRECTORY.test(path);
-    const named =
-      graph.named.exact.has(path) ||
-      [...graph.named.prefixes].some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
-    if (runtime || imported.has(path) || named) slice.add(path);
+    const named = graph.named.exact.has(path) || [...graph.named.prefixes].some((prefix) => under(path, prefix));
+    if (deployed || runtime || imported.has(path) || named) slice.add(path);
   }
   return slice;
 };
@@ -499,10 +511,13 @@ const appRuntimeSlice = (graph: Graph, paths: Iterable<string>) => {
 export const computeControlPlaneSlice = (input: {
   baseFiles: readonly SourceFile[];
   changes: readonly SliceChange[];
+  /** Defaults to the repository's own list; tests pass their own. */
+  deployExcludedPrefixes?: readonly string[];
 }): SliceResult => {
+  const excluded = input.deployExcludedPrefixes ?? DEPLOY_EXCLUDED_PREFIXES;
   const base = buildGraph(input.baseFiles);
   if (base.problems.length > 0) return { status: "failed", problems: base.problems };
-  const baseSlice = appRuntimeSlice(base, input.baseFiles.map((file) => file.path));
+  const baseSlice = appRuntimeSlice(base, input.baseFiles.map((file) => file.path), excluded);
 
   const names = new Set<string>(base.appSettingKeys);
   for (const file of input.baseFiles) {
@@ -531,7 +546,7 @@ export const computeControlPlaneSlice = (input: {
   ];
   const result = buildGraph(resultFiles);
   if (result.problems.length > 0) return { status: "failed", problems: result.problems };
-  const resultSlice = appRuntimeSlice(result, resultFiles.map((file) => file.path));
+  const resultSlice = appRuntimeSlice(result, resultFiles.map((file) => file.path), excluded);
 
   const slicePaths = new Set<string>();
   for (const change of input.changes) {
