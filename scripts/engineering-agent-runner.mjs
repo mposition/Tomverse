@@ -160,21 +160,29 @@ async function main() {
   };
 
   // GitHub, read-only; a list that is not the whole list is refused, not read as whole.
-  const githubList = async (path) => {
-    const response = await fetch(`${API_REPO}${path}`, {
-      redirect: "error",
-      signal: AbortSignal.timeout(APP_TIMEOUT_MS),
-      headers: {
-        accept: "application/vnd.github+json",
-        "x-github-api-version": "2022-11-28",
-        ...(readToken ? { authorization: `Bearer ${readToken}` } : {}),
-      },
-    });
+  // Each list is read on its own: one that cannot be read whole is null, and
+  // the other is still judged (an empty list where refs were expected would
+  // hide an unbound pull request, so null is never turned into []).
+  const githubList = async (path, { notFoundIsEmpty = false } = {}) => {
+    let response;
+    try {
+      response = await fetch(`${API_REPO}${path}`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(APP_TIMEOUT_MS),
+        headers: {
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+          ...(readToken ? { authorization: `Bearer ${readToken}` } : {}),
+        },
+      });
+    } catch {
+      return null;
+    }
+    // No ref under the prefix is answered 404: that is the list, empty.
+    if (notFoundIsEmpty && response.status === 404) return [];
     const link = response.headers.get("link");
     const body = await response.json().catch(() => null);
-    if (!response.ok || (link !== null && /rel="?next"?/.test(link)) || !Array.isArray(body)) {
-      throw new Error("namespace_unreadable");
-    }
+    if (!response.ok || (link !== null && /rel="?next"?/.test(link)) || !Array.isArray(body)) return null;
     return body;
   };
 
@@ -183,11 +191,11 @@ async function main() {
     result = await runRunnerCycle({
       app,
       namespace: async () => {
-        const refs = await githubList("/git/matching-refs/heads/agent/engineering/?per_page=100");
+        const refs = await githubList("/git/matching-refs/heads/agent/engineering/?per_page=100", { notFoundIsEmpty: true });
         const pulls = await githubList("/pulls?state=open&per_page=100");
         return {
-          refs: refs.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
-          pulls: pulls.map((pull) => ({
+          refs: refs === null ? null : refs.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
+          pulls: pulls === null ? null : pulls.map((pull) => ({
             number: pull.number,
             headRef: pull.head?.ref ?? "",
             headSha: pull.head?.sha ?? null,

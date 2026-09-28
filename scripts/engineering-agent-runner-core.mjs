@@ -57,6 +57,11 @@ export const haltOf = (json) => reportedHalt(json?.halt);
  * result. `commitDigestAt(sha)` is the sha256 of that commit's object, or null.
  */
 export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => {
+  // A list GitHub did not give whole is null: what it holds is unknown, so a
+  // round with nothing definite elsewhere is undetermined, never "none".
+  let undetermined = refs === null || pulls === null;
+  refs = refs ?? [];
+  pulls = pulls ?? [];
   const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
   const boundRuns = new Set(known.bindings.map((binding) => binding.runId));
   // A commit a consumed capability allowed counts only for a run the app has
@@ -77,7 +82,6 @@ export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => 
   // unread entry leave the observation undetermined.
   let unboundPr = false;
   let unboundRef = false;
-  let undetermined = false;
   for (const pull of pulls) {
     const runId = parseEngineeringBranchName(pull.headRef ?? "");
     const binding = byNumber.get(pull.number);
@@ -125,8 +129,8 @@ export const outcomeForSession = (session) => {
 /**
  * One cycle. `ports`:
  *   app(path, body) -> { status, json }          the engineering routes
- *   namespace() -> { refs: [{ ref, sha }], pulls: [{ number, headRef, headSha, body }] }
- *                                                 GitHub, read-only and complete, or throws
+ *   namespace() -> { refs: [{ ref, sha }] | null, pulls: [{ number, headRef, headSha, body }] | null }
+ *                                                 GitHub, read-only; a list not read whole is null
  *   commitDigestAt(sha) -> sha256 of the commit object, or null
  *   developHead() -> sha                          develop's head, read-only
  *   clone(baseSha) -> { root, trackedPaths, fsPorts, applies(patch) -> bool, dispose() }

@@ -308,6 +308,29 @@ test("an unreadable commit leaves the observation undetermined, and a bound run 
   );
 });
 
+test("a list GitHub did not give whole leaves the round undetermined, and a definite finding in the other is still recorded", async () => {
+  const known = { bindings: [], consumed: [] };
+  const digestAt = async () => null;
+  assert.equal(await observeUnbound({ refs: null, pulls: [], known, commitDigestAt: digestAt }), "undetermined");
+  assert.equal(await observeUnbound({ refs: [], pulls: null, known, commitDigestAt: digestAt }), "undetermined");
+  assert.equal(
+    await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/5", sha: "a".repeat(40) }], pulls: null, known, commitDigestAt: digestAt }),
+    "unbound_app_ref",
+  );
+  assert.equal(
+    await observeUnbound({ refs: null, pulls: [{ number: 3, headRef: "agent/engineering/5", headSha: "a".repeat(40), body: "" }], known, commitDigestAt: digestAt }),
+    "unbound_app_pr",
+  );
+  const { app, calls } = fakeApp();
+  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/5", sha: "a".repeat(40) }], pulls: null }));
+  assert.equal(round.halt, "unbound_app_ref");
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_ref" });
+  const quiet = fakeApp();
+  const undetermined = await runRunnerCycle(ports(quiet.app, okModel, fakeClone(), { refs: [], pulls: null }));
+  assert.deepEqual(undetermined, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
+  assert.equal(quiet.calls.some((call) => call.path === "observe/halt"), false);
+});
+
 test("the app's records must not move while GitHub is read, or nothing is judged", async () => {
   let reads = 0;
   const moving = fakeApp({
