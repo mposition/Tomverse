@@ -1236,8 +1236,8 @@ mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 calle
 않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
 seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
 
-후속 confirmatory v2/v4 현재 계약은 exact 188-file runtime import-closure source manifest를
-사용한다. 178개 runtime source와 10개 metadata/schema/migration 파일이며, v1의 187-file
+후속 confirmatory v3/v5 현재 계약은 exact 189-file runtime import-closure source manifest를
+사용한다. 178개 runtime source와 11개 metadata/schema/세 migration 파일이며, v1의 187-file
 행과 manifest는 수정하거나 소급 재해석하지 않는다.
 
 ### 한눈에 보는 전체 Chat 진척

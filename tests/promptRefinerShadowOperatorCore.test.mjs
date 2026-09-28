@@ -82,6 +82,9 @@ const stageBody = () => ({
     approvalTtlMinutes: contract.approvalTtlMinutes,
     previewBindingDigest: digest("4"),
     confirmation: contract.stageConfirmation,
+    runApprovalEnabled: true,
+    executionEnabled: true,
+    activationReady: true,
     executionAdmitted: false,
     productAdapterReady: false,
   },
@@ -169,6 +172,24 @@ test("the exact frozen stage, run, and execution previews are accepted", () => {
   assert.ok(execution);
   assert.equal(run.corpusDigest, "b".repeat(64));
   assert.equal(run.evidenceSpecDigest, "c".repeat(64));
+});
+
+test("stage activation readiness is the exact conjunction of both downstream flags", () => {
+  for (const [runApprovalEnabled, executionEnabled] of [
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ]) {
+    const candidate = stageBody();
+    candidate.preview.runApprovalEnabled = runApprovalEnabled;
+    candidate.preview.executionEnabled = executionEnabled;
+    candidate.preview.activationReady = runApprovalEnabled && executionEnabled;
+    assert.ok(parsePromptRefinerStagePreview(candidate));
+
+    candidate.preview.activationReady = !candidate.preview.activationReady;
+    assert.equal(parsePromptRefinerStagePreview(candidate), null);
+  }
 });
 
 test("a completed content-free evidence summary is accepted and malformed summaries fail closed", () => {

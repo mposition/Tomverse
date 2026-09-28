@@ -17,9 +17,10 @@
  * - A single date for every page. That is what this replaced: 2026-07-15 on
  *   every entry, including pages that have changed many times since.
  *
- * `/privacy` qualifies: it shows "Effective: September 14, 2026" in all seven
- * locales, and neither `components/legal/PrivacyPolicy.tsx` nor any locale's
- * `privacyPolicy` copy has changed since the commit that set that date.
+ * `/privacy` qualifies: it shows "Effective: September 28, 2026" in all seven
+ * locales. That date is the chat-provider notice, which now states only the
+ * transfer Tomverse controls. Provider country, legal name, and retention
+ * are still not on the page.
  *
  * `contentSha256` is what keeps that true. It is the digest of exactly what
  * the page renders from -- the component (LF line endings) followed by each
@@ -37,7 +38,7 @@ export type SitemapContentEvidence = {
 
 export const SITEMAP_CONTENT_EVIDENCE: Readonly<Record<string, SitemapContentEvidence>> = {
     "/privacy": {
-        date: "2026-09-14",
-        contentSha256: "ac3b5f82fa492671259539bf426e52e17824f27f673dc5d3396d1fa4bc9c9233",
+        date: "2026-09-28",
+        contentSha256: "2e5e1a5c891c281692c4df1a54d79c95952b59a18afd1ff2ad5c0b36c4852e65",
     },
 };

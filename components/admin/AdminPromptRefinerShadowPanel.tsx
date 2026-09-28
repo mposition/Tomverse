@@ -198,6 +198,10 @@ export function AdminPromptRefinerShadowPanel() {
     setError(null);
     try {
       if (stage.status === "ready_for_explicit_cost_approval") {
+        if (!stage.activationReady) {
+          setError(m.stageActivationFlagsDisabled);
+          return;
+        }
         const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -424,12 +428,30 @@ export function AdminPromptRefinerShadowPanel() {
               value={usd(stage.costCeilingMicroUsd)}
             />
             <Field label={m.maxReservations} value={stage.maxReservations} />
+            <Field
+              label={m.approvalFlag}
+              value={stage.runApprovalEnabled ? m.enabled : m.disabled}
+            />
+            <Field
+              label={m.executionFlag}
+              value={stage.executionEnabled ? m.enabled : m.disabled}
+            />
           </dl>
+          {!stage.activationReady &&
+          stage.status === "ready_for_explicit_cost_approval" ? (
+            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              {m.stageActivationFlagsDisabled}
+            </p>
+          ) : null}
           {!run ? (
             <button
               type="button"
               onClick={() => void approveStage()}
-              disabled={busy !== null}
+              disabled={
+                busy !== null ||
+                (stage.status === "ready_for_explicit_cost_approval" &&
+                  !stage.activationReady)
+              }
               className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy === "stage" ? (
