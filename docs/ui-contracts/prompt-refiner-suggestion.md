@@ -4,9 +4,12 @@
   rollout과 환경 kill switch, adapter readiness를 합쳐 최종 offer를 정한다.
   현재 준비된 adapter는 loopback Playwright fixture뿐이어서 실제 `ChatInput`의
   상태 전이는 검증되지만 운영 환경은 항상 `off`다. provider 호출, 과금, Router
-  입력 변경, Message schema 변경은 아직 연결하지 않았다.
+  입력 변경, Message schema 변경은 아직 연결하지 않았다. 아래의 순수 Chat
+  projection은 구현됐지만 제품 route/runtime caller가 없고 이 상태나 readiness를
+  바꾸지 않는다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
+- Chat 원문/실행 projection: `lib/promptRefinerChatHandoff.ts`
 - 모델 경계: `lib/promptRefinerModelPrompt.ts`
 - 실행 사전등록: `lib/promptRefinerExecutionContract.ts`
 
@@ -40,6 +43,34 @@ Router와 최종 답변 모델이 읽을 `executionPrompt`일 뿐, 사용자의 
 후속 server 연결은 이 결과를 Message 저장과 Router 입력에 각각 연결해야 한다.
 제안문을 user Message 본문으로 저장하거나, 원문을 Router에 보내면서 `accepted`로
 기록하는 구현은 계약 위반이다.
+
+`projectPromptRefinerChatHandoff()`는 이미 payload 검증을 끝낸 transcript를 받아 이
+분리를 순수하게 projection한다. `sourceMessageId`는 transcript 전체에서 중복되지 않고
+정확히 최신 user message를 가리켜야 한다. 함수는 server-held bound suggestion과 그
+scope를 현재 scope·최신 user content와 exact-string으로 대조하고, 명시된 decision으로
+`resolvePromptRefinerDecision()`을 다시 실행한 뒤 caller가 공급한 resolution의 모든
+문자열과 provenance를 byte-exact로 비교한다. history message나 assistant message를
+가리키거나, id가 없거나 중복되거나, scope·draft·request/suggestion/version/decision이
+어긋나거나 resolution에 필드가 더 있으면 고정된 content-free 오류로 거부한다.
+
+성공 시 `authoredMessages`는 입력 배열과 message object를 그대로 반환한다. accepted의
+`executionMessages`만 정확한 현재 user object를 복사해 `content` 하나를 제안문으로
+바꾸고, history·순서·role·id·attachment와 그 밖의 기존 필드는 유지한다. 다른 object와
+attachment reference도 유지하며 입력을 mutate하지 않는다. `kept_original`이면 두 view는
+같은 배열이다. 출력 provenance는 검증된 sourceMessageId, requestId, suggestionId,
+refinerVersion, inputScope와 decision뿐이며 prompt·digest·scope identity는 담지 않는다.
+이는 receipt가 아니다.
+
+이 함수 이름의 `serverSuggestion`은 browser가 보낸 suggestion을 신뢰하라는 뜻이 아니다.
+미래 caller가 suggestion을 server-held state에서 읽고 authentication·authorization과
+one-time decision consumption을 별도로 강제해야 한다. 이 순수 함수는 그 저장 출처를
+증명하거나 소비 상태를 기록하지 않고, Message를 저장하거나 Router/provider를 호출하지
+않는다. 현재 projection의 `PromptRefinerChatScope`는
+identityKey·mountedSurface·conversationId만
+가지므로 값이 다른 scope로 갔다가 똑같은 세 값으로 돌아오는 same-value ABA를 이 함수
+혼자 알아낼 수 없다. future server caller는 server-held suggestion의 수명·scope epoch 또는
+동등한 단조 identity를 함께 소유해 그 재사용을 막아야 하며, 이 exact-value 비교를 ABA
+방지나 authorization으로 설명하면 안 된다.
 
 ## 3. 한 요청은 한 draft snapshot에만 속한다
 
@@ -203,6 +234,11 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 
 - `tests/promptRefinerSuggestion.test.mjs`: strict 입력, 주입 형태 JSON encoding,
   request 결속, stale 폐기, 원문/실행 분리, fixture handoff의 scope·위조·중복 거부
+- `tests/promptRefinerChatHandoff.test.mjs`: 최신 user source id·중복/history target·
+  scope/draft·strict resolution fail-closed, exact whitespace/Unicode와 attachment/history
+  보존, input 무변조, accepted execution view를 읽는 `profileTextFor()`·
+  `preflightInputEstimate()`, authored durable-source view, 실제 attempt digest/fingerprint의
+  accepted-content 결속과 exact replay, `kept_original` 동일 view
 - `tests/client/promptRefinerSuggestionRender.test.tsx`: 미제공 시 null, 7개 언어,
   두 결정, 44px target, disabled reason, ready live status, 실패 문구,
   내부 모델/우월성 표현 부재
