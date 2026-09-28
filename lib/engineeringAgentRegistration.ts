@@ -102,13 +102,14 @@ async function sourceItems(source: RegistrationSource, pinnedCommit: string | nu
       if (run.conclusion === null) continue;
       const item = ciFailureItem({ checkName: run.name, headSha: read.headSha, conclusion: run.conclusion });
       if (item === null) continue;
-      // One identity for the card and the row: the check (by its item key) at
-      // one head. A re-run of the same check at the same head is the same
-      // item, not a new card -- the run id is not part of either.
+      // The card's tuple is intake version 2's: develop's head and the check
+      // run. A re-run of the same check at the same head has a new run id and
+      // so a new tuple; it is kept out by the row the check already has at
+      // that head (below), not by the card.
       candidates.push({
         ...item,
         pinnedCommit: read.headSha,
-        canonicalIdentity: `${ENGINEERING_AGENT_REGISTRATION_SOURCE_SYSTEMS.S2}|${read.headSha}|${item.key}`,
+        canonicalIdentity: `${ENGINEERING_AGENT_REGISTRATION_SOURCE_SYSTEMS.S2}|${read.headSha}|${run.id}`,
       });
     }
     // Two failing runs under one check name at one head: which is the item?
@@ -157,10 +158,11 @@ export async function readEngineeringAgentRegistrationCandidates(
       .map((candidate) => registrationSourceIdentity(candidate.source, candidate.key)),
   );
   // Waiting proposals of the item at any revision, and any row the item
-  // already has at this very digest: that row is the item's answer at this
-  // revision -- registered, refused or confirmed absent -- and a second
-  // proposal of it could not be recorded (one row per source, key and
-  // digest). An item that changes has a new digest and is offered again.
+  // already has at this revision: that row is the item's answer here --
+  // registered, refused or confirmed absent -- and is not asked again. A
+  // revision is the digest for the backlog and dependabot; for develop's CI
+  // it is the head, so a re-run of a check at one head, whatever its run id
+  // or conclusion, is the same item. An item that changes is offered again.
   const recorded = await prisma.engineeringAgentRegistration.findMany({
     where: {
       source: input.source,
@@ -169,14 +171,17 @@ export async function readEngineeringAgentRegistrationCandidates(
         { itemKey: { in: candidates.map((candidate) => candidate.key) } },
       ],
     },
-    select: { source: true, itemKey: true, itemDigest: true, result: true },
+    select: { source: true, itemKey: true, itemDigest: true, pinnedCommit: true, result: true },
   });
-  const digestOf = new Map(candidates.map((candidate) => [candidate.key, candidate.digest]));
+  const byKey = new Map(candidates.map((candidate) => [candidate.key, candidate]));
+  const sameRevision = (row: { itemKey: string; itemDigest: string; pinnedCommit: string }) => {
+    const candidate = byKey.get(row.itemKey);
+    if (candidate === undefined) return false;
+    return input.source === "S2" ? candidate.pinnedCommit === row.pinnedCommit : candidate.digest === row.itemDigest;
+  };
   const pending = new Set(
     recorded
-      .filter(
-        (row) => row.result === "pending" || row.result === "partial" || digestOf.get(row.itemKey) === row.itemDigest,
-      )
+      .filter((row) => row.result === "pending" || row.result === "partial" || sameRevision(row))
       .map((row) => registrationSourceIdentity(row.source as RegistrationSource, row.itemKey)),
   );
   const { eligible, excluded } = prefilterItems({
