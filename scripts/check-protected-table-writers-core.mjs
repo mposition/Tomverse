@@ -344,6 +344,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
   },
   {
+    path: "lib/amux/intakeRegistration.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The unclear-commit read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxIntakeDraft and AmuxIntakeApproval only. This file never writes AdminAuditLog.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,

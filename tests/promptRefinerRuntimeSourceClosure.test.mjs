@@ -212,12 +212,18 @@ const compilerOptions = parsedConfig.options;
 // that class as premium. Both files are in this closure. Neither addition is
 // a computed element access. The count remains 228 and the position-free
 // inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-27, AMUX back-merge: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the latched-off recommendation
+// pool and the closed auto-promotion gate. It is comment only. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so only
+// source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "45e44993df9550021dc9a7eb888248fe",
-  "cd2e50c5ae92c2e46bfaa16de61cec01",
+  "abd5fc73645355c73e54f9c4f39f1455",
+  "136f9cf8f80c965d1a19c08afe0e0db6",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
