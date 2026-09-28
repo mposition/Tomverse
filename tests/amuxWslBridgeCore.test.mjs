@@ -237,6 +237,9 @@ test("the rust bridge opens a client only after the exact env gate", () => {
   assert.equal(gate.includes("from_env"), false);
   const runner = bridge.slice(bridge.indexOf("pub async fn run_from_env"));
   assert.match(runner, /TomverseApi::from_env/);
+  assert.match(bridge, /reqwest::redirect::Policy::none\(\)/);
+  assert.match(bridge, /\.no_proxy\(\)/);
+  assert.equal(bridge.includes("env_value.map(str::trim)"), false);
   assert.match(binary, /ActivationGate::EnvOff/);
   assert.match(binary, /run_from_env/);
   assert.equal(binary.includes("TomverseApi::from_env"), false);

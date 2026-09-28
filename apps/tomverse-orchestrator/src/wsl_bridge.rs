@@ -987,6 +987,7 @@ fn local_client(local_url: &str) -> Result<reqwest::Client> {
     let url = reqwest::Url::parse(local_url).context("invalid local AMUX url")?;
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
         .timeout(Duration::from_secs(15));
     if url.scheme() == "https" {
         builder = builder.danger_accept_invalid_certs(true);
