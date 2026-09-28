@@ -76,7 +76,7 @@ const tailBoundary = (bytes: Uint8Array, length: number) => {
 };
 
 /** An input decoded, stripped of control characters and NFC-normalised, whole. */
-type Cleaned = { bytes: Uint8Array; originalBytes: number; digest: string };
+type Cleaned = { ok: true; bytes: Uint8Array; originalBytes: number; digest: string };
 
 /**
  * Normalisation happens before cutting, so the limit applies to the text the
@@ -92,13 +92,12 @@ const clean = (raw: Uint8Array): Cleaned | { ok: false; reason: "input_rejected"
     return { ok: false, reason: "input_rejected", detail: "invalid_utf8" };
   }
   return {
+    ok: true,
     bytes: encoder.encode(decoded.replace(CONTROL, "").normalize("NFC")),
     originalBytes: raw.length,
     digest: sha256(raw),
   };
 };
-
-const isCleaned = (value: ReturnType<typeof clean>): value is Cleaned => !("ok" in value);
 
 /** Keeps the start only: titles, registration items, dependabot bodies. */
 const cutHead = (input: Cleaned, total: number): PreparedText => {
@@ -146,7 +145,7 @@ const scaled = (limit: HeadTailLimit, total: number): HeadTailLimit => {
  */
 export const prepareInput = (raw: Uint8Array, limit: number | HeadTailLimit): NormalisedInput => {
   const cleaned = clean(raw);
-  if (!isCleaned(cleaned)) return cleaned;
+  if (!cleaned.ok) return cleaned;
   const prepared = typeof limit === "number" ? cutHead(cleaned, limit) : cutHeadTail(cleaned, limit);
   // Every limit in INPUT_LIMITS holds its marker; one that cannot is a programming error.
   if (prepared === null) throw new Error("the limit cannot hold the truncation marker");
@@ -177,11 +176,11 @@ export const prepareWorkRunInputs = (inputs: {
     }
   | { ok: false; source: WorkRunSource; detail: string } => {
   const cleanedBrief = clean(inputs.executionBrief);
-  if (!isCleaned(cleanedBrief)) return { ok: false, source: "executionBrief", detail: cleanedBrief.detail };
+  if (!cleanedBrief.ok) return { ok: false, source: "executionBrief", detail: cleanedBrief.detail };
   const cleanedCi = inputs.ciLog ? clean(inputs.ciLog) : null;
-  if (cleanedCi !== null && !isCleaned(cleanedCi)) return { ok: false, source: "ciLog", detail: cleanedCi.detail };
+  if (cleanedCi !== null && !cleanedCi.ok) return { ok: false, source: "ciLog", detail: cleanedCi.detail };
   const cleanedDependabot = inputs.dependabotBody ? clean(inputs.dependabotBody) : null;
-  if (cleanedDependabot !== null && !isCleaned(cleanedDependabot)) {
+  if (cleanedDependabot !== null && !cleanedDependabot.ok) {
     return { ok: false, source: "dependabotBody", detail: cleanedDependabot.detail };
   }
 
@@ -225,7 +224,7 @@ export const prepareRegistrationRound = <T extends { key: string; raw: Uint8Arra
   let used = 0;
   for (const item of items) {
     const cleaned = clean(item.raw);
-    if (!isCleaned(cleaned)) {
+    if (!cleaned.ok) {
       rejected.push(item.key);
       continue;
     }
@@ -455,7 +454,7 @@ export const parseModelResult = (
   if (
     !Array.isArray(m.tests) ||
     m.tests.length > RESULT_LIMITS.maxTests ||
-    !m.tests.every((test) => typeof test === "string" && test.length <= 256)
+    !m.tests.every((test: unknown) => typeof test === "string" && test.length <= 256)
   ) {
     return { ok: false, reason: "schema_invalid" };
   }

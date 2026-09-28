@@ -433,7 +433,76 @@ const FORBIDDEN_NAMES = new Set([
 ]);
 
 const isAssertion = (node) => ts.isAsExpression(node) || ts.isTypeAssertionExpression(node);
-const unwrapParentheses = (node) => (ts.isParenthesizedExpression(node) ? unwrapParentheses(node.expression) : node);
+
+/**
+ * Assertion targets that cannot make a value callable, numeric or a byte
+ * array: `const`, `string`, `string[]`, records and object shapes whose values
+ * are `unknown`, and the module's content block. A union is allowed when every
+ * member is.
+ */
+const allowedAssertionTarget = (type) => {
+  if (ts.isUnionTypeNode(type)) return type.types.every(allowedAssertionTarget);
+  if (ts.isArrayTypeNode(type)) return allowedAssertionTarget(type.elementType);
+  if (type.kind === ts.SyntaxKind.StringKeyword || type.kind === ts.SyntaxKind.UndefinedKeyword) return true;
+  if (ts.isTypeReferenceNode(type)) {
+    const name = type.typeName.getText();
+    if (name === "const" || name === "ContentBlock") return (type.typeArguments ?? []).length === 0;
+    if (name === "Record") {
+      const [key, value] = type.typeArguments ?? [];
+      return key?.kind === ts.SyntaxKind.StringKeyword && value?.kind === ts.SyntaxKind.UnknownKeyword;
+    }
+    return false;
+  }
+  if (ts.isTypeLiteralNode(type)) {
+    return type.members.every(
+      (member) => ts.isPropertySignature(member) && member.type?.kind === ts.SyntaxKind.UnknownKeyword,
+    );
+  }
+  return false;
+};
+
+/** An expression that produces a value, as opposed to a name being declared or a type. */
+const isValueUse = (node) => {
+  if (!(ts.isIdentifier(node) || ts.isCallExpression(node) || ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
+    return false;
+  }
+  const parent = node.parent;
+  if (ts.isIdentifier(node)) {
+    if (ts.isTypeReferenceNode(parent) || ts.isQualifiedName(parent) || ts.isTypeQueryNode(parent)) return false;
+    if ((ts.isPropertyAccessExpression(parent) && parent.name === node) || ts.isPropertyAssignment(parent) && parent.name === node) {
+      return false;
+    }
+    if (
+      (ts.isVariableDeclaration(parent) || ts.isParameter(parent) || ts.isFunctionDeclaration(parent) ||
+        ts.isPropertySignature(parent) || ts.isTypeAliasDeclaration(parent) || ts.isImportSpecifier(parent) ||
+        ts.isBindingElement(parent) || ts.isShorthandPropertyAssignment(parent)) &&
+      parent.name === node
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/** `JSON.parse(...)` assigned straight into a variable declared `unknown`: the one place `any` is accepted. */
+const isParseIntoUnknown = (node, checker) => {
+  if (!ts.isCallExpression(node) || node.expression.getText() !== "JSON.parse") return false;
+  const parent = node.parent;
+  const declaredUnknown = (declaration) =>
+    declaration !== undefined &&
+    ts.isVariableDeclaration(declaration) &&
+    declaration.type?.kind === ts.SyntaxKind.UnknownKeyword;
+  if (ts.isVariableDeclaration(parent)) return declaredUnknown(parent);
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    parent.right === node &&
+    ts.isIdentifier(parent.left)
+  ) {
+    return declaredUnknown(checker.getSymbolAtLocation(parent.left)?.valueDeclaration);
+  }
+  return false;
+};
 
 const libDirectory = new URL("../lib/", import.meta.url);
 
@@ -467,14 +536,28 @@ const capabilityProblems = (text) => {
     (diagnostic) => `type error ${diagnostic.code}`,
   );
   const visit = (node) => {
-    // Types are only evidence while nothing can lie to the checker: no `any`,
-    // no assertion through `unknown` or `any`, no assertion of an assertion.
+    // Types are only evidence while the module tells the checker nothing it did
+    // not infer: no `any` written or flowing, assertions only to the closed list
+    // of harmless shapes, and no predicate, assertion signature, overload,
+    // ambient declaration, non-null or definite assignment.
     if (node.kind === ts.SyntaxKind.AnyKeyword) problems.push("any");
-    if (isAssertion(node)) {
-      if (node.type.kind === ts.SyntaxKind.UnknownKeyword || node.type.kind === ts.SyntaxKind.AnyKeyword) {
-        problems.push("assertion through unknown or any");
-      }
-      if (isAssertion(unwrapParentheses(node.expression))) problems.push("assertion of an assertion");
+    if (isAssertion(node) && !allowedAssertionTarget(node.type)) {
+      problems.push(`assertion to ${node.type.getText(source)}`);
+    }
+    if (ts.isTypePredicateNode(node)) problems.push("type predicate");
+    if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.body === undefined) {
+      problems.push("overload or bodiless declaration");
+    }
+    if (ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) {
+      problems.push("ambient declaration");
+    }
+    if (ts.isModuleDeclaration(node)) problems.push("namespace or global augmentation");
+    if (ts.isNonNullExpression(node)) problems.push("non-null assertion");
+    if ((ts.isVariableDeclaration(node) || ts.isPropertyDeclaration(node)) && node.exclamationToken) {
+      problems.push("definite assignment");
+    }
+    if (isValueUse(node) && checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any && !isParseIntoUnknown(node, checker)) {
+      problems.push(`value typed any: ${node.getText(source).slice(0, 40)}`);
     }
     if (ts.isBindingElement(node) && node.propertyName && ts.isComputedPropertyName(node.propertyName)) {
       problems.push("destructuring by a computed key");
@@ -515,6 +598,24 @@ const capabilityProblems = (text) => {
   return problems;
 };
 
+/**
+ * The guard catches honest regressions; it is not a sandbox. TypeScript's
+ * checker is not sound (array covariance, method parameter bivariance), so a
+ * deliberately disguised edit can still pass it. docs/policy/engineering-agent.md
+ * §8 therefore enforces this module with two things: this syntactic check and an
+ * independent implementation review bound to the module. This digest is that
+ * binding -- any change to the module fails here until the digest is updated,
+ * which is when the review of the new text happens. The module is control
+ * plane (docs/policy/engineering-agent.md §4), so the agent can never push that
+ * change itself.
+ */
+const REVIEWED_MODULE_SHA256 = "a670802ce8436639e49a9256cd8bb2f962f02a1b0f162904a13ff512ae9c6f92";
+
+test("the model call module is the text its last independent review read", () => {
+  const text = readFileSync(new URL("engineeringAgentModelCall.ts", libDirectory), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(sha256(text), REVIEWED_MODULE_SHA256);
+});
+
 test("the model call module cannot reach the network, the environment or code evaluation except through its transport", () => {
   const own = readFileSync(new URL("engineeringAgentModelCall.ts", libDirectory), "utf8");
   assert.deepEqual(capabilityProblems(own), []);
@@ -551,6 +652,19 @@ test("the capability guard catches each way around it", () => {
     "logging": 'console.log("the key");\n',
     "a stack trace hook": "Error.prepareStackTrace = () => 0;\n",
     "a type error": 'export const x: number = "not a number";\n',
+    "a generic assertion":
+      'function lie<T>(x: unknown): T {\n  return x as T;\n}\nconst key = lie<number>("constr" + "uctor");\nexport const x = lie<Uint8Array>(() => 0)[key];\n',
+    "an assertion to a callable": "export const x = (0 as unknown) as () => void;\n",
+    "any flowing from a parse": 'const k: number = JSON.parse("0");\nexport const x = new Uint8Array(1)[k];\n',
+    "any flowing from an array check":
+      "const v: unknown = [];\nif (Array.isArray(v)) {\n  const [f] = v;\n  f();\n}\n",
+    "a type predicate": "const isBytes = (v: unknown): v is Uint8Array => true;\nexport const x = isBytes(0);\n",
+    "an assertion signature": "function check(v: unknown): asserts v is number {}\nexport const x = check;\n",
+    "an overload":
+      "function f(x: string): number;\nfunction f(x: unknown): unknown {\n  return x;\n}\nexport const x = f(\"a\");\n",
+    "an ambient declaration": "declare const bytes: Uint8Array;\nexport const x = bytes[0];\n",
+    "a non-null assertion": "const m = new Map<string, number>();\nexport const x = m.get(\"a\")!;\n",
+    "a definite assignment": "let b!: Uint8Array;\nexport const x = b[0];\n",
   };
   for (const [label, text] of Object.entries(fixtures)) {
     assert.notDeepEqual(capabilityProblems(text), [], label);
