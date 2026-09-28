@@ -275,8 +275,11 @@ const restoresCache = (job: Obj) => {
     if (!isObj(step) || step.uses === undefined) return false;
     if (typeof step.uses !== "string") return true;
     const uses = step.uses.trim();
-    if (uses.includes("${{") || uses.startsWith("./")) return true;
+    // A container step's work is not read here either.
+    if (uses.includes("${{") || uses.startsWith("./") || /^docker:\/\//i.test(uses)) return true;
     if (/^actions\/cache(?:\/restore)?@/i.test(uses)) return true;
+    // Any action told to read the Actions cache backend, whatever its name.
+    if (isObj(step.with) && /type\s*=\s*gha\b/i.test(JSON.stringify(step.with))) return true;
     if (/^actions\/setup-[a-z-]+@/i.test(uses)) {
       const cache = isObj(step.with) ? step.with.cache : undefined;
       return cache !== false && cache !== "false";
@@ -311,6 +314,8 @@ export const agentBranchMayMatch = (pattern: string): boolean => {
 
 export const agentBranchesAllCovered = (pattern: string): boolean => {
   if (pattern.includes("${{") || pattern.startsWith("!")) return false;
+  // A pattern this file does not model cannot be relied on to cover anything.
+  if (compileFilter(pattern) === "unknown") return false;
   if (pattern === `${AGENT_BRANCH_PREFIX}*`) return true;
   if (!pattern.endsWith("**")) return false;
   const prefix = pattern.slice(0, -2);
@@ -511,7 +516,12 @@ export const analyseCredentialReachability = (input: {
           return { status: "failed", problems: [{ path, problem: `${event}:branch_filter_unreadable` }] };
         }
         if (event === "push") {
-          const onlyTags = filter.branches === undefined && filter.tags !== undefined;
+          // GitHub judges a branch push by the branch filters alone: only a push
+          // with tag filters and no branch filter at all ignores branches.
+          const onlyTags =
+            filter.branches === undefined &&
+            filter["branches-ignore"] === undefined &&
+            (filter.tags !== undefined || filter["tags-ignore"] !== undefined);
           // Negations in an include list can only remove branches, so they are
           // ignored here: that errs towards "reached".
           const included =

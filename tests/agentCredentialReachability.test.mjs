@@ -143,6 +143,13 @@ test("workflows the agent cannot set off are not reached; ones it can are, with 
     false,
     "a tags-only push filter never fires on a branch push",
   );
+  assert.equal(
+    analyse([
+      wf("ci", credentialed.replace("  pull_request:\n    branches: [develop]", "  push:\n    tags: ['v*']\n    branches-ignore: ['release/**']")),
+    ]).forbidsAll,
+    true,
+    "a branch filter beside tag filters still judges a branch push",
+  );
 });
 
 test("workflow_run chains are followed to a fixed point", () => {
@@ -469,6 +476,16 @@ ${step}`;
 `), true, "owner and repo are case-insensitive");
   assert.equal(restores(`      - run: echo
 `), false);
+  assert.equal(restores(`      - uses: docker://alpine
+`), true, "a container step is not read");
+  assert.equal(
+    restores(`      - uses: docker/build-push-action@v6
+        with:
+          cache-from: type=gha
+`),
+    true,
+    "an action told to read the Actions cache backend",
+  );
 });
 
 test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
@@ -487,6 +504,7 @@ test("an ignore list's negation puts back what it ignored, and an unknown one mi
     branches-ignore: [${ignored}]`);
   assert.equal(analyse([wf("ci", push("'agent/**'"))]).forbidsAll, false);
   assert.equal(analyse([wf("ci", push("'agent/**', '!agent/engineering/1'"))]).forbidsAll, true, "a negation puts an agent branch back");
+  assert.equal(analyse([wf("ci", push("'agent**'"))]).forbidsAll, true, "an unmodelled pattern is not trusted to cover the agent's branches");
 });
 
 test("anything unreadable fails the whole analysis", () => {
