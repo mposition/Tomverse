@@ -149,8 +149,8 @@ test("the maximum escaped request fits the offline token upper bound", () => {
         PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE;
 
     assert.equal(messages.length, 2);
-    assert.equal(renderedUtf8Bytes, 96_848);
-    assert.equal(maxRenderedContentTokenUpperBound, 96_848);
+    assert.equal(renderedUtf8Bytes, 97_307);
+    assert.equal(maxRenderedContentTokenUpperBound, 97_307);
     assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
 });
 
