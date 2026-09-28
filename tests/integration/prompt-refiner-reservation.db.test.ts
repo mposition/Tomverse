@@ -708,6 +708,122 @@ test("current v5 runtime manifest missing or JSON-null keys fail at the actual i
     }
 });
 
+test("current v5 successor-only manifest mutations fail at the actual insert constraint", async () => {
+    const data = await stageCreateData();
+    const manifest = data.runtimeSourceManifest as unknown as {
+        schemaVersion: string;
+        files: Array<Record<string, unknown>>;
+        [key: string]: unknown;
+    };
+    assert.equal(data.id, "prompt-refiner-shadow-v4");
+    assert.equal(manifest.schemaVersion, "prompt-refiner-runtime-source-manifest-v5");
+    assert.equal(manifest.files.length, 190);
+    assert.equal(
+        manifest.files[8]!.path,
+        "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql"
+    );
+    const mutations: Array<{
+        name: string;
+        changesSourceIdentity: boolean;
+        mutate: (candidate: typeof manifest) => void;
+    }> = [
+        {
+            name: "files[8]:wrong-path",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.path = "lib/x.ts";
+                assert.equal(candidate.files[8]!.path, "lib/x.ts");
+            },
+        },
+        {
+            name: "files[8]:extra-key",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.extra = 1;
+                assert.equal(candidate.files[8]!.extra, 1);
+            },
+        },
+        {
+            name: "files[8]:string-sizeBytes",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.sizeBytes = String(candidate.files[8]!.sizeBytes);
+                assert.equal(candidate.files[8]!.sizeBytes, String(manifest.files[8]!.sizeBytes));
+            },
+        },
+        {
+            name: "files[8]:uppercase-sha256",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.sha256 = "A".repeat(64);
+                assert.equal(candidate.files[8]!.sha256, "A".repeat(64));
+            },
+        },
+        {
+            name: "manifest:extra-key",
+            changesSourceIdentity: false,
+            mutate: (candidate) => {
+                candidate.extra = 1;
+                assert.equal(candidate.extra, 1);
+            },
+        },
+        {
+            name: "manifest:string-totalSizeBytes",
+            changesSourceIdentity: false,
+            mutate: (candidate) => {
+                candidate.totalSizeBytes = String(candidate.totalSizeBytes);
+                assert.equal(candidate.totalSizeBytes, String(manifest.totalSizeBytes));
+            },
+        },
+    ];
+    assert.equal(mutations.length, 6);
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+    );
+    try {
+        const [disabled] = await prisma.$queryRaw<Array<{ enabled: string }>>`
+            SELECT "tgenabled"::text AS "enabled" FROM pg_trigger
+            WHERE "tgrelid" = '"PromptRefinerReservationStage"'::regclass
+              AND "tgname" = 'prompt_refiner_stage_guard_trigger'
+        `;
+        assert.equal(disabled?.enabled, "D");
+        for (const { name, changesSourceIdentity, mutate } of mutations) {
+            const candidate = {
+                ...data,
+                runtimeSourceManifest: structuredClone(data.runtimeSourceManifest),
+            };
+            mutate(candidate.runtimeSourceManifest as unknown as typeof manifest);
+            recomputeRuntimeManifestDigests(candidate);
+            assert.equal(
+                candidate.runtimeSourceIdentityDigest !== data.runtimeSourceIdentityDigest,
+                changesSourceIdentity,
+                name
+            );
+            assert.notEqual(candidate.runtimeSourceManifestDigest, data.runtimeSourceManifestDigest, name);
+            await assert.rejects(
+                prisma.promptRefinerReservationStage.create({ data: candidate }),
+                /PromptRefinerReservationStage_runtime_identity_check/,
+                name
+            );
+            assert.equal(await prisma.promptRefinerReservationStage.count(), 0, name);
+        }
+        const inserted = await prisma.promptRefinerReservationStage.create({ data });
+        assert.equal(inserted.id, "prompt-refiner-shadow-v4");
+        assert.deepEqual(inserted.runtimeSourceManifest, data.runtimeSourceManifest);
+        assert.equal(await prisma.promptRefinerReservationStage.count(), 1);
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+        );
+    }
+    const [restored] = await prisma.$queryRaw<Array<{ enabled: string }>>`
+        SELECT "tgenabled"::text AS "enabled" FROM pg_trigger
+        WHERE "tgrelid" = '"PromptRefinerReservationStage"'::regclass
+          AND "tgname" = 'prompt_refiner_stage_guard_trigger'
+    `;
+    assert.equal(restored?.enabled, "O");
+});
+
 test("reserve uses the DB clock and atomically binds one exact permanent slot", async () => {
     await createStage();
     const reserved = await reservePromptRefinerExecution({ requestId: "request_db_1" });
