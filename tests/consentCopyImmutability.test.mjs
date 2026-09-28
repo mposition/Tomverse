@@ -4,31 +4,39 @@
 //
 // The in-tree digests make an edit to the approved document visible; they cannot
 // make it impossible, because the same commit holds both the document and the
-// pins. This is the check that reads the base revision instead. Two rounds of
-// review shaped it: the first asked for it at all, the second broke its parser
-// three ways in one sitting, and every one of those is a case here -- a check a
-// comment can defeat reports "unchanged" about a file that changed, which is
-// worse than no check because it is quoted as evidence.
+// pins. This is the check that reads the base revision instead.
+//
+// Three rounds of review shaped it, and the third changed what it compares. The
+// first two versions compared metadata -- digests, record fields, a list of
+// which sections a version approved -- and each time a round found the same
+// shape of hole underneath: a commit could change the words and move every
+// number that described them. So it compares the words. There is no exemption
+// list left to test, because there is nothing left for one to excuse.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  AMENDABLE_SECTIONS,
+  APPROVED_DOCUMENT,
   CONSENT_COPY_SOURCE,
-  DIGEST_FIELDS,
-  DOCUMENT_AMENDMENTS,
-  PINS_SOURCE,
-  RECOMPUTED,
   RECORD_FIELDS,
   Unreadable,
   immutabilityProblems,
-  pinsOf,
   recordsOf,
+  sectionsOf,
 } from "../scripts/check-consent-copy-immutability-core.mjs";
 
-/** A minimal file of the shape the real one holds, so a case can edit one field. */
-const sourceWith = (...entries) => `
+const COPY = `
+const V2026_09_23 = Object.freeze({
+  signupOptIn: Object.freeze({ ko: "수신동의 (선택)", en: "Send me product news" }),
+  signupNotice: Object.freeze({ ko: "켜시면 보냅니다", en: "If you turn this on" }),
+});
+`;
+
+/** A minimal file of the shape the real one has, so a case can change one thing. */
+const sourceWith = (...entries) => `${COPY}
 export const CONSENT_COPY_VERSIONS: ReadonlyArray<Entry> = Object.freeze([
 ${entries.join("\n")}
 ]);
@@ -40,8 +48,6 @@ const entry = (overrides = {}) => {
     approvedBy: "mposition",
     approvedAt: "2026-09-23",
     recordSection: "8.",
-    recordDigest: "c1cb328e70178109be557037025ef807",
-    approvedBodyDigest: "4d4f8824c4a859fbc1f2007eca022af2",
     sections: `[
       ["§1", "R5 — 철회 시까지"],
       ["§4.1–4.3", "통지 3건의 문안"],
@@ -57,22 +63,18 @@ const entry = (overrides = {}) => {
     approvedBy: "${fields.approvedBy}",
     approvedAt: "${fields.approvedAt}",
     recordSection: "${fields.recordSection}",
-    recordDigest: "${fields.recordDigest}",
-    approvedBodyDigest: "${fields.approvedBodyDigest}",
-    deviceCells: {
-      signupOptIn: { section: "3.A", label: null, role: null },
-    },
     approvedSections: ${fields.sections},
+    deviceCells: { signupOptIn: { section: "3.A", label: null, role: null } },
+    deviceSummary: { section: "3.0", label: null, rows: [["#", "장치"]] },
     copy: ${fields.copy},${fields.extra}
   }),`;
 };
 
-const problemsFor = (before, now, recomputed = []) =>
+const problemsFor = (before, now) =>
   immutabilityProblems({
     before: recordsOf(before, "base"),
     now: recordsOf(now, "head"),
     base: "origin/develop",
-    recomputed,
   });
 
 const unreadable = (source, pattern) => {
@@ -86,64 +88,80 @@ const unreadable = (source, pattern) => {
   );
 };
 
-test("the real files parse, and their records are what the arrays state", () => {
+test("the real files parse, and the wording comes back as words", () => {
   const records = recordsOf(readFileSync(CONSENT_COPY_SOURCE, "utf8"), CONSENT_COPY_SOURCE);
   assert.ok(records.length >= 1);
   for (const record of records) {
     for (const field of RECORD_FIELDS) {
-      assert.ok(
-        typeof record[field] === "string" && record[field].length > 0,
-        `${field} came back empty, so the check would compare nothing`
-      );
+      assert.ok(record[field] !== undefined, `${field} came back empty`);
     }
-    assert.match(record.recordDigest, /^[0-9a-f]{32}$/);
-    assert.match(record.approvedBodyDigest, /^[0-9a-f]{32}$/);
+    // The point of the whole check: `copy` is the strings, not the name of the
+    // constant that holds them.
+    assert.equal(typeof record.copy, "object");
+    assert.ok(Object.keys(record.copy).length >= 8, "fewer keys than the approved devices");
+    for (const table of Object.values(record.copy)) {
+      for (const text of Object.values(table)) {
+        assert.equal(typeof text, "string");
+        assert.ok(text.length > 0);
+      }
+    }
   }
-  const pins = pinsOf(readFileSync(PINS_SOURCE, "utf8"), PINS_SOURCE);
-  assert.match(pins.unversionedSectionsDigest, /^[0-9a-f]{32}$/);
-  assert.ok(pins.unversionedSections.length > 0);
+
+  const sections = sectionsOf(readFileSync(APPROVED_DOCUMENT, "utf8"), APPROVED_DOCUMENT);
+  assert.ok(sections.has(""), "the status block is not a part");
+  for (const number of AMENDABLE_SECTIONS) {
+    assert.ok(sections.has(number), `${number} is not in the approved document`);
+  }
+});
+
+test("the document partition covers every byte exactly once", () => {
+  // The same claim the unit suite makes about its own pins, made here because
+  // this is the partition the base comparison uses and two partitions that
+  // disagree would compare different things.
+  const source = readFileSync(APPROVED_DOCUMENT, "utf8").replace(/\r\n/g, "\n");
+  const parts = [...sectionsOf(source, "test").values()];
+  assert.equal(parts.join(""), source);
 });
 
 test("an unchanged version is a pass, comments and formatting included", () => {
-  const before = sourceWith(entry());
-  const now = sourceWith(
-    entry({ comment: "// Rewritten comment, three words longer than it was." })
+  const { problems, added } = problemsFor(
+    sourceWith(entry()),
+    sourceWith(entry({ comment: "// Rewritten comment, three words longer than it was." }))
   );
-  const { problems, added } = problemsFor(before, now);
   assert.deepEqual(problems, []);
   assert.deepEqual(added, []);
 });
 
 test("appending a version is a pass, and the addition is named", () => {
   const before = sourceWith(entry());
-  const now = sourceWith(
-    entry(),
-    entry({ version: "2026-12-01", recordSection: "11.", copy: "V2026_12_01" })
-  );
+  const now = sourceWith(entry(), entry({ version: "2026-12-01", recordSection: "11." }));
   const { problems, added } = problemsFor(before, now);
   assert.deepEqual(problems, []);
   assert.deepEqual(added, ["2026-12-01"]);
 });
 
-test("every field of an approved record is compared", () => {
-  // One case per field, because a check that compares six of eight is the same
-  // failure as no check for the two.
+test("a changed approved string is caught, and named", () => {
+  // The hole the last round found: every earlier version compared a digest of
+  // these strings and a commit could move the digest. This compares the strings.
+  const changed = COPY.replace("Send me product news", "Send me product news and offers");
+  const now = `${changed}
+export const CONSENT_COPY_VERSIONS: ReadonlyArray<Entry> = Object.freeze([
+${entry()}
+]);
+`;
+  const { problems } = problemsFor(sourceWith(entry()), now);
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /approved wording changed: signupOptIn\.en/);
+});
+
+test("every other field of the record is compared too", () => {
   const changes = {
     version: { version: "2026-09-24" },
     approvedBy: { approvedBy: "somebody-else" },
     approvedAt: { approvedAt: "2026-09-24" },
     recordSection: { recordSection: "11." },
-    recordDigest: { recordDigest: "0".repeat(32) },
-    approvedBodyDigest: { approvedBodyDigest: "1".repeat(32) },
-    approvedSections: {
-      sections: `[
-      ["§1", "R5 — 철회 시까지"],
-    ] as const`,
-    },
-    copy: { copy: "V2026_12_01" },
+    approvedSections: { sections: `[["§1", "R5 — 철회 시까지"]] as const` },
   };
-  assert.deepEqual(Object.keys(changes).sort(), [...RECORD_FIELDS].sort());
-
   for (const [field, overrides] of Object.entries(changes)) {
     const { problems } = problemsFor(sourceWith(entry()), sourceWith(entry(overrides)));
     assert.equal(problems.length, 1, `${field} was not reported`);
@@ -155,12 +173,45 @@ test("every field of an approved record is compared", () => {
   }
 });
 
-test("a comment cannot answer for the array, or for a field", () => {
-  // The three bypasses a review found in the string-searching version. Each one
-  // made the check report "unchanged" about a file that had changed.
-  const changed = { approvedBy: "somebody-else" };
+test("a different copy table with identical strings is still a different table", () => {
+  const now = `${COPY}
+const V2026_09_23_COPY = V2026_09_23;
+export const CONSENT_COPY_VERSIONS: ReadonlyArray<Entry> = Object.freeze([
+${entry({ copy: "V2026_09_23_COPY" })}
+]);
+`;
+  // The alias is not a literal, so it is refused rather than compared -- which is
+  // the right answer: a table this cannot read is one it cannot claim anything
+  // about.
+  unreadable(now, /V2026_09_23_COPY is not a literal|copy is not the name/);
+});
 
-  // An old copy of the array in a comment, above the real one.
+test("a decoy declaration cannot answer for the export", () => {
+  // A review's own bypass: a local const with the right name and an export
+  // clause renaming the real one, so the parser read one value and the module
+  // exported another.
+  const decoy = `${COPY}
+const CONSENT_COPY_VERSIONS = Object.freeze([
+${entry()}
+]);
+const actual = Object.freeze([
+${entry({ approvedBy: "somebody-else" })}
+]);
+export { actual as CONSENT_COPY_VERSIONS };
+`;
+  unreadable(decoy, /re-exported through an export clause/);
+
+  // And a declaration that is not exported at all.
+  const unexported = `${COPY}
+const CONSENT_COPY_VERSIONS = Object.freeze([
+${entry()}
+]);
+`;
+  unreadable(unexported, /declared but not exported/);
+});
+
+test("a comment cannot answer for the array, or for a field", () => {
+  const changed = { approvedBy: "somebody-else" };
   const commentedArray = `
 /*
 export const CONSENT_COPY_VERSIONS = Object.freeze([
@@ -172,13 +223,8 @@ ${sourceWith(entry(changed))}`;
   assert.equal(problems.length, 1, "a commented-out array answered for the real one");
   assert.match(problems[0], /approvedBy/);
 
-  // An old field in a comment, above the real one. The parser reads the
-  // initialiser, so the comment is not a value.
   const commentedField = sourceWith(
-    entry({
-      ...changed,
-      comment: '// approvedBy: "mposition",',
-    })
+    entry({ ...changed, comment: '// approvedBy: "mposition",' })
   );
   const second = problemsFor(sourceWith(entry()), commentedField);
   assert.equal(second.problems.length, 1);
@@ -186,43 +232,24 @@ ${sourceWith(entry(changed))}`;
 });
 
 test("a spread, a computed key, a duplicate and a computed value are refused", () => {
-  // Not "reported as unchanged" and not "reported as changed": refused. A record
-  // this cannot read exactly is one whose runtime value it cannot claim anything
-  // about, and `...changedRecord` after the literal fields is exactly that.
   unreadable(sourceWith(entry({ extra: "\n    ...changedRecord," })), /spread/);
   unreadable(sourceWith(entry({ extra: '\n    ["approved" + "By"]: "x",' })), /computed key/);
   unreadable(sourceWith(entry({ extra: '\n    approvedBy: "somebody-else",' })), /approvedBy twice/);
   unreadable(
-    sourceWith(entry({ approvedBy: '${base}' }).replace('"${base}"', "computeApprover()")),
-    /approvedBy is not a plain string literal/
+    sourceWith(entry()).replace('approvedBy: "mposition"', "approvedBy: computeApprover()"),
+    /approvedBy is produced by a call|approvedBy is not a literal/
   );
-  unreadable(sourceWith(entry({ sections: "buildSections()" })), /approvedSections is not an array/);
+  unreadable(sourceWith(entry({ sections: "buildSections()" })), /approvedSections is produced by a call|approvedSections is not a literal/);
   unreadable(sourceWith(entry({ copy: '"V2026_09_23"' })), /copy is not the name/);
 });
 
-test("a second declaration of the array is refused rather than picked between", () => {
-  const two = `${sourceWith(entry())}\n${sourceWith(entry({ approvedBy: "somebody-else" }))}`;
-  unreadable(two, /declares CONSENT_COPY_VERSIONS 2 time\(s\)/);
+test("two declarations of the array are refused rather than picked between", () => {
+  const two = `${sourceWith(entry())}\nexport const CONSENT_COPY_VERSIONS = Object.freeze([${entry()}]);`;
+  unreadable(two, /declared 2 time\(s\)/);
 });
 
 test("a file that does not parse is refused", () => {
   unreadable("export const CONSENT_COPY_VERSIONS = Object.freeze([ {{{ ", /does not parse|cannot read/);
-});
-
-test("dropping the scope of an approval is one of those changes", () => {
-  // The whole reason the section list is no longer written beside the digest: a
-  // commit that removed §4 from the list, removed its row from the approval
-  // table and recomputed both digests used to pass everything.
-  const narrowed = {
-    sections: `[
-      ["§1", "R5 — 철회 시까지"],
-    ] as const`,
-    approvedBodyDigest: "2".repeat(32),
-  };
-  const { problems } = problemsFor(sourceWith(entry()), sourceWith(entry(narrowed)));
-  assert.equal(problems.length, 2);
-  assert.ok(problems.some((problem) => problem.includes("approvedSections")));
-  assert.ok(problems.some((problem) => problem.includes("approvedBodyDigest")));
 });
 
 test("a version cannot be removed or pushed down the array", () => {
@@ -243,138 +270,83 @@ test("a version cannot be removed or pushed down the array", () => {
   assert.match(inserted.problems[0], /A new version is appended/);
 });
 
-test("a recomputation excuses only a digest, and only the transition it names", () => {
-  const recomputed = [
-    {
-      version: "2026-09-23",
-      field: "approvedBodyDigest",
-      from: "4d4f8824c4a859fbc1f2007eca022af2",
-      to: "3".repeat(32),
-      why: "test",
-    },
-  ];
-  const named = problemsFor(
-    sourceWith(entry()),
-    sourceWith(entry({ approvedBodyDigest: "3".repeat(32) })),
-    recomputed
-  );
-  assert.deepEqual(named.problems, []);
-  assert.deepEqual(named.notes, [
-    "version 2026-09-23's approvedBodyDigest was recomputed: test",
-  ]);
-
-  // A third value, the same field: not the transition that was reviewed.
-  const other = problemsFor(
-    sourceWith(entry()),
-    sourceWith(entry({ approvedBodyDigest: "4".repeat(32) })),
-    recomputed
-  );
-  assert.equal(other.problems.length, 1);
-
-  // And an entry for a field that is not a digest excuses nothing, however
-  // exactly it names the transition. A review was right that this list is an
-  // audit signal rather than an approval, so it is narrowed to the two values
-  // that can move without the document moving.
-  for (const field of RECORD_FIELDS.filter((name) => !DIGEST_FIELDS.includes(name))) {
-    if (field === "version") continue; // reported as a reordered entry instead
-    const overrides =
-      field === "approvedSections"
-        ? { sections: '[["§1", "R5"]] as const' }
-        : field === "copy"
-          ? { copy: "ChangedCopy" }
-          : { [field]: "changed-value" };
-    const was =
-      field === "approvedSections" ? '[["§1","R5 — 철회 시까지"],["§4.1–4.3","통지 3건의 문안"]]' : undefined;
-    const { problems } = problemsFor(
-      sourceWith(entry()),
-      sourceWith(entry(overrides)),
-      [
-        {
-          version: "2026-09-23",
-          field,
-          from: was ?? "mposition",
-          to: field === "copy" ? "ChangedCopy" : "changed-value",
-          why: "an entry that must not work",
-        },
-      ]
-    );
-    assert.equal(problems.length, 1, `${field} was excused by a recomputation entry`);
-    assert.match(problems[0], /No recomputation entry can excuse this field/);
-  }
-});
-
-test("the sections no version owns are compared too, and an amendment is named", () => {
-  const pins = (digest, sections = '["0.", "7.", "9.", "10."]') => `
-export const UNVERSIONED_SECTIONS = ${sections};
-export const UNVERSIONED_SECTIONS_DIGEST = "${digest}";
-`;
-  const before = pinsOf(pins("a".repeat(32)), "base");
+test("the approved document is compared section by section, and only two may be amended", () => {
+  const doc = (overrides = {}) => {
+    const parts = {
+      "": "# 이메일 동의 문안 (S2)\n\n상태: 승인됨\n\n",
+      "0.": "## 0. 승인하실 때 보시는 것\n\n...\n\n",
+      "4.": "## 4. 통지\n\n승인된 문안\n\n",
+      "9.": "## 9. 승인 이후 발견된 것\n\n...\n\n",
+      "10.": "## 10. 고치는 법\n\n...\n",
+      ...overrides,
+    };
+    return Object.values(parts).join("");
+  };
+  const before = sectionsOf(doc(), "base");
   const source = sourceWith(entry());
+  const compare = (text) =>
+    immutabilityProblems({
+      before: recordsOf(source, "base"),
+      now: recordsOf(source, "head"),
+      base: "origin/develop",
+      documentBefore: before,
+      documentNow: sectionsOf(text, "head"),
+    });
 
-  // An edited section 9 with the digest repinned: the version records are
-  // untouched, so this is the one thing round 14's finding still covered.
-  const unnamed = immutabilityProblems({
+  assert.deepEqual(compare(doc()).problems, []);
+
+  // Approved wording: refused.
+  const wording = compare(doc({ "4.": "## 4. 통지\n\n고친 문안\n\n" }));
+  assert.equal(wording.problems.length, 1);
+  assert.match(wording.problems[0], /section 4\. of the approved document changed/);
+
+  // The status block, where 승인됨 could become 반려됨: refused.
+  const status = compare(doc({ "": "# 이메일 동의 문안 (S2)\n\n상태: 반려됨\n\n" }));
+  assert.equal(status.problems.length, 1);
+  assert.match(status.problems[0], /the status block of the approved document changed/);
+
+  // Section 0, which is neither approved wording nor the procedure: refused.
+  assert.equal(compare(doc({ "0.": "## 0. 승인하실 때\n\n바뀜\n\n" })).problems.length, 1);
+
+  // Sections 9 and 10: amended, and said so rather than refused.
+  for (const number of AMENDABLE_SECTIONS) {
+    const amended = compare(doc({ [number]: `## ${number} 고침\n\n새 내용\n\n` }));
+    assert.deepEqual(amended.problems, []);
+    assert.equal(amended.notes.length, 1);
+    assert.match(amended.notes[0], /was amended/);
+  }
+
+  // A new section is an addition, which a new version brings.
+  const added = compare(`${doc()}## 11. 새 버전\n\n문안\n`);
+  assert.deepEqual(added.problems, []);
+  assert.deepEqual(added.newSections, ["11."]);
+
+  // A deleted section is not.
+  const deleted = immutabilityProblems({
     before: recordsOf(source, "base"),
     now: recordsOf(source, "head"),
     base: "origin/develop",
-    pinsBefore: before,
-    pinsNow: pinsOf(pins("b".repeat(32)), "head"),
-    amendments: [],
+    documentBefore: before,
+    documentNow: sectionsOf(doc({ "4.": "" }), "head"),
   });
-  assert.equal(unnamed.problems.length, 1);
-  assert.match(unnamed.problems[0], /DOCUMENT_AMENDMENTS/);
-
-  // With a line saying what was amended, it passes and says so.
-  const named = immutabilityProblems({
-    before: recordsOf(source, "base"),
-    now: recordsOf(source, "head"),
-    base: "origin/develop",
-    pinsBefore: before,
-    pinsNow: pinsOf(pins("b".repeat(32)), "head"),
-    amendments: [{ from: "a".repeat(32), to: "b".repeat(32), why: "section 10.1 gained an item" }],
-  });
-  assert.deepEqual(named.problems, []);
-  assert.equal(named.notes.length, 1);
-
-  // The list itself is not amendable: a section no version claims is a section
-  // nobody approved.
-  const listMoved = immutabilityProblems({
-    before: recordsOf(source, "base"),
-    now: recordsOf(source, "head"),
-    base: "origin/develop",
-    pinsBefore: before,
-    pinsNow: pinsOf(pins("a".repeat(32), '["0.", "7.", "9.", "10.", "11."]'), "head"),
-    amendments: [],
-  });
-  assert.equal(listMoved.problems.length, 1);
-  assert.match(listMoved.problems[0], /list of sections no version owns/);
+  assert.equal(deleted.problems.length, 1);
+  assert.match(deleted.problems[0], /section 4\. was in the approved document .* and is gone/);
 });
 
-test("the recorded exemptions are the shape the check reads", () => {
-  for (const item of RECOMPUTED) {
-    assert.ok(DIGEST_FIELDS.includes(item.field), `${item.field} is not a digest field`);
-    assert.notEqual(item.from, item.to);
-    assert.ok(item.why.length > 40, "a recomputation says why, or it says nothing");
-  }
-  for (const item of DOCUMENT_AMENDMENTS) {
-    assert.notEqual(item.from, item.to);
-    assert.ok(item.why.length > 40, "an amendment says what was amended, or it says nothing");
-  }
-});
-
-test("prose in an entry cannot end it early", () => {
-  // The Korean descriptions in the approval table hold brackets and braces, and
-  // an entry that ended at the first one of those would compare a truncated
-  // record against a truncated record and pass.
-  const awkward = sourceWith(
-    entry({
-      sections: `[
-      ["§3.A–D", "동의 장치 4개의 문안 {A, B} [초안]"],
-    ] as const`,
-    })
+test("a document with two sections of the same number is refused", () => {
+  assert.throws(
+    () => sectionsOf("## 4. one\n\n## 4. two\n", "test"),
+    (error) => {
+      assert.ok(error instanceof Unreadable);
+      assert.match(error.message, /two depth-2 headings numbered 4\./);
+      return true;
+    }
   );
-  const [record] = recordsOf(awkward, "test");
-  assert.equal(record.copy, "V2026_09_23", "the entry was cut short");
-  const { problems } = problemsFor(awkward, awkward);
-  assert.deepEqual(problems, []);
+  assert.throws(
+    () => sectionsOf("no headings here\n", "test"),
+    (error) => {
+      assert.match(error.message, /no depth-2 heading/);
+      return true;
+    }
+  );
 });
