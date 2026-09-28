@@ -1279,8 +1279,8 @@ const canonicalIndexPath = (value) =>
   normalizeRepoPath(value).replace(/[A-Z]/g, (character) => String.fromCharCode(character.charCodeAt(0) + 32));
 const isTransientGitleaksReviewOutput = (value) => {
   const candidate = canonicalIndexPath(value);
-  return transientGitleaksReviewOutputs.some((value) => {
-    const root = canonicalIndexPath(value);
+  return transientGitleaksReviewOutputs.some((allowedRoot) => {
+    const root = canonicalIndexPath(allowedRoot);
     return candidate === root || candidate.startsWith(`${root}/`);
   });
 };
