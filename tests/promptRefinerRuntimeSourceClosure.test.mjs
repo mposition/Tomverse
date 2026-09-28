@@ -238,15 +238,22 @@ const compilerOptions = parsedConfig.options;
 // `feature.autoExplorationEnabled`. The predicates are repeated in that file
 // so it does not import `lib/autoExplorationAccess.ts`, which would add a
 // path to the database-bound source list. The reader has no computed element
-// access. The count remains 228 and the position-free inventory remains
-// 9aa7ec49..., so only source positions moved. The position-sensitive digest
-// below is the merge of that reader with the successor audit-facts repin.
+// access.
+//
+// 2026-09-28, guest-lead save: `updateOperationalFeatureFlags` in the same
+// file sits above the computed accesses already there. The new function
+// writes three known keys through the same tuple `.map` the combined writer
+// already had, and that map is not an element access.
+//
+// Both notes stand on the merged tree. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin of source positions and not a review of new computed access.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "48f1e9cb7e194a3e9cb412e4a66fcd9a",
-  "cd8e219c263d8e29a47df49a727da8e9",
+  "a4393f97b394865cbce797ed7897729b",
+  "466909ed083384578b9a0d56a0a7e9c6",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

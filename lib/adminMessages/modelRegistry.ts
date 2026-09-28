@@ -128,9 +128,30 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
       replaceTitle: "Replace an existing model",
       replaceHelp:
-        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The form opens the new model as coming soon and unlisted; set its runtime status and public listing before saving if it should be offered.",
+        "Only models from this provider are listed. Replace and save disables the chosen model and records this adoption as what replaces it. The form opens the new model as coming soon and unlisted; set its runtime status and public listing before saving if it should be offered. The application fallback and the guest leading model cannot be replaced here.",
       replaceLabel: "Model to replace",
       replaceNone: "Do not replace a model",
+      replaceFallback: " · application fallback · cannot replace",
+      replaceGuestLead: " · guest lead · change the lead in Platform settings first",
+      fallbackGuidance: (name: string, id: string) =>
+        `${name} (${id}) is the application fallback for new accounts, so it cannot be replaced here. Save the new model with “Do not replace a model”. Moving the default is a separate decision.`,
+      guestLeadWarning: (name: string) =>
+        `${name} is the guest leading model. Change that lead in Platform settings before replacing it.`,
+      trioWarning: (name: string, substitute: string) =>
+        `Turning off ${name} shows ${substitute} to guests in its place. Changing the guest trio is a code change.`,
+      successorStatus: (status: string, listing: string) =>
+        `New model: ${status} · ${listing}`,
+      unlisted: "unlisted",
+      fallbackProtected: (id: string) =>
+        `Not saved. ${id} is the application fallback, so this save cannot turn it off. What you entered is still here. Save with “Do not replace a model”, or read the transition under Platform settings, Default models.`,
+      guestLeadProtected: (id: string) =>
+        `Not saved. ${id} is the guest leading model. What you entered is still here. Choose “Do not replace a model”, or change the lead in Platform settings first.`,
+      openDefaultModels: "Platform settings · Default models",
+      roleFallback: "App fallback",
+      roleGuestLead: "Guest lead",
+      roleGuestTrio: "Guest trio",
+      fallbackLocked:
+        "This row is the application fallback. Runtime status, minimum plan, usage class, and removal stay as they are. Moving the fallback is a reviewed code change, described on Platform settings.",
       replaceRequired: "Choose the model this adoption replaces, or save without replacing one.",
       saveRefused: "Not saved.",
       reasonTooShort: "Write an adoption reason of at least 4 characters. That sentence is what the approval record keeps.",
@@ -352,9 +373,30 @@ export const adminModelRegistryMessages = defineAdminMessages({
       proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
       replaceTitle: "기존 모델 대체",
       replaceHelp:
-        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 출시 예정·비공개로 열리며, 제공하려면 저장 전에 런타임 상태와 공개 목록을 바꾸세요.",
+        "이 공급자의 모델만 나옵니다. 대체하고 저장을 누르면 선택한 모델을 끄고, 이 채택을 그 대체 모델로 기록합니다. 새 모델은 출시 예정·비공개로 열리며, 제공하려면 저장 전에 런타임 상태와 공개 목록을 바꾸세요. 앱 fallback과 게스트 선두 모델은 여기서 대체할 수 없습니다.",
       replaceLabel: "대체할 모델",
       replaceNone: "대체하지 않음",
+      replaceFallback: " · 앱 fallback · 대체 불가",
+      replaceGuestLead: " · 게스트 선두 · 먼저 플랫폼 설정에서 선두 변경",
+      fallbackGuidance: (name: string, id: string) =>
+        `${name} (${id})는 신규 계정 기본 모델(앱 fallback)이라 여기서 대체할 수 없습니다. 새 모델은 “대체하지 않음”으로 저장하세요. 기본 모델을 옮기는 일은 모델 채택과 별개의 결정입니다.`,
+      guestLeadWarning: (name: string) =>
+        `${name}은 게스트 선두 모델입니다. 대체하기 전에 플랫폼 설정에서 선두를 바꾸세요.`,
+      trioWarning: (name: string, substitute: string) =>
+        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 게스트 3종 변경은 코드 변경입니다.`,
+      successorStatus: (status: string, listing: string) =>
+        `새 모델: ${status} · ${listing}`,
+      unlisted: "비공개",
+      fallbackProtected: (id: string) =>
+        `저장하지 않았습니다. ${id}는 앱 fallback이라 이 저장에서 끌 수 없습니다. 입력한 내용은 그대로 있습니다. “대체하지 않음”으로 바꿔 저장하거나, 기본 모델 전환 절차는 플랫폼 설정 · 기본 모델에서 확인하세요.`,
+      guestLeadProtected: (id: string) =>
+        `저장하지 않았습니다. ${id}는 게스트 선두 모델입니다. 입력한 내용은 그대로 있습니다. “대체하지 않음”을 고르거나, 먼저 플랫폼 설정에서 선두를 바꾸세요.`,
+      openDefaultModels: "플랫폼 설정 · 기본 모델",
+      roleFallback: "앱 fallback",
+      roleGuestLead: "게스트 선두",
+      roleGuestTrio: "게스트 3종",
+      fallbackLocked:
+        "이 행은 앱 fallback입니다. 런타임 상태, 최소 플랜, 사용 등급, 제거는 그대로 둡니다. fallback을 옮기는 일은 검토를 거치는 코드 변경이며, 절차는 플랫폼 설정에 있습니다.",
       replaceRequired: "대체할 모델을 고르거나, 대체 없이 저장하세요.",
       saveRefused: "저장하지 않았습니다.",
       reasonTooShort: "채택 사유를 4자 이상 적어야 저장됩니다. 이 문장이 승인 기록에 남습니다.",
