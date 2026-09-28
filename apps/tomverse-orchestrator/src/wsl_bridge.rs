@@ -24,6 +24,15 @@ pub const WSL_BRIDGE_ENV_NAME: &str = "TOMVERSE_AMUX_WSL_BRIDGE";
 
 pub const WSL_BRIDGE_LOCAL_URL_ENV: &str = "TOMVERSE_AMUX_WSL_LOCAL_URL";
 
+/// Exit status of a runner that stopped taking assignments.
+///
+/// A halt is never resumed by the runner itself: the reason is an unknown
+/// outcome (a lost send, a refused heartbeat, an unanswered Tomverse call),
+/// and only a person can decide that it is safe to start again. Exiting 0 made
+/// the halt look like a clean shutdown to a supervisor; a distinct non-zero
+/// status is the notice.
+pub const BRIDGE_HALT_EXIT_CODE: i32 = 3;
+
 const CONTROL_PLANE_MARKERS: &[&str] = &[
     "TOMVERSE_AMUX_SYNC_SECRET",
     "TOMVERSE_AMUX_ENABLED",
@@ -201,6 +210,14 @@ impl ExistingSessionAdapter {
         self.sessions.keys().cloned().collect()
     }
 
+    /// A session that re-registered after losing its runtime lease takes the
+    /// new instance and generation. Nothing else about the session changes.
+    pub fn replace(&mut self, name: &str, presence: SessionPresence) {
+        if let Some(session) = self.sessions.get_mut(name) {
+            *session = presence;
+        }
+    }
+
     pub fn observe(&mut self, name: &str, running: bool, at_boundary: bool) {
         if let Some(session) = self.sessions.get_mut(name) {
             session.running = running;
@@ -275,6 +292,17 @@ impl WorkerAdapter for ExistingSessionAdapter {
             generation: session.generation,
         }))
     }
+}
+
+/**
+ * Whether a session whose runtime lease was lost may register again.
+ *
+ * Only a session that is still running locally and has no pending attempt.
+ * A pending attempt belongs to the old generation; re-registering would fence
+ * its heartbeats and settlement out, so that case halts instead.
+ */
+pub fn plan_reregistration(lease_lost: bool, has_pending_attempt: bool, running_locally: bool) -> bool {
+    lease_lost && !has_pending_attempt && running_locally
 }
 
 pub fn payload_leaks_control_plane(text: &str) -> bool {
@@ -942,6 +970,7 @@ pub async fn run_from_env() -> i32 {
     let mut reserved = Vec::new();
     let mut pending: Vec<crate::tomverse_api::PulledDelivery> = Vec::new();
     let mut halted = false;
+    let mut halt_reported = false;
     let empty_prompts = BTreeMap::new();
 
     loop {
@@ -975,7 +1004,27 @@ pub async fn run_from_env() -> i32 {
                     sessions.observe(&name, session.running, false);
                 }
                 Ok(response) if response.reason.as_deref() == Some("runtime_lease_lost") => {
-                    sessions.observe(&name, false, false);
+                    let mut replaced = false;
+                    if plan_reregistration(true, has_pending, session.running) {
+                        let instance_id = Uuid::new_v4().to_string();
+                        if let Ok(registered) = api.worker_register(&name, &instance_id).await {
+                            if let (true, Some(generation)) = (registered.registered, registered.generation) {
+                                sessions.replace(
+                                    &name,
+                                    SessionPresence {
+                                        running: true,
+                                        at_boundary: false,
+                                        instance_id,
+                                        generation,
+                                    },
+                                );
+                                replaced = true;
+                            }
+                        }
+                    }
+                    if !replaced {
+                        sessions.observe(&name, false, false);
+                    }
                 }
                 _ => {
                     sessions.observe(&name, session.running, false);
@@ -1054,8 +1103,12 @@ pub async fn run_from_env() -> i32 {
             }
         }
         pending = still_pending;
+        if halted && !halt_reported {
+            eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
+            halt_reported = true;
+        }
         if halted && pending.is_empty() {
-            return 0;
+            return BRIDGE_HALT_EXIT_CODE;
         }
 
         tokio::select! {
@@ -1632,5 +1685,47 @@ mod tests {
         assert_eq!(classify_bridge_result("merged"), None);
         assert_eq!(classify_bridge_result("deploy"), None);
         assert!(payload_leaks_control_plane("PostgreSQL://secret"));
+    }
+
+    #[test]
+    fn a_lost_lease_re_registers_only_an_idle_running_session() {
+        assert!(plan_reregistration(true, false, true));
+        assert!(!plan_reregistration(true, true, true), "a pending attempt belongs to the old generation");
+        assert!(!plan_reregistration(true, false, false), "a stopped session is not registered");
+        assert!(!plan_reregistration(false, false, true), "only a lost lease re-registers");
+    }
+
+    #[test]
+    fn replace_takes_the_new_instance_and_generation_only_for_a_known_session() {
+        let mut sessions = ExistingSessionAdapter::new(BTreeMap::from([(
+            "claude-impl".to_owned(),
+            SessionPresence {
+                running: true,
+                at_boundary: true,
+                instance_id: "old".into(),
+                generation: 4,
+            },
+        )]));
+        let fresh = SessionPresence {
+            running: true,
+            at_boundary: false,
+            instance_id: "new".into(),
+            generation: 5,
+        };
+        sessions.replace("claude-impl", fresh.clone());
+        sessions.replace("unknown", fresh.clone());
+        assert_eq!(sessions.presence("claude-impl"), Some(&fresh));
+        assert_eq!(sessions.presence("unknown"), None);
+    }
+
+    #[test]
+    fn a_halt_exits_with_its_own_status() {
+        // 0 is a clean shutdown and 1 is a startup failure; a halt is neither.
+        assert!(BRIDGE_HALT_EXIT_CODE != 0 && BRIDGE_HALT_EXIT_CODE != 1);
+        let source = include_str!("wsl_bridge.rs");
+        let run = &source[source.find("pub async fn run_from_env").unwrap()..];
+        let run = &run[..run.find("fn local_client").unwrap()];
+        assert!(run.contains("return BRIDGE_HALT_EXIT_CODE;"));
+        assert!(run.contains("plan_reregistration(true, has_pending, session.running)"));
     }
 }
