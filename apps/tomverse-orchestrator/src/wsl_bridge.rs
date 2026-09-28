@@ -7,7 +7,7 @@
  * `process_main` does not construct a client or open a socket.
  */
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::{bail, Result};
 use uuid::Uuid;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::board_driver::{
     BoardControlPlane, BoardDriver, DriveOutcome, RuntimeIdentity, WorkerAdapter,
 };
+use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask};
 
 pub const WSL_BRIDGE_CODE_LATCH: bool = false;
 
@@ -339,6 +340,28 @@ pub fn process_main(latch: bool) -> i32 {
     if latch { 1 } else { 0 }
 }
 
+struct SingleOwnedTask<'a, C> {
+    inner: &'a C,
+    task: OwnedTodoTask,
+}
+
+impl<C> BoardControlPlane for SingleOwnedTask<'_, C>
+where
+    C: BoardControlPlane,
+{
+    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
+        Ok(vec![self.task.clone()])
+    }
+
+    async fn execution_start(
+        &self,
+        task: &OwnedTodoTask,
+        runtime: &RuntimeIdentity,
+    ) -> Result<ExecutionStartResponse> {
+        self.inner.execution_start(task, runtime).await
+    }
+}
+
 pub async fn bridge_tick<C>(
     input: &BridgeTickInput<'_>,
     control: C,
@@ -348,58 +371,92 @@ pub async fn bridge_tick<C>(
 where
     C: BoardControlPlane,
 {
+    /*
+     * Assignment gates run before any execution start. A lookup failure from
+     * an earlier tick arrives as `BridgeHalt::Halted` and must not open a new
+     * Tomverse attempt.
+     */
     if !input.latch {
         return Ok(vec![BridgeTickResult::Idle {
             reason: "bridge_latch_off",
         }]);
     }
+    if input.env_value != Some("1") {
+        return Ok(vec![BridgeTickResult::Idle {
+            reason: "bridge_disabled",
+        }]);
+    }
+    if input.halt != BridgeHalt::Running {
+        return Ok(vec![BridgeTickResult::Idle {
+            reason: "assignments_halted",
+        }]);
+    }
+    if !input.local_reachable {
+        return Ok(vec![BridgeTickResult::Idle {
+            reason: "local_unreachable",
+        }]);
+    }
 
+    let tasks = control.owned_queue().await?;
     let snapshot = sessions.clone();
-    let outcomes = BoardDriver::new(control, sessions).tick().await?;
+    let mut seen = HashSet::new();
     let mut results = Vec::new();
+    let mut halted = false;
 
-    for outcome in outcomes {
-        match outcome {
-            DriveOutcome::ExecutionStarted {
-                worker,
-                attempt_id,
-                ..
-            } => {
-                let prompt = input
-                    .prompts
-                    .get(&attempt_id)
-                    .map(String::as_str)
-                    .unwrap_or("");
-                let presence = snapshot.presence(&worker);
-                results.push(dispatch_started(
-                    input,
-                    presence.map(|_| worker.as_str()),
-                    presence.is_some_and(|session| session.running),
-                    &attempt_id,
-                    prompt,
-                    local,
-                ));
-            }
-            DriveOutcome::StartFailed { .. } | DriveOutcome::StartReportedNotRunning { .. } => {
-                results.push(BridgeTickResult::Idle {
+    for task in tasks {
+        if !seen.insert(task.owner.clone()) {
+            continue;
+        }
+        if halted {
+            break;
+        }
+
+        let outcomes = BoardDriver::new(
+            SingleOwnedTask {
+                inner: &control,
+                task: task.clone(),
+            },
+            sessions.clone(),
+        )
+        .tick()
+        .await?;
+
+        for outcome in outcomes {
+            let result = match outcome {
+                DriveOutcome::ExecutionStarted {
+                    worker,
+                    attempt_id,
+                    ..
+                } => {
+                    let prompt = input
+                        .prompts
+                        .get(&attempt_id)
+                        .map(String::as_str)
+                        .unwrap_or("");
+                    let presence = snapshot.presence(&worker);
+                    dispatch_started(
+                        input,
+                        presence.map(|_| worker.as_str()),
+                        presence.is_some_and(|session| session.running),
+                        &attempt_id,
+                        prompt,
+                        local,
+                    )
+                }
+                DriveOutcome::StartFailed { .. }
+                | DriveOutcome::StartReportedNotRunning { .. }
+                | DriveOutcome::MidTurn { .. }
+                | DriveOutcome::RuntimeUnavailable { .. } => BridgeTickResult::Idle {
                     reason: "worker_not_running",
-                });
-            }
-            DriveOutcome::MidTurn { .. } => {
-                results.push(BridgeTickResult::Idle {
-                    reason: "worker_not_running",
-                });
-            }
-            DriveOutcome::RuntimeUnavailable { .. } => {
-                results.push(BridgeTickResult::Idle {
-                    reason: "worker_not_running",
-                });
-            }
-            DriveOutcome::ExecutionStartRefused { .. } => {
-                results.push(BridgeTickResult::Idle {
+                },
+                DriveOutcome::ExecutionStartRefused { .. } => BridgeTickResult::Idle {
                     reason: "assignments_halted",
-                });
+                },
+            };
+            if matches!(result, BridgeTickResult::Halted { .. }) {
+                halted = true;
             }
+            results.push(result);
         }
     }
 
@@ -820,6 +877,83 @@ mod tests {
         assert_eq!(
             late,
             vec![BridgeTickResult::ResultRejected {
+                attempt_id: ATTEMPT_ID.into(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn halted_bridge_does_not_start_execution() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let prompts = BTreeMap::new();
+        let mut tick = input(true, &prompts, None);
+        tick.halt = BridgeHalt::Halted;
+        let results = bridge_tick(
+            &tick,
+            FlagControl {
+                calls: calls.clone(),
+                tasks: vec![task()],
+                start: started(),
+            },
+            running_session(),
+            &mut LocalExchange::accepting(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Idle {
+                reason: "assignments_halted",
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn lookup_failure_does_not_start_the_next_worker() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut second = task();
+        second.id = "TASK-2".into();
+        second.owner = "claude-review".into();
+        let mut sessions = BTreeMap::new();
+        for name in ["claude-impl", "claude-review"] {
+            sessions.insert(
+                name.into(),
+                SessionPresence {
+                    running: true,
+                    at_boundary: true,
+                    instance_id: "00000000-0000-4000-8000-000000000001".into(),
+                    generation: 4,
+                },
+            );
+        }
+        let mut prompts = BTreeMap::new();
+        prompts.insert(ATTEMPT_ID.into(), brief_prompt());
+        let mut local = LocalExchange::accepting();
+        local.reply.transport_unknown = true;
+        local.reply.ok = false;
+        local.reply.id = None;
+        local.read_back = ReadBack::LookupFailed;
+
+        let results = bridge_tick(
+            &input(true, &prompts, None),
+            FlagControl {
+                calls: calls.clone(),
+                tasks: vec![task(), second],
+                start: started(),
+            },
+            ExistingSessionAdapter::new(sessions),
+            &mut local,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(local.sends.len(), 1);
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Halted {
                 attempt_id: ATTEMPT_ID.into(),
             }]
         );
