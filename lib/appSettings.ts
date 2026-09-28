@@ -416,6 +416,32 @@ export async function isPromptRefinerEnabled(): Promise<boolean> {
  * the starter gallery is a welcome-screen surface, resolved once per page
  * render, and it dispatches nothing of its own for a route to have to refuse.
  */
+/**
+ * Auto's session-seeded tie exploration.
+ *
+ * The predicates live in `lib/autoExplorationAccess.ts` and are repeated here
+ * on purpose. This module is inside the prompt-refiner runtime source
+ * closure, and importing that file would add it to a path list a database
+ * check is bound to. The repeated literals are locked by
+ * `tests/autoExploration.test.mjs`.
+ *
+ * No setter. Turning it on changes which model answers a tied Auto turn, and
+ * that stays an operator write of the AppSetting row after staging has shown
+ * the same conversation staying on one model and a different credit price
+ * staying out of the spread. Stopping is `AUTO_EXPLORATION_KILL_SWITCH`.
+ */
+const AUTO_EXPLORATION_FLAG_KEY = "feature.autoExplorationEnabled";
+
+export async function isAutoExplorationEnabled(): Promise<boolean> {
+  if ((process.env.AUTO_EXPLORATION_KILL_SWITCH ?? "").trim()) return false;
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: AUTO_EXPLORATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return row?.value === "true";
+}
+
 export async function isChatStarterEnabled(): Promise<boolean> {
   if (chatStarterKillSwitchEngaged(process.env)) return false;
   if (e2eDatabaseDisabled()) return false;

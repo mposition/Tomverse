@@ -256,6 +256,7 @@ import {
 } from "@/lib/billingEntitlements";
 import {
     getOperationalFeatureFlags,
+    isAutoExplorationEnabled,
     isExternalContinuationEnabledCached,
     isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
@@ -1426,6 +1427,8 @@ async function handleChatPost(
             searchBackendReadiness: resolveWebSearchBackendReadiness(),
         };
         const autoSelection = selectAutoModel({
+            explorationEnabled: await isAutoExplorationEnabled(),
+            conversationId: conversationId ?? null,
             requestedModelId,
             conversation: conversationRouting,
             // The stored product, never the surface the request came from:
@@ -4513,13 +4516,16 @@ async function handleChatPost(
                                     id: conversationId,
                                     selectionMode: "auto",
                                 },
-                                // §8: the sticky model becomes the one that
-                                // worked. On a turn that fell back that is not
-                                // the model the Router chose, and writing the
-                                // Router's choice would put the conversation
-                                // back on a model that had just failed.
+                                // The model the next turn remembers. A fallback remembers
+                                // the model that answered. A session-hash dispatch
+                                // remembers the deterministic selection, so turning
+                                // exploration off returns to it without rewriting
+                                // a past row.
                                 data: stickyStateAfterRoutedTurn(
-                                    dispatched.modelId,
+                                    displacedModelId
+                                        ? dispatched.modelId
+                                        : (autoSelection.stickyMemoryModelId ??
+                                            dispatched.modelId),
                                     // A fallback is not evidence about a
                                     // challenger, so the hysteresis streak
                                     // starts again rather than carrying a
