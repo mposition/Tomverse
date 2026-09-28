@@ -676,6 +676,53 @@ test("a sealed allowed send is never replaced under a new key", async () => {
   assert.ok(incidents.includes("EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN"));
 });
 
+test("a sealed allowed send that stopped before the provider is replaced when its contract moves", async () => {
+  // The exception to the rule above. An attempt that sealed an allowed decision
+  // and then recorded that it stopped before the provider -- the address lock
+  // was busy -- sent nothing, so a replacement is the only message, not a
+  // second one. The claim clears that record; the lane reads it first.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  mock.method(globalThis, "fetch", async () =>
+    new Response(JSON.stringify({ message: "upstream" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1, now: new Date() });
+  const retrying = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, nextAttemptAt: true },
+  });
+  assert.equal(retrying.status, "pending");
+  // What the lock-unavailable path writes, standing in for it: nothing was
+  // submitted. The contract then moves.
+  await prisma.emailDelivery.update({
+    where: { id: rows.deliveryId },
+    data: { deferReason: "send_not_submitted", displayContractHash: "e".repeat(64) },
+  });
+
+  await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(retrying.nextAttemptAt!.getTime() + 1_000),
+  });
+
+  const after = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.deepEqual(after, { status: "skipped", skipReason: "display_contract_changed" });
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { supersedesDeliveryId: rows.deliveryId } }),
+    1,
+    "the message was lost rather than replaced"
+  );
+});
+
 test("a Korean subscriber's subject carries the advertising label", async () => {
   // The marketing stream has its own key by design: it does not fall back to
   // the transactional one, so a promotion cannot be sent on the credential

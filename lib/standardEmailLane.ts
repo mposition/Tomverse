@@ -428,6 +428,13 @@ type ClaimedDelivery = {
   attempts: number;
   /** This worker's claim, as written by `claimDueDelivery()`. */
   claimedAt: Date | null;
+  /**
+   * Why the previous attempt put the row back, read before this claim cleared
+   * it. `send_not_submitted` and `quiet_hours` are written only on paths that
+   * stop before the provider is called, so they are the one positive record that
+   * an earlier sealed decision did not reach it.
+   */
+  previousDeferReason: string | null;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
   policyVersionId: string;
@@ -466,23 +473,28 @@ type ClaimedDelivery = {
  */
 const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   const staleBefore = new Date(now.getTime() - STANDARD_LANE_CLAIM_TTL_MS);
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    UPDATE "EmailDelivery"
+  // The previous defer reason is returned from the locked read, before the
+  // UPDATE clears it: `RETURNING` alone would report the cleared value.
+  const rows = await prisma.$queryRaw<Array<{ id: string; previousDeferReason: string | null }>>`
+    WITH picked AS (
+      SELECT "id", "deferReason" FROM "EmailDelivery"
+       WHERE "lane" = 'standard'
+         AND "status" = 'pending'
+         AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
+         AND ("claimedAt" IS NULL OR "claimedAt" < ${staleBefore})
+       ORDER BY "nextAttemptAt" ASC NULLS FIRST
+       FOR UPDATE SKIP LOCKED
+       LIMIT 1
+    )
+    UPDATE "EmailDelivery" d
        SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}, "deferReason" = NULL
-     WHERE "id" = (
-       SELECT "id" FROM "EmailDelivery"
-        WHERE "lane" = 'standard'
-          AND "status" = 'pending'
-          AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
-          AND ("claimedAt" IS NULL OR "claimedAt" < ${staleBefore})
-        ORDER BY "nextAttemptAt" ASC NULLS FIRST
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-     )
-    RETURNING "id"
+      FROM picked
+     WHERE d."id" = picked."id"
+    RETURNING d."id", picked."deferReason" AS "previousDeferReason"
   `;
   const claimedId = rows[0]?.id;
   if (!claimedId) return null;
+  const previousDeferReason = rows[0]?.previousDeferReason ?? null;
 
   return prisma.emailDelivery.findUnique({
     where: { id: claimedId },
@@ -516,7 +528,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
         },
       },
     },
-  }) as Promise<ClaimedDelivery | null>;
+  }).then((row) => (row ? { ...row, previousDeferReason } : null)) as Promise<ClaimedDelivery | null>;
 };
 
 /**
@@ -857,6 +869,12 @@ const decideReleaseNotesSend = async (
   // A replacement is a delivery like any other, so it gets the first of section
   // 7.6's two snapshots too. Taken before the transaction because the
   // authorization reads outside it, and only on the path that can use it.
+  //
+  // Its reads are the verdict's reads, so a failure among them is the verdict
+  // being unavailable -- retried -- and not the render failure the drain's
+  // ordinary catch would make of it: a permanent `failed` on the one path that
+  // exists to keep a message alive. Wrapped here rather than inside the function,
+  // whose enqueue-time callers want the raw error to roll their own write back.
   const replacementEnqueue =
     reenqueueIsRight(verdict.blockers) && displayProfile !== null
       ? await releaseNotesEnqueueDecision({
@@ -866,6 +884,13 @@ const decideReleaseNotesSend = async (
           emailAddress: delivery.emailAddress,
           policyVersionId: delivery.policyVersionId,
           templateVersionId: current.templateVersionId,
+        }).catch((error: unknown) => {
+          throw error instanceof VerdictUnavailableError
+            ? error
+            : new VerdictUnavailableError(
+                "the replacement's enqueue verdict could not be taken",
+                { cause: error }
+              );
         })
       : null;
 
@@ -932,10 +957,18 @@ const decideReleaseNotesSend = async (
     // exception, because not sending is safe whatever happened before: that row
     // is skipped below like any other refusal.
     const earlierAllowed = !recorded.recorded && recorded.existingAllowed;
+    // The one exception: the previous attempt recorded that it stopped before the
+    // provider -- the address lock was busy, or quiet hours began after the
+    // decision. Then nothing went out, a replacement is the only message, and
+    // failing the row would lose it for a footer fixed overnight.
+    const provedNotSubmitted =
+      delivery.previousDeferReason === "send_not_submitted" ||
+      delivery.previousDeferReason === "quiet_hours";
     if (
       earlierAllowed &&
       recorded.differs &&
-      (verdict.allowed || reenqueueIsRight(verdict.blockers))
+      (verdict.allowed || reenqueueIsRight(verdict.blockers)) &&
+      !(provedNotSubmitted && reenqueueIsRight(verdict.blockers))
     ) {
       await tx.emailDelivery.update({
         where: { id: delivery.id },
