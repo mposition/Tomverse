@@ -345,6 +345,7 @@ export type OpenWorkItemInput =
       kind: "publish";
       causeKey: string;
       runId: string;
+      patchBody: string;
       patchDigest: string;
       baseSha: string;
       expectedTreeId: string;
@@ -362,10 +363,21 @@ const OPENING_ACTOR: Record<OpenWorkItemInput["kind"], EngineeringAgentSystemAud
 };
 
 /**
- * Opens a work item. A draft's patch is stored only if it is what its digest
- * says, fits the column, and trips none of the app's secret patterns -- the
- * second check after the runner's own (§11, "저장 전 검사"). A hit stores
- * nothing and says only that it happened.
+ * A patch is stored only if it is what its digest says, fits the column, and
+ * trips none of the app's secret patterns -- the second check after the
+ * runner's own (§11, "저장 전 검사"). A hit stores nothing and says only that
+ * it happened. The database checks the digest again.
+ */
+const admitPatch = (patchBody: string, patchDigest: string, baseSha: string) => {
+  if (Buffer.byteLength(patchBody, "utf8") > ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES) refuse("patch_too_large");
+  if (sha256Hex(patchBody) !== patchDigest) refuse("patch_digest_mismatch");
+  if (!SHA1.test(baseSha)) refuse("base_sha_invalid");
+  if (detectSecrets(patchBody).length > 0) refuse("secret_detected");
+};
+
+/**
+ * Opens a work item. A draft carries the patch the owner reads, a publish item
+ * the patch the publisher applies; both are admitted by `admitPatch` first.
  */
 export async function openEngineeringAgentWorkItem(
   tx: EngineeringAgentTransaction,
@@ -380,11 +392,8 @@ export async function openEngineeringAgentWorkItem(
     runId: input.runId,
   };
   if (input.kind === "t2_draft") {
-    if (Buffer.byteLength(input.patchBody, "utf8") > ENGINEERING_AGENT_PATCH_BODY_MAX_BYTES) refuse("patch_too_large");
-    if (sha256Hex(input.patchBody) !== input.patchDigest) refuse("patch_digest_mismatch");
-    if (!SHA1.test(input.baseSha)) refuse("base_sha_invalid");
     if (!REASON.test(input.reason)) refuse("reason_invalid");
-    if (detectSecrets(input.patchBody).length > 0) refuse("secret_detected");
+    admitPatch(input.patchBody, input.patchDigest, input.baseSha);
     Object.assign(data, {
       patchBody: input.patchBody,
       patchDigest: input.patchDigest,
@@ -392,9 +401,10 @@ export async function openEngineeringAgentWorkItem(
       reason: input.reason,
     });
   } else if (input.kind === "publish") {
-    if (!SHA256.test(input.patchDigest)) refuse("patch_digest_invalid");
-    if (!SHA1.test(input.baseSha) || !SHA1.test(input.expectedTreeId)) refuse("hash_invalid");
+    if (!SHA1.test(input.expectedTreeId)) refuse("hash_invalid");
+    admitPatch(input.patchBody, input.patchDigest, input.baseSha);
     Object.assign(data, {
+      patchBody: input.patchBody,
       patchDigest: input.patchDigest,
       baseSha: input.baseSha,
       expectedTreeId: input.expectedTreeId,

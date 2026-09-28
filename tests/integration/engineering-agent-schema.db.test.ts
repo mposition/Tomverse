@@ -116,8 +116,11 @@ const newItem = (kind: string) =>
       kind,
       state: ["publish", "expire_close", "prune"].includes(kind) ? "queued" : "open",
       causeKey: `${kind}:${randomUUID()}`,
-      ...(kind === "t2_draft" ? { patchDigest: sha256("patch"), baseSha: sha1("base"), patchBody: "diff --git a/x b/x\n" } : {}),
-      ...(kind === "publish" ? { patchDigest: sha256("patch"), baseSha: sha1("base"), expectedTreeId: sha1("tree") } : {}),
+      // The body is the text its digest names; the database checks it.
+      ...(kind === "t2_draft" ? { patchDigest: sha256("patch"), baseSha: sha1("base"), patchBody: "patch" } : {}),
+      ...(kind === "publish"
+        ? { patchDigest: sha256("patch"), baseSha: sha1("base"), expectedTreeId: sha1("tree"), patchBody: "patch" }
+        : {}),
     },
   });
 
@@ -278,7 +281,7 @@ test("a publish is the consumption of its claim's capability, and a consumed cla
 
   const mismatched = await newItem("publish");
   await refused(issueCapability(mismatched.id, sha1("other tree")), "a capability matches its item");
-  await refused(
+  const publishItem = (patchBody: string | null) =>
     prisma.engineeringAgentWorkItem.create({
       data: {
         id: randomUUID(),
@@ -288,10 +291,16 @@ test("a publish is the consumption of its claim's capability, and a consumed cla
         patchDigest: sha256("patch"),
         baseSha: sha1("base"),
         expectedTreeId: sha1("tree"),
-        patchBody: "diff",
+        patchBody,
       },
+    });
+  await refused(publishItem(null), "a publish item carries the patch the publisher applies");
+  await refused(publishItem("diff --git a/x b/x"), "the patch is the text its digest names");
+  await refused(
+    prisma.engineeringAgentWorkItem.create({
+      data: { id: randomUUID(), kind: "decision", state: "open", causeKey: `decision:${randomUUID()}`, patchBody: "patch" },
     }),
-    "a publish item carries no patch body",
+    "no other kind carries a patch",
   );
 });
 

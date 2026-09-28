@@ -294,12 +294,15 @@ ALTER TABLE "EngineeringAgentWorkItem"
         CHECK ("reason" IS NULL OR "reason" ~ '^[a-z_]{1,64}$'),
     ADD CONSTRAINT "EngineeringAgentWorkItem_claimMode_check"
         CHECK ("claimMode" IS NULL OR "claimMode" IN ('write', 'lookup')),
-    -- A draft and a publish item carry what they are about; a patch body is
-    -- only ever a draft's.
+    -- A draft and a publish item carry their patch: the owner reads a draft's,
+    -- and the publisher applies a publish item's (§11: the app stores the
+    -- patch and never applies it). The body is the text its digest names.
+    -- No other kind carries one.
     ADD CONSTRAINT "EngineeringAgentWorkItem_payload_check"
         CHECK (
-            ("kind" = 't2_draft' AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL)
-            OR ("kind" = 'publish' AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL AND "patchBody" IS NULL)
+            ("kind" IN ('t2_draft', 'publish')
+                AND "patchBody" IS NOT NULL AND "patchDigest" IS NOT NULL AND "baseSha" IS NOT NULL
+                AND encode(sha256(convert_to("patchBody", 'UTF8')), 'hex') = "patchDigest")
             OR ("kind" NOT IN ('t2_draft', 'publish') AND "patchDigest" IS NULL AND "patchBody" IS NULL)
         ),
     ADD CONSTRAINT "EngineeringAgentWorkItem_publish_tree_check"

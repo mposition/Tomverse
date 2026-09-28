@@ -193,6 +193,7 @@ test("a publish consumes its one capability on the write claim, and settles wher
       kind: "publish",
       causeKey: `publish:${run.runId}`,
       runId: run.runId,
+      patchBody: "patch",
       patchDigest,
       baseSha: sha1("base"),
       expectedTreeId: sha1("tree"),
