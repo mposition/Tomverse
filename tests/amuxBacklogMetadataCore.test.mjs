@@ -226,16 +226,23 @@ test("the audit metadata carries only ids, closed-list values, a cost flag and r
     kind: "code",
     previousPriority: "p3",
     priority: "p1",
-    costPresent: true,
+    previousEstimatedCostMicrousd: null,
+    estimatedCostMicrousd: "250000",
     previousRevision: 2,
     revision: 3,
   });
   assert.deepEqual(Object.keys(metadata).sort(), [...BACKLOG_METADATA_AUDIT_KEYS].sort());
-  for (const key of ["title", "sourceKey", "executionBrief", "description", "estimatedCostMicrousd", "status", "owner"]) {
+  for (const key of ["title", "sourceKey", "executionBrief", "description", "costPresent", "status", "owner"]) {
     assert.equal(Object.hasOwn(metadata, key), false, key);
   }
   const noCost = backlogMetadataAuditMetadata(fact(), parseBacklogMetadataRequest(raw({ estimatedCostMicrousd: null })).request);
-  assert.equal(noCost.costPresent, false);
+  assert.equal(noCost.estimatedCostMicrousd, null);
+  // The replaced cost is kept, so the write can be reversed from the audit row.
+  const replaced = backlogMetadataAuditMetadata(
+    fact({ estimatedCostMicrousd: BigInt(90_000) }),
+    parseBacklogMetadataRequest(raw({ estimatedCostMicrousd: null })).request,
+  );
+  assert.equal(replaced.previousEstimatedCostMicrousd, "90000");
 });
 
 const withoutComments = (source) =>

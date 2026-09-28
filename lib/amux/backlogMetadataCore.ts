@@ -41,11 +41,17 @@ export const BACKLOG_METADATA_COST_MAX_MICROUSD = 5_000_000;
 export const BACKLOG_METADATA_RAW_BODY_MAX_BYTES = 4_096;
 export const BACKLOG_METADATA_AUDIT_ACTION = "amux.backlog_metadata.updated";
 
-/** Every key the audit row may carry. No title, source key, brief or free text. */
+/**
+ * Every key the audit row may carry. No title, source key, brief or free text.
+ * The write has no history table, so the audit row is the only record of what
+ * it replaced: it keeps the previous and new values of all three fields. The
+ * cost is an operational USD estimate in micro-dollars, carried as a string.
+ */
 export const BACKLOG_METADATA_AUDIT_KEYS = [
   "cardId",
-  "costPresent",
+  "estimatedCostMicrousd",
   "kind",
+  "previousEstimatedCostMicrousd",
   "previousKind",
   "previousPriority",
   "previousRevision",
@@ -102,6 +108,7 @@ export type BacklogMetadataCardFact = {
   executionBriefDigest: string | null;
   kind: string;
   priority: string;
+  estimatedCostMicrousd: bigint | null;
 };
 
 export type BacklogMetadataAuditMetadata = {
@@ -110,7 +117,8 @@ export type BacklogMetadataAuditMetadata = {
   kind: BoardPromotionKind;
   previousPriority: string;
   priority: BoardPromotionPriority;
-  costPresent: boolean;
+  previousEstimatedCostMicrousd: string | null;
+  estimatedCostMicrousd: string | null;
   previousRevision: number;
   revision: number;
 };
@@ -236,7 +244,7 @@ export const backlogMetadataCardWrite = (request: BacklogMetadataRequest) => ({
 });
 
 export const backlogMetadataAuditMetadata = (
-  previous: Pick<BacklogMetadataCardFact, "kind" | "priority">,
+  previous: Pick<BacklogMetadataCardFact, "kind" | "priority" | "estimatedCostMicrousd">,
   request: BacklogMetadataRequest,
 ): BacklogMetadataAuditMetadata => ({
   cardId: request.cardId,
@@ -244,7 +252,12 @@ export const backlogMetadataAuditMetadata = (
   kind: request.kind,
   previousPriority: previous.priority,
   priority: request.priority,
-  costPresent: request.estimatedCostMicrousd !== null,
+  previousEstimatedCostMicrousd:
+    previous.estimatedCostMicrousd === null || previous.estimatedCostMicrousd === undefined
+      ? null
+      : previous.estimatedCostMicrousd.toString(),
+  estimatedCostMicrousd:
+    request.estimatedCostMicrousd === null ? null : String(request.estimatedCostMicrousd),
   previousRevision: request.expectedRevision,
   revision: request.expectedRevision + 1,
 });

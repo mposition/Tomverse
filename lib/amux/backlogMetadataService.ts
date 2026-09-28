@@ -220,6 +220,7 @@ const loadFact = async (db: Db, cardId: string): Promise<BacklogMetadataCardFact
       executionBriefDigest: true,
       kind: true,
       priority: true,
+      estimatedCostMicrousd: true,
     },
   });
 
@@ -293,7 +294,7 @@ export async function commitBacklogMetadata(
     cardId: update.cardId,
     kind: update.kind,
     priority: update.priority,
-    costPresent: metadata.costPresent,
+    costPresent: metadata.estimatedCostMicrousd !== null,
     revision: metadata.revision,
   };
 }

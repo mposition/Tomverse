@@ -465,7 +465,8 @@ test("backlog metadata writes one card's fields and one audit row, and refuses a
       kind: "bug",
       previousPriority: "p3",
       priority: "p1",
-      costPresent: true,
+      previousEstimatedCostMicrousd: null,
+      estimatedCostMicrousd: "120000",
       previousRevision: 0,
       revision: 1,
     });
