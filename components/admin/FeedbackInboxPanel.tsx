@@ -25,6 +25,7 @@ import {
   FEEDBACK_USER_REPLY_MIN_LENGTH,
   feedbackStageRecipient,
   feedbackUserReplyState,
+  isFeedbackAwaitingOperator,
   isTerminalFeedbackStatus,
   type FeedbackClosureOutcome,
 } from "@/lib/feedbackLifecycleCore";
@@ -346,7 +347,8 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     });
   }, [items, query, statusFilter]);
 
-  const openCount = items.filter((item) => item.status === "open").length;
+  // Unclosed, not just `open`: a verified-trace report arrives in `reviewing`.
+  const openCount = items.filter((item) => isFeedbackAwaitingOperator(item.status)).length;
 
   const updateStatus = async (
     id: string,

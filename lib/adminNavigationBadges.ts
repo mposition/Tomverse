@@ -37,7 +37,22 @@ export type AdminNavigationCounts = {
    * received it.
    */
   overdueCampaignWaves: number | null;
+  /**
+   * Reports that have not closed -- `open` and `reviewing` both, as named by
+   * FEEDBACK_AWAITING_OPERATOR_STATUSES. Not `status: "open"`: a
+   * verified-trace report arrives as `reviewing`, and counting only `open`
+   * made the reports the server had confirmed the ones that never lit this.
+   */
   openFeedback: number | null;
+  /**
+   * The same unclosed reports, minus those whose auto-fix case is itself
+   * waiting on an operator (`autoFixActionCases`). For Support, where both are
+   * summed, that case *is* the report's work -- approve the fix, reply, close
+   * -- and counting the report as well would show one piece of work as two.
+   * The work queue lists every unclosed report and no cases, so it keeps
+   * `openFeedback`.
+   */
+  supportFeedback: number | null;
   /** Auto-fix cases waiting on an operator: a PR to approve, a verified fix
    * to reply about, or a stopped promotion (AUTOFIX_OPERATOR_ACTION_STATES). */
   autoFixActionCases: number | null;
@@ -55,6 +70,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   openModelLifecycle: null,
   overdueCampaignWaves: null,
   openFeedback: null,
+  supportFeedback: null,
   autoFixActionCases: null,
   openPrivacyRequests: null,
   pendingRefunds: null,
@@ -90,10 +106,15 @@ export const adminNavigationBadge = (
         counts.openPrivacyRequests
       );
     case "support":
-      // Distinct work items: an auto-reviewed report is `reviewing`, not
-      // `open`, so its case is not also counted as open feedback.
+      // Distinct work items, made distinct by the count itself: a report whose
+      // auto-fix case is waiting on an operator is left out of
+      // `supportFeedback`, so the pair counts once. This used to rely on
+      // status instead -- "an auto-reviewed report is `reviewing`, not `open`"
+      // -- which kept the pair from counting twice by keeping every
+      // auto-reviewed report from counting at all, including the ones with no
+      // case to stand in for them.
       return sum(
-        counts.openFeedback,
+        counts.supportFeedback,
         counts.autoFixActionCases,
         counts.openPrivacyRequests
       );

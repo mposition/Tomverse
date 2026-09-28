@@ -14,7 +14,7 @@ export const adminOverviewMessages = defineAdminMessages({
       apiKeyMissingDetail:
         "Provider calls will fail or remain unavailable until the key is configured.",
       openFeedback: (count: number) =>
-        `${count} open feedback item${count === 1 ? "" : "s"}`,
+        `${count} unresolved feedback item${count === 1 ? "" : "s"}`,
       openFeedbackDetail: "Review user-reported issues before launch traffic grows.",
       pendingRefunds: (count: number) =>
         `${count} pending refund request${count === 1 ? "" : "s"}`,
@@ -32,7 +32,7 @@ export const adminOverviewMessages = defineAdminMessages({
       monthlySpend: (spend: string) => `Estimated monthly spend: ${spend}`,
       // `number | string` so an unread count reaches the pasted report as the
       // words "could not be read" rather than as a zero somebody will quote.
-      openFeedback: (count: number | string) => `Open feedback: ${count}`,
+      openFeedback: (count: number | string) => `Unresolved feedback: ${count}`,
       pendingRefunds: (count: number | string) => `Pending refunds: ${count}`,
       usersUnreadable: "Users: could not be read",
       providersUnreadable: "Providers: could not be read",
@@ -118,7 +118,7 @@ export const adminOverviewMessages = defineAdminMessages({
         activePlanGroups: "Active plan mix",
         todayUsage: "Usage today",
         monthlyUsage: "Usage this month",
-        openFeedback: "Open feedback",
+        openFeedback: "Unresolved feedback",
         pendingRefunds: "Pending refunds",
         approvedRefunds: "Approved refunds",
         promotionRedemptions: "Promotion redemptions",
@@ -154,7 +154,7 @@ export const adminOverviewMessages = defineAdminMessages({
         blockingEnv: "Blocking configuration",
         alertFailure: "Unacknowledged alert failures",
         pendingRefund: "Refund requests waiting",
-        openFeedback: "Open feedback",
+        openFeedback: "Unresolved feedback",
       },
       actions: {
         outage: "Open the provider that is down, resolve the incident or point traffic at a fallback model.",

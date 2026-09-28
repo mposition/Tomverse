@@ -57,11 +57,28 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Revenue and retention snapshot" })
     ).toBeVisible();
-    // The work-queue counter is computed from the seeded open feedback and
+    // The work-queue counter is computed from the seeded unclosed feedback and
     // pending refund. (The "Needs attention" list is capped at six items and
     // is dominated by unconfigured providers on this fixture, so the counter
-    // is the deterministic signal.)
-    await expect(page.getByText("2 feedback / 1 refund")).toBeVisible();
+    // is the deterministic signal.) Three, not two: the verified-trace report
+    // that arrived in `reviewing` is work too, and read zero here until
+    // 2026-09-28.
+    await expect(page.getByText("3 feedback / 1 refund")).toBeVisible();
+    // The sidebar badges on real Postgres. Support: three unclosed reports --
+    // two with no auto-fix case at all, and one whose case is in
+    // `awaiting_human_review`, which is not an operator-action state
+    // (AUTOFIX_OPERATOR_ACTION_STATES), so autoFixActionCases is 0 and all
+    // three count as supportFeedback -- plus the open privacy request. The
+    // work queue: those three reports, the refund and the privacy request.
+    // Both read one short while the reviewing report went uncounted. The two
+    // case-less reports are what exercise `NOT: { autoFixCase: { is } }`
+    // keeping a report that has no case.
+    await expect(
+      page.getByRole("link", { name: /^Support, 4 awaiting action/ }).first()
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: /^Work queue, 5 awaiting action/ }).first()
+    ).toBeVisible();
     // Recent administrator activity replays the seeded audit row.
     await expect(page.getByText(FIXTURE_AUDIT_LOG.summary)).toBeVisible();
     // Each fact appears once: the operations snapshot, the KPI strip, the
@@ -110,7 +127,16 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("link", { name: new RegExp(FIXTURE_FEEDBACK.open.message.slice(0, 30)) }).first()
     ).toHaveAttribute("href", "/admin/support?tab=feedback");
-    // Only open items belong in the queue.
+    // A report that arrived in review, untouched, is in the queue as well --
+    // it is the kind the server confirmed, and the kind the queue used to miss.
+    await expect(
+      page
+        .getByRole("link", {
+          name: new RegExp(FIXTURE_FEEDBACK.autoReviewed.message.slice(0, 30)),
+        })
+        .first()
+    ).toHaveAttribute("href", "/admin/support?tab=feedback");
+    // Only unclosed items belong in the queue.
     await expect(page.getByText(FIXTURE_FEEDBACK.resolved.message)).toHaveCount(0);
     // The queue no longer stacks whole management panels underneath itself.
     await expect(
@@ -120,7 +146,7 @@ test.describe("admin read surfaces", () => {
       page.getByRole("heading", { name: "Cancellation and refund requests" })
     ).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { name: "Open support age" })
+      page.getByRole("heading", { name: "Unresolved support age" })
     ).toBeVisible();
   });
 

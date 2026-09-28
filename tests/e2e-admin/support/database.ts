@@ -537,6 +537,23 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
         plan: "Free",
         createdAt: at(-6 * DAY),
       },
+      {
+        // Exactly the shape of a production verified-trace report: arrived in
+        // review, no operator on it yet, and an error class whose evidence the
+        // policy deliberately does not record. No user or address, so it adds
+        // nothing to any customer's page.
+        id: FIXTURE_FEEDBACK.autoReviewed.id,
+        type: FIXTURE_FEEDBACK.autoReviewed.type,
+        status: "reviewing",
+        message: FIXTURE_FEEDBACK.autoReviewed.message,
+        language: "en",
+        createdAt: at(-1 * HOUR),
+        traceId: FIXTURE_FEEDBACK.autoReviewed.traceId,
+        errorReportVerification: "verified",
+        traceProvenance: "server_generated",
+        errorClassificationSource: "server",
+        evidenceAvailability: "intentionally_not_recorded",
+      },
     ],
   });
 
