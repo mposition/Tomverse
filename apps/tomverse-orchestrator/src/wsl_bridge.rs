@@ -1260,7 +1260,9 @@ pub async fn run_from_env() -> i32 {
                                 outcome,
                                 to_status,
                                 Some(reason),
-                                review_pr_number,
+                                // A review always names the field, null when the
+                                // card cites no PR, so an earlier PR is cleared.
+                                (to_status == "review").then_some(review_pr_number),
                             )
                             .await
                             .ok()
@@ -1350,19 +1352,30 @@ async fn fetch_board_list(client: &reqwest::Client, base: &str) -> Result<Vec<Lo
     Ok(parse_board_list(&body))
 }
 
-async fn fetch_board_card(client: &reqwest::Client, base: &str, id: &str) -> Result<serde_json::Value> {
+/// `Ok(None)` is a card that no longer exists (404); a transport failure or
+/// any other refusal is an error, which the caller treats as a failed read.
+async fn fetch_board_card(
+    client: &reqwest::Client,
+    base: &str,
+    id: &str,
+) -> Result<Option<serde_json::Value>> {
     if !valid_local_card_id(id) {
         bail!("wsl bridge refused an invalid local card id");
     }
-    client
+    let response = client
         .get(format!("{base}/api/board/{id}"))
         .send()
         .await
-        .context("local card read failed")?
+        .context("local card read failed")?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    response
         .error_for_status()
         .context("local card read was refused")?
         .json::<serde_json::Value>()
         .await
+        .map(Some)
         .context("invalid local card")
 }
 
@@ -1390,9 +1403,10 @@ async fn local_completion(
             .take(LOCAL_CARD_CANDIDATE_LIMIT)
         {
             match fetch_board_card(client, base, &id).await {
-                Ok(detail) if card_links_attempt(&detail, &entry.delivery.attempt_id) => {
+                Ok(Some(detail)) if card_links_attempt(&detail, &entry.delivery.attempt_id) => {
                     matches.push(id)
                 }
+                // A candidate deleted since the list was read is simply not it.
                 Ok(_) => {}
                 Err(_) => return LocalCompletion::LookupFailed,
             }
@@ -1409,7 +1423,15 @@ async fn local_completion(
         return LocalCompletion::Running;
     };
     match fetch_board_card(client, base, &id).await {
-        Ok(detail) => completion_from_card(&detail),
+        Ok(Some(detail)) => completion_from_card(&detail),
+        // The linked receipt was deleted locally: the work is gone from the
+        // local ledger, so a person decides (blocked, not todo).
+        Ok(None) => LocalCompletion::Settle {
+            outcome: "blocked",
+            to_status: "blocked",
+            reason: "local_card_closed",
+            review_pr_number: None,
+        },
         Err(_) => LocalCompletion::LookupFailed,
     }
 }

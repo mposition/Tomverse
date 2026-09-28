@@ -73,17 +73,21 @@ pub fn parse_board_list(body: &Value) -> Vec<LocalCardSummary> {
 }
 
 /// Cards that could be this attempt's receipt: the same worker session, not
-/// archived, created no earlier than the send.
+/// archived, created no earlier than the send, oldest first. The receipt is
+/// minted right after the send, so it sits at the front however many cards the
+/// session makes later, and a caller that opens only the first few still
+/// reaches it.
 pub fn candidate_card_ids(cards: &[LocalCardSummary], worker: &str, sent_at: i64) -> Vec<String> {
-    cards
+    let mut candidates: Vec<&LocalCardSummary> = cards
         .iter()
         .filter(|card| {
             !card.archived
                 && card.session.as_deref() == Some(worker)
                 && card.created >= sent_at - LOCAL_CARD_CREATED_SKEW_SECS
         })
-        .map(|card| card.id.clone())
-        .collect()
+        .collect();
+    candidates.sort_by(|left, right| left.created.cmp(&right.created).then(left.id.cmp(&right.id)));
+    candidates.into_iter().map(|card| card.id.clone()).collect()
 }
 
 /// Whether a card's own linked message carries this attempt's marker line.
@@ -180,7 +184,7 @@ mod tests {
             {"id": "bad/id", "session": "claude-impl", "created": 2000, "archived": 0},
             {"id": "AMUX-5", "session": "claude-impl", "created": 950, "archived": false}
         ]));
-        assert_eq!(candidate_card_ids(&cards, "claude-impl", 1000), vec!["AMUX-1", "AMUX-5"]);
+        assert_eq!(candidate_card_ids(&cards, "claude-impl", 1000), vec!["AMUX-5", "AMUX-1"]);
     }
 
     #[test]

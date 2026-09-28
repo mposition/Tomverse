@@ -16,6 +16,7 @@ import {
 } from "@/lib/amux/executionBudgetCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import {
+  amuxBridgeSettleReason,
   amuxHumanReviewRequired,
   amuxReviewPrNumberAccepted,
 } from "@/lib/amux/humanReviewCore";
@@ -841,8 +842,13 @@ export async function settleAmuxExecution(input: {
         budgetDestination.to_status === "done" && humanReviewRequired
           ? "review"
           : budgetDestination.to_status;
-      const recordedReviewPrNumber =
-        effectiveToStatus === "review" ? (input.reviewPrNumber ?? null) : null;
+      // A settlement that names the review PR field (even as null) replaces
+      // the stored number, so a retried card never keeps the previous
+      // attempt's PR. A caller that omits the field leaves it untouched.
+      const replacesReviewPr =
+        effectiveToStatus === "review" && input.reviewPrNumber !== undefined;
+      const recordedReviewPrNumber = replacesReviewPr ? (input.reviewPrNumber ?? null) : null;
+      const bridgeReason = amuxBridgeSettleReason(input.reason);
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: {
@@ -858,8 +864,12 @@ export async function settleAmuxExecution(input: {
                 status: effectiveToStatus,
                 owner: null,
                 claimedAt: null,
-                ...(recordedReviewPrNumber !== null
-                  ? { reviewPrNumber: recordedReviewPrNumber }
+                ...(replacesReviewPr ? { reviewPrNumber: recordedReviewPrNumber } : {}),
+                // AmuxWorkItem_review_pr_check: a stored PR requires the
+                // human-review flag. A promoted card carries only a brief, and
+                // policy version 15 already requires its review.
+                ...(replacesReviewPr && recordedReviewPrNumber !== null
+                  ? { requiresHumanReview: true }
                   : {}),
                 revision: {
                   increment: 1,
@@ -898,7 +908,9 @@ export async function settleAmuxExecution(input: {
           endedBy: input.worker,
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : effectiveToStatus === "review"
+            : bridgeReason !== null
+              ? bridgeReason
+              : effectiveToStatus === "review"
               ? "human_review_required"
               : input.outcome === "succeeded"
                 ? "execution_succeeded"
@@ -947,7 +959,9 @@ export async function settleAmuxExecution(input: {
         }
       }
 
-      if (effectiveToStatus === "review" && humanReviewRequired) {
+      // Every card that lands in review needs a person: review -> done runs
+      // only through the human review route, which requires an escalation.
+      if (effectiveToStatus === "review") {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
           specialty: task.reviewSpecialty,
@@ -960,7 +974,9 @@ export async function settleAmuxExecution(input: {
           specialty: "execution-recovery",
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : "execution_blocked",
+            : bridgeReason !== null && bridgeReason !== "local_card_done"
+              ? bridgeReason
+              : "execution_blocked",
           openedBy: input.worker,
         });
       }

@@ -12,6 +12,26 @@ export const amuxHumanReviewRequired = (task: {
 export const AMUX_REVIEW_PR_NUMBER_MAX = 2_147_483_647;
 
 /**
+ * Reason codes the WSL runner sends with a settlement (policy version 15).
+ * Only these are stored; any other text a caller sends is ignored.
+ */
+export const AMUX_BRIDGE_SETTLE_REASONS = [
+  "local_card_done",
+  "local_card_closed",
+  "local_card_unlinked",
+  "local_card_ambiguous",
+] as const;
+
+export type AmuxBridgeSettleReason = (typeof AMUX_BRIDGE_SETTLE_REASONS)[number];
+
+export const amuxBridgeSettleReason = (
+  reason: string | null | undefined,
+): AmuxBridgeSettleReason | null =>
+  (AMUX_BRIDGE_SETTLE_REASONS as readonly string[]).includes(reason ?? "")
+    ? (reason as AmuxBridgeSettleReason)
+    : null;
+
+/**
  * A review PR number belongs only to a succeeded attempt that asks for review.
  * Any other settlement carrying one is refused, so a number can never be
  * attached to a failed or blocked card.

@@ -93,7 +93,8 @@ export async function POST(request: Request) {
         body.cost_microusd === null || body.cost_microusd === undefined
           ? null
           : BigInt(body.cost_microusd),
-      reviewPrNumber: body.review_pr_number ?? null,
+      // Absent keeps the stored PR; null clears it (a review with no PR).
+      reviewPrNumber: body.review_pr_number,
     });
 
     return Response.json(outcome, {

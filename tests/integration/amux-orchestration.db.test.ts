@@ -1116,6 +1116,7 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
       process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1344,6 +1345,7 @@ test("execution start and settle are fenced by task revision and worker generati
     await prisma.amuxWorkerRuntime.deleteMany({
       where: { workerName: worker },
     });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1459,6 +1461,7 @@ test("replacement worker generation cannot heartbeat or settle the old execution
     await prisma.amuxWorkerRuntime.deleteMany({
       where: { workerName: worker },
     });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1674,6 +1677,7 @@ test("execution API is fail-closed by default and preserves the execution fences
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1797,6 +1801,7 @@ test("expired execution recovery returns only the still-current attempt to Todo 
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -2129,6 +2134,7 @@ test("execution start atomically creates durable delivery and pull ack remain id
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -2276,6 +2282,7 @@ test("replacement runtime cannot consume an old delivery and expiry cancels it w
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -3102,7 +3109,41 @@ test("a review settlement records the named PR on the card in the same transacti
     assert.deepEqual(result, { settled: true, taskRevision: 3 });
     assert.equal(task.status, "review");
     assert.equal(task.reviewPrNumber, 1733);
+    // AmuxWorkItem_review_pr_check requires the flag with a stored PR.
+    assert.equal(task.requiresHumanReview, true);
     assert.equal(escalations.length, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a review settlement that names no PR clears a PR left by an earlier attempt", async () => {
+  const { result, task, cleanup } = await runPromotedCardToSettle("amux-review-pr-cleared", async (input) => {
+    await prisma.amuxWorkItem.update({
+      where: { id: (await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).taskId },
+      data: { requiresHumanReview: true, reviewPrNumber: 1600 },
+    });
+    return settleAmuxExecution({ ...input, outcome: "succeeded", toStatus: "review", reviewPrNumber: null });
+  });
+  try {
+    assert.deepEqual(result, { settled: true, taskRevision: 3 });
+    assert.equal(task.status, "review");
+    assert.equal(task.reviewPrNumber, null);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a runner reason code is kept on the attempt and on the blocked escalation", async () => {
+  const { task, escalations, cleanup } = await runPromotedCardToSettle("amux-review-unlinked", (input) =>
+    settleAmuxExecution({ ...input, outcome: "blocked", toStatus: "blocked", reason: "local_card_unlinked" }),
+  );
+  try {
+    assert.equal(task.status, "blocked");
+    assert.equal(escalations.length, 1);
+    assert.equal(escalations[0].reason, "local_card_unlinked");
+    const attempt = await prisma.amuxExecutionAttempt.findFirstOrThrow({ where: { taskId: task.id } });
+    assert.equal(attempt.reason, "local_card_unlinked");
   } finally {
     await cleanup();
   }

@@ -465,7 +465,11 @@ export async function resolveAmuxReview(input: {
       data: {
         status: target,
         revision: { increment: 1 },
-        ...(proposal.outcome === "retry" ? { owner: null, claimedAt: null } : {}),
+        // A retried card starts a new attempt; the previous attempt's review
+        // PR must not be approved as the new attempt's work.
+        ...(proposal.outcome === "retry"
+          ? { owner: null, claimedAt: null, reviewPrNumber: null }
+          : {}),
       },
     });
     if (changed.count !== 1) return refuse("AMUX_REVIEW_TASK_CONFLICT");
