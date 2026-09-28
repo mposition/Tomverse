@@ -256,9 +256,9 @@ export const enterPinnedDeploymentChat = async (input: {
                         }
                     },
                 });
-            } catch {
+            } catch (error) {
                 await abandonBeforeDispatch("pinned_stream_start_failed");
-                throw;
+                throw error;
             }
             await ensureDispatched();
             return {

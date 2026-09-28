@@ -628,7 +628,7 @@ test("the ordinary chat retry line is unchanged and this path does not borrow th
     assert.ok(startFailure > errorAt);
     const startFailureBlock = entranceBody.slice(startFailure - 40, startFailure + 120);
     assert.match(startFailureBlock, /abandonBeforeDispatch\("pinned_stream_start_failed"\)/);
-    assert.match(startFailureBlock, /throw;/);
+    assert.match(startFailureBlock, /throw error;/);
     assert.doesNotMatch(startFailureBlock, /started: false/);
     assert.match(execution, /Math\.max\(request\.actualMicroUsd, hold\.reservedMicroUsd\)/);
     assert.match(pinned, /outcome: "unknown"/);
