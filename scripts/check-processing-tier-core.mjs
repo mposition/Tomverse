@@ -113,6 +113,15 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  */
 export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
   {
+    file: "lib/agentPushPolicy.ts",
+    sendsATier: false,
+    reason:
+      "The engineering agent's push policy lists names whose values AGENTS.md reserves for a person, and raises a change that adds one to tier two. The selector is one of those names, matched in the agent's patch text. The module builds no request and calls no provider; this exact pattern line is pinned, not the whole file.",
+    mentions: [
+      "/\\bservice_tier\\b/,",
+    ],
+  },
+  {
     file: "lib/routerDevelopmentCollectorProvider.ts",
     sendsATier: false,
     reason:

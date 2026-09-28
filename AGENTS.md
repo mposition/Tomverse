@@ -1097,6 +1097,67 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
 
+# 엔지니어링 Agent
+
+engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이전트가 AMUX에 붙는
+경로를 건드리기 전에 읽습니다.
+
+- `docs/policy/engineering-agent.md`
+
+절대 조건:
+
+- **작업은 승격된 AMUX 카드로만 받습니다.** GitHub issue·label·comment는 작업
+  원천도 승인 증거도 아닙니다. 에이전트가 AMUX backlog에 카드를 **등록**할 수는
+  있지만 승격하지 않으며, 등록 원천과 상한은 docs/policy/engineering-agent.md §2.2가
+  고정합니다.
+- **허용 판정은 본 앱 하나가 하고, 본 앱은 patch를 적용하지 않습니다.** 본 앱은
+  Git tree 목록만 검증하며, 게시 서비스의 검사는 거절만 할 수 있습니다.
+- **에이전트는 어떤 PR도 승인·병합하지 않고 auto-merge를 켜지 않습니다.** 공개된
+  PR의 승인 증거는 docs/policy/engineering-agent.md §9-10의 일곱 조건입니다.
+- **상태 전이는 `lib/engineeringAgentCore.ts`의 표에만 있습니다.** trigger·store·
+  테스트는 그 표에서 생성하거나 대조하며, 전이를 다른 곳에 옮겨 적지 않습니다.
+  특히 lease 만료는 게시 항목을 `queued`로 되돌리지 않고 `needs_lookup`으로
+  보냅니다 — 조회 없이 다시 쓰는 경로가 생기지 않게 하는 것이 그 표의 목적입니다.
+- **소비된 capability는 되돌아가지 않습니다.** 조회 전용 claim은 capability를
+  발급하지도 소비하지도 않습니다.
+- **판정 코드는 런타임 내장 모듈만 import합니다.** 초안·게시 서비스가 clone한
+  트리의 의존성을 설치·실행하지 않고 그 코드를 불러 쓰기 때문입니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/engineering-agent.md §14를 따르며, 새 경로는 그 단계의 PR이
+  이 절에 추가합니다.
+- **P1a(결정적 핵심)**: `lib/engineeringAgentCore.ts`,
+  `tests/engineeringAgentCore.test.mjs`.
+- **P1b(소유권 manifest와 tier)**: `lib/agentAuthorityFiles.ts`, `lib/agentPushPolicy.ts`,
+  `tests/agentAuthorityFiles.test.mjs`, `tests/agentPushPolicy.test.mjs`. **새 최상위
+  디렉터리나 에이전트·AMUX 이름이 든 파일을 추가하면 manifest 분류가 먼저입니다** —
+  `tests/agentAuthorityFiles.test.mjs`가 분류되지 않은 것을 실패로 만듭니다.
+- **P1e(tree 목록 검증)**: `lib/engineeringAgentTreeVerify.ts`,
+  `tests/engineeringAgentTreeVerify.test.mjs`. **patch를 적용하는 코드를 여기에 넣지
+  않습니다** — 본 앱은 tree 목록의 hash를 다시 계산하고 비교할 뿐입니다.
+- **P1f(capability와 불일치)**: `lib/engineeringAgentCapability.ts`,
+  `lib/engineeringAgentStateMismatch.ts`, `tests/engineeringAgentCapability.test.mjs`.
+  교차 잠금 순서는 `CROSS_LOCK_ORDER` 하나이며 AMUX가 자기 순서를 바꾸면 함께
+  바뀌어야 합니다.
+- **P1g(등록 Guard와 secret 검사)**: `lib/engineeringAgentRegistrationGuard.ts`,
+  `lib/engineeringAgentSecretPatterns.ts`, `tests/engineeringAgentRegistrationGuard.test.mjs`.
+  모델의 등록 제안은 여섯 필드뿐이며 우선순위·승격·담당자를 담을 자리가 없습니다.
+- **P1d(자격증명 도달 분석)**: `lib/agentCredentialReachability.ts`,
+  `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
+  고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.
+- **P1c(통제 평면 slice)**: `lib/agentControlPlaneSlice.ts`,
+  `tests/agentControlPlaneSlice.test.mjs`. **배포 이미지에 들어가는 모든 제품 파일이
+  slice입니다** — 이미지가 트리 전체로 만들어지고 런타임 코드가 조립한 경로로 파일을
+  읽으므로, 읽히지 않는다는 것을 증명할 방법이 없습니다. 그래서 지금은 제품 파일을
+  건드리는 모든 변경이 T2입니다. `DEPLOY_EXCLUDED_PREFIXES`는 **이미지의 실제 내용을
+  확인하는 검사가 생기기 전까지 비어 있어야 하며** 테스트가 강제합니다. 런타임 통제 평면
+  코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
+- **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
+  `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
+  하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한
+  회귀만 잡으므로, **모듈을 고치면 테스트의 `REVIEWED_MODULE_SHA256`이 실패하고 그 digest를
+  갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
+- **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
+  판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
