@@ -68,10 +68,17 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
 /**
  * The test that recomputes each document's current digest from the rendered
  * source, compares it with the recorded one, and checks the recorded date is
- * the one the document shows.
+ * the one the document shows -- and *which record it checks*.
+ *
+ * The record matters because a document's state is read from one of two tables
+ * (`AMENDED_DOCUMENT_EVIDENCE` first, then the sitemap's). A verifier of the
+ * sitemap entry says nothing about a value typed into the other table, and the
+ * previous version called the document verified whichever one it read.
  */
-export const DIGEST_VERIFIED_BY: Readonly<Record<string, string>> = {
-  "/privacy": "tests/sitemapLastModified.test.mjs",
+export const DIGEST_VERIFIED_BY: Readonly<
+  Record<string, { file: string; record: "sitemap" | "amended" }>
+> = {
+  "/privacy": { file: "tests/sitemapLastModified.test.mjs", record: "sitemap" },
 };
 
 /**
@@ -102,19 +109,20 @@ export const CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [];
 
 export const documentFacts = (): AmendedDocument[] =>
   AMENDED_DOCUMENTS.map((path) => {
-    const evidence =
-      AMENDED_DOCUMENT_EVIDENCE[path] ??
-      (
-        SITEMAP_CONTENT_EVIDENCE as Readonly<
-          Record<string, { date: string; contentSha256: string } | undefined>
-        >
-      )[path];
+    const amended = AMENDED_DOCUMENT_EVIDENCE[path];
+    const sitemap = (
+      SITEMAP_CONTENT_EVIDENCE as Readonly<
+        Record<string, { date: string; contentSha256: string } | undefined>
+      >
+    )[path];
+    const record = amended ? "amended" : sitemap ? "sitemap" : null;
+    const evidence = amended ?? sitemap;
     return {
       path,
       approvedDigests: APPROVED_AMENDED_DIGESTS[path] ?? [],
       publishedDigest: evidence?.contentSha256 ?? null,
       effectiveFrom: evidence?.date ?? null,
-      verified: Boolean(DIGEST_VERIFIED_BY[path]),
+      verified: record !== null && DIGEST_VERIFIED_BY[path]?.record === record,
     };
   });
 
@@ -131,6 +139,17 @@ const UNIDENTIFIED: ChangeNoticeFacts = {
 };
 
 const DAY_MS = 86_400_000;
+
+/**
+ * The suppression causes that stop a legal message.
+ *
+ * `suppressionCheck()` lets a `legal` message through an unsubscribe and a
+ * complaint -- a person who turned marketing off is exactly who a policy notice
+ * is owed to. Only these three stop it, so only these make an account
+ * unreachable. The previous version took any live cause, which excused the
+ * people the notice matters most to.
+ */
+const LEGAL_BLOCKING_CAUSES = ["hard_bounce", "manual", "privacy_request"] as const;
 
 /** A JS instant as the naive-UTC `TIMESTAMP(3)` the columns hold. */
 const utc = (value: Date) => value.toISOString();
@@ -173,6 +192,11 @@ export const noticeFactsFor = async (
   // on the documents anyway, and counting against "now" still reports progress.
   const anchor = effective ?? now;
   const deadline = noticeDeadline(anchor);
+  // The first day of the notice period. An account created on it or later joined
+  // inside the period and has until the effective date; the previous version cut
+  // at the deadline, a day later, so somebody who signed up the afternoon the bulk
+  // notice went out was held to the bulk notice's deadline.
+  const periodStart = new Date(deadline.getTime() - DAY_MS);
   const windowStart = new Date(anchor.getTime() - CHANGE_NOTICE_WINDOW_DAYS * DAY_MS);
 
   const [row] = await prisma.$queryRaw<
@@ -188,6 +212,7 @@ export const noticeFactsFor = async (
     WITH params AS (
       SELECT (${utc(anchor)}::timestamptz AT TIME ZONE 'UTC')      AS "effective",
              (${utc(deadline)}::timestamptz AT TIME ZONE 'UTC')    AS "deadline",
+             (${utc(periodStart)}::timestamptz AT TIME ZONE 'UTC') AS "periodStart",
              (${utc(windowStart)}::timestamptz AT TIME ZONE 'UTC') AS "windowStart",
              (${utc(now)}::timestamptz AT TIME ZONE 'UTC')         AS "now"
     ),
@@ -214,33 +239,29 @@ export const noticeFactsFor = async (
          AND n."sentAt" IS NOT NULL
          AND n."sentAt" < p."effective"
     ),
-    latest AS (
-      SELECT DISTINCT ON (n."userId") n."userId", n."status", n."lastErrorKind"
-        FROM notice n
-       ORDER BY n."userId", n."createdAt" DESC
-    ),
     classified AS (
       SELECT CASE
                WHEN EXISTS (
                  SELECT 1 FROM told t, params p
                   WHERE t."userId" = o."id"
                     AND (t."sentAt" < p."deadline"
-                         OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."deadline"))
+                         OR (o."createdAt" IS NOT NULL AND o."createdAt" >= p."periodStart"))
                ) THEN 'told'
                WHEN EXISTS (SELECT 1 FROM told t WHERE t."userId" = o."id") THEN 'late'
                WHEN o."email" IS NULL THEN 'unreachable'
                WHEN EXISTS (
-                 SELECT 1 FROM latest l
-                  WHERE l."userId" = o."id"
-                    AND (l."status" = 'suppressed'
-                         OR (l."status" = 'bounced'
-                             AND l."lastErrorKind" IS DISTINCT FROM 'soft_bounce'))
+                 SELECT 1 FROM notice n
+                  WHERE n."userId" = o."id"
+                    AND (n."status" = 'suppressed'
+                         OR (n."status" = 'bounced'
+                             AND n."lastErrorKind" IS DISTINCT FROM 'soft_bounce'))
                )
                AND EXISTS (
                  SELECT 1 FROM "SuppressionCause" sc, params p
                   WHERE sc."emailAddress" = lower(btrim(o."email"))
                     AND sc."releasedAt" IS NULL
                     AND (sc."expiresAt" IS NULL OR sc."expiresAt" > p."now")
+                    AND sc."reason" = ANY(${[...LEGAL_BLOCKING_CAUSES]}::text[])
                ) THEN 'unreachable'
                ELSE 'untold'
              END AS "state"

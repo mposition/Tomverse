@@ -287,3 +287,50 @@ test("pending and skipped deliveries tell nobody", async () => {
   const result = await facts();
   assert.equal(result.untold, 2);
 });
+
+test("an unsubscribe or a complaint does not excuse an account from the notice", async () => {
+  // A legal message goes through both; the people who turned marketing off are
+  // the ones the amendment is most about. Only a cause that stops legal mail
+  // makes an account unreachable.
+  const address = `complained-${randomUUID().slice(0, 8)}@example.test`;
+  const user = await prisma.user.create({
+    data: { email: address, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(user.id, "suppressed", daysBefore(40), null);
+  await recordSuppression({
+    emailAddress: address,
+    reason: "complaint",
+    source: "provider_webhook",
+    sourceEventKey: `webhook:${randomUUID()}`,
+  });
+  const result = await facts();
+  assert.equal(result.unreachable, 0);
+  assert.equal(result.untold, 1);
+});
+
+test("a hard bounce stays unreachable even when a later attempt failed", async () => {
+  // The latest row alone decided before; a failed retry after a hard bounce hid
+  // the bounce and held the whole gate shut on one dead mailbox.
+  const address = `bounced-${randomUUID().slice(0, 8)}@example.test`;
+  const user = await prisma.user.create({
+    data: { email: address, createdAt: daysBefore(90) },
+    select: { id: true },
+  });
+  await delivery(user.id, "bounced", daysBefore(40), daysBefore(40));
+  await delivery(user.id, "failed", daysBefore(35), null);
+  await suppress(address);
+  const result = await facts();
+  assert.equal(result.unreachable, 1);
+  assert.equal(result.untold, 0);
+});
+
+test("an account created on the first day of the notice period has until it applies", async () => {
+  // Effective 15 November: the period starts on 16 October. Somebody who signed
+  // up that afternoon, after the bulk notice, is told if told before 15 November.
+  const joined = await account(new Date(daysBefore(30).getTime() + 15 * 3_600_000));
+  await delivery(joined.id, "sent", daysBefore(20), daysBefore(20));
+  const result = await facts();
+  assert.equal(result.told, 1);
+  assert.equal(result.late, 0);
+});

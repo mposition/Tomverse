@@ -177,9 +177,14 @@ test("every verifier the gate relies on hashes the document and compares it", ()
   // Mentioning a path is not verifying it. The named test has to compute a
   // SHA-256 and compare it with the recorded `contentSha256` for that path, or an
   // entry here would let a hand-typed digest count as evidence.
-  for (const [path, file] of Object.entries(DIGEST_VERIFIED_BY)) {
+  for (const [path, { file, record }] of Object.entries(DIGEST_VERIFIED_BY)) {
     assert.ok(existsSync(file), `${path}: ${file} does not exist`);
-    const source = readFileSync(file, "utf8");
+    // Comments removed first: a string in a comment verifies nothing.
+    const source = readFileSync(file, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    const table = record === "sitemap" ? "SITEMAP_CONTENT_EVIDENCE" : "AMENDED_DOCUMENT_EVIDENCE";
+    assert.ok(source.includes(table), `${file} never reads ${table}, the record the gate reads`);
     assert.match(source, /createHash\(\s*"sha256"\s*\)/, `${file} computes no digest`);
     assert.ok(
       source.includes(`["${path}"].contentSha256`),
