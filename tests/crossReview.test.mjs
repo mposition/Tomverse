@@ -1270,13 +1270,19 @@ test("a review starts only on the newest preflight for its sandbox, and only whe
 // appears, and the newest preflight for the sandbox decides whether a
 // review may start.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const transientGitleaksReviewOutput = "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1";
+const transientGitleaksReviewOutputs = [
+  "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-v1",
+  "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaks-lint-v2",
+];
+const transientGitleaksReviewOutput = transientGitleaksReviewOutputs[0];
 const canonicalIndexPath = (value) =>
   normalizeRepoPath(value).replace(/[A-Z]/g, (character) => String.fromCharCode(character.charCodeAt(0) + 32));
 const isTransientGitleaksReviewOutput = (value) => {
   const candidate = canonicalIndexPath(value);
-  const root = canonicalIndexPath(transientGitleaksReviewOutput);
-  return candidate === root || candidate.startsWith(`${root}/`);
+  return transientGitleaksReviewOutputs.some((value) => {
+    const root = canonicalIndexPath(value);
+    return candidate === root || candidate.startsWith(`${root}/`);
+  });
 };
 
 test("cross-review records state the one-command and committed-bytes provenance boundary", () => {
@@ -1316,6 +1322,8 @@ test("cross-review records state the one-command and committed-bytes provenance 
 test("the transient gitleaks review output is never indexed", () => {
   assert.equal(isTransientGitleaksReviewOutput(transientGitleaksReviewOutput), true);
   assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutput}/verdict-round1.json`), true);
+  assert.equal(isTransientGitleaksReviewOutput(transientGitleaksReviewOutputs[1]), true);
+  assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutputs[1]}/verdict-round1.json`), true);
   assert.equal(isTransientGitleaksReviewOutput("DOCS\\OPS\\CROSS-REVIEW\\PACKAGES\\PROMPT-REFINER-SHADOW-STAGE-SUCCESSOR-GITLEAKS-V1\\RAW.EVENTS.JSONL"), true);
   assert.equal(isTransientGitleaksReviewOutput(`${transientGitleaksReviewOutput}-other/verdict.json`), false);
   assert.equal(isTransientGitleaksReviewOutput("docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-gitleaKs-v1/verdict.json"), false);
