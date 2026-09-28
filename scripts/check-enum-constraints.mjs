@@ -593,7 +593,7 @@ const REGISTRY = {
     module: "lib/amux/autoPromotionCore.ts",
     list: "AUTO_CONSUMPTION_STATUSES",
     reason:
-      "consumed or outcome_unknown. consumed is the only status that accompanies one backlog to todo write, and that write stays behind the shipped-off auto latch.",
+      "consumed or outcome_unknown. consumed is the only status that accompanies one backlog to todo write. Version 9 turns the code latch on. The write still needs the env value exactly enabled plus the version 8 graduation, capacity, cost, and halt checks.",
   },
   AmuxRecommendationAutoHalt_reason_check: {
     owner: "list",

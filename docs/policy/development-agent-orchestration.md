@@ -1,6 +1,6 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -8,6 +8,7 @@ approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 5
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 6
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 7
 approvedBy: mposition · approvedAt: 2026-09-25 · 정책 버전: 8
+approvedBy: mposition · approvedAt: 2026-09-27 · 정책 버전: 9
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -19,6 +20,7 @@ approvedBy: mposition · approvedAt: 2026-09-25 · 정책 버전: 8
 | 6 | 2026-09-24 mposition | 운영자가 2026-09-24에 적은 E pilot 세 카드(`OPS-JOBS-DELAYED-01`, `MOBILE-HEADER-NARROW-01`, `STARTER-LAYOUT-01`)를 위해 promotion 코드 래치를 켠다. 환경 변수 `TOMVERSE_AMUX_BOARD_PROMOTE`가 정확히 `enabled`일 때만 apply가 열린다. 이 버전은 카드를 승격하지 않고, 환경 변수를 설정하지 않으며, worker 실행과 `amux_authority`를 열지 않는다. |
 | 7 | 2026-09-24 mposition | backlog 추천 풀과 카드별 사람 승인, 보류, 거절. 풀은 새 카드 status가 아니다. 코드 래치는 끈 채로 둔다. 용량 행을 넣지 않고, 자동 승격과 worker 실행을 열지 않는다. |
 | 8 | 2026-09-25 mposition | 제한 자동 승격의 졸업 조건과 꺼진 게이트. 사람 결정 20건과 14일, 1회 US$5·24시간 US$15·30일 US$100, 자동 경로의 전역 3과 worker당 1, 사전 승인 7일, 카드 하나당 트랜잭션 하나, 중대 위반 1건 또는 15분 안 결과 불명 2건. 코드 래치는 끈 채로 둔다. 용량 행을 넣지 않고 worker 실행을 열지 않는다. |
+| 9 | 2026-09-27 mposition | 자동 승격 코드 래치를 켠다. 요청 스키마의 policyVersion은 8로 남는다. 환경 변수 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`일 때만 grant와 소비가 열린다. 이 버전은 사람 결정 20건과 용량 행을 만들지 않고, 추천 풀 래치와 worker 실행을 열지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -642,3 +644,13 @@ grant를 남기는 요청의 step-up 창은 15분이다. 그 15분은 grant의 7
 완료로 세려면 구현이 다음을 테스트로 보여야 한다. 출고 래치가 false여서 공개 경로의 grant, 소비, 비용, halt, 카드 쓰기가 0인 것. 사람 결정 19건의 거절, 20건이어도 14일보다 짧은 간격의 거절, 20건이고 간격이 14일 이상일 때만 졸업 판정이 통과하는 것. 501 cent의 거절, 24시간과 30일 합산 상한의 거절. 자동 활성 3장에서 다음 카드의 거절. worker id가 있는 요청의 거절. grant가 없거나 만료된 카드의 거절과, grant가 카드 status를 바꾸지 않는 것. 한 요청의 카드 둘의 거절. 중대 위반 1건의 halt, 15분 안 결과 불명 2건의 halt, 결과 불명 1건은 halt가 아닌 것. 열린 halt의 카드 쓰기 거절. 버전 7 추천 래치는 false로 남는 것. attempt, delivery, route decision의 증가 0. `TOMVERSE_AMUX_EXECUTE`를 읽거나 쓰지 않는 것.
 
 버전 8은 사람 결정 20건과 14일을 측정된 사실로 만들지 않는다. 그 행이 없는 동안 졸업 판정은 거절이다. 코드 래치를 켜는 것은 별도 버전이다.
+
+## 버전 9 — 자동 승격 코드 래치
+
+요청 스키마의 `policyVersion`은 8로 남는다. 버전 8의 졸업, 비용, 전역 상한, grant, halt, 용량 판정은 바꾸지 않는다.
+
+버전 9가 출고하는 `AUTO_PROMOTION_CODE_LATCH`는 true다. 환경 변수 `TOMVERSE_AMUX_BOARD_AUTO_PROMOTE`가 정확히 `enabled`일 때만 grant와 자동 소비가 트랜잭션을 연다. 이 버전은 그 환경 변수를 설정하지 않는다. HTTP route는 래치를 인자로 받지 않는다. 상수가 false이면 route는 서비스 전에 `apply_disabled`를 반환한다.
+
+이 버전은 사람 결정 20건을 만들지 않는다. 그 행이 없는 동안 소비는 `graduation_unmet`이다. 용량 행을 넣지 않는다. 그 행이 없는 동안 소비는 `capacity_unconfigured`다. 추천 풀 코드 래치는 false로 남는다. grant는 카드 status를 바꾸지 않는다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`를 읽거나 쓰지 않는다. worker를 시작하지 않는다.
+
+래치를 다시 끄는 것은 별도 버전이다.
