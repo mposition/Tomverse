@@ -126,6 +126,56 @@ export const PUBLISH_TERMINAL_STATES = writeItemTerminalStates("publish");
 export type PublishState = WriteItemState<"publish">;
 
 /**
+ * The three kinds of work item that wait on a person (policy §7, §12): a T2
+ * draft waits for its decision, a decision item for acknowledgement, a state
+ * mismatch for a person's fix. Each opens once and closes once; nothing
+ * reopens it. A T2 draft and a decision item expire by the owner queue's TTL
+ * (`QUEUE_TTL_DAYS.decision`); a state mismatch never does, because it halts
+ * the agent until a person acts.
+ */
+export const OWNER_ITEM_KINDS = ["t2_draft", "decision", "state_mismatch"] as const;
+export type OwnerItemKind = (typeof OWNER_ITEM_KINDS)[number];
+
+const OWNER_ITEM_TABLES: Readonly<Record<OwnerItemKind, ReadonlyArray<readonly [string, string]>>> = {
+  t2_draft: [
+    ["open", "approved"],
+    ["open", "rejected"],
+    ["open", "expired"],
+  ],
+  decision: [
+    ["open", "acknowledged"],
+    ["open", "expired"],
+  ],
+  state_mismatch: [["open", "resolved"]],
+};
+
+/** A T2 decision's two answers (policy §7); the approval table allows no other. */
+export const ENGINEERING_AGENT_T2_DECISIONS = ["approved", "rejected"] as const;
+
+export const ownerItemTransitions = (kind: OwnerItemKind): readonly Transition<string>[] =>
+  OWNER_ITEM_TABLES[kind];
+
+export const ownerItemStates = (kind: OwnerItemKind): string[] => [
+  "open",
+  ...OWNER_ITEM_TABLES[kind].map(([, to]) => to),
+];
+
+const isWriteItemKind = (kind: EngineeringAgentWorkItemKind): kind is WriteItemKind =>
+  (WRITE_ITEM_KINDS as readonly string[]).includes(kind);
+
+/** Every state of a work item of any kind: the table the store's trigger is checked against. */
+export const workItemStates = (kind: EngineeringAgentWorkItemKind): string[] =>
+  isWriteItemKind(kind) ? writeItemStates(kind) : ownerItemStates(kind);
+
+/** Every transition of a work item of any kind: the table the store's trigger is checked against. */
+export const workItemTransitions = (kind: EngineeringAgentWorkItemKind): readonly Transition<string>[] =>
+  isWriteItemKind(kind) ? writeItemTransitions(kind) : ownerItemTransitions(kind);
+
+/** The state a work item of this kind is created in. */
+export const workItemInitialState = (kind: EngineeringAgentWorkItemKind) =>
+  isWriteItemKind(kind) ? "queued" : "open";
+
+/**
  * How a write item was claimed. A write claim may write; a lookup claim exists
  * only to find out what an earlier claim did, and writes nothing.
  */

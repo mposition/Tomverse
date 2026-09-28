@@ -38,6 +38,9 @@ export const REGISTRATION_SOURCES = {
 } as const;
 export type RegistrationSource = keyof typeof REGISTRATION_SOURCES;
 
+/** The source ids as a list, for the database's CHECK to be compared against. */
+export const REGISTRATION_SOURCE_IDS = Object.keys(REGISTRATION_SOURCES) as RegistrationSource[];
+
 /** Fixed by the policy (§2.2); changing them is a revision. */
 export const REGISTRATION_CAPS = {
   perRound: 3,

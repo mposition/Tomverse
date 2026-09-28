@@ -841,6 +841,76 @@ const REGISTRY = {
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
+  EngineeringAgentRun_status_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "RUN_STATUSES",
+    reason:
+      "active, finished, abandoned. A transition trigger allows only the core table's pairs and refuses a finish after the lease.",
+  },
+  EngineeringAgentRun_outcome_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "RUN_OUTCOMES",
+    reason:
+      "How a run ended. Null while active; abandoned only with the abandoned status.",
+  },
+  EngineeringAgentRun_halt_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "HALT_VALUES",
+    reason:
+      "Why the agent stopped taking work, if it did. none is the ordinary value.",
+  },
+  EngineeringAgentWorkItem_kind_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_WORK_ITEM_KINDS",
+    reason:
+      "The six work item kinds. Each kind's states are a separate CHECK, compared by tests/engineeringAgentSchema.test.mjs.",
+  },
+  EngineeringAgentWorkItem_claimMode_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "WRITE_CLAIM_MODES",
+    reason:
+      "write or lookup; set only while an item is claimed.",
+  },
+  EngineeringAgentApproval_decision_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_T2_DECISIONS",
+    reason:
+      "A T2 decision's two answers. The table holds T2 decisions only, never a publish approval.",
+  },
+  EngineeringAgentBinding_state_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "BINDING_STATES",
+    reason:
+      "open, closed, pruned; a trigger allows only open to closed and closed to pruned.",
+  },
+  EngineeringAgentRegistration_source_check: {
+    owner: "list",
+    module: "lib/engineeringAgentRegistrationGuard.ts",
+    list: "REGISTRATION_SOURCE_IDS",
+    reason:
+      "The three registration sources the policy names; adding one is a policy revision.",
+  },
+  EngineeringAgentRegistration_result_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "REGISTRATION_RESULTS",
+    reason:
+      "pending until the AMUX writer answers; then written once.",
+  },
+  EngineeringAgentRequest_state_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "REQUEST_STATES",
+    reason:
+      "Internal request idempotency; in_progress may stay visible because a COMMIT can land late.",
+  },
   AmuxWorkDelivery_status_check: {
     owner: "database",
     reason:
