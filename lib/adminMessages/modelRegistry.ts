@@ -155,6 +155,10 @@ export const adminModelRegistryMessages = defineAdminMessages({
       reasonTooShort: "Write an adoption reason of at least 4 characters. That sentence is what the approval record keeps.",
       creditsBelowFloor: (credits: number, usageClass: string) =>
         `This price needs at least ${credits} credits (${usageClass}). The weight on this form is lower.`,
+      flashLiteStandardException:
+        "Save gemini-flash-lite-latest or gemini-3.5-flash-lite at the published Standard rates (US$0.30 in, cache multiplier 0.1, US$2.50 out, 65,536 output tokens) for 1 standard credit. This exception is only those two ids, and it ends after 2026-12-27 UTC.",
+      flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
+        `The 1-credit exception for Gemini 3.5 Flash-Lite ended after 2026-12-27 UTC. This price needs at least ${credits} credits (${usageClass}).`,
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -400,6 +404,10 @@ export const adminModelRegistryMessages = defineAdminMessages({
       reasonTooShort: "채택 사유를 4자 이상 적어야 저장됩니다. 이 문장이 승인 기록에 남습니다.",
       creditsBelowFloor: (credits: number, usageClass: string) =>
         `이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다. 폼의 가중치가 그보다 낮습니다.`,
+      flashLiteStandardException:
+        "gemini-flash-lite-latest 또는 gemini-3.5-flash-lite를 공개된 Standard 가격(입력 US$0.30, 캐시 입력 배수 0.1, 출력 US$2.50, 출력 상한 65,536)으로 standard 1크레딧에 저장합니다. 이 예외는 이 두 ID뿐이며, 2026-12-27(UTC)이 지나면 끝납니다.",
+      flashLiteStandardExceptionExpired: (credits: number, usageClass: string) =>
+        `Gemini 3.5 Flash-Lite의 1크레딧 예외는 2026-12-27(UTC)에 끝났습니다. 이 가격은 최소 ${credits}크레딧(${usageClass})이 필요합니다.`,
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",
