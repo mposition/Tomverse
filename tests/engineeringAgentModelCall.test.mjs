@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
@@ -46,36 +48,110 @@ test("cuts never split a character, and the digest is of the original bytes", ()
   assert.equal(cut.text, "가".repeat(170));
 });
 
-test("a head-and-tail cut keeps both ends and names what it dropped", () => {
+test("a head-and-tail cut keeps both ends, names what it dropped, and fits the limit marker included", () => {
   const raw = bytes(`${"h".repeat(20 * 1024)}${"t".repeat(20 * 1024)}`);
   const cut = prepareInput(raw, INPUT_LIMITS.executionBrief);
   const [head, marker, tail] = cut.text.split("\n");
-  assert.equal(head, "h".repeat(12 * 1024));
+  assert.ok(bytes(cut.text).length <= INPUT_LIMITS.executionBrief.total);
+  assert.match(head, /^h+$/);
+  assert.ok(head.length < 12 * 1024 && head.length > 12 * 1024 - 128, "the marker comes out of the head's share");
   assert.equal(tail, "t".repeat(4 * 1024));
-  assert.equal(marker, `[truncated ${40 * 1024 - 16 * 1024} bytes, sha256 ${sha256(raw)}]`);
+  assert.equal(marker, `[truncated ${40 * 1024 - head.length - 4 * 1024} bytes, sha256 ${sha256(raw)}]`);
 });
 
-test("the run total is met by cutting the CI log first, then the dependabot body", () => {
+/** Control characters other than newline and tab. */
+const hasControl = (text) =>
+  [...text].some((char) => {
+    const point = char.codePointAt(0);
+    return (point < 0x20 && point !== 0x09 && point !== 0x0a) || (point >= 0x7f && point <= 0x9f);
+  });
+
+/** A deterministic mix of ASCII, Hangul, emoji, control characters and code points NFC expands. */
+const mixed = (seed, length) => {
+  const pieces = [0x61, 0xac00, 0x1f600, 0x07, 0x1b, 0x0958, 0x2adc, 0x0a, 0xe9, 0x09].map((point) =>
+    String.fromCodePoint(point),
+  );
+  let state = seed;
+  let text = "";
+  for (let i = 0; i < length; i += 1) {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    text += pieces[state % pieces.length];
+  }
+  return text;
+};
+
+test("no input comes out longer than its limit, whatever normalisation does to its size", () => {
+  const grows = String.fromCodePoint(0x0958);
+  assert.ok(bytes(grows.normalize("NFC")).length > bytes(grows).length, "the fixture really grows under NFC");
+  for (let seed = 1; seed <= 40; seed += 1) {
+    const raw = bytes(mixed(seed, 2_000 + seed * 700));
+    for (const limit of [
+      INPUT_LIMITS.issueTitle,
+      INPUT_LIMITS.executionBrief,
+      INPUT_LIMITS.ciLog,
+      INPUT_LIMITS.dependabotBody,
+    ]) {
+      const prepared = prepareInput(raw, limit);
+      const total = typeof limit === "number" ? limit : limit.total;
+      assert.ok(bytes(prepared.text).length <= total, `seed ${seed}`);
+      assert.ok(!hasControl(prepared.text), `seed ${seed}`);
+      assert.equal(prepared.digest, sha256(raw));
+      assert.equal(prepared.originalBytes, raw.length);
+    }
+  }
+  assert.throws(() => prepareInput(bytes("x".repeat(100)), { total: 50, head: 10, tail: 40 }), /marker/);
+});
+
+test("the run total is met by cutting the CI log first, then the dependabot body, and every source keeps its digest", () => {
+  const executionBrief = bytes("b".repeat(15 * 1024));
+  const ciLog = bytes("c".repeat(40 * 1024));
+  const dependabotBody = bytes("d".repeat(8 * 1024));
   const result = prepareWorkRunInputs({
-    executionBrief: bytes("b".repeat(15 * 1024)),
-    ciLog: bytes("c".repeat(40 * 1024)),
-    dependabotBody: bytes("d".repeat(8 * 1024)),
+    executionBrief,
+    ciLog,
+    dependabotBody,
   });
   assert.equal(result.ok, true);
-  const size = (text) => (text === null ? 0 : bytes(text).length);
+  const size = (prepared) => (prepared === null ? 0 : bytes(prepared.text).length);
   assert.ok(size(result.brief) + size(result.ciLog) + size(result.dependabotBody) <= INPUT_LIMITS.workRunTotal);
-  assert.equal(result.brief, "b".repeat(15 * 1024), "the brief is never cut for the total");
-  assert.equal(result.dependabotBody, "d".repeat(8 * 1024), "the CI log gave way first");
-  assert.ok(result.truncated.includes("ciLog"));
+  assert.equal(result.brief.text, "b".repeat(15 * 1024), "the brief is never cut for the total");
+  assert.equal(result.dependabotBody.text, "d".repeat(8 * 1024), "the CI log gave way first");
+  assert.deepEqual(result.truncated, ["ciLog"]);
+  assert.match(
+    result.ciLog.text,
+    /\n\[truncated \d+ bytes, sha256 [0-9a-f]{64}\]\n/,
+    "a recut log still names what it dropped",
+  );
+  assert.deepEqual(
+    [result.brief, result.ciLog, result.dependabotBody].map(({ digest, originalBytes }) => [digest, originalBytes]),
+    [executionBrief, ciLog, dependabotBody].map((raw) => [sha256(raw), raw.length]),
+  );
+  assert.deepEqual(
+    prepareWorkRunInputs({
+      executionBrief: bytes("ok"),
+      ciLog: new Uint8Array([0]),
+    }),
+    {
+      ok: false,
+      source: "ciLog",
+      detail: "nul_byte",
+    },
+  );
 });
 
 test("a registration round defers what does not fit instead of cutting it again", () => {
-  const items = Array.from({ length: 10 }, (_, i) => ({ key: `K-${i}`, raw: bytes("x".repeat(8 * 1024)) }));
+  const items = Array.from({ length: 10 }, (_, i) => ({
+    key: `K-${i}`,
+    raw: bytes(`${i}`.repeat(9 * 1024)),
+  }));
   items.push({ key: "BAD-1", raw: new Uint8Array([0]) });
   const round = prepareRegistrationRound(items);
   assert.equal(round.offered.length, 8);
   assert.deepEqual(round.deferred, ["K-8", "K-9"]);
   assert.deepEqual(round.rejected, ["BAD-1"]);
+  assert.equal(round.offered[0].digest, sha256(items[0].raw), "the digest is of the item as received");
+  assert.equal(round.offered[0].originalBytes, 9 * 1024);
+  assert.equal(round.offered[0].truncated, true);
 });
 
 /* read_file ----------------------------------------------------------- */
@@ -114,44 +190,130 @@ const read = (overrides = {}) =>
     trackedPaths: new Set(["lib/a.ts", "lib/link.ts", "lib/dir", ".env"]),
     secretFixturePaths: new Set(),
     requested: "lib/a.ts",
-    ports: ports({ "/clone/lib/a.ts": "export const a = 1;\n", "/clone/lib/link.ts": "x" }),
+    ports: ports({
+      "/clone/lib/a.ts": "export const a = 1;\n",
+      "/clone/lib/link.ts": "x",
+    }),
     budgetRemaining: 1024,
     ...overrides,
   });
 
 test("read_file returns a tracked, regular, in-clone, non-denied file within budget", async () => {
-  assert.deepEqual(await read(), { ok: true, text: "export const a = 1;\n", bytes: 20 });
-  assert.deepEqual(await read({ requested: "lib/other.ts" }), { ok: false, reason: "not_tracked" });
-  assert.deepEqual(await read({ requested: "/etc/passwd" }), { ok: false, reason: "not_tracked" });
-  assert.deepEqual(await read({ requested: { path: "lib/a.ts" } }), { ok: false, reason: "not_tracked" });
-  assert.deepEqual(await read({ requested: ".env" }), { ok: false, reason: "denied" });
+  assert.deepEqual(await read(), {
+    ok: true,
+    text: "export const a = 1;\n",
+    bytes: 20,
+  });
+  assert.deepEqual(await read({ requested: "lib/other.ts" }), {
+    ok: false,
+    reason: "not_tracked",
+  });
+  assert.deepEqual(await read({ requested: "/etc/passwd" }), {
+    ok: false,
+    reason: "not_tracked",
+  });
+  assert.deepEqual(await read({ requested: { path: "lib/a.ts" } }), {
+    ok: false,
+    reason: "not_tracked",
+  });
+  assert.deepEqual(await read({ requested: ".env" }), {
+    ok: false,
+    reason: "denied",
+  });
   assert.deepEqual(
-    await read({ requested: "lib/link.ts", ports: ports({ "/clone/lib/link.ts": "x" }, { symlinks: ["/clone/lib/link.ts"] }) }),
+    await read({
+      requested: "lib/link.ts",
+      ports: ports({ "/clone/lib/link.ts": "x" }, { symlinks: ["/clone/lib/link.ts"] }),
+    }),
     { ok: false, reason: "symlink" },
   );
   assert.deepEqual(
-    await read({ ports: ports({ "/clone/lib/a.ts": "x" }, { symlinks: ["/clone/lib"] }) }),
+    await read({
+      ports: ports({ "/clone/lib/a.ts": "x" }, { symlinks: ["/clone/lib"] }),
+    }),
     { ok: false, reason: "symlink" },
     "a symlinked parent directory is refused too",
   );
   assert.deepEqual(
-    await read({ ports: ports({ "/clone/lib/a.ts": "x" }, { realpaths: { "/clone/lib/a.ts": "/elsewhere/a.ts" } }) }),
+    await read({
+      ports: ports({ "/clone/lib/a.ts": "x" }, { realpaths: { "/clone/lib/a.ts": "/elsewhere/a.ts" } }),
+    }),
     { ok: false, reason: "outside_clone" },
   );
   assert.deepEqual(
-    await read({ requested: "lib/dir", ports: ports({ "/clone/lib/dir": "" }, { directories: ["/clone/lib/dir"] }) }),
+    await read({
+      requested: "lib/dir",
+      ports: ports({ "/clone/lib/dir": "" }, { directories: ["/clone/lib/dir"] }),
+    }),
     { ok: false, reason: "not_a_file" },
   );
-  assert.deepEqual(await read({ budgetRemaining: 5 }), { ok: false, reason: "budget_exhausted" });
+  assert.deepEqual(await read({ budgetRemaining: 5 }), {
+    ok: false,
+    reason: "budget_exhausted",
+  });
+  assert.deepEqual(await read({ ports: ports({ "/clone/lib/a.ts": "a\u0000b" }) }), { ok: false, reason: "not_text" });
+});
+
+/** A Windows path, written with forward slashes here so no escaping is involved. */
+const windowsPath = (forward) => forward.split("/").join(String.fromCharCode(92));
+
+test("the clone root must be its own real path: a symlinked or junctioned root is refused, not followed", async () => {
+  const files = { "/clone/lib/a.ts": "export const a = 1;\n" };
   assert.deepEqual(
-    await read({ ports: ports({ "/clone/lib/a.ts": "a\u0000b" }) }),
-    { ok: false, reason: "not_text" },
+    await read({
+      ports: ports(files, { realpaths: { "/clone": "/elsewhere/clone" } }),
+    }),
+    { ok: false, reason: "clone_root_not_canonical" },
+  );
+  assert.deepEqual(
+    await read({
+      cloneRoot: "/clone/",
+      ports: ports(files, { realpaths: { "/clone/": "/clone" } }),
+    }),
+    { ok: true, text: "export const a = 1;\n", bytes: 20 },
+    "a trailing separator is not a different root",
+  );
+  const windows = { "C:/work/clone/lib/a.ts": "w" };
+  assert.deepEqual(
+    await read({
+      cloneRoot: windowsPath("C:/work/clone"),
+      ports: ports(windows, {
+        realpaths: {
+          [windowsPath("C:/work/clone")]: windowsPath("C:/work/clone"),
+          "C:/work/clone/lib/a.ts": windowsPath("C:/work/clone/lib/a.ts"),
+        },
+      }),
+    }),
+    { ok: true, text: "w", bytes: 1 },
+    "backslashes and a drive letter are the same path",
+  );
+  assert.deepEqual(
+    await read({
+      cloneRoot: windowsPath("c:/work/clone"),
+      ports: ports(windows, {
+        realpaths: {
+          [windowsPath("c:/work/clone")]: windowsPath("C:/work/clone"),
+        },
+      }),
+    }),
+    { ok: false, reason: "clone_root_not_canonical" },
+    "case is not folded: a differently spelled root is refused",
+  );
+  assert.deepEqual(
+    await read({
+      cloneRoot: "/",
+      ports: ports(files, { realpaths: { "/": "/" } }),
+    }),
+    {
+      ok: false,
+      reason: "clone_root_not_canonical",
+    },
   );
 });
 
 /* The request -------------------------------------------------------- */
 
-test("the request goes to the one fixed host, and the key appears only in its header", () => {
+test("the request goes to the one fixed host, carries the key only in its header, and asks for no fallback", () => {
   const sentinel = "SENTINEL-KEY-7f3a9c";
   const request = buildModelRequest({
     apiKey: sentinel,
@@ -161,60 +323,228 @@ test("the request goes to the one fixed host, and the key appears only in its he
   });
   assert.equal(request.url, MODEL_ENDPOINT);
   assert.equal(new URL(request.url).host, "api.anthropic.com");
+  assert.deepEqual(Object.keys(request.headers).sort(), ["anthropic-version", "content-type", "x-api-key"]);
   assert.equal(request.headers["x-api-key"], sentinel);
   assert.equal(request.headers["anthropic-version"], ANTHROPIC_VERSION);
   assert.ok(!request.body.includes(sentinel));
   const body = JSON.parse(request.body);
-  assert.deepEqual(body.tools.map((tool) => tool.name), ["read_file"]);
-  assert.equal(body.fallbacks, "default");
+  assert.deepEqual(Object.keys(body).sort(), ["max_tokens", "messages", "model", "system", "tools"]);
+  assert.deepEqual(
+    body.tools.map((tool) => tool.name),
+    ["read_file"],
+  );
   assert.equal(body.max_tokens, SESSION_LIMITS.maxOutputTokens);
 });
 
-test("the model call module cannot run anything and never reads the environment", () => {
-  const path = new URL("../lib/engineeringAgentModelCall.ts", import.meta.url);
-  const source = ts.createSourceFile("m.ts", readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+test("the tool budget and the fixed inputs fit inside the request limit (design §4.2a)", () => {
+  assert.ok(SESSION_LIMITS.maxUserContentBytes >= INPUT_LIMITS.workRunTotal);
+  assert.ok(SESSION_LIMITS.maxUserContentBytes >= INPUT_LIMITS.registrationRound);
+  const fixed = SESSION_LIMITS.maxSystemBytes + SESSION_LIMITS.maxUserContentBytes + SESSION_LIMITS.maxToolBytes;
+  assert.ok(fixed < SESSION_LIMITS.maxRequestBytes, "room is left for the model's own turns");
+});
+
+test("an oversize input or a request grown past the limit ends the session", async () => {
+  const noRead = async () => ({ ok: false, reason: "denied" });
+  const never = async () => {
+    throw new Error("must not be called");
+  };
+  const base = {
+    apiKey: "k",
+    system: "s",
+    userContent: "task",
+    readFile: noRead,
+  };
+  assert.deepEqual(
+    await runModelSession({
+      ...base,
+      system: "s".repeat(SESSION_LIMITS.maxSystemBytes + 1),
+      transport: never,
+    }),
+    { ok: false, reason: "input_too_large" },
+  );
+  assert.deepEqual(
+    await runModelSession({
+      ...base,
+      userContent: "u".repeat(SESSION_LIMITS.maxUserContentBytes + 1),
+      transport: never,
+    }),
+    { ok: false, reason: "input_too_large" },
+  );
+  const { transport, requests } = scripted([
+    reply("tool_use", [
+      {
+        type: "thinking",
+        thinking: "x".repeat(SESSION_LIMITS.maxRequestBytes),
+        signature: "sig",
+      },
+      { type: "tool_use", id: "t", name: "read_file", input: { path: "a" } },
+    ]),
+  ]);
+  assert.deepEqual(await runModelSession({ ...base, transport }), {
+    ok: false,
+    reason: "request_too_large",
+  });
+  assert.equal(requests.length, 1, "the oversize request was never sent");
+});
+
+/**
+ * The module's capability guard, over its own syntax tree and types. It is a
+ * function so the fixtures below can show what it catches.
+ */
+const FORBIDDEN_NAMES = new Set([
+  "fetch",
+  "XMLHttpRequest",
+  "WebSocket",
+  "EventSource",
+  "navigator",
+  "globalThis",
+  "global",
+  "window",
+  "self",
+  "process",
+  "WebAssembly",
+  "Function",
+  "eval",
+  "require",
+  "module",
+  "constructor",
+  "prototype",
+  "__proto__",
+  "Reflect",
+  "Proxy",
+  "setTimeout",
+  "setInterval",
+  "setImmediate",
+  "queueMicrotask",
+  "Worker",
+  "importScripts",
+  "Deno",
+  "Bun",
+]);
+
+const libDirectory = new URL("../lib/", import.meta.url);
+
+const capabilityProblems = (text) => {
+  const fileName = fileURLToPath(new URL("engineeringAgentModelCall.guard.ts", libDirectory));
+  const options = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    strict: true,
+    noEmit: true,
+    skipLibCheck: true,
+    types: ["node"],
+  };
+  const host = ts.createCompilerHost(options);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (name, language, ...rest) =>
+    path.resolve(name) === fileName
+      ? ts.createSourceFile(name, text, language, true)
+      : getSourceFile(name, language, ...rest);
+  const fileExists = host.fileExists.bind(host);
+  host.fileExists = (name) => path.resolve(name) === fileName || fileExists(name);
+  const readFile = host.readFile.bind(host);
+  host.readFile = (name) => (path.resolve(name) === fileName ? text : readFile(name));
+  const program = ts.createProgram([fileName], options, host);
+  const checker = program.getTypeChecker();
+  const source = program.getSourceFiles().find((file) => path.resolve(file.fileName) === fileName);
+
   const problems = [];
   const visit = (node) => {
-    if (ts.isImportDeclaration(node)) {
-      const from = node.moduleSpecifier.text;
-      if (from !== "node:crypto") problems.push(`import ${from}`);
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const from = node.moduleSpecifier?.text;
+      if (from !== undefined && from !== "node:crypto") problems.push(`import ${from}`);
     }
-    if (ts.isCallExpression(node)) {
-      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push("dynamic import");
-      if (ts.isIdentifier(node.expression) && ["eval", "require", "Function"].includes(node.expression.text)) {
-        problems.push(node.expression.text);
+    if (ts.isImportEqualsDeclaration(node)) problems.push("import =");
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
+      problems.push("dynamic import");
+    if (ts.isMetaProperty(node)) problems.push("meta property");
+    if (node.kind === ts.SyntaxKind.WithStatement) problems.push("with");
+    if ((ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) && FORBIDDEN_NAMES.has(node.text.replace(/^#/, ""))) {
+      problems.push(node.text);
+    }
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && FORBIDDEN_NAMES.has(node.text)) {
+      problems.push(`"${node.text}"`);
+    }
+    if (ts.isIdentifier(node) && node.text === "Object") {
+      const parent = node.parent;
+      if (!(ts.isPropertyAccessExpression(parent) && parent.expression === node && parent.name.text === "keys")) {
+        problems.push("Object other than Object.keys");
       }
     }
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "Function") {
-      problems.push("new Function");
-    }
-    if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "process"
-    ) {
-      problems.push(`process.${node.name.text}`);
+    if (ts.isElementAccessExpression(node)) {
+      const type = checker.getTypeAtLocation(node.argumentExpression);
+      if (!(type.flags & ts.TypeFlags.NumberLike)) problems.push("index by a non-number");
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
-  assert.deepEqual(problems, []);
+  return problems;
+};
+
+test("the model call module cannot reach the network, the environment or code evaluation except through its transport", () => {
+  const own = readFileSync(new URL("engineeringAgentModelCall.ts", libDirectory), "utf8");
+  assert.deepEqual(capabilityProblems(own), []);
+});
+
+test("the capability guard catches each way around it", () => {
+  const fixtures = {
+    "a network global": 'fetch("https://other.example/");\n',
+    "a request object": "export const x = new XMLHttpRequest();\n",
+    "a socket": 'export const x = new WebSocket("wss://other.example/");\n',
+    "the global object": "export const x = globalThis.process.env.SECRET;\n",
+    "Node's global": "export const x = global;\n",
+    "an aliased constructor": 'const F = Function;\nexport const x = F("return 1")();\n',
+    "a constructor chain": 'export const x = ({}).constructor.constructor("return 1")();\n',
+    "a constructor by literal key": 'export const x = ({})["constructor"];\n',
+    "a constructor by built key":
+      'const k = "constr" + "uctor";\nexport const x = ({} as Record<string, unknown>)[k];\n',
+    reflection: 'export const x = Reflect.get({}, "a");\n',
+    "a prototype walk": "export const x = Object.getPrototypeOf(async () => {});\n",
+    "an aliased eval": 'const e = eval;\nexport const x = e("1");\n',
+    WebAssembly: "export const x = WebAssembly.compile(new Uint8Array());\n",
+    "a timer": "export const x = setTimeout(() => {}, 1);\n",
+    "a dynamic import": 'export const x = import("node:child_process");\n',
+    "a static import": 'import { spawn } from "node:child_process";\nexport const x = spawn;\n',
+    "a re-export": 'export { spawn } from "node:child_process";\n',
+    "import.meta": "export const x = import.meta.url;\n",
+  };
+  for (const [label, text] of Object.entries(fixtures)) {
+    assert.notDeepEqual(capabilityProblems(text), [], label);
+  }
+  assert.deepEqual(
+    capabilityProblems("const b = new Uint8Array(2);\nexport const x = b[1] + Object.keys({}).length;\n"),
+    [],
+  );
 });
 
 /* The answer --------------------------------------------------------- */
 
 const answer = (overrides = {}) =>
-  JSON.stringify({ manifest: { summary: "Fix x", tests: ["tests/x.test.mjs"] }, patch: "diff --git a/x b/x\n", ...overrides });
+  JSON.stringify({
+    manifest: { summary: "Fix x", tests: ["tests/x.test.mjs"] },
+    patch: "diff --git a/x b/x\n",
+    ...overrides,
+  });
 
 test("the answer is exactly manifest and patch, within limits", () => {
   assert.equal(parseModelResult(answer()).ok, true);
-  assert.deepEqual(parseModelResult(answer({ patch: "  " })), { ok: false, reason: "no_change" });
+  assert.deepEqual(parseModelResult(answer({ patch: "  " })), {
+    ok: false,
+    reason: "no_change",
+  });
   for (const text of [
     "Here is the patch: " + answer(),
     answer({ extra: 1 }),
-    JSON.stringify({ manifest: { summary: "x", tests: [], notes: "y" }, patch: "p" }),
+    JSON.stringify({
+      manifest: { summary: "x", tests: [], notes: "y" },
+      patch: "p",
+    }),
     answer({ patch: "p".repeat(64 * 1024 + 1) }),
-    JSON.stringify({ manifest: { summary: "x".repeat(2049), tests: [] }, patch: "p" }),
+    JSON.stringify({
+      manifest: { summary: "x".repeat(2049), tests: [] },
+      patch: "p",
+    }),
     "[]",
     "not json",
   ]) {
@@ -235,14 +565,27 @@ const scripted = (responses) => {
   return { transport, requests };
 };
 
-const reply = (stop_reason, content) => ({ status: 200, json: { stop_reason, content } });
+const reply = (stop_reason, content) => ({
+  status: 200,
+  json: { stop_reason, content },
+});
 
 test("a tool loop answers every read_file call in one message and returns the parsed answer", async () => {
   const { transport, requests } = scripted([
     reply("tool_use", [
       { type: "thinking", thinking: "", signature: "sig" },
-      { type: "tool_use", id: "t1", name: "read_file", input: { path: "lib/a.ts" } },
-      { type: "tool_use", id: "t2", name: "read_file", input: { path: ".env" } },
+      {
+        type: "tool_use",
+        id: "t1",
+        name: "read_file",
+        input: { path: "lib/a.ts" },
+      },
+      {
+        type: "tool_use",
+        id: "t2",
+        name: "read_file",
+        input: { path: ".env" },
+      },
     ]),
     reply("end_turn", [{ type: "text", text: answer() }]),
   ]);
@@ -272,11 +615,27 @@ test("failures are failures, never a change or no change", async () => {
       transport: scripted(responses).transport,
       readFile: async () => ({ ok: true, text: "x".repeat(10), bytes: 10 }),
     });
-  assert.deepEqual(await run([reply("refusal", [])]), { ok: false, reason: "refused" });
-  assert.deepEqual(await run([reply("max_tokens", [])]), { ok: false, reason: "output_limit" });
-  assert.deepEqual(await run([{ status: 529, json: {} }]), { ok: false, reason: "provider_error", status: 529 });
-  assert.deepEqual(await run([new Error("socket hang up")]), { ok: false, reason: "provider_error" });
-  assert.deepEqual(await run([reply("pause_turn", [])]), { ok: false, reason: "unexpected_response" });
+  assert.deepEqual(await run([reply("refusal", [])]), {
+    ok: false,
+    reason: "refused",
+  });
+  assert.deepEqual(await run([reply("max_tokens", [])]), {
+    ok: false,
+    reason: "output_limit",
+  });
+  assert.deepEqual(await run([{ status: 529, json: {} }]), {
+    ok: false,
+    reason: "provider_error",
+    status: 529,
+  });
+  assert.deepEqual(await run([new Error("socket hang up")]), {
+    ok: false,
+    reason: "provider_error",
+  });
+  assert.deepEqual(await run([reply("pause_turn", [])]), {
+    ok: false,
+    reason: "unexpected_response",
+  });
   assert.deepEqual(await run([reply("end_turn", [{ type: "text", text: "I could not do it." }])]), {
     ok: false,
     reason: "schema_invalid",
