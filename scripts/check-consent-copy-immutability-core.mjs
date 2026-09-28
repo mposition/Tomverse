@@ -33,9 +33,30 @@
 // an old field in a comment above a computed value, and a spread after the
 // literals. This parses with TypeScript and refuses anything it cannot read
 // exactly. A round after that found the parser trusting any declaration with the
-// right name: it now requires a top-level `export const`, and refuses a file
-// that re-exports the name under an alias.
+// right name: it requires a top-level `export const`, refuses a file that
+// re-exports the name under an alias, and refuses `let`.
+//
+// ## What a static read cannot promise, and who promises it
+//
+// A round after *that* separated the literal from the value: `Object.assign`
+// after the declaration, a reassignment to an exported `let`, and a local
+// `Object.freeze` shadowing the global one all left this reading the old strings
+// while the module exported new ones. Two answers, and both are needed.
+//
+// Here: the module is held to a shape where none of those can happen. A
+// top-level statement that is not an import, a `const`, a type or a function
+// declaration is refused -- which is every way to run code at module scope --
+// and so is a declaration that shadows `Object`.
+//
+// And in `tests/consentCopyImmutability.test.mjs`: the module is imported and
+// its actual exported value is compared with what this read statically. That is
+// the only thing that can say "the strings this compared are the strings the
+// product uses", and a shape check alone cannot, because the next bypass is
+// always a shape nobody thought of.
 
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
 import ts from "typescript";
 
 const SOURCE = "lib/emailConsentCopy.ts";
@@ -112,7 +133,11 @@ const exportedConst = (file, where, name) => {
     );
     for (const declaration of statement.declarationList.declarations) {
       if (ts.isIdentifier(declaration.name) && declaration.name.text === name) {
-        found.push({ declaration, exported });
+        found.push({
+          declaration,
+          exported,
+          isConst: (statement.declarationList.flags & ts.NodeFlags.Const) !== 0,
+        });
       }
     }
   }
@@ -120,9 +145,57 @@ const exportedConst = (file, where, name) => {
     fail(where, `${name} is declared ${found.length} time(s) at the top level; it must be once`);
   }
   if (!found[0].exported) fail(where, `${name} is declared but not exported`);
+  if (!found[0].isConst) {
+    fail(
+      where,
+      `${name} is not declared \`const\`, so the value this reads is only the one it ` +
+        `started with`
+    );
+  }
   const initialiser = found[0].declaration.initializer;
   if (initialiser === undefined) fail(where, `${name} has no initialiser`);
   return initialiser;
+};
+
+/**
+ * The module runs no code, so nothing can change a value after it is written.
+ *
+ * Every top-level statement has to be an import, a `const`, a type or a function
+ * declaration. An expression statement is the one that matters -- `Object.assign(
+ * CONSENT_COPY_VERSIONS[0].copy, { … })` is an expression statement, and a review
+ * used exactly that to leave this reading one table while the module exported
+ * another -- but a loop, a branch or a class body would do as well, so the rule
+ * is a list of what is allowed rather than a list of what is not.
+ *
+ * And nothing may shadow `Object`: a local `const Object = { freeze: (x) => … }`
+ * turns every `Object.freeze` in the file into a call this cannot follow, which
+ * was the third bypass of the same round.
+ */
+const assertNoModuleSideEffects = (file, where) => {
+  for (const statement of file.statements) {
+    const allowed =
+      ts.isImportDeclaration(statement) ||
+      ts.isExportDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isFunctionDeclaration(statement) ||
+      (ts.isVariableStatement(statement) &&
+        (statement.declarationList.flags & ts.NodeFlags.Const) !== 0);
+    if (!allowed) {
+      fail(
+        where,
+        `${SOURCE} runs a statement at module scope (${ts.SyntaxKind[statement.kind]}), so a ` +
+          `value this read from a declaration may not be the value the module exports`
+      );
+    }
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.name.text === "Object") {
+          fail(where, `${SOURCE} shadows Object, so Object.freeze is not the one this reads`);
+        }
+      }
+    }
+  }
 };
 
 /** Unwraps `Object.freeze(x)`, `x as const` and parentheses; refuses other calls. */
@@ -230,6 +303,7 @@ const copyTable = (file, identifier, where) => {
  */
 export const recordsOf = (source, where) => {
   const file = parse(source, where);
+  assertNoModuleSideEffects(file, where);
   const array = unwrap(exportedConst(file, where, ARRAY), where, ARRAY);
   if (!ts.isArrayLiteralExpression(array)) fail(where, `${ARRAY} is not an array literal`);
   if (array.elements.length === 0) fail(where, `${ARRAY} holds no entries`);
@@ -281,27 +355,49 @@ export const recordsOf = (source, where) => {
   });
 };
 
+/** A heading node's text, as the reader sees it. */
+const headingText = (node) => {
+  if (node.type === "text" || node.type === "inlineCode") return node.value;
+  if (!Array.isArray(node.children)) return "";
+  return node.children.map(headingText).join("");
+};
+
 /**
  * The approved document, split into its depth-2 sections plus the bytes before
- * the first one.
+ * the first one, in document order.
  *
  * A heading to the next heading, the last to the end of the file, so every byte
- * belongs to exactly one part. `tests/emailConsentCopy.test.mjs` reassembles the
- * document from the same partition and compares it with the file, so the two
- * cannot disagree about what a section is.
+ * belongs to exactly one part. The returned Map is ordered, and the comparison
+ * below uses that order: two sections swapped is a different document, and a
+ * lookup by number alone said it was not.
+ *
+ * Parsed with the Markdown parser rather than matched with a regular
+ * expression. A review found what the difference costs: `## 11.` inside a fenced
+ * code block is a section to a regular expression and a line of code to the
+ * parser, so the immutability check and the unit suite disagreed about what the
+ * document contained. This is the one partition now -- `tests/emailConsentCopy.test.mjs`
+ * imports it rather than keeping its own.
  */
 export const sectionsOf = (source, where) => {
   const text = source.replace(/\r\n/g, "\n");
-  const headings = [];
-  const pattern = /^## +(\S+)/gm;
-  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
-    headings.push({ number: match[1], at: match.index });
-  }
+  const tree = fromMarkdown(text, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
+  const headings = tree.children
+    .filter((node) => node.type === "heading" && node.depth === 2)
+    .map((node) => ({
+      number: headingText(node).trim().split(/\s+/)[0],
+      at: node.position.start.offset,
+    }));
   if (headings.length === 0) fail(where, `${DOCUMENT} has no depth-2 heading`);
 
   const sections = new Map();
   sections.set("", text.slice(0, headings[0].at));
   headings.forEach((heading, index) => {
+    if (!/^[0-9]+\.$/.test(heading.number)) {
+      fail(where, `${DOCUMENT} has a depth-2 heading numbered "${heading.number}"`);
+    }
     if (sections.has(heading.number)) {
       fail(where, `${DOCUMENT} has two depth-2 headings numbered ${heading.number}`);
     }
@@ -309,6 +405,23 @@ export const sectionsOf = (source, where) => {
     sections.set(heading.number, text.slice(heading.at, end));
   });
   return sections;
+};
+
+/**
+ * The depth-2 section numbers one version's record and approval table name.
+ *
+ * What a new section has to belong to. A commit may add a section, but only as
+ * part of adding the version that was approved in it -- section 10's whole
+ * procedure is that new wording arrives in a new section of a new version, and a
+ * new section belonging to no version is wording nobody approved.
+ */
+export const sectionsOwnedBy = (record) => {
+  const owned = new Set([record.recordSection]);
+  for (const row of record.approvedSections ?? []) {
+    const named = /^§([0-9]+)(\.|$)/.exec(Array.isArray(row) ? row[0] : String(row));
+    if (named) owned.add(`${named[1]}.`);
+  }
+  return owned;
 };
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -394,6 +507,39 @@ export const immutabilityProblems = ({
   });
 
   if (documentBefore !== null && documentNow !== null) {
+    // The order the sections were in, kept. Looking each one up by number said
+    // a document with two sections swapped was unchanged, and a reader of that
+    // document would not agree.
+    // Both filtered to the sections that are in both, so a deletion is reported
+    // once, as a deletion, rather than also as a reordering of what is left.
+    const wasOrder = [...documentBefore.keys()].filter((number) => documentNow.has(number));
+    const nowOrder = [...documentNow.keys()].filter((number) => documentBefore.has(number));
+    if (wasOrder.join("|") !== nowOrder.join("|")) {
+      problems.push(
+        `the approved document's sections are in a different order: ${wasOrder.join(", ")} ` +
+          `at ${base}, ${nowOrder.join(", ")} now. Section 10 adds a version at the end; it ` +
+          `does not move what is already there.`
+      );
+    }
+
+    // A new section belongs to a version this commit appended, or it is wording
+    // nobody approved.
+    const ownedByNew = new Set(
+      now
+        .slice(before.length)
+        .flatMap((record) => [...sectionsOwnedBy(record)])
+    );
+    for (const number of documentNow.keys()) {
+      if (number === "" || documentBefore.has(number)) continue;
+      if (!ownedByNew.has(number)) {
+        problems.push(
+          `section ${number} is new and no version added by this change names it, in its ` +
+            `record section or its approval table. A section nobody approved is not part of ` +
+            `an approved document.`
+        );
+      }
+    }
+
     for (const [number, bytes] of documentBefore) {
       const current = documentNow.get(number);
       const name = number === "" ? "the status block" : `section ${number}`;

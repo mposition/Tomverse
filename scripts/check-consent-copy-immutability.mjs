@@ -167,6 +167,20 @@ if (baseSource === null) {
   ) {
     stop(`${BASELINE} holds no document sections, so the approved document is compared with nothing.`);
   }
+  // The same sections, in the same order. "Not empty" let a baseline holding
+  // only the status block pass while every real section was reported as a new
+  // one -- an addition is allowed, so eleven of them were allowed, and the
+  // output said the document was unchanged. On a first landing the baseline is
+  // the tree, so anything but equality is an edit to one of them.
+  const baselineSections = Object.keys(baseline.document);
+  const treeSections = [...now.document.keys()];
+  if (baselineSections.join("|") !== treeSections.join("|")) {
+    stop(
+      `${BASELINE} names sections ${baselineSections.join(", ") || "(none)"} and the approved ` +
+        `document has ${treeSections.join(", ")}. On a first landing the baseline is the ` +
+        `document; a missing section would otherwise read as one this commit added.`
+    );
+  }
   report(
     immutabilityProblems({
       before: baseline.records,
@@ -188,9 +202,20 @@ if (baseSource === null) {
 }
 
 const baseDocument = atBase(APPROVED_DOCUMENT);
+if (baseDocument === null) {
+  // Fail closed. The source is at the base and the document is not, which is
+  // either a move nobody told this check about or a deletion -- and skipping the
+  // document comparison because one side is missing is how a whole half of the
+  // check goes quiet. A move updates this file with it.
+  stop(
+    `${SOURCE} exists at ${base} and ${APPROVED_DOCUMENT} does not. The approved wording ` +
+      `cannot be compared with anything, and the version records alone do not cover it.`
+  );
+}
+
 const before = {
   records: read(base, () => recordsOf(baseSource, base)),
-  document: baseDocument === null ? null : read(base, () => sectionsOf(baseDocument, base)),
+  document: read(base, () => sectionsOf(baseDocument, base)),
 };
 
 report(
@@ -199,7 +224,7 @@ report(
     now: now.records,
     base,
     documentBefore: before.document,
-    documentNow: before.document === null ? null : now.document,
+    documentNow: now.document,
   }),
   `${base} (${commit.slice(0, 12)})`,
   ""

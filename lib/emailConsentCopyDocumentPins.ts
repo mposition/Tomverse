@@ -3,23 +3,32 @@
  *
  * Contract: docs/policy/email-consent-copy-draft.md sections 10, 10.1.
  *
- * ## Why these are in `lib/` and not in the test that reads them
+ * ## What these are for, now that something else compares the bytes
  *
- * Because they have to be comparable with the base revision, and a value in a
- * test file is not. A review walked round 14's finding into the one place it still
- * stood: the sections no version owns -- the status block, section 9's recorded
- * decisions, section 10's procedure -- were pinned only inside the test file, so a
- * commit could edit section 9 and repin in the same breath and the base comparison
- * saw nothing, because no version's record had moved.
+ * They are an **in-tree consistency pin**, and nothing more. The base comparison
+ * (`scripts/check-consent-copy-immutability.mjs`) is what says an approved
+ * version's bytes have not changed since the base revision; it reads the document
+ * and the version records directly and does not read this file at all.
  *
- * So `scripts/check-consent-copy-immutability.mjs` reads this file at the base
- * revision too. The digest here is allowed to move -- sections 9 and 10 are
- * amendable, and the document's own revision history amends them -- but only with
- * a line in `DOCUMENT_AMENDMENTS` naming the exact pair of values and what was
- * amended. An amendment nobody wrote down cannot be told from an edit to the
- * approved wording hiding behind one.
+ * An earlier version of that check did read these, and this comment said so. It
+ * also described a `DOCUMENT_AMENDMENTS` list that no longer exists. Both were
+ * true of a design that compared digests; the check compares the document section
+ * by section now, so a digest recorded here proves nothing to it. A comment that
+ * describes a mechanism the code has dropped is worse than no comment, because
+ * the next person reads it as the design.
  *
- * Nothing here is used at runtime. It is a record, read by one test and one check.
+ * What they still do, which the base comparison does not:
+ *
+ * - They fail in the unit suite the moment the document changes, without needing
+ *   a base revision at all -- so a local edit is caught before it is pushed.
+ * - They make an intended change a **recorded** act: repinning is a line in the
+ *   diff that says the document moved, next to the change that moved it.
+ * - They hold the partition honest. `tests/emailConsentCopy.test.mjs` reassembles
+ *   the document from the parts these cover and compares it with the file, which
+ *   is what keeps "every byte belongs to exactly one section" true of the same
+ *   partition the base comparison uses.
+ *
+ * Nothing here is used at runtime. It is a record, read by one test.
  */
 
 /**
@@ -29,7 +38,7 @@
  * other pins exist. Not a claim that the owner approved every byte: the approval
  * covers sections 1 to 6 and says so.
  */
-export const APPROVED_DOCUMENT_DIGEST = "c80eacd4136aec39bbf096587989c492";
+export const APPROVED_DOCUMENT_DIGEST = "e58fbe657a1619a540315f14d9d82f83";
 
 /**
  * The depth-2 sections no version owns, in document order.
@@ -53,4 +62,4 @@ export const UNVERSIONED_SECTIONS = ["0.", "7.", "9.", "10."];
  * byte, because a partition with a gap is how three earlier attempts at this got
  * through.
  */
-export const UNVERSIONED_SECTIONS_DIGEST = "9820de8da9e4b35ca56bec88d447dea1";
+export const UNVERSIONED_SECTIONS_DIGEST = "658e9f4b52a442a79301060d8e112469";

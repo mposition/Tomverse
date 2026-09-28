@@ -114,6 +114,51 @@ test("the real files parse, and the wording comes back as words", () => {
   }
 });
 
+test("what this check read statically is what the module actually exports", async () => {
+  // The guarantee the whole slice rests on, and the one a static read cannot
+  // make on its own. A review left three bypasses in place with the parser
+  // hardened: an Object.assign after the declaration, a reassignment to an
+  // exported let, and a local Object.freeze shadowing the global one. Each one
+  // left the checker reading the old strings while the module exported new
+  // ones, and no shape rule catches the next one nobody thought of.
+  //
+  // So the module is imported and its value compared. If these ever disagree,
+  // the check is reading a file and the product is running something else, and
+  // it does not matter which of them is right.
+  const copyModule = await import("../lib/emailConsentCopy.ts");
+  const statically = recordsOf(readFileSync(CONSENT_COPY_SOURCE, "utf8"), CONSENT_COPY_SOURCE);
+
+  assert.equal(copyModule.CONSENT_COPY_VERSIONS.length, statically.length);
+  copyModule.CONSENT_COPY_VERSIONS.forEach((exported, index) => {
+    const read = statically[index];
+    assert.equal(exported.version, read.version);
+    assert.equal(exported.approvedBy, read.approvedBy);
+    assert.equal(exported.approvedAt, read.approvedAt);
+    assert.equal(exported.recordSection, read.recordSection);
+    const plain = (value) => JSON.parse(JSON.stringify(value));
+    assert.deepEqual(plain(exported.approvedSections), read.approvedSections);
+    assert.deepEqual(plain(exported.deviceCells), read.deviceCells);
+    assert.deepEqual(plain(exported.deviceSummary), read.deviceSummary);
+    // The words, which is what the rest of this file is about.
+    assert.deepEqual(plain(exported.copy), read.copy);
+  });
+
+  // And the accessor the product calls, not only the table behind it: a
+  // consentCopy() that transformed a string on the way out would pass every
+  // comparison above.
+  for (const [index, exported] of copyModule.CONSENT_COPY_VERSIONS.entries()) {
+    for (const [key, table] of Object.entries(statically[index].copy)) {
+      for (const [language, text] of Object.entries(table)) {
+        assert.equal(
+          copyModule.consentCopy(key, language, exported.version),
+          text,
+          `consentCopy(${key}, ${language}, ${exported.version}) is not the approved string`
+        );
+      }
+    }
+  }
+});
+
 test("the document partition covers every byte exactly once", () => {
   // The same claim the unit suite makes about its own pins, made here because
   // this is the partition the base comparison uses and two partitions that
@@ -316,10 +361,24 @@ test("the approved document is compared section by section, and only two may be 
     assert.match(amended.notes[0], /was amended/);
   }
 
-  // A new section is an addition, which a new version brings.
-  const added = compare(`${doc()}## 11. 새 버전\n\n문안\n`);
-  assert.deepEqual(added.problems, []);
-  assert.deepEqual(added.newSections, ["11."]);
+  // A new section is an addition, but only as part of the version approved in
+  // it: a section belonging to no version is wording nobody approved.
+  const orphan = compare(`${doc()}## 11. 새 버전\n\n문안\n`);
+  assert.equal(orphan.problems.length, 1);
+  assert.match(orphan.problems[0], /section 11\. is new and no version added by this change names it/);
+
+  const withVersion = immutabilityProblems({
+    before: recordsOf(source, "base"),
+    now: recordsOf(
+      sourceWith(entry(), entry({ version: "2026-12-01", recordSection: "11." })),
+      "head"
+    ),
+    base: "origin/develop",
+    documentBefore: before,
+    documentNow: sectionsOf(`${doc()}## 11. 새 버전\n\n문안\n`, "head"),
+  });
+  assert.deepEqual(withVersion.problems, []);
+  assert.deepEqual(withVersion.newSections, ["11."]);
 
   // A deleted section is not.
   const deleted = immutabilityProblems({

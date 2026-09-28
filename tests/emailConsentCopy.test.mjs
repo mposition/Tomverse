@@ -34,6 +34,11 @@ import {
   UNVERSIONED_SECTIONS,
   UNVERSIONED_SECTIONS_DIGEST,
 } from "../lib/emailConsentCopyDocumentPins.ts";
+// The depth-2 partition, imported rather than kept twice. A review found the
+// two implementations disagreeing about a heading inside a fenced code block --
+// a section to one, a line of code to the other -- and two partitions that
+// disagree are two documents being checked.
+import { sectionsOf } from "../scripts/check-consent-copy-immutability-core.mjs";
 import {
   MAKES_NO_SEND_PROMISE_VERSIONS,
   PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
@@ -487,49 +492,25 @@ const sourceOf = (source, nodes, endOffset) => {
   return source.slice(from, endOffset ?? nodes[nodes.length - 1].position.end.offset);
 };
 
-/** Where one depth-2 section's bytes end: the next one's heading, or the end. */
-const sectionEnd = (tree, source, number) => {
-  const at = tree.children.findIndex(
-    (node) =>
-      node.type === "heading" &&
-      node.depth === 2 &&
-      textOf(node).trim().split(/\s+/)[0] === number
-  );
-  for (let i = at + 1; i < tree.children.length; i += 1) {
-    const node = tree.children[i];
-    if (node.type === "heading" && node.depth === 2) return node.position.start.offset;
-  }
-  return source.length;
+/**
+ * One depth-2 section, as the bytes between its heading and the next one's.
+ *
+ * Both this and the immutability check read `sectionsOf()`, which is the point:
+ * the pins below and the base comparison have to be about the same sections.
+ */
+const documentSections = (source) => sectionsOf(source, "the approved document");
+
+const sectionSource = (source, tree, number) => {
+  void tree;
+  const section = documentSections(source).get(number);
+  assert.ok(section !== undefined, `the approved document has no depth-2 ${number} section`);
+  return section;
 };
 
-/** One depth-2 section, as the bytes between its heading and the next one's. */
-const sectionSource = (source, tree, number) =>
-  sourceOf(source, sectionOf(tree, number, 2), sectionEnd(tree, source, number));
-
-/**
- * Every depth-2 section number, in the order the document holds them.
- *
- * Each one has to be a number followed by a dot, and each has to be unique. A
- * heading that is not numbered would otherwise be a section this file's pins
- * cannot name, and a repeated number would make "section 4" two places.
- */
-const sectionNumbers = (tree) => {
-  const numbers = tree.children
-    .filter((node) => node.type === "heading" && node.depth === 2)
-    .map((node) => textOf(node).trim().split(/\s+/)[0]);
-  for (const number of numbers) {
-    assert.match(
-      number,
-      /^[0-9]+\.$/,
-      `the approved document has a depth-2 heading numbered "${number}", which no pin can name`
-    );
-  }
-  assert.equal(
-    new Set(numbers).size,
-    numbers.length,
-    "two depth-2 headings of the approved document carry the same number"
-  );
-  return numbers;
+/** Every depth-2 section number, in the order the document holds them. */
+const sectionNumbers = (tree, source = approvedSource()) => {
+  void tree;
+  return [...documentSections(source).keys()].filter((number) => number !== "");
 };
 
 /**
