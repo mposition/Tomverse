@@ -484,25 +484,6 @@ const APPROVED_DOCUMENT = "docs/policy/email-consent-copy-draft.md";
 
 
 /**
- * The source bytes of a section: from its heading to the next section's heading,
- * or to the end of the document.
- *
- * Not "to the end of the last node in it", which is what the first version did.
- * A review counted what that left out: the blank line between two sections and
- * the newline at the end of the file belonged to no part of any digest, twenty-one
- * bytes in the current document -- and, worse, a depth-1 heading with a body
- * inserted between two sections sat in the same gap, so its whole text was
- * covered by nothing but the document digest that a new version moves anyway.
- *
- * Taking the range to the next heading's start means every byte after the first
- * heading belongs to exactly one section, whatever is in it.
- */
-const sourceOf = (source, nodes, endOffset) => {
-  const from = nodes[0].position.start.offset;
-  return source.slice(from, endOffset ?? nodes[nodes.length - 1].position.end.offset);
-};
-
-/**
  * One depth-2 section, as the bytes between its heading and the next one's.
  *
  * Both this and the immutability check read `sectionsOf()`, which is the point:
