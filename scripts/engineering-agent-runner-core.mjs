@@ -56,10 +56,11 @@ export const haltOf = (json) => reportedHalt(json?.halt);
  * consumed capability allowed -- the publisher's own, between its push and its
  * result. `commitDigestAt(sha)` is the sha256 of that commit's object, or null.
  */
-export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => {
-  // A list GitHub did not give whole is null: what it holds is unknown, so a
-  // round with nothing definite elsewhere is undetermined, never "none".
-  let undetermined = refs === null || pulls === null;
+export const observeUnbound = async ({ refs, pulls, known, commitDigestAt, refsComplete = true, pullsComplete = true }) => {
+  // A list GitHub did not give whole -- no body (null) or a first page of more
+  // -- is judged for what it holds; with nothing definite found, the round is
+  // undetermined, never "none".
+  let undetermined = refs === null || pulls === null || !refsComplete || !pullsComplete;
   refs = refs ?? [];
   pulls = pulls ?? [];
   const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
@@ -129,8 +130,9 @@ export const outcomeForSession = (session) => {
 /**
  * One cycle. `ports`:
  *   app(path, body) -> { status, json }          the engineering routes
- *   namespace() -> { refs: [{ ref, sha }] | null, pulls: [{ number, headRef, headSha, body }] | null }
- *                                                 GitHub, read-only; a list not read whole is null
+ *   namespace() -> { refs: [{ ref, sha }] | null, pulls: [{ number, headRef, headSha, body }] | null,
+ *                    refsComplete, pullsComplete }
+ *                                                 GitHub, read-only; unread is null, a partial page is incomplete
  *   commitDigestAt(sha) -> sha256 of the commit object, or null
  *   developHead() -> sha                          develop's head, read-only
  *   clone(baseSha) -> { root, trackedPaths, fsPorts, applies(patch) -> bool, dispose() }

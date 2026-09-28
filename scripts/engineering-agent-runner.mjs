@@ -160,9 +160,10 @@ async function main() {
   };
 
   // GitHub, read-only; a list that is not the whole list is refused, not read as whole.
-  // Each list is read on its own: one that cannot be read whole is null, and
-  // the other is still judged (an empty list where refs were expected would
-  // hide an unbound pull request, so null is never turned into []).
+  // Each list is read on its own and returned as what was read plus whether
+  // it is the whole list: a page with a next page is judged for what it holds
+  // and marked incomplete; a list with no body at all is null. Neither is
+  // ever taken for a complete, empty list.
   const githubList = async (path, { notFoundIsEmpty = false } = {}) => {
     let response;
     try {
@@ -179,11 +180,13 @@ async function main() {
       return null;
     }
     // No ref under the prefix is answered 404: that is the list, empty.
-    if (notFoundIsEmpty && response.status === 404) return [];
+    if (notFoundIsEmpty && response.status === 404) return { items: [], complete: true };
     const link = response.headers.get("link");
     const body = await response.json().catch(() => null);
-    if (!response.ok || (link !== null && /rel="?next"?/.test(link)) || !Array.isArray(body)) return null;
-    return body;
+    if (!response.ok || !Array.isArray(body)) return null;
+    // The same next-page reading as lib/engineeringAgentGitHubRead.ts.
+    const hasNext = link !== null && /<[^>]*>\s*;\s*rel="?next"?/i.test(link);
+    return { items: body, complete: !hasNext };
   };
 
   let result;
@@ -194,8 +197,10 @@ async function main() {
         const refs = await githubList("/git/matching-refs/heads/agent/engineering/?per_page=100", { notFoundIsEmpty: true });
         const pulls = await githubList("/pulls?state=open&per_page=100");
         return {
-          refs: refs === null ? null : refs.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
-          pulls: pulls === null ? null : pulls.map((pull) => ({
+          refsComplete: refs?.complete === true,
+          pullsComplete: pulls?.complete === true,
+          refs: refs === null ? null : refs.items.map((ref) => ({ ref: String(ref.ref ?? ""), sha: ref.object?.sha ?? null })),
+          pulls: pulls === null ? null : pulls.items.map((pull) => ({
             number: pull.number,
             headRef: pull.head?.ref ?? "",
             headSha: pull.head?.sha ?? null,

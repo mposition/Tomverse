@@ -331,6 +331,22 @@ test("a list GitHub did not give whole leaves the round undetermined, and a defi
   assert.equal(quiet.calls.some((call) => call.path === "observe/halt"), false);
 });
 
+test("a first page of more is judged for what it holds, and never read as the whole list", async () => {
+  const known = { bindings: [], consumed: [] };
+  const digestAt = async () => null;
+  const page = [{ number: 3, headRef: "agent/engineering/5", headSha: "a".repeat(40), body: "" }];
+  assert.equal(await observeUnbound({ refs: [], pulls: page, pullsComplete: false, known, commitDigestAt: digestAt }), "unbound_app_pr");
+  assert.equal(
+    await observeUnbound({ refs: [], pulls: [{ number: 4, headRef: "feature/x", headSha: "a".repeat(40), body: "hi" }], pullsComplete: false, known, commitDigestAt: digestAt }),
+    "undetermined",
+    "nothing definite on the first page, and more pages unread",
+  );
+  const { app, calls } = fakeApp();
+  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [], pulls: page, refsComplete: true, pullsComplete: false }));
+  assert.equal(round.halt, "unbound_app_pr");
+  assert.deepEqual(calls.find((call) => call.path === "observe/halt").body, { halt: "unbound_app_pr" });
+});
+
 test("the app's records must not move while GitHub is read, or nothing is judged", async () => {
   let reads = 0;
   const moving = fakeApp({
