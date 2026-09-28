@@ -26,6 +26,7 @@ import {
 import {
   PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
   PROMPT_REFINER_RESERVATION_STAGE_ID,
+  PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
 } from "@/lib/promptRefinerReservationCore";
 import {
   PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
@@ -76,6 +77,18 @@ export class PromptRefinerStageAdmissionError extends Error {
 
 const refuse = (status: number, code: string, message: string): never => {
   throw new PromptRefinerStageAdmissionError(status, code, message);
+};
+
+const promptRefinerShadowActivationFlags = () => {
+  const runApprovalEnabled =
+    process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED === "true";
+  const executionEnabled =
+    process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED === "true";
+  return Object.freeze({
+    runApprovalEnabled,
+    executionEnabled,
+    activationReady: runApprovalEnabled && executionEnabled,
+  });
 };
 
 const serverRuntimeIdentity = (): {
@@ -309,6 +322,9 @@ const promptRefinerStageAuditMetadata = (stage: StoredStage) => ({
   maxReservations: stage.maxReservations,
   costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
   approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+  ...(stage.id === PROMPT_REFINER_RESERVATION_STAGE_V3_ID
+    ? { runApprovalEnabled: true, executionEnabled: true }
+    : {}),
   approvedAt: stage.approvedAt.toISOString(),
   approvalExpiresAt: stage.approvalExpiresAt.toISOString(),
   reason: PROMPT_REFINER_STAGE_REASON,
@@ -464,6 +480,7 @@ const dbClock = async (tx: Prisma.TransactionClient): Promise<Date> => {
 
 export const promptRefinerStagePreview = async () => {
   const facts = await loadPromptRefinerStageAdmissionFacts();
+  const activation = promptRefinerShadowActivationFlags();
   const existing = await prisma.promptRefinerReservationStage.findUnique({
     where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
   });
@@ -485,6 +502,7 @@ export const promptRefinerStagePreview = async () => {
     approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
     previewBindingDigest,
     confirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
+    ...activation,
     executionAdmitted: false as const,
     productAdapterReady: false as const,
   };
@@ -501,6 +519,14 @@ export const createPromptRefinerReservationStage = async (input: {
   };
 }) => {
   if (!input.session.user?.id) refuse(403, "PROMPT_REFINER_STAGE_ACTOR_REQUIRED", "Administrator identity is required.");
+  const activation = promptRefinerShadowActivationFlags();
+  if (!activation.activationReady) {
+    refuse(
+      503,
+      "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
+      "Run approval and execution flags must be enabled before creating an immutable stage."
+    );
+  }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     refuse(503, "PROMPT_REFINER_STAGE_AUDIT_KEY_REQUIRED", "Audit integrity signing is not configured.");
   }
@@ -555,6 +581,8 @@ export const createPromptRefinerReservationStage = async (input: {
         maxReservations: PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
         costCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
         approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+        runApprovalEnabled: activation.runApprovalEnabled,
+        executionEnabled: activation.executionEnabled,
         approvedAt: now.toISOString(),
         approvalExpiresAt: new Date(now.getTime() + PROMPT_REFINER_STAGE_APPROVAL_TTL_MS).toISOString(),
         reason: PROMPT_REFINER_STAGE_REASON,

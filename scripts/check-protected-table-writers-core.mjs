@@ -504,6 +504,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration adds the content-free evidence column and binds terminal evidence to the existing audit transaction. It contains no attempt DML and seeds no evidence.",
   },
   {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The stage-successor migration reads exact human/system audit rows from replacement guards and changes DDL only. It preserves the failed v2 approval as immutable audit evidence and seeds no stage, reservation, run, attempt or audit row.",
+  },
+  {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 10,
+    writeVerbs: 22,
+    reason:
+      "The migration admits the successor v5 run contract while preserving historical v3/v4 rows. It contains no run DML and seeds no authority.",
+  },
+  {
+    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The migration admits v5 attempt bindings while preserving historical v3/v4 attempts. It contains no attempt DML and seeds no evidence.",
+  },
+  {
     path: "scripts/report-unswept-tables-core.mjs",
     table: "MarketingReport",
     tableMentions: 1,

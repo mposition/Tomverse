@@ -1,0 +1,2145 @@
+diff --git a/components/admin/AdminPromptRefinerShadowPanel.tsx b/components/admin/AdminPromptRefinerShadowPanel.tsx
+index ed8e9234d..fc66ddf97 100644
+--- a/components/admin/AdminPromptRefinerShadowPanel.tsx
++++ b/components/admin/AdminPromptRefinerShadowPanel.tsx
+@@ -198,6 +198,10 @@ export function AdminPromptRefinerShadowPanel() {
+     setError(null);
+     try {
+       if (stage.status === "ready_for_explicit_cost_approval") {
++        if (!stage.activationReady) {
++          setError(m.stageActivationFlagsDisabled);
++          return;
++        }
+         const response = await fetch(PROMPT_REFINER_SHADOW_STAGE_PATH, {
+           method: "POST",
+           headers: { "Content-Type": "application/json" },
+@@ -424,12 +428,30 @@ export function AdminPromptRefinerShadowPanel() {
+               value={usd(stage.costCeilingMicroUsd)}
+             />
+             <Field label={m.maxReservations} value={stage.maxReservations} />
++            <Field
++              label={m.approvalFlag}
++              value={stage.runApprovalEnabled ? m.enabled : m.disabled}
++            />
++            <Field
++              label={m.executionFlag}
++              value={stage.executionEnabled ? m.enabled : m.disabled}
++            />
+           </dl>
++          {!stage.activationReady &&
++          stage.status === "ready_for_explicit_cost_approval" ? (
++            <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
++              {m.stageActivationFlagsDisabled}
++            </p>
++          ) : null}
+           {!run ? (
+             <button
+               type="button"
+               onClick={() => void approveStage()}
+-              disabled={busy !== null}
++              disabled={
++                busy !== null ||
++                (stage.status === "ready_for_explicit_cost_approval" &&
++                  !stage.activationReady)
++              }
+               className="mt-5 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+             >
+               {busy === "stage" ? (
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.authorization.md
+new file mode 100644
+index 000000000..cda405071
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.authorization.md
+@@ -0,0 +1,34 @@
++# Prompt Refiner immutable stage successor v1 독립 검토 승인 기록
++
++- approvedBy: `mposition`
++- approvedAt: `2026-09-28` (Australia/Brisbane)
++- author: `codex`
++- independentReviewer: `claude-code-max`
++- reviewedHead: `401643f926a2651e0d74df39c06d656ffca62738`
++- baseCommit: `b840c817a505da0bf4e54b279d9bba09b95999c7`
++
++사용자는 CHAT-01을 완료할 때까지 권장 순서로 자동 개발하고 독립 검토가 필요할 때
++Claude 검토를 받도록 지시했다. 이 작업의 Claude 검토에 `--skip-preflight` 예외도
++승인했다. 이 문서는 전자서명, 검토 통과, provider 실행, 비용 지출, 배포 또는 제품
++노출 승인이 아니다.
++
++## 적용 범위
++
++이번 승인은 immutable `prompt-refiner-shadow-v2` stage가 downstream run·execution flag가
++꺼진 배포에서 먼저 만들어진 뒤 flag 활성화 재배포로 exact deployment 결속이 달라져
++재사용할 수 없게 된 순서 오류를 닫는 successor 변경의 읽기 전용 검토에만 적용한다.
++기존 v2 기록은 audit evidence로 보존하고, 새 v3 stage/v5 run identity와 두 flag의
++선행 conjunction gate를 검증한다.
++
++## 유지되는 경계
++
++- Claude는 저장된 Claude Code Max `claude.ai` 로그인만 사용한다. child 환경에서
++  `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 대소문자와 무관하게 제거하고,
++  `loggedIn=true`, `authMethod=claude.ai`, `apiProvider=firstParty`,
++  `subscriptionType=max`를 호출 직전에 확인한다. 실패하면 API 방식으로 전환하지 않는다.
++- reviewer는 Read/Grep/Glob만 사용하고 shell, write, hook, plugin, skill, MCP를 사용할
++  수 없다. `--skip-preflight`는 이 도구 제한 때문에 write-refusal probe를 증명할 수 없는
++  환경 제약만 우회하며 test·guard 실패를 우회하지 않는다.
++- 독립 검토는 provider/model 호출, Railway 변경, database mutation, stage/run 승인,
++  flag 활성화, 유료 shadow 실행, 제품 Prompt Refiner 노출, Router 결합, push·merge·deploy를
++  포함하지 않는다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.task.json
+new file mode 100644
+index 000000000..7024c5b55
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.task.json
+@@ -0,0 +1,49 @@
++{
++  "taskId": "prompt-refiner-shadow-stage-successor-v1",
++  "requirement": "CHAT-01 Prompt Refiner의 immutable stage 순서 오류를 닫는다. 기존 prompt-refiner-shadow-v2는 run 승인·execution flag가 꺼진 배포에서 먼저 생성됐고, flag 활성화 재배포가 exact deployment binding을 바꿔 이후 run preview가 이를 거부했다. v2 행과 audit를 삭제·수정·재사용하지 않고 보존하며, 새 reservation authority v3/stage v3/run v5 identity를 만든다. stage preview와 browser는 두 downstream flag를 각각 표시하고 conjunction이 false면 차단하며, server writer도 audit·stage row보다 먼저 같은 조건으로 fail-closed해야 한다. 두 flag가 켜진 exact deployment에서만 새 60분 approval window를 만들 수 있다. 기존 provider/model, 합성 16-case corpus, 비용·timeout·retry·unknown-stop 경계와 제품·Router 비권한성은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max다.",
++  "completionCriteria": [
++    "기존 v1/v2 reservation stage, v3/v4 run, reservation, attempt와 audit 행은 migration에서 seed·backfill·삭제·재해석 없이 보존된다.",
++    "현재 identity는 reservation authority v3, stage admission v3, stage v3, runtime manifest v4, execution manifest v3, run v5로 application·schema·migration·operator 계약에서 일치한다.",
++    "run approval flag와 execution flag 중 하나라도 false면 stage preview가 activationReady=false를 반환하고 UI와 server writer가 stage 승인 전에 차단하며 audit 또는 stage row를 만들지 않는다.",
++    "두 flag가 true인 exact staging deployment에서만 v3 stage를 만들 수 있고 이후 preview·run은 같은 deployment, commit, source-manifest, 비용 사실에 결속한다.",
++    "PostgreSQL successor migration은 189-file runtime manifest를 기존 188-file validator에 정확히 위임하고 새 v3/v5 insert만 허용하면서 legacy immutable/update guard를 유지한다.",
++    "provider/model openai/gpt-5-6-luna, 16 synthetic cases, per-request US$0.024916, run US$0.398656, stage US$2.491600/100 slots, timeout 15s, retry 0, unknown stop/no redispatch는 이전 계약과 동일하다.",
++    "제품 Chat, 실제 사용자 prompt, suggestion UI, Router coupling과 productAdapterReady는 활성화하지 않고 provider 실행에는 별도 exact stage/run 및 비용 승인이 계속 필요하다.",
++    "unit, server-contract, fresh PostgreSQL migration·DB integration, TypeScript, ESLint, protected-writer, 문서·정책·schema 검사가 통과한다.",
++    "Claude verdict는 exact package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
++    "이 exchange의 package output 디렉터리만 recursive review-record 팽창을 막기 위해 diff에서 제외하며 task, authorization, 구현·migration·테스트·문서는 모두 검토 대상에 남는다."
++  ],
++  "baseCommit": "b840c817a505da0bf4e54b279d9bba09b95999c7",
++  "writableScope": [
++    "components/admin/AdminPromptRefinerShadowPanel.tsx",
++    "docs/ops/cross-review/packages",
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.authorization.md",
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-stage-successor-v1.task.json",
++    "docs/ops/prompt-refiner-confirmatory-shadow-v5.md",
++    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
++    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
++    "docs/ops/tomverse-chat-progress.md",
++    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
++    "docs/policy/prompt-refiner-observability.md",
++    "lib/adminMessages/promptRefinerShadow.ts",
++    "lib/marketingAutomationAccess.ts",
++    "lib/promptRefinerReservationCore.ts",
++    "lib/promptRefinerShadowOperatorCore.ts",
++    "lib/promptRefinerShadowRunContract.ts",
++    "lib/promptRefinerStageAdmission.ts",
++    "lib/promptRefinerStageAdmissionCore.ts",
++    "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
++    "prisma/schema.prisma",
++    "scripts/check-protected-table-writers-core.mjs",
++    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
++    "tests/integration/prompt-refiner-reservation.db.test.ts",
++    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
++    "tests/adminWriteRouteGuards.test.mjs",
++    "tests/promptRefinerReservationCore.test.mjs",
++    "tests/promptRefinerRuntimeSourceClosure.test.mjs",
++    "tests/promptRefinerShadowOperatorCore.test.mjs",
++    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
++    "tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/prompt-refiner-confirmatory-shadow-v5.md b/docs/ops/prompt-refiner-confirmatory-shadow-v5.md
+new file mode 100644
+index 000000000..0ddbc92ba
+--- /dev/null
++++ b/docs/ops/prompt-refiner-confirmatory-shadow-v5.md
+@@ -0,0 +1,69 @@
++# Prompt Refiner confirmatory shadow v5 successor 계약
++
++상태: **구현 검증 중, provider 실행·제품 노출 미승인**
++
++## 1. 목적
++
++`prompt-refiner-shadow-v2`는 run 승인·실행 flag가 꺼진 배포에서 생성된 뒤, 두 flag를
++활성화하는 재배포로 exact deployment 결속이 달라졌다. 이 기록은 삭제·수정·재사용하지
++않고 immutable audit evidence로 보존한다. v5 successor는 같은 모델·합성 corpus·비용
++상한을 새 identity로 다시 승인할 수 있게 하며, 같은 순서 오류가 재발하지 않게 한다.
++
++- reservation stage: `prompt-refiner-shadow-v3`
++- reservation authority: `prompt-refiner-reservation-authority-v3`
++- stage admission: `prompt-refiner-stage-admission-v3`
++- runtime source manifest: `prompt-refiner-runtime-source-manifest-v4`
++- execution manifest: `prompt-refiner-shadow-execution-manifest-v3`
++- run: `prompt-refiner-shadow-run-v5`
++
++기존 v1/v3 및 v2/v4 stage·run·reservation·attempt 행과 audit는 그대로 유지한다. migration은
++새 행을 seed하거나 기존 행을 backfill하지 않는다.
++
++## 2. 선행 flag 게이트
++
++서버 preview는 run 승인 flag와 execution flag를 각각 표시하고 두 값의 conjunction인
++`activationReady`를 제공한다. 둘 중 하나라도 false면 브라우저는 stage 승인 버튼을
++비활성화하고, server writer도 audit 또는 stage row를 만들기 전에 fail-closed한다.
++
++따라서 immutable stage를 만든 뒤 flag 활성화를 위해 재배포하는 순서는 더 이상 가능하지
++않다. 두 flag가 켜진 exact deployment에서만 60분 approval window가 시작된다.
++
++## 3. runtime·비용 결속
++
++stage preview와 writer는 승인 시점 staging deployment의 full commit SHA, Railway deployment
++id와 **189개 고정 source 파일**의 exact bytes를 결속한다.
++189개 중 178개는 8개 실행 root의 local TypeScript/JavaScript runtime import closure이며,
++나머지 11개는 resolution
++metadata, Prisma schema 및 세 migration이다. 파일당 8 MiB, 전체 16 MiB 상한은 유지한다.
++
++PostgreSQL runtime validator v4는 successor migration을 exact ordered path에서 제거해 만든
++188-file v3 manifest를 기존 validator로 다시 검증한다. v3 stage와 v5 run의 insert guard는
++새 digest만 허용하고, 기존 행의 immutable/update guard는 유지한다.
++
++비용 및 실행 경계는 v4와 동일하다.
++
++- provider/model: `openai/gpt-5-6-luna`
++- 합성 case: 16
++- 요청당 최악 상한: US$0.024916
++- run 최악 상한: US$0.398656
++- stage authority 상한: US$2.491600 / 100 slots
++- timeout: 15,000 ms
++- retry: 0
++- unknown outcome: stop, no redispatch
++
++## 4. 비권한성
++
++이 successor는 제품 Chat, 실제 사용자 prompt, 제안형 UI 또는 Router coupling을 활성화하지
++않는다. `productAdapterReady`는 false이며 provider 실행에는 owner의 exact stage/run 승인과
++별도 비용 승인이 계속 필요하다.
++
++## 5. 검증 기준
++
++- 빈 PostgreSQL 전체 migration 적용 및 schema drift 0
++- 기존 v1/v2 stage와 v3/v4 run 기록 보존
++- flag-off deployment에서 stage writer와 UI 모두 승인 차단
++- flag-on exact deployment에서만 v3 stage와 v5 run 생성
++- 189-file TypeScript/PostgreSQL ordered closure 일치
++- content-free evidence, no-retry, unknown-stop 경계 유지
++- unit, server-contract, DB integration, typecheck, lint, 저장소 gate 통과
++- Claude Code Max 구독 CLI 독립 검토 승인
+diff --git a/docs/ops/prompt-refiner-durable-stage-writer-contract.md b/docs/ops/prompt-refiner-durable-stage-writer-contract.md
+index a5d1f9968..fc0609718 100644
+--- a/docs/ops/prompt-refiner-durable-stage-writer-contract.md
++++ b/docs/ops/prompt-refiner-durable-stage-writer-contract.md
+@@ -2,15 +2,16 @@
+ 
+ ## 1. 불변 식별자
+ 
+-- stage: `prompt-refiner-shadow-v2` (`prompt-refiner-shadow-v1`은 완료된 legacy 행으로 보존)
+-- admission: `prompt-refiner-stage-admission-v2`
++- stage: `prompt-refiner-shadow-v3` (`prompt-refiner-shadow-v1`·`v2`는 immutable legacy 행으로 보존)
++- admission: `prompt-refiner-stage-admission-v3`
++- reservation authority: `prompt-refiner-reservation-authority-v3`
+ - approval TTL: 정확히 60분
+ - environment: `staging`만
+-- confirmation: `APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES`
++- confirmation: `APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES`
+ - 감사 reason은 클라이언트 입력이 아니라 서버 내부 상수 `bounded_staging_shadow_cost_approval`로만 기록한다.
+ 
+-과거 v1 proposal/evidence/corpus/source digest는 그대로 재검증하지만, 현행 v2 reservation
+-authority는 v2 execution manifest가 별도로 결속한다. 과거 proposal 안의 v1 stage 표기는
++과거 v1 proposal/evidence/corpus/source digest는 그대로 재검증하지만, 현행 v3 reservation
++authority는 v3 execution manifest가 별도로 결속한다. 과거 proposal 안의 v1 stage 표기는
+ 과거 승인 제안의 byte identity이며 현행 stage identity가 아니다. 두 계약의 실제 값은 코드와
+ migration CHECK에 함께 고정되고 운영자는 값을 request로 교체할 수 없다.
+ 
+@@ -19,7 +20,7 @@ migration CHECK에 함께 고정되고 운영자는 값을 request로 교체할
+ `GET /api/admin/prompt-refiner/shadow-stage`
+ 
+ 인증된 owner와 최근 인증을 요구한다. DB mutation, rate-limit 소비, stage/audit 생성은 없다.
+-서버가 과거 evidence를 replay하고 현재 deployment의 188개 고정 source 파일 raw bytes를 읽어
++서버가 과거 evidence를 replay하고 현재 deployment의 189개 고정 source 파일 raw bytes를 읽어
+ proposal/runtime-source/execution digest, commit, deployment, 고정 비용·slot·TTL과
+ `executionAdmitted:false`, `productAdapterReady:false`를 반환한다. 또한 environment,
+ deployment id, commit SHA, 세 digest, 비용·capacity·TTL 전체의 canonical JSON을 결속한
+@@ -37,7 +38,7 @@ body는 4 KiB 이하 strict JSON이고 다음 다섯 필드만 허용한다.
+   "runtimeSourceManifestDigest": "sha256:<64 hex>",
+   "executionManifestDigest": "sha256:<64 hex>",
+   "previewBindingDigest": "sha256:<64 hex>",
+-  "confirmation": "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES"
++  "confirmation": "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES"
+ }
+ ```
+ 
+@@ -65,7 +66,7 @@ stage를 200으로 반환하며 audit을 추가하지 않는다. actor 또는 im
+ 
+ ## 5. 저장 manifest
+ 
+-runtime source manifest v3는 schema version, full commit SHA, 정렬된 고정 경로 각각의 byte
++runtime source manifest v4는 schema version, full commit SHA, 정렬된 고정 경로 각각의 byte
+ size와 SHA-256 및 검증된 총 byte 수만 담는다. 8 MiB/file과 16 MiB/closure를 모두
+ fail-closed로 적용한다. execution manifest는 고정 reservation/execution contract,
+ cost/capacity와 두 false readiness boolean만 담는다. 두 JSON 모두 strict canonical digest로
+@@ -74,12 +75,14 @@ error/body는 담지 않는다.
+ 
+ ## 6. DB 강제 계약
+ 
+-- migration은 기존 stage가 있으면 중단하고 seed/backfill하지 않는다.
++- 최초 admission migration은 예상하지 못한 기존 stage가 있으면 중단했다. successor
++  migration은 exact legacy v1/v2 stage를 그대로 보존하며 어떤 stage도 seed하거나
++  backfill하지 않는다.
+ - writer가 UTC로 정규화한 한 DB clock snapshot으로 승인·만료 시각을 audit metadata와 stage 양쪽에
+   기록하고, INSERT trigger는 두 값이 정확히 일치하지 않으면 거부한다.
+-- DB CHECK는 188개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
++- DB CHECK는 189개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical
+   digest를 다시 계산하고 execution manifest의 canonical digest도 다시 계산한다.
+-- 188개 중 178개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
++- 189개 중 178개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는
+   static import/re-export, literal dynamic import, literal `require`, require alias,
+   `module.require`와 `createRequire` 호출로 도달하는 local runtime 폐쇄와 같아야 한다.
+   `node:module`과 `module`은 같은 builtin으로 취급하고 named·default·namespace import의
+@@ -88,8 +91,8 @@ error/body는 담지 않는다.
+   `require("node:module")` 또는 `module.require("module")`의 반환값에서 곧바로
+   `createRequire`/`_load` 등을 호출하는 체인도 별칭 추적을 우회할 수 있으므로 거부한다.
+   type-only import는 제외하고, 해석할 수 없는 local 또는 non-literal runtime import도
+-  테스트에서 거부한다. 나머지 10개는 root/workspace package metadata와
+-  TypeScript/Prisma/two-migration 형식을 결속하는 고정 파일이다. 경로 해석은 checked-in
++  테스트에서 거부한다. 나머지 11개는 root/workspace package metadata와
++  TypeScript/Prisma/세 migration 형식을 결속하는 고정 파일이다. 경로 해석은 checked-in
+   `tsconfig` compiler option과 workspace package exports를 사용한다. closure 검사는 현재
+   실행 폐쇄에서 사용하는 `process.env`, 직접 `process.cwd()`, 고정 operational state용
+   `globalThis.__tomverseOperationalState`, `lib/prisma.ts`의 정확한
+@@ -155,8 +158,10 @@ credential lookup, network, provider call 또는 flag mutation은 발생하지 
+ - 503: runtime identity/source 또는 audit signing key 없음
+ 
+ 409는 retry 신호가 아니다. 새 GET으로 facts를 다시 확인하거나 이미 존재하는 immutable
+-행을 조사한다. migration의 기존-row abort도 삭제/우회하지 말고 provenance를 사람이
+-판정해야 한다.
++행을 조사한다. 최초 `20260918130000_prompt_refiner_stage_admission` migration의
++unexpected-row abort는 historical provenance로 보존한다. successor migration은 exact legacy
++v1/v2 stage와 manifest를 보존·검증하고, 그 밖의 ID 또는 manifest는 CHECK/guard로 거부하며
++어떤 행도 seed하거나 backfill하지 않는다.
+ 
+ ## 9. 검증 경로
+ 
+diff --git a/docs/ops/prompt-refiner-durable-stage-writer-task.md b/docs/ops/prompt-refiner-durable-stage-writer-task.md
+index 7d1b70834..a3e14382c 100644
+--- a/docs/ops/prompt-refiner-durable-stage-writer-task.md
++++ b/docs/ops/prompt-refiner-durable-stage-writer-task.md
+@@ -14,10 +14,11 @@ flag·credential·receipt writer를 연결하지 않는다.
+ 
+ - 기존 `PromptRefinerReservationStage`의 additive migration
+ - 승인 시점의 DB-owned 시각과 고정 60분 TTL
+-- staging 환경, runtime commit, Railway deployment id, 188-file/16 MiB bounded exact-byte
++- staging 환경, runtime commit, Railway deployment id, 189-file/16 MiB bounded exact-byte
+   runtime import-closure source manifest
+-- 완료된 v1 proposal은 역사적 byte identity로 보존하고 현행 v2 reservation authority는
+-  v2 execution manifest에 별도로 결속
++- 완료된 v1 proposal은 역사적 byte identity로 보존하고 현행
++  `prompt-refiner-reservation-authority-v3`는
++  `prompt-refiner-shadow-execution-manifest-v3`에 별도로 결속
+ - 과거 proposal/evidence/corpus/source identity와 현재 execution manifest의 immutable 결속
+ - owner 전용 관리자 GET preview와 POST create-only writer
+ - advisory lock, DB rate limit, fixed confirmation, 최근 인증, 전역 CSRF
+@@ -36,7 +37,9 @@ flag·credential·receipt writer를 연결하지 않는다.
+ 
+ ## 4. 완료 기준
+ 
+-1. 예상하지 못한 기존 stage 행이 있으면 migration이 backfill하지 않고 실패한다.
++1. 최초 `20260918130000_prompt_refiner_stage_admission` migration의 unexpected-row abort는
++   historical 동작이다. successor는 exact legacy v1/v2 stage와 manifest를 보존·검증하고,
++   그 밖의 ID 또는 manifest를 CHECK/guard로 거부하며 어떤 행도 seed/backfill하지 않는다.
+ 2. GET은 DB를 변경하지 않는 content-free preview만 반환한다.
+ 3. POST는 서버가 다시 계산한 세 digest, environment/deployment/commit과 고정
+    비용·capacity·TTL을 모두 결속한 `previewBindingDigest`, 고정 확인문이 일치할 때만 진행한다.
+diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
+index f6f0a087c..d8f4fc609 100644
+--- a/docs/ops/tomverse-chat-progress.md
++++ b/docs/ops/tomverse-chat-progress.md
+@@ -1236,8 +1236,8 @@ mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 calle
+ 않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
+ seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
+ 
+-후속 confirmatory v2/v4 현재 계약은 exact 188-file runtime import-closure source manifest를
+-사용한다. 178개 runtime source와 10개 metadata/schema/migration 파일이며, v1의 187-file
++후속 confirmatory v3/v5 현재 계약은 exact 189-file runtime import-closure source manifest를
++사용한다. 178개 runtime source와 11개 metadata/schema/세 migration 파일이며, v1의 187-file
+ 행과 manifest는 수정하거나 소급 재해석하지 않는다.
+ 
+ ### 한눈에 보는 전체 Chat 진척
+diff --git a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
+index 6f256fbb5..7c7e7b31b 100644
+--- a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
++++ b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md
+@@ -37,7 +37,7 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시
+ | 만료된 승인을 서비스가 재사용 | reserve/consume이 DB clock, exact runtime facts, stage expiry를 재검증 |
+ | 서비스 검사 우회 직접 reservation/consume | DB trigger가 stage approval expiry와 고정 contract를 다시 검사. application reserve/consume은 audit HMAC을 별도로 재검증해 위조 stage가 provider 경계로 진행하지 못하게 한다 |
+ | model registry 또는 pricing drift | transaction에서 registry SHARE lock 후 exact execution contract 재검증 |
+-| symlink/path traversal 또는 거대 파일 | import-closure로 검증되는 188개 고정 path allowlist, fd open/fstat, symlink component 거부, bounded read/post-fstat, 파일당 8 MiB 및 전체 16 MiB cap |
++| symlink/path traversal 또는 거대 파일 | import-closure로 검증되는 189개 고정 path allowlist, fd open/fstat, symlink component 거부, bounded read/post-fstat, 파일당 8 MiB 및 전체 16 MiB cap |
+ | 보안 의존성 source drift 누락 | admin route/reservation/shadow execution/proxy root의 local runtime import 폐쇄를 TypeScript 실제 module resolution과 workspace exports로 재계산하고 TS↔SQL ordered path equality를 강제; type-only만 제외하며 aliased require/module.require/createRequire를 추적한다. `node:module`/`module`의 named·default·namespace `createRequire`는 지원하되 runtime re-export, dynamic namespace, 반환 namespace 직접 체이닝과 다른 module namespace surface는 거부한다. 현재 폐쇄에서 필요한 `process.env`, 직접 `process.cwd()`, 고정 operational state의 정확한 초기화와 Map `get`/`set`, `lib/prisma.ts`의 정확한 `globalForPrisma.prisma` singleton 필드, 검증된 `Reflect.apply` 캡처만 safe form으로 인정한다. Node `global`의 다른 직접·별칭 사용과 constructor/`__proto__`/임의 `prototype` chain, 열거된 Reflect/module/process/globalThis/eval/Function non-literal·간접 loader, unresolved local import를 거부한다. non-static element access는 기본 거부하고 현재 실행 폐쇄의 검토된 데이터 인덱싱만 path·line·column·정확한 source text의 정렬된 SHA-256 snapshot으로 동결한다. 접근의 추가·이동·표현 변경은 snapshot 불일치로 fail-closed하며, 갱신 전 loader/capability escape 여부를 별도 검토하고 negative fixture를 보강한다. 이 snapshot은 검토된 예외의 완전한 구조 목록이지 임의 JavaScript reflection 의미론의 증명이 아니다. snapshot 안의 `value[key]`를 유지한 채 다른 위치의 `key` binding 의미만 바꾸는 residual은 승인된 exact source-file bytes, full commit SHA와 deployment ID의 결속 및 독립 source review로 통제한다. |
+ | prompt/credential/provider error가 provenance에 유입 | manifest schema는 path/size/hash와 고정 실행 숫자만 허용; audit reason은 request가 아니라 서버 내부 상수 |
+ | 승인 endpoint 탐색·CSRF·탈취 session | 비관리자 404, owner-only, recent authentication, global origin guard, DB atomic rate limit |
+diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
+index c02399bea..ebdebe83d 100644
+--- a/docs/policy/prompt-refiner-observability.md
++++ b/docs/policy/prompt-refiner-observability.md
+@@ -46,8 +46,9 @@ profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease
+ 
+ ## 0. Durable reservation authority 경계
+ 
+-- 완료된 legacy stage는 `prompt-refiner-shadow-v1`, confirmatory authority는
+-  `prompt-refiner-shadow-v2`로 분리한다. 새 승인은 v2 한 행에만 생성되며 요청당 24,916
++- 완료된 legacy stage는 `prompt-refiner-shadow-v1`, downstream flag 준비 전 생성돼
++  실행할 수 없는 첫 confirmatory stage는 `prompt-refiner-shadow-v2`, 현재 confirmatory
++  authority는 `prompt-refiner-shadow-v3`로 분리한다. 새 승인은 v3 한 행에만 생성되며 요청당 24,916
+   microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
+ - reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
+   검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
+@@ -300,27 +301,30 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서
+ 실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
+ 검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
+ 새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
+-추가한다. 그 writer 전까지 현재 v2 admission의 fail-closed 결과와 default-off 제품 상태를
+-유지한다.
++추가한다. 이 문단이 기록한 최초 writer 이전에는 당시 v2 admission의 fail-closed 결과와
++default-off 제품 상태를 유지했다.
+ 
+ ## 11. durable staging approval provenance
+ 
+-후속 `prompt-refiner-stage-admission-v2`는 과거 proposal을 현재 staging 배포에 다시
++현행 `prompt-refiner-stage-admission-v3`와
++`prompt-refiner-reservation-authority-v3`는 과거 proposal을 현재 staging 배포에 다시
+ 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로
+-다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 188개 source
++다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 189개 source
+ 파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는
+-admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 10개는
+-root/workspace resolution metadata, Prisma schema와 두 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
++admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 11개는
++root/workspace resolution metadata, Prisma schema와 세 migration을 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를
+ 넘으면 거부한다. 별도 execution manifest는
+-고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
++`prompt-refiner-shadow-execution-manifest-v3`로 고정 모델·가격·output cap·retry·timeout·최악 비용·100 slot 계약을 담되
+ `executionAdmitted=false`, `productAdapterReady=false`를 유지한다.
+ 
+ 승인 시각과 정확히 60분인 expiry는 PostgreSQL clock이 소유한다. stage insert와
+ tamper-evident success audit은 advisory lock 아래 같은 transaction에서 commit하며, exact
+ same actor/runtime replay만 audit 추가 없이 idempotent하다. 다른 immutable facts 또는 만료된
+-행의 replay는 409다. migration은 기존 stage를 추측 backfill하거나 seed하지 않고 예상하지
+-못한 행이 하나라도 있으면 실패한다. DB trigger가 provenance 수정·삭제 및 만료 후 새
+-reservation/consume을 거부하되 HMAC secret은 소유하지 않으므로 hash shape만 검사한다.
++행의 replay는 409다. 최초 `20260918130000_prompt_refiner_stage_admission` migration은
++unexpected existing row를 만나면 중단한 historical 계약이다. successor migration은 exact
++legacy v1/v2 stage와 manifest를 보존·검증하고, 그 밖의 ID 또는 manifest를 CHECK/guard로
++거부하며 어떤 행도 seed하거나 backfill하지 않는다. DB trigger가 provenance 수정·삭제 및
++만료 후 새 reservation/consume을 거부하되 HMAC secret은 소유하지 않으므로 hash shape만 검사한다.
+ application writer create/replay와 reserve/consume이 같은 검증 helper로 stage-linked audit
+ 행의 signed payload HMAC을 현재·과거 integrity key와 현재·legacy canonical 형식으로
+ 검증하고, signed metadata를 stage에 다시 결속한 뒤 current source/execution manifest를
+@@ -350,9 +354,11 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
+ 
+ ## 12. 격리된 live adapter와 단일 실행 계약
+ 
+-`prompt-refiner-shadow-run-v3`는 위 stage의 100개 reservation pool을 실제 실행
+-승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
+-좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
++역사적 `prompt-refiner-shadow-run-v3`는 legacy `prompt-refiner-shadow-v1` stage의
++100개 reservation pool을 실제 실행 승인으로 해석하지 않고, 한 번의 합성 shadow를
++동결 corpus 16건으로 좁힌 최초 계약이었다. 현재 successor는
++`prompt-refiner-shadow-v3` stage와 `prompt-refiner-shadow-run-v5` run의 exact pair다.
++요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
+ retry는 0, timeout은 15초다. route의 300초 platform cap보다 짧은 240초 호출 admission
+ budget과 10초 terminal-write 여유를 고정해, 다음 case를 안전하게 끝낼 시간이 없으면
+ reservation 전에 pause한다. 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
+diff --git a/lib/adminMessages/promptRefinerShadow.ts b/lib/adminMessages/promptRefinerShadow.ts
+index c12752a9d..2e78359b5 100644
+--- a/lib/adminMessages/promptRefinerShadow.ts
++++ b/lib/adminMessages/promptRefinerShadow.ts
+@@ -68,6 +68,8 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
+       "The server refused the execution request. It is not a retry signal; inspect status before any new action.",
+     runApprovalFlagDisabled:
+       "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED is off. Enable it and redeploy before approving a new run.",
++    stageActivationFlagsDisabled:
++      "Run approval and execution flags must both be enabled before creating an immutable stage. Enable them and redeploy first.",
+     executionFlagDisabled:
+       "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED is off. Enable it and redeploy before executing the approved run.",
+     reauthenticate: "Sign in again and return to this screen",
+@@ -139,6 +141,8 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
+       "서버가 실행 요청을 거부했습니다. 재시도 신호가 아니므로 새 작업 전에 상태를 확인하세요.",
+     runApprovalFlagDisabled:
+       "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED가 꺼져 있습니다. 새 run 승인 전에 활성화하고 다시 배포하세요.",
++    stageActivationFlagsDisabled:
++      "immutable stage를 만들기 전에 run 승인 flag와 실행 flag를 모두 활성화하고 먼저 재배포해야 합니다.",
+     executionFlagDisabled:
+       "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED가 꺼져 있습니다. 승인된 run 실행 전에 활성화하고 다시 배포하세요.",
+     reauthenticate: "다시 로그인한 뒤 이 화면으로 돌아오기",
+diff --git a/lib/marketingAutomationAccess.ts b/lib/marketingAutomationAccess.ts
+index 910c893da..bef35881e 100644
+--- a/lib/marketingAutomationAccess.ts
++++ b/lib/marketingAutomationAccess.ts
+@@ -323,11 +323,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
+  * `AmuxWorkItem`. Neither is a marketing model or webhook input. The digest
+  * still moves because the whole Prisma schema is deliberately watched.
+  *
++ * 2026-09-27: the Prompt Refiner stage successor updates two contract comments
++ * in the watched schema: the runtime manifest is now v4 over 189 files, and the
++ * evidence-spec requirement applies to every v4-or-later shadow run. No model,
++ * column, constraint, webhook writer, descriptor or admission decision changes;
++ * the fingerprint moves because schema comments are watched bytes too.
++ *
+  * Both notes stand because both changes are in this tree, and the value below
+  * is computed over the merged schema rather than taken from either side.
+  */
+ export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
+-  "35eb63631aee2e6cb7aeea59d0b76c5cb2c41c6261ef9002f06dbaa75cf38f7a";
++  "a76456e853a9c7576ce3255a0cafcb31e7f2b3580182f83ba33464088553f3ec";
+ 
+ const sha256 = (value: string): string =>
+   createHash("sha256").update(value, "utf8").digest("hex");
+diff --git a/lib/promptRefinerReservationCore.ts b/lib/promptRefinerReservationCore.ts
+index cf0e1fbe7..65f0c31d5 100644
+--- a/lib/promptRefinerReservationCore.ts
++++ b/lib/promptRefinerReservationCore.ts
+@@ -13,13 +13,14 @@ import {
+  * This module decides shapes and state only; it does not read or write a DB.
+  */
+ export const PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION =
+-    "prompt-refiner-reservation-authority-v2" as const;
++    "prompt-refiner-reservation-authority-v3" as const;
+ export const PROMPT_REFINER_RESERVATION_STAGE_IDS = Object.freeze([
+     "prompt-refiner-shadow-v1",
+     "prompt-refiner-shadow-v2",
++    "prompt-refiner-shadow-v3",
+ ] as const);
+ export const PROMPT_REFINER_RESERVATION_STAGE_ID =
+-    PROMPT_REFINER_RESERVATION_STAGE_IDS[1];
++    PROMPT_REFINER_RESERVATION_STAGE_IDS[2];
+ export const PROMPT_REFINER_RESERVATION_TTL_MS = 5 * 60 * 1_000;
+ 
+ export const PROMPT_REFINER_RESERVATION_STAGE_STATUSES = Object.freeze([
+@@ -68,7 +69,7 @@ const computedReservationContractDigest = `sha256:${createHash("sha256")
+     .digest("hex")}`;
+ 
+ export const PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST =
+-    "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1" as const;
++    "sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72" as const;
+ 
+ if (computedReservationContractDigest !== PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST) {
+     throw new Error(
+diff --git a/lib/promptRefinerShadowOperatorCore.ts b/lib/promptRefinerShadowOperatorCore.ts
+index 887e12fd0..3456c0d22 100644
+--- a/lib/promptRefinerShadowOperatorCore.ts
++++ b/lib/promptRefinerShadowOperatorCore.ts
+@@ -34,8 +34,8 @@ export const PROMPT_REFINER_SHADOW_EXECUTION_PATH =
+   "/api/admin/prompt-refiner/shadow-run/execute" as const;
+ 
+ export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
+-  stageId: "prompt-refiner-shadow-v2",
+-  runId: "prompt-refiner-shadow-run-v4",
++  stageId: "prompt-refiner-shadow-v3",
++  runId: "prompt-refiner-shadow-run-v5",
+   environment: "staging",
+   provider: "openai",
+   modelId: "gpt-5-6-luna",
+@@ -53,11 +53,11 @@ export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
+   tokenizerEncoding: "o200k_base",
+   maxInputTokens: 100_000,
+   stageConfirmation:
+-    "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES",
++    "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES",
+   runConfirmation:
+-    "APPROVE PROMPT REFINER SHADOW RUN V4 FOR THE DISPLAYED COST CEILING",
++    "APPROVE PROMPT REFINER SHADOW RUN V5 FOR THE DISPLAYED COST CEILING",
+   executionConfirmation:
+-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V4 ONCE",
++    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V5 ONCE",
+ });
+ 
+ type UnknownRecord = Record<string, unknown>;
+@@ -89,6 +89,9 @@ export type PromptRefinerStagePreview = Readonly<{
+   approvalTtlMinutes: number;
+   previewBindingDigest: string;
+   confirmation: string;
++  runApprovalEnabled: boolean;
++  executionEnabled: boolean;
++  activationReady: boolean;
+   executionAdmitted: false;
+   productAdapterReady: false;
+ }>;
+@@ -324,6 +327,17 @@ export const promptRefinerStagePreviewProblems = (
+     problems.push("approval_ttl");
+   if (preview.confirmation !== contract.stageConfirmation)
+     problems.push("confirmation");
++  const runApprovalEnabled = boolean(preview.runApprovalEnabled);
++  const executionEnabled = boolean(preview.executionEnabled);
++  const activationReady = boolean(preview.activationReady);
++  if (runApprovalEnabled === null) problems.push("run_approval_enabled");
++  if (executionEnabled === null) problems.push("execution_enabled");
++  if (
++    activationReady === null ||
++    activationReady !== (runApprovalEnabled === true && executionEnabled === true)
++  ) {
++    problems.push("activation_ready");
++  }
+   if (preview.executionAdmitted !== false) problems.push("execution_admitted");
+   if (preview.productAdapterReady !== false) problems.push("product_adapter");
+   return problems;
+diff --git a/lib/promptRefinerShadowRunContract.ts b/lib/promptRefinerShadowRunContract.ts
+index 30a75ec2c..264a8178c 100644
+--- a/lib/promptRefinerShadowRunContract.ts
++++ b/lib/promptRefinerShadowRunContract.ts
+@@ -28,7 +28,7 @@ import {
+ } from "@/lib/promptRefinerShadowEvidenceCore";
+ 
+ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
+-    "prompt-refiner-shadow-run-v4" as const;
++    "prompt-refiner-shadow-run-v5" as const;
+ export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
+     "prompt-refiner-openai-sdk-adapter-v1" as const;
+ export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
+@@ -36,17 +36,17 @@ export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE = "js-tiktoken" as const;
+ export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION = "1.0.21" as const;
+ export const PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING = "o200k_base" as const;
+ export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION =
+-    "prompt-refiner-shadow-run-source-v2" as const;
++    "prompt-refiner-shadow-run-source-v3" as const;
+ export const PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG =
+     "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED" as const;
+ export const PROMPT_REFINER_SHADOW_RUN_CONFIRMATION =
+-    "APPROVE PROMPT REFINER SHADOW RUN V4 FOR THE DISPLAYED COST CEILING" as const;
++    "APPROVE PROMPT REFINER SHADOW RUN V5 FOR THE DISPLAYED COST CEILING" as const;
+ export const PROMPT_REFINER_SHADOW_RUN_ID =
+-    "prompt-refiner-shadow-run-v4" as const;
++    "prompt-refiner-shadow-run-v5" as const;
+ export const PROMPT_REFINER_SHADOW_EXECUTION_FLAG =
+     "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED" as const;
+ export const PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION =
+-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V4 ONCE" as const;
++    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V5 ONCE" as const;
+ // Unknown sweeps persist this threshold as terminal telemetry. Deriving it
+ // from the evidence ceiling prevents the sweep from producing a receipt that
+ // the writer or the durable aggregate reader must reject.
+@@ -108,6 +108,7 @@ export const PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS = Object.freeze([
+     "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
+     "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+     "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
++    "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+ ] as const);
+ export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES = 2 * 1024 * 1024;
+ export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+@@ -221,7 +222,7 @@ const computedDigest = `sha256:${createHash("sha256")
+ 
+ // Replaced with the computed literal before review. A mismatch fails import.
+ export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
+-    "sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7" as const;
++    "sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd" as const;
+ 
+ if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
+     throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);
+diff --git a/lib/promptRefinerStageAdmission.ts b/lib/promptRefinerStageAdmission.ts
+index a03f481ee..3528eb474 100644
+--- a/lib/promptRefinerStageAdmission.ts
++++ b/lib/promptRefinerStageAdmission.ts
+@@ -78,6 +78,18 @@ const refuse = (status: number, code: string, message: string): never => {
+   throw new PromptRefinerStageAdmissionError(status, code, message);
+ };
+ 
++const promptRefinerShadowActivationFlags = () => {
++  const runApprovalEnabled =
++    process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED === "true";
++  const executionEnabled =
++    process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED === "true";
++  return Object.freeze({
++    runApprovalEnabled,
++    executionEnabled,
++    activationReady: runApprovalEnabled && executionEnabled,
++  });
++};
++
+ const serverRuntimeIdentity = (): {
+   environment: typeof PROMPT_REFINER_STAGE_ENVIRONMENT;
+   commitSha: string;
+@@ -464,6 +476,7 @@ const dbClock = async (tx: Prisma.TransactionClient): Promise<Date> => {
+ 
+ export const promptRefinerStagePreview = async () => {
+   const facts = await loadPromptRefinerStageAdmissionFacts();
++  const activation = promptRefinerShadowActivationFlags();
+   const existing = await prisma.promptRefinerReservationStage.findUnique({
+     where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
+   });
+@@ -485,6 +498,7 @@ export const promptRefinerStagePreview = async () => {
+     approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+     previewBindingDigest,
+     confirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
++    ...activation,
+     executionAdmitted: false as const,
+     productAdapterReady: false as const,
+   };
+@@ -501,6 +515,13 @@ export const createPromptRefinerReservationStage = async (input: {
+   };
+ }) => {
+   if (!input.session.user?.id) refuse(403, "PROMPT_REFINER_STAGE_ACTOR_REQUIRED", "Administrator identity is required.");
++  if (!promptRefinerShadowActivationFlags().activationReady) {
++    refuse(
++      503,
++      "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
++      "Run approval and execution flags must be enabled before creating an immutable stage."
++    );
++  }
+   if (adminAuditIntegrityKeys(process.env).length === 0) {
+     refuse(503, "PROMPT_REFINER_STAGE_AUDIT_KEY_REQUIRED", "Audit integrity signing is not configured.");
+   }
+diff --git a/lib/promptRefinerStageAdmissionCore.ts b/lib/promptRefinerStageAdmissionCore.ts
+index 690f3b16d..4fd235dd9 100644
+--- a/lib/promptRefinerStageAdmissionCore.ts
++++ b/lib/promptRefinerStageAdmissionCore.ts
+@@ -27,18 +27,18 @@ import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+  * cannot create a stage, reserve a slot, call a provider, or enable a flag.
+  */
+ export const PROMPT_REFINER_STAGE_ADMISSION_VERSION =
+-  "prompt-refiner-stage-admission-v2" as const;
++  "prompt-refiner-stage-admission-v3" as const;
+ export const PROMPT_REFINER_RUNTIME_SOURCE_MANIFEST_VERSION =
+-  "prompt-refiner-runtime-source-manifest-v3" as const;
++  "prompt-refiner-runtime-source-manifest-v4" as const;
+ export const PROMPT_REFINER_EXECUTION_MANIFEST_VERSION =
+-  "prompt-refiner-shadow-execution-manifest-v2" as const;
++  "prompt-refiner-shadow-execution-manifest-v3" as const;
+ export const PROMPT_REFINER_STAGE_APPROVAL_TTL_MS = 60 * 60 * 1_000;
+ export const PROMPT_REFINER_STAGE_ENVIRONMENT = "staging" as const;
+ export const PROMPT_REFINER_STAGE_CONFIRMATION =
+-  "APPROVE PROMPT REFINER SHADOW STAGE V2 FOR 60 MINUTES" as const;
++  "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES" as const;
+ export const PROMPT_REFINER_STAGE_REASON =
+   "bounded_staging_shadow_cost_approval" as const;
+-export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 188 as const;
++export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 189 as const;
+ export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES = 8 * 1024 * 1024;
+ export const PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
+ 
+@@ -65,6 +65,7 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
+   "prisma/schema.prisma",
+   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
++  "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+   "apps/mobile/package.json",
+   "packages/chat-core/package.json",
+   "packages/ui-tokens/package.json",
+diff --git a/prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql b/prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql
+new file mode 100644
+index 000000000..17a3a2286
+--- /dev/null
++++ b/prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql
+@@ -0,0 +1,606 @@
++-- Admit a successor Prompt Refiner stage/run after the first v2 stage was
++-- durably bound before its required feature flags were enabled. The v2 row is
++-- preserved unchanged as audit evidence. This migration seeds no approval,
++-- performs no provider call and cannot expose the Refiner to product traffic.
++
++ALTER FUNCTION "prompt_refiner_runtime_manifest_valid"(JSONB, TEXT, TEXT, TEXT)
++    RENAME TO "prompt_refiner_runtime_manifest_v3_valid";
++
++-- Runtime manifest v4 is the reviewed v3 closure plus this migration at the
++-- exact ordered position. Legacy v2/v3 manifests continue through the prior
++-- validator; the successor row must use the 189-file v4 closure.
++CREATE FUNCTION "prompt_refiner_runtime_manifest_valid"(
++    manifest JSONB,
++    commit_sha TEXT,
++    source_identity_digest TEXT,
++    manifest_digest TEXT
++)
++RETURNS BOOLEAN
++LANGUAGE plpgsql
++IMMUTABLE
++STRICT
++PARALLEL SAFE
++AS $$
++DECLARE
++    files JSONB;
++    added JSONB;
++    legacy_files JSONB;
++    legacy_manifest JSONB;
++BEGIN
++    IF manifest->>'schemaVersion' IN (
++        'prompt-refiner-runtime-source-manifest-v2',
++        'prompt-refiner-runtime-source-manifest-v3'
++    ) THEN
++        RETURN "prompt_refiner_runtime_manifest_v3_valid"(
++            manifest, commit_sha, source_identity_digest, manifest_digest
++        );
++    END IF;
++    IF manifest->>'schemaVersion' <> 'prompt-refiner-runtime-source-manifest-v4'
++       OR jsonb_typeof(manifest) <> 'object'
++       OR manifest <> jsonb_build_object(
++            'schemaVersion', manifest->'schemaVersion',
++            'commitSha', manifest->'commitSha',
++            'totalSizeBytes', manifest->'totalSizeBytes',
++            'files', manifest->'files'
++       )
++       OR manifest->>'commitSha' <> commit_sha
++       OR commit_sha !~ '^[a-f0-9]{40}$'
++       OR jsonb_typeof(manifest->'files') <> 'array'
++       OR jsonb_array_length(manifest->'files') <> 189
++       OR jsonb_typeof(manifest->'totalSizeBytes') <> 'number'
++       OR manifest->>'totalSizeBytes' !~ '^[1-9][0-9]*$'
++       OR (manifest->>'totalSizeBytes')::NUMERIC > 16777216
++       OR source_identity_digest <> "prompt_refiner_sha256_json"(
++            jsonb_build_object('files', manifest->'files')
++       )
++       OR manifest_digest <> "prompt_refiner_sha256_json"(manifest) THEN
++        RETURN FALSE;
++    END IF;
++    files := manifest->'files';
++    added := files->7;
++    IF added <> jsonb_build_object(
++            'path', 'prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql',
++            'sizeBytes', added->'sizeBytes',
++            'sha256', added->'sha256'
++       )
++       OR jsonb_typeof(added->'sizeBytes') <> 'number'
++       OR added->>'sizeBytes' !~ '^[1-9][0-9]*$'
++       OR (added->>'sizeBytes')::NUMERIC > 8388608
++       OR jsonb_typeof(added->'sha256') <> 'string'
++       OR added->>'sha256' !~ '^[a-f0-9]{64}$' THEN
++        RETURN FALSE;
++    END IF;
++    SELECT jsonb_agg(value ORDER BY ordinal)
++    INTO legacy_files
++    FROM jsonb_array_elements(files) WITH ORDINALITY AS entry(value, ordinal)
++    WHERE ordinal <> 8;
++    legacy_manifest := jsonb_build_object(
++        'schemaVersion', 'prompt-refiner-runtime-source-manifest-v3',
++        'commitSha', commit_sha,
++        'totalSizeBytes',
++            (manifest->>'totalSizeBytes')::NUMERIC - (added->>'sizeBytes')::NUMERIC,
++        'files', legacy_files
++    );
++    RETURN "prompt_refiner_runtime_manifest_v3_valid"(
++        legacy_manifest,
++        commit_sha,
++        "prompt_refiner_sha256_json"(jsonb_build_object('files', legacy_files)),
++        "prompt_refiner_sha256_json"(legacy_manifest)
++    );
++EXCEPTION WHEN OTHERS THEN
++    RETURN FALSE;
++END;
++$$;
++
++ALTER TABLE "PromptRefinerReservationStage"
++    DROP CONSTRAINT "PromptRefinerReservationStage_id_check",
++    DROP CONSTRAINT "PromptRefinerReservationStage_contract_check",
++    DROP CONSTRAINT "PromptRefinerReservationStage_admission_identity_check",
++    DROP CONSTRAINT "PromptRefinerReservationStage_runtime_identity_check",
++    DROP CONSTRAINT "PromptRefinerReservationStage_execution_manifest_check";
++
++ALTER TABLE "PromptRefinerReservationStage"
++    ADD CONSTRAINT "PromptRefinerReservationStage_id_check" CHECK (
++        "id" IN (
++            'prompt-refiner-shadow-v1',
++            'prompt-refiner-shadow-v2',
++            'prompt-refiner-shadow-v3'
++        )
++    ),
++    ADD CONSTRAINT "PromptRefinerReservationStage_contract_check" CHECK (
++        "contractVersion" = 'prompt-refiner-execution-contract-v1'
++        AND (
++            ("id" = 'prompt-refiner-shadow-v1'
++             AND "contractDigest" = 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f')
++            OR
++            ("id" = 'prompt-refiner-shadow-v2'
++             AND "contractDigest" = 'sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1')
++            OR
++            ("id" = 'prompt-refiner-shadow-v3'
++             AND "contractDigest" = 'sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72')
++        )
++    ),
++    ADD CONSTRAINT "PromptRefinerReservationStage_admission_identity_check" CHECK (
++        "proposalVersion" = 'prompt-refiner-shadow-stage-proposal-v1'
++        AND "proposalDigest" = 'sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2'
++        AND "evidenceBundleDigest" = 'sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159'
++        AND "evidenceManifestSha256" = '9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d'
++        AND "historicalSourceRef" = 'f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830'
++        AND "historicalSourceIdentityDigest" = 'ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39'
++        AND "corpusDigest" = 'bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958'
++        AND (
++            ("id" = 'prompt-refiner-shadow-v1'
++             AND "admissionVersion" = 'prompt-refiner-stage-admission-v1')
++            OR
++            ("id" = 'prompt-refiner-shadow-v2'
++             AND "admissionVersion" = 'prompt-refiner-stage-admission-v2')
++            OR
++            ("id" = 'prompt-refiner-shadow-v3'
++             AND "admissionVersion" = 'prompt-refiner-stage-admission-v3')
++        )
++    ),
++    ADD CONSTRAINT "PromptRefinerReservationStage_runtime_identity_check" CHECK (
++        "runtimeEnvironment" = 'staging'
++        AND "runtimeCommitSha" ~ '^[a-f0-9]{40}$'
++        AND "runtimeDeploymentId" ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
++        AND "runtimeSourceIdentityDigest" ~ '^sha256:[a-f0-9]{64}$'
++        AND "runtimeSourceManifestDigest" ~ '^sha256:[a-f0-9]{64}$'
++        AND (
++            ("id" = 'prompt-refiner-shadow-v1'
++             AND "runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2')
++            OR
++            ("id" = 'prompt-refiner-shadow-v2'
++             AND "runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3')
++            OR
++            ("id" = 'prompt-refiner-shadow-v3'
++             AND "runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v4')
++        )
++        AND "prompt_refiner_runtime_manifest_valid"(
++            "runtimeSourceManifest",
++            "runtimeCommitSha",
++            "runtimeSourceIdentityDigest",
++            "runtimeSourceManifestDigest"
++        )
++    ),
++    ADD CONSTRAINT "PromptRefinerReservationStage_execution_manifest_check" CHECK (
++        "executionManifestDigest" ~ '^sha256:[a-f0-9]{64}$'
++        AND jsonb_typeof("executionManifest") = 'object'
++        AND "executionManifestDigest" = "prompt_refiner_sha256_json"("executionManifest")
++        AND (
++            ("id" = 'prompt-refiner-shadow-v1' AND "executionManifest" = '{
++              "schemaVersion":"prompt-refiner-shadow-execution-manifest-v1",
++              "stageId":"prompt-refiner-shadow-v1",
++              "reservationContractDigest":"sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f",
++              "runtimeSource":{"fileCount":187,"maxFileBytes":8388608,"maxTotalBytes":16777216},
++              "executionContractVersion":"prompt-refiner-execution-contract-v1",
++              "executionContract":{"contractVersion":"prompt-refiner-execution-contract-v1","refinerVersion":"suggest-v1","mode":"shadow","userVisible":false,"model":{"provider":"openai","modelId":"gpt-5-6-luna","apiModelId":"gpt-5.6-luna","pricingVersion":"openai-gpt-5.6-luna-2026-08-01","pricingEffectiveDate":"2026-08-01","routing":"direct_provider_api","processingTier":"standard","reasoningEffort":"medium","contextWindowTokens":1050000,"reasoningTokenBilling":"billed_as_output","inputUsdPerMillionTokens":0.2,"outputUsdPerMillionTokens":1.2},"request":{"maxSourceChars":16000,"maxSourceBytes":32768,"maxInputTokens":100000,"maxOutputTokens":4096,"timeoutMs":15000,"retryCount":0,"promptCaching":"disabled","tools":"none","perRequestCostCeilingMicroUsd":24916},"stage":{"maxDispatches":100,"costCeilingMicroUsd":2491600,"requiresSeparateApproval":true,"reservationAuthority":"unavailable"}},
++              "perRequestCostMicroUsd":24916,"maxReservations":100,"costCeilingMicroUsd":2491600,"executionAdmitted":false,"productAdapterReady":false
++            }'::jsonb)
++            OR
++            ("id" = 'prompt-refiner-shadow-v2' AND "executionManifest" = '{
++              "schemaVersion":"prompt-refiner-shadow-execution-manifest-v2",
++              "stageId":"prompt-refiner-shadow-v2",
++              "reservationContractDigest":"sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1",
++              "runtimeSource":{"fileCount":188,"maxFileBytes":8388608,"maxTotalBytes":16777216},
++              "executionContractVersion":"prompt-refiner-execution-contract-v1",
++              "executionContract":{"contractVersion":"prompt-refiner-execution-contract-v1","refinerVersion":"suggest-v1","mode":"shadow","userVisible":false,"model":{"provider":"openai","modelId":"gpt-5-6-luna","apiModelId":"gpt-5.6-luna","pricingVersion":"openai-gpt-5.6-luna-2026-08-01","pricingEffectiveDate":"2026-08-01","routing":"direct_provider_api","processingTier":"standard","reasoningEffort":"medium","contextWindowTokens":1050000,"reasoningTokenBilling":"billed_as_output","inputUsdPerMillionTokens":0.2,"outputUsdPerMillionTokens":1.2},"request":{"maxSourceChars":16000,"maxSourceBytes":32768,"maxInputTokens":100000,"maxOutputTokens":4096,"timeoutMs":15000,"retryCount":0,"promptCaching":"disabled","tools":"none","perRequestCostCeilingMicroUsd":24916},"stage":{"maxDispatches":100,"costCeilingMicroUsd":2491600,"requiresSeparateApproval":true,"reservationAuthority":"unavailable"}},
++              "perRequestCostMicroUsd":24916,"maxReservations":100,"costCeilingMicroUsd":2491600,"executionAdmitted":false,"productAdapterReady":false
++            }'::jsonb)
++            OR
++            ("id" = 'prompt-refiner-shadow-v3' AND "executionManifest" = '{
++              "schemaVersion":"prompt-refiner-shadow-execution-manifest-v3",
++              "stageId":"prompt-refiner-shadow-v3",
++              "reservationContractDigest":"sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72",
++              "runtimeSource":{"fileCount":189,"maxFileBytes":8388608,"maxTotalBytes":16777216},
++              "executionContractVersion":"prompt-refiner-execution-contract-v1",
++              "executionContract":{"contractVersion":"prompt-refiner-execution-contract-v1","refinerVersion":"suggest-v1","mode":"shadow","userVisible":false,"model":{"provider":"openai","modelId":"gpt-5-6-luna","apiModelId":"gpt-5.6-luna","pricingVersion":"openai-gpt-5.6-luna-2026-08-01","pricingEffectiveDate":"2026-08-01","routing":"direct_provider_api","processingTier":"standard","reasoningEffort":"medium","contextWindowTokens":1050000,"reasoningTokenBilling":"billed_as_output","inputUsdPerMillionTokens":0.2,"outputUsdPerMillionTokens":1.2},"request":{"maxSourceChars":16000,"maxSourceBytes":32768,"maxInputTokens":100000,"maxOutputTokens":4096,"timeoutMs":15000,"retryCount":0,"promptCaching":"disabled","tools":"none","perRequestCostCeilingMicroUsd":24916},"stage":{"maxDispatches":100,"costCeilingMicroUsd":2491600,"requiresSeparateApproval":true,"reservationAuthority":"unavailable"}},
++              "perRequestCostMicroUsd":24916,"maxReservations":100,"costCeilingMicroUsd":2491600,"executionAdmitted":false,"productAdapterReady":false
++            }'::jsonb)
++        )
++    );
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_stage_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    actual_count INTEGER;
++    actual_cost BIGINT;
++    observed_at TIMESTAMP(3);
++    audit "AdminAuditLog"%ROWTYPE;
++    audit_approved_at TIMESTAMP(3);
++    audit_expires_at TIMESTAMP(3);
++BEGIN
++    IF TG_OP = 'DELETE' THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage % cannot be deleted', OLD."id";
++    END IF;
++    IF TG_OP = 'INSERT' THEN
++        observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++        IF NEW."id" <> 'prompt-refiner-shadow-v3'
++           OR NEW."reservationCount" <> 0 OR NEW."allocatedCostMicroUsd" <> 0
++           OR NEW."status" <> 'approved' THEN
++            RAISE EXCEPTION 'PromptRefinerReservationStage v3 must start with zero accounting and approved status';
++        END IF;
++        SELECT * INTO audit FROM "AdminAuditLog"
++        WHERE "id" = NEW."authorizationAuditLogId";
++        audit_approved_at := ((audit."metadata"->>'approvedAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++        audit_expires_at := ((audit."metadata"->>'approvalExpiresAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++        IF NOT FOUND OR audit."actorUserId" IS DISTINCT FROM NEW."approvedBy"
++           OR audit."action" <> 'prompt_refiner.shadow_stage.activated'
++           OR audit."targetType" <> 'PromptRefinerReservationStage'
++           OR audit."targetId" IS DISTINCT FROM NEW."id"
++           OR audit."entryHash" IS NULL OR audit."entryHash" !~ '^[a-f0-9]{64}$'
++           OR audit."createdAt" < observed_at - INTERVAL '1 minute'
++           OR audit."createdAt" > observed_at + INTERVAL '1 minute'
++           OR audit."metadata" IS DISTINCT FROM jsonb_build_object(
++                'admissionVersion', NEW."admissionVersion",
++                'proposalDigest', NEW."proposalDigest",
++                'evidenceBundleDigest', NEW."evidenceBundleDigest",
++                'runtimeSourceManifestDigest', NEW."runtimeSourceManifestDigest",
++                'executionManifestDigest', NEW."executionManifestDigest",
++                'environment', NEW."runtimeEnvironment",
++                'deploymentId', NEW."runtimeDeploymentId",
++                'commitSha', NEW."runtimeCommitSha",
++                'perRequestCostMicroUsd', NEW."perRequestCostMicroUsd",
++                'maxReservations', NEW."maxReservations",
++                'costCeilingMicroUsd', NEW."costCeilingMicroUsd",
++                'approvalTtlMinutes', 60,
++                'approvedAt', audit."metadata"->'approvedAt',
++                'approvalExpiresAt', audit."metadata"->'approvalExpiresAt',
++                'reason', 'bounded_staging_shadow_cost_approval'
++           )
++           OR jsonb_typeof(audit."metadata"->'approvedAt') <> 'string'
++           OR jsonb_typeof(audit."metadata"->'approvalExpiresAt') <> 'string'
++           OR audit_approved_at < observed_at - INTERVAL '1 minute'
++           OR audit_approved_at > observed_at
++           OR audit_expires_at <> audit_approved_at + INTERVAL '60 minutes'
++           OR NEW."approvedAt" IS DISTINCT FROM audit_approved_at
++           OR NEW."approvalExpiresAt" IS DISTINCT FROM audit_expires_at THEN
++            RAISE EXCEPTION 'PromptRefinerReservationStage authorization audit binding is invalid';
++        END IF;
++        NEW."createdAt" := observed_at;
++        NEW."updatedAt" := observed_at;
++        RETURN NEW;
++    END IF;
++    IF NEW."id" IS DISTINCT FROM OLD."id"
++       OR NEW."contractVersion" IS DISTINCT FROM OLD."contractVersion"
++       OR NEW."contractDigest" IS DISTINCT FROM OLD."contractDigest"
++       OR NEW."perRequestCostMicroUsd" IS DISTINCT FROM OLD."perRequestCostMicroUsd"
++       OR NEW."maxReservations" IS DISTINCT FROM OLD."maxReservations"
++       OR NEW."costCeilingMicroUsd" IS DISTINCT FROM OLD."costCeilingMicroUsd"
++       OR NEW."admissionVersion" IS DISTINCT FROM OLD."admissionVersion"
++       OR NEW."proposalVersion" IS DISTINCT FROM OLD."proposalVersion"
++       OR NEW."proposalDigest" IS DISTINCT FROM OLD."proposalDigest"
++       OR NEW."evidenceBundleDigest" IS DISTINCT FROM OLD."evidenceBundleDigest"
++       OR NEW."evidenceManifestSha256" IS DISTINCT FROM OLD."evidenceManifestSha256"
++       OR NEW."historicalSourceRef" IS DISTINCT FROM OLD."historicalSourceRef"
++       OR NEW."historicalSourceIdentityDigest" IS DISTINCT FROM OLD."historicalSourceIdentityDigest"
++       OR NEW."corpusDigest" IS DISTINCT FROM OLD."corpusDigest"
++       OR NEW."runtimeCommitSha" IS DISTINCT FROM OLD."runtimeCommitSha"
++       OR NEW."runtimeSourceIdentityDigest" IS DISTINCT FROM OLD."runtimeSourceIdentityDigest"
++       OR NEW."runtimeSourceManifest" IS DISTINCT FROM OLD."runtimeSourceManifest"
++       OR NEW."runtimeSourceManifestDigest" IS DISTINCT FROM OLD."runtimeSourceManifestDigest"
++       OR NEW."runtimeEnvironment" IS DISTINCT FROM OLD."runtimeEnvironment"
++       OR NEW."runtimeDeploymentId" IS DISTINCT FROM OLD."runtimeDeploymentId"
++       OR NEW."executionManifest" IS DISTINCT FROM OLD."executionManifest"
++       OR NEW."executionManifestDigest" IS DISTINCT FROM OLD."executionManifestDigest"
++       OR NEW."approvedBy" IS DISTINCT FROM OLD."approvedBy"
++       OR NEW."approvedAt" IS DISTINCT FROM OLD."approvedAt"
++       OR NEW."approvalExpiresAt" IS DISTINCT FROM OLD."approvalExpiresAt"
++       OR NEW."authorizationAuditLogId" IS DISTINCT FROM OLD."authorizationAuditLogId"
++       OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt" THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage % contract is immutable', OLD."id";
++    END IF;
++    IF NEW."status" IS DISTINCT FROM OLD."status"
++       AND NOT (OLD."status" = 'approved' AND NEW."status" = 'closed') THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage % status transition is invalid', OLD."id";
++    END IF;
++    IF NEW."reservationCount" = OLD."reservationCount"
++       AND NEW."allocatedCostMicroUsd" = OLD."allocatedCostMicroUsd" THEN
++        RETURN NEW;
++    END IF;
++    SELECT COUNT(*)::INTEGER, COALESCE(SUM("reservedCostMicroUsd"), 0)::BIGINT
++    INTO actual_count, actual_cost FROM "PromptRefinerReservation"
++    WHERE "stageId" = OLD."id";
++    IF NEW."reservationCount" <> actual_count
++       OR NEW."allocatedCostMicroUsd" <> actual_cost THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage % accounting must equal durable tombstones', OLD."id";
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_reservation_insert_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    stage "PromptRefinerReservationStage"%ROWTYPE;
++    observed_at TIMESTAMP(3);
++BEGIN
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."status" <> 'reserved' OR NEW."consumedAt" IS NOT NULL
++       OR NEW."releasedAt" IS NOT NULL OR NEW."expiredAt" IS NOT NULL
++       OR NEW."stageId" <> 'prompt-refiner-shadow-v3'
++       OR NEW."contractDigest" <> 'sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72'
++       OR NEW."reservedCostMicroUsd" <> 24916
++       OR NEW."expiresAt" <> NEW."createdAt" + INTERVAL '5 minutes'
++       OR NEW."createdAt" > observed_at OR NEW."expiresAt" <= observed_at
++       OR NEW."expiresAt" > observed_at + INTERVAL '5 minutes' THEN
++        RAISE EXCEPTION 'PromptRefinerReservation v3 contract binding is invalid';
++    END IF;
++    SELECT * INTO stage FROM "PromptRefinerReservationStage"
++    WHERE "id" = NEW."stageId" FOR UPDATE;
++    IF NOT FOUND OR stage."status" <> 'approved'
++       OR stage."approvalExpiresAt" <= observed_at
++       OR stage."runtimeEnvironment" <> 'staging'
++       OR stage."contractVersion" <> 'prompt-refiner-execution-contract-v1'
++       OR stage."contractDigest" <> NEW."contractDigest"
++       OR stage."perRequestCostMicroUsd" <> 24916
++       OR stage."maxReservations" <> 100
++       OR stage."costCeilingMicroUsd" <> 2491600 THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage v3 contract is not approved';
++    END IF;
++    IF stage."reservationCount" >= 100
++       OR stage."allocatedCostMicroUsd" + 24916 > 2491600 THEN
++        RAISE EXCEPTION 'PromptRefinerReservationStage capacity is exhausted';
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++ALTER TABLE "PromptRefinerShadowRun"
++    DROP CONSTRAINT "PromptRefinerShadowRun_contract_check";
++ALTER TABLE "PromptRefinerShadowRun"
++    ADD CONSTRAINT "PromptRefinerShadowRun_contract_check" CHECK (
++        "corpusDigest" = 'bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958'
++        AND "adapterVersion" = 'prompt-refiner-openai-sdk-adapter-v1'
++        AND "perRequestCostMicroUsd" = 24916
++        AND "maxDispatches" = 16
++        AND "costCeilingMicroUsd" = 398656
++        AND (
++            ("stageId" = 'prompt-refiner-shadow-v1'
++             AND "runContractVersion" = 'prompt-refiner-shadow-run-v3'
++             AND "runContractDigest" = 'sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280'
++             AND "evidenceSpecDigest" IS NULL)
++            OR
++            ("stageId" = 'prompt-refiner-shadow-v2'
++             AND "runContractVersion" = 'prompt-refiner-shadow-run-v4'
++             AND "runContractDigest" = 'sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7'
++             AND "evidenceSpecDigest" = '7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1')
++            OR
++            ("stageId" = 'prompt-refiner-shadow-v3'
++             AND "runContractVersion" = 'prompt-refiner-shadow-run-v5'
++             AND "runContractDigest" = 'sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd'
++             AND "evidenceSpecDigest" = '7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1')
++        )
++    );
++
++ALTER TABLE "PromptRefinerShadowAttempt"
++    DROP CONSTRAINT "PromptRefinerShadowAttempt_v4_duration_check",
++    DROP CONSTRAINT "PromptRefinerShadowAttempt_binding_check",
++    DROP CONSTRAINT "PromptRefinerShadowAttempt_terminal_check";
++ALTER TABLE "PromptRefinerShadowAttempt"
++    ADD CONSTRAINT "PromptRefinerShadowAttempt_v5_duration_check" CHECK (
++        "runContractDigest" NOT IN (
++            'sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7',
++            'sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd'
++        )
++        OR "durationMs" IS NULL
++        OR "durationMs" <= 60000
++    ),
++    ADD CONSTRAINT "PromptRefinerShadowAttempt_binding_check" CHECK (
++        "id" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "runId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "reservationId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "requestId" ~ '^[A-Za-z0-9:_-]{1,128}$'
++        AND "caseId" ~ '^[A-Za-z0-9._:-]{1,128}$'
++        AND "caseIndex" BETWEEN 0 AND 15
++        AND "provider" = 'openai' AND "modelId" = 'gpt-5-6-luna'
++        AND "adapterVersion" = 'prompt-refiner-openai-sdk-adapter-v1'
++        AND (
++            ("stageId" = 'prompt-refiner-shadow-v1'
++             AND "reservationContractDigest" = 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f'
++             AND "runContractDigest" = 'sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280')
++            OR
++            ("stageId" = 'prompt-refiner-shadow-v2'
++             AND "reservationContractDigest" = 'sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1'
++             AND "runContractDigest" = 'sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7')
++            OR
++            ("stageId" = 'prompt-refiner-shadow-v3'
++             AND "reservationContractDigest" = 'sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72'
++             AND "runContractDigest" = 'sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd')
++        )
++    ),
++    ADD CONSTRAINT "PromptRefinerShadowAttempt_terminal_check" CHECK (
++        ("status" = 'dispatch_intent'
++         AND "terminalReason" IS NULL AND "failureLayer" IS NULL
++         AND "failureCode" IS NULL AND "terminalAt" IS NULL
++         AND "durationMs" IS NULL AND "inputTokens" IS NULL
++         AND "cachedInputTokens" IS NULL AND "cacheWriteInputTokens" IS NULL
++         AND "outputTokens" IS NULL AND "reasoningTokens" IS NULL
++         AND "actualCostMicroUsd" IS NULL AND "terminalAuditLogId" IS NULL
++         AND "evidence" IS NULL)
++        OR
++        ("status" = 'terminal'
++         AND "terminalReason" IN ('suggested','provider_error','timeout','invalid_response','empty_response','no_change','cancelled_after_dispatch','unknown_after_dispatch')
++         AND "terminalAt" IS NOT NULL AND "terminalAuditLogId" IS NOT NULL
++         AND (
++            ("terminalReason" = 'suggested' AND "failureLayer" = 'none' AND "failureCode" IS NULL)
++            OR ("terminalReason" IN ('provider_error','timeout','cancelled_after_dispatch','unknown_after_dispatch')
++                AND "failureLayer" = 'provider' AND "failureCode" IS NOT NULL)
++            OR ("terminalReason" IN ('invalid_response','empty_response','no_change')
++                AND "failureLayer" = 'response_validation' AND "failureCode" = "terminalReason")
++         )
++         AND (
++            ("runContractDigest" = 'sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280'
++             AND "evidence" IS NULL)
++            OR
++            ("runContractDigest" IN (
++                'sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7',
++                'sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd'
++             )
++             AND jsonb_typeof("evidence") = 'object'
++             AND "evidence"->>'caseId' = "caseId"
++             AND "evidence"->>'terminalStatus' = CASE
++                    WHEN "terminalReason" = 'suggested' THEN 'suggested'
++                    WHEN "terminalReason" = 'unknown_after_dispatch' THEN 'unknown'
++                    ELSE 'failed' END
++             AND "evidence" = jsonb_build_object(
++                    'caseId', "evidence"->'caseId',
++                    'language', "evidence"->'language',
++                    'category', "evidence"->'category',
++                    'terminalStatus', "evidence"->'terminalStatus',
++                    'evidenceStatus', "evidence"->'evidenceStatus',
++                    'distinctFromSource', "evidence"->'distinctFromSource',
++                    'lengthWithinBounds', "evidence"->'lengthWithinBounds',
++                    'languageMatched', "evidence"->'languageMatched',
++                    'requiredConceptGroups', "evidence"->'requiredConceptGroups',
++                    'matchedConceptGroups', "evidence"->'matchedConceptGroups',
++                    'requiredExactLiterals', "evidence"->'requiredExactLiterals',
++                    'preservedExactLiterals', "evidence"->'preservedExactLiterals',
++                    'injectionSafelyFramed', "evidence"->'injectionSafelyFramed',
++                    'lengthBucket', "evidence"->'lengthBucket',
++                    'failureReasons', "evidence"->'failureReasons'
++             ))
++         )
++        )
++    );
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_run_insert_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    stage "PromptRefinerReservationStage"%ROWTYPE;
++    audit "AdminAuditLog"%ROWTYPE;
++    audit_approved_at TIMESTAMP(3);
++    audit_expires_at TIMESTAMP(3);
++BEGIN
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."stageId" <> 'prompt-refiner-shadow-v3'
++       OR NEW."runContractVersion" <> 'prompt-refiner-shadow-run-v5'
++       OR NEW."status" <> 'approved' OR NEW."dispatchCount" <> 0
++       OR NEW."terminalCount" <> 0 OR NEW."knownActualCostMicroUsd" <> 0
++       OR NEW."startedAt" IS NOT NULL OR NEW."completedAt" IS NOT NULL
++       OR NEW."stoppedAt" IS NOT NULL OR NEW."stopReason" IS NOT NULL THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun v5 must start approved and empty';
++    END IF;
++    IF NEW."approvedAt" > observed_at OR NEW."approvalExpiresAt" <= observed_at
++       OR NEW."createdAt" < NEW."approvedAt"
++       OR NEW."createdAt" > observed_at + INTERVAL '1 minute' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun approval time is invalid';
++    END IF;
++    SELECT * INTO stage FROM "PromptRefinerReservationStage"
++    WHERE "id" = NEW."stageId" FOR UPDATE;
++    IF NOT FOUND OR stage."status" <> 'approved'
++       OR stage."approvalExpiresAt" <= observed_at
++       OR NEW."approvalExpiresAt" > stage."approvalExpiresAt"
++       OR stage."contractDigest" <> 'sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72'
++       OR stage."corpusDigest" <> NEW."corpusDigest"
++       OR stage."runtimeCommitSha" <> NEW."runtimeCommitSha"
++       OR stage."runtimeDeploymentId" <> NEW."runtimeDeploymentId" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun stage binding is invalid';
++    END IF;
++    SELECT * INTO audit FROM "AdminAuditLog"
++    WHERE "id" = NEW."authorizationAuditLogId";
++    audit_approved_at := ((audit."metadata"->>'approvedAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    audit_expires_at := ((audit."metadata"->>'approvalExpiresAt')::TIMESTAMPTZ AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NOT FOUND OR audit."actorUserId" IS DISTINCT FROM NEW."approvedBy"
++       OR audit."action" <> 'prompt_refiner.shadow_run.approved'
++       OR audit."targetType" <> 'PromptRefinerShadowRun'
++       OR audit."targetId" IS DISTINCT FROM NEW."id"
++       OR audit."summary" <> 'Approved one bounded Prompt Refiner staging shadow run.'
++       OR audit."entryHash" IS NULL OR audit."entryHash" !~ '^[a-f0-9]{64}$'
++       OR audit."metadata" IS DISTINCT FROM jsonb_build_object(
++            'stageId', NEW."stageId",
++            'runContractVersion', NEW."runContractVersion",
++            'runContractDigest', NEW."runContractDigest",
++            'corpusDigest', NEW."corpusDigest",
++            'evidenceSpecDigest', NEW."evidenceSpecDigest",
++            'adapterVersion', NEW."adapterVersion",
++            'runtimeSourceManifestDigest', NEW."runtimeSourceManifestDigest",
++            'previewBindingDigest', NEW."previewBindingDigest",
++            'runtimeDeploymentId', NEW."runtimeDeploymentId",
++            'runtimeCommitSha', NEW."runtimeCommitSha",
++            'perRequestCostMicroUsd', NEW."perRequestCostMicroUsd",
++            'maxDispatches', NEW."maxDispatches",
++            'costCeilingMicroUsd', NEW."costCeilingMicroUsd",
++            'timeoutMs', 15000, 'retryCount', 0,
++            'unknownOutcomePolicy', 'stop_no_redispatch',
++            'approvedAt', audit."metadata"->'approvedAt',
++            'approvalExpiresAt', audit."metadata"->'approvalExpiresAt',
++            'executionAdmitted', true, 'productAdapterReady', false
++       )
++       OR jsonb_typeof(audit."metadata"->'approvedAt') <> 'string'
++       OR jsonb_typeof(audit."metadata"->'approvalExpiresAt') <> 'string'
++       OR NEW."approvedAt" IS DISTINCT FROM audit_approved_at
++       OR NEW."approvalExpiresAt" IS DISTINCT FROM audit_expires_at THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun authorization audit binding is invalid';
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
++
++CREATE OR REPLACE FUNCTION "prompt_refiner_shadow_attempt_insert_guard"()
++RETURNS TRIGGER AS $$
++DECLARE
++    observed_at TIMESTAMP(3);
++    run "PromptRefinerShadowRun"%ROWTYPE;
++    reservation "PromptRefinerReservation"%ROWTYPE;
++    audit "AdminAuditLog"%ROWTYPE;
++    admission_tokens INTEGER;
++BEGIN
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3);
++    IF NEW."runContractDigest" <> 'sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd'
++       OR NEW."status" <> 'dispatch_intent' OR NEW."evidence" IS NOT NULL
++       OR NEW."dispatchIntentAt" <> NEW."createdAt"
++       OR NEW."dispatchIntentAt" > observed_at
++       OR NEW."dispatchIntentAt" < observed_at - INTERVAL '1 minute' THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt v5 must start as a current dispatch intent';
++    END IF;
++    SELECT * INTO run FROM "PromptRefinerShadowRun"
++    WHERE "id" = NEW."runId" FOR UPDATE;
++    IF NOT FOUND OR run."status" NOT IN ('approved','running')
++       OR run."approvalExpiresAt" <= observed_at
++       OR run."runContractDigest" <> NEW."runContractDigest"
++       OR run."stageId" <> NEW."stageId"
++       OR run."adapterVersion" <> NEW."adapterVersion"
++       OR run."dispatchCount" >= run."maxDispatches"
++       OR run."knownActualCostMicroUsd" > run."costCeilingMicroUsd" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowRun cannot accept a dispatch intent';
++    END IF;
++    SELECT * INTO reservation FROM "PromptRefinerReservation"
++    WHERE "id" = NEW."reservationId" FOR UPDATE;
++    IF NOT FOUND OR reservation."status" <> 'reserved'
++       OR reservation."expiresAt" <= observed_at
++       OR reservation."requestId" <> NEW."requestId"
++       OR reservation."stageId" <> NEW."stageId"
++       OR reservation."contractDigest" <> NEW."reservationContractDigest" THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt reservation binding is invalid';
++    END IF;
++    SELECT * INTO audit FROM "AdminAuditLog" WHERE "id" = NEW."dispatchAuditLogId";
++    IF jsonb_typeof(audit."metadata"->'admissionInputTokens') = 'number' THEN
++        admission_tokens := (audit."metadata"->>'admissionInputTokens')::INTEGER;
++    END IF;
++    IF NOT FOUND OR audit."actorUserId" IS NOT NULL
++       OR audit."action" <> 'prompt_refiner.shadow_dispatch.intent_recorded'
++       OR audit."targetType" <> 'PromptRefinerShadowAttempt'
++       OR audit."targetId" IS DISTINCT FROM NEW."id"
++       OR audit."summary" <> 'Recorded one Prompt Refiner provider dispatch intent.'
++       OR audit."metadata"->>'systemActor' IS DISTINCT FROM 'prompt-refiner-shadow-runner'
++       OR audit."metadata"->>'runId' IS DISTINCT FROM NEW."runId"
++       OR audit."metadata"->>'reservationId' IS DISTINCT FROM NEW."reservationId"
++       OR audit."metadata"->>'requestId' IS DISTINCT FROM NEW."requestId"
++       OR audit."metadata"->>'caseId' IS DISTINCT FROM NEW."caseId"
++       OR (audit."metadata"->>'caseIndex')::INTEGER IS DISTINCT FROM NEW."caseIndex"
++       OR audit."metadata"->>'runContractDigest' IS DISTINCT FROM NEW."runContractDigest"
++       OR audit."metadata"->>'adapterVersion' IS DISTINCT FROM NEW."adapterVersion"
++       OR audit."metadata"->>'provider' IS DISTINCT FROM NEW."provider"
++       OR audit."metadata"->>'modelId' IS DISTINCT FROM NEW."modelId"
++       OR (audit."metadata"->>'timeoutMs')::INTEGER IS DISTINCT FROM 15000
++       OR (audit."metadata"->>'retryCount')::INTEGER IS DISTINCT FROM 0
++       OR audit."metadata"->>'tokenizerPackage' IS DISTINCT FROM 'js-tiktoken'
++       OR audit."metadata"->>'tokenizerPackageVersion' IS DISTINCT FROM '1.0.21'
++       OR audit."metadata"->>'tokenizerEncoding' IS DISTINCT FROM 'o200k_base'
++       OR admission_tokens IS NULL OR admission_tokens < 0 OR admission_tokens > 100000 THEN
++        RAISE EXCEPTION 'PromptRefinerShadowAttempt dispatch audit binding is invalid';
++    END IF;
++    RETURN NEW;
++END;
++$$ LANGUAGE plpgsql;
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 782c1a2fa..87654e17d 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -5675,7 +5675,7 @@ model PromptRefinerReservationStage {
+   corpusDigest                   String
+   runtimeCommitSha               String
+   runtimeSourceIdentityDigest    String
+-  /// Content-free v3 manifest for the exact 188-file runtime import closure;
++  /// Content-free v4 manifest for the exact 189-file runtime import closure;
+   /// the database validates ordered paths plus 8 MiB/file and 16 MiB total.
+   runtimeSourceManifest          Json
+   runtimeSourceManifestDigest    String
+@@ -6511,8 +6511,8 @@ model PromptRefinerShadowRun {
+   runContractVersion          String
+   runContractDigest           String    @unique
+   corpusDigest                String
+-  /// Null only for the immutable historical v3 run. Every v4 run is bound to
+-  /// the reviewed evidence specification before approval.
++  /// Null only for the immutable historical v3 run. Every v4-or-later run is
++  /// bound to the reviewed evidence specification before approval.
+   evidenceSpecDigest          String?
+   adapterVersion              String
+   status                      String    @default("approved")
+diff --git a/scripts/check-protected-table-writers-core.mjs b/scripts/check-protected-table-writers-core.mjs
+index a7ce920a0..fd67f5356 100644
+--- a/scripts/check-protected-table-writers-core.mjs
++++ b/scripts/check-protected-table-writers-core.mjs
+@@ -495,6 +495,30 @@ export const RAW_SQL_ALLOWLIST = [
+     reason:
+       "The migration adds the content-free evidence column and binds terminal evidence to the existing audit transaction. It contains no attempt DML and seeds no evidence.",
+   },
++  {
++    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
++    table: "AdminAuditLog",
++    tableMentions: 6,
++    writeVerbs: 22,
++    reason:
++      "The stage-successor migration reads exact human/system audit rows from replacement guards and changes DDL only. It preserves the failed v2 approval as immutable audit evidence and seeds no stage, reservation, run, attempt or audit row.",
++  },
++  {
++    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
++    table: "PromptRefinerShadowRun",
++    tableMentions: 10,
++    writeVerbs: 22,
++    reason:
++      "The migration admits the successor v5 run contract while preserving historical v3/v4 rows. It contains no run DML and seeds no authority.",
++  },
++  {
++    path: "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
++    table: "PromptRefinerShadowAttempt",
++    tableMentions: 6,
++    writeVerbs: 22,
++    reason:
++      "The migration admits v5 attempt bindings while preserving historical v3/v4 attempts. It contains no attempt DML and seeds no evidence.",
++  },
+   {
+     path: "scripts/report-unswept-tables-core.mjs",
+     table: "MarketingReport",
+diff --git a/tests/adminWriteRouteGuards.test.mjs b/tests/adminWriteRouteGuards.test.mjs
+index 5703412ea..81cb118d6 100644
+--- a/tests/adminWriteRouteGuards.test.mjs
++++ b/tests/adminWriteRouteGuards.test.mjs
+@@ -16,7 +16,7 @@
+ import assert from "node:assert/strict";
+ import test from "node:test";
+ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+-import { join } from "node:path";
++import { join, sep } from "node:path";
+ import { fileURLToPath } from "node:url";
+ 
+ const ADMIN_API_DIR = fileURLToPath(new URL("../app/api/admin/", import.meta.url));
+@@ -95,7 +95,8 @@ const routes = routeFiles(ADMIN_API_DIR).map((path) => {
+   const source = withoutComments(readFileSync(path, "utf8"));
+   const imported = importedSources(source);
+   return {
+-    name: path.slice(ADMIN_API_DIR.length),
++    // Route identities are repository-style paths even when the filesystem is Windows.
++    name: path.slice(ADMIN_API_DIR.length).split(sep).join("/"),
+     source,
+     /**
+      * Whether the route, or a service it calls, performs `name`.
+diff --git a/tests/integration/prompt-refiner-reservation-admission.db.test.ts b/tests/integration/prompt-refiner-reservation-admission.db.test.ts
+index e1e6fe616..315d47bd9 100644
+--- a/tests/integration/prompt-refiner-reservation-admission.db.test.ts
++++ b/tests/integration/prompt-refiner-reservation-admission.db.test.ts
+@@ -34,6 +34,8 @@ import {
+ process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+ process.env.RAILWAY_GIT_COMMIT_SHA = "b".repeat(40);
+ process.env.RAILWAY_DEPLOYMENT_ID = "prompt-refiner-admission-db-test";
++process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
++process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
+ const AUDIT_FIXTURE_KEY = "prompt-refiner-reservation-strong-fixture-key";
+ process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_FIXTURE_KEY;
+ 
+@@ -121,11 +123,36 @@ before(async () => {
+ 
+ beforeEach(async () => {
+   process.env.RAILWAY_DEPLOYMENT_ID = "prompt-refiner-admission-db-test";
++  process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
++  process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
+   process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_FIXTURE_KEY;
+   delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
+   await reset();
+ });
+ 
++test("immutable stage creation requires exact true for both downstream flags before any audit write", async () => {
++  for (const [flag, value] of [
++    ["PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED", "false"],
++    ["PROMPT_REFINER_SHADOW_EXECUTION_ENABLED", "false"],
++    ["PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED", "TRUE"],
++    ["PROMPT_REFINER_SHADOW_EXECUTION_ENABLED", "TRUE"],
++  ] as const) {
++    process.env.PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED = "true";
++    process.env.PROMPT_REFINER_SHADOW_EXECUTION_ENABLED = "true";
++    process.env[flag] = value;
++    await assert.rejects(
++      create(),
++      (error: unknown) =>
++        error instanceof Error &&
++        "code" in error &&
++        error.code === "PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED",
++      `${flag}=${value}`
++    );
++    assert.equal(await prisma.promptRefinerReservationStage.count(), 0, `${flag}=${value}`);
++    assert.equal(await prisma.adminAuditLog.count(), 0, `${flag}=${value}`);
++  }
++});
++
+ test("migration has no seed and the writer atomically binds provenance to one audit", async () => {
+   assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
+   const migration = readFileSync(
+diff --git a/tests/integration/prompt-refiner-reservation.db.test.ts b/tests/integration/prompt-refiner-reservation.db.test.ts
+index 153a563a5..eae0555bf 100644
+--- a/tests/integration/prompt-refiner-reservation.db.test.ts
++++ b/tests/integration/prompt-refiner-reservation.db.test.ts
+@@ -176,6 +176,241 @@ const createStage = async (input: { status?: "approved" | "closed" } = {}) => {
+     return stage;
+ };
+ 
++const legacyStageFixture = async (version: 1 | 2) => {
++    const facts = await loadPromptRefinerStageAdmissionFacts();
++    const stageId = `prompt-refiner-shadow-v${version}`;
++    const contractDigest = version === 1
++        ? "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f"
++        : "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1";
++    const removedPaths = new Set([
++        "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
++        ...(version === 1
++            ? ["prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"]
++            : []),
++    ]);
++    const currentManifest = facts.runtimeSourceManifest as unknown as {
++        commitSha: string;
++        files: Array<{ path: string; sizeBytes: number; sha256: string }>;
++    };
++    const files = currentManifest.files.filter((entry) => !removedPaths.has(entry.path));
++    const runtimeSourceManifest = {
++        schemaVersion: `prompt-refiner-runtime-source-manifest-v${version + 1}`,
++        commitSha: currentManifest.commitSha,
++        totalSizeBytes: files.reduce((sum, entry) => sum + entry.sizeBytes, 0),
++        files,
++    };
++    const runtimeSourceIdentityDigest = prefixedPromptRefinerDigest({ files });
++    const runtimeSourceManifestDigest = prefixedPromptRefinerDigest(runtimeSourceManifest);
++    const executionManifest = structuredClone(facts.executionManifest) as unknown as Record<string, unknown>;
++    executionManifest.schemaVersion = `prompt-refiner-shadow-execution-manifest-v${version}`;
++    executionManifest.stageId = stageId;
++    executionManifest.reservationContractDigest = contractDigest;
++    executionManifest.runtimeSource = {
++        fileCount: version === 1 ? 187 : 188,
++        maxFileBytes: 8 * 1024 * 1024,
++        maxTotalBytes: 16 * 1024 * 1024,
++    };
++    const executionManifestDigest = prefixedPromptRefinerDigest(executionManifest);
++    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
++    `;
++    assert.ok(clock);
++    const approvedAt = clock.now;
++    const approvalExpiresAt = new Date(approvedAt.getTime() + PROMPT_REFINER_STAGE_APPROVAL_TTL_MS);
++    const authorizationAuditLogId = await writeAdminAuditLog({
++        session: fixtureSession,
++        request: fixtureRequest,
++        action: "prompt_refiner.shadow_stage.activated",
++        targetType: "PromptRefinerReservationStage",
++        targetId: stageId,
++        summary: "Preserved an exact legacy Prompt Refiner staging shadow stage fixture.",
++        metadata: {
++            admissionVersion: `prompt-refiner-stage-admission-v${version}`,
++            proposalDigest: facts.proposalDigest,
++            evidenceBundleDigest: facts.evidenceBundleDigest,
++            runtimeSourceManifestDigest,
++            executionManifestDigest,
++            environment: facts.runtimeEnvironment,
++            deploymentId: facts.runtimeDeploymentId,
++            commitSha: facts.runtimeCommitSha,
++            perRequestCostMicroUsd: 24_916,
++            maxReservations: 100,
++            costCeilingMicroUsd: 2_491_600,
++            approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
++            approvedAt: approvedAt.toISOString(),
++            approvalExpiresAt: approvalExpiresAt.toISOString(),
++            reason: PROMPT_REFINER_STAGE_REASON,
++        },
++    });
++    return {
++        stageId,
++        contractDigest,
++        admissionVersion: `prompt-refiner-stage-admission-v${version}`,
++        facts,
++        runtimeSourceManifest,
++        runtimeSourceIdentityDigest,
++        runtimeSourceManifestDigest,
++        executionManifest,
++        executionManifestDigest,
++        approvedAt,
++        approvalExpiresAt,
++        authorizationAuditLogId,
++    };
++};
++
++const insertLegacyStageFixture = async (
++    fixture: Awaited<ReturnType<typeof legacyStageFixture>>
++) => prisma.$executeRawUnsafe(
++    `
++      INSERT INTO "PromptRefinerReservationStage" (
++        "id", "contractVersion", "contractDigest", "status",
++        "perRequestCostMicroUsd", "maxReservations", "costCeilingMicroUsd",
++        "reservationCount", "allocatedCostMicroUsd", "admissionVersion",
++        "proposalVersion", "proposalDigest", "evidenceBundleDigest",
++        "evidenceManifestSha256", "historicalSourceRef",
++        "historicalSourceIdentityDigest", "corpusDigest", "runtimeCommitSha",
++        "runtimeSourceIdentityDigest", "runtimeSourceManifest",
++        "runtimeSourceManifestDigest", "runtimeEnvironment", "runtimeDeploymentId",
++        "executionManifest", "executionManifestDigest", "approvedBy", "approvedAt",
++        "approvalExpiresAt", "authorizationAuditLogId", "createdAt", "updatedAt"
++      ) VALUES (
++        $1, $2, $3, 'approved', 24916, 100, 2491600, 0, 0, $4,
++        $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17,
++        $18::jsonb, $19, 'mposition', $20, $21, $22, $20, $20
++      )
++    `,
++    fixture.stageId,
++    PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
++    fixture.contractDigest,
++    fixture.admissionVersion,
++    fixture.facts.proposalVersion,
++    fixture.facts.proposalDigest,
++    fixture.facts.evidenceBundleDigest,
++    fixture.facts.evidenceManifestSha256,
++    fixture.facts.historicalSourceRef,
++    fixture.facts.historicalSourceIdentityDigest,
++    fixture.facts.corpusDigest,
++    fixture.facts.runtimeCommitSha,
++    fixture.runtimeSourceIdentityDigest,
++    JSON.stringify(fixture.runtimeSourceManifest),
++    fixture.runtimeSourceManifestDigest,
++    fixture.facts.runtimeEnvironment,
++    fixture.facts.runtimeDeploymentId,
++    JSON.stringify(fixture.executionManifest),
++    fixture.executionManifestDigest,
++    fixture.approvedAt,
++    fixture.approvalExpiresAt,
++    fixture.authorizationAuditLogId
++);
++
++const legacyRunFixture = (
++    version: 3 | 4,
++    stage: Awaited<ReturnType<typeof legacyStageFixture>>
++) => ({
++    id: `legacy-shadow-run-v${version}`,
++    stageId: stage.stageId,
++    runContractVersion: `prompt-refiner-shadow-run-v${version}`,
++    runContractDigest: version === 3
++        ? "sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280"
++        : "sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7",
++    evidenceSpecDigest: version === 3
++        ? null
++        : "7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1",
++    previewBindingDigest: `sha256:${version.toString(16).repeat(64)}`,
++    authorizationAuditLogId: `legacy-shadow-run-v${version}-audit`,
++    stage,
++});
++
++const insertLegacyRunFixture = async (
++    fixture: ReturnType<typeof legacyRunFixture>
++) => prisma.$executeRawUnsafe(
++    `
++      INSERT INTO "PromptRefinerShadowRun" (
++        "id", "stageId", "runContractVersion", "runContractDigest", "corpusDigest",
++        "evidenceSpecDigest", "adapterVersion", "status", "perRequestCostMicroUsd",
++        "maxDispatches", "costCeilingMicroUsd", "dispatchCount", "terminalCount",
++        "knownActualCostMicroUsd", "runtimeCommitSha", "runtimeDeploymentId",
++        "runtimeSourceManifest", "runtimeSourceManifestDigest", "previewBindingDigest",
++        "approvedBy", "approvedAt", "approvalExpiresAt", "authorizationAuditLogId",
++        "createdAt", "updatedAt"
++      ) VALUES (
++        $1, $2, $3, $4, $5, $6, 'prompt-refiner-openai-sdk-adapter-v1', 'approved',
++        24916, 16, 398656, 0, 0, 0, $7, $8, $9::jsonb, $10, $11, 'mposition',
++        $12, $13, $14, $12, $12
++      )
++    `,
++    fixture.id,
++    fixture.stageId,
++    fixture.runContractVersion,
++    fixture.runContractDigest,
++    fixture.stage.facts.corpusDigest,
++    fixture.evidenceSpecDigest,
++    fixture.stage.facts.runtimeCommitSha,
++    fixture.stage.facts.runtimeDeploymentId,
++    JSON.stringify(fixture.stage.runtimeSourceManifest),
++    fixture.stage.runtimeSourceManifestDigest,
++    fixture.previewBindingDigest,
++    fixture.stage.approvedAt,
++    fixture.stage.approvalExpiresAt,
++    fixture.authorizationAuditLogId
++);
++
++const insertLegacyReservationFixture = async (input: {
++    id: string;
++    stageId: string;
++    requestId: string;
++    contractDigest: string;
++    createdAt: Date;
++}) => prisma.$executeRawUnsafe(
++    `
++      INSERT INTO "PromptRefinerReservation" (
++        "id", "stageId", "requestId", "contractDigest", "status",
++        "reservedCostMicroUsd", "expiresAt", "createdAt", "updatedAt"
++      ) VALUES ($1, $2, $3, $4, 'reserved', 24916, $5, $6, $6)
++    `,
++    input.id,
++    input.stageId,
++    input.requestId,
++    input.contractDigest,
++    new Date(input.createdAt.getTime() + 5 * 60_000),
++    input.createdAt
++);
++
++const insertLegacyAttemptFixture = async (input: {
++    id: string;
++    runId: string;
++    reservationId: string;
++    requestId: string;
++    caseIndex: number;
++    stageId: string;
++    reservationContractDigest: string;
++    runContractDigest: string;
++    createdAt: Date;
++}) => prisma.$executeRawUnsafe(
++    `
++      INSERT INTO "PromptRefinerShadowAttempt" (
++        "id", "runId", "reservationId", "requestId", "caseId", "caseIndex",
++        "stageId", "reservationContractDigest", "runContractDigest", "provider",
++        "modelId", "adapterVersion", "status", "dispatchIntentAt",
++        "dispatchAuditLogId", "createdAt", "updatedAt"
++      ) VALUES (
++        $1, $2, $3, $4, $5, $6, $7, $8, $9, 'openai', 'gpt-5-6-luna',
++        'prompt-refiner-openai-sdk-adapter-v1', 'dispatch_intent', $10, $11, $10, $10
++      )
++    `,
++    input.id,
++    input.runId,
++    input.reservationId,
++    input.requestId,
++    `legacy-case-${input.caseIndex}`,
++    input.caseIndex,
++    input.stageId,
++    input.reservationContractDigest,
++    input.runContractDigest,
++    input.createdAt,
++    `${input.id}-dispatch-audit`
++);
++
+ const bindingOf = (reservation: {
+     reservationId: string;
+     requestId: string;
+@@ -232,6 +467,166 @@ beforeEach(async () => {
+     await reset();
+ });
+ 
++test("successor migration preserves exact legacy v1/v2 manifests and rejects a re-digested tamper", async () => {
++    const v1 = await legacyStageFixture(1);
++    const v2 = await legacyStageFixture(2);
++    await prisma.$executeRawUnsafe(
++        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
++    );
++    try {
++        await insertLegacyStageFixture(v1);
++        await insertLegacyStageFixture(v2);
++        const preserved = await prisma.promptRefinerReservationStage.findMany({
++            where: { id: { in: [v1.stageId, v2.stageId] } },
++            orderBy: { id: "asc" },
++            select: { id: true, executionManifestDigest: true },
++        });
++        assert.deepEqual(preserved, [
++            { id: v1.stageId, executionManifestDigest: v1.executionManifestDigest },
++            { id: v2.stageId, executionManifestDigest: v2.executionManifestDigest },
++        ]);
++
++        const tampered = structuredClone(v1.executionManifest);
++        tampered.productAdapterReady = true;
++        await assert.rejects(
++            prisma.$executeRawUnsafe(
++                `
++                  UPDATE "PromptRefinerReservationStage"
++                  SET "executionManifest" = $1::jsonb,
++                      "executionManifestDigest" = $2
++                  WHERE "id" = $3
++                `,
++                JSON.stringify(tampered),
++                prefixedPromptRefinerDigest(tampered),
++                v1.stageId
++            ),
++            /PromptRefinerReservationStage_execution_manifest_check/
++        );
++        assert.deepEqual(
++            (
++                await prisma.promptRefinerReservationStage.findUniqueOrThrow({
++                    where: { id: v1.stageId },
++                    select: { executionManifest: true },
++                })
++            ).executionManifest,
++            v1.executionManifest
++        );
++    } finally {
++        await prisma.$executeRawUnsafe(
++            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
++        );
++    }
++});
++
++test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", async () => {
++    const stageV1 = await legacyStageFixture(1);
++    const stageV2 = await legacyStageFixture(2);
++    const runV3 = legacyRunFixture(3, stageV1);
++    const runV4 = legacyRunFixture(4, stageV2);
++    await prisma.$executeRawUnsafe(`
++      ALTER TABLE "PromptRefinerReservationStage"
++        DISABLE TRIGGER "prompt_refiner_stage_guard_trigger";
++      ALTER TABLE "PromptRefinerReservation"
++        DISABLE TRIGGER "prompt_refiner_reservation_insert_guard_trigger";
++      ALTER TABLE "PromptRefinerReservation"
++        DISABLE TRIGGER "prompt_refiner_reservation_account_insert_trigger";
++      ALTER TABLE "PromptRefinerShadowRun"
++        DISABLE TRIGGER "prompt_refiner_shadow_run_insert_guard_trigger";
++      ALTER TABLE "PromptRefinerShadowAttempt"
++        DISABLE TRIGGER "prompt_refiner_shadow_attempt_insert_guard_trigger";
++    `);
++    try {
++        await insertLegacyStageFixture(stageV1);
++        await insertLegacyStageFixture(stageV2);
++        await insertLegacyRunFixture(runV3);
++        await insertLegacyRunFixture(runV4);
++        assert.equal(await prisma.promptRefinerShadowRun.count(), 2);
++
++        await assert.rejects(
++            insertLegacyRunFixture({
++                ...runV3,
++                id: "legacy-shadow-run-tampered",
++                runContractDigest: `sha256:${"f".repeat(64)}`,
++                authorizationAuditLogId: "legacy-shadow-run-tampered-audit",
++            }),
++            /PromptRefinerShadowRun_contract_check/
++        );
++
++        await insertLegacyReservationFixture({
++            id: "legacy-reservation-v3",
++            stageId: stageV1.stageId,
++            requestId: "legacy-request-v3",
++            contractDigest: stageV1.contractDigest,
++            createdAt: stageV1.approvedAt,
++        });
++        await insertLegacyReservationFixture({
++            id: "legacy-reservation-v4",
++            stageId: stageV2.stageId,
++            requestId: "legacy-request-v4",
++            contractDigest: stageV2.contractDigest,
++            createdAt: stageV2.approvedAt,
++        });
++        await insertLegacyReservationFixture({
++            id: "legacy-reservation-tampered",
++            stageId: stageV1.stageId,
++            requestId: "legacy-request-tampered",
++            contractDigest: stageV1.contractDigest,
++            createdAt: stageV1.approvedAt,
++        });
++        await insertLegacyAttemptFixture({
++            id: "legacy-attempt-v3",
++            runId: runV3.id,
++            reservationId: "legacy-reservation-v3",
++            requestId: "legacy-request-v3",
++            caseIndex: 0,
++            stageId: stageV1.stageId,
++            reservationContractDigest: stageV1.contractDigest,
++            runContractDigest: runV3.runContractDigest,
++            createdAt: stageV1.approvedAt,
++        });
++        await insertLegacyAttemptFixture({
++            id: "legacy-attempt-v4",
++            runId: runV4.id,
++            reservationId: "legacy-reservation-v4",
++            requestId: "legacy-request-v4",
++            caseIndex: 1,
++            stageId: stageV2.stageId,
++            reservationContractDigest: stageV2.contractDigest,
++            runContractDigest: runV4.runContractDigest,
++            createdAt: stageV2.approvedAt,
++        });
++        assert.equal(await prisma.promptRefinerShadowAttempt.count(), 2);
++
++        await assert.rejects(
++            insertLegacyAttemptFixture({
++                id: "legacy-attempt-tampered",
++                runId: runV3.id,
++                reservationId: "legacy-reservation-tampered",
++                requestId: "legacy-request-tampered",
++                caseIndex: 2,
++                stageId: stageV1.stageId,
++                reservationContractDigest: stageV2.contractDigest,
++                runContractDigest: runV3.runContractDigest,
++                createdAt: stageV1.approvedAt,
++            }),
++            /PromptRefinerShadowAttempt_binding_check/
++        );
++    } finally {
++        await prisma.$executeRawUnsafe(`
++          ALTER TABLE "PromptRefinerShadowAttempt"
++            ENABLE TRIGGER "prompt_refiner_shadow_attempt_insert_guard_trigger";
++          ALTER TABLE "PromptRefinerShadowRun"
++            ENABLE TRIGGER "prompt_refiner_shadow_run_insert_guard_trigger";
++          ALTER TABLE "PromptRefinerReservation"
++            ENABLE TRIGGER "prompt_refiner_reservation_account_insert_trigger";
++          ALTER TABLE "PromptRefinerReservation"
++            ENABLE TRIGGER "prompt_refiner_reservation_insert_guard_trigger";
++          ALTER TABLE "PromptRefinerReservationStage"
++            ENABLE TRIGGER "prompt_refiner_stage_guard_trigger";
++        `);
++    }
++});
++
+ test("reserve uses the DB clock and atomically binds one exact permanent slot", async () => {
+     await createStage();
+     const reserved = await reservePromptRefinerExecution({ requestId: "request_db_1" });
+diff --git a/tests/integration/prompt-refiner-shadow-run.db.test.ts b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+index 44fae750c..fb23cf52e 100644
+--- a/tests/integration/prompt-refiner-shadow-run.db.test.ts
++++ b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+@@ -27,6 +27,7 @@ import {
+ import {
+     PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
+     PROMPT_REFINER_SHADOW_CASE_IDS,
++    PROMPT_REFINER_SHADOW_EXECUTION_FLAG,
+     PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG,
+     PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
+     PROMPT_REFINER_SHADOW_RUN_ID,
+@@ -59,6 +60,7 @@ process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
+ process.env.ADMIN_AUDIT_INTEGRITY_KEY =
+     "prompt-refiner-shadow-run-strong-fixture-key";
+ process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] = "true";
++process.env[PROMPT_REFINER_SHADOW_EXECUTION_FLAG] = "true";
+ 
+ const fixtureSession = {
+     user: { id: "mposition", email: "owner@example.com" },
+@@ -421,7 +423,7 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
+     );
+ });
+ 
+-test("v4 terminal duration is bounded before an immutable receipt can be stored", async () => {
++test("v5 terminal duration is bounded before an immutable receipt can be stored", async () => {
+     await approveStage();
+     await approveRun();
+     const { attempt } = await dispatch({
+@@ -452,7 +454,7 @@ test("v4 terminal duration is bounded before an immutable receipt can be stored"
+     const durationConstraints = await prisma.$queryRawUnsafe<Array<{ definition: string }>>(`
+         SELECT pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+-        WHERE conname = 'PromptRefinerShadowAttempt_v4_duration_check'
++        WHERE conname = 'PromptRefinerShadowAttempt_v5_duration_check'
+     `);
+     assert.equal(durationConstraints.length, 1);
+     assert.match(
+@@ -474,7 +476,8 @@ test("v4 runtime manifest wrapper preserves strict and parallel-safe validator m
+         FROM pg_proc
+         WHERE proname IN (
+           'prompt_refiner_runtime_manifest_valid',
+-          'prompt_refiner_runtime_manifest_v2_valid'
++          'prompt_refiner_runtime_manifest_v2_valid',
++          'prompt_refiner_runtime_manifest_v3_valid'
+         )
+         ORDER BY proname
+     `);
+@@ -484,6 +487,11 @@ test("v4 runtime manifest wrapper preserves strict and parallel-safe validator m
+             parallel: "s",
+             strict: true,
+         },
++        {
++            name: "prompt_refiner_runtime_manifest_v3_valid",
++            parallel: "s",
++            strict: true,
++        },
+         {
+             name: "prompt_refiner_runtime_manifest_valid",
+             parallel: "s",
+diff --git a/tests/promptRefinerReservationCore.test.mjs b/tests/promptRefinerReservationCore.test.mjs
+index bfcdb8808..7090e6152 100644
+--- a/tests/promptRefinerReservationCore.test.mjs
++++ b/tests/promptRefinerReservationCore.test.mjs
+@@ -46,12 +46,13 @@ const validStage = (overrides = {}) => ({
+ test("reservation contract freezes one bounded, content-free authority", () => {
+     assert.equal(
+         PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
+-        "prompt-refiner-reservation-authority-v2"
++        "prompt-refiner-reservation-authority-v3"
+     );
+-    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v2");
++    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v3");
+     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_IDS], [
+         "prompt-refiner-shadow-v1",
+         "prompt-refiner-shadow-v2",
++        "prompt-refiner-shadow-v3",
+     ]);
+     assert.equal(PROMPT_REFINER_RESERVATION_TTL_MS, 300_000);
+     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.perRequestCostMicroUsd, 24_916);
+@@ -59,7 +60,7 @@ test("reservation contract freezes one bounded, content-free authority", () => {
+     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.costCeilingMicroUsd, 2_491_600);
+     assert.equal(
+         PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+-        "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1"
++        "sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72"
+     );
+     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_STATUSES], [
+         "approved",
+diff --git a/tests/promptRefinerRuntimeSourceClosure.test.mjs b/tests/promptRefinerRuntimeSourceClosure.test.mjs
+index 7b6ad3eb7..cbcf8420a 100644
+--- a/tests/promptRefinerRuntimeSourceClosure.test.mjs
++++ b/tests/promptRefinerRuntimeSourceClosure.test.mjs
+@@ -212,12 +212,21 @@ const compilerOptions = parsedConfig.options;
+ // that class as premium. Both files are in this closure. Neither addition is
+ // a computed element access. The count remains 228 and the position-free
+ // inventory remains 9aa7ec49..., so only source positions moved.
++//
++// 2026-09-27, stage successor v3: the flag precondition adds no computed
++// element access. Source positions in promptRefinerStageAdmission.ts moved;
++// count and position-free inventory remain unchanged.
++//
++// 2026-09-27, package-gate repin: the reviewed marketing webhook fingerprint
++// provenance above MARKETING_WEBHOOK_PIPELINE_FINGERPRINT adds comment lines in
++// lib/marketingAutomationAccess.ts. The count remains 228 and the
++// position-free inventory remains 9aa7ec49..., so only source positions moved.
+ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
+ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
+   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
+ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
+-  "45e44993df9550021dc9a7eb888248fe",
+-  "cd2e50c5ae92c2e46bfaa16de61cec01",
++  "f45b025701de762d84c06ae51b561ea3",
++  "24775911c6e8cc13cf7b3b86bc5bf943",
+ ].join("");
+ 
+ const unwrapStaticExpression = (node) => {
+@@ -324,6 +333,7 @@ const fixedNonImportPaths = Object.freeze([
+   "prisma/schema.prisma",
+   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
++  "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+   ...workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))).sort(),
+ ]);
+ 
+@@ -1366,6 +1376,10 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
+     join(repositoryRoot, "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"),
+     "utf8"
+   );
++  const successorMigration = readFileSync(
++    join(repositoryRoot, "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql"),
++    "utf8"
++  );
+   const block = legacyMigration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
+   assert.ok(block, "migration expected_paths block is missing");
+   const sqlPaths = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+@@ -1374,10 +1388,15 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
+   );
+   assert.ok(addedPath, "v4 migration extension path is missing");
+   sqlPaths.splice(6, 0, addedPath[1]);
++  const successorPath = successorMigration.match(
++    /'path', '(prisma\/migrations\/20260927130000_prompt_refiner_shadow_stage_successor_v3\/migration\.sql)'/
++  );
++  assert.ok(successorPath, "v3 successor migration extension path is missing");
++  sqlPaths.splice(7, 0, successorPath[1]);
+   assert.equal(sqlPaths.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
+   assert.deepEqual(sqlPaths, [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS]);
+-  const executionManifestFileCount = migration.match(
+-    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v2"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
++  const executionManifestFileCount = successorMigration.match(
++    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v3"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
+   );
+   assert.ok(executionManifestFileCount, "migration executionManifest runtimeSource.fileCount is missing");
+   assert.equal(
+@@ -1386,8 +1405,8 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
+     "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
+   );
+   assert.match(
+-    migration,
+-    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'/,
++    successorMigration,
++    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'[\s\S]*?"id" = 'prompt-refiner-shadow-v3'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v4'/,
+     "database stage identity must select the matching runtime manifest generation"
+   );
+ });
+@@ -1399,9 +1418,9 @@ test("operator-facing contracts name the enforced runtime source closure size",
+     ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
+     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
+     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
+-    ["docs/ops/tomverse-chat-progress.md", /confirmatory v2\/v4 현재 계약은 exact (\d+)-file/],
++    ["docs/ops/tomverse-chat-progress.md", /confirmatory v3\/v5 현재 계약은 exact (\d+)-file/],
+     ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
+-    ["docs/ops/prompt-refiner-confirmatory-shadow-v4.md", /\*\*(\d+)개 고정 source 파일\*\*/],
++    ["docs/ops/prompt-refiner-confirmatory-shadow-v5.md", /\*\*(\d+)개 고정 source 파일\*\*/],
+   ]) {
+     const source = readFileSync(join(repositoryRoot, path), "utf8");
+     const found = source.match(pattern);
+@@ -1410,7 +1429,7 @@ test("operator-facing contracts name the enforced runtime source closure size",
+   }
+ 
+   const contract = readFileSync(
+-    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v4.md"),
++    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v5.md"),
+     "utf8"
+   );
+   assert.match(
+diff --git a/tests/promptRefinerShadowOperatorCore.test.mjs b/tests/promptRefinerShadowOperatorCore.test.mjs
+index 5876a2c60..3df349e54 100644
+--- a/tests/promptRefinerShadowOperatorCore.test.mjs
++++ b/tests/promptRefinerShadowOperatorCore.test.mjs
+@@ -82,6 +82,9 @@ const stageBody = () => ({
+     approvalTtlMinutes: contract.approvalTtlMinutes,
+     previewBindingDigest: digest("4"),
+     confirmation: contract.stageConfirmation,
++    runApprovalEnabled: true,
++    executionEnabled: true,
++    activationReady: true,
+     executionAdmitted: false,
+     productAdapterReady: false,
+   },
+@@ -171,6 +174,24 @@ test("the exact frozen stage, run, and execution previews are accepted", () => {
+   assert.equal(run.evidenceSpecDigest, "c".repeat(64));
+ });
+ 
++test("stage activation readiness is the exact conjunction of both downstream flags", () => {
++  for (const [runApprovalEnabled, executionEnabled] of [
++    [false, false],
++    [false, true],
++    [true, false],
++    [true, true],
++  ]) {
++    const candidate = stageBody();
++    candidate.preview.runApprovalEnabled = runApprovalEnabled;
++    candidate.preview.executionEnabled = executionEnabled;
++    candidate.preview.activationReady = runApprovalEnabled && executionEnabled;
++    assert.ok(parsePromptRefinerStagePreview(candidate));
++
++    candidate.preview.activationReady = !candidate.preview.activationReady;
++    assert.equal(parsePromptRefinerStagePreview(candidate), null);
++  }
++});
++
+ test("a completed content-free evidence summary is accepted and malformed summaries fail closed", () => {
+   const stage = parsePromptRefinerStagePreview(stageBody());
+   assert.ok(stage);
+diff --git a/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts b/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts
+index 8fda1b6aa..7af3e3da0 100644
+--- a/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts
++++ b/tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts
+@@ -20,8 +20,8 @@ process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
+ const digest = (character: string) => `sha256:${character.repeat(64)}`;
+ const preview = {
+     status: "ready_for_explicit_cost_approval",
+-    runId: "prompt-refiner-shadow-run-v4",
+-    stageId: "prompt-refiner-shadow-v2",
++    runId: "prompt-refiner-shadow-run-v5",
++    stageId: "prompt-refiner-shadow-v3",
+     stageRuntimeSourceManifestDigest: digest("1"),
+     runSourceManifestDigest: digest("2"),
+     environment: "staging",
+@@ -228,7 +228,7 @@ test("POST accepts only the fixed 4 KiB approval binding", async () => {
+     assert.equal(world.createCalls, 0);
+ });
+ 
+-test("POST records the exact v4 execution authority without calling a provider", async () => {
++test("POST records the exact v5 execution authority without calling a provider", async () => {
+     const route = await loadRoute();
+     const oldFetch = globalThis.fetch;
+     globalThis.fetch = async () => {
+diff --git a/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts b/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts
+index 6a572c18b..249852be1 100644
+--- a/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts
++++ b/tests/server-contract/admin-prompt-refiner-shadow-stage-route.test.ts
+@@ -46,7 +46,7 @@ let world = fresh();
+ let installed = false;
+ 
+ const previewFacts = {
+-  stageId: "prompt-refiner-shadow-v2",
++  stageId: "prompt-refiner-shadow-v3",
+   status: "ready_for_explicit_cost_approval",
+   proposalDigest: `sha256:${"1".repeat(64)}`,
+   runtimeSourceManifestDigest: `sha256:${"2".repeat(64)}`,
+@@ -75,6 +75,9 @@ const preview = {
+     approvalTtlMinutes: previewFacts.approvalTtlMinutes,
+   }),
+   confirmation: PROMPT_REFINER_STAGE_CONFIRMATION,
++  runApprovalEnabled: true,
++  executionEnabled: true,
++  activationReady: true,
+   executionAdmitted: false,
+   productAdapterReady: false,
+ };

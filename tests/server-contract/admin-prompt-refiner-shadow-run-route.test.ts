@@ -20,8 +20,8 @@ process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 const preview = {
     status: "ready_for_explicit_cost_approval",
-    runId: "prompt-refiner-shadow-run-v4",
-    stageId: "prompt-refiner-shadow-v2",
+    runId: "prompt-refiner-shadow-run-v5",
+    stageId: "prompt-refiner-shadow-v3",
     stageRuntimeSourceManifestDigest: digest("1"),
     runSourceManifestDigest: digest("2"),
     environment: "staging",
@@ -228,7 +228,7 @@ test("POST accepts only the fixed 4 KiB approval binding", async () => {
     assert.equal(world.createCalls, 0);
 });
 
-test("POST records the exact v4 execution authority without calling a provider", async () => {
+test("POST records the exact v5 execution authority without calling a provider", async () => {
     const route = await loadRoute();
     const oldFetch = globalThis.fetch;
     globalThis.fetch = async () => {

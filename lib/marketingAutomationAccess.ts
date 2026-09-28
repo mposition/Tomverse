@@ -323,16 +323,22 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * `AmuxWorkItem`. Neither is a marketing model or webhook input. The digest
  * still moves because the whole Prisma schema is deliberately watched.
  *
- * Both notes stand because both changes are in this tree, and the value below
- * is computed over the merged schema rather than taken from either side.
+ * 2026-09-27: the Prompt Refiner stage successor updates two contract comments
+ * in the watched schema: the runtime manifest is now v4 over 189 files, and the
+ * evidence-spec requirement applies to every v4-or-later shadow run. No model,
+ * column, constraint, webhook writer, descriptor or admission decision changes;
+ * the fingerprint moves because schema comments are watched bytes too.
  *
  * 2026-09-27: the AMUX back-merge adds the latched-off recommendation pool
  * and the closed auto-promotion gate. Neither is a marketing model or a
  * webhook input. The digest moves because the whole Prisma schema is
  * deliberately watched.
+ *
+ * Both notes stand because both changes are in this tree, and the value below
+ * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "909d8f73c0ef29fd7f371f6b39d28c311a865c98434b148a211ef4c49cfdaf9b";
+  "7a958d21deb5d165c1419299605729f50884325768de9d897f0782794fc7fb28";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
