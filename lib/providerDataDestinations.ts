@@ -649,9 +649,8 @@ export const providerDataDestination = (
 /**
  * Whether this provider's destination is established at all.
  *
- * **Not a routing permission.** Whether a request may be served is decided by
- * `endpointMayServeConstrainedTraffic` in `lib/deploymentIdentity.ts`, from an
- * approval in force at that moment. Two functions answering "may this go
+ * **Not a routing permission.** Whether a request may be served is a separate
+ * approval, made when the request is served. Two answers to "may this go
  * here?" from different sources is how a notice and a gate come to disagree,
  * and the disagreement is only discovered after somebody has been told.
  *

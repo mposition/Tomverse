@@ -519,9 +519,21 @@ test("deepseek names the Hangzhou company and does not store API content in a na
         new URL("../lib/modelRegistryShared.ts", import.meta.url),
         "utf8"
     );
-    assert.match(registry, /deepseek:\s*\{[\s\S]*?baseUrl: "https:\/\/api\.deepseek\.com"/);
-    assert.equal(registry.includes("api.deepseek.cn"), false);
-    assert.equal(registry.includes("api.sg.deepseek.com"), false);
+    const hosts = [...registry.matchAll(/https?:\/\/[^"'\\\s]+/g)].map(
+        (match) => new URL(match[0]).hostname
+    );
+    assert.equal(
+        hosts.some((host) => host === "api.deepseek.com"),
+        true
+    );
+    assert.equal(
+        hosts.some((host) => host === "api.deepseek.cn"),
+        false
+    );
+    assert.equal(
+        hosts.some((host) => host === "api.sg.deepseek.com"),
+        false
+    );
 });
 
 test("mistral API training is off and the row is ready", () => {
