@@ -932,7 +932,7 @@ export const adoptionReplacementRefusal = (input: {
     isApplicationDefault: boolean;
     isGuestDefault: boolean;
   } | null;
-}): { status: 400 | 409; message: string } | null => {
+}): { status: 400 | 409; message: string; code?: string } | null => {
   if (!input.replacesModelId) return null;
   if (input.replacesModelId === input.adoptedModelId) {
     return { status: 400, message: "A model cannot replace itself." };
@@ -952,12 +952,14 @@ export const adoptionReplacementRefusal = (input: {
   if (input.predecessor.isApplicationDefault) {
     return {
       status: 409,
+      code: "APPLICATION_FALLBACK_PROTECTED",
       message: "The application fallback model must remain enabled and Guest-accessible.",
     };
   }
   if (input.predecessor.isGuestDefault) {
     return {
       status: 409,
+      code: "GUEST_LEAD_PROTECTED",
       message:
         "Change the Guest default model in Platform Settings before disabling or restricting this model.",
     };

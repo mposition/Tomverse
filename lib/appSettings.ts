@@ -183,6 +183,25 @@ export async function updateGuestDefaultModel(modelId: string) {
   return normalized;
 }
 
+export async function updateOperationalFeatureFlags(flags: OperationalFeatureFlags) {
+  if (e2eDatabaseDisabled()) return flags;
+  await prisma.$transaction(
+    [
+      [OPERATIONAL_FLAG_KEYS.aiChatEnabled, String(flags.aiChatEnabled)],
+      [OPERATIONAL_FLAG_KEYS.attachmentsEnabled, String(flags.attachmentsEnabled)],
+      [OPERATIONAL_FLAG_KEYS.publicSharingEnabled, String(flags.publicSharingEnabled)],
+    ].map(([key, value]) =>
+      prisma.appSetting.upsert({
+        where: { key },
+        create: { key, value },
+        update: { value },
+      })
+    )
+  );
+  invalidatePublicSnapshot("app-settings");
+  return getOperationalFeatureFlags();
+}
+
 export async function updatePublicAppSettings(settings: PublicAppSettings) {
   if (e2eDatabaseDisabled()) return settings;
   const rejection = await guestDefaultModelRejection(
