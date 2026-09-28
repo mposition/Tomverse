@@ -112,6 +112,9 @@ const amuxAttempt = async () => {
   });
   fixtureTaskIds.push(task.id);
   const now = new Date();
+  // An attempt still running: a run on an attempt AMUX has already ended is
+  // an orphaned run, and that halts the agent (§11) -- which is not what these
+  // tests are about.
   const attempt = await prisma.amuxExecutionAttempt.create({
     data: {
       id: `eng-agent-attempt-${randomUUID()}`,
@@ -123,10 +126,7 @@ const amuxAttempt = async () => {
       attemptNumber: 1,
       heartbeatAt: now,
       startedAt: now,
-      endedAt: now,
-      outcome: "succeeded",
-      toStatus: "review",
-      endedBy: "engineering-runner",
+      leaseExpiresAt: new Date(now.getTime() + 60 * 60_000),
     },
   });
   return { task, attempt };

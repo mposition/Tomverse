@@ -128,32 +128,49 @@ before(async () => {
 });
 
 after(async () => {
-  // AMUX recovery in these tests ends every expired attempt, not only a test's
-  // own, so other fixtures' runs are left active under ended attempts. The
-  // fixture plays the person once more: every such run is opened as a
-  // mismatch, ended as abandoned and resolved, and the halts these tests
-  // recorded are acknowledged -- the next file starts from no halt.
+  // AMUX recovery in these tests ends every expired attempt, so this file's
+  // own runs can be left active under ended attempts. Only this file's runs
+  // are touched, and only through the product's own action: a person closes
+  // each mismatch, which the resolver refuses for a run that was ever allowed
+  // to write -- then this hook throws and the suite fails, as it should.
+  const owner = {
+    user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+    expires: new Date(Date.now() + 3_600_000).toISOString(),
+  } as Session;
   while ((await runEngineeringAgentTransaction(prisma, (tx) => openEngineeringAgentRunMismatches(tx))) > 0) {
     // the sweep takes a bounded batch per call
   }
   const open = await prisma.engineeringAgentWorkItem.findMany({
-    where: { kind: "state_mismatch", state: "open" },
-    select: { id: true, run: { select: { id: true, status: true, amuxAttemptId: true } } },
+    where: { kind: "state_mismatch", state: "open", runId: { in: fixtureRunIds } },
+    select: { id: true },
   });
   for (const item of open) {
-    if (item.run?.status === "active") {
-      await runEngineeringAgentTransaction(prisma, (tx) =>
-        endEngineeringAgentRun(tx, { runId: item.run!.id, amuxAttemptId: item.run!.amuxAttemptId, outcome: "abandoned", halt: "none" }),
-      );
-    }
-    await prisma.engineeringAgentWorkItem.update({ where: { id: item.id }, data: { state: "resolved" } });
+    await runEngineeringAgentTransaction(
+      prisma,
+      (tx) =>
+        resolveEngineeringAgentStateMismatch(tx, {
+          session: owner,
+          workItemId: item.id,
+          action: "close_domain_after_verified_no_write",
+        }),
+      { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, item.id) },
+    );
   }
-  const acknowledgedAt = new Date(Date.now() + 1_000).toISOString();
-  await prisma.appSetting.upsert({
-    where: { key: "engineeringAgent.haltAcknowledgedAt" },
-    create: { key: "engineeringAgent.haltAcknowledgedAt", value: acknowledgedAt },
-    update: { value: acknowledgedAt },
+  // The halts this file's runs recorded are acknowledged as of the last of
+  // them, and no later: a halt anything else records afterwards still holds.
+  const lastHalted = await prisma.engineeringAgentRun.findFirst({
+    where: { id: { in: fixtureRunIds }, halt: { not: "none" }, endedAt: { not: null } },
+    orderBy: { endedAt: "desc" },
+    select: { endedAt: true },
   });
+  if (lastHalted?.endedAt) {
+    const acknowledgedAt = lastHalted.endedAt.toISOString();
+    await prisma.appSetting.upsert({
+      where: { key: "engineeringAgent.haltAcknowledgedAt" },
+      create: { key: "engineeringAgent.haltAcknowledgedAt", value: acknowledgedAt },
+      update: { value: acknowledgedAt },
+    });
+  }
   await prisma.appSetting.deleteMany({ where: { key: INCIDENT_KEY } });
   if (previousIncident) {
     await prisma.appSetting.create({
@@ -177,7 +194,12 @@ after(async () => {
 
 const sha1 = (seed: string) => createHash("sha1").update(seed).digest("hex");
 let runCounter = 700_000_000 + (Math.floor(Date.now() / 1000) % 100_000_000);
-const nextRunId = () => String((runCounter += 1));
+const fixtureRunIds: string[] = [];
+const nextRunId = () => {
+  const runId = String((runCounter += 1));
+  fixtureRunIds.push(runId);
+  return runId;
+};
 
 /** A worker that is registered, idle and ready, and a todo card it owns. */
 const readyWorkerWithCard = async (options: { requiresHumanReview?: boolean } = {}) => {

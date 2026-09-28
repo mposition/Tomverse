@@ -51,7 +51,7 @@ const writeWork = (overrides = {}) => {
   return { ...work, commitDigest: overrides.commitDigest ?? sha256(expectedPublishCommit(work, DATE)) };
 };
 
-const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
+const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, headAfterPull, moveDuringDiff = false, lastLook = { verdict: "no_objection" }, build, pushOk = true, remoteAfterPush, createPull, pulls, branchBefore = null, commitAt = {} } = {}) => {
   const calls = [];
   const tokens = { minted: 0, revoked: 0 };
   let branch = branchBefore;
@@ -71,7 +71,10 @@ const fakeWorld = ({ work, halt = "none", diff = { digest: "d".repeat(64) }, hea
         return branch;
       },
       pullsForHead: async () => openPulls,
-      pullDiffDigest: async () => diff,
+      pullDiffDigest: async () => {
+        if (moveDuringDiff) branch = "8".repeat(40);
+        return diff;
+      },
       createPull: async (input) => {
         calls.push({ path: "github:createPull", input });
         const answer = createPull ?? { status: "created", number: 42 };
@@ -127,6 +130,7 @@ test("a write claim is rebuilt, looked at last, pushed once to a new branch, and
     "git:push",
     "github:branchOid",
     "github:createPull",
+    "github:branchOid",
     "github:branchOid",
     "publish/result",
   ]);
@@ -323,7 +327,16 @@ test("only a diff AMUX would bind is hashed", () => {
     Buffer.from("diff --git a/x b/x\nGIT binary patch\n"),
     Buffer.from("diff --git a/x b/x\n+hidden \u202e text\n"),
     Buffer.from([0x64, 0x69, 0x66, 0x66, 0xff]),
+    Buffer.concat([Buffer.from("diff --git a/x b/x" + String.fromCharCode(10) + "+nul "), Buffer.from([0]), Buffer.from(" here")]),
+    Buffer.concat([Buffer.from("diff --git a/x b/x" + String.fromCharCode(10)), Buffer.alloc(1024 * 1024, 0x61)]),
   ]) {
     assert.deepEqual(bindableDiffDigest(bad), { refused: true });
   }
+});
+
+test("a head that moves while the diff is read binds nothing", async () => {
+  const world = fakeWorld({ work: writeWork(), moveDuringDiff: true });
+  const round = await runPublisherCycle(world.ports);
+  assert.deepEqual([round.finishedNormally, round.reason], [false, "pull_request_head_changed"]);
+  assert.equal(world.calls.some((call) => call.path === "publish/result"), false, "left for the next lookup");
 });

@@ -31,7 +31,10 @@ const OWNER = "mposition";
 const REPOSITORY = "Tomverse";
 const REPOSITORY_URL = `https://github.com/${OWNER}/${REPOSITORY}.git`;
 const API = "https://api.github.com";
-const MAX_DIFF_BYTES = 4 * 1024 * 1024;
+/** AMUX's review diff limit (lib/amux/reviewGitHub.ts): a larger diff is not one it binds. */
+const MAX_DIFF_BYTES = 1024 * 1024;
+/** Revoking the token must finish inside the supervisor's grace before SIGKILL. */
+const REVOKE_TIMEOUT_MS = 3_000;
 
 /** Exactly the variables this service reads; the IaC declaration lists the same. */
 export const PUBLISHER_VARIABLES = [
@@ -174,11 +177,11 @@ async function workspaceAt(baseSha) {
   };
 }
 
-const githubRequest = async (token, method, path, { body, accept } = {}) =>
+const githubRequest = async (token, method, path, { body, accept, timeoutMs = TIMEOUT_MS } = {}) =>
   fetch(`${API}${path}`, {
     method,
     redirect: "error",
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: {
       accept: accept ?? "application/vnd.github+json",
       authorization: `Bearer ${token}`,
@@ -195,7 +198,7 @@ const githubRequest = async (token, method, path, { body, accept } = {}) =>
  * reorder what a person reviews. Anything else is refused, never hashed.
  */
 export const bindableDiffDigest = (bytes) => {
-  if (bytes.byteLength > MAX_DIFF_BYTES) return { refused: true };
+  if (bytes.byteLength > MAX_DIFF_BYTES || bytes.includes(0)) return { refused: true };
   let text;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -251,8 +254,26 @@ const githubPorts = (token) => ({
       accept: "application/vnd.github.diff",
     }).catch(() => null);
     if (response === null || !response.ok) return null;
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return bindableDiffDigest(bytes);
+    // Read with the limit, as AMUX does: a body past it stops being read.
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_DIFF_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          return { refused: true };
+        }
+        chunks.push(value);
+      }
+    } catch {
+      return null;
+    }
+    return bindableDiffDigest(Buffer.concat(chunks));
   },
   createPull: async ({ title, body, head }) => {
     let response;
@@ -272,7 +293,7 @@ const githubPorts = (token) => ({
   },
 });
 
-async function mintToken({ appId, installationId, privateKey }) {
+async function mintToken({ appId, installationId, privateKey }, hold) {
   const jwt = appJwt(appId, privateKey, Math.floor(Date.now() / 1000));
   const response = await fetch(`${API}/app/installations/${installationId}/access_tokens`, {
     method: "POST",
@@ -289,13 +310,16 @@ async function mintToken({ appId, installationId, privateKey }) {
   const body = await response.json().catch(() => null);
   if (response.status !== 201 || typeof body?.token !== "string") throw new Error("token_unavailable");
   const revoke = async () => {
-    await githubRequest(body.token, "DELETE", "/installation/token").catch(() => undefined);
+    await githubRequest(body.token, "DELETE", "/installation/token", { timeoutMs: REVOKE_TIMEOUT_MS }).catch(() => undefined);
   };
+  // Held before anything else is awaited, so a SIGTERM from here on revokes it.
+  const minted = { token: body.token, revoke };
+  hold(minted);
   if (!tokenPermissionsAllowed(body.permissions)) {
     await revoke();
     throw new Error("token_permissions_refused");
   }
-  return { token: body.token, revoke };
+  return minted;
 }
 
 async function main() {
@@ -341,20 +365,32 @@ async function main() {
   // The supervisor's first signal at the deadline: revoke the token this cycle
   // holds before the group is killed (§13-20), then stop.
   let heldToken = null;
+  // From SIGTERM on, nothing more is written or signalled: every call to the
+  // app or GitHub refuses, the token is revoked, and the process exits.
+  let stopping = false;
   process.on("SIGTERM", () => {
+    stopping = true;
     void (heldToken?.revoke() ?? Promise.resolve()).finally(() => process.exit(70));
   });
+  const unlessStopping = (fn) => (...args) => {
+    if (stopping) throw new Error("stopping");
+    return fn(...args);
+  };
 
   let result;
   try {
     result = await runPublisherCycle({
-      app,
-      mintToken: async () => {
-        heldToken = await mintToken(credentials);
-        return heldToken;
+      app: unlessStopping(app),
+      mintToken: unlessStopping(() =>
+        mintToken(credentials, (minted) => {
+          heldToken = minted;
+        }),
+      ),
+      github: (token) => {
+        const ports = githubPorts(token);
+        return Object.fromEntries(Object.entries(ports).map(([name, fn]) => [name, unlessStopping(fn)]));
       },
-      github: githubPorts,
-      workspace: workspaceAt,
+      workspace: unlessStopping(workspaceAt),
     });
   } catch (error) {
     result = { finishedNormally: false, halt: "unknown", reason: error instanceof Error ? error.message : "failed" };
@@ -363,11 +399,14 @@ async function main() {
   // A cycle that ran to its end says so, and reads the halt once more: the
   // signal follows the halt as it stands now, not as it stood at the claim.
   let haltAfter = "unknown";
+  if (stopping) return;
   if (result.finishedNormally) {
     const finished = await app("service/finished", {}).catch(() => null);
     haltAfter = finished?.status === 200 ? reportedHalt(finished.json?.halt) : "unknown";
   }
   const success = finalSignalIsSuccess({ finishedNormally: result.finishedNormally, roundHalt: result.halt, haltAfter });
+  // SIGTERM may have come while the halt was read: then the supervisor signals.
+  if (stopping) return;
   await fetch(success ? deadMan : `${deadMan.replace(/\/+$/, "")}/fail`, {
     method: "GET",
     redirect: "error",

@@ -58,35 +58,49 @@ export const haltOf = (json) => reportedHalt(json?.halt);
  */
 export const observeUnbound = async ({ refs, pulls, known, commitDigestAt }) => {
   const byNumber = new Map(known.bindings.map((binding) => [binding.prNumber, binding]));
+  const boundRuns = new Set(known.bindings.map((binding) => binding.runId));
+  // A commit a consumed capability allowed counts only for a run the app has
+  // not bound yet -- the publisher's own write before its result. Once bound,
+  // only the bound head is the run's. A commit object that cannot be read
+  // leaves the observation undetermined, never decided either way.
   const allowedCommit = async (runId, sha) => {
+    if (boundRuns.has(runId)) return false;
     const digests = new Set(known.consumed.filter((row) => row.runId === runId).map((row) => row.commitDigest));
     if (digests.size === 0 || typeof sha !== "string") return false;
     const digest = await commitDigestAt(sha);
-    return digest !== null && digests.has(digest);
+    if (digest === null) throw UNDETERMINED;
+    return digests.has(digest);
   };
-  for (const pull of pulls) {
-    const runId = parseEngineeringBranchName(pull.headRef ?? "");
-    const binding = byNumber.get(pull.number);
-    if (binding !== undefined) {
-      // A bound pull request stays at the head it was verified at.
-      if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
+  try {
+    for (const pull of pulls) {
+      const runId = parseEngineeringBranchName(pull.headRef ?? "");
+      const binding = byNumber.get(pull.number);
+      if (binding !== undefined) {
+        // A bound pull request stays at the head it was verified at.
+        if (binding.runId === runId && pull.headSha === binding.verifiedHeadSha) continue;
+        return "unbound_app_pr";
+      }
+      const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
+      const claimsToBeOurs = runId !== null || (pull.body ?? "").startsWith("<!-- engineering-agent");
+      if (!claimsToBeOurs) continue;
+      if (marked && (await allowedCommit(runId, pull.headSha))) continue;
       return "unbound_app_pr";
     }
-    const marked = runId !== null && prBodyCarriesMarker(pull.body ?? "", runId);
-    const claimsToBeOurs = runId !== null || (pull.body ?? "").startsWith("<!-- engineering-agent");
-    if (!claimsToBeOurs) continue;
-    if (marked && (await allowedCommit(runId, pull.headSha))) continue;
-    return "unbound_app_pr";
-  }
-  for (const { ref, sha } of refs) {
-    const runId = parseEngineeringBranchName(ref);
-    if (runId === null) return "unbound_app_ref";
-    if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
-    if (await allowedCommit(runId, sha)) continue;
-    return "unbound_app_ref";
+    for (const { ref, sha } of refs) {
+      const runId = parseEngineeringBranchName(ref);
+      if (runId === null) return "unbound_app_ref";
+      if (known.bindings.some((binding) => binding.runId === runId && binding.verifiedHeadSha === sha)) continue;
+      if (await allowedCommit(runId, sha)) continue;
+      return "unbound_app_ref";
+    }
+  } catch (error) {
+    if (error === UNDETERMINED) return "undetermined";
+    throw error;
   }
   return "none";
 };
+
+const UNDETERMINED = Symbol("undetermined");
 
 const knownShape = (json) => Array.isArray(json?.bindings) && Array.isArray(json?.consumed);
 
@@ -136,6 +150,10 @@ export async function runRunnerCycle(ports) {
     return { finishedNormally: false, halt: "unknown", reason: "observation_raced" };
   }
   const observed = await observeUnbound({ ...namespace, known: known.json, commitDigestAt: ports.commitDigestAt });
+  if (observed === "undetermined") {
+    // Like a raced reading: nothing is recorded, and the round is not healthy.
+    return { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" };
+  }
   if (observed !== "none") {
     const recorded = await ports.app("observe/halt", { halt: observed });
     return { finishedNormally: recorded.status === 200, halt: observed, reason: "observed_unbound" };

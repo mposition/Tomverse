@@ -265,6 +265,31 @@ test("a branch or pull request passes only at a bound head or an allowed commit,
   assert.equal((await runRunnerCycle(ports(unreadable.app, okModel))).finishedNormally, false);
 });
 
+test("an unreadable commit leaves the observation undetermined, and a bound run passes only at its bound head", async () => {
+  const A = "a".repeat(40);
+  const C = "c".repeat(40);
+  const allowed = "d".repeat(64);
+  const unbound = { bindings: [], consumed: [{ runId: "222", commitDigest: allowed }] };
+  assert.equal(
+    await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [], known: unbound, commitDigestAt: async () => null }),
+    "undetermined",
+  );
+  const { app, calls } = fakeApp({ "observe/known": { status: 200, json: unbound } });
+  const round = await runRunnerCycle(ports(app, okModel, fakeClone(), { refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [] }));
+  assert.deepEqual(round, { finishedNormally: false, halt: "unknown", reason: "observation_undetermined" });
+  assert.equal(calls.some((call) => call.path === "observe/halt"), false, "nothing recorded for an object not read");
+
+  const bound = {
+    bindings: [{ runId: "222", prNumber: 7, headSha: A, verifiedHeadSha: A }],
+    consumed: [{ runId: "222", commitDigest: allowed }],
+  };
+  assert.equal(
+    await observeUnbound({ refs: [{ ref: "refs/heads/agent/engineering/222", sha: C }], pulls: [], known: bound, commitDigestAt: async () => allowed }),
+    "unbound_app_ref",
+    "once bound, an earlier allowed commit is not the run's",
+  );
+});
+
 test("the app's records must not move while GitHub is read, or nothing is judged", async () => {
   let reads = 0;
   const moving = fakeApp({

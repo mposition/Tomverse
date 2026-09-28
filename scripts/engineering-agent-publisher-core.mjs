@@ -155,6 +155,12 @@ export async function runPublisherCycle(ports) {
       const diff = await github.pullDiffDigest(pull.number);
       if (diff === null) return { unreadable: "snapshot_unreadable" };
       if (diff.refused) return { refused: "diff_not_bindable" };
+      // Read again after the diff, as AMUX's review does: a head that moved
+      // while the diff was read means the digest is not this commit's.
+      const again = (await github.pullsForHead(work.branch)).find((candidate) => candidate.number === pull.number);
+      if (again?.headSha !== verifiedHeadSha || again?.baseSha !== pull.baseSha || (await github.branchOid(work.branch)) !== verifiedHeadSha) {
+        return { unreadable: "pull_request_head_changed" };
+      }
       return {
         pullRequest: {
           prNumber: pull.number,
