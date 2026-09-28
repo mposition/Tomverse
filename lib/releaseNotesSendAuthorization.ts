@@ -291,14 +291,36 @@ export async function releaseNotesSendAuthorization(
   // (docs/policy/email-notifications.md section 13.4), and an objection
   // survives the account that made it -- so an address reused by a new account
   // carries the refusal the previous holder made from the same mailbox.
-  const objected = await read("the objection", async () =>
-    Boolean(
-      await prisma.emailPermissionEvent.findFirst({
-        where: { emailAddress: input.normalizedAddress, kind: "objected" },
-        select: { id: true },
-      })
-    )
+  //
+  // The latest one, compared with the consent below rather than read as a
+  // permanent mark. An objection followed by a later grant is a person who
+  // changed their mind and said so; reading "any objection, ever" kept them
+  // refused, and recorded the refusal as `permission_revoked` about somebody
+  // who had just asked to be sent to.
+  const latestObjection = await read("the objection", () =>
+    prisma.emailPermissionEvent.findFirst({
+      where: { emailAddress: input.normalizedAddress, kind: "objected" },
+      orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+      select: { occurredAt: true },
+    })
   );
+
+  // Whether this account has been shown the in-product notice, which tells the
+  // person we will not send unless asked. An input to `overrideBlockers()`:
+  // from then on the override may not apply. Any notice, like
+  // `inProductConsentNotice.ts` reads it -- the conservative answer, and the
+  // same one, so the notice and the send cannot disagree about who was promised.
+  const shownNoUnrequestedSendPromise =
+    input.userId === null
+      ? false
+      : await read("the in-product notice", async () =>
+          Boolean(
+            await prisma.emailPermissionEvent.findFirst({
+              where: { userId: input.userId as string, kind: "notice_shown" },
+              select: { id: true },
+            })
+          )
+        );
 
   // Two rows, both required, because they answer different halves of one
   // question. The consent record says an act of consent happened and names the
@@ -321,7 +343,7 @@ export async function releaseNotesSendAuthorization(
       prisma.consentRecord.findFirst({
         where: { emailAddress: input.normalizedAddress, purpose: input.purpose },
         orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-        select: { id: true, action: true },
+        select: { id: true, action: true, occurredAt: true },
       }),
       input.userId === null
         ? Promise.resolve(null)
@@ -343,8 +365,19 @@ export async function releaseNotesSendAuthorization(
     // `ReleaseNotesConsentInput` refuses a consent that cannot say what it rests
     // on -- an assertion, not a convention, and the reason this reads the row
     // rather than a boolean.
-    return { express, evidenceIds: express && latest ? [latest.id] : [] };
+    return {
+      express,
+      evidenceIds: express && latest ? [latest.id] : [],
+      // The same latest row, read for the override's standing rather than for a
+      // basis: a withdrawal is the person's act and no approval sits above it.
+      withdrawn: latest !== null && latest.action === "withdrawn",
+      grantedAt: granted && latest ? latest.occurredAt : null,
+    };
   });
+
+  const objected =
+    latestObjection !== null &&
+    (consent.grantedAt === null || latestObjection.occurredAt > consent.grantedAt);
 
   // Composed here rather than by the caller, for the reason the candidate
   // countries are derived here: this module already holds the rules and the duty
@@ -448,6 +481,11 @@ export async function releaseNotesSendAuthorization(
             // member's own, which is how a cohort sealed under an older rule
             // stops matching rather than matching wrongly.
             addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+            standing: {
+              hasObjected: objected,
+              consentWithdrawn: consent.withdrawn,
+              shownNoUnrequestedSendPromise,
+            },
           };
         });
 
@@ -462,7 +500,7 @@ export async function releaseNotesSendAuthorization(
     recipient: {
       suppressed: input.suppressed,
       objected,
-      consent,
+      consent: { express: consent.express, evidenceIds: consent.evidenceIds },
     },
     flags,
     display: {

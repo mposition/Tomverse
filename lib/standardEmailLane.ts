@@ -87,7 +87,12 @@ import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue"
 import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
 import { subjectLabelWaived } from "@/lib/releaseNotesDisplayRequirements";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
-import { consentAddressDigest } from "@/lib/emailConsentToken";
+// The cohort's own digest, not the consent-link digest. The two are different
+// functions -- one hex over the normalised address, the other a prefixed
+// base64url -- and comparing a delivery digest from one with a member digest
+// sealed by the other failed for every member, so the approved override never
+// applied and each refusal was recorded as the person revoking permission.
+import { approvalAddressDigest } from "@/lib/emailSendApprovalCohort";
 
 /**
  * The standard lane: durable, at-least-once, delivered eventually.
@@ -818,9 +823,9 @@ const decideReleaseNotesSend = async (
   const { verdict, displayProfile } = await releaseNotesSendAuthorization({
     userId: delivery.userId,
     purpose,
-    deliveryAddressDigest: consentAddressDigest(normalizedAddress),
+    deliveryAddressDigest: approvalAddressDigest(normalizedAddress),
     currentAddressDigest: account?.email
-      ? consentAddressDigest(normalizeSuppressionAddress(account.email))
+      ? approvalAddressDigest(account.email)
       : null,
     // The version this row was pinned to, not the active one: the lane composes
     // a queued message under the version that message carries (EM-04).

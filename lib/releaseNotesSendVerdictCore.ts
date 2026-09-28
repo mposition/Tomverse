@@ -43,6 +43,7 @@ import {
   decisionAllowed,
   type ApprovalScopeInput,
 } from "@/lib/emailPermissionLedgerCore";
+import { overrideBlockers } from "@/lib/emailSendApprovalCohortCore";
 import {
   releaseNotesAuthorityVerdict,
   type ReleaseNotesAuthorityVerdict,
@@ -155,6 +156,24 @@ export type OverrideInput = {
    * somebody else.
    */
   addressNormalizationVersion: string;
+  /**
+   * The person's own standing, which decides whether an override may apply at
+   * all -- before the question of whether it covers them.
+   *
+   * `overrideBlockers()` (lib/emailSendApprovalCohortCore.ts) is the approved
+   * list of those conditions, and `inProductConsentNotice.ts` says S9 inherits
+   * it by calling it. The first version of this verdict did not, so a person who
+   * had been shown the in-product notice -- and told we will not send unless
+   * asked -- could still be sent to under the override, and a high-confidence
+   * country no profile covers (`profileForCountry()` answers `ZZ`) was a
+   * legal refusal the override would lift.
+   */
+  standing: {
+    hasObjected: boolean;
+    consentWithdrawn: boolean;
+    /** A `notice_shown` exists for this account. */
+    shownNoUnrequestedSendPromise: boolean;
+  };
 };
 
 export type SendVerdictInput = {
@@ -308,7 +327,31 @@ export const releaseNotesSendVerdict = (input: SendVerdictInput): SendVerdict =>
   let overrideApplied: SendVerdict["overrideApplied"] = null;
   let overrideRefusal: string | null = null;
   if (overrideNeeded && input.override !== null) {
+    // The person first, then the approval. A blocked override is refused
+    // whatever its scope and cohort say, and the refusal names every reason
+    // rather than the first, because that is the list the admin screen shows.
+    const standingBlockers = overrideBlockers({
+      hasObjected: input.override.standing.hasObjected,
+      consentWithdrawn: input.override.standing.consentWithdrawn,
+      // `suppressionCheck()` already answered across the purpose,
+      // classification and global scopes, and the verdict's own `suppressed`
+      // blocker refuses on it unconditionally. Passed once, here, so the
+      // override's list says it too.
+      suppressedForPurpose: input.recipient.suppressed,
+      suppressedForClassification: false,
+      suppressedGlobally: false,
+      // One candidate or none under the rule in force (`candidateCountries()`
+      // in lib/releaseNotesSendAuthorization.ts). A list of two is a conflict,
+      // and a conflict is an undetermined country -- taking the first would let
+      // the override through on whichever country happened to sort first.
+      country: input.countries.length === 1 ? input.countries[0]! : "ZZ",
+      obligationsDecided:
+        input.countries.length > 0 &&
+        input.countries.every((country) => obligations[country]?.allSettled === true),
+      shownNoUnrequestedSendPromise: input.override.standing.shownNoUnrequestedSendPromise,
+    });
     overrideRefusal =
+      (standingBlockers.length > 0 ? `override_blocked:${standingBlockers.join(",")}` : null) ??
       approvalScopeRefusal(input.override.approval, {
         approvalType: "risk_accepted",
         policyVersionId: input.policyVersionId,

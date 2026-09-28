@@ -66,10 +66,12 @@ const approval = (overrides = {}) => ({
 const override = ({ approval: approvalOverrides, ...rest } = {}) => ({
   approvalId: "approval-1",
   approval: approval(approvalOverrides),
-  member: { userId: "user-1", addressDigest: "digest-1" },
+  member: { userId: "user-1", addressDigest: "digest-1", addressNormalizationVersion: "v1" },
   userId: "user-1",
   deliveryAddressDigest: "digest-1",
   currentAddressDigest: "digest-1",
+  addressNormalizationVersion: "v1",
+  standing: { hasObjected: false, consentWithdrawn: false, shownNoUnrequestedSendPromise: false },
   ...rest,
 });
 
@@ -181,12 +183,60 @@ test("no country, or one that could not be settled, is a blocker an override can
       override: override(),
     });
     assert.ok(result.blockers.includes("country_undetermined"), JSON.stringify(countries));
-    // The override applied -- it was needed and it covers this person -- and the
-    // send is still refused. Section 5.6: the override sits above the authority
-    // refusal and does not touch the blockers.
-    assert.notEqual(result.overrideApplied, null);
+    // And the override does not even apply. `overrideBlockers()` -- the approved
+    // list S9 inherits -- refuses it for an undetermined country, so the refusal
+    // names that rather than recording an override as applied to a send that
+    // could not go.
+    assert.equal(result.overrideApplied, null);
+    assert.match(result.overrideRefusal ?? "", /country_undetermined/);
     assert.equal(result.allowed, false);
   }
+});
+
+test("an override is refused for the standing overrideBlockers() names", () => {
+  // S8's approved list, which the first version of this verdict never called.
+  // Each of these is a person the override may not reach, however the approval
+  // is scoped.
+  const noConsent = { suppressed: false, objected: false, consent: { express: false, evidenceIds: [] } };
+  const cases = [
+    [{ hasObjected: true }, "objected"],
+    [{ consentWithdrawn: true }, "consent_withdrawn"],
+    [{ shownNoUnrequestedSendPromise: true }, "promised_no_unrequested_send"],
+  ];
+  for (const [standing, reason] of cases) {
+    const result = verdict({
+      recipient: noConsent,
+      override: override({
+        standing: {
+          hasObjected: false,
+          consentWithdrawn: false,
+          shownNoUnrequestedSendPromise: false,
+          ...standing,
+        },
+      }),
+    });
+    assert.equal(result.overrideApplied, null, reason);
+    assert.match(result.overrideRefusal ?? "", new RegExp(reason));
+    assert.ok(result.blockers.includes("approval_member_mismatch"), reason);
+    assert.equal(result.allowed, false);
+  }
+
+  // A country no profile covers is a legal refusal the override would otherwise
+  // lift: `profileForCountry()` answers ZZ, and `overrideBlockers()` says no.
+  const unreviewed = verdict({
+    countries: ["JP"],
+    rules: [],
+    recipient: noConsent,
+    override: override(),
+  });
+  assert.equal(unreviewed.overrideApplied, null);
+  assert.match(unreviewed.overrideRefusal ?? "", /country_undetermined/);
+  assert.equal(unreviewed.allowed, false);
+
+  // And with nothing against the person, the override applies.
+  const clean = verdict({ recipient: noConsent, override: override() });
+  assert.notEqual(clean.overrideApplied, null);
+  assert.equal(clean.allowed, true);
 });
 
 test("the display contract has three states and the enqueue does not compare", () => {

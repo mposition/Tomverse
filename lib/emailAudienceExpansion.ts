@@ -45,6 +45,7 @@ import {
   recordEnqueueDecision,
   releaseNotesEnqueueDecision,
 } from "@/lib/releaseNotesEnqueueDecision";
+import { releaseNotesAudienceWhere } from "@/lib/releaseNotesAudience";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
 import { deliveryContentForLanguage } from "@/lib/emailCampaignContentCore";
 
@@ -141,23 +142,21 @@ const cohortCandidates = async (input: {
    */
   classification: SendClassification;
   purpose: string | null;
+  /** The version the expansion pins, which scopes the approvals that count. */
+  policyVersionId: string;
 }): Promise<ExpansionCandidate[]> => {
   if (input.cohort.kind === "marketing_consent") {
+    // The candidate condition the estimate reads too
+    // (lib/releaseNotesAudience.ts): confirmed consent, or a sealed
+    // `risk_accepted` approval. The second half is the population section 5.6
+    // exists for, and a query on consent alone could never reach it.
+    const audience = await releaseNotesAudienceWhere({
+      purpose: input.cohort.purpose,
+      policyVersionId: input.policyVersionId,
+    });
     const rows = await prisma.user.findMany({
       where: {
-        accountStatus: "active",
-        emailPreferences: {
-          some: {
-            purpose: input.cohort.purpose,
-            enabled: true,
-            grantedAt: { not: null },
-            // Confirmed consent only (docs/policy/email-double-opt-in.md §6).
-            // The lane refuses the rest anyway; filing them here would put
-            // people in the ledger as recipients who can never receive.
-            confirmedAt: { not: null },
-          },
-        },
-        ...(input.after ? { id: { gt: input.after } } : {}),
+        AND: [audience, ...(input.after ? [{ id: { gt: input.after } }] : [])],
       },
       orderBy: { id: "asc" },
       take: input.take,
@@ -450,6 +449,7 @@ export async function expandEmailEvent(input: {
             take: plan.take,
             classification: definition.classification,
             purpose: definition.purpose ?? null,
+            policyVersionId,
           })
         : (
             await nextCandidates({
@@ -544,67 +544,75 @@ export async function expandEmailEvent(input: {
             })
           : null;
 
-        const written = await prisma.emailDelivery.createManyAndReturn({
-          select: { id: true },
-          data: [
-            {
-              eventId: event.id,
+        // The row and its enqueue snapshot in one transaction, as the
+        // single-message path has them. Two transactions lost the snapshot for
+        // good whenever the second failed: the row was already committed and
+        // `pending`, the drain took it, and a resumed pass found the insert
+        // swallowed by `skipDuplicates` and had no row id to record against --
+        // so the first of section 7.6's two snapshots was simply never written
+        // for that recipient.
+        // Captured here, where the null check above has narrowed it; a closure
+        // does not keep that narrowing.
+        const emailAddress = candidate.email;
+        const written = await prisma.$transaction(async (tx) => {
+          const rows = await tx.emailDelivery.createManyAndReturn({
+            select: { id: true },
+            data: [
+              {
+                eventId: event.id,
+                userId: candidate.id,
+                recipientKey: recipientKeyFor(candidate.id),
+                lane: "standard",
+                emailAddress,
+                language,
+                // The contract's own profile for a release-notes row, for the same
+                // reason as the single-message path: the hash names it and the send
+                // renders from the pin.
+                jurisdictionCountry:
+                  releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
+                jurisdictionProfileKey:
+                  releaseNotes?.displayProfile?.profileKey ?? resolved?.profileKey ?? "ZZ",
+                policyVersionId,
+                templateVersionId: template.templateVersionId,
+                ...(releaseNotes
+                  ? { displayContractHash: releaseNotes.displayContractHash }
+                  : {}),
+                idempotencyKey: `${event.id}:${recipientKeyFor(candidate.id)}`,
+                // A dry run writes the same rows and marks them, so it answers
+                // the question a dry run is asked. `dry_run` is already in the
+                // skipReason CHECK and nothing has ever written it.
+                ...(spec.dryRun
+                  ? { status: "skipped", skipReason: "dry_run", nextAttemptAt: null }
+                  : { status: "pending", nextAttemptAt: new Date() }),
+                attempts: 0,
+                renderDataSnapshot: encryptSnapshot(
+                  deliveryContent.payload,
+                  snapshotKeyring()
+                ) as Prisma.InputJsonValue,
+              },
+            ],
+            // The unique index decides duplicates. A resumed pass re-covering
+            // ground is the ordinary case, not an error.
+            skipDuplicates: true,
+          });
+          // Only for a row this pass wrote. A resumed pass that finds the insert
+          // swallowed finds the snapshot too, because both committed together.
+          const [row] = rows;
+          if (row && releaseNotes) {
+            await recordEnqueueDecision(tx, {
+              decision: releaseNotes,
+              deliveryId: row.id,
               userId: candidate.id,
-              recipientKey: recipientKeyFor(candidate.id),
-              lane: "standard",
-              emailAddress: candidate.email,
-              language,
-              // The contract's own profile for a release-notes row, for the same
-              // reason as the single-message path: the hash names it and the send
-              // renders from the pin.
-              jurisdictionCountry:
-                releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
-              jurisdictionProfileKey:
-                releaseNotes?.displayProfile?.profileKey ?? resolved?.profileKey ?? "ZZ",
-              policyVersionId,
-              templateVersionId: template.templateVersionId,
-              ...(releaseNotes
-                ? { displayContractHash: releaseNotes.displayContractHash }
-                : {}),
-              idempotencyKey: `${event.id}:${recipientKeyFor(candidate.id)}`,
-              // A dry run writes the same rows and marks them, so it answers
-              // the question a dry run is asked. `dry_run` is already in the
-              // skipReason CHECK and nothing has ever written it.
-              ...(spec.dryRun
-                ? { status: "skipped", skipReason: "dry_run", nextAttemptAt: null }
-                : { status: "pending", nextAttemptAt: new Date() }),
-              attempts: 0,
-              renderDataSnapshot: encryptSnapshot(
-                deliveryContent.payload,
-                snapshotKeyring()
-              ) as Prisma.InputJsonValue,
-            },
-          ],
-          // The unique index decides duplicates. A resumed pass re-covering
-          // ground is the ordinary case, not an error.
-          skipDuplicates: true,
+              purpose: definition.purpose as string,
+              classification: definition.classification,
+            });
+          }
+          return rows;
         });
 
         if (written.length === 1) {
           result.expanded += 1;
           expandedSoFar += 1;
-          // Only for a row this pass wrote. A resumed pass re-covering ground
-          // finds `skipDuplicates` swallowed the insert, and the snapshot that
-          // belongs to that row was written when it was; a second one would be
-          // refused by the `(deliveryId, phase)` unique anyway, but asking is
-          // how the record stays a record of what happened rather than of when
-          // somebody re-ran something.
-          if (releaseNotes) {
-            await prisma.$transaction((tx) =>
-              recordEnqueueDecision(tx, {
-                decision: releaseNotes,
-                deliveryId: written[0].id,
-                userId: candidate.id,
-                purpose: definition.purpose as string,
-                classification: definition.classification,
-              })
-            );
-          }
         } else {
           result.alreadyPresent += 1;
         }
@@ -615,7 +623,10 @@ export async function expandEmailEvent(input: {
             userId: candidate.id,
             email: candidate.email,
             language,
-            jurisdictionCountry: resolved?.countryCode ?? "ZZ",
+            // The country the row pinned, so the wave ledger and the delivery
+            // cannot name different countries for one recipient.
+            jurisdictionCountry:
+              releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
             ledger: candidate.ledger,
             // Looked up only when this pass did not write the row, which is
             // the resumed case. The ordinary path already has the id.

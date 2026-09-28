@@ -62,10 +62,12 @@ const BLOCKER_SKIP_REASON: Record<SendBlocker, ReleaseNotesSkipReason> = {
   // and it was taken back.
   objected: "permission_revoked",
   suppressed: "consent_withdrawn",
-  // The approval this send was going to rest on does not cover it. Not the
-  // person's act, but it is about who this message may go to, so it is read
-  // before anything about the message's contents.
-  approval_member_mismatch: "permission_revoked",
+  // The approval this send was going to rest on does not cover it -- so there
+  // is no basis, which is what `no_consent` says. Not `permission_revoked`:
+  // that word reports the person's act, and a cohort member whose address
+  // digest simply did not match had revoked nothing. Recording it that way put
+  // a withdrawal in the ledger for people who had never withdrawn.
+  approval_member_mismatch: "no_consent",
   // No country, or two that disagree. Nothing about the message is decidable
   // until this is, because every rule below is a country's.
   country_undetermined: "jurisdiction_unconfirmed",

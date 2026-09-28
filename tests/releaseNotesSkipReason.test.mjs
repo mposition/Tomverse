@@ -66,7 +66,7 @@ test("each blocker alone maps to its own word", () => {
     feature_disabled: "marketing_disabled",
     display_contract_changed: "display_contract_changed",
     display_unsatisfiable: "display_unsatisfiable",
-    approval_member_mismatch: "permission_revoked",
+    approval_member_mismatch: "no_consent",
   };
   // Not a subset: the table is checked against the whole blocker list, so a new
   // blocker fails here as well as in `unmappedBlockers()`.

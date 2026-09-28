@@ -3,7 +3,12 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { consentAddressDigest } from "@/lib/emailConsentToken";
+// The cohort's own digest, not the consent-link digest. The two are different
+// functions -- one hex over the normalised address, the other a prefixed
+// base64url -- and comparing a delivery digest from one with a member digest
+// sealed by the other failed for every member, so the approved override never
+// applied and each refusal was recorded as the person revoking permission.
+import { approvalAddressDigest } from "@/lib/emailSendApprovalCohort";
 import {
   normalizeSuppressionAddress,
   suppressionCheck,
@@ -101,9 +106,9 @@ export async function releaseNotesEnqueueDecision(input: {
   const { verdict, displayProfile } = await releaseNotesSendAuthorization({
     userId: input.userId,
     purpose: input.purpose,
-    deliveryAddressDigest: consentAddressDigest(normalizedAddress),
+    deliveryAddressDigest: approvalAddressDigest(normalizedAddress),
     currentAddressDigest: account?.email
-      ? consentAddressDigest(normalizeSuppressionAddress(account.email))
+      ? approvalAddressDigest(account.email)
       : null,
     pinnedPolicyVersionId: input.policyVersionId,
     // Nothing to compare against yet: this call is what produces the pin. The
