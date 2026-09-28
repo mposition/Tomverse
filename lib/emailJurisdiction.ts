@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import {
   normalizeCountry,
@@ -34,8 +36,22 @@ export async function jurisdictionForUser(input: {
    * committed with consent in the same transaction.
    */
   countryConfirmation?: { country: string; confirmedAt: Date };
+  /**
+   * The transaction to read in, when the answer has to be the one true inside
+   * it.
+   *
+   * Without it the country is read on the global client, which cannot see a
+   * country the caller's transaction has just written. That is harmless for a
+   * pure read and not harmless when the answer decides whether a permanent row
+   * may be written in the same transaction -- the in-product notice records
+   * `notice_shown` once per account, and asking a stale snapshot whether the
+   * override will mail somebody let it record a promise the override broke
+   * the moment the transaction committed.
+   */
+  client?: Prisma.TransactionClient;
 }): Promise<JurisdictionForUser> {
-  const settings = await prisma.userSettings.findUnique({
+  const db = input.client ?? prisma;
+  const settings = await db.userSettings.findUnique({
     where: { userId: input.userId },
     select: {
       country: true,
@@ -51,7 +67,7 @@ export async function jurisdictionForUser(input: {
   // The jurisdiction resolved the last time they actually agreed to something.
   // Only a consent that still stands counts: a withdrawal says nothing about
   // where somebody is.
-  const lastConsent = await prisma.consentRecord.findFirst({
+  const lastConsent = await db.consentRecord.findFirst({
     where: { userId: input.userId, action: { in: ["granted", "reconfirmed"] } },
     orderBy: { occurredAt: "desc" },
     select: { jurisdiction: true },

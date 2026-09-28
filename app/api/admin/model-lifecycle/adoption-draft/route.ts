@@ -9,9 +9,11 @@ import { prisma } from "@/lib/prisma";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import {
   ADOPTION_USAGE_CLASSES,
+  adoptionDocReadIsDue,
   buildAdoptionDraft,
   registryIdFromApiModel,
 } from "@/lib/modelAdoptionDraft";
+import { refreshProviderModelDocEvidence } from "@/lib/providerModelDocEvidence";
 import { modelProductSurface } from "@/lib/modelLifecycleTriage";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
@@ -23,10 +25,13 @@ import type { AiModel } from "@/lib/models";
  * The registry form, prefilled from what this morning's scan already knows
  * about a queued model.
  *
- * Read-only and side-effect free: it proposes, and the operator's save is what
- * decides anything. Kept apart from the queue's own GET because that response
- * is a list served to a browser on every panel load, and a draft is one item's
- * worth of detail that only matters when somebody clicks adopt.
+ * It proposes, and the operator's save is what decides anything. When the
+ * stored documentation read is missing, stale, or from an older parser, this
+ * request reads that one model's first-party documents and stores the evidence
+ * row, the same read the daily scan does. A fresh parse is reused and the
+ * host is not asked again. Kept apart from the queue's own GET because that
+ * response is a list served to a browser on every panel load, and a draft is
+ * one item's worth of detail that only matters when somebody clicks adopt.
  *
  * The observation row is read by (provider, apiModel) -- the exact pair the
  * work item was filed under -- rather than by the collapsed family, because
@@ -117,9 +122,9 @@ export async function GET(req: Request) {
           })
         : null,
       prisma.modelRegistryEntry.findMany({ select: { id: true } }),
-      // What the daily documentation read found for the same exact pair. Read,
-      // never fetched here: the form must not depend on a documentation host
-      // answering while somebody has it open.
+      // What the daily documentation read found for the same exact pair. A
+      // fresh parse is used as it stands. Anything less is read below, once,
+      // for this model.
       pairObserved
         ? prisma.providerModelDocEvidence.findUnique({
             where: { provider_apiModel: pair },
@@ -135,8 +140,45 @@ export async function GET(req: Request) {
         : null,
     ]);
     // A row whose sources are not the shape this code writes is not evidence:
-    // the operator could not open what the numbers came from.
-    const docSources = docRow ? docSourcesFromStored(docRow.sources) : null;
+    // the operator could not open what the numbers came from. That, a missing
+    // row, a failed read, or evidence past its age is one live read of this
+    // model's own documents. A host that does not answer leaves the stored
+    // row in place and the form still opens.
+    let evidenceRow = docRow;
+    const storedSources = evidenceRow ? docSourcesFromStored(evidenceRow.sources) : null;
+    const storedParse =
+      evidenceRow && storedSources ? docParseFromStored(evidenceRow) : null;
+    if (
+      pairObserved &&
+      adoptionDocReadIsDue({
+        provider: pair.provider,
+        parse: storedParse,
+        fetchedAt: evidenceRow?.fetchedAt ?? null,
+        now: new Date(),
+      })
+    ) {
+      try {
+        await refreshProviderModelDocEvidence({
+          provider: pair.provider,
+          apiModel: pair.apiModel,
+          displayName: observation?.displayName ?? null,
+        });
+        evidenceRow = await prisma.providerModelDocEvidence.findUnique({
+          where: { provider_apiModel: pair },
+          select: {
+            status: true,
+            parserVersion: true,
+            fields: true,
+            problems: true,
+            sources: true,
+            fetchedAt: true,
+          },
+        });
+      } catch {
+        evidenceRow = docRow;
+      }
+    }
+    const docSources = evidenceRow ? docSourcesFromStored(evidenceRow.sources) : null;
 
     const metadata =
       observation?.metadata &&
@@ -195,11 +237,11 @@ export async function GET(req: Request) {
       worstCaseInputTokens: chatUserMaxInputTokens(),
       registryModelId: pricedModelId,
       docEvidence:
-        docRow && docSources
+        evidenceRow && docSources
           ? {
-              parse: docParseFromStored(docRow),
+              parse: docParseFromStored(evidenceRow),
               sources: docSources,
-              fetchedAt: docRow.fetchedAt,
+              fetchedAt: evidenceRow.fetchedAt,
             }
           : null,
     });

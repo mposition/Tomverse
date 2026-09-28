@@ -97,10 +97,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-21, this merge: develop's moves and this branch's arrive together,
 // and each side had already repinned for its own reason. This branch raised
 // `MARKETING_WEBHOOK_PIPELINE_FINGERPRINT` and rewrote the comment above it;
-// 2026-09-22, merging develop into S3 again: both sides moved positions in
-// this closure and neither is taken -- the value below is computed over the
-// merged tree. The position-free inventory is unchanged on both sides, so
-// this is a repin and not a review of new computed access.
+// develop's confirmatory shadow v4 added a reviewed runtime path and its own
+// schema and comment changes. Neither is taken over the other -- the value
+// below is computed over the merged tree, which is the only tree that will
+// exist. What makes that a repin rather than a review is that the
+// position-free inventory (`path + expression text` for every entry) is
+// unchanged from `origin/develop`: no computed access was added, removed or
+// altered by either side, only moved. The count is 228 and that inventory
+// hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
+// on this tree and on `origin/develop` alike.
 //
 // 2026-09-21, merging develop into S3: develop moved this closure and so did
 // S3, and neither side is taken -- the value below is computed over the merged
@@ -116,20 +121,15 @@ const compilerOptions = parsedConfig.options;
 // repin rather than a review. The value below is the same inventory with the
 // new line and column numbers.
 //
-// develop's confirmatory shadow v4 added a reviewed runtime path and its own
-// schema and comment changes. Neither is taken over the other -- the value
-// below is computed over the merged tree, which is the only tree that will
-// exist. What makes that a repin rather than a review is that the
-// position-free inventory (`path + expression text` for every entry) is
-// unchanged from `origin/develop`: no computed access was added, removed or
-// altered by either side, only moved. The count is 228 and that inventory
-// hashes to 9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65
-// on this tree and on `origin/develop` alike.
-//
 // 2026-09-21, S1f on top: the same watched-schema comment now also records
 // `MarketingPost.factsDigest`, which moves the positions once more in the
 // same file. The count is still 228 and the position-free inventory still
 // hashes to the value above, so this is a repin and not a review.
+//
+// 2026-09-22, merging develop into S3 again: both sides moved positions in
+// this closure and neither is taken -- the value below is computed over the
+// merged tree. The position-free inventory is unchanged on both sides, so
+// this is a repin and not a review of new computed access.
 //
 // 2026-09-22: the AMUX-only Prisma schema change repins the marketing pipeline
 // fingerprint, and its review note moves subsequent source positions in
@@ -158,15 +158,87 @@ const compilerOptions = parsedConfig.options;
 // is back to 228 and the position-free inventory still hashes to the value
 // above, so this is a repin and not a review.
 //
+// 2026-09-23, S7 alongside: the release-notes link table moved into
+// `lib/productAnnouncementEmail.ts` and pushed the access below it down that
+// file. It brought none of its own -- the id lookups ask a `Map`, the rejected
+// field names are written out, and the type predicate asks that `Map` rather
+// than `Object.prototype.hasOwnProperty.call`, which this closure's
+// prototype-capability check refuses outright. The count is still 228 and the
+// position-free inventory still hashes to the value above, so this is a repin
+// and not a review.
+//
 // Both notes stand because both changes are in this tree, and the value below
 // is recomputed over the merged tree rather than taken from either side of the
 // conflict.
+//
+// 2026-09-23, the routing ADR branch alongside: three closure files gain
+// lines and everything below them moves down.
+//
+//   lib/routingAttemptStore.ts        the error class vocabulary, as an array
+//                                     literal, and `model_output` added to the
+//                                     failure layers;
+//   lib/chatAttemptCostLedger.ts      one parameter typed to that vocabulary
+//                                     instead of `string`;
+//   lib/marketingAutomationAccess.ts  a review note above the watched-schema
+//                                     fingerprint, which is comment only.
+//
+// None of them brought a computed access. The vocabulary is a literal array
+// of string literals and the one bracket beside it is `(typeof …)[number]`, a
+// type-level index this inventory does not collect. The count is still 228 and
+// the position-free inventory still hashes to the value above, so this is a
+// repin and not a review.
+//
+// 2026-09-24, the pinned-deployment experiment note above the fingerprint.
+// Comment only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, AMUX release reconciliation: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the promotion approval model and
+// execution-brief fields. It is comment only. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, frontier usage class: `lib/models.ts` gains the frontier class,
+// its credit weight and the usage-profile case, and `lib/modelPricing.ts`
+// treats that class as premium. Both files are in this closure. Neither
+// addition is a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-24, those notes now stand together after merging develop. Comment
+// only. Count 228, position-free hash unchanged. A repin of the
+// position-sensitive digest only.
+//
+// 2026-09-24, apex usage class: `lib/models.ts` gains the apex class, its
+// credit weight and the usage-profile case, and `lib/modelPricing.ts` treats
+// that class as premium. Both files are in this closure. Neither addition is
+// a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-27, stage successor v3: the flag precondition adds no computed
+// element access. Source positions in promptRefinerStageAdmission.ts moved;
+// count and position-free inventory remain unchanged.
+//
+// 2026-09-27, package-gate repin: the reviewed marketing webhook fingerprint
+// provenance above MARKETING_WEBHOOK_PIPELINE_FINGERPRINT adds comment lines in
+// lib/marketingAutomationAccess.ts. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-27, AMUX back-merge: the watched-schema review note in
+// `lib/marketingAutomationAccess.ts` records the latched-off recommendation
+// pool and the closed auto-promotion gate. It is comment only. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so only
+// source positions moved.
+//
+// 2026-09-28, successor audit-facts repin: adding the exact activation facts
+// and then binding their generation check to the immutable v3 ID moves later
+// computed accesses in the admission and reservation modules. The count
+// remains 228 and the position-free inventory remains 9aa7ec49..., so this
+// repin records source-position movement only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "fa8b16ea4a83762a158ee1d4fd3410c6",
-  "8772c89ca44192de0893f7168ae19b0d",
+  "f09e1e78146afa6b436b5846a6e6592b",
+  "2ebabbc6b965b91b95c4a4cb6576b2dc",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
@@ -273,6 +345,7 @@ const fixedNonImportPaths = Object.freeze([
   "prisma/schema.prisma",
   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+  "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
   ...workspacePackageDirectories.map((directory) => repositoryPath(join(directory, "package.json"))).sort(),
 ]);
 
@@ -1128,6 +1201,17 @@ const runtimeImportClosure = () => {
   return [...closure].sort();
 };
 
+test("runtime source closure provenance dates stay chronological", () => {
+  const source = readFileSync(new URL(import.meta.url), "utf8");
+  const blockEnd = source.indexOf("const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT =");
+  assert.notEqual(blockEnd, -1, "runtime source closure provenance boundary is missing");
+  const dates = [...source.slice(0, blockEnd).matchAll(/^[ \t]*\/\/[ \t]+(\d{4}-\d{2}-\d{2})/gm)].map(
+    (match) => match[1]
+  );
+  assert.ok(dates.length > 1, "runtime source closure provenance needs multiple dated records");
+  assert.deepEqual(dates, [...dates].sort(), "runtime source closure provenance dates are not chronological");
+});
+
 test("runtime source allowlist is exactly the deterministic local runtime import closure", () => {
   const dynamicAccesses = dynamicElementAccessSnapshot();
   assert.equal(
@@ -1315,6 +1399,10 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     join(repositoryRoot, "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"),
     "utf8"
   );
+  const successorMigration = readFileSync(
+    join(repositoryRoot, "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql"),
+    "utf8"
+  );
   const block = legacyMigration.match(/expected_paths CONSTANT TEXT\[\] := ARRAY\[([\s\S]*?)\n\s*\];/);
   assert.ok(block, "migration expected_paths block is missing");
   const sqlPaths = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
@@ -1323,10 +1411,15 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
   );
   assert.ok(addedPath, "v4 migration extension path is missing");
   sqlPaths.splice(6, 0, addedPath[1]);
+  const successorPath = successorMigration.match(
+    /'path', '(prisma\/migrations\/20260927130000_prompt_refiner_shadow_stage_successor_v3\/migration\.sql)'/
+  );
+  assert.ok(successorPath, "v3 successor migration extension path is missing");
+  sqlPaths.splice(7, 0, successorPath[1]);
   assert.equal(sqlPaths.length, PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   assert.deepEqual(sqlPaths, [...PROMPT_REFINER_RUNTIME_SOURCE_PATHS]);
-  const executionManifestFileCount = migration.match(
-    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v2"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
+  const executionManifestFileCount = successorMigration.match(
+    /"schemaVersion":"prompt-refiner-shadow-execution-manifest-v3"[\s\S]*?"runtimeSource":\{"fileCount":(\d+),/
   );
   assert.ok(executionManifestFileCount, "migration executionManifest runtimeSource.fileCount is missing");
   assert.equal(
@@ -1335,8 +1428,8 @@ test("TypeScript and PostgreSQL enforce the identical ordered runtime source pat
     "migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract"
   );
   assert.match(
-    migration,
-    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'/,
+    successorMigration,
+    /"id" = 'prompt-refiner-shadow-v1'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v2'[\s\S]*?"id" = 'prompt-refiner-shadow-v2'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v3'[\s\S]*?"id" = 'prompt-refiner-shadow-v3'[\s\S]*?"runtimeSourceManifest"->>'schemaVersion' = 'prompt-refiner-runtime-source-manifest-v4'/,
     "database stage identity must select the matching runtime manifest generation"
   );
 });
@@ -1348,9 +1441,9 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     ["prisma/schema.prisma", /exact (\d+)-file runtime import closure/],
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
-    ["docs/ops/tomverse-chat-progress.md", /confirmatory v2\/v4 현재 계약은 exact (\d+)-file/],
+    ["docs/ops/tomverse-chat-progress.md", /confirmatory v3\/v5 현재 계약은 exact (\d+)-file/],
     ["docs/policy/prompt-refiner-durable-stage-writer-threat-model.md", /검증되는 (\d+)개 고정 path allowlist/],
-    ["docs/ops/prompt-refiner-confirmatory-shadow-v4.md", /\*\*(\d+)개 고정 source 파일\*\*/],
+    ["docs/ops/prompt-refiner-confirmatory-shadow-v5.md", /\*\*(\d+)개 고정 source 파일\*\*/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");
     const found = source.match(pattern);
@@ -1359,7 +1452,7 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   }
 
   const contract = readFileSync(
-    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v4.md"),
+    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v5.md"),
     "utf8"
   );
   assert.match(

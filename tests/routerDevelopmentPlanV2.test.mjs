@@ -31,9 +31,41 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // and re-deriving reproduces the previous pair exactly
   // ("1465b4ca…639c63" and "0e480ddd…63621a"). No row, selection, price or
   // catalogue value moved, and no v1 corpus case changed profile.
+  //
+  // Re-baselined again for two version strings: `router-selection-v3`, the
+  // tie-break becoming a partition refinement rather than a pairwise
+  // comparator, and `router-full-catalog-diagnostic-v4`, which renamed the
+  // finding that rewrite made untrue. The plan records both.
+  //
+  // The counterfactual is run here rather than described. Substituting the two
+  // strings back and re-deriving must reproduce the previous pair exactly,
+  // which is what says neither change moved a row of this plan -- the old and
+  // new rankings agree on everything the v1 corpus produces. A re-baseline
+  // asserted only against itself would say nothing at all.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
-  assert.equal(legacy.planDigest, "c27c6a833b7fc6a41956098d8a967a9c5224545c2de7d74f90d72cf1339afc4b");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "64e628f3ac59ee52283991f2a58a4a71b8b028b793451cc6012229971a0a4b3a");
+  assert.equal(legacy.versions.router.selection, "router-selection-v3");
+  assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
+  assert.equal(legacy.planDigest, "9f948dd55cf75518c76a23324c8fe05c6b96fca2b647facec6dab35bef6946e5");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "e58faed7ac2c3d0a3939a50c39e51e54b6e204fbbffb6fca435f8788f29de4c1");
+
+  // The digest covers the body without itself, and it is written last, so
+  // dropping it leaves the remaining keys in the order they were built in.
+  const body = { ...legacy };
+  delete body.planDigest;
+  const asBefore = {
+    ...body,
+    versions: {
+      ...body.versions,
+      diagnostic: "router-full-catalog-diagnostic-v3",
+      router: { ...body.versions.router, selection: "router-selection-v2" },
+    },
+  };
+  const beforePlanDigest = benchmarkDigest(canonicalBenchmarkJson(asBefore));
+  assert.equal(beforePlanDigest, "c27c6a833b7fc6a41956098d8a967a9c5224545c2de7d74f90d72cf1339afc4b");
+  assert.equal(
+    benchmarkDigest(JSON.stringify({ ...asBefore, planDigest: beforePlanDigest })),
+    "64e628f3ac59ee52283991f2a58a4a71b8b028b793451cc6012229971a0a4b3a"
+  );
   assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
   assert.throws(() => validateDevelopmentPlan(plan, { ...common, corpus: oldCorpus }), /plan:unexpected_or_missing_fields/);

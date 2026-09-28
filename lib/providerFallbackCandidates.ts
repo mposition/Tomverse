@@ -34,6 +34,14 @@ export const PROVIDER_FALLBACKS: Record<AiProvider, ProviderFallback> = {
   qwen: { reason: "Multilingual fallback", recommendedModelIds: ["mistral-small-4", "gemini-2-5-flash", "glm-5.2"] },
   zhipu: { reason: "GLM fallback", recommendedModelIds: ["qwen3.6-flash", "deepseek-v4-flash", "mistral-small-4"] },
   perplexity: { reason: "Search provider fallback; web-aware answer may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  // An inference host with no catalogue model routed to it yet. When
+  // deployments land here, the first replacement for a hosted model is the
+  // same model's other deployment, which is the routing layer's job; this
+  // list is what a person is offered when that is not enough.
+  deepinfra: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  together: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  openrouter: { reason: "Emergency aggregator fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
+  sail: { reason: "Inference host fallback; hosted open-weight models may be unavailable", recommendedModelIds: ["gpt-5-6-luna", "gemini-2-5-flash", "claude-haiku-4-5"] },
 };
 
 /**

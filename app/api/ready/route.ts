@@ -16,10 +16,15 @@ import { getSearchProviderBudgetReadiness } from "@/lib/searchProviderBudgetRead
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
+import { subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
+import { biennialNoticeReadiness } from "@/lib/biennialConsentNoticeReadiness";
+import { footerDisclosureReadiness } from "@/lib/emailFooterDisclosureReadiness";
+import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
 import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
+import { amuxReviewApprovalReadiness } from "@/lib/amux/reviewApprovalCore";
 import {
   getActiveProviders,
   getProviderBudgetReadiness,
@@ -243,6 +248,64 @@ const readinessResponse = async (head = false) => {
   // yes -- the exact state EM-10 describes for the keyring.
   const businessIdentity = businessIdentityReadiness();
   const emailBusinessIdentity = businessIdentity.ready;
+  // The subject labels a statute requires, read from the rows a send composes
+  // under rather than from the seed (draft section 7.8). A warning until
+  // MARKETING_EMAIL_FROM is set, for the reason the keyring gives, and only
+  // asked at all once the database answered -- it reads the active policy
+  // version, and a failing database has already made this endpoint not-ready.
+  //
+  // When it cannot answer -- a timeout or an error on this query alone, after
+  // the database probe succeeded -- the result depends on whether the answer
+  // matters. Before marketing is configured there is nothing to hold back, so
+  // not knowing is not a reason to fail. Once it is, not knowing is exactly the
+  // state EM-10 describes: answering ready while every Singaporean send would
+  // be refused. Reading an unknown as ready was fail-open in the half where it
+  // counts.
+  const subjectLabels = databaseResult.ready
+    ? await withDeadline(
+        subjectLabelReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The email subject label readiness check timed out."
+      ).catch(() => null)
+    : null;
+  const emailSubjectLabels =
+    subjectLabels === null ? !marketingSendingConfigured(process.env) : subjectLabels.ready;
+  // The footer blocks a statute names, on the rows that send. Separate from
+  // `emailBusinessIdentity` because that check reports a jurisdiction's own
+  // block as a warning -- on purpose, since whether this deployment has Korean
+  // recipients is not a fact an environment holds -- and a warning cannot answer
+  // "is this duty done". Same unknown-answer rule as above.
+  const footerDisclosures = databaseResult.ready
+    ? await withDeadline(
+        footerDisclosureReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The email footer disclosure readiness check timed out."
+      ).catch(() => null)
+    : null;
+  const emailFooterDisclosures =
+    footerDisclosures === null
+      ? !marketingSendingConfigured(process.env)
+      : footerDisclosures.ready;
+  // The two-yearly Korean notice is deferred, and section 7.7 asks for the
+  // device that stops it being forgotten: the deadline is a fact about rows,
+  // not the constant on the duty. Same shape as above, including what an
+  // unanswerable query means.
+  const biennialNotice = databaseResult.ready
+    ? await withDeadline(
+        biennialNoticeReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The biennial consent notice readiness check timed out."
+      ).catch(() => null)
+    : null;
+  // Reported, not gating. A Korean duty falling due is a reason to refuse
+  // Korean marketing -- which the rule verdict does, from the same
+  // `biennialNoticeReadiness()` answer -- and not a reason to take the whole
+  // deployment down. A review was right that failing readiness here would have
+  // done exactly that.
+  const emailBiennialConsentNotice =
+    biennialNotice === null ? !marketingSendingConfigured(process.env) : biennialNotice.healthy;
+  const amuxReviewStatus = amuxReviewApprovalReadiness(process.env);
+  const amuxReviewApproval = amuxReviewStatus.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
@@ -250,7 +313,8 @@ const readinessResponse = async (head = false) => {
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailUnsubscribeKeyRetention && emailConsentKeyring &&
-    emailBusinessIdentity;
+    emailBusinessIdentity && emailSubjectLabels && emailFooterDisclosures &&
+    amuxReviewApproval;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -473,6 +537,76 @@ const readinessResponse = async (head = false) => {
           traceId,
         },
       }),
+      // The two Korean duty checks. Both are reported rather than only folded
+      // into a boolean: the subject label's own failure names which country is
+      // refused, and the biennial notice's warning is the whole point of
+      // section 7.7's "device that stops it being forgotten" -- a warning that
+      // reaches nobody is a calculation.
+      reportOperationalDependencyStatus({
+        dependency: "email-subject-labels",
+        healthy: emailSubjectLabels,
+        code: "EMAIL_SUBJECT_LABEL_MISSING",
+        title: "A statutory subject label is not on the rows that send",
+        error:
+          subjectLabels === null
+            ? "The subject label readiness check could not be answered."
+            : subjectLabels.problems.length > 0
+              ? subjectLabels.problems.map((problem) => problem.message).join(" | ")
+              : "Every required subject label is present.",
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          required: String(subjectLabels?.required ?? "unknown"),
+          labelsPresent: String(subjectLabels?.labelsPresent ?? "unknown"),
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "email-footer-disclosures",
+        healthy: emailFooterDisclosures,
+        code: "EMAIL_FOOTER_DISCLOSURE_MISSING",
+        title: "A statutory footer block is not on the rows that send",
+        error:
+          footerDisclosures === null
+            ? "The footer disclosure readiness check could not be answered."
+            : footerDisclosures.problems.length > 0
+              ? footerDisclosures.problems.map((problem) => problem.message).join(" | ")
+              : "Every required footer block is named and has a value.",
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          disclosuresPresent: String(footerDisclosures?.disclosuresPresent ?? "unknown"),
+          policyVersions: String(footerDisclosures?.policyVersionIds.length ?? "unknown"),
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "email-biennial-consent-notice",
+        healthy: emailBiennialConsentNotice && (biennialNotice?.problems.length ?? 0) === 0,
+        code: "EMAIL_BIENNIAL_CONSENT_NOTICE_DUE",
+        title: "Korea's two-yearly consent notice is due or close to it",
+        error:
+          biennialNotice === null
+            ? "The biennial consent notice readiness check could not be answered."
+            : biennialNotice.problems.length > 0
+              ? biennialNotice.problems.map((problem) => problem.message).join(" | ")
+              : biennialNotice.earliestDueAt === null
+                ? "No Korean recipient is anchored, so nothing is due."
+                : `The earliest deadline is ${biennialNotice.earliestDueAt.toISOString().slice(0, 10)}.`,
+        severity: "warning",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // A count and a date, and nothing that identifies anybody: the
+          // deadline is reported to the day rather than the millisecond, so a
+          // single-recipient count cannot be correlated back to one consent.
+          recipients: String(biennialNotice?.recipients ?? "unknown"),
+          earliestDueOn: biennialNotice?.earliestDueAt?.toISOString().slice(0, 10) ?? "none",
+          traceId,
+        },
+      }),
       reportOperationalDependencyStatus({
         dependency: "email-business-identity",
         healthy: emailBusinessIdentity,
@@ -580,6 +714,23 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "amux-review-approval",
+        healthy: amuxReviewApproval,
+        code: "AMUX_REVIEW_APPROVAL_NOT_READY",
+        title: "AMUX human review approval is not configured correctly",
+        error: amuxReviewApproval
+          ? "AMUX human review approval is configured (or its flag is off)."
+          : `Missing or invalid: ${amuxReviewStatus.missing.join(", ")}`,
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          enabled: amuxReviewStatus.enabled,
+          missingVariableNames: amuxReviewStatus.missing.join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -623,6 +774,10 @@ const readinessResponse = async (head = false) => {
         emailUnsubscribeKeyRetention,
         emailConsentKeyring,
         emailBusinessIdentity,
+        emailSubjectLabels,
+        emailFooterDisclosures,
+        emailBiennialConsentNotice,
+        amuxReviewApproval,
       },
       traceId,
     },

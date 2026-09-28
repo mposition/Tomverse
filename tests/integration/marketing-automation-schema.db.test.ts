@@ -17,6 +17,9 @@ import { createHash } from "node:crypto";
 import { marketingEnvelopeDigest } from "@/lib/marketingStore";
 import {
   approveMarketingPost,
+  claimDueMarketingPost,
+  releaseMarketingPostClaim,
+  marketingSerializationFailure,
   createMarketingChannel,
   createMarketingPost,
   insertAiVisibilityRun,
@@ -313,6 +316,7 @@ beforeEach(async () => {
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
+      "AmuxReviewDecision",
       "AdminAuditLog"
     RESTART IDENTITY
   `);
@@ -1956,4 +1960,691 @@ test("the S2b1 cap writer refuses an effective increase before the DB trigger", 
     }),
     "cap_change_raises_limit",
   );
+});
+
+// ---------------------------------------------------------------------------
+// S1 r7 amendment 2: the one row that may be inserted already scheduled
+// ---------------------------------------------------------------------------
+//
+// The store's own refusals are unit-tested against a fake
+// (tests/marketingS2b2AutonomousInsert.test.ts). These are the other half: the
+// trigger's, against a real PostgreSQL, because the whole reason the exception
+// is written in SQL is that it holds for a write that never goes near the
+// store module.
+
+/** The shape the exception is defined as, with nothing else set. */
+const autonomousScheduledRow = (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown> = {},
+) => ({
+  channelId,
+  locale: "en",
+  kind: "social",
+  logicalKey: `auto-${Math.random().toString(36).slice(2)}`,
+  envelope: envelope({ scheduledAt: slot.toISOString() }),
+  envelopeDigest: DIGEST,
+  rendererVersion: "r1",
+  templateId: "template-1",
+  templateDigest: OTHER_DIGEST,
+  claimIds: [],
+  assetIds: [],
+  claimRegistryVersion: 1,
+  assetRegistryVersion: 1,
+  factSnapshot,
+  factsDigest: DIGEST,
+  guardDecision: "autonomous_eligible",
+  guardCodes: [] as string[],
+  // Empty, because that is what `guardDraft()` returns for an autonomous
+  // decision: the rule ids it collects are the ones that had something to say.
+  // The fixture used to write `["rule.template"]`, and that one value hid a
+  // trigger clause that refused every legitimate row.
+  guardRuleIds: [] as string[],
+  status: "scheduled",
+  mode: "autonomous",
+  scheduledAt: slot,
+  history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+  historyVersion: 0,
+  ...overrides,
+});
+
+const refusesAutonomousRow = async (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown>,
+) =>
+  assert.rejects(
+    prisma.marketingPost.create({
+      data: autonomousScheduledRow(channelId, slot, overrides) as never,
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+
+test("an autonomous scheduled row of the right shape is accepted", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  const created = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot) as never,
+  });
+  assert.equal(created.status, "scheduled");
+  assert.equal(created.mode, "autonomous");
+  assert.equal(created.historyVersion, 0);
+  // The trigger still stamps `createdAt` from the server clock. The exception
+  // widens which statuses may be inserted; it does not hand the caller the
+  // clock.
+  assert.ok(Math.abs(created.createdAt.getTime() - Date.now()) < 60_000);
+  assert.deepEqual(created.guardRuleIds, []);
+
+  // A decision that did collect a rule id is accepted too. The clause is about
+  // the decision being autonomous, not about how much it had to say.
+  const withRule = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot, {
+      guardRuleIds: ["rule.template"],
+    }) as never,
+  });
+  assert.deepEqual(withRule.guardRuleIds, ["rule.template"]);
+});
+
+test("the first history entry names the envelope the row stores", async () => {
+  // The store checks the digest; a row inserted another way does not go
+  // through it, and the first entry is what every later append is compared
+  // against.
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft", { envelopeDigest: OTHER_DIGEST })],
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft")],
+  });
+});
+
+test("the exception is exactly scheduled-and-autonomous, not either half", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // `scheduled` with an approval-mode row is the ordinary refusal, unchanged.
+  await refusesAutonomousRow(account.id, slot, {
+    mode: "approval",
+    guardDecision: "approval_required",
+  });
+  // And an autonomous row that is not scheduled is not this exception either:
+  // it falls back to the draft rule, which permits only two statuses.
+  await refusesAutonomousRow(account.id, slot, {
+    status: "approved",
+    scheduledAt: null,
+  });
+});
+
+test("a scheduled autonomous row goes out when its envelope says, or not at all", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // The column and the envelope disagreeing is the case this clause exists
+  // for: the publisher acts on the column and the Guard judged the envelope.
+  await refusesAutonomousRow(account.id, slot, {
+    scheduledAt: new Date(slot.getTime() + DAY),
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    envelope: envelope({ scheduledAt: null }),
+  });
+  await refusesAutonomousRow(account.id, slot, { scheduledAt: null });
+});
+
+test("a scheduled autonomous row carries a sealed autonomous decision", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    guardDecision: "approval_required",
+  });
+  await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
+  // No `factsDigest: null` case here any more. Since S2b3 the column is NOT
+  // NULL, so the generated client refuses the null before a statement is sent
+  // -- a PrismaClientValidationError, which says something about Prisma's
+  // types and nothing about the database. The guarantee this case stood for
+  // is now stronger than the trigger clause it exercised: every row, not just
+  // an autonomous one, must carry a digest, and "a marketing post cannot be
+  // written without its facts digest" proves that with raw SQL against the
+  // column itself.
+});
+
+test("autonomy is only ever inside a named template", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, { templateId: null });
+  await refusesAutonomousRow(account.id, slot, { templateDigest: null });
+});
+
+test("a scheduled autonomous row cannot mint its own approval", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { approvalAuditLogId: "audit-1" },
+    { approvedAt: new Date() },
+    { approvedDigest: DIGEST },
+    { approvalExpiresAt: new Date(Date.now() + DAY) },
+    // Nor become the source another autonomous post inherits from.
+    { reusableAsTemplate: true },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("a scheduled autonomous row arrives unclaimed and without an outcome", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { slotDate: new Date() },
+    { claimToken: "token-1" },
+    { leaseUntil: new Date(Date.now() + 60_000) },
+    { externalUrl: "https://www.tomverse.app/p/1" },
+    { verifiedPublicAt: new Date() },
+    { verificationMethod: "api_lookup" },
+    { errorCode: "provider_rejected" },
+    { outcomeUnknownAt: new Date() },
+    { deletedAt: new Date() },
+    { deletionMethod: "operator_unpublish" },
+    { contentPurgedAt: new Date() },
+    { legalHold: true },
+    // The clauses outside the exception still apply to it.
+    { publishedAt: new Date() },
+    { publishAttempt: 1 },
+    { providerRequestKey: "key-1" },
+    { externalPostId: "external-1" },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("the exception adds no drafted-to-scheduled edge", async () => {
+  // The other half of "this is not a lifted refusal". A post that started as a
+  // draft still cannot walk to `scheduled`: the only route is to be inserted
+  // as one.
+  const account = await channel();
+  const draft = await post(account.id);
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { status: "scheduled", mode: "autonomous" },
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+});
+
+test("a serialization failure is one the retry loop recognises", async () => {
+  // Not about the admission, and not named as though it were. Two overlapping
+  // `SERIALIZABLE` transactions each read what the other writes, which is the
+  // shape SSI exists to catch; whether it catches this particular pair is
+  // PostgreSQL's business and not something to assert.
+  //
+  // What is asserted is the property the bounded retry depends on: if
+  // PostgreSQL does refuse to order two of these, it says so in a way
+  // `marketingSerializationFailure()` recognises. That predicate was wrong
+  // once -- it compared `error.code` to "40001", which a Prisma caller never
+  // sees -- and a conflict the classifier does not recognise is a conflict
+  // nothing retries.
+  //
+  // The store's own refusal on withdrawn evidence, and the row the trigger
+  // accepts, are proved end to end in marketing-templates.db.test.ts, which
+  // calls the store rather than a copy of its SQL.
+  const account = await channel();
+  const first = await publishedPost(account.id);
+  const second = await publishedPost(account.id);
+
+  const bump = (id: string, claim: string) =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT DISTINCT used."value"
+          FROM "MarketingPost" AS post,
+               unnest(post."claimIds") AS used("value")
+          WHERE post."channelId" = ${account.id}
+            AND post."status" IN ('published')
+        `);
+        await tx.marketingPost.update({
+          where: { id },
+          data: { claimIds: [claim] },
+        });
+        return "done" as const;
+      },
+      { isolationLevel: "Serializable" },
+    );
+
+  const results = await Promise.all([
+    bump(first.id, "claim.one").catch((error: unknown) => error),
+    bump(second.id, "claim.two").catch((error: unknown) => error),
+  ]);
+
+  for (const result of results) {
+    if (result instanceof Error) {
+      assert.ok(
+        marketingSerializationFailure(result),
+        `unrecognised concurrency failure: ${result.message}`,
+      );
+    } else {
+      assert.equal(result, "done");
+    }
+  }
+});
+
+test("a marketing post cannot be written without its facts digest", async () => {
+  // S2b3. The column was nullable while rows predating it might exist; the
+  // migration establishes there are none and the database now says so for
+  // every future row.
+  //
+  // Against a real PostgreSQL rather than against Prisma's types, because the
+  // types are regenerated from the schema and would agree with a schema the
+  // database had not been given. Twice in this slice's review a rule the code
+  // and its types agreed on turned out to be one the database did not have.
+  const account = await channel();
+  await assert.rejects(
+    prisma.$executeRaw`
+      INSERT INTO "MarketingPost" (
+        "id", "channelId", "locale", "kind", "logicalKey",
+        "envelope", "envelopeDigest", "rendererVersion",
+        "claimIds", "assetIds", "claimRegistryVersion", "assetRegistryVersion",
+        "factSnapshot", "factsDigest",
+        "guardDecision", "guardCodes", "guardRuleIds",
+        "status", "mode", "history", "historyVersion", "updatedAt"
+      ) VALUES (
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${account.id}, 'en', 'social',
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${JSON.stringify(envelope())}::jsonb, ${DIGEST}, 'r1',
+        ARRAY[]::text[], ARRAY[]::text[], 1, 1,
+        ${JSON.stringify(factSnapshot)}::jsonb, NULL,
+        'approval_required', ARRAY[]::text[], ARRAY[]::text[],
+        'drafted', 'approval',
+        ${JSON.stringify([historyEntry("draft", { envelopeDigest: DIGEST })])}::jsonb,
+        0, now()
+      )
+    `,
+    /factsDigest|not-null|null value/i,
+  );
+
+  // And the ordinary fixture, which does set it, still goes in -- so the test
+  // above is about the digest and not about the statement being malformed.
+  const written = await post(account.id);
+  assert.equal(written.factsDigest, DIGEST);
+});
+
+// ---------------------------------------------------------------------------
+// S2c: one slot, one winner
+// ---------------------------------------------------------------------------
+
+/** A channel in approval mode with one post due to go out. */
+async function accountWithDuePost() {
+  const account = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "approval_mode", approvalStartedAt: new Date(Date.now() - DAY) },
+  });
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-claim",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  // Due: a moment that has already passed at the database's clock.
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+  return { account, postId: draft.id };
+}
+
+const admits = async () => ({ publish: true });
+
+test("a claim writes only the slot, and the row stays scheduled", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const before = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  const result = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(result.claimed);
+  assert.equal(result.id, postId);
+
+  const after = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(after.status, "scheduled");
+  assert.equal(after.claimToken, "worker-a");
+  assert.ok(after.slotDate);
+  assert.ok(after.leaseUntil);
+  // The three that would say something left for the platform, and the two that
+  // would say the post moved on.
+  assert.equal(after.publishAttempt, before.publishAttempt);
+  assert.equal(after.providerRequestKey, null);
+  assert.equal(after.historyVersion, before.historyVersion);
+  assert.deepEqual(after.history, before.history);
+
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "marketing_post.claimed", targetId: postId },
+  });
+  assert.ok(audit, "the claim wrote no audit entry");
+});
+
+test("two workers race for one slot and exactly one wins", async () => {
+  // The reason the channel is locked before the counts are read. Both
+  // transactions want the same post and the same day; the channel row is the
+  // mutex, so the second waits and then finds the slot gone.
+  const { account } = await accountWithDuePost();
+
+  const claim = (token: string) =>
+    runMarketingTransaction(
+      prisma,
+      (tx) =>
+        claimDueMarketingPost(tx, {
+          channelId: account.id,
+          claimToken: token,
+          resolveAdmission: admits,
+        }),
+      { isolationLevel: "Serializable" },
+    ).catch((error: unknown) => error);
+
+  const results = await Promise.all([claim("worker-a"), claim("worker-b")]);
+
+  const claimed = results.filter(
+    (result): result is { claimed: true; id: string; leaseUntil: Date } =>
+      !(result instanceof Error) && result !== null && (result as { claimed?: unknown }).claimed === true,
+  );
+  assert.equal(claimed.length, 1, "exactly one worker may hold a slot");
+
+  // The loser is either answered or told to retry. At SERIALIZABLE, a worker
+  // that waited on the channel lock while the winner updated that row receives
+  // a serialization failure -- that is PostgreSQL doing its job, and it arrives
+  // from a raw statement as P2010, not P2034. What matters is that the
+  // classifier recognises it, because a failure it does not recognise is one
+  // nothing retries. The first version of this test demanded an answer and so
+  // asserted something PostgreSQL does not do.
+  const losers = results.filter((result) => result !== claimed[0]);
+  assert.equal(losers.length, 1);
+  const loser = losers[0];
+  if (loser instanceof Error) {
+    assert.ok(
+      marketingSerializationFailure(loser),
+      `a losing worker's failure must be one the retry recognises: ${loser.message}`,
+    );
+    // And retrying it is an answer: the slot is taken, so the retried claim
+    // finds nothing it may take.
+    const retried = await claim("worker-b");
+    assert.ok(!(retried instanceof Error), "the retry must be answered");
+    assert.equal((retried as { claimed: boolean }).claimed, false);
+  } else {
+    assert.equal((loser as { claimed: boolean }).claimed, false);
+  }
+
+  const rows = await prisma.marketingPost.findMany({
+    where: { channelId: account.id, claimToken: { not: null } },
+  });
+  assert.equal(rows.length, 1);
+});
+
+test("a release gives the slot back and another worker can take it", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  const released = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(released, { released: true });
+
+  const free = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(free.claimToken, null);
+  assert.equal(free.slotDate, null);
+  assert.equal(free.leaseUntil, null);
+  assert.equal(free.status, "scheduled");
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(second.claimed);
+});
+
+test("a release must present the claim it is giving back", async () => {
+  const { account, postId } = await accountWithDuePost();
+  await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  // A worker whose lease expired, trying to tidy up, must not clear the claim
+  // of whoever took the slot after it.
+  const wrongToken = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-b",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(wrongToken, { released: false });
+
+  const wrongVersion = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion + 1,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+
+  // And a release naming a lease this row no longer has.
+  const wrongLease = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: new Date((held.leaseUntil as Date).getTime() - 1000),
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(wrongLease, { released: false });
+  assert.deepEqual(wrongVersion, { released: false });
+
+  const still = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(still.claimToken, "worker-a");
+});
+
+test("a crashed worker's slot is renewed on a one-a-day channel, not refused", async () => {
+  // The round-two blocker, against a real PostgreSQL. LinkedIn is allowed one
+  // post a day. Worker A claims today's slot and dies; its lease runs out;
+  // worker B reclaims the same row. That row is today's one post, and counting
+  // it against the cap refused its own renewal -- so the only recovery path
+  // for a crashed worker was a permanent refusal.
+  //
+  // Also the proof the day survives the trip: `slotDate` goes in as a `DATE`
+  // and comes back through `to_char` as text, and a renewal is recognised only
+  // if the two strings agree.
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.ok(held.slotDate);
+
+  // Worker A is gone. Its lease is made to have run out -- directly, because
+  // the only other way is to wait fifteen minutes, and a test is allowed to
+  // write a row the store would not.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { leaseUntil: new Date(Date.now() - 60_000) },
+  });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(second.claimed, "a renewal must not be refused by its own slot");
+
+  const renewed = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(renewed.claimToken, "worker-b");
+  assert.deepEqual(
+    renewed.slotDate,
+    held.slotDate,
+    "a renewal leaves the day it already held",
+  );
+
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "marketing_post.claimed", targetId: postId },
+    orderBy: { createdAt: "asc" },
+  });
+  assert.equal(audits.length, 2);
+  assert.equal(
+    (audits[1]?.metadata as { renewed?: unknown } | null)?.renewed,
+    true,
+  );
+});
+
+test("a second post on a one-a-day channel is refused the same day", async () => {
+  // The other half of the same rule: renewal is exempt from the cap, a new
+  // spend is not.
+  const { account } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+
+  // A second approved post on the same account, due now.
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-second",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(second, { claimed: false, reason: "daily_cap_reached" });
+});
+
+test("a claim token and its lease are set together or not at all", async () => {
+  // A row holding a token with no lease is claimed by nobody and reclaimable
+  // by nobody, so it would never go out and nothing would say why. The store
+  // never writes one; the constraint is there for the writer that someday
+  // does, so it fails at the write rather than as a post that quietly stops.
+  const { postId } = await accountWithDuePost();
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: "orphan", leaseUntil: null },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: null, leaseUntil: new Date() },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  // Both, or neither, is fine.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: "held", leaseUntil: new Date(Date.now() + 60_000) },
+  });
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: null, leaseUntil: null },
+  });
 });

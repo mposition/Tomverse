@@ -58,6 +58,15 @@ const isSurfaceAllowlist = (node) => {
     return values !== null && new Set(values).size === 3 &&
         values.every((value) => ["chat", "workspace", "continuation"].includes(value));
 };
+const isNavigationFreshness = (node) => {
+    node = unparenthesized(node);
+    if (!ts.isBinaryExpression(node) ||
+        node.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return false;
+    const sides = [node.left, node.right].map((side) =>
+        accessPath(unparenthesized(side)));
+    return sides.includes("navigationAttempt") &&
+        sides.includes("conversationNavigationAttemptRef.current");
+};
 
 export function extractContinuationRouting(text) {
     const source = ts.createSourceFile("ChatPageClient.tsx", text,
@@ -145,6 +154,8 @@ export function extractContinuationRouting(text) {
             const sides = [node.left, node.right].map((side) => accessPath(unparenthesized(side)));
             return sides.includes("currentChatIdRef.current") && sides.includes("id");
         }).map(conjunctSpan),
+        trailingNavigationFreshness: conjuncts(trailingDecision.expression)
+            .filter(isNavigationFreshness).map(conjunctSpan),
     };
     return {
         anchors,

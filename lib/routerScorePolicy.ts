@@ -101,7 +101,8 @@ export type RouterQualityEvidence = {
      * scale the record defines, or null when it carries no interval.
      *
      * Only ever compared against another cell's lower bound from the same kind
-     * of record, and only inside one band -- see `compareRouterScoreCells`.
+     * of record, and only inside one band -- see `partitionByQuality` in
+     * lib/routerSelection.ts, which applies it to a whole tied group.
      */
     qualityCi95Lower: number | null;
 };
@@ -256,16 +257,23 @@ export const ROUTER_TIE_BREAK_ORDER = [
 export type RouterTieBreakCriterion = (typeof ROUTER_TIE_BREAK_ORDER)[number];
 
 /**
- * Measured signals for criteria 2 to 4, supplied by the caller.
+ * Measured signals for criteria 2 to 5, supplied by the caller.
  *
  * Injected rather than looked up, exactly as `unhealthyModelIds` already is:
  * where a number comes from is the caller's business, and what it means is
  * this policy's. That is also what keeps `selectRouterModel` pure.
  *
  * A missing entry means *unknown*, not zero and not best. An unknown value
- * never wins and never loses a comparison; the criterion is skipped for that
- * pair and the next one decides. Treating an absent success rate as 100%
- * would rank a model nobody has ever called above one with a measured record.
+ * never wins and never loses a comparison. Treating an absent success rate as
+ * 100% would rank a model nobody has ever called above one with a measured
+ * record.
+ *
+ * The criterion is skipped for the whole group of candidates nothing earlier
+ * has separated, rather than for the pairs containing the unmeasured one.
+ * Skipping per pair is what made the old comparator intransitive -- the same
+ * criterion decided one pair and was skipped for another -- and
+ * `lib/routerSelection.ts` builds the order by partition refinement for that
+ * reason.
  */
 export type RouterTieBreakSignals = {
     /** Expected total cost of this turn, per model, in US dollars. */
@@ -295,10 +303,17 @@ export type RouterTieBreakSignals = {
 /**
  * The cost and latency thresholds the tie-break compares against.
  *
- * Two measurements that differ by less than these are the same measurement.
  * Without them the cost criterion decides every tie on the fourth decimal
  * place of a price, and the Router would reshuffle itself on a rounding
  * difference while reporting a confident reason for it.
+ *
+ * "Within the threshold is the same measurement" cannot be read pairwise:
+ * at a 5% ratio 100 ties 104 and 104 ties 108 while 100 beats 108, so the
+ * relation is not transitive and is no basis for an order. The reading that
+ * is: within a group, a bucket holds the measurements within the threshold of
+ * that bucket's own first value (`lib/routerSelection.ts`). So 104 can share
+ * a bucket with 108 in one candidate set and not in another, depending on
+ * where the bucket started.
  *
  * They are here, under this file's version, rather than beside the code that
  * applies them, because a threshold is only meaningful against the scale it
@@ -410,29 +425,3 @@ export const stickyHysteresisTurnsFor = (profile: TaskProfile): number =>
         ? ROUTER_STICKY_HYSTERESIS_TURNS + ROUTER_WEAK_CONFIDENCE_EXTRA_TURNS
         : ROUTER_STICKY_HYSTERESIS_TURNS;
 
-/**
- * Orders two cells by quality alone. Negative means the left one ranks higher.
- *
- * Band first, always, and the interval only refines *within* a band. The
- * tempting alternative -- let a measured interval outrank a band -- does not
- * survive contact with a partly-measured snapshot: with A ahead of B on an
- * interval, B ahead of C on a band and C ahead of A on a band, the comparator
- * has no consistent answer and the sort result depends on input order. A
- * strict primary key is what makes this a total order.
- *
- * An interval is compared only when both cells carry one, for the same reason
- * a missing signal is skipped below: a cell with no interval is unmeasured,
- * not zero.
- */
-export const compareRouterScoreCells = (
-    left: RouterScoreCell,
-    right: RouterScoreCell
-): number => {
-    if (left.qualityBand !== right.qualityBand) {
-        return right.qualityBand - left.qualityBand;
-    }
-    if (left.qualityCi95Lower !== null && right.qualityCi95Lower !== null) {
-        return right.qualityCi95Lower - left.qualityCi95Lower;
-    }
-    return 0;
-};

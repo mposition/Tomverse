@@ -45,7 +45,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   aiVisibilityAccuracyFlagsSchema,
   aiVisibilityCitedUrlsSchema,
@@ -83,11 +83,17 @@ import {
   MARKETING_AUDIT_PROBLEMS,
   verifyMarketingAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
-import { marketingFactsScopeDigest } from "@/lib/marketingFacts";
+import {
+  marketingFactsDigest,
+  marketingFactsScopeDigest,
+  type MarketingGuardFacts,
+} from "@/lib/marketingFacts";
 import {
   marketingGuardDecisionIsSealed,
   marketingGuardDraftDigest,
+  marketingTemplateWriteConditions,
   type MarketingGuardDecision as GuardDecision,
+  type MarketingTemplateBinding,
 } from "@/lib/marketingGuardCore";
 
 /**
@@ -125,13 +131,95 @@ export type MarketingTransaction = Prisma.TransactionClient & {
 export async function runMarketingTransaction<T>(
   client: PrismaClient,
   run: (tx: MarketingTransaction) => Promise<T>,
-  options?: { maxWait?: number; timeout?: number },
+  options?: {
+    maxWait?: number;
+    timeout?: number;
+    /**
+     * The isolation the work needs, when the default is not enough.
+     *
+     * Stated narrowly, because it is easy to claim more than it gives. The
+     * autonomous admission asks four questions in four statements -- the
+     * switches, the channel, the template, the prior use -- and under read
+     * committed each is answered as of the moment it runs. A decision could be
+     * admitted against switches read before an operator turned publishing off
+     * and prior use read after, which is an answer that was never true at any
+     * single instant.
+     *
+     * `SERIALIZABLE` makes the four one instant, or the transaction does not
+     * commit. It does not make a concurrent unpublish impossible: this
+     * transaction committing before that one is a legal order, and the post is
+     * then scheduled on evidence that was true at its serialization point,
+     * which is the right answer. What it removes is the mixture.
+     */
+    isolationLevel?: Prisma.TransactionIsolationLevel;
+  },
 ): Promise<T> {
   return client.$transaction(
     (tx) => run(tx as unknown as MarketingTransaction),
     options,
   );
 }
+
+/**
+ * Whether a failure is PostgreSQL saying "try again", rather than "no".
+ *
+ * A serialization failure is not a refusal: nothing was wrong with the write,
+ * two transactions simply could not both be true. The caller may retry it --
+ * but only before anything has left the database, which for the autonomous
+ * insert means before any vendor call exists at all (that is S2d2). Retrying
+ * after an external effect would repeat the effect.
+ *
+ * Walked structurally, not read off one field. Two different shapes reach a
+ * caller for the same conflict:
+ *
+ * - from a model delegate call, a top-level `P2034` -- the adapter maps
+ *   40001 and 40P01 to `TransactionWriteConflict` and Prisma raises that code;
+ * - from a raw statement, **`P2010` "Raw query failed"**, with the conflict
+ *   only inside `meta.driverAdapterError.cause` (`kind:
+ *   "TransactionWriteConflict"`, `originalCode: "40001"`). There is no top-level
+ *   `P2034` and no `cause` on the error itself.
+ *
+ * An earlier version read `error.code` for `P2034` and `databaseErrorMetadata()`
+ * -- which reads `error.cause` -- for the rest, so it recognised the first shape
+ * and missed the second. Most of the autonomous insert's statements are raw (the
+ * locks, the `FOR SHARE`, the prior-use reads), so a serialization failure
+ * there was not retried: the transaction aborted and nothing wrong was written,
+ * but the bounded retry the plan requires did not happen. It was found by S2c's
+ * integration test racing two workers against a real PostgreSQL, where the loser
+ * received exactly that `P2010`.
+ *
+ * The walk is the one `isStatementTimeout` in lib/conversationSearchResults.ts
+ * already uses: through `cause`, `meta` and `driverAdapterError`.
+ *
+ * A deadlock (40P01) counts too, and for the same reason: it is the other way
+ * two transactions taking the same locks can fail to both be true, nothing
+ * was wrong with either, and neither has made an external call.
+ */
+export const marketingSerializationFailure = (error: unknown): boolean => {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    if (
+      record.code === "P2034" ||
+      record.kind === "TransactionWriteConflict" ||
+      record.code === "40001" ||
+      record.code === "40P01" ||
+      record.originalCode === "40001" ||
+      record.originalCode === "40P01"
+    ) {
+      return true;
+    }
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return false;
+};
+
+/** How many times a serialization failure may be retried before it is an answer. */
+export const MARKETING_SERIALIZATION_RETRIES = 3;
 
 /** A write refused before it reached the database. */
 export class MarketingStoreRefusedError extends Error {
@@ -149,6 +237,236 @@ const asJson = (value: unknown): Prisma.InputJsonValue =>
 
 /** The audit actions that authorise the two operator-only movements. */
 export const MARKETING_RESUME_AUTONOMOUS_ACTION = "marketing_account.resume_autonomous";
+/**
+ * The one action S2b2 writes.
+ *
+ * Its own constant, not a thirtieth entry in `MARKETING_S2B1_ACTIONS`: that
+ * table is the approved S2b1 inventory and a test compares it whole, so adding
+ * to it would say S2b1 grew an action it was never approved for.
+ */
+/**
+ * The statuses that mean this account has already put a claim in front of
+ * people.
+ *
+ * "Used before" is a question about publication, not about intent, so a
+ * `scheduled` post does not answer it yes -- nothing has left yet, and two
+ * posts may legitimately be queued for the same claim before either goes. The
+ * boundary is the moment a request leaves for the platform, which is why
+ * `publishing` and `outcome_unknown` count: for the first we do not yet know
+ * the answer and for the second we never will, and in both cases claiming the
+ * account has never published it would be asserting something we cannot see.
+ * `failed` does not count -- the adapter confirmed nothing was published.
+ *
+ * The facts resolver that fills `usedBefore` must ask over this same list.
+ * Two lists would let a decision be made against one meaning of "published"
+ * and written against another.
+ */
+/**
+ * What the admission resolver has to report back, not just decide.
+ *
+ * `autonomousPublish` is the answer. The other three are what the answer was
+ * computed against, and they are here because the store cannot read them for
+ * itself without importing the composition that gathers them -- which would
+ * put the store downstream of its own caller. Reporting them instead keeps one
+ * rule: the caller says what the decision was made under, the resolver says
+ * what is true now, and this module refuses the difference.
+ */
+/** The locked channel row, as the admission resolver is given it. */
+export type MarketingAdmissionChannel = {
+  readonly id: string;
+  readonly channel: MarketingChannelName;
+  readonly status: MarketingChannelStatus;
+  readonly connectionGeneration: number;
+};
+
+export type MarketingAutonomousAdmission = {
+  readonly autonomousPublish: boolean;
+  /** The digest of the code that decided, over the admission manifest. */
+  readonly admissionCodeDigest: string;
+  /** `marketingAutomation.configGeneration`, read inside this transaction. */
+  readonly configGeneration: number;
+  /** The Railway deployment this process belongs to. */
+  readonly deploymentId: string;
+};
+
+/**
+ * How recently a health observation must have been made to count.
+ *
+ * Sixty seconds, and positive by construction. Health is the one admission
+ * input that is about the outside world rather than about a row, so an old
+ * observation is not a weaker answer -- it is an answer about a different
+ * moment.
+ *
+ * Here rather than beside the composition that reads it, because it decides an
+ * admission and therefore belongs to the bytes `admissionCodeDigest` covers.
+ * This module is a manifest root; the composition cannot be one, since it
+ * carries the digest itself. It is also not in the Prompt Refiner's runtime
+ * source closure, which `lib/marketingAutomationAccess.ts` -- the other
+ * obvious home -- is, and a sealed snapshot there is repinned by a person.
+ */
+export const MARKETING_HEALTH_FRESHNESS_SECONDS = 60;
+
+export type MarketingHealthObservation = {
+  readonly channelId: string;
+  readonly connectionGeneration: number;
+  readonly healthy: boolean;
+  readonly observedAt: Date;
+};
+
+/**
+ * Whether an observation may be used as this channel's health, at this clock.
+ *
+ * Missing, stale, future-dated or about another channel or connection
+ * generation is false -- each for the same reason, that it is not an
+ * observation of the thing being asked about now. A future-dated row is not
+ * "very fresh": it is a clock disagreement, and treating it as the freshest
+ * answer would make a broken clock look like a healthy adapter.
+ */
+export const marketingHealthIsFresh = (
+  observation: MarketingHealthObservation | null,
+  now: Date,
+  expect: { readonly channelId: string; readonly connectionGeneration: number },
+  thresholdSeconds: number = MARKETING_HEALTH_FRESHNESS_SECONDS,
+): boolean => {
+  if (observation === null) return false;
+  if (!(thresholdSeconds > 0)) return false;
+  if (observation.channelId !== expect.channelId) return false;
+  if (observation.connectionGeneration !== expect.connectionGeneration) {
+    return false;
+  }
+  const age = now.getTime() - observation.observedAt.getTime();
+  if (!Number.isFinite(age)) return false;
+  if (age < 0) return false;
+  if (age > thresholdSeconds * 1000) return false;
+  return observation.healthy;
+};
+
+export const MARKETING_PRIOR_USE_STATUSES = [
+  "publishing",
+  "published",
+  "outcome_unknown",
+  "verified",
+  "removed_by_platform",
+] as const;
+
+export const MARKETING_S2B2_ACTIONS = Object.freeze({
+  postAutonomousScheduled: "marketing_post.autonomous_scheduled",
+} as const);
+
+/**
+ * The two actions S2c writes.
+ *
+ * Both are the publisher's, and both are about a slot rather than about a
+ * publication. A claim says this worker intends to publish this post in this
+ * day's slot and nobody else should; a release says it no longer does. Neither
+ * touches `status`, `history`, `publishAttempt` or `providerRequestKey`,
+ * because none of those is true yet -- the post is still `scheduled` and
+ * nothing has left for the platform.
+ */
+export const MARKETING_S2C_ACTIONS = Object.freeze({
+  postClaimed: "marketing_post.claimed",
+  postClaimReleased: "marketing_post.claim_released",
+} as const);
+
+/**
+ * How long a claim is good for before a sweep may take it back.
+ *
+ * A lease, not a lock: the process holding it can die, and something has to be
+ * able to say so without asking it. Fifteen minutes is longer than any publish
+ * this system will make and shorter than the gap between two of them, and the
+ * reconciliation that reclaims an expired one is S2d1's.
+ */
+/**
+ * Why a claim was not taken.
+ *
+ * Every one of these is an ordinary answer rather than a failure. A publisher
+ * that finds nothing due, or an account at its cap, has done its job; returning
+ * a reason rather than throwing is what lets the caller log it once and go
+ * round again without a handler that has to tell errors from non-events apart.
+ *
+ * A refusal that *is* wrong -- an empty token, a lease in the past -- is thrown
+ * instead, because it says the caller is broken rather than that the world is
+ * busy.
+ */
+export type MarketingClaimRefusal =
+  | "channel_not_publishing"
+  | "channel_posts_by_hand"
+  | "not_admitted"
+  | "nothing_due"
+  | "daily_cap_reached"
+  | "weekly_cap_reached"
+  | "claim_conflict";
+
+/**
+ * Why a slot was given back.
+ *
+ * Closed, and recorded in the audit entry, because "a claim was released" on
+ * its own does not say whether the worker was shutting down tidily or the
+ * account was paused underneath it -- and those read very differently in a
+ * week's worth of entries.
+ */
+export const MARKETING_CLAIM_RELEASE_REASONS = [
+  /** The lease would expire before the publish could finish. */
+  "lease_too_short",
+  /** The admission resolver answered no on the re-check before the call. */
+  "no_longer_admitted",
+  /** The worker is stopping, and is giving back what it has not used. */
+  "worker_shutdown",
+  /** The adapter this account needs does not exist in this build. */
+  "adapter_unavailable",
+] as const;
+
+export type MarketingClaimReleaseReason =
+  (typeof MARKETING_CLAIM_RELEASE_REASONS)[number];
+
+export const MARKETING_CLAIM_LEASE_MS = 15 * 60 * 1000;
+
+/**
+ * What a slot is.
+ *
+ * **One row, one slot: the day this post is spending.** The plan counts
+ * `MarketingPost` slot rows without a fifth table, so a row holds at most one
+ * day, and `slotDate` is that day. A claim writes it; a release clears it;
+ * nothing else touches it -- the generic history patch cannot, by type.
+ *
+ * Three consequences, each of which an earlier version of this got wrong:
+ *
+ * - **Renewing is not spending.** A worker that dies leaves a claim whose lease
+ *   runs out, and the next worker reclaims the same row for the same day. That
+ *   row is already one of today's spends, so counting it against today's cap
+ *   refused its own renewal -- on a one-a-day channel, the only recovery path
+ *   for a crashed worker never succeeded.
+ * - **Retracting does not refund.** An unpublish leaves `slotDate` where it was,
+ *   so a post that went out and was taken down still counts for its day.
+ * - **A retry on a later day moves the row.** A post that failed and was
+ *   requeued -- which is an operator's audited decision, not something the
+ *   system does to itself -- is claimed again on whatever day it next goes
+ *   out, and that is the day it spends. The earlier attempt's day is released
+ *   by the move. An earlier version kept the old day on the grounds that a
+ *   failure had consumed it, which is a rule the plan never made and which the
+ *   one-row model cannot express without counting one post twice.
+ */
+
+/** The caps in force for an account: the policy's, unless an operator lowered them. */
+export const marketingChannelCaps = (channel: {
+  readonly channel: string;
+  readonly dailyCapOverride: number | null;
+  readonly weeklyCapOverride: number | null;
+}): { readonly daily: number; readonly weekly: number } | null => {
+  const policy =
+    MARKETING_CHANNEL_CAPS[channel.channel as MarketingChannelName] ?? null;
+  // A channel with no policy cap is one that is posted by hand. An override
+  // cannot create a cap where the policy has none, because there is no
+  // automated posting to cap.
+  if (policy === null) return null;
+  const lower = (cap: number, override: number | null) =>
+    override === null ? cap : Math.min(cap, override);
+  return {
+    daily: lower(policy.daily, channel.dailyCapOverride),
+    weekly: lower(policy.weekly, channel.weeklyCapOverride),
+  };
+};
+
 export const MARKETING_REQUEUE_ACTION = "marketing_post.requeue_after_failure";
 
 /** Exact S2b1 action names. These strings are audit/store contracts. */
@@ -243,6 +561,39 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   resume_drain_required: 409,
   drain_not_stopped: 409,
   identity_change_needs_connection: 409,
+  autonomous_insert_not_eligible: 409,
+  autonomous_insert_has_codes: 409,
+  autonomous_insert_not_scheduled: 409,
+  autonomous_insert_without_template: 409,
+  autonomous_insert_template_mismatch: 409,
+  autonomous_insert_template_digest_mismatch: 409,
+  autonomous_insert_channel_not_autonomous: 409,
+  autonomous_insert_channel_has_no_autonomy: 409,
+  autonomous_insert_slot_not_future: 409,
+  autonomous_insert_slot_unreadable: 409,
+  autonomous_insert_facts_mismatch: 422,
+  autonomous_insert_claim_no_longer_used: 409,
+  autonomous_insert_asset_no_longer_used: 409,
+  autonomous_insert_code_digest_changed: 409,
+  autonomous_insert_config_generation_changed: 409,
+  autonomous_insert_deployment_changed: 409,
+  autonomous_insert_deployment_unknown: 503,
+  // The three the claim path throws rather than answers. A publisher asking
+  // for a slot with an empty token or a lease that has already expired is not
+  // describing a busy world, it is describing itself being wrong -- and a
+  // request nobody can fix by changing it is a 500. They are here because no
+  // HTTP route raises them today and one might, and a refusal with no meaning
+  // is how the last two slices found their own gaps.
+  claim_token_empty: 500,
+  claim_lease_not_positive: 500,
+  claim_release_reason_unknown: 500,
+  claim_release_lease_unreadable: 500,
+  transaction_not_serializable: 500,
+  autonomous_insert_binding_expired: 409,
+  autonomous_insert_binding_not_sealed: 409,
+  autonomous_insert_template_gone: 409,
+  autonomous_insert_template_changed: 409,
+  autonomous_insert_not_admitted: 409,
     resume_autonomous_conflict: 409,
     resume_autonomous_not_allowed: 409,
     resume_evidence_missing: 409,
@@ -1457,7 +1808,21 @@ export function marketingEnvelopeDigest(envelope: MarketingEnvelope): string {
     .digest("hex");
 }
 
-export async function createMarketingPost(
+/**
+ * What every marketing post has to satisfy before it is written, whoever is
+ * writing it.
+ *
+ * This was the first half of `createMarketingPost` while there was one
+ * writer. S2b2 adds a second -- the autonomous scheduled insert -- and the two
+ * differ in exactly two places: one refuses a sealed `autonomous_eligible`
+ * decision and a scheduled envelope, the other requires both. Everything
+ * before that is the same question and is asked once, here, because the same
+ * checks written twice are two places to get them right and one place to get
+ * them wrong quietly.
+ *
+ * It reads the channel, so it takes a database. It writes nothing.
+ */
+async function admitMarketingPostInput(
   database: MarketingDatabase,
   rawInput: CreateMarketingPostInput,
 ) {
@@ -1586,16 +1951,6 @@ export async function createMarketingPost(
     );
   }
 
-  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
-  // has a column for one, and a create that set the first and not the second
-  // left two answers to the same question.
-  if (envelopeForDigest.scheduledAt !== null) {
-    throw new MarketingStoreRefusedError(
-      "envelope_scheduled_at_create",
-      "A post is scheduled by an append, not by the envelope it is created with",
-    );
-  }
-
   // The account the envelope names has to be the account being written to.
   // `accountSlug` is what a publisher posts from, and the Guard checked the
   // channel this row belongs to.
@@ -1611,6 +1966,34 @@ export async function createMarketingPost(
     throw new MarketingStoreRefusedError(
       "envelope_account_not_this_channel",
       "The envelope names an account other than the one this post belongs to",
+    );
+  }
+
+  return {
+    input,
+    envelope: envelopeForDigest,
+    verdict,
+    guardCodes,
+    guardRuleIds,
+    factsDigest,
+    account,
+  };
+}
+
+export async function createMarketingPost(
+  database: MarketingDatabase,
+  rawInput: CreateMarketingPostInput,
+) {
+  const { input, envelope: envelopeForDigest, verdict, guardCodes, guardRuleIds, factsDigest } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // A draft is not scheduled. The envelope carries a `scheduledAt` and the row
+  // has a column for one, and a create that set the first and not the second
+  // left two answers to the same question.
+  if (envelopeForDigest.scheduledAt !== null) {
+    throw new MarketingStoreRefusedError(
+      "envelope_scheduled_at_create",
+      "A post is scheduled by an append, not by the envelope it is created with",
     );
   }
 
@@ -1695,9 +2078,14 @@ export type MarketingPostPatch = {
   approvalExpiresAt?: Date | null;
   reusableAsTemplate?: boolean;
   scheduledAt?: Date | null;
-  slotDate?: Date | null;
-  claimToken?: string | null;
-  leaseUntil?: Date | null;
+  // `slotDate`, `claimToken` and `leaseUntil` are not here. The claim writes all
+  // three and the release clears all three. A requeue clears the token and the
+  // lease -- the failed attempt's worker has concluded -- and deliberately leaves
+  // `slotDate`, so the next claim renews or moves the day. Nothing else writes
+  // them: a generic patch that could set them could clear a spent slot and give
+  // an account its day back, which is the thing the caps exist to stop. A rule
+  // stated in a comment and not in the type is a rule the next caller has to
+  // find.
   publishAttempt?: number;
   providerRequestKey?: string | null;
   externalPostId?: string | null;
@@ -1781,9 +2169,6 @@ const postPatchData = (
     data.reusableAsTemplate = patch.reusableAsTemplate;
   }
   if (patch.scheduledAt !== undefined) data.scheduledAt = copyDate(patch.scheduledAt);
-  if (patch.slotDate !== undefined) data.slotDate = copyDate(patch.slotDate);
-  if (patch.claimToken !== undefined) data.claimToken = patch.claimToken;
-  if (patch.leaseUntil !== undefined) data.leaseUntil = copyDate(patch.leaseUntil);
   if (patch.publishAttempt !== undefined) data.publishAttempt = patch.publishAttempt;
   if (patch.providerRequestKey !== undefined) {
     data.providerRequestKey = patch.providerRequestKey;
@@ -1833,6 +2218,869 @@ export type MarketingRequeueEvidence = { auditLogId: string };
  * arrived some other way would otherwise be carried forward by every later
  * append, with this module's name on the write.
  */
+
+/**
+ * The only writer that may insert a post already scheduled, already
+ * autonomous, with nobody having looked at it.
+ *
+ * Authority: S1 plan r7 amendment 2 and the S2 plan's "Autonomous insert:
+ * complete shape", both approved 2026-09-23. The insert trigger carries the
+ * half of the contract that is a property of the row; this carries the half
+ * that needs other rows, and the two halves are checked in the same
+ * transaction as the write so neither can be true at a different moment than
+ * the other.
+ *
+ * What it does, in the order it matters:
+ *
+ * 1. Locks the channel. It is the per-channel mutex the caps rest on, and it
+ *    is what stops the account changing mode underneath the decision.
+ * 2. Reads the database's clock. The binding's window is judged against that
+ *    clock and no other -- a caller's clock is one nobody agreed on.
+ * 3. Holds the template row with `FOR SHARE` and writes against every
+ *    condition `marketingTemplateWriteConditions()` returns. Autonomy is only
+ *    ever inside an approved template, so a template that has been edited,
+ *    purged, un-marked or moved on a version is not one this may reuse.
+ * 4. Resolves admission *here*, by calling the resolver this function was
+ *    handed, inside this transaction. Taking a resolved answer as an argument
+ *    would let it be resolved anywhere, at any time, against anything.
+ * 5. Inserts, and writes the system audit row in the same transaction.
+ *
+ * The audit metadata is what dispatch compares against later: the code digest,
+ * the configuration generation and the deployment id. A post admitted by one
+ * build is not dispatched by another without being admitted again.
+ */
+export async function insertAutonomousScheduledMarketingPost(
+  database: MarketingTransaction,
+  rawInput: CreateMarketingPostInput & {
+    /** The sealed proof that this template was a template, and when. */
+    readonly binding: MarketingTemplateBinding;
+    /**
+     * Resolved inside this transaction, by this function, rather than handed
+     * in already answered.
+     */
+    /**
+     * Resolved inside this transaction, against the row this function locked.
+     *
+     * The locked channel is handed over rather than looked up again, and
+     * rather than taken from whatever the caller believed: this transaction
+     * holds that row `FOR UPDATE`, so it is the only description of the
+     * account that cannot change under the answer. A resolver reading the
+     * caller's copy would be judging a mode that was true when the caller
+     * assembled its arguments.
+     */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+    ) => Promise<MarketingAutonomousAdmission>;
+    /**
+     * The facts the decision was sealed over.
+     *
+     * Not taken on trust: both digests are recomputed below, and the sealed
+     * decision carries them, so a facts object that is not the one the Guard
+     * read fails before it is used. It is needed because the decision records
+     * only the digests, and `usedBefore` -- the one answer in there that another
+     * transaction can invalidate -- has to be re-asked at write time.
+     */
+    readonly facts: MarketingGuardFacts;
+    readonly admissionCodeDigest: string;
+    readonly configGeneration: number;
+    readonly deploymentId: string;
+    readonly commitSha: string;
+  },
+) {
+  const binding = rawInput.binding;
+  const resolveAdmission = rawInput.resolveAdmission;
+  // Copied field by field, here, for the reason everything else in this module
+  // is: a property can be an accessor. `marketingFactsDigest()` reads
+  // `claims` and the prior-use check below reads it again, and an object whose
+  // getter answered one list to the digest and another to the check would have
+  // its digest verified against facts that were never used. There is one list
+  // from here on and the argument is not read again.
+  const facts: MarketingGuardFacts = {
+    channelId: String(rawInput.facts.channelId),
+    channel: String(rawInput.facts.channel),
+    locale: String(rawInput.facts.locale),
+    claims: [...rawInput.facts.claims].map((claim) => ({ ...claim })),
+    assets: [...rawInput.facts.assets].map((asset) => ({ ...asset })),
+    claimRegistryVersion: Number(rawInput.facts.claimRegistryVersion),
+    assetRegistryVersion: Number(rawInput.facts.assetRegistryVersion),
+    factSnapshotDigest:
+      rawInput.facts.factSnapshotDigest === null
+        ? null
+        : String(rawInput.facts.factSnapshotDigest),
+  };
+  const provenance = {
+    admissionCodeDigest: String(rawInput.admissionCodeDigest),
+    configGeneration: Number(rawInput.configGeneration),
+    deploymentId: String(rawInput.deploymentId),
+    commitSha: String(rawInput.commitSha),
+  };
+
+  // **The audit chain lock, before any row lock.** `lib/adminAudit.ts` takes
+  // this lock inside every append, and `lib/marketingAdminMutations.ts` takes
+  // it first in its transaction and says so: every other audit write in the
+  // process queues behind it. This function writes its audit entry last,
+  // because it needs the id of the row it creates -- so without this line it
+  // would take the channel's row lock first and the chain lock last, the exact
+  // reverse of the admin path, and two of them running at once would deadlock.
+  // Taking it here costs an ordering, not a second lock: it is the same
+  // transaction-scoped advisory lock the append will ask for again.
+  await takeAuditChainLock(database);
+
+  const { input, envelope, guardRuleIds, factsDigest, verdict, guardCodes } =
+    await admitMarketingPostInput(database, rawInput);
+
+  // The opposite of the draft path in both directions: this one requires the
+  // verdict a person never saw, and requires the slot the draft path refuses.
+  if (verdict !== "autonomous_eligible") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_eligible",
+      "Only an autonomous-eligible decision may be inserted already scheduled",
+    );
+  }
+  if (guardCodes.length > 0) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_has_codes",
+      "An autonomous-eligible decision carries no codes",
+    );
+  }
+  if (envelope.scheduledAt === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_scheduled",
+      "An autonomous post is inserted with the slot its envelope names",
+    );
+  }
+  if (input.templateId === null || input.templateDigest === null) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_without_template",
+      "Autonomy is only ever inside an approved template",
+    );
+  }
+  if (input.templateId !== binding.templateId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_mismatch",
+      "The binding proves a different template than the post names",
+    );
+  }
+  if (input.templateDigest !== binding.approvedDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_digest_mismatch",
+      "The binding proves a different approved digest than the post names",
+    );
+  }
+
+  // The per-channel mutex, and the thing that stops the account changing mode
+  // under the decision.
+  const channel = await lockMarketingChannel(database, input.channelId);
+  if (channel.status !== "autonomous_mode") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_not_autonomous",
+      "Only an account in autonomous mode may be written to without a person",
+    );
+  }
+  if (
+    (MARKETING_NO_AUTONOMY_CHANNELS as readonly string[]).includes(channel.channel)
+  ) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_channel_has_no_autonomy",
+      "This channel is posted by hand and has no autonomous path",
+    );
+  }
+
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!now) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  // The slot is in the future at the database's clock. A post inserted for an
+  // instant that has already passed is due the moment it exists, which is a
+  // way of publishing now while appearing to schedule.
+  const slot = new Date(envelope.scheduledAt);
+  if (!Number.isFinite(slot.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_unreadable",
+      "The envelope's scheduled instant is not a time",
+    );
+  }
+  if (slot.getTime() <= now.getTime()) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_slot_not_future",
+      "An autonomous post is scheduled for a time that has not happened yet",
+    );
+  }
+
+  // The binding's window is judged against that clock and no other.
+  const conditions = marketingTemplateWriteConditions(binding, now);
+  if (!conditions.ok) {
+    // Two throws, each with its code where the reader and the check both
+    // look for it: immediately after the constructor. Assembling the code
+    // from a fragment made it ungreppable, and putting it behind a ternary
+    // made it invisible to the sweep that gives every refusal an HTTP
+    // meaning -- both of which read, from outside, as a status for a
+    // refusal nothing raises.
+    if (conditions.refusal === "binding_expired") {
+      throw new MarketingStoreRefusedError(
+        "autonomous_insert_binding_expired",
+        "The template binding proof has aged out at the database clock",
+      );
+    }
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_binding_not_sealed",
+      "The template binding is not a write condition at the database's clock",
+    );
+  }
+
+  // Held, not looked at. `FOR SHARE` keeps the template as the binding proved
+  // it until this transaction ends, so an edit or a purge in flight loses the
+  // race rather than winning it silently.
+  const held = await database.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT "id" FROM "MarketingPost" WHERE "id" = ${binding.templateId} FOR SHARE
+  `);
+  if (held.length !== 1) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_gone",
+      "The template this post reuses no longer exists",
+    );
+  }
+  const template = await database.marketingPost.findFirst({
+    where: conditions.where,
+    select: { id: true },
+  });
+  if (!template) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_template_changed",
+      "The template no longer matches the binding that proved it",
+    );
+  }
+
+  // **The facts are the ones the decision was sealed over.** The decision
+  // records two digests and nothing else, so this is where a facts object
+  // stops being an argument and starts being the thing the Guard read.
+  // One comparison, not two. `marketingFactsDigest()` covers the account, the
+  // channel, the locale, every claim and asset answer, both registry versions
+  // and the snapshot digest -- so a facts object that passes it is the one the
+  // decision was sealed over, and the scope digest is already checked against
+  // the post's own columns in `admitMarketingPostInput()`. A second check over
+  // a subset of the same bytes would look like a further guarantee and be none.
+  if (marketingFactsDigest(facts) !== factsDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_facts_mismatch",
+      "These are not the facts the decision was made from",
+    );
+  }
+
+  // **The one answer in the facts another transaction can turn false.**
+  //
+  // Which way round matters, and it is the opposite of the obvious one. An
+  // autonomous decision has `usedBefore: true` for every claim and asset it
+  // names -- `guardDraft()` raises `first_use_of_claim` otherwise and the
+  // verdict stops being autonomous -- so a *new* prior use cannot hurt this
+  // post. What can is prior use going away: a concurrent unpublish, delete or
+  // retention purge of the last row that carried the claim leaves nothing
+  // saying this account ever published it, and the autonomy rested on that
+  // exact sentence.
+  //
+  // Refusing then is not conservatism. The Guard re-run on the same facts
+  // would say `first_use_of_claim`, and first use of a claim is a thing the
+  // policy sends to a person.
+  //
+  // Two queries rather than one with the column interpolated: a runtime
+  // column name is a thing `check:protected-table-writers` refuses on sight,
+  // and it is right to -- it cannot tell a literal chosen here from a string
+  // that arrived. Both ask "which of these", not "is any of these": any is not
+  // what the decision rested on.
+  //
+  // Asking it here, rather than trusting what the decision recorded, is the
+  // whole check: the answer is taken from what the database says now.
+  //
+  // It is also the read that the isolation level needs in order to have
+  // anything to say, since SSI detects a dependency only against a read a
+  // transaction actually performed -- but that is a smaller claim than it
+  // sounds, and `runMarketingTransaction`'s `isolationLevel` spells out how
+  // small. A concurrent unpublish does not have to become a serialization
+  // failure: this transaction committing first is a legal order and the post
+  // is then right as of that point. What the isolation level buys is that this
+  // read and the three before it are one instant.
+  const reliedOnClaimIds = facts.claims
+    .filter((claim) => claim.usedBefore === true)
+    .map((claim) => claim.claimId);
+  const reliedOnAssetIds = facts.assets
+    .filter((asset) => asset.usedBefore === true)
+    .map((asset) => asset.assetId);
+
+  const publishedClaims =
+    reliedOnClaimIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."claimIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnClaimIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingClaim = reliedOnClaimIds.find((id) => !publishedClaims.has(id));
+  if (missingClaim !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_claim_no_longer_used",
+      "A claim this decision relied on having been published no longer has been",
+    );
+  }
+
+  const publishedAssets =
+    reliedOnAssetIds.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            await database.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+              SELECT DISTINCT used."value" AS "value"
+              FROM "MarketingPost" AS post,
+                   unnest(post."assetIds") AS used("value")
+              WHERE post."channelId" = ${input.channelId}
+                AND post."status" IN (${Prisma.join([
+                  ...MARKETING_PRIOR_USE_STATUSES,
+                ])})
+                AND used."value" IN (${Prisma.join([...reliedOnAssetIds])})
+            `)
+          ).map((row) => row.value),
+        );
+  const missingAsset = reliedOnAssetIds.find((id) => !publishedAssets.has(id));
+  if (missingAsset !== undefined) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_asset_no_longer_used",
+      "An asset this decision relied on having been published no longer has been",
+    );
+  }
+
+  // Resolved here, inside this transaction, by this function.
+  const admission = await resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
+
+  // **The decision was made under one build, one configuration and one
+  // deployment; the write happens under whatever is running now.** The caller
+  // carries what it saw when the decision was sealed, the resolver reports what
+  // it just read, and a difference means the decision is about a world that has
+  // moved. Checked before the admission answer itself: an answer produced under
+  // a configuration the decision never saw is not the answer the decision was
+  // given, whichever way it came out.
+  if (admission.admissionCodeDigest !== provenance.admissionCodeDigest) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_code_digest_changed",
+      "The admission code is not the build this decision was made under",
+    );
+  }
+  if (admission.configGeneration !== provenance.configGeneration) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_config_generation_changed",
+      "A setting that affects admission changed after this decision was made",
+    );
+  }
+  // Refused before the comparison, because an empty deployment id compares
+  // equal to an empty deployment id: with the variable unset on both sides the
+  // fence passes every time and the audit records a fence that was never one.
+  // "We do not know which deployment this is" is not a match.
+  if (provenance.deploymentId === "" || admission.deploymentId === "") {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_unknown",
+      "There is no deployment identity to fence this decision to",
+    );
+  }
+  if (admission.deploymentId !== provenance.deploymentId) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_deployment_changed",
+      "This decision was made on a deployment that is no longer the one running",
+    );
+  }
+
+  if (!admission.autonomousPublish) {
+    throw new MarketingStoreRefusedError(
+      "autonomous_insert_not_admitted",
+      "Autonomous publishing is not admitted right now",
+    );
+  }
+
+  const draftEntry = marketingHistoryEntrySchema.parse({
+    at: input.draftedAt.toISOString(),
+    type: "draft",
+    envelopeDigest: input.envelopeDigest,
+  });
+
+  const created = await database.marketingPost.create({
+    data: {
+      channelId: input.channelId,
+      locale: input.locale,
+      kind: input.kind,
+      logicalKey: input.logicalKey,
+      envelope: asJson(envelope),
+      envelopeDigest: input.envelopeDigest,
+      rendererVersion: input.rendererVersion,
+      templateId: input.templateId,
+      templateDigest: input.templateDigest,
+      claimIds: [...input.claimIds],
+      assetIds: [...input.assetIds],
+      claimRegistryVersion: input.claimRegistryVersion,
+      assetRegistryVersion: input.assetRegistryVersion,
+      factSnapshot: asJson(input.factSnapshot),
+      factsDigest,
+      // Derived from the decision, never from the caller.
+      guardDecision: "autonomous_eligible",
+      guardCodes: [],
+      guardRuleIds: [...guardRuleIds],
+      status: "scheduled",
+      mode: "autonomous",
+      scheduledAt: slot,
+      history: asJson([draftEntry]),
+    },
+    select: { id: true },
+  });
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-guard",
+    action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+    targetType: "MarketingPost",
+    targetId: created.id,
+    summary: "Scheduled a marketing post without a person, inside an approved template.",
+    metadata: {
+      channelId: input.channelId,
+      factsDigest,
+      factsScopeDigest: rawInput.decision.factsScopeDigest,
+      templateId: binding.templateId,
+      templateDigest: binding.approvedDigest,
+      // What dispatch compares against. A post admitted by one build of the
+      // admission code, one configuration generation or one deployment is not
+      // dispatched by another without being admitted again. The commit is
+      // provenance: Git identity alone does not prove what bytes ran.
+      admissionCodeDigest: provenance.admissionCodeDigest,
+      configGeneration: provenance.configGeneration,
+      deploymentId: provenance.deploymentId,
+      commitSha: provenance.commitSha,
+      scheduledAt: slot.toISOString(),
+    },
+  });
+
+  return { id: created.id };
+}
+
+/**
+ * Refuse a transaction that is not at the isolation this work needs.
+ *
+ * Asked of the database rather than assumed of the caller. The level is set
+ * where the transaction is opened, which is a different file from the one that
+ * depends on it, and a caller that forgets gets a claim that looks like it
+ * worked.
+ */
+async function requireSerializableTransaction(
+  database: MarketingTransaction,
+  what: string,
+): Promise<void> {
+  const rows = await database.$queryRaw<Array<{ level: string }>>(Prisma.sql`
+    SELECT current_setting('transaction_isolation') AS "level"
+  `);
+  const level = rows[0]?.level ?? "";
+  if (level.toLowerCase() !== "serializable") {
+    throw new MarketingStoreRefusedError(
+      "transaction_not_serializable",
+      `A marketing ${what} runs at SERIALIZABLE, not ${level || "an unknown level"}`,
+    );
+  }
+}
+
+/**
+ * One post this account is due to publish, locked, or nothing.
+ *
+ * `SKIP LOCKED` is what makes several workers useful rather than a queue with
+ * extra steps: a row another worker is already holding is not waited for, it is
+ * passed over. `FOR UPDATE OF p` locks the post and not the channel joined to
+ * it, because the channel is locked separately and deliberately -- see
+ * `claimDueMarketingPost`.
+ *
+ * Due means the slot has arrived at the database's clock and nobody is
+ * currently holding it: either no claim, or a claim whose lease has run out.
+ * An expired lease is a claim whose worker is gone, and reclaiming it is the
+ * only way a post whose process died ever goes out.
+ */
+async function lockDueMarketingPost(
+  database: MarketingTransaction,
+  channelId: string,
+  now: Date,
+): Promise<{ id: string; historyVersion: number; slotDay: string | null } | null> {
+  // `slotDay` comes back as text, not as a `DATE`: a `DATE` crosses into
+  // JavaScript as a `Date`, and which calendar day that `Date` then names
+  // depends on who reads it. The claim compares it with a day that is also
+  // text, and two strings have no time zone.
+  const rows = await database.$queryRaw<
+    Array<{ id: string; historyVersion: number; slotDay: string | null }>
+  >(Prisma.sql`
+    SELECT p."id", p."historyVersion",
+           to_char(p."slotDate", 'YYYY-MM-DD') AS "slotDay"
+    FROM "MarketingPost" AS p
+    WHERE p."channelId" = ${channelId}
+      AND p."status" = 'scheduled'
+      AND p."scheduledAt" IS NOT NULL
+      AND p."scheduledAt" <= ${now}
+      AND p."deletedAt" IS NULL
+      AND p."contentPurgedAt" IS NULL
+      -- Exactly the two conditions the claim tests, and no third.
+      -- "leaseUntil IS NULL" used to be here too, which selected a row
+      -- holding a token with no lease: locked, handed back, and taken by
+      -- neither claim path, every time. The store sets the two together, so
+      -- that state is not one it makes -- and a query that invites it in is
+      -- how it would go unnoticed if something else ever did.
+      AND (p."claimToken" IS NULL OR p."leaseUntil" <= ${now})
+    ORDER BY p."scheduledAt" ASC, p."id" ASC
+    LIMIT 1
+    FOR UPDATE OF p SKIP LOCKED
+  `);
+  return rows[0] ?? null;
+}
+
+/**
+ * Take the next due post's slot for this worker.
+ *
+ * **A claim is not a dispatch.** The row stays `scheduled`, its history and
+ * history version do not move, and `publishAttempt` and `providerRequestKey`
+ * are untouched -- those three are what say a request left for the platform,
+ * and nothing has. What this writes is `slotDate`, `claimToken` and
+ * `leaseUntil`: which day the post is spending, who is spending it, and until
+ * when that is true.
+ *
+ * The order of locks is the channel first, then the post. The channel is the
+ * per-channel mutex the plan names: the day and week counts are read while it
+ * is held, so two workers cannot each count four of a five-a-week cap and both
+ * take the fifth. The post lock comes second and skips what is already held,
+ * so workers on different posts of the same account still serialise on the
+ * channel -- which is correct, because the thing they are competing for is the
+ * account's allowance, not the row.
+ */
+export async function claimDueMarketingPost(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly channelId: string;
+    readonly claimToken: string;
+    /** Resolved inside this transaction, as the autonomous insert's is. */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+    ) => Promise<{ readonly publish: boolean }>;
+    readonly leaseMs?: number;
+  },
+): Promise<
+  | { readonly claimed: true; readonly id: string; readonly leaseUntil: Date }
+  | { readonly claimed: false; readonly reason: MarketingClaimRefusal }
+> {
+  const channelId = String(rawInput.channelId);
+  const claimToken = String(rawInput.claimToken);
+  const resolveAdmission = rawInput.resolveAdmission;
+  const leaseMs =
+    rawInput.leaseMs === undefined
+      ? MARKETING_CLAIM_LEASE_MS
+      : Number(rawInput.leaseMs);
+  if (!Number.isFinite(leaseMs) || leaseMs <= 0) {
+    throw new MarketingStoreRefusedError(
+      "claim_lease_not_positive",
+      "A lease that has already expired is not a lease",
+    );
+  }
+  if (claimToken.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "claim_token_empty",
+      "A claim is held by a token, and an empty one identifies nobody",
+    );
+  }
+
+  // The audit chain lock before any row lock, for the reason the autonomous
+  // insert takes it: this function's audit entry names the row it claims, so
+  // it is written last, and taking the two locks in the other order from the
+  // admin paths is how two of them deadlock.
+  // The plan puts this whole transaction at `SERIALIZABLE`, and the caller is
+  // what sets it -- `runMarketingTransaction` takes the level, this function
+  // takes a transaction. So this asks. A claim that counted an account's
+  // allowance under read committed would be counting rows as of whenever each
+  // statement ran, and the channel lock alone does not fix that: it serialises
+  // the two workers, and the second one still reads its counts from a snapshot
+  // taken before the first committed.
+  await requireSerializableTransaction(database, "claim");
+
+  await takeAuditChainLock(database);
+
+  const channel = await lockMarketingChannel(database, channelId);
+  if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
+    return { claimed: false, reason: "channel_not_publishing" };
+  }
+
+  // One evaluation of the clock, returned twice: as the instant, for lease
+  // arithmetic and comparisons, and as the UTC calendar day, as text. The day
+  // used to be taken from the instant with `toISOString()`, which trusts that
+  // the `Date` the driver built from a naive UTC timestamp is UTC -- true
+  // when the process runs in UTC, and not something this function should
+  // depend on. `slotDay` already comes back through `to_char`; this is the
+  // same defence for the other side of the comparison.
+  const clock = await database.$queryRaw<Array<{ now: Date; day: string }>>(Prisma.sql`
+    SELECT t AS "now", to_char(t, 'YYYY-MM-DD') AS "day"
+    FROM (
+      SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS t
+    ) AS clock
+  `);
+  const now = clock[0]?.now;
+  const clockDay = clock[0]?.day;
+  if (!now || !clockDay) {
+    throw new MarketingStoreRefusedError(
+      "database_clock_unavailable",
+      "The database clock did not return a timestamp",
+    );
+  }
+
+  const admission = await resolveAdmission(database, {
+    id: channel.id,
+    channel: channel.channel as MarketingChannelName,
+    status: channel.status as MarketingChannelStatus,
+    connectionGeneration: Number(channel.connectionGeneration),
+  });
+  if (!admission.publish) {
+    return { claimed: false, reason: "not_admitted" };
+  }
+
+  const due = await lockDueMarketingPost(database, channelId, now);
+  if (!due) return { claimed: false, reason: "nothing_due" };
+
+  const caps = marketingChannelCaps({
+    channel: channel.channel,
+    dailyCapOverride: channel.dailyCapOverride,
+    weeklyCapOverride: channel.weeklyCapOverride,
+  });
+  if (caps === null) {
+    // A channel the policy gives no cap is one that is posted by hand. There
+    // is no number to count against, so there is no slot to take.
+    return { claimed: false, reason: "channel_posts_by_hand" };
+  }
+
+  // **One definition of today, from one clock read, as text.** The statement
+  // above returned it, formatted in SQL from the same evaluation as `now`.
+  // Everything below -- the renewal test, the count and the write -- derives
+  // from this string.
+  //
+  // Two earlier versions got this wrong in opposite ways. Binding `now` as a
+  // `Date` and casting it in SQL resolved the day in the session's time zone.
+  // Calling `clock_timestamp()` again in the counting statement read a second
+  // clock, which a transaction that straddles midnight sees as the next day:
+  // the count would be about day D+1 and the write about day D. A string cast
+  // to `::date` has no time zone and is read once.
+  const day = clockDay;
+  const slotDate = new Date(`${day}T00:00:00.000Z`);
+
+  // **Renewing is not spending.** A row that already holds today is a claim
+  // whose worker went away and whose lease ran out; taking it again spends
+  // nothing new. Counting it against today's cap refused its own renewal, and
+  // on a channel allowed one post a day that made the only recovery path for a
+  // crashed worker a permanent refusal.
+  const renewing = due.slotDay === day;
+
+  let usedToday: number | null = null;
+  let usedWeek: number | null = null;
+  if (!renewing) {
+    // Counted while the channel is held, which is what makes the count worth
+    // anything, and without this row: it is about to spend today, and if it
+    // held an earlier day -- a failure somebody requeued -- that day moves
+    // with it rather than being counted twice.
+    const used = await database.$queryRaw<Array<{ today: bigint; week: bigint }>>(
+      Prisma.sql`
+        SELECT
+          count(*) FILTER (WHERE "slotDate" = ${day}::date) AS "today",
+          count(*) FILTER (WHERE "slotDate" > ${day}::date - 7) AS "week"
+        FROM "MarketingPost"
+        WHERE "channelId" = ${channelId}
+          AND "slotDate" IS NOT NULL
+          AND "id" <> ${due.id}
+      `,
+    );
+    usedToday = Number(used[0]?.today ?? 0);
+    usedWeek = Number(used[0]?.week ?? 0);
+    if (usedToday >= caps.daily) {
+      return { claimed: false, reason: "daily_cap_reached" };
+    }
+    if (usedWeek >= caps.weekly) {
+      return { claimed: false, reason: "weekly_cap_reached" };
+    }
+  }
+
+  const leaseUntil = new Date(now.getTime() + leaseMs);
+  // A renewal leaves the day alone; a new spend writes it. Either way the day
+  // is the one the count, if there was one, was about.
+  const data = renewing
+    ? { claimToken, leaseUntil }
+    : { slotDate, claimToken, leaseUntil };
+
+  // Conditional on everything the decision to claim was made against. The row
+  // is held by `FOR UPDATE` so none of it can have moved, and the predicate is
+  // here for the case where it somehow did: a claim written over another
+  // worker's is two workers publishing one post.
+  const claimed = await database.marketingPost.updateMany({
+    where: {
+      id: due.id,
+      status: "scheduled",
+      historyVersion: due.historyVersion,
+      // Nobody holds it. Not also `slotDate: null`: a requeued post holds the
+      // day of its earlier attempt, and requiring null made it unclaimable.
+      claimToken: null,
+      deletedAt: null,
+      contentPurgedAt: null,
+    },
+    data,
+  });
+  if (claimed.count !== 1) {
+    // Somebody held it and their lease has run out. A separate predicate, so
+    // "nobody had it" and "somebody's lease expired" stay different facts.
+    const reclaimed = await database.marketingPost.updateMany({
+      where: {
+        id: due.id,
+        status: "scheduled",
+        historyVersion: due.historyVersion,
+        leaseUntil: { lte: now },
+        deletedAt: null,
+        contentPurgedAt: null,
+      },
+      data,
+    });
+    if (reclaimed.count !== 1) {
+      return { claimed: false, reason: "claim_conflict" };
+    }
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2C_ACTIONS.postClaimed,
+    targetType: "MarketingPost",
+    targetId: due.id,
+    summary: renewing
+      ? "Renewed the lease on a publishing slot this post already held."
+      : "Took a publishing slot for a scheduled post.",
+    metadata: {
+      channelId,
+      // The token is the claim's identity and the release has to present it,
+      // so it is recorded. It identifies a worker's attempt, not a person.
+      claimToken,
+      leaseUntil: leaseUntil.toISOString(),
+      slotDate: day,
+      renewed: renewing,
+      // Null on a renewal, because nothing was counted: the row already held
+      // the day, and a number here would suggest a cap check that did not run.
+      dailyUsedBefore: usedToday,
+      weeklyUsedBefore: usedWeek,
+      dailyCap: caps.daily,
+      weeklyCap: caps.weekly,
+    },
+  });
+
+  return { claimed: true, id: due.id, leaseUntil };
+}
+
+/**
+ * Give a claimed slot back, before anything has left for the platform.
+ *
+ * The caller has to say which claim it is giving back. A release that matched
+ * only on the post id would let a worker whose lease had already expired --
+ * and whose slot another worker had since taken -- clear the new holder's
+ * claim, which is worse than the stall it was trying to fix.
+ *
+ * `status`, `history` and `historyVersion` do not move here either. A
+ * release is the exact undo of a claim and nothing else happened in between:
+ * if something had, this is not the function to call.
+ */
+export async function releaseMarketingPostClaim(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly claimToken: string;
+    /**
+     * The lease this caller believes it holds.
+     *
+     * The token alone is not enough. A worker can be told its token, finish a
+     * long pause, and try to tidy up after a lease that expired while it was
+     * gone -- by which time another worker may hold the same row under a new
+     * lease. Binding the exact instant makes that release match nothing, which
+     * is the right answer.
+     */
+    readonly expectedLeaseUntil: Date;
+    readonly expectedHistoryVersion: number;
+    readonly reason: MarketingClaimReleaseReason;
+  },
+): Promise<{ readonly released: boolean }> {
+  const id = String(rawInput.id);
+  const claimToken = String(rawInput.claimToken);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const expectedLeaseUntil = new Date(rawInput.expectedLeaseUntil.getTime());
+  if (!Number.isFinite(expectedLeaseUntil.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "claim_release_lease_unreadable",
+      "A release names the lease it is giving back, and that is not a time",
+    );
+  }
+  const reason = rawInput.reason;
+  if (!(MARKETING_CLAIM_RELEASE_REASONS as readonly string[]).includes(reason)) {
+    throw new MarketingStoreRefusedError(
+      "claim_release_reason_unknown",
+      "A release says why, from a closed list",
+    );
+  }
+
+  await takeAuditChainLock(database);
+
+  const released = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "scheduled",
+      claimToken,
+      leaseUntil: expectedLeaseUntil,
+      historyVersion: expectedHistoryVersion,
+      // Nothing has left. A row holding a request key is one that has been
+      // dispatched, and a dispatched post is not released -- its outcome is
+      // recorded.
+      providerRequestKey: null,
+    },
+    data: {
+      slotDate: null,
+      claimToken: null,
+      leaseUntil: null,
+    },
+  });
+  if (released.count !== 1) return { released: false };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2C_ACTIONS.postClaimReleased,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "Gave back a publishing slot without publishing.",
+    metadata: {
+      claimToken,
+      reason,
+      historyVersion: expectedHistoryVersion,
+      leaseUntil: expectedLeaseUntil.toISOString(),
+    },
+  });
+
+  return { released: true };
+}
+
 export async function appendMarketingPostHistory(
   database: MarketingDatabase,
   rawInput: {
@@ -1954,6 +3202,15 @@ export async function appendMarketingPostHistory(
     data.approvalAuditLogId = input.requeue.auditLogId;
     data.approvedAt = verdict.createdAt;
     data.approvedDigest = digest;
+    // **A requeue ends whatever claim the failed attempt left.** The worker
+    // that dispatched it has concluded -- the outcome is `failed` -- so its
+    // token and lease describe nothing, and leaving them set hid the post
+    // behind a dead lease for up to fifteen minutes after a person had just
+    // re-approved it. The day stays: under one row, one slot, a retry the same
+    // day renews it and a retry on a later day moves it, and both of those are
+    // the claim's decision, made when the claim happens.
+    data.claimToken = null;
+    data.leaseUntil = null;
   }
 
   const updated = await database.marketingPost.updateMany({
@@ -1996,7 +3253,7 @@ type LockedMarketingPost = {
   claimRegistryVersion: number;
   assetRegistryVersion: number;
   factSnapshot: Prisma.JsonValue;
-  factsDigest: string | null;
+  factsDigest: string;
 };
 
 async function lockMarketingPost(
@@ -2515,6 +3772,15 @@ export async function requeueMarketingPostAfterFailure(
       approvalAuditLogId: input.auditLogId,
       approvedAt,
       approvedDigest: input.expectedEnvelopeDigest,
+      // **A requeue ends whatever claim the failed attempt left.** The worker
+      // that dispatched it has concluded -- the outcome is `failed` -- so its
+      // token and lease describe nothing, and leaving them set hid the post
+      // behind a dead lease for up to fifteen minutes after a person had just
+      // re-approved it. The day stays: under one row, one slot, a retry the same
+      // day renews it and a retry on a later day moves it, and both of those are
+      // the claim's decision, made when the claim happens.
+      claimToken: null,
+      leaseUntil: null,
     },
   });
   requireOne(updated.count, "requeue_conflict", "The post changed before re-queue");

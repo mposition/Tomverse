@@ -1487,7 +1487,7 @@ EEA·영국을 여는 선행 게이트입니다.
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | ~~R5~~ 해소(2026-09-23) | 해시할 문안이 먼저. 초안: [email-consent-copy-draft.md](email-consent-copy-draft.md) |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
-| S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | |
+| S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | 둘로 나눕니다. **S5a** — rule 테이블(draft에서만 쓰기, 한 `(ruleKey, ruleVersion)`은 한 내용), 수신자·호주 발신자 authority 판정, seed(정본 5.1.1). 선행 결정 없음. **S5b** — 호주 관계 lifecycle(4.4). R4 대기. S5b 전까지 호주 `inferred_consent`는 판정에서 쓰지 않습니다 |
 | S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`(불변식 9), 한·영 안내, 14일 통지(`consent_result_notice` 포함) + 2년 고지 수신자별 기한 경고 | S3(승인 원장) | 2년 배치는 기한 전 별도 |
 | S7 | 템플릿 + 구조화 payload + 링크 표 | — | |
 | S8 | 기존 사용자 제품 내 동의 안내(5.4) + 기존 계정 IP 추정 국가 기록(5.3) + 제품 내 안내 화면(9절) + 78계정 승인·cohort 기록과 admin 표시 | S3 | |

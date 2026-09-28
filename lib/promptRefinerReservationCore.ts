@@ -13,13 +13,16 @@ import {
  * This module decides shapes and state only; it does not read or write a DB.
  */
 export const PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION =
-    "prompt-refiner-reservation-authority-v2" as const;
+    "prompt-refiner-reservation-authority-v3" as const;
 export const PROMPT_REFINER_RESERVATION_STAGE_IDS = Object.freeze([
     "prompt-refiner-shadow-v1",
     "prompt-refiner-shadow-v2",
+    "prompt-refiner-shadow-v3",
 ] as const);
+export const PROMPT_REFINER_RESERVATION_STAGE_V3_ID =
+    PROMPT_REFINER_RESERVATION_STAGE_IDS[2];
 export const PROMPT_REFINER_RESERVATION_STAGE_ID =
-    PROMPT_REFINER_RESERVATION_STAGE_IDS[1];
+    PROMPT_REFINER_RESERVATION_STAGE_V3_ID;
 export const PROMPT_REFINER_RESERVATION_TTL_MS = 5 * 60 * 1_000;
 
 export const PROMPT_REFINER_RESERVATION_STAGE_STATUSES = Object.freeze([
@@ -68,7 +71,7 @@ const computedReservationContractDigest = `sha256:${createHash("sha256")
     .digest("hex")}`;
 
 export const PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST =
-    "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1" as const;
+    "sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72" as const;
 
 if (computedReservationContractDigest !== PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST) {
     throw new Error(

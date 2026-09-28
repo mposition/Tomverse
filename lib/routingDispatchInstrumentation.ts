@@ -46,6 +46,7 @@ import {
   recordFallbackTransition,
   type PlannerMode,
   type RoutingAttemptOutcome,
+  type RoutingAttemptErrorClass,
   type RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import type {
@@ -592,7 +593,7 @@ export const completeInstrumentedDispatch = async (
     firstVisibleTokenAt?: Date | null;
     actualInputTokens?: number | null;
     actualOutputTokens?: number | null;
-    errorClass?: string | null;
+    errorClass?: RoutingAttemptErrorClass | null;
     assistantMessageId?: string | null;
     settlementOutcome?: string | null;
     firstTokenMs?: number | null;

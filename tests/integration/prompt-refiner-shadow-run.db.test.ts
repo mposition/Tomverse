@@ -27,6 +27,7 @@ import {
 import {
     PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
     PROMPT_REFINER_SHADOW_CASE_IDS,
+    PROMPT_REFINER_SHADOW_EXECUTION_FLAG,
     PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG,
     PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
     PROMPT_REFINER_SHADOW_RUN_ID,
@@ -59,6 +60,7 @@ process.env.RAILWAY_DEPLOYMENT_ID = FIXTURE_DEPLOYMENT_ID;
 process.env.ADMIN_AUDIT_INTEGRITY_KEY =
     "prompt-refiner-shadow-run-strong-fixture-key";
 process.env[PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG] = "true";
+process.env[PROMPT_REFINER_SHADOW_EXECUTION_FLAG] = "true";
 
 const fixtureSession = {
     user: { id: "mposition", email: "owner@example.com" },
@@ -421,7 +423,7 @@ test("terminal receipt is immutable, idempotent only when exact, and updates cos
     );
 });
 
-test("v4 terminal duration is bounded before an immutable receipt can be stored", async () => {
+test("v5 terminal duration is bounded before an immutable receipt can be stored", async () => {
     await approveStage();
     await approveRun();
     const { attempt } = await dispatch({
@@ -452,7 +454,7 @@ test("v4 terminal duration is bounded before an immutable receipt can be stored"
     const durationConstraints = await prisma.$queryRawUnsafe<Array<{ definition: string }>>(`
         SELECT pg_get_constraintdef(oid) AS definition
         FROM pg_constraint
-        WHERE conname = 'PromptRefinerShadowAttempt_v4_duration_check'
+        WHERE conname = 'PromptRefinerShadowAttempt_v5_duration_check'
     `);
     assert.equal(durationConstraints.length, 1);
     assert.match(
@@ -474,13 +476,19 @@ test("v4 runtime manifest wrapper preserves strict and parallel-safe validator m
         FROM pg_proc
         WHERE proname IN (
           'prompt_refiner_runtime_manifest_valid',
-          'prompt_refiner_runtime_manifest_v2_valid'
+          'prompt_refiner_runtime_manifest_v2_valid',
+          'prompt_refiner_runtime_manifest_v3_valid'
         )
         ORDER BY proname
     `);
     assert.deepEqual(functions, [
         {
             name: "prompt_refiner_runtime_manifest_v2_valid",
+            parallel: "s",
+            strict: true,
+        },
+        {
+            name: "prompt_refiner_runtime_manifest_v3_valid",
             parallel: "s",
             strict: true,
         },

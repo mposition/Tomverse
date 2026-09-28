@@ -1,0 +1,46 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxBoardPromotionMessages = defineAdminMessages({
+  en: {
+    title: "AMUX card promotion",
+    description:
+      "Preview reads one to three backlog cards and writes nothing. Prepare, approve, reject and expire record an approval. Apply moves only those cards to todo when the server reports that this promotion is permitted. This screen cannot set that permission, choose the cards, or start a worker.",
+    requestLabel: "Promotion request",
+    preview: "Preview",
+    prepare: "Prepare",
+    approvalLabel: "Approval id",
+    approve: "Approve",
+    reject: "Reject",
+    expire: "Expire",
+    expireDue: "Expire due",
+    apply: "Apply",
+    applyDisabled: "Apply is disabled. The server refuses it even if this control is bypassed.",
+    renewSignIn: "Renew administrator sign-in",
+    error: (code: string) => `Error: ${code}`,
+    status: (status: string) => `Status: ${status}`,
+    refusal: (code: string) => `Refusal: ${code}`,
+    applyPermitted: (permitted: string) => `Apply permitted: ${permitted}`,
+    cards: (count: number) => `Cards: ${count}.`,
+  },
+  ko: {
+    title: "AMUX 카드 승격",
+    description:
+      "미리보기는 backlog 카드 1~3건을 읽고 아무것도 쓰지 않습니다. 준비, 승인, 거절, 만료는 승인 기록만 남깁니다. 적용은 서버가 이 승격을 허용했다고 보고할 때만 그 카드를 todo로 옮깁니다. 이 화면은 그 허용을 켜거나, 카드를 고르거나, 워커를 시작하지 않습니다.",
+    requestLabel: "승격 요청",
+    preview: "미리보기",
+    prepare: "준비",
+    approvalLabel: "승인 ID",
+    approve: "승인",
+    reject: "거절",
+    expire: "만료",
+    expireDue: "기한 지난 항목 만료",
+    apply: "적용",
+    applyDisabled: "적용은 꺼져 있습니다. 이 버튼을 우회해도 서버가 거절합니다.",
+    renewSignIn: "관리자 로그인을 갱신",
+    error: (code: string) => `오류: ${code}`,
+    status: (status: string) => `상태: ${status}`,
+    refusal: (code: string) => `거절 사유: ${code}`,
+    applyPermitted: (permitted: string) => `적용 허용: ${permitted}`,
+    cards: (count: number) => `카드 ${count}건.`,
+  },
+});

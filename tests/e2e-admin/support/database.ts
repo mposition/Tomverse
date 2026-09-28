@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
@@ -538,6 +540,23 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
         plan: "Free",
         createdAt: at(-6 * DAY),
       },
+      {
+        // Exactly the shape of a production verified-trace report: arrived in
+        // review, no operator on it yet, and an error class whose evidence the
+        // policy deliberately does not record. No user or address, so it adds
+        // nothing to any customer's page.
+        id: FIXTURE_FEEDBACK.autoReviewed.id,
+        type: FIXTURE_FEEDBACK.autoReviewed.type,
+        status: "reviewing",
+        message: FIXTURE_FEEDBACK.autoReviewed.message,
+        language: "en",
+        createdAt: at(-1 * HOUR),
+        traceId: FIXTURE_FEEDBACK.autoReviewed.traceId,
+        errorReportVerification: "verified",
+        traceProvenance: "server_generated",
+        errorClassificationSource: "server",
+        evidenceAvailability: "intentionally_not_recorded",
+      },
     ],
   });
 
@@ -1069,6 +1088,19 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     claimRegistryVersion: 1,
     assetRegistryVersion: 1,
     factSnapshot: {},
+    // Not optional since 20260923140000. A post records which resolver answers
+    // its Guard decision was made from, and a row without one is a decision
+    // nobody can reconstruct -- so the fixture states it rather than leaving a
+    // shape the database would refuse.
+    //
+    // Derived from the envelope digest rather than equal to it. They are
+    // different questions -- one is what the post says, the other is what the
+    // Guard was told -- and a fixture that made them the same value would be
+    // planting an identity that does not hold, for the next test that compares
+    // them to find.
+    factsDigest: createHash("sha256")
+      .update(`facts:${digest}`, "utf8")
+      .digest("hex"),
     guardDecision: "approval_required",
     guardCodes: [FIXTURE_MARKETING.pending.guardCode],
     guardRuleIds: [],
