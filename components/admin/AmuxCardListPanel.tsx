@@ -18,7 +18,7 @@ export function AmuxCardListPanel({
   const messages = useAdminMessages(adminAmuxCardsMessages);
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-card-list-panel">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h1>
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
       <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-card-list-count">
         {messages.shown(rows.length, total, limit)}

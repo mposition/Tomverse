@@ -1,14 +1,20 @@
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
-import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth/next";
-
-import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
-import { getAdminRole } from "@/lib/adminAuth";
-import { authOptions } from "@/lib/auth";
-
-export default async function AdminAmuxBacklogMetadataPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-  return <AmuxBacklogMetadataPanel />;
+/**
+ * Retired route, preserved as a redirect.
+ *
+ * Card metadata is now the AMUX Backlog page's Card metadata section.
+ * The destination is owner-only in the same way this page was: another role
+ * is redirected and then answers 404 there.
+ */
+export default async function AdminAmuxBacklogMetadataRedirectPage({
+  searchParams,
+}: PageProps<"/admin/amux-backlog-metadata">) {
+  redirect(
+    adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-backlog-metadata"], await searchParams)
+  );
 }

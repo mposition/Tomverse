@@ -121,6 +121,9 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminAuditSystemActors.ts",
   "lib/adminAuth*",
   "lib/adminMessages/amux*",
+  // The AMUX admin tab status reads the same switches as the AMUX routes.
+  "lib/adminAmux*",
+  "tests/adminAmux*",
   "lib/adminMessages/engineeringAgent*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
