@@ -53,6 +53,8 @@ type AmuxReport = {
     budgetWindowStartsAt: string | null;
     budgetWindowEndsAt: string | null;
   }>;
+  escalations_total?: number;
+  escalations_limit?: number;
   escalations: Array<{
     id: string;
     specialty: string | null;
@@ -730,6 +732,12 @@ export function AdminAmuxRoutingPanel() {
                 <p className="mt-2 text-xs leading-5 text-amber-200/80">
                   {m.resolutionAvailability}
                 </p>
+                {typeof report.escalations_total === "number" &&
+                report.escalations_total > report.escalations.length ? (
+                  <p className="mt-2 text-xs text-zinc-400" data-testid="admin-amux-escalations-bounded">
+                    {m.escalationsBounded(report.escalations.length, report.escalations_total)}
+                  </p>
+                ) : null}
                 {report.escalations.length === 0 ? (
                   <p className="mt-2 text-sm text-zinc-500">
                     {m.noEscalations}

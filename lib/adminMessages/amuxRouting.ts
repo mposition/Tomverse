@@ -17,6 +17,8 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     noPolicies: "No project or team limits are configured.",
     escalations: "Human review queue",
     noEscalations: "No unresolved human escalation.",
+    escalationsBounded: (shown: number, total: number) =>
+      `Showing the oldest ${shown} of ${total} unresolved escalations.`,
     resolutionAvailability:
       "Task review is available only when the separate approval path is enabled. Acknowledgement alone never releases blocked work.",
     reasonUnspecified: "reason code unavailable",
@@ -151,6 +153,8 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     noPolicies: "설정된 project/team 한도가 없습니다.",
     escalations: "사람 검토 큐",
     noEscalations: "미해결 human escalation이 없습니다.",
+    escalationsBounded: (shown: number, total: number) =>
+      `미해결 에스컬레이션 ${total}건 가운데 오래된 ${shown}건을 표시합니다.`,
     resolutionAvailability:
       "별도 승인 경로가 활성화된 경우에만 작업 검토 결정을 할 수 있습니다. 확인(acknowledge)만으로 차단된 작업이 재개되지는 않습니다.",
     reasonUnspecified: "사유 코드 없음",

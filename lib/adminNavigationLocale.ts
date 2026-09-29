@@ -373,9 +373,10 @@ export const localizeAdminTabs = <T extends AdminNavTab>(
 /** `resolveAdminPageMeta`, with the heading and breadcrumb in the given locale. */
 export const localizeAdminPageMeta = (
   pathname: string,
-  locale: AdminLocale
+  locale: AdminLocale,
+  role?: AdminRole | null
 ): AdminPageMeta => {
-  const meta = resolveAdminPageMeta(pathname);
+  const meta = resolveAdminPageMeta(pathname, role);
   if (locale !== "ko") return meta;
   if (!meta.isKnown) return { ...meta, ...UNKNOWN_PAGE_KO };
 

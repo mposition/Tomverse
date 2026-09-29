@@ -912,7 +912,15 @@ export const ADMIN_DETAIL_ROUTES = [
  * behaviour titled `/admin/search` -- and any recent route that had since been
  * renamed -- "Overview", which reads as a wrong page rather than an unknown one.
  */
-export const resolveAdminPageMeta = (pathname: string): AdminPageMeta => {
+export const resolveAdminPageMeta = (
+  pathname: string,
+  /**
+   * When given, an entry this role may not view resolves as unknown, so the
+   * shell does not title a page the role is about to receive a 404 for.
+   * Omitted means unfiltered, for callers that are not rendering for a role.
+   */
+  role?: AdminRole | null,
+): AdminPageMeta => {
   const detail = ADMIN_DETAIL_ROUTES.find((route) => route.pattern.test(pathname));
   if (detail) {
     return {
@@ -940,7 +948,7 @@ export const resolveAdminPageMeta = (pathname: string): AdminPageMeta => {
   }
 
   const item = findAdminNavItem(pathname);
-  if (item) {
+  if (item && (role === undefined || adminIsVisibleTo(role, item))) {
     return {
       label: item.label,
       description: item.description,

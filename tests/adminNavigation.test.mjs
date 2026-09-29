@@ -559,6 +559,10 @@ test("the Execution badge counts the escalations the Assignment section lists", 
     /where: \{ status: \{ in: \[\.\.\.AMUX_ESCALATION_AWAITING_STATUSES\] \} \}/;
   assert.match(loader.slice(loader.indexOf("amuxHumanEscalation.count(")), sameWhere);
   assert.match(report.slice(report.indexOf("amuxHumanEscalation.findMany(")), sameWhere);
+  // The list is bounded and says so: its total counts the same set as the badge.
+  assert.match(report.slice(report.indexOf("amuxHumanEscalation.count(")), sameWhere);
+  assert.match(report, /take: AMUX_ESCALATION_LIST_LIMIT/);
+  assert.match(report, /escalations_total: escalationsTotal/);
   // The page's tab badge turns a failed read into no badge.
   assert.match(
     readPage("amux-execution"),
@@ -578,4 +582,18 @@ test("a tab strip never offers a section the viewer's role cannot open", () => {
     const page = readPage(item.href.replace("/admin/", ""));
     assert.match(page, /role=\{role\}/, `${item.id} does not pass the role to its tab strip`);
   }
+});
+
+test("the shell does not title a page the role cannot view", () => {
+  for (const path of ["/admin/amux-backlog", "/admin/amux-promotion"]) {
+    assert.equal(resolveAdminPageMeta(path, "owner").isKnown, true, path);
+    for (const role of ADMIN_ROLE_ORDER.filter((r) => r !== "owner")) {
+      const meta = resolveAdminPageMeta(path, role);
+      assert.equal(meta.isKnown, false, `${path} for ${role}`);
+      assert.equal(meta.label, "Admin Console");
+    }
+    // Unfiltered callers keep the entry.
+    assert.equal(resolveAdminPageMeta(path).isKnown, true);
+  }
+  assert.equal(resolveAdminPageMeta("/admin/amux-execution", "support").isKnown, true);
 });
