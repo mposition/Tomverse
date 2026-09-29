@@ -29,6 +29,7 @@ const account = (overrides = {}) => ({
   email: "new@example.test",
   providers: ["google"],
   alreadyConsumed: false,
+  createdBySignIn: true,
   ...overrides,
 });
 
@@ -61,6 +62,9 @@ test("an existing account's sign-in never consumes a choice", () => {
   assert.equal(refusal({ account: { createdAt: null } }), "account_age_unknown");
   // One that consumed a choice already.
   assert.equal(refusal({ account: { alreadyConsumed: true } }), "account_already_consumed");
+  // New and matching, but made by another tab's sign-up and only signed into
+  // here: the asking session's sign-in did not create it.
+  assert.equal(refusal({ account: { createdBySignIn: false } }), "not_created_by_this_sign_in");
 });
 
 test("the binding has to be the channel's own", () => {

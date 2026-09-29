@@ -38,6 +38,7 @@ export const SIGNUP_CONSENT_OAUTH_PROVIDERS = ["google", "azure-ad"] as const;
 
 export type SignupConsentRefusal =
   | "not_pending"
+  | "not_created_by_this_sign_in"
   | "account_predates_attempt"
   | "account_age_unknown"
   | "binding_mismatch"
@@ -75,6 +76,12 @@ export const signupConsentRefusal = (input: {
     /** Every sign-in provider the account has an `Account` row for. */
     providers: readonly string[];
     alreadyConsumed: boolean;
+    /**
+     * The asking session's sign-in created this account. The binding below
+     * proves the account matches the channel; this proves it was this sign-in
+     * that made it, not another tab's sign-up into which this tab then signed.
+     */
+    createdBySignIn: boolean;
   };
   /**
    * An email login for this address that was **requested** after the choice
@@ -87,6 +94,7 @@ export const signupConsentRefusal = (input: {
 }): SignupConsentRefusal | null => {
   if (signupConsentAttemptState(input.attempt, input.now) !== "pending") return "not_pending";
   if (input.account.alreadyConsumed) return "account_already_consumed";
+  if (!input.account.createdBySignIn) return "not_created_by_this_sign_in";
   if (input.account.createdAt === null) return "account_age_unknown";
   if (input.account.createdAt.getTime() < input.attempt.createdAt.getTime()) {
     return "account_predates_attempt";

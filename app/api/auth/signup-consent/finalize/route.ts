@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     const body = await readLimitedJson(req, 1_024, bodySchema);
     const result = await finalizeSignupConsentAttempt({
       userId: session.user.id,
+      createdBySignIn: session.user.accountCreatedBySignIn === true,
       attemptId: body.attemptId,
       nonce: body.nonce,
     });

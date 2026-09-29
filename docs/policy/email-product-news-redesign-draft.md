@@ -505,11 +505,23 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
   - 이 탭의 로그인만 소비합니다. 저장한 attempt의 id를 로그인 `callbackUrl`의
     표지(`signupConsent`)로 싣고, finalize는 **그 표지를 가진 착지에서만** 요청합니다.
     다른 탭의 세션 알림이나 같은 브라우저의 다른 가입은 표지가 없으므로 소비하지
-    않습니다. 표지는 착지 즉시 주소창에서 지웁니다. 유효 시간은 15분입니다.
+    않습니다. 표지는 재시도가 끝난 뒤 주소창에서 지웁니다. 유효 시간은 15분입니다.
+  - 서버는 **그 세션의 로그인이 계정을 만들었는지**를 봅니다. 계정을 만든 로그인의
+    JWT에만 `accountCreatedBySignIn`이 참이고(OAuth는 adapter의 `isNewUser`, 이메일
+    코드는 `authorize()`가 전달), 다른 탭의 가입이 만든 계정에 이 탭이 나중에 로그인한
+    세션은 거짓입니다(`not_created_by_this_sign_in`).
+  - 이메일 코드 경로의 선택은 **코드를 요청할 때** 저장되고, 코드 단계에서는 장치가
+    잠깁니다. 화면에서 바꿀 수 있는데 기록되지 않는 선택을 두지 않습니다.
+  - 메일의 로그인 **링크**로 끝낸 가입은 소비하지 않습니다. 링크는 보통 다른 탭에서
+    열려 표지도 nonce도 없고, 그 선택은 만료됩니다(동의 없음으로 남습니다).
   - email_code의 binding은 **선택 이후에 요청되어** 소비된 로그인 코드입니다. 선택 전에
     요청된 코드(다른 로그인, 재활성화)는 이 흐름이 아닙니다.
-  - attempt의 시각은 **DB 시계**로 찍습니다. `User.createdAt`·`EmailLoginAttempt.createdAt`
-    이 DB가 찍은 값이므로, 앱 인스턴스 시계로 찍으면 두 시계를 비교하게 됩니다.
+  - attempt의 시각은 **DB 시계**(`LOCALTIMESTAMP(3)`)로 찍습니다. `User.createdAt`·
+    `EmailLoginAttempt.createdAt`은 `DEFAULT CURRENT_TIMESTAMP`가 세션 시간대로
+    `timestamp(3)`에 넣은 값이고 `LOCALTIMESTAMP`는 바로 그 값입니다. 앱 인스턴스
+    시계로 찍으면 두 시계를 비교하게 됩니다.
+  - 착지에서 가입 선택을 처리했으면 그 세션의 IP 추정 기록(기존 계정용)은 건너뜁니다
+    — 방금 기록한 가입 시점의 추정을 곧바로 덮지 않기 위해서입니다.
   - 체크한 opt-in은 **확인 메일로 끝나거나 아무것도 남기지 않습니다.** 확인 요청이
     불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
     503), 그 착지가 몇 번 다시 시도합니다. 그래서 화면은 **수집 게이트·확인 게이트와

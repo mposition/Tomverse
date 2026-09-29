@@ -8,6 +8,8 @@ declare module "next-auth" {
             plan?: "Free" | "Pro" | "Max";
             createdAt?: string;
             authenticatedAt?: string;
+            /** This session's sign-in created the account (sign-up consent, S4). */
+            accountCreatedBySignIn?: boolean;
         } & DefaultSession["user"];
     }
 }
@@ -23,5 +25,11 @@ declare module "next-auth/jwt" {
          * `User.sessionsRevokedAt` so revocation works without a session table.
          */
         sessionIssuedAt?: number;
+        /**
+         * True only on the token of the sign-in that created the account. The
+         * sign-up screen's choice is consumed by that session and no other: an
+         * account another tab created is signed into here with this false.
+         */
+        accountCreatedBySignIn?: boolean;
     }
 }

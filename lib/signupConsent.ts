@@ -87,14 +87,17 @@ export async function signupConsentAvailable(ipCountry: string | null | undefine
  * The database's clock, in the naive-UTC form the timestamp columns store.
  *
  * An attempt is compared with `User.createdAt` and `EmailLoginAttempt.createdAt`,
- * which the database stamps. Stamping the attempt with this process's clock
- * compared two clocks, and an instance running behind let an account created
- * just before the choice pass as created after it.
+ * which the database stamps with `DEFAULT CURRENT_TIMESTAMP` into a
+ * `timestamp(3)` -- the session's local time, whatever its TimeZone.
+ * `LOCALTIMESTAMP(3)` is that same value, so the two sides are one clock in one
+ * zone. Stamping the attempt with this process's clock compared two clocks,
+ * and an instance running behind let an account created just before the
+ * choice pass as created after it.
  */
 const databaseNow = async (
   db: Pick<typeof prisma, "$queryRaw"> = prisma
 ): Promise<Date> => {
-  const [row] = await db.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS "now"`;
+  const [row] = await db.$queryRaw<{ now: Date }[]>`SELECT LOCALTIMESTAMP(3) AS "now"`;
   if (!row) throw new Error("The database did not report its clock.");
   return row.now;
 };
@@ -210,6 +213,7 @@ export type FinalizeSignupConsentResult =
 export const TERMINAL_FINALIZE_REFUSALS: ReadonlySet<string> = new Set([
   "not_found",
   "not_pending",
+  "not_created_by_this_sign_in",
   "account_predates_attempt",
   "account_age_unknown",
   "binding_mismatch",
@@ -230,6 +234,8 @@ const CONFIRMATION_UNAVAILABLE = Symbol("confirmation_unavailable");
  */
 export async function finalizeSignupConsentAttempt(input: {
   userId: string;
+  /** The asking session's sign-in created the account (`accountCreatedBySignIn`). */
+  createdBySignIn: boolean;
   attemptId: string;
   nonce: string;
   now?: Date;
@@ -274,6 +280,7 @@ export async function finalizeSignupConsentAttempt(input: {
       email,
       providers: user.accounts.map((account) => account.provider),
       alreadyConsumed: user.signupConsentAttempt !== null,
+      createdBySignIn: input.createdBySignIn,
     },
     emailLoginSince,
     now,

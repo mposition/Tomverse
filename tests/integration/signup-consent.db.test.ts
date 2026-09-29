@@ -99,6 +99,7 @@ test("an OAuth sign-up consumes its choice, and everything it implies commits to
 
   const result = await finalizeSignupConsentAttempt({
     userId: user.id,
+    createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
@@ -129,6 +130,7 @@ test("an OAuth sign-up consumes its choice, and everything it implies commits to
   // Once.
   const again = await finalizeSignupConsentAttempt({
     userId: user.id,
+    createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
@@ -146,8 +148,11 @@ test("an existing account's sign-in never consumes a choice", async () => {
     ipCountry: "AU",
   });
   assert.ok(issued.ok);
+  // Even a session claiming to have created the account is refused on its
+  // age: the two checks are independent.
   const result = await finalizeSignupConsentAttempt({
     userId: existing.id,
+    createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
@@ -187,6 +192,7 @@ test("an email-code sign-up is bound to its address and the code it consumed", a
 
   const result = await finalizeSignupConsentAttempt({
     userId: user.id,
+    createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
@@ -226,11 +232,11 @@ test("a superseded choice is not consumed, and the replacing one is", async () =
   assert.ok(second.ok);
   const user = await oauthAccount(later(issuedAt));
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: first.attemptId, nonce: first.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: first.attemptId, nonce: first.nonce }),
     { ok: false, reason: "not_pending" }
   );
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: second.attemptId, nonce: second.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: second.attemptId, nonce: second.nonce }),
     { ok: true, confirmationRequested: false }
   );
 });
@@ -286,7 +292,7 @@ test("an opt-in whose confirmation cannot be requested rolls back, and can be fi
   // The confirmation lane goes away between the screen and the landing.
   await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, false);
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: false, reason: "confirmation_unavailable" }
   );
   // Nothing of it committed: the attempt is still pending, and no notice, no
@@ -300,7 +306,7 @@ test("an opt-in whose confirmation cannot be requested rolls back, and can be fi
 
   await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, true);
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: true, confirmationRequested: true }
   );
 });
@@ -335,7 +341,7 @@ test("a code requested before the choice is not this flow's code", async () => {
     select: { id: true },
   });
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: false, reason: "binding_mismatch" }
   );
 });
@@ -356,7 +362,7 @@ test("an estimate whose country has no profile is recorded on the notice as unre
   assert.ok(issued.ok);
   const user = await oauthAccount(later(issuedAt));
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: true, confirmationRequested: false }
   );
   const shown = await prisma.emailPermissionEvent.findFirstOrThrow({
@@ -379,12 +385,12 @@ test("a wrong nonce, and a switched-off gate, consume nothing", async () => {
   assert.ok(issued.ok);
   const user = await oauthAccount(later(issuedAt));
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: "wrong" }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: "wrong" }),
     { ok: false, reason: "not_found" }
   );
   await setEmailFeatureFlag(EMAIL_SIGNUP_CONSENT_FLAG_KEY, false);
   assert.deepEqual(
-    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: false, reason: "disabled" }
   );
   assert.deepEqual(

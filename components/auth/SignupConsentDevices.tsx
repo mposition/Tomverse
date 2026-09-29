@@ -23,6 +23,12 @@ export function SignupConsentDevices(props: {
   optIn: boolean;
   objected: boolean;
   onChange: (next: { optIn: boolean; objected: boolean }) => void;
+  /**
+   * Locked once an email code has been requested: that request stored the
+   * choice, and the code's sign-in consumes exactly that one. A box still
+   * changeable on screen would show a choice nothing records.
+   */
+  disabled?: boolean;
 }) {
   const id = useId();
   const language: ConsentCopyLanguage = (CONSENT_COPY_LANGUAGES as readonly string[]).includes(
@@ -35,6 +41,7 @@ export function SignupConsentDevices(props: {
 
   return (
     <fieldset
+      disabled={props.disabled}
       data-testid="signup-consent-devices"
       className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-950/60"
     >

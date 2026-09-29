@@ -119,24 +119,16 @@ export async function storeSignupConsentChoice(input: {
  * stored attempt's marker counts. The server decides whether this account may
  * consume it; an existing account's sign-in never does.
  */
-export async function finalizeStoredSignupConsent(): Promise<void> {
+export async function finalizeStoredSignupConsent(): Promise<boolean> {
   const stored = readStored();
-  if (!stored) return;
+  if (!stored) return false;
   let url: URL;
   try {
     url = new URL(window.location.href);
   } catch {
-    return;
+    return false;
   }
-  if (url.searchParams.get(SIGNUP_CONSENT_MARKER_PARAM) !== stored.attemptId) return;
-  // The marker is spent whatever happens next: a reload must not look like a
-  // fresh landing, and the address bar should not carry it.
-  url.searchParams.delete(SIGNUP_CONSENT_MARKER_PARAM);
-  try {
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-  } catch {
-    // The URL keeps the marker; the stored choice still decides.
-  }
+  if (url.searchParams.get(SIGNUP_CONSENT_MARKER_PARAM) !== stored.attemptId) return false;
   // 200 is a final answer: consumed, or refused for good. Anything else -- the
   // confirmation lane briefly gone (503), a rate limit, a server error, the
   // network -- rolled back and left the attempt pending, so it is tried again
@@ -158,6 +150,15 @@ export async function finalizeStoredSignupConsent(): Promise<void> {
     }
   }
   forget();
+  // Removed only now: a reload during the retries is still this landing, and
+  // finds the attempt either consumed (a final answer) or still pending.
+  url.searchParams.delete(SIGNUP_CONSENT_MARKER_PARAM);
+  try {
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // The URL keeps the marker; with nothing stored, it does nothing.
+  }
+  return true;
 }
 
 const FINALIZE_RETRY_DELAYS_MS = [0, 2_000, 8_000];

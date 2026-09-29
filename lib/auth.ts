@@ -98,7 +98,7 @@ export const authOptions: NextAuthOptions = {
                         result.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID"
                     );
                 }
-                return prisma.user.findUniqueOrThrow({
+                const signedIn = await prisma.user.findUniqueOrThrow({
                     where: { id: result.userId },
                     select: {
                         id: true,
@@ -111,6 +111,9 @@ export const authOptions: NextAuthOptions = {
                         subscriptionCurrentPeriodEnd: true,
                     },
                 });
+                // Carried to the token: whether this sign-in created the
+                // account, which the sign-up consent choice depends on.
+                return { ...signedIn, isNewUser: result.isNewUser };
             },
         }),
     ],
@@ -175,9 +178,15 @@ export const authOptions: NextAuthOptions = {
                 return false;
             }
         },
-        async jwt({ token, user }) {
+        async jwt({ token, user, isNewUser }) {
             if (user) {
                 token.id = user.id;
+                // OAuth reports it through the adapter; the email code through
+                // authorize(). Set on every sign-in, so a later sign-in into an
+                // existing account clears it.
+                token.accountCreatedBySignIn =
+                    isNewUser === true ||
+                    (user as typeof user & { isNewUser?: unknown }).isNewUser === true;
                 const analyticsUser = user as typeof user & {
                     plan?: unknown;
                     createdAt?: unknown;
@@ -230,6 +239,7 @@ export const authOptions: NextAuthOptions = {
             session.user.plan = token.plan;
             session.user.createdAt = token.createdAt;
             session.user.authenticatedAt = token.authenticatedAt;
+            session.user.accountCreatedBySignIn = token.accountCreatedBySignIn === true;
             return session;
         },
     },

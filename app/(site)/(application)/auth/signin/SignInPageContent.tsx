@@ -356,6 +356,7 @@ function SignInButtons({
             </p>
             {signupConsentEnabled ? (
                 <SignupConsentDevices
+                    disabled={step === "code"}
                     language={lang}
                     optIn={consentChoice.optIn}
                     objected={consentChoice.objected}

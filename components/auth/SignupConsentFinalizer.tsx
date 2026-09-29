@@ -22,7 +22,12 @@ export function SignupConsentFinalizer({ enabled }: { enabled: boolean }) {
   useEffect(() => {
     if (!enabled || status !== "authenticated" || ran.current) return;
     ran.current = true;
-    void finalizeStoredSignupConsent().then(recordJurisdictionEstimateOnce);
+    // A landing that consumed a sign-up choice has just recorded the estimate
+    // the screen was rendered under; the per-session estimate is for existing
+    // accounts, and running it here would overwrite that one at once.
+    void finalizeStoredSignupConsent().then((handled) =>
+      handled ? undefined : recordJurisdictionEstimateOnce()
+    );
   }, [enabled, status]);
   return null;
 }
