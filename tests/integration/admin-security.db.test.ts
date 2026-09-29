@@ -240,6 +240,150 @@ test("a run still inside its silence budget is not reported delayed", async () =
   assert.equal(reconciliation?.status, "succeeded");
 });
 
+/**
+ * A daily job is read from its own history, not from a window every other job
+ * shares.
+ *
+ * The dashboard used to read the newest 150 rows across all jobs and pick each
+ * job's runs out of them. Five jobs share the 15-minute cron and the provider
+ * probe runs every 10 minutes, so those rows fill 150 within hours; by
+ * midday a daily job that ran at 03:00 had fallen out, read as never run, and
+ * was shown `delayed`. The run had happened -- the maintenance cron wrote it --
+ * the dashboard just no longer looked that far back.
+ *
+ * The fixture is that morning: the daily rows are written first and the
+ * frequent jobs then fill far more than 150 rows on top of them. Every time
+ * asserted is the stored row's own, so "the screen matches the cron record" is
+ * the check itself rather than a paraphrase of it.
+ */
+test("a daily job keeps its own latest run, success and failure when frequent jobs fill the recent window", async () => {
+  const now = new Date("2026-09-29T12:00:00.000Z");
+  const at = (iso: string) => new Date(iso);
+
+  // What the maintenance cron (03:00 UTC) recorded for retention cleanup: a
+  // failure yesterday, then a success this morning.
+  const cleanupFailure = await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "retention_cleanup",
+      status: "failed",
+      startedAt: at("2026-09-28T03:00:00.000Z"),
+      completedAt: at("2026-09-28T03:04:00.000Z"),
+      error: "Error: bucket listing timed out",
+    },
+  });
+  const cleanupSuccess = await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "retention_cleanup",
+      status: "succeeded",
+      startedAt: at("2026-09-29T03:00:00.000Z"),
+      completedAt: at("2026-09-29T03:02:00.000Z"),
+      processedCount: 41,
+    },
+  });
+
+  // A daily job on a failure streak whose last success is days old: the
+  // streak and the success must both come from this job's own rows.
+  const usageSuccess = await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "provider_usage_sync",
+      status: "succeeded",
+      startedAt: at("2026-09-27T00:30:00.000Z"),
+      completedAt: at("2026-09-27T00:31:00.000Z"),
+    },
+  });
+  await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "provider_usage_sync",
+      status: "failed",
+      startedAt: at("2026-09-28T00:30:00.000Z"),
+      completedAt: at("2026-09-28T00:31:00.000Z"),
+      error: "Error: older failure",
+    },
+  });
+  const usageLatestFailure = await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "provider_usage_sync",
+      status: "failed",
+      startedAt: at("2026-09-29T00:30:00.000Z"),
+      completedAt: at("2026-09-29T00:31:00.000Z"),
+      error: "Error: provider usage endpoint returned 503",
+    },
+  });
+
+  // Then the frequent jobs, every cycle from 00:31 to noon.
+  const frequentEvery15 = [
+    "credit_reservation_reconciliation",
+    "notification_delivery_retry",
+    "standard_email_drain",
+    "campaign_wave_scheduler",
+    "infrastructure_threshold_monitor",
+  ];
+  const frequentRows: Array<{
+    jobKey: string;
+    status: string;
+    startedAt: Date;
+    completedAt: Date;
+  }> = [];
+  const windowStart = at("2026-09-29T00:31:00.000Z").getTime();
+  const pushCycle = (jobKey: string, everyMinutes: number) => {
+    for (
+      let startedAt = windowStart;
+      startedAt < now.getTime();
+      startedAt += everyMinutes * 60 * 1_000
+    ) {
+      frequentRows.push({
+        jobKey,
+        status: "succeeded",
+        startedAt: new Date(startedAt),
+        completedAt: new Date(startedAt + 1_000),
+      });
+    }
+  };
+  for (const jobKey of frequentEvery15) pushCycle(jobKey, 15);
+  pushCycle("provider_probe", 10);
+  await prisma.scheduledJobRun.createMany({ data: frequentRows });
+
+  // The fixture only proves something if the daily rows really are outside
+  // the old shared window.
+  const newerThanDailyRuns = await prisma.scheduledJobRun.count({
+    where: { startedAt: { gt: usageLatestFailure.startedAt } },
+  });
+  assert.ok(
+    newerThanDailyRuns > 150,
+    `expected more than 150 newer rows, got ${newerThanDailyRuns}`
+  );
+
+  const dashboard = await getScheduledJobsDashboard(now);
+  const cleanup = dashboard.find((job) => job.key === "retention_cleanup");
+  const usage = dashboard.find((job) => job.key === "provider_usage_sync");
+
+  // The screen shows exactly what the maintenance cron recorded.
+  assert.equal(cleanup?.lastRunAt, cleanupSuccess.startedAt.toISOString());
+  assert.equal(cleanup?.lastSuccessAt, cleanupSuccess.completedAt?.toISOString());
+  assert.equal(cleanup?.lastFailureAt, cleanupFailure.completedAt?.toISOString());
+  assert.equal(cleanup?.lastError, cleanupFailure.error);
+  assert.equal(cleanup?.lastProcessedCount, 41);
+  assert.equal(cleanup?.consecutiveFailures, 0);
+  assert.equal(cleanup?.delayed, false);
+  assert.equal(cleanup?.status, "succeeded");
+
+  assert.equal(usage?.lastRunAt, usageLatestFailure.startedAt.toISOString());
+  assert.equal(usage?.lastSuccessAt, usageSuccess.completedAt?.toISOString());
+  assert.equal(usage?.lastFailureAt, usageLatestFailure.completedAt?.toISOString());
+  assert.equal(usage?.lastError, usageLatestFailure.error);
+  assert.equal(usage?.consecutiveFailures, 2);
+  assert.equal(usage?.delayed, false);
+  assert.equal(usage?.status, "failed");
+
+  // A daily job with no row at all is still reported as never run: the fix
+  // reads further back, it does not invent a run.
+  const catalogMonitor = dashboard.find(
+    (job) => job.key === "provider_model_catalog_monitor"
+  );
+  assert.equal(catalogMonitor?.lastRunAt, null);
+  assert.equal(catalogMonitor?.delayed, true);
+});
+
 /* --------------------------------- the single-administrator exception ----- */
 
 /**
