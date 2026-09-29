@@ -521,9 +521,10 @@ IP를 그대로 쓰고, production 밖에서는 `x-real-ip`도 씁니다. 동의
 말할 수 있는 사실이 아닙니다** — 저장소가 아니라 운영 DB가 가진 값이고, 보내기
 전에 확인해야 하는 것입니다. 원장과
 봉인 장치(S3), cohort 판정(S8a), 발송 판정(S9)이 이 경로를 이룹니다. 이 계정들을
-위해 `EmailPreference`를 채우면 안 됩니다 — 확인된 preference는 release notes의
-후보가 되므로, 그 행들은 봉인된 cohort가 아니라 **express consent로** 나가고, 그것이
-위 목록이 말하는 지어낸 동의입니다.
+위해 동의 행을 만들지 않습니다. 확인된 `EmailPreference`만으로는 express가 아니고
+(최신 `ConsentRecord`가 `granted`·`reconfirmed`여야 합니다), 그 경우 봉인 멤버는 그대로
+override로 나갑니다. 둘을 함께 만들면 봉인된 cohort가 아니라 **express consent로**
+나가며, 그것이 위 목록이 말하는 지어낸 동의입니다.
 
 이 절은 그 판단을 기록해 둔 것이지 결정을 막는 것이 아닙니다. 다르게 정하시면
 그때 기록하겠습니다.
