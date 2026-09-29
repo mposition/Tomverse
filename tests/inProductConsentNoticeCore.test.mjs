@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   NOTICE_EVENT_KINDS,
   canonicalJson,
+  noticeCandidatesFor,
   noticeJurisdictionColumns,
   inProductNoticeOffer,
   noticePurposes,
@@ -310,5 +311,47 @@ test("what the person decided outranks our reason for not asking", () => {
   assert.equal(
     inProductNoticeOffer({ ...covered, suppressed: true }).refusal,
     "suppressed"
+  );
+});
+
+test("the screen's candidates are exactly the countries the resolution involved", () => {
+  // The shape recordNoticeShown() requires; the S8 screen builds it with this.
+  const ruleVersionOf = (country) => (country === "AU" ? 3 : 0);
+  const copyHash = "sha256:x";
+  assert.deepEqual(
+    noticeCandidatesFor({
+      resolved: { countryCode: "AU", confidence: "high", source: "billing" },
+      ruleVersionOf,
+      copyHash,
+    }),
+    [{ country: "AU", signal: "billing", ruleVersion: 3, copyHash }]
+  );
+  assert.deepEqual(
+    noticeCandidatesFor({
+      resolved: { countryCode: "ZZ", confidence: "conflict", source: "conflict", conflicts: ["AU", "KR", "AU"] },
+      ruleVersionOf,
+      copyHash,
+    }),
+    [
+      { country: "AU", signal: "conflict", ruleVersion: 3, copyHash },
+      { country: "KR", signal: "conflict", ruleVersion: 0, copyHash },
+    ]
+  );
+  assert.deepEqual(
+    noticeCandidatesFor({
+      resolved: { countryCode: "ZZ", confidence: "unknown", source: "unresolved" },
+      ruleVersionOf,
+      copyHash,
+    }),
+    []
+  );
+  // A guess is still what the screen rendered under.
+  assert.deepEqual(
+    noticeCandidatesFor({
+      resolved: { countryCode: "KR", confidence: "low", source: "inferred" },
+      ruleVersionOf,
+      copyHash,
+    }),
+    [{ country: "KR", signal: "inferred", ruleVersion: 0, copyHash }]
   );
 });

@@ -6,6 +6,8 @@ import type { Session } from "next-auth";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
 import { SignupConsentFinalizer } from "@/components/auth/SignupConsentFinalizer";
+import { InProductConsentNotice } from "@/components/email/InProductConsentNotice";
+import { consentNoticeCollectionReady } from "@/lib/inProductConsentNoticeSurface";
 import { isEmailSignupConsentEnabled } from "@/lib/appSettings";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
@@ -105,6 +107,11 @@ export default async function ApplicationLayout({
   const signupConsentEnabled = session?.user?.id
     ? await isEmailSignupConsentEnabled().catch(() => false)
     : false;
+  // The in-product consent notice (S8, draft section 5.4): only where it could
+  // be honoured -- the same gate and a confirmation that can be sent.
+  const consentNoticeEnabled = session?.user?.id
+    ? await consentNoticeCollectionReady().catch(() => false)
+    : false;
 
   return (
     <SessionProviderWrapper session={session}>
@@ -127,6 +134,7 @@ export default async function ApplicationLayout({
             {children}
           </ModelCatalogProvider>
           <SignupConsentFinalizer enabled={signupConsentEnabled} />
+          <InProductConsentNotice enabled={consentNoticeEnabled} />
         </AnalyticsProvider>
       </LanguageProvider>
     </SessionProviderWrapper>
