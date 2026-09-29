@@ -43,8 +43,9 @@ pub enum DriveOutcome {
 
 #[allow(async_fn_in_trait)]
 pub trait BoardControlPlane: Send + Sync {
-    /// The owned queue, or the app's board-capacity refusal
-    /// (`board_capacity_exceeded`), which wrote nothing.
+    /// The owned queue, the app's board-capacity refusal
+    /// (`board_capacity_exceeded`) or its database-busy answer
+    /// (`amux_database_busy`). Neither of the last two wrote anything.
     async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>>;
 
     async fn execution_start(
@@ -113,11 +114,15 @@ where
      */
     pub async fn tick(&self) -> Result<Vec<DriveOutcome>> {
         // The WSL bridge reads the owned queue itself and skips a tick on a
-        // capacity refusal; this driver (execute mode) keeps failing the tick.
+        // capacity refusal or a busy database; this driver (execute mode)
+        // keeps failing the tick on both, as it did on every 409 and 503.
         let tasks = match self.control.owned_queue().await? {
             SelectionRead::Ready(tasks) => tasks,
             SelectionRead::BoardCapacityExceeded => {
                 anyhow::bail!("Tomverse AMUX owned queue exceeds one complete response")
+            }
+            SelectionRead::DatabaseBusy => {
+                anyhow::bail!("unsupported Tomverse internal response status")
             }
         };
 
