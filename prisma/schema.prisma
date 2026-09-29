@@ -7914,6 +7914,20 @@ model AmuxIntakeApproval {
   @@index([workItemId])
 }
 
+/// The commit deadline of one AMUX mutation transaction (orchestration policy
+/// version 18). The fence in lib/amux/dbBoundary.ts inserts the row as that
+/// transaction's last statement; the deferred constraint trigger
+/// `amux_commit_deadline_check` runs during its COMMIT, fails the COMMIT with
+/// SQLSTATE AX001 once the database clock has reached `deadline`, and
+/// otherwise deletes the row. The function and trigger exist only in migration
+/// 20260929200000_amux_commit_deadline_check; `prisma db push` creates neither.
+model AmuxCommitDeadline {
+  /// txid_current() of the transaction that inserted the row.
+  txid      BigInt   @id
+  deadline  DateTime @db.Timestamptz(3)
+  operation String
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the
