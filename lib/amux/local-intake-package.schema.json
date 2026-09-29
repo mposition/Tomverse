@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "analysisId",
+    "inputDigest",
+    "boardSnapshotDigest",
+    "snapshotGeneratedAt",
+    "generatedAt",
+    "agentReceipt",
+    "classification",
+    "recommendation",
+    "summary",
+    "questions",
+    "cards"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "analysisId": { "type": "string" },
+    "inputDigest": { "type": "string" },
+    "boardSnapshotDigest": { "type": "string" },
+    "snapshotGeneratedAt": { "type": "string" },
+    "generatedAt": { "type": "string" },
+    "agentReceipt": { "type": "object", "additionalProperties": false },
+    "classification": { "type": "string" },
+    "recommendation": { "type": "string" },
+    "summary": { "type": "string" },
+    "questions": { "type": "array", "items": { "type": "string" } },
+    "cards": { "type": "array", "maxItems": 8, "items": { "type": "object", "additionalProperties": false } }
+  }
+}
