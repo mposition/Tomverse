@@ -1504,6 +1504,7 @@ mod tests {
             id: "TASK-1".into(),
             owner: "claude-impl".into(),
             revision: 2,
+            ..Default::default()
         }
     }
 

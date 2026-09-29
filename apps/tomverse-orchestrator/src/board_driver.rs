@@ -236,6 +236,7 @@ mod tests {
             id: "TASK-1".into(),
             owner: "worker-a".into(),
             revision: 7,
+            ..Default::default()
         }
     }
 
@@ -428,6 +429,7 @@ mod tests {
             id: "TASK-2".into(),
             owner: "worker-b".into(),
             revision: 2,
+            ..Default::default()
         });
         let calls = control.start_calls.clone();
         let driver = BoardDriver::new(control, FakeAdapter::idle_running());

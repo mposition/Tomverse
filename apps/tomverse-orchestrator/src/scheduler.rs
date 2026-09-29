@@ -552,6 +552,7 @@ mod tests {
                 capacity_weight: 0,
                 incident_bonus: 0,
             },
+            ..Default::default()
         }
     }
 

@@ -44,6 +44,16 @@ worker heartbeat가 `runtime_lease_lost`로 거절되면 다시 등록하지 않
 
 Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 알려진 결과로 본다. 닫힌 사유 목록의 거절과 CAS 패배는 소유권을 바꾸지 않았으므로 같은 창의 다음 후보로 넘어간다. 전송 오류, 예상 밖 상태 코드·본문 같은 결과 불명 claim과 queue·routing snapshot·recover 호출의 실패는 프로세스를 0이 아닌 종료 코드로 끝낸다. 다시 시작한 프로세스는 queue를 새로 읽는다.
 
+## Wire compatibility
+
+`POST /api/internal/amux/queue`와 `POST /api/internal/amux/owned-queue`의 응답 모양은 호환 기간에 있다.
+
+- 서버는 main이 보내 온 모양을 그대로 보낸다. queue 행은 15개 키(`title`, `status`, `owner`, `dependencies` 포함), owned queue 행은 9개 키(`title`, `description`, `kind`, `priority`, `claimed_at`, `created_at` 포함)다. 스키마는 `lib/amux/wireContract.ts`, 기준 본문은 `tests/fixtures/amux-queue-wire-compat-v1.json`이다.
+- main 7724fd683부터 develop AMUX 이식 전까지 빌드한 Rust는 queue의 `title`·`status`·`dependencies`와 owned queue의 `title`·`kind`·`priority`·`created_at`을 필수로 읽는다. 없으면 orchestrator tick이 실패하고 bridge는 halt한다(종료 코드 3).
+- 이 트리에서 빌드한 Rust는 두 모양(위 전체 모양과 `id`·`owner`·`revision`만 가진 최소 모양)을 모두 받고, 그 밖의 필드는 거절한다. 호환 필드는 읽지 않는다.
+- 배포 순서: 서버 먼저가 안전하다. 옛 바이너리와 새 바이너리가 모두 전체 모양을 읽는다. bridge를 먼저 다시 빌드해도 안전하다. 새 바이너리는 배포 전 서버의 전체 모양도 읽는다.
+- 호환 필드를 빼는 것은 별도 변경이다. WSL bridge와 Railway orchestrator가 모두 이 트리 이후의 바이너리로 돈다는 것을 확인한 뒤, 스키마, 기준 본문, `tests/amuxWireContract.test.ts`, `lib/amux/store.ts`, 이 절을 함께 바꾼다.
+
 ## halt와 재시작
 
 halt는 runner가 스스로 풀지 않는다. 원인은 사라진 전송, 거절된 heartbeat, 응답 없는 Tomverse 호출 같은 결과 불명이고, 다시 시작해도 되는지는 사람이 판단한다. halt한 runner는 진행 중인 attempt가 남지 않으면 종료 코드 3으로 끝나고 stderr에 한 줄을 남긴다. 종료 코드 0은 정상 종료, 1은 시작 실패다.

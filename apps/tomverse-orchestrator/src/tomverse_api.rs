@@ -25,7 +25,7 @@ const MAX_ROUTING_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_LIFECYCLE_RESPONSE_BYTES: usize = 128 * 1024;
 const MAX_QUEUE_ITEMS: usize = 512;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QueueTask {
     pub id: String,
@@ -42,6 +42,20 @@ pub struct QueueTask {
     pub scoring_version: String,
     #[serde(default)]
     pub scheduler_signals: ScoreBreakdown,
+    // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
+    // compatibility"). main's server has always sent these four, and the
+    // server keeps sending them while an orchestrator built before this
+    // change, which requires them, may still be running. Accepted and never
+    // read here; a server that drops them parses the same. Any other field is
+    // still refused.
+    #[serde(default, rename = "title")]
+    pub legacy_title: Option<String>,
+    #[serde(default, rename = "status")]
+    pub legacy_status: Option<String>,
+    #[serde(default, rename = "owner")]
+    pub legacy_owner: Option<String>,
+    #[serde(default, rename = "dependencies")]
+    pub legacy_dependencies: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -707,6 +721,51 @@ mod tests {
         assert_eq!(eligible.candidates.len(), 2);
     }
 
+    fn queue_wire_fixture(name: &str) -> Value {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-queue-wire-compat-v1.json"
+        ))
+        .unwrap();
+        fixtures[name].clone()
+    }
+
+    #[test]
+    fn queue_rows_parse_in_the_server_shape_and_the_minimal_shape() {
+        // tests/amuxWireContract.test.ts holds the app's response schema to
+        // the same file: the app sends *_server during the compatibility
+        // window, and this binary must also accept *_minimal after it.
+        let server: QueueTask = serde_json::from_value(queue_wire_fixture("queue_server")).unwrap();
+        assert_eq!(server.id, "TASK-1");
+        assert_eq!(server.scheduler_score, 32);
+        assert_eq!(server.legacy_title.as_deref(), Some("Fix the window"));
+        assert_eq!(server.legacy_owner, None);
+        let minimal: QueueTask = serde_json::from_value(queue_wire_fixture("queue_minimal")).unwrap();
+        assert_eq!(minimal.id, "TASK-1");
+        assert_eq!(minimal.legacy_title, None);
+        assert_eq!(minimal.legacy_dependencies, None);
+        for name in ["queue_server", "queue_minimal"] {
+            let mut body = queue_wire_fixture(name);
+            body["future_field"] = serde_json::json!(true);
+            assert!(serde_json::from_value::<QueueTask>(body).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn owned_queue_rows_parse_in_the_server_shape_and_the_minimal_shape() {
+        for name in ["owned_server", "owned_minimal"] {
+            let task: OwnedTodoTask = serde_json::from_value(queue_wire_fixture(name)).unwrap();
+            assert_eq!(task.id, "TASK-1", "{name}");
+            assert_eq!(task.owner, "claude-impl", "{name}");
+            assert_eq!(task.revision, 2, "{name}");
+            let mut body = queue_wire_fixture(name);
+            body["future_field"] = serde_json::json!(true);
+            assert!(serde_json::from_value::<OwnedTodoTask>(body).is_err(), "{name}");
+        }
+        let server: OwnedTodoTask = serde_json::from_value(queue_wire_fixture("owned_server")).unwrap();
+        assert_eq!(server.legacy_description, None);
+        assert_eq!(server.legacy_kind.as_deref(), Some("code"));
+    }
+
     #[test]
     fn routing_snapshot_still_refuses_an_unknown_top_level_field() {
         for name in ["eligible", "refusal"] {
@@ -1027,12 +1086,31 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OwnedTodoTask {
     pub id: String,
     pub owner: String,
     pub revision: i64,
+    // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
+    // compatibility"). main's server has always sent these six, and the server
+    // keeps sending them while a WSL bridge built before this change, which
+    // requires title, kind, priority and created_at, may still be running.
+    // Accepted and never read: card text is not bridge input (the delivery
+    // prompt is). A server that drops them parses the same. Any other field
+    // is still refused.
+    #[serde(default, rename = "title")]
+    pub legacy_title: Option<String>,
+    #[serde(default, rename = "description")]
+    pub legacy_description: Option<String>,
+    #[serde(default, rename = "kind")]
+    pub legacy_kind: Option<String>,
+    #[serde(default, rename = "priority")]
+    pub legacy_priority: Option<String>,
+    #[serde(default, rename = "claimed_at")]
+    pub legacy_claimed_at: Option<String>,
+    #[serde(default, rename = "created_at")]
+    pub legacy_created_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { POST as claimPost } from "@/app/api/internal/amux/claim/route";
 import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
@@ -69,6 +71,18 @@ import {
 } from "@/lib/amux/store";
 
 const SCORING_VERSION = "amux-global-priority-v1";
+
+// The queue bodies the app sends during the compatibility window, the same
+// file the Rust client parses (tests/fixtures/amux-queue-wire-compat-v1.json).
+const queueWireCompat = JSON.parse(
+  readFileSync(
+    join(process.cwd(), "tests/fixtures/amux-queue-wire-compat-v1.json"),
+    "utf8",
+  ),
+) as {
+  queue_server: Record<string, unknown>;
+  owned_server: Record<string, unknown>;
+};
 
 const makeAmuxSyncSecret = () => `amux-test-${randomUUID()}`;
 
@@ -1701,6 +1715,16 @@ test("live dependents contribute to dependent_count exactly once", async () => {
 
   assert.ok(parent);
   assert.equal(parent.dependent_count, 1);
+
+  // Main's queue keys, kept for the compatibility window: an orchestrator
+  // built from main before the develop AMUX port requires them.
+  assert.deepEqual(
+    Object.keys(parent).sort(),
+    Object.keys(queueWireCompat.queue_server).sort(),
+  );
+  assert.equal(parent.status, "todo");
+  assert.equal(parent.owner, null);
+  assert.deepEqual(parent.dependencies, []);
 
   // The child waits on the unfinished parent.
   assert.equal(
@@ -3788,7 +3812,11 @@ test("execution-off worker and owned routes cannot touch control state", async (
   }
 });
 
-test("owned queue exposes only minimal runnable owner-assigned Todo metadata", async () => {
+// The owned queue keeps main's nine keys during the compatibility window: a
+// WSL bridge built from main before the develop AMUX port requires them and
+// halts on a body without them (docs/ops/amux/wsl-execution-bridge.md, "Wire
+// compatibility"). The key list is the shared fixture the Rust client parses.
+test("owned queue exposes only runnable owner-assigned Todo work in the compatibility shape", async () => {
   const ownedId = await createTodo("amux-owned-queue");
   const unownedId = await createTodo("amux-unowned-queue");
   const worker = `amux-owned-${randomUUID()}`;
@@ -3831,8 +3859,14 @@ test("owned queue exposes only minimal runnable owner-assigned Todo metadata", a
 
     const rows = (await response.json()) as Array<{
       id: string;
+      title: string;
+      description: string | null;
+      kind: string;
+      priority: string;
       owner: string;
       revision: number;
+      claimed_at: string | null;
+      created_at: string;
     }>;
 
     const owned = rows.find((row) => row.id === ownedId);
@@ -3840,7 +3874,17 @@ test("owned queue exposes only minimal runnable owner-assigned Todo metadata", a
     assert.ok(owned);
     assert.equal(owned.owner, worker);
     assert.equal(owned.revision, 4);
-    assert.deepEqual(Object.keys(owned).sort(), ["id", "owner", "revision"]);
+    assert.equal(owned.kind, "code");
+    assert.equal(owned.priority, "p1");
+    assert.equal(owned.description, "Delivery body for the selected worker.");
+    assert.equal(
+      new Date(owned.claimed_at ?? "").getTime(),
+      claimedAt.getTime(),
+    );
+    assert.deepEqual(
+      Object.keys(owned).sort(),
+      Object.keys(queueWireCompat.owned_server).sort(),
+    );
 
     assert.equal(
       rows.some((row) => row.id === unownedId),

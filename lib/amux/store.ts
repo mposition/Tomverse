@@ -51,14 +51,28 @@ const nonScoringDependentStatuses = (): string[] => [
   "cancelled",
 ];
 
+/**
+ * The selection queue row.
+ *
+ * `title`, `status`, `owner` and `dependencies` are a compatibility window,
+ * not selection input (docs/ops/amux/wsl-execution-bridge.md, "Wire
+ * compatibility"). An orchestrator built from main before the develop AMUX
+ * port requires them and fails to parse a queue without them; the Rust built
+ * from this tree accepts the row with or without them. Removing them is its
+ * own change, made once no such orchestrator runs.
+ */
 export type AmuxQueueTask = {
   id: string;
+  title: string;
+  status: "todo";
   kind: string;
   priority: string;
   pinned: boolean;
   drag: number;
+  owner: null;
   revision: number;
   created_at: string;
+  dependencies: string[];
   dependent_count: number;
   scheduler_score: number;
   scoring_version: typeof AMUX_GLOBAL_PRIORITY_VERSION;
@@ -268,12 +282,17 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
           id: true,
+          title: true,
           kind: true,
           priority: true,
           pinned: true,
           drag: true,
           revision: true,
           createdAt: true,
+          dependencies: {
+            select: { dependencyId: true },
+            orderBy: { dependencyId: "asc" },
+          },
           dueAt: true,
           duePrecision: true,
           dueSource: true,
@@ -313,12 +332,16 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
         const score = scoreAmuxScheduler({ ...input, now: dbNow });
         return {
           id: row.id,
+          title: row.title,
+          status: "todo" as const,
           kind: row.kind,
           priority: row.priority,
           pinned: row.pinned,
           drag: row.drag,
+          owner: null,
           revision: row.revision,
           created_at: row.createdAt.toISOString(),
+          dependencies: row.dependencies.map((edge) => edge.dependencyId),
           dependent_count: row._count.dependents,
           scheduler_score: score.total,
           scoring_version: AMUX_GLOBAL_PRIORITY_VERSION,
@@ -666,10 +689,27 @@ async function writeAmuxClaimRefusalAudit(
   });
 }
 
+/**
+ * The owned queue row.
+ *
+ * Only `id`, `owner` and `revision` are execution input. The other six are
+ * the shape main's server has always sent, kept for a compatibility window
+ * (docs/ops/amux/wsl-execution-bridge.md, "Wire compatibility"): a WSL bridge
+ * built from main before the develop AMUX port requires `title`, `kind`,
+ * `priority` and `created_at` and halts on a body without them. The Rust
+ * built from this tree accepts the row with or without them and reads none of
+ * them. Removing them is its own change, made once no such bridge runs.
+ */
 export type AmuxOwnedTodo = {
   id: string;
+  title: string;
+  description: string | null;
+  kind: string;
+  priority: string;
   owner: string;
   revision: number;
+  claimed_at: string | null;
+  created_at: string;
 };
 
 /**
@@ -705,8 +745,14 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
         ],
         select: {
           id: true,
+          title: true,
+          description: true,
+          kind: true,
+          priority: true,
           owner: true,
           revision: true,
+          claimedAt: true,
+          createdAt: true,
         },
         take: AMUX_OWNED_QUEUE_MAX_ITEMS + 1,
       }),
@@ -721,8 +767,14 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
       ? [
           {
             id: row.id,
+            title: row.title,
+            description: row.description,
+            kind: row.kind,
+            priority: row.priority,
             owner: row.owner,
             revision: row.revision,
+            claimed_at: row.claimedAt?.toISOString() ?? null,
+            created_at: row.createdAt.toISOString(),
           },
         ]
       : [],

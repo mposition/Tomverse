@@ -9,36 +9,74 @@ import {
   amuxRoutingResponseSchema,
 } from "@/lib/amux/wireContract";
 
-const queueRow = {
-  id: "TASK-1",
-  kind: "code",
-  priority: "p1",
-  pinned: false,
-  drag: 0,
-  revision: 1,
-  created_at: "2026-09-21T00:00:00.000Z",
-  dependent_count: 0,
-  scheduler_score: 32,
-  scoring_version: "amux-global-priority-v2",
-  scheduler_signals: {
-    pin: 0,
-    age_hours: 0,
-    type_weight: 12,
-    priority_weight: 20,
-    dependents: 0,
-    dependent_weight: 0,
-    drag: 0,
-    urgency: 0,
-    capacity_weight: 0,
-    incident_bonus: 0,
-    total: 32,
-  },
+// The queue bodies the app sends during the compatibility window, shared with
+// the Rust client (apps/tomverse-orchestrator/src/tomverse_api.rs parses the
+// same file). *_server is main's full shape, which an orchestrator or WSL
+// bridge built from main before the develop AMUX port requires; *_minimal is
+// the shape the app may send once no such binary runs
+// (docs/ops/amux/wsl-execution-bridge.md, "Wire compatibility").
+const queueWire = JSON.parse(
+  readFileSync(
+    join(process.cwd(), "tests/fixtures/amux-queue-wire-compat-v1.json"),
+    "utf8",
+  ),
+);
+const queueRow = queueWire.queue_server;
+const ownedRow = queueWire.owned_server;
+
+// Every field main's Rust structs require without a serde default. Removing
+// one from the app's response schema halts a bridge built before the port.
+const MAIN_RUST_REQUIRED_QUEUE_FIELDS = [
+  "id",
+  "title",
+  "status",
+  "kind",
+  "priority",
+  "pinned",
+  "drag",
+  "revision",
+  "created_at",
+  "dependencies",
+  "dependent_count",
+];
+const MAIN_RUST_REQUIRED_OWNED_FIELDS = [
+  "id",
+  "title",
+  "kind",
+  "priority",
+  "owner",
+  "revision",
+  "created_at",
+];
+
+const withoutField = (row: Record<string, unknown>, field: string) => {
+  const copy = { ...row };
+  delete copy[field];
+  return copy;
 };
 
-test("selection wire never accepts title, partial capacity, or oversized revisions", () => {
+test("selection wire keeps main's required fields during the compatibility window", () => {
   assert.equal(amuxQueueResponseSchema.safeParse([queueRow]).success, true);
+  for (const field of MAIN_RUST_REQUIRED_QUEUE_FIELDS) {
+    const without = withoutField(queueRow, field);
+    assert.equal(
+      amuxQueueResponseSchema.safeParse([without]).success,
+      false,
+      field,
+    );
+  }
+  // The minimal shape is the later target, not what this app sends yet.
   assert.equal(
-    amuxQueueResponseSchema.safeParse([{ ...queueRow, title: "private" }])
+    amuxQueueResponseSchema.safeParse([queueWire.queue_minimal]).success,
+    false,
+  );
+  assert.equal(
+    amuxQueueResponseSchema.safeParse([{ ...queueRow, future_field: true }])
+      .success,
+    false,
+  );
+  assert.equal(
+    amuxQueueResponseSchema.safeParse([{ ...queueRow, owner: "claimed" }])
       .success,
     false,
   );
@@ -54,18 +92,73 @@ test("selection wire never accepts title, partial capacity, or oversized revisio
   );
 });
 
-test("owned queue exposes only identity and revision", () => {
-  const minimal = { id: "TASK-1", owner: "codex-a", revision: 1 };
-  assert.equal(amuxOwnedQueueResponseSchema.safeParse([minimal]).success, true);
+test("owned queue keeps main's required fields during the compatibility window", () => {
+  assert.equal(amuxOwnedQueueResponseSchema.safeParse([ownedRow]).success, true);
+  for (const field of MAIN_RUST_REQUIRED_OWNED_FIELDS) {
+    const without = withoutField(ownedRow, field);
+    assert.equal(
+      amuxOwnedQueueResponseSchema.safeParse([without]).success,
+      false,
+      field,
+    );
+  }
   assert.equal(
-    amuxOwnedQueueResponseSchema.safeParse([
-      { ...minimal, description: "private" },
-    ]).success,
+    amuxOwnedQueueResponseSchema.safeParse([queueWire.owned_minimal]).success,
     false,
   );
   assert.equal(
-    amuxOwnedQueueResponseSchema.safeParse(Array(513).fill(minimal)).success,
+    amuxOwnedQueueResponseSchema.safeParse([{ ...ownedRow, future_field: 1 }])
+      .success,
     false,
+  );
+  assert.equal(
+    amuxOwnedQueueResponseSchema.safeParse(Array(513).fill(ownedRow)).success,
+    false,
+  );
+});
+
+test("the Rust client accepts the compatibility queue fields and never requires them", () => {
+  const api = readFileSync(
+    join(process.cwd(), "apps/tomverse-orchestrator/src/tomverse_api.rs"),
+    "utf8",
+  );
+  const structBody = (name: string) => {
+    const start = api.indexOf(
+      `#[serde(deny_unknown_fields)]\npub struct ${name} {`,
+    );
+    assert.notEqual(start, -1, `${name} keeps deny_unknown_fields`);
+    return api.slice(start, api.indexOf("\n}", start));
+  };
+  for (const [struct, fields] of [
+    ["QueueTask", ["title", "status", "owner", "dependencies"]],
+    [
+      "OwnedTodoTask",
+      ["title", "description", "kind", "priority", "claimed_at", "created_at"],
+    ],
+  ] as const) {
+    const body = structBody(struct);
+    for (const field of fields) {
+      assert.ok(
+        body.includes(
+          `#[serde(default, rename = "${field}")]\n    pub legacy_${field}: Option<`,
+        ),
+        `${struct}.${field} is accepted with a default`,
+      );
+    }
+  }
+  assert.ok(
+    api.includes(
+      "fn queue_rows_parse_in_the_server_shape_and_the_minimal_shape()",
+    ),
+  );
+  assert.ok(
+    api.includes(
+      "fn owned_queue_rows_parse_in_the_server_shape_and_the_minimal_shape()",
+    ),
+  );
+  assert.ok(
+    api.includes('"../../../tests/fixtures/amux-queue-wire-compat-v1.json"'),
+    "the Rust tests parse the same fixture",
   );
 });
 
