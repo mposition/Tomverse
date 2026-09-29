@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardAutoPromotionMessages } from "@/lib/adminMessages/amuxBoardAutoPromotion";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-auto-promotion");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-promotion?tab=auto-promotion");
 const DAY_MS = 24 * 60 * 60 * 1000;
 // The resume request header. lib/amux/autoPromotionCore.ts owns these values
 // and tests/amuxAutoPromotionCore.test.mjs keeps this copy equal to them; the
@@ -74,7 +74,7 @@ export function AmuxBoardAutoPromotionPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-auto-promotion-panel">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h1>
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
       <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       {overview ? (
         <div className="rounded-md border border-zinc-200 p-3 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100">

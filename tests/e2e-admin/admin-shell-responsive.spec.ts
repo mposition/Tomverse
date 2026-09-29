@@ -35,6 +35,10 @@ const NAV_LABELS = [
   "Alerts",
   "Marketing",
   "Platform settings",
+  // The AMUX group, listed in full to the owner these tests sign in as.
+  "Backlog",
+  "Promotion",
+  "Execution",
   "Audit log",
   "Retention",
   "Admin access",
@@ -46,6 +50,7 @@ const NAV_GROUPS = [
   "Revenue",
   "AI Platform",
   "Operations",
+  "AMUX",
   "Governance",
 ];
 

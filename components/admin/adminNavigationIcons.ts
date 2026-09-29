@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowUpFromLine,
   BarChart3,
   Bell,
   Bot,
@@ -9,6 +10,7 @@ import {
   Database,
   Gauge,
   GitPullRequest,
+  Inbox,
   KeyRound,
   LifeBuoy,
   Mail,
@@ -23,6 +25,7 @@ import {
   ShieldCheck,
   Timer,
   Users,
+  Workflow,
 } from "lucide-react";
 import { ADMIN_NAVIGATION, ADMIN_UNLISTED_PAGES } from "@/lib/adminNavigation";
 
@@ -53,6 +56,9 @@ export const ADMIN_NAV_ICONS = {
   marketing: Share2,
   "engineering-agent": GitPullRequest,
   platform: Settings2,
+  "amux-backlog": Inbox,
+  "amux-promotion": ArrowUpFromLine,
+  "amux-execution": Workflow,
   "email-policy": Mail,
   audit: ShieldCheck,
   retention: Database,

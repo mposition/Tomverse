@@ -7,6 +7,7 @@ import {
   AMUX_INCIDENT_SETTING_KEY,
 } from "@/lib/amux/incidentCore";
 import { publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
+import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { prisma } from "@/lib/prisma";
 
 const asRecord = (value: Prisma.JsonValue | null | undefined) =>
@@ -137,6 +138,8 @@ const summarizeSignals = (signals: Prisma.JsonValue) => {
   };
 };
 
+export const AMUX_ESCALATION_LIST_LIMIT = 100;
+
 export async function getAmuxExplainabilityReport() {
   const [
     decisions,
@@ -146,6 +149,7 @@ export async function getAmuxExplainabilityReport() {
     incidentRow,
     policies,
     escalations,
+    escalationsTotal,
   ] = await Promise.all([
     prisma.amuxRouteDecision.findMany({
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -214,9 +218,9 @@ export async function getAmuxExplainabilityReport() {
       },
     }),
     prisma.amuxHumanEscalation.findMany({
-      where: { status: { in: ["open", "acknowledged"] } },
+      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      take: 100,
+      take: AMUX_ESCALATION_LIST_LIMIT,
       select: {
         id: true,
         specialty: true,
@@ -226,6 +230,9 @@ export async function getAmuxExplainabilityReport() {
           select: { id: true, title: true, priority: true, status: true },
         },
       },
+    }),
+    prisma.amuxHumanEscalation.count({
+      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
     }),
   ]);
 
@@ -283,6 +290,9 @@ export async function getAmuxExplainabilityReport() {
       budgetWindowStartsAt: policy.budgetWindowStartsAt?.toISOString() ?? null,
       budgetWindowEndsAt: policy.budgetWindowEndsAt?.toISOString() ?? null,
     })),
+    // The list is bounded; the total says how many it left out (IA rule 6).
+    escalations_total: escalationsTotal,
+    escalations_limit: AMUX_ESCALATION_LIST_LIMIT,
     escalations: escalations.map((escalation) => ({
       ...escalation,
       reason_code: publicAmuxEscalationReasonCode(escalation.task.status),

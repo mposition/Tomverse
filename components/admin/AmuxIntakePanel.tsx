@@ -7,7 +7,7 @@ import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-intake");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=intake");
 
 type IntakeBody = {
   outcome?: string;
@@ -56,7 +56,7 @@ export function AmuxIntakePanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-intake-panel">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h1>
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
       <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-intake-request">
         {messages.requestLabel}
