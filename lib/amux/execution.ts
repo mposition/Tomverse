@@ -269,6 +269,26 @@ export async function startAmuxExecution(
       const now = input.now ?? context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
       if (incident.blocks_admission) {
+        // main recorded this refusal (#1595) and a develop merge had dropped
+        // it; tests/integration/amux-orchestration.db.test.ts pins it.
+        await writeSystemAuditLog({
+          systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: "amux.execution.start_refused",
+          targetType: "AmuxWorkItem",
+          targetId: input.taskId,
+          summary: `Refused AMUX execution start for ${input.taskId} during incident mode.`,
+          metadata: {
+            reason: "incident_frozen",
+            worker: input.worker,
+            expected_revision: input.expectedRevision,
+            incident_state: incident.state.state,
+            incident_transition_id: incident.state.transition_id,
+            incident_valid: incident.valid,
+            measured: true,
+            verdict: "refused",
+          },
+          tx,
+        });
         return {
           started: false as const,
           reason: "incident_frozen" as const,
@@ -1204,6 +1224,11 @@ export async function reclaimExpiredAmuxExecutions(
             attempt_number: attempt.attemptNumber,
           });
           const effectiveToStatus = budgetDestination.to_status;
+          // An expiry that also exhausted the attempt budget says so on the
+          // attempt and its escalation, as main recorded it (#1595).
+          const recoveryReason = budgetDestination.exhausted_limit
+            ? "attempt_budget_exhausted"
+            : "lease_expired";
 
           const moved = await tx.amuxWorkItem.updateMany({
             where: {
@@ -1250,7 +1275,7 @@ export async function reclaimExpiredAmuxExecutions(
               outcome: "expired",
               toStatus: effectiveToStatus,
               endedBy: "system:amux-execution-reaper",
-              reason: "lease_expired",
+              reason: recoveryReason,
             },
           });
 
@@ -1262,7 +1287,9 @@ export async function reclaimExpiredAmuxExecutions(
             await openAmuxHumanEscalation(tx, {
               taskId: attempt.taskId,
               specialty: "execution-recovery",
-              reason: "execution_lease_expired",
+              reason: budgetDestination.exhausted_limit
+                ? "attempt_budget_exhausted"
+                : "execution_lease_expired",
               openedBy: "system:amux-execution-reaper",
             });
           }

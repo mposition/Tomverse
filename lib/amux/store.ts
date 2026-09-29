@@ -468,10 +468,16 @@ export async function claimUnownedTodo(
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claim, async (tx, context) => {
     const incident = await lockAmuxAdmissionAndReadIncident(tx, context.dbNow);
     if (incident.blocks_admission) {
+      // The incident that blocked admission, as main recorded it (#1595).
       await writeAmuxClaimRefusalAudit(
         tx,
         "incident_admission_blocked",
         refusalContext,
+        {
+          incident_state: incident.state.state,
+          incident_transition_id: incident.state.transition_id,
+          incident_valid: incident.valid,
+        },
       );
       return {
         claimed: false as const,
@@ -501,7 +507,12 @@ export async function claimUnownedTodo(
     );
     const wip = await evaluateLockedAmuxWip(tx, policies);
     if (!wip.allowed) {
-      await writeAmuxClaimRefusalAudit(tx, "wip_limit_reached", refusalContext);
+      // The resource that was full and the counts read under its lock, as
+      // main recorded them (#1595).
+      await writeAmuxClaimRefusalAudit(tx, "wip_limit_reached", refusalContext, {
+        blocked_resource: wip.blocked_resource,
+        wip: wip.evidence,
+      });
       return {
         claimed: false as const,
         reason: "wip_limit_reached" as const,
