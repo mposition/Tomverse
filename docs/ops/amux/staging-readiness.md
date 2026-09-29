@@ -58,8 +58,9 @@ dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신
   수 상한이나 전체 transaction 시간 상한 자체도 필수 조건이 아니다. Final SELECT와
   COMMIT 사이에 race가 있으므로 응답 유실/불명확한 COMMIT은 service가 성공으로
   추정하지 않고 정지한다. DB에는 state+audit 전부 또는 전무가 남을 수 있으며,
-  특히 settle의 늦은 terminal COMMIT은 아직 배제되지 않았다. Future execution API는
-  코드에서 production hard-disabled이며 DB 보증·staging 검증 전에는 flag만으로 활성화 불가
+  특히 settle의 늦은 terminal COMMIT은 아직 배제되지 않았다. 정책 버전 18부터
+  execution API는 code latch(true)와 flag(trim 후 `1`)가 모두 참이면 열리므로, DB 보증·
+  staging 검증 전에는 flag를 켜지 않는 운영 규칙으로 보류한다
 
 ## 2026-09-21 isolated DB preflight
 

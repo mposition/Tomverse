@@ -347,6 +347,9 @@ test("the execution API opens on the code latch and the flag, in any NODE_ENV", 
     assert.equal(isAmuxExecutionApiEnabled(), false);
     process.env.NODE_ENV = "test";
     assert.equal(isAmuxExecutionApiEnabled(), false);
+    // NODE_ENV=test is not a special case either way.
+    process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+    assert.equal(isAmuxExecutionApiEnabled(), true);
   } finally {
     if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = priorNodeEnv;
