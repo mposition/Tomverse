@@ -1,6 +1,6 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -15,6 +15,9 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 12
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 13
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 14
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 15
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 16
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 17
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 18
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -33,6 +36,9 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 15
 | 13 | 2026-09-28 mposition | 개발용 WSL runner를 명시적 예외로 둔다. Agent별 Railway 실행 원칙은 그대로다. 코드 래치는 끈 채로 둔다. 연결 계약은 `docs/ops/amux/wsl-execution-bridge.md`다. worker 실행과 환경 변수는 켜지 않는다. |
 | 14 | 2026-09-28 mposition | 개발용 WSL runner의 코드 래치를 켠다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 `bridge_tick`에 들어간다. 이 버전은 그 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 자격증명 격리의 실측을 이 승인이 대신하지 않는다. |
 | 15 | 2026-09-29 mposition | WSL 실행 루프 연결. 로컬 AMUX가 만든 카드를 실행 영수증으로 허용하고 그 종료 상태를 `review`·`blocked` 정산 신호로 쓴다. claim 전용 모드(`TOMVERSE_AMUX_CLAIM`), 승격 카드의 사람 Review 강제, settle의 review PR 번호, backlog 카드 메타데이터 writer(`TOMVERSE_AMUX_BACKLOG_METADATA`), 자동 승격 grant의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개. 새 환경 변수를 설정하지 않고 병합·배포·활성화를 포함하지 않는다. |
+| 16 | 2026-09-29 mposition | 역할 판정과 단계 사이클. 결정적 기준값(`chore`·`implementation`·`contract`)에 LLM 신호는 상향만 한다. LLM 호출은 제품 DB 자격증명 없는 AMUX Orchestrator가 전용 키로 하고, 모델은 owner가 Admin에서 고른다(기본 `gpt-6-sol`). 단계 카드는 `design → develop → test → review`를 지나며 chore는 `develop → review`다. review는 develop의 확인된 실행 provider와 다른 provider가 맡는다. 버전 15의 완료 신호를 review 단계에서만 개정한다. 단계 사이클 코드 래치는 끈 채로 둔다. 환경 변수, worker catalog, WSL 세션은 바꾸지 않는다. |
+| 17 | 2026-09-29 mposition | 버전 7의 추천 풀 Admin 화면 문장 개정. 화면은 owner 전용 `/admin/amux-promotion?tab=recommendation`이고 owner에게만 내비게이션에 나타난다. owner가 아닌 역할의 내비게이션, 검색, 탭에는 나타나지 않는다. 옛 경로는 redirect로 유지한다. 권한, 래치, 환경 변수는 바꾸지 않는다. |
+| 18 | 2026-09-29 mposition | 실행 API 게이트. 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`(true로 출고)와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`(trim 후 `1`)가 모두 참일 때만 실행 API가 열리며 `NODE_ENV`와 무관하다. Phase A 절의 비활성 문장을 이 조건으로 개정한다. local process executor 금지와 engineering adapter 래치는 그대로다. late COMMIT 성공 기록 방지 테스트가 아직 없음을 기록하고, `develop` AMUX의 `main` 병합은 그 테스트가 `routing` 레인에서 head SHA 녹색일 때만 한다. 환경 변수는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -164,7 +170,9 @@ Phase A에서 검증 가능한 AMUX 능력은 queue read와 routing snapshot의 
 실행, 외부 시스템 변경을 뜻하지 않는다.
 
 `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery,
-settlement은 Phase A production에서 비활성이다. local process executor는
+settlement(이하 실행 API)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고,
+환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다(버전 18).
+판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다. local process executor는
 production에서 실행할 수 없으며 환경변수만으로 그 금지를 해제하지 못한다.
 이후 실행 허용은 Agent별 승인 정책, 격리된 실행 서비스, 비용·보존·감사 계약과
 별도 검증·활성화 결정을 요구한다. 선택 전용 route의 production 활성화도 별도
@@ -574,7 +582,7 @@ kill switch는 환경 값이 정확히 `enabled`가 아니거나 코드 래치�
 
 감사 action은 `amux.recommendation.prepared`, `amux.recommendation.held`, `amux.recommendation.rejected`, `amux.recommendation.expired`, `amux.recommendation.consumed`, `amux.recommendation.outcome_unknown`이다. actor는 사람이다. metadata에는 brief, 제목, source key를 넣지 않는다. 허용 값은 decision id, snapshot id, digest, 개수, reason code, `reviewAfter`, 용량의 분자와 분모뿐이다.
 
-저장은 본 앱 DB다. Admin 화면은 owner 전용 `/admin/amux-board-recommendation`이고 내비게이션 목록에 넣지 않는다. GitHub issue, label, comment는 상태 저장소가 아니다. 보존 기간은 이 버전이 정하지 않는다. 법적 보존이 미정인 동안 행을 지우는 job을 만들지 않는다.
+저장은 본 앱 DB다. Admin 화면은 owner 전용이며 `/admin/amux-promotion?tab=recommendation`에 있다(버전 17). owner가 아닌 역할의 내비게이션, 검색, 탭에는 나타나지 않는다. 옛 경로 `/admin/amux-board-recommendation`은 redirect로 유지한다. GitHub issue, label, comment는 상태 저장소가 아니다. 보존 기간은 이 버전이 정하지 않는다. 법적 보존이 미정인 동안 행을 지우는 job을 만들지 않는다.
 
 판정은 본 앱 route에 있다. LLM과 외부 텍스트 실행이 없으므로 별도 Railway 서비스, 서비스와 앱의 hard timeout 쌍, Publisher, GitHub 쓰기는 없다. 추천 경로가 제품 DB credential을 새로 받지 않는다. 중국 본토 전송과 고객에게 보이는 자동 결정 표시는 없다. Admin 문구는 추천을 더 나은 실행이나 최적 선택이라고 말하지 않는다.
 
@@ -774,3 +782,182 @@ owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimat
 - 만료된 grant는 소비 시도와 주기 호출에서 `expired`로 바꾸고 감사를 남긴다.
 - 자동 경로의 결과 불명은 기록하고, 버전 8의 halt 조건에 따라 halt 행을 연다. owner와 최근 step-up의 재개 writer를 둔다.
 - Admin 화면은 `/admin/amux-board-auto-promotion`이다.
+
+## 버전 16 — 역할 판정과 단계 사이클
+
+승인자 mposition, 승인일 2026-09-29. 버전 13~15의 예외, 래치, 로컬 카드 영수증, 사람 Review 강제는 이 절이 명시적으로 바꾸는 문장을 빼고 유지한다. 이 버전은 세 가지를 더한다.
+
+1. 카드마다 실행 역할(`chore`, `implementation`, `contract`)을 정한다. 서버의 결정적 규칙이 기준값을 정하고, LLM 신호는 그 값을 올릴 수만 있다.
+2. 한 카드가 `design → develop → test → review` 단계를 차례로 지난다.
+3. review 단계는 develop을 실행한 provider와 다른 provider의 worker가 맡는다.
+
+새 환경 변수를 설정하지 않는다. 병합, 배포, 환경 변수 활성화, worker catalog와 WSL 세션 변경은 운영자가 따로 한다.
+
+### Authority 허용 목록 개정
+
+Authority 절의 앱 경계 1(`/api/internal/amux/*`)에 내부 route 둘을 더한다. `role-judgement/pending`(판정 입력과 남은 일일 한도 조회)과 `role-judgement/signal`(신호 기록)이다. 호출자는 Railway AMUX Orchestrator이며, 이 서비스는 제품 DB 자격증명을 갖지 않는다. 앱 route는 모델을 호출하지 않는다.
+
+### 적용 범위와 스위치
+
+- 코드 래치 `STAGE_CYCLE_CODE_LATCH`는 false로 출고한다. 켜는 것은 별도 버전이다.
+- 래치가 열리고 환경 변수 `TOMVERSE_AMUX_STAGE_CYCLE`이 정확히 `enabled`일 때 승격되는 카드만 `stageCycle` true로 승격한다. 이런 카드를 **단계 카드**라 부른다. 래치와 환경 변수는 서버가 읽으며, 어떤 route도 요청 본문으로 받지 않는다.
+- `stageCycle`이 false인 카드(이 버전 전의 카드 포함)에는 이 절의 어떤 규칙도 적용되지 않는다. 역할 판정, 역할·제외 검사, 시도 상한 변경이 모두 없고, 버전 15의 한 단계 흐름과 시도 상한 5를 그대로 따른다.
+- 스위치가 켜진 뒤 꺼지면, 단계 카드는 현재 단계를 끝낸 뒤 다음 단계로 가지 않고 lifecycle `review`(사람)로 간다.
+
+### 역할 판정
+
+역할의 순서는 `chore < implementation < contract`다.
+
+**결정적 기준값(base).** 서버 순수 함수 `deriveAmuxRoutingBase()`가 계산한다. 입력은 저장된 `classification`(task_kind, complexity, risk, files_expected 개수)과 `expectedPaths`뿐이다. 제목, 설명, execution brief는 입력이 아니다.
+
+- `contract`: 다음 가운데 하나라도 해당하면. `expectedPaths`가 없거나 비었다. 경로 하나라도 정규화에 실패한다. 정규화한 경로가 **contract 경로 목록**과 일치하거나 그 아래에 있다. task_kind가 `architecture`, `migration`, `security`다. risk가 3이다.
+- `chore`: contract가 아니고, task_kind가 `iteration`, `dependency_upgrade`, `tests` 가운데 하나이며, complexity ≤ 2, risk = 1, files_expected ≤ 2, `expectedPaths` 개수 ≤ 2다.
+- `implementation`: 그 밖의 모든 카드다.
+
+**경로 정규화.** 저장소 상대 경로여야 한다. 앞의 `./` 하나만 제거하고, 그 뒤 `/`로 나눈 조각에 `.`, `..`, 빈 조각이 하나라도 있으면 거절한다. 역슬래시, 절대경로, 드라이브 문자, 제어 문자도 거절한다. 거절된 경로가 하나라도 있으면 base는 contract다. contract 경로 목록과의 비교는 양쪽을 소문자로 바꾼 뒤 한다. 대소문자만 다른 경로로 목록을 피하지 못하게 하기 위해서다.
+
+**contract 경로 목록**(코드 상수 `AMUX_CONTRACT_PATHS`, 이 문서의 개정으로만 바꾼다): `lib/modelPricing.ts`, `lib/credit`, `lib/chatCostGuardrails.ts`, `lib/models.ts`, `lib/billingPriceCatalog.ts`, `lib/planChange`, `lib/conversationProduct.ts`, `lib/billingPromotionAdminPolicy.ts`, `lib/email`, `lib/amux/`, `prisma/`, `docs/policy/`, `docs/ui-contracts/`, `apps/tomverse-orchestrator/`, `.github/`. 끝이 `/`인 항목은 디렉터리 접두사다. 그 밖의 항목은 파일 이름 접두사다.
+
+**LLM 신호.**
+
+- 입력: 제목, 설명, execution brief, `classification`, `expectedPaths`. 모두 데이터이며, 구분된 JSON 한 덩어리로 모델에 넣는다.
+- 출력: `{ role, reasons }`만 받는다. `role`은 세 값 가운데 하나이고, `reasons`는 고정된 코드 목록의 부분집합이다. 형식이 다르면 신호가 없는 것으로 본다.
+- 최종값 = max(base, 신호). **LLM은 base보다 낮은 값을 만들지 못한다.** 신호가 없으면 최종값은 base다. 외부 텍스트가 바꿀 수 있는 것은 더 높은 역할, 곧 더 긴 파이프라인뿐이다.
+
+**시각과 상태.**
+
+- 단계 카드의 승격 트랜잭션은 `promotedAt`을 `clock_timestamp()`로 쓰고, `routingRole`, `stage`, `requiredRoutingRole`은 null로 둔다. `stageCycle`이 true이고 `routingRole`이 null인 카드는 **판정 대기**이며, 라우터와 claim이 모두 거절한다.
+- `signal` route는 role, reasons, 호출에 쓴 모델 id, 모델이 보고한 입력·출력 토큰 수만 받는다. 서버는 base를 저장값으로 다시 계산하고, 최종값을 정하고, 판정 행을 추가한다. `routingRole IS NULL`인 조건부 update 한 번으로 `routingRole`, 첫 `stage`, `requiredRoutingRole`, `stageEnteredAt`을 쓴다.
+- 신호의 유효 창은 `promotedAt`부터 DB 시계로 10분이다. 창이 지나면 기존 recover 주기가 판정 대기 카드에 신호 없는 판정(base)을 같은 조건부 update로 쓴다. 창 뒤에 도착한 신호는 판정 행만 추가하고 카드를 바꾸지 않는다.
+- 판정 결과는 시스템 감사 `amux.role.judged`로 남는다. owner는 최근 step-up 후 `routingRole`을 더 높은 값으로만 바꿀 수 있고(사람 감사 `amux.role.raised`), 그때 첫 단계와 담당도 다시 쓴다. 이 변경은 카드가 아직 claim된 적이 없을 때만 받는다.
+
+**모델.**
+
+- 기본값은 `gpt-6-sol`이다. 설정은 `AppSetting` 한 행이며, owner가 최근 step-up 후 Admin AMUX › Promotion의 **역할 판정 모델** 설정에서 바꾼다. 이 설정은 카드 승격 route와 별개의 route이고, 변경은 사람 감사 `amux.role_model.changed`로 남는다.
+- 고를 수 있는 모델은 세 조건을 모두 만족해야 한다. 운영 모델 레지스트리에서 활성이다. `resolveModelPricing()`의 `costSource`가 `conservative_fallback` 계열이 아니다. provider가 orchestrator adapter가 구현한 provider(이 버전에서는 `openai`)다. 저장된 모델이 나중에 이 조건을 잃으면, 그 뒤의 판정은 신호 없이 base로 한다.
+- 호출 키는 orchestrator 서비스에만 있는 전용 변수이며, 앱의 Chat provider 키와 다르다.
+- `pending` route는 판정 입력, 남은 일일 한도와 함께 **호출할 모델 id**를 돌려준다. 저장된 모델이 세 조건을 통과할 때만 id를 주고, 아니면 `call: false`를 준다. orchestrator는 `call: false`이거나 전용 키가 없으면 모델을 부르지 않고, 그 카드는 신호 없음(base)이 된다. 모델 id를 orchestrator의 설정이나 기본값에서 정하지 않는다.
+- `signal` route는 호출에 쓴 모델 id를 함께 받는다. 서버는 그 id가 판정 시점의 저장 모델과 같고 세 조건을 통과할 때만 신호를 쓴다. 다르면 신호를 버리고, 비용은 그 id의 단가로 판정 행에 남긴다.
+
+**비용과 한도.**
+
+- 판정 비용은 서버가 보고된 토큰 수와 판정 시점의 `resolveModelPricing()` 단가로 계산해 판정 행에 microusd로 쓴다. 판정 행은 attempt가 없는 별도 원장이며, 버전 12 비용 namespace의 일부이다. 사용자 크레딧, 플랜, Chat provider 예산과 섞지 않는다.
+- 일일 한도는 DB 시계 UTC 일 기준 US$5다. `pending` route가 남은 한도를 함께 돌려주고, 한도가 0 이하이면 orchestrator는 모델을 부르지 않는다. 한도를 넘긴 뒤 도착한 신호는 판정 행에 비용만 남기고 신호 없음으로 처리한다.
+- 호출 하나는 출력 512 토큰 이하, 60초이며, 서비스가 마감에 강제 종료한다.
+
+### 단계
+
+| 단계 | 담당 역할(`requiredRoutingRole`) | 산출물 |
+|---|---|---|
+| design | `contract` | 설계 메모를 담은 draft PR |
+| develop | `routingRole` 값 | 같은 PR의 구현 커밋 |
+| test | `tests` | 같은 PR의 테스트 커밋 |
+| review | `review` | 로컬 카드 종료 상태로 전하는 판정 |
+
+- `routingRole`이 contract 또는 implementation이면 첫 단계는 `design`이고 네 단계를 모두 지난다. chore이면 첫 단계는 `develop`이고 다음은 `review`뿐이다.
+- `requiredRoutingRole`은 현재 단계의 담당만 담는다. 원래 역할은 불변 `routingRole`에 있다.
+- 라우터의 `execution_ready`와 후보 `dispatch_ready`, 그리고 claim 트랜잭션이 같은 역할·제외 판정을 한다. claim은 카드 행 CAS 전에 트랜잭션 안에서 다시 한다.
+
+### 단계 전진
+
+단계 카드의 settle이 `succeeded`이고 현재 단계가 마지막이 아니면, 그 settle 트랜잭션의 update 한 번에서 다음을 한다.
+
+- status `todo`, owner null, `stage`를 다음 단계로, `requiredRoutingRole`을 다음 단계 담당으로, `stageEnteredAt`을 `clock_timestamp()`로 쓰고, revision을 1 올린다.
+- PR 번호가 있으면 `reviewPrNumber`, `requiresHumanReview` true, `reviewSpecialty` `code-review`를 함께 쓴다.
+- 시스템 감사는 `amux.stage.advanced`다. 사람 escalation은 lifecycle status가 `review`가 될 때만 연다.
+
+마지막 단계(review)의 `succeeded`는 버전 15대로 lifecycle `review`로 가고 사람 Review를 기다린다. 이중 전진은 attempt의 `endedAt` 조건부 update와 카드 revision CAS가 막는다.
+
+### 버전 15의 완료 신호 개정 (단계 카드에만)
+
+- delivery pull 응답에 `stage` 필드를 `prompt`와 분리해 둔다. 서버가 카드 행에서 복사한 값이며, 단계 카드가 아니면 null이다.
+- 브리지는 로컬 카드 status를 `blocked`로 접기 전에 `stage`를 읽는다. `stage`가 `review`이고 로컬 status가 `discarded` 또는 `cancelled`일 때만, 사유 `review_changes_requested`로 `blocked` 정산한다. 이 사유를 `AMUX_BRIDGE_SETTLE_REASONS`에 더한다. 그 밖의 경우는 버전 15 그대로다(`quarantined`, `local_card_unlinked`, `local_card_ambiguous`는 `blocked`).
+- 서버는 그 사유이고 카드의 **저장된** `stage`가 `review`일 때만, 같은 settle 트랜잭션에서 되감는다. 되감기는 status `todo`, owner null, `stage` `develop`, `requiredRoutingRole` = `routingRole`, `stageRound` + 1, `stageEnteredAt` 갱신, revision + 1이다. 시스템 감사는 `amux.stage.review_rejected`다.
+- 증가 후 `stageRound`가 2 이상이면 되감지 않고 lifecycle `blocked`로 두고 escalation(`stage_review_rounds_exhausted`)을 연다.
+- 로컬 신호로 `failed → todo`를 만들지 않는다는 버전 15 규칙은 그대로다. 사람 Review의 retry는 단계 카드를 `develop`으로 되돌리고 `stageRound`를 1 올린다.
+
+### 실제 실행 provider
+
+- 브리지는 runtime 등록과 heartbeat에 로컬 AMUX 세션 목록의 `provider` 값을 선택 필드로 싣는다. 서버는 값과 catalog provider를 둘 다 소문자로 바꾸고 `claude-code`를 `claude`로 접은 뒤 비교한다. 다르면 등록 또는 heartbeat를 `provider_mismatch`로 거절한다.
+- **확인된 provider**는 값이 있고 일치하며, 허용 목록 `AMUX_VERIFIED_PROVIDERS`(이 버전에서는 `claude`, `codex`)에 드는 것이다. 로컬 AMUX는 목록 밖의 provider를 claude 바이너리로 실행하므로, `devin`이나 `cursor` 같은 값은 로컬 AMUX에 그 provider의 실행 adapter가 생긴 뒤 이 문서의 개정으로만 목록에 들어간다.
+- 필드가 없는 등록은 버전 15처럼 받는다. 그 runtime의 provider는 **미확인**이다. 미확인 runtime은 단계 카드를 claim하지 못하고, `stageCycle`이 false인 카드만 받는다. 그래서 이 검사는 단계 래치가 꺼진 버전 15 세션을 멈추지 않는다.
+- runtime 행에 확인된 provider 컬럼을 둔다. 제외 판정은 이 컬럼만 읽는다.
+
+### 공급자 교차 검토와 대기
+
+- develop 단계의 `succeeded` settle은 같은 트랜잭션에서 append-only `AmuxStageRun`에 worker와 runtime의 확인된 provider를 쓴다.
+- review 단계 claim은 가장 최근 develop 성공 행의 provider와 **다른 확인된 provider**의 worker에게만 간다. 그 행이 없으면 거절한다.
+- test 단계 claim은 가장 최근 develop 성공 행과 **다른 worker**에게만 간다. 다른 provider가 가능하면 그쪽을 먼저 고른다.
+- 대기 시작은 그 단계의 `stageEnteredAt`(DB 시계)이다. 24시간 이상 claim되지 않으면, 기존 recover 주기의 새 스캔이 escalation을 연다. 사유는 `review_provider_unavailable`, `test_worker_unavailable`이다.
+- escalation은 카드당 열린 행이 하나다. 같은 사유의 열린 행이 있으면 새로 열지 않는다. 다른 사유의 열린 행이 있으면 그 행을 두고 새 사유는 감사에만 남긴다. 사람은 이미 그 카드를 보고 있다.
+- escalation 사유 allowlist에 `review_provider_unavailable`, `test_worker_unavailable`, `stage_review_rounds_exhausted`, `stage_cost_exceeded`, `stage_attempts_exhausted`를 더한다.
+
+### 시도와 비용 상한 (단계 카드에만)
+
+- attempt start는 시도 행에 `stage`와 `stageRound`를 쓴다. 상한은 `(stage, stageRound)`별 2회, 카드 전체 10회이고, 넘으면 `blocked`와 escalation(`stage_attempts_exhausted`)이다. `stageCycle`이 false인 카드는 상한 5 그대로다.
+- 비용: 이 절이 버전 12가 미뤄 둔 비용 원장의 admission 사용이다. 합은 카드의 attempt마다 정산액 하나(미정산이면 그 attempt의 예약액 하나, project와 team scope에 중복된 예약은 한 번만)와 그 카드의 판정 행 비용이다. 합이 `estimatedCostMicrousd`의 3배를 넘으면 다음 claim과 같은 단계의 다음 attempt start를 `stage_cost_exceeded`로 거절하고 escalation을 연다. `estimatedCostMicrousd`가 null이면 기존 `cost_estimate_missing`이다.
+
+### 승격 입력
+
+- 수동 승격 항목 스키마와 자동 승격 grant의 결속 항목에 `expectedPaths`를 더한다. 단계 카드로 승격되는 요청에서만 필수이고, 1개 이상 50개 이하, 항목당 300자 이하다.
+- 단계 카드가 아닌 행의 `expectedPaths`는 null이다. 기존 행은 바꾸지 않는다.
+
+### 저장
+
+- `AmuxWorkItem`: `stageCycle`(boolean, 기본 false), `promotedAt`, `routingRole`(null 또는 세 값, CHECK), `stage`(null 또는 네 값, CHECK), `stageRound`(null 또는 0 이상, 컬럼 기본값 없음; 단계 카드를 만드는 트랜잭션이 0을 쓴다), `stageEnteredAt`, `expectedPaths`(text[] 또는 null). CHECK: `stageCycle`이 false이면 앞의 단계 컬럼은 모두 null이다.
+- `AmuxExecutionAttempt`: `stage`, `stageRound`(단계 카드에서만 non-null).
+- `AmuxWorkerRuntime`: `verifiedProvider`(null 또는 허용 목록 값).
+- `AmuxRoleJudgement`(append-only): taskId, base, 신호 role, reasons, 모델 id, 입력·출력 토큰, 비용 microusd, 창 안 여부, 한도 초과 여부, 최종 적용 여부, createdAt. 제목·설명·brief와 모델 출력 원문은 저장하지 않는다.
+- `AmuxStageRun`(append-only): taskId, stage, round, worker, provider, attemptId(unique), outcome, prNumber, createdAt.
+- 두 append-only 테이블에는 UPDATE와 DELETE를 막는 trigger를 둔다.
+
+### 이 버전이 하지 않는 것
+
+PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가, 자동 승격의 조건 변경을 하지 않는다. 로컬 AMUX의 새 provider adapter(예: Cursor)는 이 저장소 밖의 일이며, 생긴 뒤에도 `AMUX_VERIFIED_PROVIDERS` 개정 전에는 단계 카드를 받지 못한다.
+
+## 버전 18 — 실행 API 게이트
+
+승인자 mposition, 승인일 2026-09-29. 버전 13~17은 유지한다. 이 버전은 「Phase A selection-only boundary」 절의 한 문단과, 두 브랜치가 서로 다르게 구현한 실행 API 게이트를 하나로 정한다.
+
+### 무엇이 달랐나
+
+- `develop`의 `lib/amux/executionGate.ts`는 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
+- `main`의 같은 파일은 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`이면 연다. 버전 13~15의 WSL 실행 루프는 이 경로로 운영 중이다.
+- 「Phase A selection-only boundary」 절은 "claim과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement은 Phase A production에서 비활성이다"라고 적는다. 버전 15는 claim 전용 모드와 실행 루프를 승인했지만, 이 문장을 명시적으로 개정하지 않았다.
+
+### 개정
+
+「Phase A selection-only boundary」 절의 두 번째 문단 첫 문장을 다음으로 바꾼다.
+
+> `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement(이하 **실행 API**)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고, 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다. 판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다.
+
+같은 문단의 나머지는 유지한다. 특히 다음은 바뀌지 않는다.
+
+- local process executor는 production에서 실행할 수 없으며, 환경 변수만으로 그 금지를 해제하지 못한다.
+- 실행 API가 열려도 worker 실행은 버전 13의 WSL runner 예외와 버전 12의 승인된 adapter(그 자신의 래치 포함)를 통해서만 일어난다.
+- `queue`와 `routing-snapshot` 같은 선택 전용 route의 production 활성화, 그리고 개별 Agent의 실행 허용은 각자의 승인이다.
+
+### 코드 래치
+
+- `AMUX_EXECUTION_API_CODE_LATCH`는 `lib/amux/executionGate.ts`의 코드 상수이고, 이 버전은 **true로 출고**한다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
+- 게이트는 래치와 환경 변수를 인자로 받는 순수 함수 하나로 판정하고, 공개 함수는 그 함수에 출고 상수와 환경 값을 넘긴다.
+- 테스트가 고정하는 것: 출고 상수가 true다. 래치가 false이면 환경 값이 `1`이어도 닫힌다. 래치가 true이고 환경 값이 `1`이면 `NODE_ENV`가 `production`이어도 열린다. 환경 값이 비었거나 `1`이 아니면 닫힌다.
+- 기존 단위 테스트 `tests/amuxClaimContractParity.test.mjs`의 "a production build cannot activate future execution with an environment flag"는 위 동작으로 바꾼다. 환경 변수를 비우면 `execution_api_disabled`인 기존 DB 통합 테스트는 유지한다.
+- 래치를 false로 되돌리는 것은 닫는 변경이며, 이 문서의 개정 없이 할 수 있다. 여는 변경(false → true)은 이 문서의 개정이다.
+- `lib/amux/dbBoundary.ts`의 "Future execution stays hard-disabled until the DB is proven…" 주석은 게이트를 바꾸는 같은 커밋에서 이 버전과 맞게 고친다.
+
+### 활성화 증거
+
+같은 절의 "실행 경로 활성화 전에는 같은 DB 통합 테스트가 late COMMIT의 성공 기록 방지와 read-back 식별·멱등을 증명해야 한다"는 문장은 유지한다. 이 버전은 다음을 사실로 적는다.
+
+- **late COMMIT의 성공 기록 방지를 증명하는 테스트는 아직 트리에 없다.** 현재 `tests/integration/amux-orchestration.db.test.ts`에 있는 commit fence rollback(COMMIT 전 DB-clock 검사), statement timeout rollback, HTTP 응답 유실 뒤 read-back, delivery pull·ack 멱등은 그 증명이 아니다.
+- 버전 15의 운영 활성화는 운영자가 환경 변수를 켠 결정이며, 그 시점에 위 증명은 없었다. 이 버전은 그 결정을 소급해 증명된 것으로 만들지 않는다.
+- `develop`의 AMUX를 `main`으로 옮기는 병합은 다음을 모두 만족할 때만 한다.
+  1. deadline이 지난 뒤 COMMIT된 실행이 성공으로 기록되면 **실패하는** 새 DB 통합 테스트가, `Credit Finance DB Integration` 워크플로의 matrix `routing` 레인에 들어 있다.
+  2. 그 레인이 병합 대상 PR의 **head SHA**에서 녹색이다. 기존 테스트만의 녹색이나 PR Fast Gate의 녹색은 이 조건을 충족하지 않는다.
+  3. PR 본문에 그 run의 링크와 head SHA를 적는다.
+- 이 레인은 required branch protection이 아니다. 위 조건은 병합하는 사람이 확인하는 규칙이다.
+
+### 이 버전이 하지 않는 것
+
+환경 변수를 설정하거나 바꾸지 않는다. 운영 중인 루프의 동작을 바꾸지 않는다. `main`의 현재 조건 "환경 변수 `1`"에 "래치 true"가 더해질 뿐이다. worker catalog, WSL 세션, 자동 승격, engineering adapter 래치, 단계 사이클 래치를 바꾸지 않는다.
