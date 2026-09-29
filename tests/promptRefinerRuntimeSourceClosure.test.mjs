@@ -1559,6 +1559,21 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     assert.ok(found, `${path} has no historical v4 closure count`);
     assert.equal(found[1], "189", `${path} historical v4 closure count drifted`);
   }
+  const historicalContract = readFileSync(
+    join(repositoryRoot, "docs/ops/prompt-refiner-confirmatory-shadow-v5.md"),
+    "utf8"
+  );
+  assert.match(historicalContract, /상태: \*\*historical · superseded/);
+  assert.match(
+    historicalContract,
+    /\[`prompt-refiner-confirmatory-shadow-v6\.md`\]\(prompt-refiner-confirmatory-shadow-v6\.md\)/,
+    "historical v5 contract must point to the current v6 successor"
+  );
+  assert.match(
+    historicalContract,
+    /stage v4 \/ run v6 및 \*\*190개 고정 source 파일\*\*/,
+    "historical v5 contract must identify the current stage, run and source count"
+  );
   const stageContract = readFileSync(
     join(repositoryRoot, "docs/ops/prompt-refiner-durable-stage-writer-contract.md"),
     "utf8"
