@@ -148,13 +148,29 @@ test("the committing phase starts only after the fence, and AX001 is read before
   const body = between(code, "export async function withAmuxDbBoundary<T>(", "\n}\n");
   assert.match(body, /let phase: AmuxDbBoundaryPhase = "running";/);
   assert.match(body, /requireAmuxCommitFence\(fence, boundary\.operation\);\s*\}\s*phase = "committing";\s*return result;\s*\}/);
-  assert.match(body, /return transaction\.catch\(\(error: unknown\): never => \{\s*throw amuxDbBoundaryFailure\(boundary, phase, error\);/);
+  assert.match(
+    body,
+    /return transaction\.catch\(\(error: unknown\): never => \{\s*throw amuxDbBoundaryFailure\(\s*boundary,\s*phase,\s*error,\s*amuxRouteWriteState\(routeDeadline\),?\s*\);/,
+  );
+  // A mutation marks its route before BEGIN, so a later read of the route
+  // cannot be answered as "nothing was written".
+  assert.ok(
+    body.indexOf("routeDeadline.mutationStarted = true;") > 0 &&
+      body.indexOf("routeDeadline.mutationStarted = true;") < body.indexOf("prisma.$transaction("),
+  );
 
   const failure = between(code, "export const amuxDbBoundaryFailure = (", "\n};\n");
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") > 0);
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") < failure.indexOf('phase === "committing"'));
   assert.match(failure, /isAmuxLateCommitError\(error\)\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_DEADLINE_EXCEEDED"/);
   assert.match(failure, /phase === "committing" && boundary\.isolation === "mutation"\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_OUTCOME_UNKNOWN"/);
+  // The busy answer is decided after both, only for a read, only in a route
+  // that started nothing that can write.
+  assert.ok(failure.indexOf('"AMUX_DB_OUTCOME_UNKNOWN"') < failure.indexOf('"AMUX_DB_READ_BUSY"'));
+  assert.match(
+    failure,
+    /boundary\.isolation === "read" &&\s*routeWrites === "no_mutation_started" &&\s*!\(error instanceof AmuxDbBoundaryError\) &&\s*amuxTransientDatabaseCode\(error\) !== null\s*\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_READ_BUSY"/,
+  );
 
   const core = withoutComments(read("lib/amux/autoPromotionCore.ts"));
   const auto = between(core, "export const autoTransactionFailure = (", "\n};\n");
