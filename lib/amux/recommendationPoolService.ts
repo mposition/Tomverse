@@ -369,6 +369,14 @@ const selectionFor = async (db: Db, now: Date) => {
 };
 
 /**
+ * The version 7 selection inside the caller's transaction. The caller already
+ * holds the `tomverse-amux-recommendation:queue` advisory lock. The
+ * auto-promotion system consume (orchestration policy version 15) builds its
+ * one-row snapshot from this, so it uses the same filter as prepare.
+ */
+export const recommendationSelectionLocked = (tx: Prisma.TransactionClient, now: Date) => selectionFor(tx, now);
+
+/**
  * The included rows carry what an approve item must repeat (revision and
  * source digest), and the excluded rows carry their exclusion code, so the
  * owner can build a decision from the screen instead of a database read.

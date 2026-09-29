@@ -6,28 +6,49 @@ import {
   amuxCatalogTextRefused,
   boardImportApplyPermitted,
 } from "./boardImportCore.ts";
+import { AMUX_AUTO_PROMOTER_AUDIT_ACTOR } from "../adminAuditSystemActors.ts";
 import {
   type BoardPromotionItem,
   BOARD_PROMOTION_CANONICALIZATION_VERSION,
   BOARD_PROMOTION_POLICY_VERSION,
+  boardPromotionItemBindingsDigest,
+  parseBoardPromotionItems,
   parseBoardPromotionRequest,
 } from "./boardPromotionCore.ts";
 
 /**
- * Closed gate for one pre-approved card.
+ * Gate for one pre-approved card.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 9).
- * The request schema stays at policy version 8.
+ * docs/policy/development-agent-orchestration.md (orchestration policy
+ * version 15, "자동 승격 개정"). Version 9 ships the code latch true. Apply
+ * still needs the env value exactly `enabled`.
  *
- * Version 9 ships the code latch true. Apply still needs the env value
- * exactly `enabled`. Parsing and the numeric checks are pure.
- * Nothing here reads an execution switch, starts a worker, or spends credits.
+ * Version 15 binds the promotion item and a cent amount to the grant, lets the
+ * system actor consume a bound grant from the internal tick, writes one cost
+ * row per consumption, and adds the owner's resume writer. A grant request is
+ * policy version 15. A consume request is version 15 (item and amount come
+ * from the grant) or the version 8 shape, which the human route still takes.
+ *
+ * Parsing and the numeric checks are pure. Nothing here reads an execution
+ * switch, starts a worker, or spends credits.
  */
 
-export const AUTO_PROMOTION_POLICY_VERSION = 8;
+export const AUTO_PROMOTION_POLICY_VERSION = 15;
+/** The version 8 consume shape. The human route keeps accepting it. */
+export const AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION = 8;
 export const AUTO_PROMOTION_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
 export const AUTO_PROMOTION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE";
 export const AUTO_PROMOTION_CODE_LATCH = true;
+/** Bound grants carry 1..500 cents. The cost ledger itself allows 0..500. */
+export const AUTO_GRANT_AMOUNT_MIN_CENTS = 1;
+/** Due grants expired by one call. */
+export const AUTO_EXPIRE_BATCH = 50;
+/**
+ * What an actor column holds when the system actor wrote the row. The columns
+ * have no User foreign key, and the linked audit row carries the listed actor
+ * in `metadata.systemActor`, so this is a marker and not an account id.
+ */
+export const AUTO_SYSTEM_ACTOR_ROW_ID = `system:${AMUX_AUTO_PROMOTER_AUDIT_ACTOR}`;
 export const AUTO_GRADUATION_DECISIONS = 20;
 export const AUTO_GRADUATION_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
 export const AUTO_COST_EVENT_CENTS = 500;
@@ -72,17 +93,44 @@ export type AutoGrantRequest = {
   policyVersion: typeof AUTO_PROMOTION_POLICY_VERSION;
   grantId: string;
   cardId: string;
+  amountCents: number;
+  item: BoardPromotionItem;
 };
 
+/** Version 8 shape: the request repeats the item and the amount. */
 export type AutoConsumeRequest = {
   canonicalizationVersion: typeof AUTO_PROMOTION_CANONICALIZATION_VERSION;
-  policyVersion: typeof AUTO_PROMOTION_POLICY_VERSION;
+  policyVersion: typeof AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION;
   grantId: string;
   consumptionId: string;
   snapshotId: string;
   workerId: null;
   amountCents: number;
   item: BoardPromotionItem;
+};
+
+/** Version 15 shape: the item and the amount are the ones the grant bound. */
+export type AutoBoundConsumeRequest = {
+  canonicalizationVersion: typeof AUTO_PROMOTION_CANONICALIZATION_VERSION;
+  policyVersion: typeof AUTO_PROMOTION_POLICY_VERSION;
+  grantId: string;
+  consumptionId: string;
+  snapshotId: string;
+  workerId: null;
+};
+
+export type AutoResumeRequest = {
+  canonicalizationVersion: typeof AUTO_PROMOTION_CANONICALIZATION_VERSION;
+  policyVersion: typeof AUTO_PROMOTION_POLICY_VERSION;
+  haltId: string;
+};
+
+/** What a grant row stores about its binding. All three are null on a legacy row. */
+export type AutoGrantBinding = {
+  workItemId: string;
+  itemBindings: unknown;
+  itemBindingsDigest: string | null;
+  amountCents: number | null;
 };
 
 const sameKeys = (value: object, expected: readonly string[]): boolean => {
@@ -97,7 +145,7 @@ const scrub = (value: unknown): unknown => {
   const copy: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (
-      (key === "grantId" || key === "consumptionId" || key === "snapshotId") &&
+      (key === "grantId" || key === "consumptionId" || key === "snapshotId" || key === "haltId") &&
       typeof child === "string" &&
       UUID_PATTERN.test(child)
     ) {
@@ -121,9 +169,33 @@ const parseObject = (raw: string): { ok: true; value: Record<string, unknown> } 
   return { ok: true, value: parsed as Record<string, unknown> };
 };
 
-const headerOk = (value: Record<string, unknown>): boolean =>
+const headerOk = (
+  value: Record<string, unknown>,
+  policyVersion: number = AUTO_PROMOTION_POLICY_VERSION,
+): boolean =>
   value.canonicalizationVersion === AUTO_PROMOTION_CANONICALIZATION_VERSION &&
-  value.policyVersion === AUTO_PROMOTION_POLICY_VERSION;
+  value.policyVersion === policyVersion;
+
+const uuid = (value: unknown): value is string => typeof value === "string" && UUID_PATTERN.test(value);
+
+/**
+ * One promotion item through the version 3 item parser, so the grant, the
+ * version 8 consume and the manual pilot refuse the same things: `unknown`
+ * kind, a brief over 8 KiB, and anything the catalog scanner refuses.
+ */
+const parseOnePromotionItem = (value: unknown): { ok: true; item: BoardPromotionItem } | { ok: false; code: string } => {
+  const item = parseBoardPromotionRequest(JSON.stringify({
+    canonicalizationVersion: BOARD_PROMOTION_CANONICALIZATION_VERSION,
+    policyVersion: BOARD_PROMOTION_POLICY_VERSION,
+    items: [value],
+  }));
+  if (!item.ok) return item;
+  if (item.request.items.length !== 1) return { ok: false, code: "one_card" };
+  return { ok: true, item: item.request.items[0] };
+};
+
+const amountIn = (value: unknown, min: number): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= min && value <= AUTO_COST_EVENT_CENTS;
 
 const digestOf = (value: unknown): string =>
   createHash("sha256").update(amuxCanonicalJson(value), "utf8").digest("hex");
@@ -238,77 +310,243 @@ export const autoAuditMetadata = (
   return metadata;
 };
 
+/**
+ * Version 15 grant. The grant binds the whole promotion item and a cent
+ * amount; `cardId` stays in the shape and has to name the item's card.
+ */
 export const parseAutoGrantRequest = (
   raw: string,
-): { ok: true; request: AutoGrantRequest; requestDigest: string } | { ok: false; code: string } => {
+):
+  | { ok: true; request: AutoGrantRequest; requestDigest: string; itemBindingsDigest: string }
+  | { ok: false; code: string } => {
   const parsed = parseObject(raw);
   if (!parsed.ok) return parsed;
-  if (!sameKeys(parsed.value, ["canonicalizationVersion", "policyVersion", "grantId", "cardId"])) {
+  if (Array.isArray(parsed.value.items)) return { ok: false, code: "one_card" };
+  if (!sameKeys(parsed.value, ["canonicalizationVersion", "policyVersion", "grantId", "cardId", "amountCents", "item"])) {
     return { ok: false, code: "schema_rejected" };
   }
   if (!headerOk(parsed.value)) return { ok: false, code: "schema_rejected" };
-  if (typeof parsed.value.grantId !== "string" || !UUID_PATTERN.test(parsed.value.grantId)) {
-    return { ok: false, code: "schema_rejected" };
-  }
-  if (typeof parsed.value.cardId !== "string" || parsed.value.cardId.length < 1 || parsed.value.cardId.length > 64) {
-    return { ok: false, code: "schema_rejected" };
-  }
+  if (!uuid(parsed.value.grantId)) return { ok: false, code: "schema_rejected" };
+  if (typeof parsed.value.cardId !== "string") return { ok: false, code: "schema_rejected" };
+  if (!amountIn(parsed.value.amountCents, AUTO_GRANT_AMOUNT_MIN_CENTS)) return { ok: false, code: "schema_rejected" };
+  const item = parseOnePromotionItem(parsed.value.item);
+  if (!item.ok) return item;
+  if (item.item.cardId !== parsed.value.cardId) return { ok: false, code: "schema_rejected" };
   const request: AutoGrantRequest = {
     canonicalizationVersion: AUTO_PROMOTION_CANONICALIZATION_VERSION,
     policyVersion: AUTO_PROMOTION_POLICY_VERSION,
     grantId: parsed.value.grantId,
-    cardId: parsed.value.cardId,
+    cardId: item.item.cardId,
+    amountCents: parsed.value.amountCents,
+    item: item.item,
+  };
+  return {
+    ok: true,
+    request,
+    requestDigest: digestOf(request),
+    itemBindingsDigest: boardPromotionItemBindingsDigest([item.item]),
+  };
+};
+
+const CONSUME_ID_KEYS = ["canonicalizationVersion", "policyVersion", "grantId", "consumptionId", "snapshotId", "workerId"];
+
+/**
+ * A consume request for the human route. Version 15 names the grant and takes
+ * the item and amount the grant bound. Version 8 repeats them; on a bound
+ * grant they have to be the bound ones, which the service checks.
+ */
+export const parseAutoConsumeRequest = (
+  raw: string,
+):
+  | { ok: true; request: AutoConsumeRequest | AutoBoundConsumeRequest; requestDigest: string }
+  | { ok: false; code: string } => {
+  const parsed = parseObject(raw);
+  if (!parsed.ok) return parsed;
+  if (Array.isArray(parsed.value.items) && parsed.value.items.length !== 1) return { ok: false, code: "one_card" };
+  const v8 = parsed.value.policyVersion === AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION;
+  const keys = v8 ? [...CONSUME_ID_KEYS, "amountCents", "item"] : CONSUME_ID_KEYS;
+  if (!sameKeys(parsed.value, keys)) return { ok: false, code: "schema_rejected" };
+  if (!headerOk(parsed.value, v8 ? AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION : AUTO_PROMOTION_POLICY_VERSION)) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  const { grantId, consumptionId, snapshotId } = parsed.value;
+  if (!uuid(grantId) || !uuid(consumptionId) || !uuid(snapshotId)) return { ok: false, code: "schema_rejected" };
+  if (parsed.value.workerId !== null) return { ok: false, code: "worker_not_admitted" };
+  if (!v8) {
+    const request: AutoBoundConsumeRequest = {
+      canonicalizationVersion: AUTO_PROMOTION_CANONICALIZATION_VERSION,
+      policyVersion: AUTO_PROMOTION_POLICY_VERSION,
+      grantId,
+      consumptionId,
+      snapshotId,
+      workerId: null,
+    };
+    return { ok: true, request, requestDigest: digestOf(request) };
+  }
+  if (!Number.isInteger(parsed.value.amountCents)) return { ok: false, code: "schema_rejected" };
+  const item = parseOnePromotionItem(parsed.value.item);
+  if (!item.ok) return item;
+  const request: AutoConsumeRequest = {
+    canonicalizationVersion: AUTO_PROMOTION_CANONICALIZATION_VERSION,
+    policyVersion: AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION,
+    grantId,
+    consumptionId,
+    snapshotId,
+    workerId: null,
+    amountCents: parsed.value.amountCents as number,
+    item: item.item,
   };
   return { ok: true, request, requestDigest: digestOf(request) };
 };
 
-export const parseAutoConsumeRequest = (
+export const autoConsumeRequestIsBound = (
+  request: AutoConsumeRequest | AutoBoundConsumeRequest,
+): request is AutoBoundConsumeRequest => request.policyVersion === AUTO_PROMOTION_POLICY_VERSION;
+
+/** The owner's resume request names one halt and nothing else. */
+export const parseAutoResumeRequest = (
   raw: string,
-): { ok: true; request: AutoConsumeRequest; requestDigest: string } | { ok: false; code: string } => {
+): { ok: true; request: AutoResumeRequest; requestDigest: string } | { ok: false; code: string } => {
   const parsed = parseObject(raw);
   if (!parsed.ok) return parsed;
-  if (Array.isArray(parsed.value.items) && parsed.value.items.length !== 1) return { ok: false, code: "one_card" };
-  if (!sameKeys(parsed.value, [
-    "canonicalizationVersion",
-    "policyVersion",
-    "grantId",
-    "consumptionId",
-    "snapshotId",
-    "workerId",
-    "amountCents",
-    "item",
-  ])) {
+  if (!sameKeys(parsed.value, ["canonicalizationVersion", "policyVersion", "haltId"])) {
     return { ok: false, code: "schema_rejected" };
   }
   if (!headerOk(parsed.value)) return { ok: false, code: "schema_rejected" };
-  if (typeof parsed.value.grantId !== "string" || !UUID_PATTERN.test(parsed.value.grantId)) {
-    return { ok: false, code: "schema_rejected" };
-  }
-  if (typeof parsed.value.consumptionId !== "string" || !UUID_PATTERN.test(parsed.value.consumptionId)) {
-    return { ok: false, code: "schema_rejected" };
-  }
-  if (typeof parsed.value.snapshotId !== "string" || !UUID_PATTERN.test(parsed.value.snapshotId)) {
-    return { ok: false, code: "schema_rejected" };
-  }
-  if (parsed.value.workerId !== null) return { ok: false, code: "worker_not_admitted" };
-  if (!Number.isInteger(parsed.value.amountCents)) return { ok: false, code: "schema_rejected" };
-  const itemRaw = JSON.stringify({
-    canonicalizationVersion: BOARD_PROMOTION_CANONICALIZATION_VERSION,
-    policyVersion: BOARD_PROMOTION_POLICY_VERSION,
-    items: [parsed.value.item],
-  });
-  const item = parseBoardPromotionRequest(itemRaw);
-  if (!item.ok) return item;
-  if (item.request.items.length !== 1) return { ok: false, code: "one_card" };
-  const request: AutoConsumeRequest = {
+  if (!uuid(parsed.value.haltId)) return { ok: false, code: "schema_rejected" };
+  const request: AutoResumeRequest = {
     canonicalizationVersion: AUTO_PROMOTION_CANONICALIZATION_VERSION,
     policyVersion: AUTO_PROMOTION_POLICY_VERSION,
-    grantId: parsed.value.grantId,
-    consumptionId: parsed.value.consumptionId,
-    snapshotId: parsed.value.snapshotId,
-    workerId: null,
-    amountCents: parsed.value.amountCents as number,
-    item: item.request.items[0],
+    haltId: parsed.value.haltId,
   };
   return { ok: true, request, requestDigest: digestOf(request) };
+};
+
+/**
+ * The item a bound grant stored, read back fail-closed. The stored JSON goes
+ * through the same item parser as a request, has to be exactly one item for
+ * the grant's own card, and has to reproduce the stored digest.
+ */
+export const autoBoundItem = (
+  binding: AutoGrantBinding,
+):
+  | { ok: true; item: BoardPromotionItem; amountCents: number; itemBindingsDigest: string }
+  | { ok: false; code: "grant_unbound" | "grant_binding_invalid" } => {
+  const empty =
+    (binding.itemBindings === null || binding.itemBindings === undefined) &&
+    binding.itemBindingsDigest === null &&
+    binding.amountCents === null;
+  if (empty) return { ok: false, code: "grant_unbound" };
+  const items = parseBoardPromotionItems(binding.itemBindings);
+  if (!items || items.length !== 1) return { ok: false, code: "grant_binding_invalid" };
+  if (binding.itemBindingsDigest === null || boardPromotionItemBindingsDigest(items) !== binding.itemBindingsDigest) {
+    return { ok: false, code: "grant_binding_invalid" };
+  }
+  if (items[0].cardId !== binding.workItemId) return { ok: false, code: "grant_binding_invalid" };
+  if (!amountIn(binding.amountCents, AUTO_GRANT_AMOUNT_MIN_CENTS)) return { ok: false, code: "grant_binding_invalid" };
+  return { ok: true, item: items[0], amountCents: binding.amountCents, itemBindingsDigest: binding.itemBindingsDigest };
+};
+
+/**
+ * Whether this consume may use this grant's binding. The system path and a
+ * version 15 request need a bound grant. A version 8 request may still use a
+ * legacy grant; on a bound grant its item and amount must be the bound ones.
+ */
+export const autoConsumeBindingAccepted = (input: {
+  binding: AutoGrantBinding;
+  item: BoardPromotionItem;
+  amountCents: number;
+  requireBound: boolean;
+}):
+  | { ok: true; bound: boolean }
+  | { ok: false; code: "grant_unbound" | "grant_binding_invalid" | "grant_item_mismatch" | "grant_amount_mismatch" } => {
+  const bound = autoBoundItem(input.binding);
+  if (!bound.ok) {
+    if (bound.code === "grant_unbound" && !input.requireBound) return { ok: true, bound: false };
+    return bound;
+  }
+  if (boardPromotionItemBindingsDigest([input.item]) !== bound.itemBindingsDigest) {
+    return { ok: false, code: "grant_item_mismatch" };
+  }
+  if (input.amountCents !== bound.amountCents) return { ok: false, code: "grant_amount_mismatch" };
+  return { ok: true, bound: true };
+};
+
+/** The request digest a system consumption stores. No free text goes in. */
+export const autoSystemConsumeDigest = (input: {
+  grantId: string;
+  consumptionId: string;
+  snapshotId: string;
+  itemBindingsDigest: string;
+  amountCents: number;
+}): string =>
+  digestOf({
+    actor: AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
+    canonicalizationVersion: AUTO_PROMOTION_CANONICALIZATION_VERSION,
+    policyVersion: AUTO_PROMOTION_POLICY_VERSION,
+    ...input,
+  });
+
+/**
+ * Lost consume outcomes, one per attempted consumption id. A consumption row
+ * flagged by read-back and the read-back row for the same id are one event,
+ * not two: counting both would let one lost outcome open a halt alone.
+ */
+export const autoUnknownEvents = (input: {
+  consumptions: readonly { id: string; outcomeUnknownAt: Date | null }[];
+  unknowns: readonly { id: string; recordedAt: Date }[];
+}): Date[] => {
+  const events = new Map<string, Date>();
+  for (const row of input.unknowns) events.set(row.id, row.recordedAt);
+  for (const row of input.consumptions) {
+    if (row.outcomeUnknownAt && !events.has(row.id)) events.set(row.id, row.outcomeUnknownAt);
+  }
+  return [...events.values()];
+};
+
+/**
+ * HTTP status of the internal tick for its `reason`. A deterministic refusal
+ * is a finished tick (200). The gate (`apply_disabled`) and a lost outcome
+ * (`outcome_unknown` for the consume, `expiry_outcome_unknown` for the expiry
+ * step) are 409; a missing audit key is 503; an unbound audit or an
+ * unexpected failure is 500.
+ */
+/** Grants one tick may try before it stops; still at most one card moves. */
+export const AUTO_TICK_GRANT_ATTEMPTS = 10;
+
+/**
+ * Refusals that belong to the picked grant's own card, so the tick tries the
+ * next grant instead of refusing every tick until this grant expires. A
+ * refusal about the whole path (halt, graduation, missing capacity row, the
+ * global automatic cap, incident, audit keys) ends the tick. `capacity_full`
+ * and `cost_exceeded` are per card here: the first comes from this card's
+ * place in the ranking cut, the second from this grant's bound amount, and a
+ * later grant can still pass; if the queue is truly full every candidate is
+ * refused and the tick ends at the attempt bound.
+ */
+const AUTO_TICK_CARD_SPECIFIC_REFUSALS = new Set([
+  "not_backlog",
+  "conflict",
+  "dependency_open",
+  "not_included",
+  "lifecycle_present",
+  "brief_digest_changed",
+  "review_waiting",
+  "grant_binding_invalid",
+  "grant_missing",
+  "capacity_full",
+  "cost_exceeded",
+]);
+
+export const autoTickCardSpecificRefusal = (code: string): boolean =>
+  AUTO_TICK_CARD_SPECIFIC_REFUSALS.has(code);
+
+export const autoTickHttpStatus = (reason: string | null | undefined): number => {
+  if (!reason) return 200;
+  if (reason === "apply_disabled" || reason === "outcome_unknown" || reason === "expiry_outcome_unknown") {
+    return 409;
+  }
+  if (reason === "audit_key_missing") return 503;
+  if (reason === "audit_unbound" || reason === "auto_promotion_failed") return 500;
+  return 200;
 };

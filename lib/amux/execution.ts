@@ -18,6 +18,12 @@ import {
 } from "@/lib/amux/executionBudgetCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import {
+  AMUX_DEFAULT_REVIEW_SPECIALTY,
+  amuxBridgeSettleReason,
+  amuxHumanReviewRequired,
+  amuxReviewPrNumberAccepted,
+} from "@/lib/amux/humanReviewCore";
+import {
   evaluateLockedAmuxCostAdmission,
   lockAmuxResourcePolicies,
 } from "@/lib/amux/resourcePolicy";
@@ -706,6 +712,7 @@ export async function settleAmuxExecution(input: {
   toStatus: AmuxExecutionToStatus;
   reason?: string | null;
   actualCostMicrousd?: bigint | null;
+  reviewPrNumber?: number | null;
   now?: Date;
 }): Promise<
   | { settled: true; taskRevision: number }
@@ -715,6 +722,15 @@ export async function settleAmuxExecution(input: {
     throw new Error(
       `Invalid AMUX execution settlement: ${input.outcome} -> ${input.toStatus}`,
     );
+  }
+  if (
+    !amuxReviewPrNumberAccepted({
+      outcome: input.outcome,
+      toStatus: input.toStatus,
+      reviewPrNumber: input.reviewPrNumber,
+    })
+  ) {
+    throw new Error("Invalid AMUX review PR number for this settlement");
   }
   if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
     return { settled: false, reason: "fenced_out" };
@@ -796,10 +812,28 @@ export async function settleAmuxExecution(input: {
         requested_status: input.toStatus,
         attempt_number: attempt.attemptNumber,
       });
+      // Policy version 15: a promoted card (approved brief) or one that asks
+      // for review never settles to done; it goes to human review.
+      const humanReviewRequired = amuxHumanReviewRequired(task);
       const effectiveToStatus =
-        budgetDestination.to_status === "done" && task.requiresHumanReview
+        budgetDestination.to_status === "done" && humanReviewRequired
           ? "review"
           : budgetDestination.to_status;
+      // A settlement that names the review PR field (even as null) replaces
+      // the stored number, so a retried card never keeps the previous
+      // attempt's PR. A caller that omits the field leaves it untouched.
+      const replacesReviewPr =
+        effectiveToStatus === "review" && input.reviewPrNumber !== undefined;
+      const recordedReviewPrNumber = replacesReviewPr ? (input.reviewPrNumber ?? null) : null;
+      const bridgeReason = amuxBridgeSettleReason(input.reason);
+      // AmuxWorkItem_review_pr_check needs requiresHumanReview with a stored
+      // PR, and AmuxWorkItem_human_review_shape_check needs a specialty with
+      // that flag. A promoted card has neither, so recording its first PR
+      // sets both; an existing specialty is kept.
+      const marksHumanReview = replacesReviewPr && recordedReviewPrNumber !== null;
+      const reviewSpecialty = marksHumanReview
+        ? (task.reviewSpecialty ?? AMUX_DEFAULT_REVIEW_SPECIALTY)
+        : task.reviewSpecialty;
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: {
@@ -815,6 +849,8 @@ export async function settleAmuxExecution(input: {
                 status: effectiveToStatus,
                 owner: null,
                 claimedAt: null,
+                ...(replacesReviewPr ? { reviewPrNumber: recordedReviewPrNumber } : {}),
+                ...(marksHumanReview ? { requiresHumanReview: true, reviewSpecialty } : {}),
                 revision: {
                   increment: 1,
                 },
@@ -852,7 +888,9 @@ export async function settleAmuxExecution(input: {
           endedBy: input.worker,
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : effectiveToStatus === "review"
+            : bridgeReason !== null
+              ? bridgeReason
+              : effectiveToStatus === "review"
               ? "human_review_required"
               : input.outcome === "succeeded"
                 ? "execution_succeeded"
@@ -901,10 +939,12 @@ export async function settleAmuxExecution(input: {
         }
       }
 
-      if (effectiveToStatus === "review" && task.requiresHumanReview) {
+      // Every card that lands in review needs a person: review -> done runs
+      // only through the human review route, which requires an escalation.
+      if (effectiveToStatus === "review") {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
-          specialty: task.reviewSpecialty,
+          specialty: reviewSpecialty,
           reason: "human_review_required",
           openedBy: input.worker,
         });
@@ -914,7 +954,9 @@ export async function settleAmuxExecution(input: {
           specialty: "execution-recovery",
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : "execution_blocked",
+            : bridgeReason !== null && bridgeReason !== "local_card_done"
+              ? bridgeReason
+              : "execution_blocked",
           openedBy: input.worker,
         });
       }
@@ -939,6 +981,7 @@ export async function settleAmuxExecution(input: {
           to_status: effectiveToStatus,
           human_review_forced:
             input.toStatus === "done" && effectiveToStatus === "review",
+          review_pr_number: recordedReviewPrNumber,
           reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
           settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
           attempt_number: attempt.attemptNumber,

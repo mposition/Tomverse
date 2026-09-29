@@ -334,11 +334,18 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * webhook input. The digest moves because the whole Prisma schema is
  * deliberately watched.
  *
+ * 2026-09-29: the AMUX back-merge of orchestration policy v15 binds
+ * auto-promotion grants to one item and one cent amount (three nullable
+ * columns on `AmuxRecommendationAutoGrant`) and adds
+ * `AmuxRecommendationAutoUnknown`. Neither is a marketing model or a webhook
+ * input. The digest moves because the whole Prisma schema is deliberately
+ * watched.
+ *
  * Both notes stand because both changes are in this tree, and the value below
  * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f90ac8c53c27740e4cdba78373db88ff2f7851f9c1bb54d334572d7e5ff4b1ec";
+  "c477a1d7590ad6d0763b9ef9f477fb72e14b80b07737051a003b092244e478aa";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

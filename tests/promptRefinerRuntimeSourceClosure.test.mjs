@@ -254,12 +254,20 @@ const compilerOptions = parsedConfig.options;
 // Standard profile. Both files are in this closure. Neither addition is a
 // computed element access. The count remains 228 and the position-free
 // inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-29, AMUX policy v15 back-merge: `lib/adminAuditSystemActors.ts`
+// gains the `amux-auto-promoter` system actor and
+// `lib/marketingAutomationAccess.ts` gains a dated note and the pipeline
+// fingerprint recomputed over the merged schema. Both files are in this
+// closure. Neither change is a computed element access. The count remains 228
+// and the position-free inventory remains 9aa7ec49..., so only source
+// positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "91a28fd31a974ed4b06a1aba2e93c326",
-  "4b94ee581fc9f3093b6f80088c1a6c47",
+  "0c29bca0c6b8b2eab72ad1d1b6a1597e",
+  "38a6818f684db88fe52654fade9419f3",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
