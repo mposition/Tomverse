@@ -146,7 +146,9 @@ export async function POST(req: Request) {
     await withdrawAllMarketing({
       ...common,
       source: "unsubscribe_link",
-      onConsentRecorded: await prepareProcessingResultNotice(common.userId),
+      onConsentRecorded: await prepareProcessingResultNotice(common.userId, {
+        stopsAllMarketing: true,
+      }),
     });
     return answer({ ok: true, scope: "all" });
   }

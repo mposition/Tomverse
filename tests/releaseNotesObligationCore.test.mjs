@@ -116,11 +116,10 @@ test("the duties this build does not do have no row", () => {
     .map((duty) => duty.obligationKey);
   assert.deepEqual(
     obligationsFor("KR").filter((key) => !korean.includes(key)),
-    ["advertising_subject_label"]
+    ["consent_result_notice_14_days", "advertising_subject_label"]
   );
-  // `consent_result_notice_14_days` is done since S6b: both notices carry the
-  // approved wording and are queued with the change they report.
-  assert.ok(korean.includes("consent_result_notice_14_days"));
+  // `consent_result_notice_14_days` stays open: a single purpose's withdrawal
+  // has no approved wording (S6b sends the consent and all-marketing notices).
   // `bilingual_unsubscribe_notice` is done since S6b: the footer prints the
   // notice in Korean and English, and the check renders it to confirm.
   assert.ok(korean.includes("bilingual_unsubscribe_notice"));

@@ -324,15 +324,13 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     warnDaysBefore: null,
     notes: `${DRAFT} section 7.7: the unsubscribe notice in Korean and English (시행령 별표 6), whatever the message's language. The footer renders it in every language UNSUBSCRIBE_NOTICE_LANGUAGES names for the pinned profile (S6b); the check renders a footer in each message language and confirms both notices are there, so a build that stops doing it unsettles the duty instead of keeping it.`,
   },
-  {
-    countryCode: "KR",
-    obligationKey: "consent_result_notice_14_days",
-    state: "implemented",
-    readinessCheck: "emailProcessingResultNotice",
-    dueByIso: null,
-    warnDaysBefore: null,
-    notes: `${DRAFT} section 7.7: the result of a consent, an unsubscribe or a withdrawal, within 14 days (제50조제7항, 시행령 제62조의2). consent_result_notice and unsubscribe_result_notice carry the approved wording of docs/policy/email-consent-copy-draft.md sections 4.1 and 4.2 and are queued in the transaction that records the change (S6b); the check confirms both are registered and render.`,
-  },
+  // `consent_result_notice_14_days` has no row yet. The consent notice and
+  // the all-marketing unsubscribe notice are built and queued (S6b), but a
+  // single purpose's withdrawal sends nothing: the approved wording says all
+  // marketing to the address stops, which is false for it, and a
+  // purpose-scoped wording is an owner approval that does not exist. A duty
+  // done for some of the changes it covers is not done, so Korea stays
+  // unsettled on it.
   {
     countryCode: "KR",
     obligationKey: "no_login_for_unsubscribe",

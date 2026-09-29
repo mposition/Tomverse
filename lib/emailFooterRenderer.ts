@@ -315,6 +315,9 @@ const unsubscribeNoticeCopies = (input: FooterInput, copy: FooterCopy): FooterCo
  * build that stops doing it cannot keep the duty settled.
  */
 export const unsubscribeNoticeCarriesLanguages = (languages: readonly string[]): boolean => {
+  // Nothing required is not the duty done: a table that lost Korea's row would
+  // otherwise keep the duty settled.
+  if (languages.length < 2) return false;
   const url = "https://example.invalid/unsubscribe";
   return LANGUAGES.every((messageLanguage) => {
     const rendered = renderJurisdictionFooter({

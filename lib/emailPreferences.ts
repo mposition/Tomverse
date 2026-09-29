@@ -302,10 +302,21 @@ export type SetPreferenceInput = {
   now?: Date;
 };
 
-/** What a consent-record hook receives. */
+/**
+ * What a consent-record hook receives: a consent record, or -- for a refusal
+ * by somebody who never consented (the risk_accepted cohort) -- the
+ * suppression the refusal wrote, as `action: "withdrawn"`.
+ */
 export type ConsentRecordedHook = (
   tx: Prisma.TransactionClient,
-  record: { id: string; userId: string; emailAddress: string; action: string; occurredAt: Date }
+  record: {
+    id: string;
+    referenceType: "consent_record" | "suppression_event";
+    userId: string;
+    emailAddress: string;
+    action: string;
+    occurredAt: Date;
+  }
 ) => Promise<void>;
 
 export async function setPreference(input: SetPreferenceInput): Promise<PreferenceChangeResult> {
@@ -525,6 +536,9 @@ export async function applyPreferenceChange(
         select: { id: true },
       });
       if (!refusal) {
+        const sourceEventKey =
+          input.suppressionEventKey ??
+          `preference-unchanged:${input.userId}:${purpose}:${randomUUID()}`;
         await recordSuppression(
           {
             emailAddress: email,
@@ -535,12 +549,22 @@ export async function applyPreferenceChange(
               (input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center"),
             sourceDeliveryId: input.deliveryId ?? null,
             occurredAt: now,
-            sourceEventKey:
-              input.suppressionEventKey ??
-              `preference-unchanged:${input.userId}:${purpose}:${randomUUID()}`,
+            sourceEventKey,
           },
           tx
         );
+        // A refusal by somebody with no consent to withdraw is still a
+        // refusal to report (the cohort the override mails is exactly this).
+        if (input.onConsentRecorded) {
+          await input.onConsentRecorded(tx, {
+            id: sourceEventKey,
+            referenceType: "suppression_event",
+            userId: input.userId,
+            emailAddress: normalizeSuppressionAddress(email),
+            action: "withdrawn",
+            occurredAt: now,
+          });
+        }
       }
     }
     return cancelledRequest ? ("cancelled" as const) : ("already_set" as const);
@@ -672,6 +696,7 @@ export async function applyPreferenceChange(
     if (input.onConsentRecorded) {
       await input.onConsentRecorded(tx, {
         id: consentRecord.id,
+        referenceType: "consent_record",
         userId: input.userId,
         emailAddress: consentRecord.emailAddress,
         action: consentRecord.action,
@@ -775,15 +800,15 @@ export async function withdrawAllMarketing(input: {
   now?: Date;
 }) {
   const results: PreferenceChangeResult[] = [];
-  // One request, one processing result: the hook runs for the first purpose
-  // that actually records a withdrawal, not once per purpose.
-  let reported = false;
-  const hook = input.onConsentRecorded;
-  const once: ConsentRecordedHook | undefined = hook
-    ? async (tx, record) => {
-        if (reported) return;
-        await hook(tx, record);
-        reported = true;
+  // One request, one processing result, reported once the whole request has
+  // succeeded. Each purpose commits on its own, so a notice queued with the
+  // first would say "all marketing is off" while a later purpose failed and
+  // stayed on. The first recorded change is noted, and the notice is queued
+  // after the last purpose commits.
+  let first: Parameters<ConsentRecordedHook>[1] | null = null;
+  const note: ConsentRecordedHook | undefined = input.onConsentRecorded
+    ? async (_tx, record) => {
+        if (!first) first = record;
       }
     : undefined;
   for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
@@ -793,9 +818,14 @@ export async function withdrawAllMarketing(input: {
         purpose,
         enabled: false,
         viaToken: input.source === "unsubscribe_link",
-        ...(once ? { onConsentRecorded: once } : {}),
+        ...(note ? { onConsentRecorded: note } : {}),
       })
     );
+  }
+  const reported = first as Parameters<ConsentRecordedHook>[1] | null;
+  if (input.onConsentRecorded && reported) {
+    const hook = input.onConsentRecorded;
+    await prisma.$transaction((tx) => hook(tx, reported));
   }
   return results;
 }

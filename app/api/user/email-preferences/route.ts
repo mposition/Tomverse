@@ -227,7 +227,7 @@ export async function PATCH(req: Request) {
       }
     } else if (body.withdrawAllMarketing) {
       await withdrawAllMarketing({
-        onConsentRecorded: await prepareProcessingResultNotice(userId),
+        onConsentRecorded: await prepareProcessingResultNotice(userId, { stopsAllMarketing: true }),
         userId,
         capturedVia: "preference_center",
         source: "preference_center",

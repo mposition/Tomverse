@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
-import { ensureDefaultPreferences, withdrawAllMarketing } from "@/lib/emailPreferences";
+import { ensureDefaultPreferences, setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import {
   CONSENT_RESULT_NOTICE_TEMPLATE,
@@ -91,7 +91,7 @@ test("unsubscribing from everything answers with one result notice", async () =>
     userId: user.id,
     capturedVia: "unsubscribe_page",
     source: "unsubscribe_link",
-    onConsentRecorded: await prepareProcessingResultNotice(user.id),
+    onConsentRecorded: await prepareProcessingResultNotice(user.id, { stopsAllMarketing: true }),
   });
   const withdrawals = await prisma.consentRecord.findMany({
     where: { userId: user.id, action: "withdrawn" },
@@ -118,14 +118,14 @@ test("a consent answers with the consent notice, in the transaction that records
   // Rolled back: nothing queued.
   await assert.rejects(
     prisma.$transaction(async (tx) => {
-      await hook(tx, { ...record, userId: user.id });
+      await hook(tx, { ...record, referenceType: "consent_record", userId: user.id });
       throw new Error("rollback");
     }),
     /rollback/
   );
   assert.equal((await noticesFor(user.id, CONSENT_RESULT_NOTICE_TEMPLATE)).length, 0);
 
-  await prisma.$transaction((tx) => hook(tx, { ...record, userId: user.id }));
+  await prisma.$transaction((tx) => hook(tx, { ...record, referenceType: "consent_record", userId: user.id }));
   const notices = await noticesFor(user.id, CONSENT_RESULT_NOTICE_TEMPLATE);
   assert.equal(notices.length, 1);
   assert.equal(notices[0]!.language, "en");
@@ -138,6 +138,7 @@ test("a request or a lapse is not a processing result", async () => {
     await prisma.$transaction((tx) =>
       hook(tx, {
         id: randomUUID(),
+        referenceType: "consent_record",
         userId: user.id,
         emailAddress: user.email!,
         action,
@@ -146,4 +147,40 @@ test("a request or a lapse is not a processing result", async () => {
     );
   }
   assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
+});
+
+test("a single purpose's withdrawal queues nothing: the approved wording says all marketing stops", async () => {
+  const user = await subscribed();
+  await setPreference({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: false,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+    viaToken: true,
+    onConsentRecorded: await prepareProcessingResultNotice(user.id),
+  });
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id, action: "withdrawn" } }), 1);
+  assert.equal((await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE)).length, 0);
+});
+
+test("an unsubscribe by somebody who never consented is reported too", async () => {
+  // The risk_accepted cohort: nothing on, nothing to withdraw, and the click
+  // still records a refusal the notice reports.
+  const user = await prisma.user.create({
+    data: { email: `cohort-${randomUUID().slice(0, 8)}@example.test` },
+    select: { id: true, email: true },
+  });
+  await prisma.userSettings.create({ data: { userId: user.id, language: "ko" } });
+  await ensureDefaultPreferences(user.id);
+  await withdrawAllMarketing({
+    userId: user.id,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+    onConsentRecorded: await prepareProcessingResultNotice(user.id, { stopsAllMarketing: true }),
+  });
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  const notices = await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]!.event.referenceType, "suppression_event");
 });

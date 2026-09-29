@@ -153,6 +153,7 @@ after(async () => {
 // only time a draft's duty rows may be written. `advertising_subject_label` is
 // `implemented` rather than waived, which is why the label is still printed.
 const KOREAN_DUTIES_THE_SEED_LEAVES_OPEN = [
+  ["consent_result_notice_14_days", "emailProcessingResultNotice"],
   ["advertising_subject_label", "emailSubjectLabels"],
 ] as const;
 

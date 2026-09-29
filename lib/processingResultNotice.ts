@@ -53,7 +53,20 @@ const noticeLanguage = (language: string | null | undefined) => (language === "k
  * consent notice, `withdrawn` with the unsubscribe notice. Other actions
  * (requests, lapses) are not processing results and queue nothing.
  */
-export async function prepareProcessingResultNotice(userId: string): Promise<ConsentRecordedHook> {
+export async function prepareProcessingResultNotice(
+  userId: string,
+  options: {
+    /**
+     * Whether this request stops every marketing purpose (the unsubscribe
+     * link's `all`, the settings screen's "turn off all"). The approved
+     * unsubscribe notice says marketing email to this address stops; only a
+     * request that does that may send it. A single purpose's withdrawal
+     * queues nothing until a purpose-scoped wording is approved
+     * (docs/policy/email-product-news-redesign-draft.md 7.7).
+     */
+    stopsAllMarketing?: boolean;
+  } = {}
+): Promise<ConsentRecordedHook> {
   const settings = await prisma.userSettings.findUnique({
     where: { userId },
     select: { language: true },
@@ -70,7 +83,7 @@ export async function prepareProcessingResultNotice(userId: string): Promise<Con
     const kind =
       record.action === "granted" || record.action === "reconfirmed"
         ? "consent"
-        : record.action === "withdrawn"
+        : record.action === "withdrawn" && options.stopsAllMarketing
           ? "unsubscribe"
           : null;
     if (!kind) return;
@@ -81,7 +94,7 @@ export async function prepareProcessingResultNotice(userId: string): Promise<Con
       userId: record.userId,
       language,
       payload: { date: processingResultDate(record.occurredAt) },
-      referenceType: "consent_record",
+      referenceType: record.referenceType,
       referenceId: record.id,
       ...template,
       policyVersionId,
