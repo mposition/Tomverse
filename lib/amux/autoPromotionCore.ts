@@ -550,3 +550,66 @@ export const autoTickHttpStatus = (reason: string | null | undefined): number =>
   if (reason === "audit_unbound" || reason === "auto_promotion_failed") return 500;
   return 200;
 };
+
+/**
+ * Where an auto-promotion transaction was when it failed. `starting`: the
+ * callback had not run yet (pool wait, BEGIN). `running`: inside the callback,
+ * before it returned. `committing`: the callback had returned, so the COMMIT
+ * was sent or about to be.
+ */
+export type AutoTransactionPhase = "starting" | "running" | "committing";
+
+/**
+ * What a failed auto-promotion transaction means for the rows it would have
+ * written.
+ *
+ * - `outcome_unknown`: the COMMIT may or may not have taken effect. Only a
+ *   failure after the callback returned is this; it is read back and never
+ *   retried, and it counts toward the halt rule.
+ * - `conflict`: a unique key refused a row. Nothing committed.
+ * - `deadline_exceeded`: a statement, transaction or pool deadline ran out
+ *   before COMMIT was sent. Nothing committed.
+ * - `rolled_back`: any other failure before COMMIT was sent, a lost connection
+ *   included. Nothing committed.
+ *
+ * A client never sends COMMIT for a transaction whose callback threw, and
+ * PostgreSQL does not commit a transaction it never received a COMMIT for, so
+ * every failure before `committing` is a known one. A statement timeout
+ * (SQLSTATE 57014) inside the callback is the case this exists for: it rolls
+ * the transaction back, and calling it unknown refused the grant for good and
+ * could open a halt.
+ */
+export type AutoTransactionFailure = "outcome_unknown" | "conflict" | "deadline_exceeded" | "rolled_back";
+
+const PRISMA_TIMEOUT_CODES = new Set([
+  // Timed out fetching a connection from the pool.
+  "P2024",
+  // Transaction API error: could not start in `maxWait`, or the interactive
+  // transaction's own timeout closed it.
+  "P2028",
+]);
+
+const errorField = (error: unknown, key: string): unknown =>
+  error && typeof error === "object" && key in error ? (error as Record<string, unknown>)[key] : undefined;
+
+/** SQLSTATE 57014, wherever Prisma put it: the raw-query `meta.code`, or the text of a model query's error. */
+export const autoTransactionStatementCancelled = (error: unknown): boolean => {
+  const meta = errorField(error, "meta");
+  if (errorField(meta, "code") === "57014" || errorField(error, "code") === "57014") return true;
+  const texts = [errorField(meta, "database_error"), errorField(meta, "message"), errorField(error, "message")];
+  return texts.some(
+    (text) =>
+      typeof text === "string" &&
+      (/\b57014\b/.test(text) || /canceling statement due to statement timeout/i.test(text)),
+  );
+};
+
+export const autoTransactionFailure = (phase: AutoTransactionPhase, error: unknown): AutoTransactionFailure => {
+  if (phase === "committing") return "outcome_unknown";
+  const code = errorField(error, "code");
+  if (code === "P2002") return "conflict";
+  if (autoTransactionStatementCancelled(error) || (typeof code === "string" && PRISMA_TIMEOUT_CODES.has(code))) {
+    return "deadline_exceeded";
+  }
+  return "rolled_back";
+};

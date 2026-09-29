@@ -16,8 +16,8 @@ import {
   BoardImportError,
   boardImportAuditEntryHashMatches,
   boardImportAuditKeysPresent,
-  boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
+import { AmuxDbBoundaryError } from "@/lib/amux/dbBoundary";
 import {
   boardPromotionCardWrite,
   boardPromotionExecutionBriefDigest,
@@ -58,6 +58,8 @@ import {
   parseAutoResumeRequest,
   AUTO_TICK_GRANT_ATTEMPTS,
   autoTickCardSpecificRefusal,
+  autoTransactionFailure,
+  type AutoTransactionPhase,
 } from "@/lib/amux/autoPromotionCore";
 import { writeAutoPromoterAudit } from "@/lib/amux/autoPromotionSystemAudit";
 import {
@@ -139,6 +141,19 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   return parsed;
 };
 
+/** The operation name a deadline refusal from this module carries. */
+const AUTO_PROMOTION_DB_OPERATION = "auto_promotion";
+
+/**
+ * One auto-promotion transaction under the queue lock.
+ *
+ * A failure is classified by where the transaction was
+ * (`autoTransactionFailure`), not by its message: only a failure after the
+ * callback returned, when the COMMIT may or may not have taken effect, is
+ * `outcome_unknown`. Anything earlier rolled back, so a statement timeout is a
+ * deadline refusal the caller may meet again next time, not a lost outcome that
+ * refuses its grant for good and counts toward the halt rule.
+ */
 const withAutoTransaction = async <T>(
   targetId: string | null,
   run: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
@@ -146,27 +161,34 @@ const withAutoTransaction = async <T>(
   if (!boardImportAuditKeysPresent(adminAuditIntegrityKeys(process.env).length)) {
     throw new BoardImportError("audit_key_missing", 503, targetId);
   }
+  let phase: AutoTransactionPhase = "starting";
   try {
     return await prisma.$transaction(
       async (tx) => {
+        phase = "running";
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))`;
-        return run(tx, await databaseNow(tx));
+        const result = await run(tx, await databaseNow(tx));
+        // Nothing may run after this line inside the callback: from here on a
+        // failure can only come from the COMMIT itself.
+        phase = "committing";
+        return result;
       },
       { maxWait: 5_000, timeout: 20_000 },
     );
   } catch (error) {
-    if (error instanceof BoardImportError) throw error;
-    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-    if (code === "P2002") throw new BoardImportError("conflict", 409, targetId);
-    const message = error instanceof Error ? error.message : "";
-    if (
-      boardImportFailureIsAmbiguous(typeof code === "string" ? code : null) ||
-      /timeout|ECONNRESET|ECONNREFUSED|Connection terminated|closed the connection|Server has closed/i.test(message)
-    ) {
-      throw new BoardImportError("outcome_unknown", 409, targetId);
+    // Refusals are thrown by the callback, so the transaction rolled back.
+    if (error instanceof BoardImportError || error instanceof AmuxDbBoundaryError) throw error;
+    switch (autoTransactionFailure(phase, error)) {
+      case "outcome_unknown":
+        throw new BoardImportError("outcome_unknown", 409, targetId);
+      case "conflict":
+        throw new BoardImportError("conflict", 409, targetId);
+      case "deadline_exceeded":
+        throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", AUTO_PROMOTION_DB_OPERATION);
+      default:
+        throw error;
     }
-    throw error;
   }
 };
 

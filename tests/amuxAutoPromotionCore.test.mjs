@@ -31,6 +31,8 @@ import {
   autoReadbackCritical,
   autoSystemConsumeDigest,
   autoTickHttpStatus,
+  autoTransactionFailure,
+  autoTransactionStatementCancelled,
   autoUnknownEvents,
   autoWorkerAdmitted,
   parseAutoConsumeRequest,
@@ -487,4 +489,106 @@ test("the halt read-back counts only lifecycle rows the consume itself could wri
   assert.equal((service.match(/"createdAt" <= c\."createdAt"/g) ?? []).length, 3);
   assert.match(service, /autoConsumptions: \{ some: \{\}, none: \{ status: "consumed" \} \}/);
   assert.doesNotMatch(service, /autoGrants: \{ some: \{\} \},\s*autoConsumptions/);
+});
+
+// Prisma error shapes as they arrive, reduced to the fields the classifier reads.
+const rawStatementTimeout = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2010",
+  message: "Raw query failed. Code: `57014`. Message: `canceling statement due to statement timeout`",
+  meta: { code: "57014", message: "canceling statement due to statement timeout" },
+};
+const modelStatementTimeout = {
+  name: "PrismaClientUnknownRequestError",
+  message:
+    'Error occurred during query execution:\nConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "57014", message: "canceling statement due to statement timeout", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })',
+};
+const transactionClosed = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2028",
+  message: "Transaction API error: Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 20000 ms.",
+};
+const startTimeout = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2028",
+  message: "Transaction API error: Unable to start a transaction in the given time.",
+};
+const poolTimeout = { name: "PrismaClientKnownRequestError", code: "P2024", message: "Timed out fetching a new connection from the connection pool." };
+const serverClosed = { name: "PrismaClientKnownRequestError", code: "P1017", message: "Server has closed the connection." };
+const connectionTerminated = new Error("Connection terminated unexpectedly");
+const connectionReset = new Error("read ECONNRESET");
+const uniqueViolation = { name: "PrismaClientKnownRequestError", code: "P2002", message: "Unique constraint failed" };
+
+test("a statement timeout inside the transaction is a known rollback, not a lost outcome", () => {
+  assert.equal(autoTransactionStatementCancelled(rawStatementTimeout), true);
+  assert.equal(autoTransactionStatementCancelled(modelStatementTimeout), true);
+  assert.equal(autoTransactionStatementCancelled(serverClosed), false);
+  assert.equal(autoTransactionStatementCancelled(new Error("statement ok")), false);
+
+  // Before COMMIT was sent the transaction rolled back, whatever the cause.
+  assert.equal(autoTransactionFailure("running", rawStatementTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", modelStatementTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", transactionClosed), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("starting", startTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("starting", poolTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", serverClosed), "rolled_back");
+  assert.equal(autoTransactionFailure("running", connectionTerminated), "rolled_back");
+  assert.equal(autoTransactionFailure("running", connectionReset), "rolled_back");
+  assert.equal(autoTransactionFailure("starting", serverClosed), "rolled_back");
+  assert.equal(autoTransactionFailure("running", uniqueViolation), "conflict");
+  assert.equal(autoTransactionFailure("running", new Error("anything else")), "rolled_back");
+  assert.equal(autoTransactionFailure("running", null), "rolled_back");
+});
+
+test("only a failure after the callback returned is an unknown outcome", () => {
+  const samples = [
+    rawStatementTimeout,
+    modelStatementTimeout,
+    transactionClosed,
+    startTimeout,
+    poolTimeout,
+    serverClosed,
+    connectionTerminated,
+    connectionReset,
+    uniqueViolation,
+    new Error("anything else"),
+  ];
+  for (const error of samples) {
+    // A connection lost during or after COMMIT: the commit may have happened.
+    assert.equal(autoTransactionFailure("committing", error), "outcome_unknown", error.message);
+    assert.notEqual(autoTransactionFailure("running", error), "outcome_unknown", error.message);
+    assert.notEqual(autoTransactionFailure("starting", error), "outcome_unknown", error.message);
+  }
+});
+
+test("the transaction wrapper classifies by phase, and a known rollback is not recorded as unknown", () => {
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  // No message matching: a timeout text inside the callback is not an unknown outcome.
+  assert.doesNotMatch(service, /timeout\|ECONNRESET/);
+  assert.equal(service.includes("boardImportFailureIsAmbiguous"), false);
+  const wrapper = service.slice(
+    service.indexOf("const withAutoTransaction = async"),
+    service.indexOf("const requireBoundAudit = async"),
+  );
+  assert.ok(wrapper.length > 0);
+  assert.match(wrapper, /let phase: AutoTransactionPhase = "starting";/);
+  assert.match(wrapper, /async \(tx\) => \{\s*phase = "running";/);
+  // "committing" is set after the callback's last statement and before its return.
+  assert.match(wrapper, /phase = "committing";\s*return result;\s*\}/);
+  assert.match(wrapper, /switch \(autoTransactionFailure\(phase, error\)\)/);
+  assert.match(wrapper, /case "outcome_unknown":\s*throw new BoardImportError\("outcome_unknown"/);
+  assert.match(wrapper, /case "deadline_exceeded":\s*throw new AmuxDbBoundaryError\("AMUX_DB_DEADLINE_EXCEEDED"/);
+  // Only an outcome_unknown refusal is recorded as a lost outcome, on both paths.
+  for (const entry of ["export async function consumeAutoPromotion", "export async function runAutoPromotionTick"]) {
+    const body = service.slice(service.indexOf(entry));
+    const record = body.indexOf("recordAutoOutcomeUnknownSafely(");
+    assert.ok(record > 0, entry);
+    assert.match(body.slice(0, record), /error\.code === "outcome_unknown"/, entry);
+  }
+  // The owner route answers a rolled-back deadline as retryable, not as a lost outcome.
+  const route = withoutComments(read("app/api/admin/amux/board-auto-promotion/route.ts"));
+  assert.match(
+    route,
+    /error instanceof AmuxDbBoundaryError && error\.code === "AMUX_DB_DEADLINE_EXCEEDED"[\s\S]*?"database_deadline_exceeded"[\s\S]*?status: 503/,
+  );
 });
