@@ -357,9 +357,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * version 18). Not a marketing model, not a webhook input, and no descriptor,
  * webhook writer or admission decision changes. The digest moves because the
  * whole Prisma schema is deliberately watched.
+ *
+ * 2026-09-29: the release-notes send verdict (S9) -- the permission ledger's
+ * decision columns and `EmailDelivery`'s display-contract pin -- merged with
+ * develop. Not a marketing webhook input and no descriptor or admission
+ * decision changes; the value below is computed over the merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "ba39a04cf4d74e8da5f7ac776a89f5355bdc6d0ad7c525223e1a2d0a19270ee3";
+  "a148d94931b13fdcc425fcca5dc785edf78d173c0eeab6ca445412a83c8500ce";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

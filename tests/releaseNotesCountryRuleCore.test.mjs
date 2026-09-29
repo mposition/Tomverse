@@ -244,36 +244,58 @@ test("one express consent satisfying both sides is recorded as shared", () => {
   assert.equal(verdict.sharedBasis, "express_consent");
   assert.deepEqual(verdict.ruleVersions, [{ ruleKey: "release_notes.KR", ruleVersion: 1 }]);
 
-  // US with consent: allowed, but the recipient side rested on opt_out, so
-  // nothing was shared.
+  // US with consent is shared too, and this is the case that was got wrong.
+  // Section 4.2 asks whether one basis *satisfies* both authorities, not whether
+  // both rested on the same word. CAN-SPAM needs no consent, so an express
+  // consent satisfies it as surely as it satisfies the Australian sender
+  // authority -- and a US recipient who went through double opt-in is exactly
+  // the person 4.2's "for example, an express consent" describes.
+  //
+  // `recipientAuthority()` still records `opt_out` on that authority, because
+  // that is what the rule needed. The two fields answer different questions.
   const us = releaseNotesAuthorityVerdict({ countries: ["US"], rules: [ruleFor("US")], consent });
   assert.equal(us.legalAllowed, true);
-  assert.equal(us.sharedBasis, null);
+  assert.equal(us.sharedBasis, "express_consent");
+  assert.equal(
+    us.authorities.find((entry) => entry.country === "US")?.basis,
+    "opt_out"
+  );
 });
 
-test("a basis is shared only when every recipient authority rested on it", () => {
-  // US is opt_out and KR is express_consent, so with a consent both allow and
-  // the send is legal -- but no single basis carried both sides. Reading it as
-  // "some candidate shared it" put that claim in the audit record.
+test("no consent means no shared basis, whatever the rules allow", () => {
+  // The other half of section 4.2. Without an express consent the Australian
+  // sender authority does not rest on one, so nothing carried both sides even
+  // where every recipient rule allowed on its own terms.
+  const noConsent = { express: false, evidenceIds: [] };
+  const us = releaseNotesAuthorityVerdict({
+    countries: ["US"],
+    rules: [ruleFor("US")],
+    consent: noConsent,
+  });
+  assert.equal(us.sharedBasis, null);
+
+  // And with a consent, a mixed pair is shared: one consent satisfies the
+  // opt-out country, the express-consent country and the sender.
   const mixed = releaseNotesAuthorityVerdict({
     countries: ["US", "KR"],
     rules: [ruleFor("US"), ruleFor("KR")],
     consent,
   });
   assert.equal(mixed.legalAllowed, true);
-  assert.equal(mixed.sharedBasis, null);
+  assert.equal(mixed.sharedBasis, "express_consent");
   assert.deepEqual(mixed.ruleVersions, [
     { ruleKey: "release_notes.KR", ruleVersion: 1 },
     { ruleKey: "release_notes.US", ruleVersion: 1 },
   ]);
 
-  // Two express-consent countries: one consent did satisfy every authority.
-  const both = releaseNotesAuthorityVerdict({
-    countries: ["KR", "DE"],
-    rules: [ruleFor("KR"), ruleFor("DE")],
+  // A refused send shares nothing, because nothing carried both sides.
+  const refused = releaseNotesAuthorityVerdict({
+    countries: ["KR", "JP"],
+    rules: [ruleFor("KR")],
     consent,
   });
-  assert.equal(both.sharedBasis, "express_consent");
+  assert.equal(refused.legalAllowed, false);
+  assert.equal(refused.sharedBasis, null);
 });
 
 test("every candidate country must pass, not just one", () => {

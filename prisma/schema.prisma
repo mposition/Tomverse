@@ -5325,6 +5325,57 @@ model EmailDelivery {
   /// credential_sync | standard
   lane String @default("standard")
 
+  /// How many times this message has been re-enqueued because the display
+  /// contract moved under it, and the row it replaces.
+  ///
+  /// A message is rendered at enqueue and authorised again at send, so the
+  /// display obligations can change while it waits (C16). The answer is to skip
+  /// it and enqueue a replacement rendered under the current contract, which the
+  /// old `(eventId, recipientKey)` unique forbade -- a replacement is a second
+  /// message for the same recipient. The generation joins that key.
+  ///
+  /// A root is generation 0 and supersedes nothing; a replacement is a later
+  /// generation and supersedes exactly one row. Both directions are one CHECK,
+  /// because either half alone permits a state nobody can read: a generation-2
+  /// row with no predecessor is a replacement for a message nobody can find.
+  generation Int @default(0)
+
+  /// The display contract this message was rendered to, as a sha256 hex digest.
+  ///
+  /// Recomputed at send and compared: a difference is C16, and the message is
+  /// skipped and re-enqueued under the current contract rather than sent with a
+  /// footer the law no longer accepts. Null on every row that predates this and on
+  /// the credential lane, which has no display obligations to compose; a null at
+  /// send is read as a contract that cannot be confirmed, which is the same
+  /// refusal as one that moved.
+  displayContractHash String?
+
+  /// The row this one replaces. Unique: one delivery has at most one
+  /// replacement, which is what stops a crash between the skip and the insert
+  /// producing two messages for one skip.
+  supersedesDeliveryId String?         @unique
+  supersedes           EmailDelivery?  @relation("EmailDeliveryGeneration", fields: [supersedesDeliveryId], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "EmailDelivery_supersedes_fkey")
+  supersededBy         EmailDelivery?  @relation("EmailDeliveryGeneration")
+
+  /// The first message of this chain, which is this row itself at generation 0.
+  ///
+  /// Stored rather than walked: the idempotency key section 7.6 fixes is
+  /// `rootDeliveryId:g<generation>:<hash prefix>`, and a key that needed a
+  /// recursive query would be a key the drain could fail to compute.
+  ///
+  /// The empty-string default is how "absent" reaches the database: Prisma cannot
+  /// express "filled by the database from this row's own id", and a writer
+  /// inserting a root cannot name an id that does not exist yet. The BEFORE
+  /// INSERT trigger replaces an empty value with the row's own id, and a CHECK
+  /// holds a generation-0 row to being its own root.
+  rootDeliveryId String         @default("")
+  /// `map:` on both, because the migrations name these constraints for what they
+  /// are rather than for their columns, and a Prisma default name for the same
+  /// foreign key is schema drift -- which is what the DB integration lane
+  /// compares, and what two open pull requests failed on.
+  root           EmailDelivery  @relation("EmailDeliveryRoot", fields: [rootDeliveryId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "EmailDelivery_root_fkey")
+  generations    EmailDelivery[] @relation("EmailDeliveryRoot")
+
   /// The address at send time. Kept even after the account changes address.
   emailAddress String
   language     String
@@ -5438,7 +5489,8 @@ model EmailDelivery {
 
   permissionDecisions EmailPermissionDecision[]
 
-  @@unique([eventId, recipientKey])
+  @@unique([eventId, recipientKey, generation])
+  @@index([rootDeliveryId])
   /// A message id identifies a delivery within an account. Plain rather than
   /// partial: Postgres does not compare nulls, so a delivery that never reached
   /// the provider -- no account, no message id -- conflicts with nothing, which

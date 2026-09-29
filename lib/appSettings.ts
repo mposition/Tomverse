@@ -57,6 +57,7 @@ import {
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
   emailFeatureEnabledFromValue,
 } from "@/lib/emailFeatureFlags";
 import {
@@ -636,6 +637,22 @@ export async function isEmailMarketingEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
     where: { key: EMAIL_MARKETING_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+/**
+ * Release notes, the last switch in the activation order.
+ *
+ * Off for the same reasons as the others when the database cannot be read: a
+ * harness with no database must not be able to send, and off is the answer that
+ * fails safely.
+ */
+export async function isEmailReleaseNotesEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_RELEASE_NOTES_FLAG_KEY },
     select: { value: true },
   });
   return emailFeatureEnabledFromValue(row?.value);

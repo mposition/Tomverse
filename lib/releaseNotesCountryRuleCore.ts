@@ -420,10 +420,26 @@ export const releaseNotesAuthorityVerdict = (input: {
   const authorities = [...recipient, sender];
   const legalAllowed = authorities.every((entry) => entry.verdict === "allow");
 
+  // Whether one basis *could* have carried both sides, not whether the recorded
+  // bases happen to read the same.
+  //
+  // Section 4.2 asks for the fact that a single basis satisfied the recipient
+  // authority and the Australian sender authority together. Comparing the
+  // recorded strings answers a different question, because
+  // `recipientAuthority()` records what the rule needed: an `opt_out` country
+  // rests on `opt_out` even for somebody who gave express consent, since no
+  // consent was required of them. Reading that as "no shared basis" said there
+  // was none in exactly the case where there plainly was one -- a US recipient
+  // who went through double opt-in.
+  //
+  // With an express consent in hand, every recipient rule that allowed would
+  // also have allowed on it: `opt_out` allows unconditionally, and both consent
+  // bases allow on express consent. A rule that would not -- closed, or absent
+  // -- denies, and `legalAllowed` is false. So the implication needs no
+  // per-country restatement, and the recorded basis on each authority still
+  // says what that authority actually rested on.
   const sharedBasis =
-    legalAllowed &&
-    sender.basis === "express_consent" &&
-    recipient.every((entry) => entry.basis === "express_consent")
+    legalAllowed && sender.basis === "express_consent" && input.consent.express
       ? "express_consent"
       : null;
 
