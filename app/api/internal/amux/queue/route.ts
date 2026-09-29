@@ -11,7 +11,10 @@ import {
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
 import { AmuxQueueCapacityError, listDispatchable } from "@/lib/amux/store";
-import { amuxQueueResponseSchema } from "@/lib/amux/wireContract";
+import {
+  amuxQueueResponseSchema,
+  keepCanonicalAmuxQueueRows,
+} from "@/lib/amux/wireContract";
 import { z } from "zod";
 
 const requestSchema = z.object({}).strict();
@@ -25,7 +28,9 @@ export async function POST(request: Request) {
     try {
       await readLimitedJson(request, 1_024, requestSchema);
       return amuxBoundedJsonNoStore(
-        await listDispatchable(),
+        keepCanonicalAmuxQueueRows("selection", await listDispatchable(), (row) => [
+          row.id,
+        ]),
         200,
         amuxQueueResponseSchema,
       );

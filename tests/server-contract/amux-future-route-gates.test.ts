@@ -79,7 +79,13 @@ mock.module(moduleUrl("lib/amux/store.ts"), {
   },
 });
 mock.module(moduleUrl("lib/amux/wireContract.ts"), {
-  namedExports: { amuxOwnedQueueResponseSchema: {} },
+  namedExports: {
+    amuxOwnedQueueResponseSchema: {},
+    keepCanonicalAmuxQueueRows: () => {
+      serviceCalls += 1;
+      throw new Error("execution-off request filtered future rows");
+    },
+  },
 });
 
 const routesPromise = Promise.all(

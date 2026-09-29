@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  AMUX_MACHINE_ID_PATTERN,
   AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema,
 } from "@/lib/amux/claimContract";
@@ -23,6 +24,42 @@ const unitSignal = z.number().min(0).max(1).nullable();
 // turn one unusual stored title into a failed queue for every worker.
 const legacyCardText = z.string().max(100_000);
 const legacyCardId = z.string().min(1).max(120);
+
+/**
+ * Drops the queue rows whose stored machine ids the wire schema would refuse,
+ * so one such row cannot turn the whole queue into a 500.
+ *
+ * main accepted any trimmed card id and worker name up to 120 characters; the
+ * canonical rule (`AMUX_MACHINE_ID_PATTERN`) refuses, for example, one that
+ * ends in `-`. The claim, routing-snapshot and execution-start routes refuse
+ * such an id in their request, so the card cannot be claimed or started
+ * through this app either way; answering the other rows keeps every other
+ * card and worker moving. What was dropped is reported as a count, never as
+ * the ids, and every remaining row still goes through the full schema.
+ */
+export const keepCanonicalAmuxQueueRows = <T>(
+  queue: "selection" | "owned",
+  rows: readonly T[],
+  machineIds: (row: T) => readonly string[],
+): T[] => {
+  const kept = rows.filter((row) =>
+    machineIds(row).every((id) => AMUX_MACHINE_ID_PATTERN.test(id)),
+  );
+  const rejected = rows.length - kept.length;
+  if (rejected > 0) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "queue_rows_rejected",
+        queue,
+        reason: "non_canonical_machine_id",
+        rejected_rows: rejected,
+        kept_rows: kept.length,
+      }),
+    );
+  }
+  return kept;
+};
 
 export const amuxQueueResponseSchema = z
   .array(

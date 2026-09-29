@@ -7,6 +7,7 @@ import {
   amuxOwnedQueueResponseSchema,
   amuxQueueResponseSchema,
   amuxRoutingResponseSchema,
+  keepCanonicalAmuxQueueRows,
 } from "@/lib/amux/wireContract";
 
 // The queue bodies across the compatibility window, shared with the Rust
@@ -146,6 +147,45 @@ test("owned queue keeps main's required fields during the compatibility window",
     amuxOwnedQueueResponseSchema.safeParse(Array(513).fill(ownedRow)).success,
     false,
   );
+});
+
+test("a row with a non-canonical stored id is dropped and counted, not a failed queue", (t) => {
+  const warnings: string[] = [];
+  t.mock.method(console, "warn", (line: string) => warnings.push(line));
+
+  const rows = [
+    queueRow,
+    { ...queueRow, id: "TASK-trailing-" },
+    { ...queueRow, id: "TASK with space" },
+  ];
+  const kept = keepCanonicalAmuxQueueRows("selection", rows, (row) => [row.id]);
+  assert.deepEqual(kept, [queueRow]);
+  assert.equal(amuxQueueResponseSchema.safeParse(kept).success, true);
+  // The unfiltered body is what used to reach the schema and fail it.
+  assert.equal(amuxQueueResponseSchema.safeParse(rows).success, false);
+  assert.equal(warnings.length, 1);
+  assert.deepEqual(JSON.parse(warnings[0]), {
+    subsystem: "amux",
+    event: "queue_rows_rejected",
+    queue: "selection",
+    reason: "non_canonical_machine_id",
+    rejected_rows: 2,
+    kept_rows: 1,
+  });
+  assert.doesNotMatch(warnings[0], /TASK-trailing-|TASK with space/);
+
+  const owned = keepCanonicalAmuxQueueRows(
+    "owned",
+    [ownedRow, { ...ownedRow, owner: "worker-" }],
+    (row) => [row.id, row.owner],
+  );
+  assert.deepEqual(owned, [ownedRow]);
+  assert.equal(JSON.parse(warnings[1]).queue, "owned");
+  assert.equal(JSON.parse(warnings[1]).rejected_rows, 1);
+
+  // A clean queue logs nothing.
+  keepCanonicalAmuxQueueRows("selection", [queueRow], (row) => [row.id]);
+  assert.equal(warnings.length, 2);
 });
 
 test("the Rust client accepts the compatibility queue fields and never requires them", () => {
