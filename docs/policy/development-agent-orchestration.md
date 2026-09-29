@@ -1,6 +1,6 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -14,6 +14,7 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 11
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 12
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 13
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 14
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 15
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -31,6 +32,7 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 14
 | 12 | 2026-09-28 mposition | Authority 절: 개별 Agent 정책이 승인한 앱 내부 adapter를 두 번째 앱 경계로 인정한다. 허용 동작은 worker 등록·heartbeat, claim, execution start·heartbeat·settle(결과는 `review`·`todo`·`blocked`뿐), delivery pull·ack, review 대상 PR 번호, settle 시점 비용 원장뿐이다. recover, 승격, 승인, 카드 수정, `done`은 열지 않는다. 승인된 adapter는 `engineering` 하나다. adapter 코드 래치는 끈 채로 둔다. |
 | 13 | 2026-09-28 mposition | 개발용 WSL runner를 명시적 예외로 둔다. Agent별 Railway 실행 원칙은 그대로다. 코드 래치는 끈 채로 둔다. 연결 계약은 `docs/ops/amux/wsl-execution-bridge.md`다. worker 실행과 환경 변수는 켜지 않는다. |
 | 14 | 2026-09-28 mposition | 개발용 WSL runner의 코드 래치를 켠다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 `bridge_tick`에 들어간다. 이 버전은 그 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 자격증명 격리의 실측을 이 승인이 대신하지 않는다. |
+| 15 | 2026-09-29 mposition | WSL 실행 루프 연결. 로컬 AMUX가 만든 카드를 실행 영수증으로 허용하고 그 종료 상태를 `review`·`blocked` 정산 신호로 쓴다. claim 전용 모드(`TOMVERSE_AMUX_CLAIM`), 승격 카드의 사람 Review 강제, settle의 review PR 번호, backlog 카드 메타데이터 writer(`TOMVERSE_AMUX_BACKLOG_METADATA`), 자동 승격 grant의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개. 새 환경 변수를 설정하지 않고 병합·배포·활성화를 포함하지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -727,3 +729,48 @@ Tomverse의 카드, 추천, 승격, 승인, 실행 원장, 감사는 정본이�
 버전 13의 예외와 경계는 유지한다. 이 버전은 `WSL_BRIDGE_CODE_LATCH`를 true로 바꾼다. runner는 그 래치와 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`의 값이 정확히 `1`인 것이 함께 있을 때만 `bridge_tick`에 들어간다. 로컬 AMUX 주소는 loopback만 허용한다. 세션이 이미 실행 중이 아니면 프로세스를 만들지 않는다.
 
 이 버전은 `TOMVERSE_AMUX_WSL_BRIDGE`와 `TOMVERSE_AMUX_WSL_LOCAL_URL`을 설정하지 않는다. `TOMVERSE_AMUX_EXECUTE`를 켜지 않는다. worker 프로세스를 시작하지 않는다. 환경변수를 비운 것을 자격증명 격리의 실측으로 세지 않는다. 연결 계약은 `docs/ops/amux/wsl-execution-bridge.md`다.
+
+## 버전 15 — WSL 실행 루프 연결
+
+승인자 mposition, 승인일 2026-09-29. 버전 13의 예외와 경계, 버전 14의 래치는 유지한다. 이 버전은 owner 없는 Todo가 runner에 닿는 경로와, runner가 결과를 Tomverse에 돌려주는 경로를 연다. 새 환경 변수를 설정하지 않는다. 병합, 배포, 환경 변수의 활성화는 운영자가 따로 한다.
+
+### 로컬 카드는 실행 영수증이다
+
+버전 13의 "로컬 보드에 같은 작업의 카드를 만들지 않는다"를 이 절로 대체한다. 로컬 AMUX는 실질적인 작업 메시지에 대해 `no_board`를 거절하고 로컬 카드를 만든 뒤 메시지를 worker에게 전달한다(AMUX-3071). 그 카드를 그 attempt의 로컬 실행 기록으로 허용한다. 정본은 여전히 Tomverse다. 로컬 카드의 상태는 Tomverse 카드의 상태가 아니다.
+
+- Bridge는 `/api/board`에 쓰지 않는다. 읽기는 `GET /api/board`와 `GET /api/board/{id}`뿐이다.
+- 전송 응답의 `no_board_refused`는 거절이 아니라 "전달됨, 로컬 카드 발급"이다. 그 attempt는 진행 중이다.
+
+### 연결과 완료 신호
+
+- 연결: 같은 worker 세션의 카드 가운데, 생성 시각이 전송 시각 이후이고 카드에 연결된 메시지 원문에 `Execution attempt: <attempt id>` 줄이 있는 카드 하나다. 후보가 둘 이상이면 연결하지 않고 `blocked`(`local_card_ambiguous`)로 정산한다. 30분 안에 연결하지 못하면 `blocked`(`local_card_unlinked`)로 정산한다.
+- 완료: 연결된 카드의 status가 `done` 또는 `verified`이면 `succeeded` → `review`다. `discarded`, `cancelled`, `quarantined`이면 `blocked` → `blocked`다. 그 밖의 status는 진행 중이다. 로컬 카드 신호로 `failed` → `todo`를 만들지 않는다. 다시 배정하는 것은 사람 Review의 retry다.
+- 로컬 카드의 제목, 설명, `last_result`, evidence는 신뢰하지 않는 입력이다. Tomverse로 복사하지 않는다. 예외는 `https://github.com/mposition/Tomverse/pull/<n>` 형식의 첫 PR 번호 하나다. 서버는 그 번호를 GitHub 읽기로 검증한다.
+- runtime lease를 잃은 세션은 다시 등록하지 않고 halt한다. 등록은 열린 attempt를 보지 않고 generation을 올리기 때문이다.
+
+### settle의 review PR 번호
+
+`execution/settle`은 `succeeded` → `review`에서만 선택적 `review_pr_number`(1 이상 2147483647 이하 정수)를 받는다. 서버는 그 번호를 카드의 `reviewPrNumber`에 같은 트랜잭션으로 기록한다. 다른 결과에 번호가 있으면 거절한다.
+
+### 사람 Review 강제
+
+승인된 execution brief digest가 있는 카드, 또는 `requiresHumanReview`가 true인 카드는 `done` 요청을 `review`로 바꾸고, `review`에서 사람 escalation을 연다. `review`에서 `done`으로 가는 경로는 사람 Review route뿐이다(`TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED`).
+
+### claim 전용 모드
+
+코드 래치 `CLAIM_ONLY_CODE_LATCH`는 true로 출고하고, 환경 변수 `TOMVERSE_AMUX_CLAIM`이 정확히 `1`일 때만 연다. 이 모드는 claim만 하고 RuntimeService와 명령 실행기를 시작하지 않는다. claim은 서버가 execution_ready로 판정한 runtime에만 간다. `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_CLAIM`이 함께 설정되면 orchestrator는 시작하지 않는다.
+
+### backlog 카드 메타데이터 writer
+
+owner와 최근 step-up이 backlog 카드 하나의 `kind`, `priority`, `estimatedCostMicrousd`만 고친다. 대상은 `backlog`, owner null, brief 없음, 보관되지 않은 카드다. revision + 1과 사람 감사를 같은 트랜잭션에 쓴다. status는 바꾸지 않는다. `estimatedCostMicrousd`는 0 이상 5,000,000 이하다. 코드 래치 true, 환경 변수 `TOMVERSE_AMUX_BACKLOG_METADATA`가 정확히 `enabled`일 때만 연다.
+
+### 자동 승격 개정
+
+버전 8의 졸업(사람 결정 20건, 14일), 비용 상한, 전역 3, worker당 1, grant 7일, 한 트랜잭션 한 카드는 그대로다. 바뀌는 것은 다음이다.
+
+- grant는 승격 항목(kind, priority, classification, execution brief와 그 digest)과 비용 cent를 grant 시점에 결속한다. 사람의 사전 승인은 그 항목에 대한 것이다.
+- 버전 8의 "시스템 actor는 없다"를 이 절로 바꾼다. 시스템 actor `amux-auto-promoter`가 내부 route로 소비할 수 있다. 호출자는 Railway AMUX Orchestrator이고 주기는 5분이다. 시스템 소비는 grant에 결속된 항목만 쓰고, 같은 트랜잭션 안에서 같은 필터로 만든 system snapshot을 쓴다. 사람 owner route의 소비도 남는다.
+- 소비 트랜잭션은 비용 장부 행을 함께 쓴다.
+- 만료된 grant는 소비 시도와 주기 호출에서 `expired`로 바꾸고 감사를 남긴다.
+- 자동 경로의 결과 불명은 기록하고, 버전 8의 halt 조건에 따라 halt 행을 연다. owner와 최근 step-up의 재개 writer를 둔다.
+- Admin 화면은 `/admin/amux-board-auto-promotion`이다.

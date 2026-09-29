@@ -124,6 +124,11 @@ const USE_CASE_CANDIDATES: Record<
   ],
   value: [
     "gpt-5-6-luna",
+    // The guest trio's Gemini slot moved to gemini-flash-lite-latest on
+    // 2026-09-28 (lib/appDefaults.ts). A new guest comparison selects it, so
+    // it must be a candidate here or the picker cannot show a selected model.
+    // gemini-2-5-flash stays behind it as the fallback.
+    "gemini-flash-lite-latest",
     "gemini-2-5-flash",
     "deepseek-v4-flash",
     "mistral-small-4",
