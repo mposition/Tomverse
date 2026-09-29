@@ -16,6 +16,7 @@ import { readConsentKeyring } from "@/lib/emailConsentToken";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
+import { ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { CONSENT_CONFIRMATION_TTL_MS } from "@/lib/emailConsentToken";
 import {
   noticeStateForUser,
@@ -123,8 +124,11 @@ export async function recordConsentNoticeAction(input: {
   const offer = await noticeStateForUser({ userId: input.userId });
   const alreadyShown = !offer.offered && offer.refusal === "already_shown";
   // The render is one fact per account: another tab, or a response that was
-  // lost, may have recorded it already, and that is the render recorded.
-  if (input.action === "shown" && alreadyShown) return { recorded: true };
+  // lost, may have recorded it already, and that is the render recorded. An
+  // objection another tab recorded wrote the render with it.
+  if (input.action === "shown" && !offer.offered && (alreadyShown || offer.refusal === "objected")) {
+    return { recorded: true };
+  }
   const answerAfterRender = input.action !== "shown" && alreadyShown;
   if (!offer.offered && !answerAfterRender) return { recorded: false, reason: "not_offered" };
 
@@ -226,6 +230,11 @@ export async function recordConsentNoticeAction(input: {
     return !pending;
   });
 
+  // Seeded here, before the transaction: inside it, seeding would wait on the
+  // row the first purpose locked (see `preferencesSeeded`).
+  await ensureDefaultPreferences(input.userId);
+
+  const requested: string[] = [];
   // One commit for all of them: a partial "Yes" would leave some mail queued
   // under a screen that says nothing was saved, and the retry that screen
   // invites would then replace those links.
@@ -245,8 +254,13 @@ export async function recordConsentNoticeAction(input: {
           ip: input.ip ?? null,
           userAgent: input.userAgent ?? null,
           client: tx,
+          preferencesSeeded: true,
+          // Decided again under the row lock: a concurrent "Yes" may have
+          // requested it since the read above.
+          skipIfPending: true,
         });
-        if (!result.requested) throw CONFIRMATION_UNAVAILABLE;
+        if (result.requested) requested.push(purpose);
+        else if (result.reason !== "pending") throw CONFIRMATION_UNAVAILABLE;
       }
     });
   } catch (error) {
@@ -257,5 +271,5 @@ export async function recordConsentNoticeAction(input: {
     }
     throw error;
   }
-  return { recorded: true, requested: toRequest };
+  return { recorded: true, requested };
 }

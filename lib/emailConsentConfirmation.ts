@@ -11,6 +11,7 @@ import {
   readConsentKeyring,
   readConsentToken,
   type ConsentTokenResult,
+  CONSENT_CONFIRMATION_TTL_MS,
 } from "@/lib/emailConsentToken";
 import { jurisdictionForUser, recordEstimatedCountry } from "@/lib/emailJurisdiction";
 import {
@@ -88,6 +89,7 @@ export type ConsentConfirmationRequestResult =
         | "not_consent_purpose"
         | "no_address"
         | "already_confirmed"
+        | "pending"
         | "disabled"
         | "keys_missing";
     };
@@ -138,6 +140,20 @@ export async function requestConsentConfirmation(input: {
    * the caller's transaction does not commit half of it.
    */
   client?: Prisma.TransactionClient;
+  /**
+   * The caller seeded the account's preference rows before opening
+   * `client`'s transaction. Required when one transaction requests several
+   * purposes: seeding on the global client (an INSERT ... ON CONFLICT on the
+   * same rows) would wait on the row the first request locked and updated,
+   * and the transaction waits on it -- until the interactive timeout.
+   */
+  preferencesSeeded?: boolean;
+  /**
+   * Leave a purpose alone that is already waiting on a live link, decided under
+   * the row lock: a new request would replace its id and kill the link in the
+   * inbox. Answered as `{ requested: false, reason: "pending" }`, not thrown.
+   */
+  skipIfPending?: boolean;
 }): Promise<ConsentConfirmationRequestResult> {
   if (!isEmailPurpose(input.purpose) || !CONSENT_REQUIRED_PURPOSES.has(input.purpose)) {
     return { requested: false, reason: "not_consent_purpose" };
@@ -164,7 +180,7 @@ export async function requestConsentConfirmation(input: {
   });
   if (!user?.email) return { requested: false, reason: "no_address" };
 
-  await ensureDefaultPreferences(input.userId);
+  if (!input.preferencesSeeded) await ensureDefaultPreferences(input.userId);
   const now = input.now ?? new Date();
   const policyVersionId = await ensureBootstrapPolicyVersion();
   const requestId = randomUUID();
@@ -193,6 +209,7 @@ export async function requestConsentConfirmation(input: {
   });
 
   const countrySource = input.countrySource ?? "self_declared";
+  let skippedPending = false;
   const write = async (tx: Prisma.TransactionClient) => {
       // Same lock order as setPreference(): user, then preference. The address
       // the mail goes to is the one read under the lock.
@@ -203,9 +220,25 @@ export async function requestConsentConfirmation(input: {
       await lockEmailPreferenceRow(tx, input.userId, purpose);
       const existing = await tx.emailPreference.findUnique({
         where: { userId_purpose: { userId: input.userId, purpose } },
-        select: { enabled: true, confirmedAt: true },
+        select: {
+          enabled: true,
+          confirmedAt: true,
+          confirmationRequestId: true,
+          confirmationRequestedAt: true,
+        },
       });
       if (existing?.enabled && existing.confirmedAt) throw ALREADY_CONFIRMED;
+      if (
+        input.skipIfPending &&
+        existing &&
+        !existing.enabled &&
+        existing.confirmationRequestId !== null &&
+        existing.confirmationRequestedAt !== null &&
+        now.getTime() - existing.confirmationRequestedAt.getTime() < CONSENT_CONFIRMATION_TTL_MS
+      ) {
+        skippedPending = true;
+        return;
+      }
 
       if (countrySource === "self_declared") {
         await tx.userSettings.upsert({
@@ -277,6 +310,7 @@ export async function requestConsentConfirmation(input: {
 
   if (input.client) {
     await write(input.client);
+    if (skippedPending) return { requested: false, reason: "pending" };
     return { requested: true, purpose, requestedAt: now };
   }
 
@@ -289,6 +323,7 @@ export async function requestConsentConfirmation(input: {
     throw error;
   }
 
+  if (skippedPending) return { requested: false, reason: "pending" };
   return { requested: true, purpose, requestedAt: now };
 }
 
