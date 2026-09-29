@@ -17,7 +17,12 @@ import {
   boardImportAuditEntryHashMatches,
   boardImportAuditKeysPresent,
 } from "@/lib/amux/boardImportCore";
-import { AmuxDbBoundaryError } from "@/lib/amux/dbBoundary";
+import {
+  AmuxDbBoundaryError,
+  amuxRouteHasBudgetForMs,
+  anchorAmuxRouteDeadline,
+  fenceAmuxRouteDeadline,
+} from "@/lib/amux/dbBoundary";
 import {
   boardPromotionCardWrite,
   boardPromotionExecutionBriefDigest,
@@ -57,6 +62,12 @@ import {
   parseAutoGrantRequest,
   parseAutoResumeRequest,
   AUTO_TICK_GRANT_ATTEMPTS,
+  AUTO_TICK_SEQUENTIAL_TRANSACTIONS,
+  AUTO_TICK_STATEMENT_TIMEOUT_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  AUTO_TRANSACTION_COMMIT_RESERVE_MS,
   autoTickCardSpecificRefusal,
   autoTransactionFailure,
   type AutoTransactionPhase,
@@ -144,8 +155,47 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
 /** The operation name a deadline refusal from this module carries. */
 const AUTO_PROMOTION_DB_OPERATION = "auto_promotion";
 
+type AutoTransactionLimits = { maxWaitMs: number; timeoutMs: number; statementTimeoutMs: number };
+
+/** The owner's routes, as since version 8. They run outside any route budget. */
+const OWNER_TRANSACTION_LIMITS: AutoTransactionLimits = {
+  maxWaitMs: 5_000,
+  timeoutMs: 20_000,
+  statementTimeoutMs: Number(BOARD_IMPORT_STATEMENT_TIMEOUT),
+};
+
+/** The system actor runs only from the internal tick, inside its route budget. */
+const TICK_TRANSACTION_LIMITS: AutoTransactionLimits = {
+  maxWaitMs: AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  timeoutMs: AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  statementTimeoutMs: AUTO_TICK_STATEMENT_TIMEOUT_MS,
+};
+
+const limitsFor = (actor: AutoActor): AutoTransactionLimits =>
+  actor.kind === "system" ? TICK_TRANSACTION_LIMITS : OWNER_TRANSACTION_LIMITS;
+
+/** The application per-transaction maximum. Not a database bound. */
+const transactionMaxMs = (limits: AutoTransactionLimits): number =>
+  limits.maxWaitMs + limits.timeoutMs + AUTO_TRANSACTION_COMMIT_RESERVE_MS;
+
+/**
+ * Whether the tick's route budget still covers `transactions` more tick
+ * transactions: the next one and those it has to leave room for. Always true
+ * outside a route budget.
+ */
+const tickHasRoomFor = (transactions: number): boolean =>
+  amuxRouteHasBudgetForMs(transactions * AUTO_TICK_TRANSACTION_MAX_MS);
+
 /**
  * One auto-promotion transaction under the queue lock.
+ *
+ * Inside a route budget (the internal tick) a transaction whose
+ * per-transaction maximum no longer fits does not start, its first statement
+ * after the timeout anchors the route's database-clock deadline, and its last
+ * statement fences on it: one that reached the deadline rolls back instead of
+ * committing late (docs/policy/development-agent-orchestration.md, Phase A:
+ * a late run is not recorded as success). Only the COMMIT itself can still
+ * finish after the deadline.
  *
  * A failure is classified by where the transaction was
  * (`autoTransactionFailure`), not by its message: only a failure after the
@@ -156,25 +206,32 @@ const AUTO_PROMOTION_DB_OPERATION = "auto_promotion";
  */
 const withAutoTransaction = async <T>(
   targetId: string | null,
+  limits: AutoTransactionLimits,
   run: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
 ): Promise<T> => {
   if (!boardImportAuditKeysPresent(adminAuditIntegrityKeys(process.env).length)) {
     throw new BoardImportError("audit_key_missing", 503, targetId);
+  }
+  const maxMs = transactionMaxMs(limits);
+  if (!amuxRouteHasBudgetForMs(maxMs)) {
+    throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", AUTO_PROMOTION_DB_OPERATION);
   }
   let phase: AutoTransactionPhase = "starting";
   try {
     return await prisma.$transaction(
       async (tx) => {
         phase = "running";
-        await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)`;
+        const routeDeadlineAt = await anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))`;
         const result = await run(tx, await databaseNow(tx));
+        await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);
         // Nothing may run after this line inside the callback: from here on a
         // failure can only come from the COMMIT itself.
         phase = "committing";
         return result;
       },
-      { maxWait: 5_000, timeout: 20_000 },
+      { maxWait: limits.maxWaitMs, timeout: limits.timeoutMs },
     );
   } catch (error) {
     // Refusals are thrown by the callback, so the transaction rolled back.
@@ -617,7 +674,7 @@ export async function commitAutoGrant(
   requestDigest: string,
 ) {
   const itemBindingsDigest = boardPromotionItemBindingsDigest([grant.item]);
-  return withAutoTransaction(grant.grantId, async (tx, now) => {
+  return withAutoTransaction(grant.grantId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const existing = await tx.amuxRecommendationAutoGrant.findUnique({ where: { id: grant.grantId } });
     if (existing) {
       if (existing.workItemId !== grant.item.cardId || existing.requestDigest !== requestDigest) {
@@ -697,7 +754,7 @@ export async function commitAutoPromotion(
   const worker = autoWorkerAdmitted(body.workerId);
   if (!worker.ok) throw new BoardImportError(worker.code, 409, body.consumptionId);
   const actor = autoHumanActor(session, request);
-  const outcome = await withAutoTransaction(body.consumptionId, async (tx, now) => {
+  const outcome = await withAutoTransaction(body.consumptionId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const existing = await tx.amuxRecommendationAutoConsumption.findUnique({ where: { id: body.consumptionId } });
     if (existing) {
       if (
@@ -773,7 +830,7 @@ export async function commitSystemAutoPromotion(input: {
   | { promoted: true; consumptionId: string; grantId: string; snapshotId: string }
   | { promoted: false; reason: "no_grant" }
 > {
-  return withAutoTransaction(input.consumptionId, async (tx, now) => {
+  return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now) => {
     await requireAutoOpen(tx, input.consumptionId);
     const grant = await tx.amuxRecommendationAutoGrant.findFirst({
       where: {
@@ -836,7 +893,7 @@ const expireDueGrantsOneByOne = async (
 ): Promise<void> => {
   for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
     if (!hasRoom()) return;
-    const moved = await withAutoTransaction(null, async (tx, now) => {
+    const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now) => {
       const due = await tx.amuxRecommendationAutoGrant.findFirst({
         where: { status: "active", expiresAt: { lte: now } },
         orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
@@ -868,11 +925,19 @@ export type AutoTickResult = {
  * it first. Expiry is its own transaction and commits even when the consume
  * is refused. At most one card moves. A lost consume outcome is read back and
  * recorded, the halt rule is evaluated, and nothing is tried again.
+ *
+ * Inside the route budget no transaction starts unless the time left also
+ * covers what it must leave room for: an expiry leaves room for a consume and
+ * the record of its lost outcome, and a consume for that record. Grants still
+ * due when the budget runs short expire on the next tick; a consume that no
+ * longer fits ends the tick with `route_budget_exhausted` and moves nothing.
  */
 export async function runAutoPromotionTick(): Promise<AutoTickResult> {
   const expiry = { expired: 0 };
   try {
-    await expireDueGrantsOneByOne(AUTO_SYSTEM_ACTOR, expiry);
+    await expireDueGrantsOneByOne(AUTO_SYSTEM_ACTOR, expiry, () =>
+      tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS),
+    );
   } catch (error) {
     if (!(error instanceof BoardImportError)) throw error;
     // No consume was attempted, so this is not a lost consume outcome and is
@@ -891,6 +956,9 @@ export async function runAutoPromotionTick(): Promise<AutoTickResult> {
   const skipGrantIds: string[] = [];
   let lastReason: string | undefined;
   for (let attempt = 0; attempt < AUTO_TICK_GRANT_ATTEMPTS; attempt += 1) {
+    if (!tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS - 1)) {
+      return { promoted: false, reason: "route_budget_exhausted", expired };
+    }
     const consumptionId = randomUUID();
     const snapshotId = randomUUID();
     let pickedGrantId: string | null = null;
@@ -1139,7 +1207,7 @@ const writeAutoHaltLocked = async (
 };
 
 export async function commitAutoHaltFromReadback(input: { actor: AutoActor; haltId: string }) {
-  return withAutoTransaction(input.haltId, async (tx, now) => {
+  return withAutoTransaction(input.haltId, limitsFor(input.actor), async (tx, now) => {
     const decision = await readAutoHaltLocked(tx, now, null);
     return writeAutoHaltLocked(tx, now, input.actor, input.haltId, decision);
   });
@@ -1157,7 +1225,7 @@ export async function recordAutoOutcomeUnknown(input: {
   haltId?: string;
 }) {
   const haltId = input.haltId ?? randomUUID();
-  return withAutoTransaction(input.consumptionId, async (tx, now) => {
+  return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now) => {
     const mark = await readAutoOutcomeUnknownLocked(tx, input);
     const halt = await readAutoHaltLocked(
       tx,
@@ -1201,7 +1269,7 @@ export async function resumeAutoPromotion(input: { session: Session; request: Re
 }
 
 export async function commitAutoResume(session: Session, request: Request, haltId: string) {
-  return withAutoTransaction(haltId, async (tx, now) => {
+  return withAutoTransaction(haltId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const halt = await tx.amuxRecommendationAutoHalt.findUnique({
       where: { id: haltId },
       select: { id: true, clearedAt: true, violationCode: true },

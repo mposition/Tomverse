@@ -613,3 +613,36 @@ export const autoTransactionFailure = (phase: AutoTransactionPhase, error: unkno
   }
   return "rolled_back";
 };
+
+/**
+ * The internal tick's time layers (docs/policy/development-agent-orchestration.md,
+ * Phase A: timeout layering, and "a late run is not recorded as success").
+ *
+ * The Rust client waits `TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT` (30 s). The
+ * lifecycle routes keep three seconds of their client deadline for connect,
+ * COMMIT and response transport (15 s client, 12 s route); the tick keeps the
+ * same, so its route budget is 27 s. The route anchors that budget on the
+ * database clock in its first transaction and fences every later COMMIT on it.
+ *
+ * Each tick transaction declares an application per-transaction maximum:
+ * `maxWait` + the interactive transaction timeout + the same 200 ms commit
+ * reserve as `AMUX_DB_COMMIT_RESERVE_MS`. It is an application figure, not a
+ * database bound; PostgreSQL enforces only the statement timeout. A tick runs
+ * at most three such transactions back to back that it must be able to finish:
+ * an expiry, a consume, and the record of a lost consume, so three maxima fit
+ * inside the budget. A transaction is not started unless the time left covers
+ * it and everything it has to leave room for.
+ *
+ * These are code-contract values sized to the existing client deadline. They
+ * have not been measured against the production database; the owner's routes
+ * keep their own, longer limits.
+ */
+export const AUTO_TICK_ROUTE_BUDGET_MS = 27_000;
+export const AUTO_TICK_TRANSACTION_MAX_WAIT_MS = 1_000;
+export const AUTO_TICK_TRANSACTION_TIMEOUT_MS = 6_000;
+export const AUTO_TICK_STATEMENT_TIMEOUT_MS = 5_000;
+export const AUTO_TRANSACTION_COMMIT_RESERVE_MS = 200;
+export const AUTO_TICK_TRANSACTION_MAX_MS =
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS + AUTO_TICK_TRANSACTION_TIMEOUT_MS + AUTO_TRANSACTION_COMMIT_RESERVE_MS;
+/** Expiry, consume, and the record of a lost consume. */
+export const AUTO_TICK_SEQUENTIAL_TRANSACTIONS = 3;

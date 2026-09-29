@@ -176,11 +176,25 @@ pub const TOMVERSE_INTERNAL_CLAIM_TIMEOUT: Duration = Duration::from_secs(18);
 /// transport. Unknown outcomes stop; never blindly retry.
 pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The auto-promotion tick waits up to five seconds for a connection and runs
-/// one transaction of up to twenty (lib/amux/autoPromotionService.ts). Thirty
-/// seconds covers both plus transport; a timeout is an unknown outcome the
-/// server records on its side, and the scheduler does not retry it.
+/// The auto-promotion tick runs several short transactions -- the expiry of
+/// due grants, at most one consume, and the record of a lost consume -- inside
+/// a 27-second route budget anchored on the database clock
+/// (`AUTO_TICK_ROUTE_BUDGET_MS`, lib/amux/autoPromotionCore.ts). The server
+/// starts no transaction that could not finish inside that budget and fences
+/// each COMMIT on it, so no transaction commits after the deadline; only a
+/// COMMIT already under way can finish late. Thirty seconds adds the three
+/// seconds the lifecycle routes keep for connect, commit and transport.
+///
+/// A timeout here is an unknown outcome for this client only. The server does
+/// not learn of it and records nothing for it. The scheduler logs it and does
+/// not retry; the next tick reads the grants again, and a consume that did
+/// commit has its consumption row, so that grant is not consumed twice.
 pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The server's route budget for the tick, pinned against
+/// lib/amux/autoPromotionCore.ts by tests/amuxClaimContractParity.test.mjs.
+#[cfg(test)]
+const AUTO_PROMOTION_ROUTE_BUDGET: Duration = Duration::from_secs(27);
 
 const MAX_CLAIM_RESPONSE_BYTES: usize = 8 * 1024;
 
@@ -586,8 +600,14 @@ mod tests {
         // outcome. Connect stays shorter than every total deadline.
         assert!(TOMVERSE_INTERNAL_CLAIM_TIMEOUT > Duration::from_secs(15));
         assert!(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT > Duration::from_secs(12));
-        // Auto-promotion: 5 s connection wait plus a 20 s transaction.
-        assert!(TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT > Duration::from_secs(25));
+        // Auto-promotion: the tick's route budget, a connect, and at least a
+        // second for commit and response transport.
+        assert!(
+            TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT
+                >= AUTO_PROMOTION_ROUTE_BUDGET
+                    + TOMVERSE_INTERNAL_CONNECT_TIMEOUT
+                    + Duration::from_secs(1)
+        );
         assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_REQUEST_TIMEOUT);
         assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT);
     }

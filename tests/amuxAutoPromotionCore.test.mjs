@@ -18,6 +18,13 @@ import {
   AUTO_PROMOTION_POLICY_VERSION,
   AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION,
   AUTO_SYSTEM_ACTOR_ROW_ID,
+  AUTO_TICK_ROUTE_BUDGET_MS,
+  AUTO_TICK_SEQUENTIAL_TRANSACTIONS,
+  AUTO_TICK_STATEMENT_TIMEOUT_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  AUTO_TRANSACTION_COMMIT_RESERVE_MS,
   autoBoundItem,
   autoConsumeBindingAccepted,
   autoConsumeRequestIsBound,
@@ -653,4 +660,74 @@ test("the tick holds the audit chain lock only for the appends that end each sho
   assert.ok(readback.indexOf("readAutoHaltLocked(") < readback.indexOf("writeAutoHaltLocked("));
   // The pending lost outcome counts in the halt decision as it will once written.
   assert.match(record, /mark\.kind === "record" \? \{ id: input\.consumptionId, recordedAt: now \} : null/);
+});
+
+test("the tick's three transactions fit its route budget, and each statement fits its transaction", () => {
+  assert.equal(
+    AUTO_TICK_TRANSACTION_MAX_MS,
+    AUTO_TICK_TRANSACTION_MAX_WAIT_MS + AUTO_TICK_TRANSACTION_TIMEOUT_MS + AUTO_TRANSACTION_COMMIT_RESERVE_MS,
+  );
+  assert.equal(AUTO_TICK_SEQUENTIAL_TRANSACTIONS, 3);
+  assert.ok(AUTO_TICK_SEQUENTIAL_TRANSACTIONS * AUTO_TICK_TRANSACTION_MAX_MS <= AUTO_TICK_ROUTE_BUDGET_MS);
+  assert.ok(AUTO_TICK_STATEMENT_TIMEOUT_MS < AUTO_TICK_TRANSACTION_TIMEOUT_MS);
+  // The same commit reserve as the bounded AMUX transactions.
+  const boundary = read("lib/amux/dbBoundary.ts");
+  assert.match(
+    boundary,
+    new RegExp(`export const AMUX_DB_COMMIT_RESERVE_MS = ${AUTO_TRANSACTION_COMMIT_RESERVE_MS};`),
+  );
+});
+
+test("the tick route runs inside its route budget, and every tick transaction is admitted, anchored and fenced", () => {
+  const route = withoutComments(read("app/api/internal/amux/auto-promotion/tick/route.ts"));
+  assert.match(route, /return withAmuxRouteBudget\(async \(\) => \{/);
+  assert.match(route, /\}, AUTO_TICK_ROUTE_BUDGET_MS\);/);
+  assert.ok(route.indexOf("isAmuxSyncAuthorized(request)") < route.indexOf("withAmuxRouteBudget("));
+  // Failures answer in the shape of the other AMUX internal routes.
+  assert.match(route, /isAmuxInputError\(error\)/);
+  assert.equal((route.match(/amuxInternalErrorResponse\(OPERATION, error\)/g) ?? []).length, 2);
+  assert.equal(route.includes("auto_promotion_failed"), false);
+
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  const wrapper = service.slice(
+    service.indexOf("const withAutoTransaction = async"),
+    service.indexOf("const requireBoundAudit = async"),
+  );
+  const order = [
+    "if (!amuxRouteHasBudgetForMs(maxMs))",
+    "prisma.$transaction(",
+    "set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)",
+    "anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION)",
+    "pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))",
+    "const result = await run(tx, await databaseNow(tx));",
+    "await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);",
+    'phase = "committing";',
+  ].map((needle) => {
+    const index = wrapper.indexOf(needle);
+    assert.ok(index >= 0, needle);
+    return index;
+  });
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "admission, anchor, lock, work, fence, commit");
+  assert.match(wrapper, /\{ maxWait: limits\.maxWaitMs, timeout: limits\.timeoutMs \}/);
+
+  // The system actor, which only the tick uses, gets the tick's limits.
+  assert.match(service, /actor\.kind === "system" \? TICK_TRANSACTION_LIMITS : OWNER_TRANSACTION_LIMITS/);
+  const system = service.slice(service.indexOf("export async function commitSystemAutoPromotion"));
+  assert.match(system, /withAutoTransaction\(input\.consumptionId, TICK_TRANSACTION_LIMITS,/);
+
+  // No tick transaction starts without room for what it must leave room for.
+  const tick = service.slice(
+    service.indexOf("export async function runAutoPromotionTick"),
+    service.indexOf("export async function tickAutoPromotion"),
+  );
+  assert.match(tick, /expireDueGrantsOneByOne\(AUTO_SYSTEM_ACTOR, expiry, \(\) =>\s*tickHasRoomFor\(AUTO_TICK_SEQUENTIAL_TRANSACTIONS\),?\s*\)/);
+  const room = tick.indexOf("if (!tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS - 1))");
+  assert.ok(room > 0 && room < tick.indexOf("commitSystemAutoPromotion("));
+  assert.match(tick, /reason: "route_budget_exhausted"/);
+  const expiry = service.slice(
+    service.indexOf("const expireDueGrantsOneByOne = async"),
+    service.indexOf("export async function expireDueAutoGrants"),
+  );
+  assert.ok(expiry.indexOf("if (!hasRoom()) return;") < expiry.indexOf("withAutoTransaction("));
+  assert.equal(autoTickHttpStatus("route_budget_exhausted"), 200);
 });

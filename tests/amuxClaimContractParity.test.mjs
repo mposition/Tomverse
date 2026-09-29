@@ -448,3 +448,42 @@ test("unknown future-lifecycle outcomes stop the whole runtime run", () => {
   );
   assert.match(boardSource, /AMUX_EXECUTION_START_OUTCOME_UNKNOWN/);
 });
+
+test("the auto-promotion client deadline outlives the tick's DB-clock route budget", async () => {
+  const { AUTO_TICK_ROUTE_BUDGET_MS } = await import("../lib/amux/autoPromotionCore.ts");
+  const seconds = (name) =>
+    Number(
+      rustSource.match(
+        new RegExp(`${name}: Duration = Duration::from_secs\\((\\d+)\\)`),
+      )?.[1],
+    ) * 1_000;
+  const connectMs = seconds("TOMVERSE_INTERNAL_CONNECT_TIMEOUT");
+  const clientMs = seconds("TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT");
+  assert.ok(Number.isFinite(clientMs) && Number.isFinite(connectMs));
+  // The Rust test pins its own copy of the budget; it must be this one.
+  assert.equal(seconds("AUTO_PROMOTION_ROUTE_BUDGET"), AUTO_TICK_ROUTE_BUDGET_MS);
+  assert.ok(
+    clientMs >= AUTO_TICK_ROUTE_BUDGET_MS + connectMs + 1_000,
+    "the tick client must reserve a second beyond route and connect",
+  );
+  const start = rustSource.indexOf("pub async fn auto_promotion_tick(");
+  assert.ok(start >= 0);
+  const next = rustSource.indexOf("\n    pub async fn ", start + 1);
+  assert.match(
+    rustSource.slice(start, next),
+    /\.timeout\(TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT\)/,
+  );
+  // A client timeout is unknown only on the client side; the server does not
+  // record it, and the comment must not say it does.
+  const doc = rustSource.slice(
+    rustSource.lastIndexOf("///", rustSource.indexOf("pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT")) - 2_000,
+    rustSource.indexOf("pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT"),
+  );
+  assert.doesNotMatch(doc, /server records it on its side/);
+  assert.doesNotMatch(doc, /runs\s+one transaction/);
+  const route = readFileSync(
+    join(process.cwd(), "app", "api", "internal", "amux", "auto-promotion", "tick", "route.ts"),
+    "utf8",
+  );
+  assert.match(route, /\}, AUTO_TICK_ROUTE_BUDGET_MS\);/);
+});
