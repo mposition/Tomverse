@@ -887,7 +887,12 @@ export async function withdrawAllMarketing(input: {
     }
     const recorded = first as Parameters<ConsentRecordedHook>[1] | null;
     if (recorded || changed) {
-      const email = normalizeSuppressionAddress(user.email as string);
+      // The address as it is under the user row lock the purposes above took,
+      // so the notice goes where the suppression was written -- not the one
+      // read before the transaction, which may have changed since.
+      const locked = await lockUserEmail(tx, input.userId);
+      if (!locked) return results;
+      const email = normalizeSuppressionAddress(locked);
       await hook(
         tx,
         recorded ?? {
