@@ -34,6 +34,7 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 로그인이 끊기거나 수신거부하면 끝납니다. 정책이 허락하는 범위를 적는 문장이지,
 누가 받는지를 단정하는 문장이 아닙니다. 관련 콘텐츠 범위(docs/policy/email-product-news-redesign-draft.md §4.4)는 Tomverse
 서비스 자체의 소식이며, 별개 제품군의 교차판매는 제품 소식에 들어가지 않습니다.
+수신자별 기능 필터는 없으므로 그 범위는 사람이 캠페인을 승인할 때 내용으로 지킵니다.
 
 ## 2. `/privacy` — 이메일 조항 첫 두 문장의 대체안
 
