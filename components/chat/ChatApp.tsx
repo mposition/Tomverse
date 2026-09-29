@@ -44,6 +44,7 @@ import {
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
@@ -1162,13 +1163,18 @@ function ChatAppComponent({
             // message is appended exactly once -- `messages` is the pre-send
             // snapshot, and the id filter keeps a re-render or a resend from
             // duplicating it.
-            messages: [
-              ...messages.filter(
-                (message) =>
-                  isTranscriptMessage(message) && message.id !== userMessage.id
-              ),
-              userMessage,
-            ].map(toChatRequestMessage),
+            // The newest part that fits the request limits: a conversation
+            // has no length limit, and one sent whole could not be continued
+            // past them (lib/chatRequestLimits.ts).
+            messages: fitChatRequestTranscript(
+              [
+                ...messages.filter(
+                  (message) =>
+                    isTranscriptMessage(message) && message.id !== userMessage.id
+                ),
+                userMessage,
+              ].map(toChatRequestMessage)
+            ),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
