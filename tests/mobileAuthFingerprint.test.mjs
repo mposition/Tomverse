@@ -271,6 +271,22 @@ test("V12a every refusal path runs in a child process and writes nothing to eith
     const notBase64 = "PEPPER-SYNTHETIC-NOT-BASE64!!!!!!";
     const script = join(directory, "run.mjs");
     const outcomesPath = join(directory, "outcomes.json");
+    // Values go into generated source, so a JSON string is escaped further: a
+    // JSON literal may still carry characters that end a script or a line.
+    const unsafe = {
+      "<": "\\u003C",
+      ">": "\\u003E",
+      "\b": "\\b",
+      "\f": "\\f",
+      "\n": "\\n",
+      "\r": "\\r",
+      "\t": "\\t",
+      "\0": "\\0",
+      "\u2028": "\\u2028",
+      "\u2029": "\\u2029",
+    };
+    const literal = (value) =>
+      JSON.stringify(value).replace(/[<>\b\f\n\r\t\0\u2028\u2029]/g, (character) => unsafe[character]);
 
     writeFileSync(
       script,
@@ -280,10 +296,10 @@ test("V12a every refusal path runs in a child process and writes nothing to eith
         `  mobileFingerprintKeyFromBase64,`,
         `  mobileKeyringFingerprint,`,
         `  mobileKeyringFingerprintFromMaterials,`,
-        `} from ${JSON.stringify(coreUrl)};`,
-        `const key = Buffer.from(${JSON.stringify(key.toString("base64"))}, "base64");`,
-        `const signing = [${JSON.stringify(SIGN_1)}];`,
-        `const peppers = [${JSON.stringify(pepper)}];`,
+        `} from ${literal(coreUrl)};`,
+        `const key = Buffer.from(${literal(key.toString("base64"))}, "base64");`,
+        `const signing = [${literal(SIGN_1)}];`,
+        `const peppers = [${literal(pepper)}];`,
         `const outcomes = {};`,
         `const walk = (name, body) => {`,
         `  try { body(); outcomes[name] = "no throw"; }`,
@@ -294,12 +310,12 @@ test("V12a every refusal path runs in a child process and writes nothing to eith
         `walk("pepper not a string", () => mobileKeyringFingerprint({ key, signing, peppers: [Buffer.alloc(0)] }));`,
         `walk("material element signing", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: signing, pepperMaterials: [] }));`,
         `walk("material element pepper", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: [], pepperMaterials: peppers }));`,
-        `walk("materials not an array", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: ${JSON.stringify(SIGN_1)}, pepperMaterials: [] }));`,
-        `walk("key wrong length", () => mobileFingerprintKeyFromBase64(${JSON.stringify(shortKey.toString("base64"))}));`,
-        `walk("key not base64", () => mobileFingerprintKeyFromBase64(${JSON.stringify(notBase64)}));`,
-        `walk("key not bytes", () => mobileKeyringFingerprint({ key: ${JSON.stringify(key.toString("base64"))}, signing, peppers }));`,
-        `walk("raw key wrong length", () => mobileKeyringFingerprint({ key: Buffer.from(${JSON.stringify(shortKey.toString("base64"))}, "base64"), signing, peppers }));`,
-        `writeFileSync(${JSON.stringify(outcomesPath)}, JSON.stringify(outcomes));`,
+        `walk("materials not an array", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: ${literal(SIGN_1)}, pepperMaterials: [] }));`,
+        `walk("key wrong length", () => mobileFingerprintKeyFromBase64(${literal(shortKey.toString("base64"))}));`,
+        `walk("key not base64", () => mobileFingerprintKeyFromBase64(${literal(notBase64)}));`,
+        `walk("key not bytes", () => mobileKeyringFingerprint({ key: ${literal(key.toString("base64"))}, signing, peppers }));`,
+        `walk("raw key wrong length", () => mobileKeyringFingerprint({ key: Buffer.from(${literal(shortKey.toString("base64"))}, "base64"), signing, peppers }));`,
+        `writeFileSync(${literal(outcomesPath)}, JSON.stringify(outcomes));`,
       ].join("\n")
     );
 

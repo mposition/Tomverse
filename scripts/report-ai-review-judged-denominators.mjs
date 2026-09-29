@@ -278,10 +278,12 @@ const denominatorsOver = (subset) => ({
 const exact = cases.every((item) => judgedGoldItems.has(item.id));
 const span = (range) => (range.lower === range.upper ? `${range.lower}` : `${range.lower}–${range.upper}`);
 
+// Ranges spelled as escapes: a literal U+F900 normalises to U+8C48, which
+// once widened the CJK compatibility range across Hangul and surrogates.
 const width = (text) =>
     [...String(text)].reduce(
         (total, character) =>
-            total + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/.test(character) ? 2 : 1),
+            total + (/[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(character) ? 2 : 1),
         0
     );
 const cell = (text, size) => `${text}${" ".repeat(Math.max(1, size - width(text)))}`;

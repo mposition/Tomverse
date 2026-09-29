@@ -65,12 +65,22 @@ const FORBIDDEN_IDENTIFIERS = [
   "secretDigest",
 ];
 
-/** Comments explain why these names are absent; that is not a use of them. */
-const stripComments = (source) =>
-  source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+/**
+ * Comments explain why these names are absent; that is not a use of them.
+ * Repeated until nothing changes, so removing one comment cannot leave the
+ * pieces of another behind.
+ */
+const stripComments = (source) => {
+  let current = source;
+  for (;;) {
+    const next = current
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    if (next === current) return current;
+    current = next;
+  }
+};
 
 const walk = (directory) => {
   const found = [];

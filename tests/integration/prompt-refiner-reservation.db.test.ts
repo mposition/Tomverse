@@ -1128,7 +1128,7 @@ test("naive reservation timestamps remain UTC under non-UTC database sessions", 
                 assert.equal(late.releasedAt, null);
                 throw new Error(`rollback-${zone}`);
             }),
-            new RegExp(`rollback-${zone.replace(/[/.]/g, "\\$&")}`)
+            new RegExp(`rollback-${zone.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}`)
         );
         assert.equal(await prisma.promptRefinerReservation.count(), 0);
         const stage = await prisma.promptRefinerReservationStage.findUniqueOrThrow({

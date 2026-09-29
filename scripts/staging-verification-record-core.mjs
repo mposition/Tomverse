@@ -86,9 +86,12 @@ export const sectionLetter = (section) => {
   return match ? match[1] : null;
 };
 
-/** A cell that cannot break the table it sits in. */
+/**
+ * A cell that cannot break the table it sits in. Backslashes are escaped
+ * first, so a trailing one cannot turn an escaped pipe back into a separator.
+ */
 const cell = (text) =>
-  text.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
+  text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
 /**
  * The item table an executor fills in.
