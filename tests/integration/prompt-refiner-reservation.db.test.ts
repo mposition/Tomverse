@@ -26,6 +26,7 @@ import {
     PROMPT_REFINER_STAGE_REASON,
     prefixedPromptRefinerDigest,
 } from "@/lib/promptRefinerStageAdmissionCore";
+import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 
 const INPUT_PRICE_ENV = "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION";
@@ -794,6 +795,42 @@ test("current v5 successor-only manifest mutations fail at the actual insert con
             };
             mutate(candidate.runtimeSourceManifest as unknown as typeof manifest);
             recomputeRuntimeManifestDigests(candidate);
+            const candidateManifest = candidate.runtimeSourceManifest as unknown as typeof manifest;
+            const candidateSourceIdentity = { files: candidateManifest.files };
+            const [databaseParity] = await prisma.$queryRawUnsafe<Array<{
+                manifestCanonicalJson: string;
+                manifestDigest: string;
+                sourceIdentityCanonicalJson: string;
+                sourceIdentityDigest: string;
+            }>>(
+                `SELECT
+                    "prompt_refiner_canonical_json"($1::jsonb) AS "manifestCanonicalJson",
+                    "prompt_refiner_sha256_json"($1::jsonb) AS "manifestDigest",
+                    "prompt_refiner_canonical_json"($2::jsonb) AS "sourceIdentityCanonicalJson",
+                    "prompt_refiner_sha256_json"($2::jsonb) AS "sourceIdentityDigest"`,
+                JSON.stringify(candidateManifest),
+                JSON.stringify(candidateSourceIdentity)
+            );
+            assert.equal(
+                databaseParity?.manifestCanonicalJson,
+                canonicalBenchmarkJson(candidateManifest),
+                `${name}:manifest-canonical-json`
+            );
+            assert.equal(
+                databaseParity?.manifestDigest,
+                candidate.runtimeSourceManifestDigest,
+                `${name}:manifest-digest`
+            );
+            assert.equal(
+                databaseParity?.sourceIdentityCanonicalJson,
+                canonicalBenchmarkJson(candidateSourceIdentity),
+                `${name}:source-identity-canonical-json`
+            );
+            assert.equal(
+                databaseParity?.sourceIdentityDigest,
+                candidate.runtimeSourceIdentityDigest,
+                `${name}:source-identity-digest`
+            );
             assert.equal(
                 candidate.runtimeSourceIdentityDigest !== data.runtimeSourceIdentityDigest,
                 changesSourceIdentity,
