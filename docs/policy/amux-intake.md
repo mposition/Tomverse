@@ -12,8 +12,9 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 2
 | 1 | 2026-09-24 mposition | 단계 8 production backlog write를 승인한다. 코드 래치를 켠다. 법적 보존 기간과 USD 상한은 정하지 않는다. |
 | 2 | 2026-09-28 mposition | 에이전트 등록 원천. 사람이 확인하는 원천의 규칙을 그 원천으로 한정하는 범위 문장을 더하고, 엔지니어링 Agent의 등록 원천 절을 추가한다. 새 원천의 코드 래치는 끈 채로 둔다. 승격과 사람 경로 규칙은 바꾸지 않는다. |
 | 3 | 2026-09-29 mposition | 로컬 분석 원천. 운영자 PC의 Frontier 분석 package를 Admin에서 카드마다 확인한다. 코드 래치는 끈 채로 둔다. 환경 값은 설정하지 않는다. |
+| 3 | 2026-09-30 mposition | 로컬 분석 원천의 production 등록을 연다. 코드 래치 `LOCAL_INTAKE_APPLY_CODE_LATCH`를 켠다. writer는 `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY=enabled`일 때만 열린다. 법적 보존 기간, DPA, 라이브 모델 호출은 이 승인이 정하지 않는다. |
 
-문서 맨 아래의 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. v1과 v2의 writer는 바뀌지 않는다.
+문서 맨 아래의 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. 2026-09-30 활성화 승인이 코드 래치를 켜고, 환경 값이 `enabled`일 때만 writer를 연다. v1과 v2의 writer는 바뀌지 않는다.
 
 실행 제어는 `docs/policy/development-agent-orchestration.md`가 정한다. 두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
 
@@ -161,7 +162,7 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 3
 
-이 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 코드 래치의 출고 값은 false다. `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY`는 이 승인이 설정하지 않는다. v1의 `codex-conversation` writer와 v2의 에이전트 등록 writer는 이 절이 바꾸지 않는다.
+이 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인의 코드 래치 출고 값은 false였고, `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY`는 그 승인이 설정하지 않았다. 2026-09-30에 같은 운영자가 production 등록을 승인했다. 코드 래치는 그 승인으로 켜진다. v1의 `codex-conversation` writer와 v2의 에이전트 등록 writer는 이 절이 바꾸지 않는다.
 
 이 원천은 사람이 확인하는 세 번째 등록 원천이다. 운영자 PC의 로컬 도구가 Frontier 모델로 분석 package를 만들고, 운영자가 Admin에서 package를 가져와 카드마다 확인한 뒤 `backlog`로 등록한다. 앱, Railway service, API route, 브라우저는 LLM을 호출하지 않는다.
 
@@ -216,10 +217,10 @@ canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package 
 
 **감사.** human audit metadata는 approval id, card digest, package digest, card count, policy version, schema version, scanner version, actor, source identity뿐이다. 원문, 제목, 본문, secret finding은 넣지 않는다. 기존 hash-chained audit writer만 쓴다.
 
-**스위치.** 이 원천 전용 코드 래치의 출고 값은 false다. 환경 값은 `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY=enabled`뿐이다. v1의 `TOMVERSE_AMUX_INTAKE_APPLY`와 v2의 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY`와는 독립이다. 사람이 최근 step-up으로 이 환경 값을 해제하기 전에는 writer가 열리지 않는다. 모델과 system actor는 해제하지 못한다. 로컬 도구에는 자동 실행이 없다. 운영자의 분석 요청 한 번에 프로세스 한 번이고, 자동 retry는 없다.
+**스위치.** 2026-09-30 승인으로 이 원천 전용 코드 래치는 켜져 있다. 환경 값은 `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY=enabled`뿐이다. 둘 중 하나라도 빠지면 writer는 열리지 않는다. v1의 `TOMVERSE_AMUX_INTAKE_APPLY`와 v2의 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY`와는 독립이다. 환경 값을 바꾸는 것은 사람이다. 모델과 system actor는 바꾸지 못한다. 로컬 도구에는 자동 실행이 없다. 운영자의 분석 요청 한 번에 프로세스 한 번이고, 자동 retry는 없다.
 
-**비용.** 로컬 호출 비용은 운영자의 Frontier 구독이다. 사용자 credit, 플랜, Chat provider budget을 읽거나 쓰지 않는다. 서버 경로의 provider 호출은 0이다. USD 상한 숫자는 이 승인이 정하지 않는다. 서버가 LLM을 호출하지 않으므로 그 숫자는 이 원천의 writer를 여는 조건이 아니다. 법적 보존 기간도 이 승인이 정하지 않는다. normalized 행을 production에 남기는 활성화는 보존 정책의 별도 승인 전이다.
+**비용.** 로컬 호출 비용은 운영자의 Frontier 구독이다. 사용자 credit, 플랜, Chat provider budget을 읽거나 쓰지 않는다. 서버 경로의 provider 호출은 0이다. USD 상한 숫자는 이 승인이 정하지 않는다. 서버가 LLM을 호출하지 않으므로 그 숫자는 이 원천의 writer를 여는 조건이 아니다. 법적 보존 기간도 2026-09-30 활성화 승인이 정하지 않는다. 레지스트리의 보존 기간은 계속 TBD다.
 
 **지역.** 중국 본토의 접속, 처리 region, 그 지역의 provider는 쓰지 않는다. 운영자 입력과 snapshot을 로컬 도구 밖의 모델로 보내는 것은 국외 처리가 될 수 있다. 개인정보로 보이는 입력은 모델 호출 전에 거절한다. DPA와 처리 지역을 확인하기 전의 실제 모델 호출은 이 승인이 허용하지 않는다.
 
-**아직 열지 않는 것.** 법적 보존 기간, production 활성화, 환경 값 설정, `executionBrief` 작성, dependency edge, `todo` 승격, owner claim, worker 실행, 원격 push, PR, 배포.
+**아직 열지 않는 것.** 법적 보존 기간의 확정, DPA와 처리 지역 확인 전의 라이브 모델 호출, `executionBrief` 작성, dependency edge, `todo` 승격, owner claim, worker 실행, 원격 push, PR, 배포.

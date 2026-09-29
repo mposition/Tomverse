@@ -9,8 +9,8 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
  *
  * Parsing, scanning and the guard are pure. This module does not open a
  * transaction, call a provider, or create a card. The shipped apply latch is
- * false. Production registration also needs TOMVERSE_AMUX_INTAKE_LOCAL_APPLY
- * to be exactly enabled, which this approval does not set.
+ * true as of the 2026-09-30 activation. Production registration still needs
+ * TOMVERSE_AMUX_INTAKE_LOCAL_APPLY to be exactly enabled.
  */
 
 export const LOCAL_INTAKE_POLICY_VERSION = 3;
@@ -31,7 +31,7 @@ export const LOCAL_INTAKE_QUESTION_CAP = 12;
 export const LOCAL_INTAKE_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const LOCAL_INTAKE_APPLY_ENV = "TOMVERSE_AMUX_INTAKE_LOCAL_APPLY";
 export const LOCAL_INTAKE_SOURCE_KEY_SECRET_ENV = "AMUX_INTAKE_LOCAL_SOURCE_KEY_SECRET";
-export const LOCAL_INTAKE_APPLY_CODE_LATCH = false;
+export const LOCAL_INTAKE_APPLY_CODE_LATCH = true;
 export const LOCAL_INTAKE_SCANNER_VERSION = "local-amux-intake-scan-v1";
 export const LOCAL_INTAKE_PROMPT_VERSION = "local-amux-intake-prompt-v1";
 export const LOCAL_INTAKE_CANONICALIZATION_VERSION = "amux-json-v1";
