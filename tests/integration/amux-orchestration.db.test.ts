@@ -2834,53 +2834,129 @@ test("a transaction rolled back for another reason leaves no commit deadline row
   }
 });
 
-test("without the commit deadline trigger an AMUX write is refused, and the migration's text restores it", async () => {
-  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-MISSING");
+/*
+ * Nothing here is committed. The trigger is dropped, the fence is run, and the
+ * installer is exercised inside one transaction that the test rolls back, so
+ * a run that dies half way leaves the migrated trigger in place for every test
+ * after it (migrate deploy would not put it back). The route fence runs on
+ * that transaction's own client; its trigger check is the same clause as the
+ * mutation fence's (tests/amuxCommitDeadline.test.mjs), and what
+ * withAmuxDbBoundary does with the refusal is covered through the real Prisma
+ * client in tests/server-contract/amux-commit-deadline-boundary.test.ts.
+ */
+test("without the commit deadline trigger the fence refuses, and the installer restores the migration's definition, all rolled back", async () => {
   const install = readAmuxCommitDeadlineInstallSql(process.cwd());
-  const triggerPresent = async () =>
-    (
-      await prisma.$queryRaw<Array<{ present: boolean }>>`
-        SELECT EXISTS (
-          SELECT 1 FROM pg_catalog.pg_trigger t
-          WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
-            AND t.tgname = 'amux_commit_deadline_check'
-            AND t.tgdeferrable AND t.tginitdeferred
-        ) AS "present"
-      `
-    )[0]?.present === true;
-  assert.equal(await triggerPresent(), true, "setup: the migration installed the trigger");
+  type CheckState = { count: number; deferred: boolean; body: string | null };
+  const checkState = async (client: Pick<typeof prisma, "$queryRaw">): Promise<CheckState> => {
+    const rows = await client.$queryRaw<CheckState[]>`
+      SELECT count(t.oid)::integer AS "count",
+        coalesce(
+          bool_and(
+            t.tgdeferrable AND t.tginitdeferred AND t.tgtype::integer = 5
+              AND t.tgfoid = to_regprocedure('"amux_commit_deadline_check"()')
+          ),
+          false
+        ) AS "deferred",
+        (
+          SELECT p.prosrc FROM pg_catalog.pg_proc p
+          WHERE p.oid = to_regprocedure('"amux_commit_deadline_check"()')
+        ) AS "body"
+      FROM pg_catalog.pg_trigger t
+      WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
+        AND t.tgname = 'amux_commit_deadline_check'
+    `;
+    const row = rows[0];
+    assert.ok(row);
+    return row;
+  };
+  const migrated = (state: CheckState) =>
+    state.count === 1 && state.deferred && (state.body ?? "").includes("'AX001'");
+
+  assert.equal(migrated(await checkState(prisma)), true, "setup: the migration installed the check");
+  const ROLL_BACK = new Error("roll the catalogue changes back");
+  const seen = {
+    missingRefusal: null as unknown,
+    dropped: null as CheckState | null,
+    installedOnce: null as CheckState | null,
+    installedTwice: null as CheckState | null,
+    stale: null as CheckState | null,
+    refreshed: null as CheckState | null,
+    fencePassedAfterRestore: false,
+  };
   const warnings = mock.method(console, "warn", () => {});
   try {
-    await prisma.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
-    assert.equal(await triggerPresent(), false);
     await assert.rejects(
-      withAmuxDbBoundary(
-        { operation: "commit_deadline_missing_test", prismaCallCeiling: 3, isolation: "mutation" },
+      prisma.$transaction(
         async (tx) => {
-          await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+          await tx.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
+          seen.dropped = await checkState(tx);
+
+          // The fence refuses without the trigger. Its marker insert is undone
+          // at the savepoint so the transaction can fence again below.
+          await tx.$executeRaw`SAVEPOINT commit_check_missing`;
+          try {
+            await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_missing_test");
+          } catch (error) {
+            seen.missingRefusal = error;
+          }
+          await tx.$executeRaw`ROLLBACK TO SAVEPOINT commit_check_missing`;
+
+          // The push harnesses' installer puts it back; a second run changes nothing.
+          await tx.$executeRawUnsafe(install);
+          seen.installedOnce = await checkState(tx);
+          await tx.$executeRawUnsafe(install);
+          seen.installedTwice = await checkState(tx);
+
+          // An older function body and a trigger that is not deferred are both
+          // replaced with the migration's.
+          await tx.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
+          await tx.$executeRaw`
+            CREATE OR REPLACE FUNCTION "amux_commit_deadline_check"()
+            RETURNS TRIGGER LANGUAGE plpgsql AS $stale$ BEGIN RETURN NULL; END; $stale$
+          `;
+          await tx.$executeRaw`
+            CREATE CONSTRAINT TRIGGER "amux_commit_deadline_check"
+              AFTER INSERT ON "AmuxCommitDeadline"
+              DEFERRABLE INITIALLY IMMEDIATE
+              FOR EACH ROW EXECUTE FUNCTION "amux_commit_deadline_check"()
+          `;
+          seen.stale = await checkState(tx);
+          await tx.$executeRawUnsafe(install);
+          seen.refreshed = await checkState(tx);
+
+          // With the definition restored the same fence passes.
+          await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_restored_test");
+          seen.fencePassedAfterRestore = true;
+          throw ROLL_BACK;
         },
+        { timeout: 15_000 },
       ),
-      (error: unknown) =>
-        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_COMMIT_CHECK_MISSING",
+      (error: unknown) => error === ROLL_BACK,
     );
-    assert.equal(warnings.mock.callCount(), 1);
-    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
-    assert.notEqual(row.priority, "p0", "the refused write was rolled back");
-    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
   } finally {
     warnings.mock.restore();
-    // The same text the Admin E2E and push harnesses apply, run twice: the
-    // second run must be a no-op, not a duplicate-trigger error.
-    await prisma.$executeRawUnsafe(install);
-    await prisma.$executeRawUnsafe(install);
-    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
-  assert.equal(await triggerPresent(), true);
-  const restored = await withAmuxDbBoundary(
-    { operation: "commit_deadline_restored_test", prismaCallCeiling: 2, isolation: "mutation" },
+
+  assert.ok(seen.dropped && seen.dropped.count === 0, JSON.stringify(seen.dropped));
+  assert.ok(seen.missingRefusal instanceof AmuxDbBoundaryError);
+  assert.equal(seen.missingRefusal.code, "AMUX_DB_COMMIT_CHECK_MISSING");
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.ok(seen.installedOnce && migrated(seen.installedOnce), JSON.stringify(seen.installedOnce));
+  assert.deepEqual(seen.installedTwice, seen.installedOnce);
+  assert.ok(seen.stale && seen.stale.count === 1 && !seen.stale.deferred, JSON.stringify(seen.stale));
+  assert.equal((seen.stale.body ?? "").includes("AX001"), false);
+  assert.ok(seen.refreshed && migrated(seen.refreshed), JSON.stringify(seen.refreshed));
+  assert.equal(seen.fencePassedAfterRestore, true);
+
+  // The rollback left the migrated check exactly as it was, and it still works.
+  assert.equal(migrated(await checkState(prisma)), true);
+  assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+  const committed = await withAmuxDbBoundary(
+    { operation: "commit_deadline_intact_test", prismaCallCeiling: 2, isolation: "mutation" },
     async () => "committed",
   );
-  assert.equal(restored, "committed");
+  assert.equal(committed, "committed");
+  assert.equal(await prisma.amuxCommitDeadline.count(), 0);
 });
 
 test("replacement worker generation cannot heartbeat or settle the old execution attempt", async () => {
