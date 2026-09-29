@@ -1716,14 +1716,13 @@ test("live dependents contribute to dependent_count exactly once", async () => {
   assert.ok(parent);
   assert.equal(parent.dependent_count, 1);
 
-  // Main's queue keys, kept for the compatibility window: an orchestrator
-  // built from main before the develop AMUX port requires them.
+  // The queue keys an orchestrator built from main before the develop AMUX
+  // port requires, kept for the compatibility window.
   assert.deepEqual(
     Object.keys(parent).sort(),
     Object.keys(queueWireCompat.queue_server).sort(),
   );
   assert.equal(parent.status, "todo");
-  assert.equal(parent.owner, null);
   assert.deepEqual(parent.dependencies, []);
 
   // The child waits on the unfinished parent.
@@ -3829,10 +3828,11 @@ test("execution-off worker and owned routes cannot touch control state", async (
   }
 });
 
-// The owned queue keeps main's nine keys during the compatibility window: a
-// WSL bridge built from main before the develop AMUX port requires them and
+// The owned queue keeps the seven keys a WSL bridge built from main before the
+// develop AMUX port requires, during the compatibility window; that bridge
 // halts on a body without them (docs/ops/amux/wsl-execution-bridge.md, "Wire
-// compatibility"). The key list is the shared fixture the Rust client parses.
+// compatibility"). description and claimed_at are Options there and are not
+// sent. The key list is the shared fixture the Rust client parses.
 test("owned queue exposes only runnable owner-assigned Todo work in the compatibility shape", async () => {
   const ownedId = await createTodo("amux-owned-queue");
   const unownedId = await createTodo("amux-unowned-queue");
@@ -3877,12 +3877,10 @@ test("owned queue exposes only runnable owner-assigned Todo work in the compatib
     const rows = (await response.json()) as Array<{
       id: string;
       title: string;
-      description: string | null;
       kind: string;
       priority: string;
       owner: string;
       revision: number;
-      claimed_at: string | null;
       created_at: string;
     }>;
 
@@ -3893,10 +3891,10 @@ test("owned queue exposes only runnable owner-assigned Todo work in the compatib
     assert.equal(owned.revision, 4);
     assert.equal(owned.kind, "code");
     assert.equal(owned.priority, "p1");
-    assert.equal(owned.description, "Delivery body for the selected worker.");
-    assert.equal(
-      new Date(owned.claimed_at ?? "").getTime(),
-      claimedAt.getTime(),
+    // The stored description never reaches the wire.
+    assert.doesNotMatch(
+      JSON.stringify(rows),
+      /Delivery body for the selected worker/,
     );
     assert.deepEqual(
       Object.keys(owned).sort(),

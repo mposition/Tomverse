@@ -35,7 +35,6 @@ export const amuxQueueResponseSchema = z
         priority: z.string().min(1).max(32),
         pinned: z.boolean(),
         drag: z.number().int().min(0).max(8),
-        owner: z.null(),
         revision: prismaInt,
         created_at: timestamp,
         dependencies: z.array(legacyCardId).max(10_000),
@@ -68,12 +67,10 @@ export const amuxOwnedQueueResponseSchema = z
       .object({
         id: amuxMachineIdSchema,
         title: legacyCardText,
-        description: legacyCardText.nullable(),
         kind: z.string().min(1).max(64),
         priority: z.string().min(1).max(32),
         owner: amuxMachineIdSchema,
         revision: prismaInt,
-        claimed_at: timestamp.nullable(),
         created_at: timestamp,
       })
       .strict(),

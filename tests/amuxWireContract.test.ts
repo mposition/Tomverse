@@ -9,10 +9,11 @@ import {
   amuxRoutingResponseSchema,
 } from "@/lib/amux/wireContract";
 
-// The queue bodies the app sends during the compatibility window, shared with
-// the Rust client (apps/tomverse-orchestrator/src/tomverse_api.rs parses the
-// same file). *_server is main's full shape, which an orchestrator or WSL
-// bridge built from main before the develop AMUX port requires; *_minimal is
+// The queue bodies across the compatibility window, shared with the Rust
+// client (apps/tomverse-orchestrator/src/tomverse_api.rs and
+// main_wire_compat.rs parse the same file). *_server is what this app sends:
+// exactly the fields an orchestrator or WSL bridge built from main before the
+// develop AMUX port requires. *_main is what main's server sent; *_minimal is
 // the shape the app may send once no such binary runs
 // (docs/ops/amux/wsl-execution-bridge.md, "Wire compatibility").
 const queueWire = JSON.parse(
@@ -49,6 +50,14 @@ const MAIN_RUST_REQUIRED_OWNED_FIELDS = [
   "created_at",
 ];
 
+// Fields main's Rust reads with a serde default or as an Option. The app
+// sends the scheduler evidence and none of the rest.
+const MAIN_RUST_DEFAULTED_QUEUE_FIELDS_SENT = [
+  "scheduler_score",
+  "scoring_version",
+  "scheduler_signals",
+];
+
 const withoutField = (row: Record<string, unknown>, field: string) => {
   const copy = { ...row };
   delete copy[field];
@@ -57,6 +66,18 @@ const withoutField = (row: Record<string, unknown>, field: string) => {
 
 test("selection wire keeps main's required fields during the compatibility window", () => {
   assert.equal(amuxQueueResponseSchema.safeParse([queueRow]).success, true);
+  assert.deepEqual(
+    Object.keys(queueRow).sort(),
+    [
+      ...MAIN_RUST_REQUIRED_QUEUE_FIELDS,
+      ...MAIN_RUST_DEFAULTED_QUEUE_FIELDS_SENT,
+    ].sort(),
+  );
+  // main's own body carried owner, which main's Rust reads as an Option.
+  assert.equal(
+    amuxQueueResponseSchema.safeParse([queueWire.queue_main]).success,
+    false,
+  );
   for (const field of MAIN_RUST_REQUIRED_QUEUE_FIELDS) {
     const without = withoutField(queueRow, field);
     assert.equal(
@@ -94,6 +115,16 @@ test("selection wire keeps main's required fields during the compatibility windo
 
 test("owned queue keeps main's required fields during the compatibility window", () => {
   assert.equal(amuxOwnedQueueResponseSchema.safeParse([ownedRow]).success, true);
+  assert.deepEqual(
+    Object.keys(ownedRow).sort(),
+    [...MAIN_RUST_REQUIRED_OWNED_FIELDS].sort(),
+  );
+  // description and claimed_at are Options in main's Rust and are not sent:
+  // free text of up to 50,000 characters has no place under a 512 KB ceiling.
+  assert.equal(
+    amuxOwnedQueueResponseSchema.safeParse([queueWire.owned_main]).success,
+    false,
+  );
   for (const field of MAIN_RUST_REQUIRED_OWNED_FIELDS) {
     const without = withoutField(ownedRow, field);
     assert.equal(

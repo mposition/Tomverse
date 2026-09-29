@@ -48,10 +48,10 @@ Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 
 
 `POST /api/internal/amux/queue`와 `POST /api/internal/amux/owned-queue`의 응답 모양은 호환 기간에 있다.
 
-- 서버는 main이 보내 온 모양을 그대로 보낸다. queue 행은 15개 키(`title`, `status`, `owner`, `dependencies` 포함), owned queue 행은 9개 키(`title`, `description`, `kind`, `priority`, `claimed_at`, `created_at` 포함)다. 스키마는 `lib/amux/wireContract.ts`, 기준 본문은 `tests/fixtures/amux-queue-wire-compat-v1.json`이다.
-- main 7724fd683부터 develop AMUX 이식 전까지 빌드한 Rust는 queue의 `title`·`status`·`dependencies`와 owned queue의 `title`·`kind`·`priority`·`created_at`을 필수로 읽는다. 없으면 orchestrator tick이 실패하고 bridge는 halt한다(종료 코드 3).
-- 이 트리에서 빌드한 Rust는 두 모양(위 전체 모양과 `id`·`owner`·`revision`만 가진 최소 모양)을 모두 받고, 그 밖의 필드는 거절한다. 호환 필드는 읽지 않는다.
-- 배포 순서: 서버 먼저가 안전하다. 옛 바이너리와 새 바이너리가 모두 전체 모양을 읽는다. bridge를 먼저 다시 빌드해도 안전하다. 새 바이너리는 배포 전 서버의 전체 모양도 읽는다.
+- main 7724fd683부터 develop AMUX 이식 전까지 빌드한 Rust는 queue의 `title`·`status`·`dependencies`와 owned queue의 `title`·`kind`·`priority`·`created_at`을 필수로 읽는다. 없으면 orchestrator tick이 실패하고 bridge는 halt한다(종료 코드 3). 그 Rust의 API 구조체에는 `deny_unknown_fields`가 없고(executor.rs에만 있다), `Option` 필드는 키가 없으면 `None`이다.
+- 서버는 그 필수 필드를 보내고 그 밖의 호환 필드는 보내지 않는다. queue 행은 14개 키(main이 보내던 `owner`는 뺀다), owned queue 행은 7개 키(main이 보내던 `description`·`claimed_at`는 뺀다. description은 최대 50,000자의 자유 텍스트라 512KB 상한을 채울 수 있다)다. 스키마는 `lib/amux/wireContract.ts`, 기준 본문은 `tests/fixtures/amux-queue-wire-compat-v1.json`이다.
+- 이 트리에서 빌드한 Rust는 main 서버의 모양, 이 서버의 모양, `id`·`owner`·`revision`만 가진 최소 모양을 모두 받고, 그 밖의 필드는 거절한다. 호환 필드는 읽지 않는다.
+- 배포 순서: 서버 먼저가 안전하다. 옛 바이너리와 새 바이너리가 모두 이 서버의 모양을 읽는다. bridge를 먼저 다시 빌드해도 안전하다. 새 바이너리는 배포 전 main 서버의 모양도 읽는다.
 - 호환 필드를 빼는 것은 별도 변경이다. WSL bridge와 Railway orchestrator가 모두 이 트리 이후의 바이너리로 돈다는 것을 확인한 뒤, 스키마, 기준 본문, `tests/amuxWireContract.test.ts`, `lib/amux/store.ts`, 이 절을 함께 바꾼다.
 
 ## halt와 재시작

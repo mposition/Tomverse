@@ -1,7 +1,7 @@
 {
   "version": "amux-queue-wire-compat-v1",
-  "note": "Queue and owned-queue bodies during the compatibility window. *_server is what the app sends: main's full shape, which an orchestrator or WSL bridge built from main 7724fd683 or later requires. *_minimal is the shape the app may send once no such binary runs. Rust (tomverse_api.rs) must parse both; the app's response schemas (lib/amux/wireContract.ts) must accept only *_server.",
-  "queue_server": {
+  "note": "Queue and owned-queue bodies across the compatibility window. *_main is what main's server sent before this port (7724fd683). *_server is what this app sends: the non-Option fields main's Rust QueueTask and OwnedTodoTask require, and nothing else. *_minimal is the shape the app may send once no binary older than this port runs. The Rust built from this tree (tomverse_api.rs) must parse all three; main's frozen structs (main_wire_compat.rs) must parse *_main and *_server; the app's response schemas (lib/amux/wireContract.ts) must accept only *_server.",
+  "queue_main": {
     "id": "TASK-1",
     "title": "Fix the window",
     "status": "todo",
@@ -10,6 +10,34 @@
     "pinned": false,
     "drag": 0,
     "owner": null,
+    "revision": 1,
+    "created_at": "2026-09-21T00:00:00.000Z",
+    "dependencies": ["TASK-0"],
+    "dependent_count": 0,
+    "scheduler_score": 32,
+    "scoring_version": "amux-global-priority-v2",
+    "scheduler_signals": {
+      "pin": 0,
+      "age_hours": 0,
+      "type_weight": 12,
+      "priority_weight": 20,
+      "dependents": 0,
+      "dependent_weight": 0,
+      "drag": 0,
+      "urgency": 0,
+      "capacity_weight": 0,
+      "incident_bonus": 0,
+      "total": 32
+    }
+  },
+  "queue_server": {
+    "id": "TASK-1",
+    "title": "Fix the window",
+    "status": "todo",
+    "kind": "code",
+    "priority": "p1",
+    "pinned": false,
+    "drag": 0,
     "revision": 1,
     "created_at": "2026-09-21T00:00:00.000Z",
     "dependencies": ["TASK-0"],
@@ -55,15 +83,24 @@
       "total": 32
     }
   },
-  "owned_server": {
+  "owned_main": {
     "id": "TASK-1",
     "title": "Fix the window",
-    "description": null,
+    "description": "Card body that main's server sent.",
     "kind": "code",
     "priority": "p1",
     "owner": "claude-impl",
     "revision": 2,
     "claimed_at": "2026-09-21T00:01:00.000Z",
+    "created_at": "2026-09-21T00:00:00.000Z"
+  },
+  "owned_server": {
+    "id": "TASK-1",
+    "title": "Fix the window",
+    "kind": "code",
+    "priority": "p1",
+    "owner": "claude-impl",
+    "revision": 2,
     "created_at": "2026-09-21T00:00:00.000Z"
   },
   "owned_minimal": {

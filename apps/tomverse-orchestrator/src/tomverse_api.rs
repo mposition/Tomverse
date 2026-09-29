@@ -43,11 +43,12 @@ pub struct QueueTask {
     #[serde(default)]
     pub scheduler_signals: ScoreBreakdown,
     // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
-    // compatibility"). main's server has always sent these four, and the
-    // server keeps sending them while an orchestrator built before this
-    // change, which requires them, may still be running. Accepted and never
-    // read here; a server that drops them parses the same. Any other field is
-    // still refused.
+    // compatibility"). main's server sent these four. This app keeps sending
+    // title, status and dependencies, which an orchestrator built before this
+    // change requires, and no longer sends owner, which that orchestrator
+    // reads as an Option. Accepted from either server and never read here; a
+    // server that drops them parses the same. Any other field is still
+    // refused.
     #[serde(default, rename = "title")]
     pub legacy_title: Option<String>,
     #[serde(default, rename = "status")]
@@ -739,26 +740,27 @@ mod tests {
     fn queue_rows_parse_in_the_server_shape_and_the_minimal_shape() {
         // tests/amuxWireContract.test.ts holds the app's response schema to
         // the same file: the app sends *_server during the compatibility
-        // window, and this binary must also accept *_minimal after it.
-        let server: QueueTask = serde_json::from_value(queue_wire_fixture("queue_server")).unwrap();
-        assert_eq!(server.id, "TASK-1");
-        assert_eq!(server.scheduler_score, 32);
-        assert_eq!(server.legacy_title.as_deref(), Some("Fix the window"));
-        assert_eq!(server.legacy_owner, None);
-        let minimal: QueueTask = serde_json::from_value(queue_wire_fixture("queue_minimal")).unwrap();
-        assert_eq!(minimal.id, "TASK-1");
-        assert_eq!(minimal.legacy_title, None);
-        assert_eq!(minimal.legacy_dependencies, None);
-        for name in ["queue_server", "queue_minimal"] {
+        // window, this binary must also accept *_minimal after it, and
+        // *_main is what main's server sends until this app deploys.
+        for name in ["queue_main", "queue_server", "queue_minimal"] {
+            let task: QueueTask = serde_json::from_value(queue_wire_fixture(name)).unwrap();
+            assert_eq!(task.id, "TASK-1", "{name}");
+            assert_eq!(task.scheduler_score, 32, "{name}");
             let mut body = queue_wire_fixture(name);
             body["future_field"] = serde_json::json!(true);
             assert!(serde_json::from_value::<QueueTask>(body).is_err(), "{name}");
         }
+        let server: QueueTask = serde_json::from_value(queue_wire_fixture("queue_server")).unwrap();
+        assert_eq!(server.legacy_title.as_deref(), Some("Fix the window"));
+        assert_eq!(server.legacy_owner, None);
+        let minimal: QueueTask = serde_json::from_value(queue_wire_fixture("queue_minimal")).unwrap();
+        assert_eq!(minimal.legacy_title, None);
+        assert_eq!(minimal.legacy_dependencies, None);
     }
 
     #[test]
     fn owned_queue_rows_parse_in_the_server_shape_and_the_minimal_shape() {
-        for name in ["owned_server", "owned_minimal"] {
+        for name in ["owned_main", "owned_server", "owned_minimal"] {
             let task: OwnedTodoTask = serde_json::from_value(queue_wire_fixture(name)).unwrap();
             assert_eq!(task.id, "TASK-1", "{name}");
             assert_eq!(task.owner, "claude-impl", "{name}");
@@ -767,8 +769,11 @@ mod tests {
             body["future_field"] = serde_json::json!(true);
             assert!(serde_json::from_value::<OwnedTodoTask>(body).is_err(), "{name}");
         }
+        let main: OwnedTodoTask = serde_json::from_value(queue_wire_fixture("owned_main")).unwrap();
+        assert!(main.legacy_description.is_some());
         let server: OwnedTodoTask = serde_json::from_value(queue_wire_fixture("owned_server")).unwrap();
         assert_eq!(server.legacy_description, None);
+        assert_eq!(server.legacy_claimed_at, None);
         assert_eq!(server.legacy_kind.as_deref(), Some("code"));
     }
 
@@ -1099,12 +1104,13 @@ pub struct OwnedTodoTask {
     pub owner: String,
     pub revision: i64,
     // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
-    // compatibility"). main's server has always sent these six, and the server
-    // keeps sending them while a WSL bridge built before this change, which
-    // requires title, kind, priority and created_at, may still be running.
-    // Accepted and never read: card text is not bridge input (the delivery
-    // prompt is). A server that drops them parses the same. Any other field
-    // is still refused.
+    // compatibility"). main's server sent these six. This app keeps sending
+    // title, kind, priority and created_at, which a WSL bridge built before
+    // this change requires, and no longer sends description and claimed_at,
+    // which that bridge reads as Options. Accepted from either server and
+    // never read: card text is not bridge input (the delivery prompt is). A
+    // server that drops them parses the same. Any other field is still
+    // refused.
     #[serde(default, rename = "title")]
     pub legacy_title: Option<String>,
     #[serde(default, rename = "description")]
