@@ -15,8 +15,17 @@
  * Pure: no database, no clock.
  */
 
+import {
+  EMAIL_RELATIONSHIP_DORMANCY_MONTHS,
+  addUtcMonths,
+  relationshipEndedSourceEventKey,
+  relationshipStartedSourceEventKey,
+} from "./emailPreferenceCore";
+
+export { addUtcMonths, relationshipEndedSourceEventKey, relationshipStartedSourceEventKey };
+
 /** R4: the relationship ends when the last sign-in is older than this. */
-export const AU_RELATIONSHIP_DORMANCY_MONTHS = 24;
+export const AU_RELATIONSHIP_DORMANCY_MONTHS = EMAIL_RELATIONSHIP_DORMANCY_MONTHS;
 
 /**
  * Sign-up notice copy versions whose wording tells the person that product
@@ -34,12 +43,6 @@ export const RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS: readonly string[] = O
 
 export const relationshipDisclosedBy = (copyVersion: string): boolean =>
   RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS.includes(copyVersion);
-
-/** The key that makes one start per account, and one end per start. */
-export const relationshipStartedSourceEventKey = (userId: string) =>
-  `relationship:started:${userId}`;
-export const relationshipEndedSourceEventKey = (startedEventId: string) =>
-  `relationship:ended:${startedEventId}`;
 
 export type AuRelationshipFacts = {
   /** The account's `relationship_started` event, if one was written. */
@@ -70,31 +73,15 @@ export type AuRelationshipStanding =
   | { active: true; eventId: string }
   | { active: false; reason: AuRelationshipRefusal };
 
-/** `from` plus whole calendar months, clamped to the month's last day, in UTC. */
-export const addUtcMonths = (from: Date, months: number): Date => {
-  const target = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + months, 1));
-  const lastDay = new Date(
-    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
-  ).getUTCDate();
-  return new Date(
-    Date.UTC(
-      target.getUTCFullYear(),
-      target.getUTCMonth(),
-      Math.min(from.getUTCDate(), lastDay),
-      from.getUTCHours(),
-      from.getUTCMinutes(),
-      from.getUTCSeconds(),
-      from.getUTCMilliseconds()
-    )
-  );
-};
-
 /**
  * Whether the recorded relationship stands for this message.
  *
  * Every end is final. An account restored from a deletion request, or a person
  * signing in again after 24 months, does not restart a relationship: the start
  * event is what the notice at signup covered, and nothing later re-shows it.
+ * Dormancy is judged here from `lastLoginAt` until the next sign-in, and that
+ * sign-in records it as an end (`endDormantEmailRelationshipAtSignIn()` in
+ * lib/emailPreferences.ts) before `lastLoginAt` moves, in one transaction.
  */
 export const auRelationshipStanding = (facts: AuRelationshipFacts): AuRelationshipStanding => {
   if (!facts.started) return { active: false, reason: "no_relationship" };

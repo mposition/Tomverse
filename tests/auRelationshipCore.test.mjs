@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -13,6 +14,7 @@ import {
   MAKES_NO_SEND_PROMISE_VERSIONS,
   PROMISE_NO_UNREQUESTED_SEND_VERSIONS,
 } from "../lib/emailConsentCopy.ts";
+import { relationshipDormantAt } from "../lib/emailPreferenceCore.ts";
 import {
   auSenderAuthority,
   recipientAuthority,
@@ -99,4 +101,25 @@ test("an inferred consent passes the Australian sender and an inferred_consent r
   const refused = auSenderAuthority({ consent: { express: false, evidenceIds: [] } });
   assert.equal(refused.reason, "no_au_sender_consent");
   assert.equal(typeof recipientAuthority, "function");
+});
+
+test("the sign-in event ends a relationship at the moment it went dormant", () => {
+  const lastSeen = new Date("2026-01-31T09:00:00.000Z");
+  // 24 calendar months, clamped: 2028-01-31.
+  assert.equal(relationshipDormantAt(lastSeen, new Date("2028-01-30T23:59:59.999Z")), null);
+  assert.equal(
+    relationshipDormantAt(lastSeen, new Date("2028-06-01T00:00:00.000Z"))?.toISOString(),
+    "2028-01-31T09:00:00.000Z"
+  );
+});
+
+test("the sign-in event calls the end inside the transaction that moves lastLoginAt", () => {
+  // Otherwise the first sign-in after dormancy would bring the relationship
+  // back, and the verdict would cite its start event again.
+  const source = readFileSync("lib/auth.ts", "utf8");
+  const event = source.slice(source.indexOf("async signIn({ user, account, isNewUser })"));
+  const transaction = event.indexOf(".$transaction(async (tx) =>");
+  const end = event.indexOf("await endDormantEmailRelationshipAtSignIn(tx,");
+  const move = event.indexOf("data: { lastLoginAt: now }");
+  assert.ok(transaction > -1 && end > transaction && move > end, "order: transaction, end, lastLoginAt");
 });

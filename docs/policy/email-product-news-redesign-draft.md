@@ -455,7 +455,9 @@ writer·drain이 공유합니다.**
 (scope `marketing`)로 한 번 쓰며, 개정이 시행 중이고, 거부 장치를 쓰지 않았고, 본
 가입 고지 버전이 `RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS`에 있을 때만입니다 —
 **오늘 이 목록은 비어 있으므로 시작되는 관계는 없습니다.** 종료는 삭제 요청
-(`relationship_ended`, 같은 transaction), 마지막 로그인 24개월 경과, 가입 때와 다른
+(`relationship_ended`, 같은 transaction), 마지막 로그인 24개월 경과(다음 로그인이
+`lastLoginAt`을 옮기기 전에 같은 transaction에서 `relationship_ended`로 기록 — 기록하지
+못하면 `lastLoginAt`도 움직이지 않습니다), 가입 때와 다른
 주소, 동의 철회로 판정하고, 수신거부는 suppression이 먼저 막습니다. **종료는 최종입니다**
 — 계정 복구나 재로그인이 관계를 다시 시작하지 않습니다. 발송 판정은 시작 사건을
 추론 동의의 증거로 인용합니다.

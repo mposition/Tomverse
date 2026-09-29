@@ -12,6 +12,7 @@ import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import { finalizeSignupConsentAttempt, issueSignupConsentAttempt } from "@/lib/signupConsent";
 import { auRelationshipForSend, recordRelationshipEnded } from "@/lib/auRelationship";
 import { scheduleTomverseAccountDeletion } from "@/lib/accountDeletion";
+import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // The Australian relationship (S5b).
@@ -197,4 +198,65 @@ test("an account without a relationship is scheduled for deletion without writin
   const user = await account();
   await scheduleTomverseAccountDeletion(user.id);
   assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 0);
+});
+
+test("the dormancy clock never runs from before the relationship started", async () => {
+  // A last sign-in older than the relationship does not make it dormant: the
+  // relationship began a minute ago.
+  const lastLoginAt = new Date(Date.now() - 25 * MONTH_MS);
+  const user = await account(lastLoginAt);
+  await startedFor(user);
+  const now = new Date();
+  const result = await prisma.$transaction(async (tx) => {
+    const ended = await endDormantEmailRelationshipAtSignIn(tx, {
+      userId: user.id,
+      previousLastLoginAt: lastLoginAt,
+      now,
+    });
+    await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: now } });
+    return ended;
+  });
+  assert.deepEqual(result, { ended: false });
+});
+
+test("a relationship older than 24 months ends at the sign-in, once", async () => {
+  const user = await account(null);
+  const old = new Date(Date.now() - 26 * MONTH_MS);
+  const started = await prisma.emailPermissionEvent.create({
+    data: {
+      userId: user.id,
+      emailAddress: user.email!,
+      addressNormalizationVersion: "v1",
+      kind: "relationship_started",
+      scopeKey: "marketing",
+      occurredAt: old,
+      capturedVia: "signup_form",
+      sourceEventKey: `relationship:started:${user.id}`,
+      policyVersionId,
+      evidence: { copyVersion: "fixture" },
+    },
+    select: { id: true },
+  });
+  const now = new Date();
+  const signIn = () =>
+    prisma.$transaction(async (tx) => {
+      const ended = await endDormantEmailRelationshipAtSignIn(tx, {
+        userId: user.id,
+        previousLastLoginAt: new Date(old.getTime() + 60_000),
+        now,
+      });
+      await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: now } });
+      return ended;
+    });
+  assert.deepEqual(await signIn(), { ended: true });
+  assert.deepEqual(await signIn(), { ended: false });
+  const ended = await prisma.emailPermissionEvent.findMany({
+    where: { userId: user.id, kind: "relationship_ended" },
+    select: { sourceEventKey: true, evidence: true },
+  });
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0]!.sourceEventKey, `relationship:ended:${started.id}`);
+  assert.equal((ended[0]!.evidence as { reason: string }).reason, "dormant");
+  // lastLoginAt is fresh now, and the relationship stays ended.
+  assert.deepEqual(await standing(user), { active: false, reason: "relationship_ended" });
 });

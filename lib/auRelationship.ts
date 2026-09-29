@@ -123,12 +123,11 @@ export async function recordRelationshipEnded(
   });
   if (!started) return { recorded: false };
   const sourceEventKey = relationshipEndedSourceEventKey(started.id);
-  const existing = await tx.emailPermissionEvent.findUnique({
-    where: { kind_sourceEventKey: { kind: "relationship_ended", sourceEventKey } },
-    select: { id: true },
-  });
-  if (existing) return { recorded: false };
-  await tx.emailPermissionEvent.create({
+  // ON CONFLICT DO NOTHING: an end written concurrently (another deletion
+  // request, a dormant sign-in) must not abort the caller's transaction, which
+  // here is the deletion request itself -- after Stripe was already told.
+  const written = await tx.emailPermissionEvent.createMany({
+    skipDuplicates: true,
     data: {
       userId: input.userId,
       emailAddress: started.emailAddress,
@@ -145,7 +144,7 @@ export async function recordRelationshipEnded(
       evidence: { reason: input.reason, startedEventId: started.id },
     },
   });
-  return { recorded: true };
+  return { recorded: written.count === 1 };
 }
 
 /**

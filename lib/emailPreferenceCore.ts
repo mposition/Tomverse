@@ -441,3 +441,51 @@ export const classificationDisagreements = (): string[] => {
   }
   return problems;
 };
+
+/* ------------------------------------------------------------------ *
+ * The Australian relationship's clock and keys
+ * (docs/policy/email-product-news-redesign-draft.md section 4.4, R4).
+ *
+ * Here rather than in lib/auRelationshipCore.ts because the sign-in event in
+ * lib/auth.ts ends a dormant relationship, and lib/auth.ts is in the Prompt
+ * Refiner's sealed runtime source closure (lib/promptRefinerStageAdmissionCore.ts):
+ * it may only reach modules that closure already lists, and this is one.
+ * lib/auRelationshipCore.ts re-exports these.
+ * ------------------------------------------------------------------ */
+
+/** R4: the relationship ends when the last sign-in is this many months old. */
+export const EMAIL_RELATIONSHIP_DORMANCY_MONTHS = 24;
+
+/** The key that makes one start per account, and one end per start. */
+export const relationshipStartedSourceEventKey = (userId: string) =>
+  `relationship:started:${userId}`;
+export const relationshipEndedSourceEventKey = (startedEventId: string) =>
+  `relationship:ended:${startedEventId}`;
+
+/** `from` plus whole calendar months, clamped to the month's last day, in UTC. */
+export const addUtcMonths = (from: Date, months: number): Date => {
+  const target = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  return new Date(
+    Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth(),
+      Math.min(from.getUTCDate(), lastDay),
+      from.getUTCHours(),
+      from.getUTCMinutes(),
+      from.getUTCSeconds(),
+      from.getUTCMilliseconds()
+    )
+  );
+};
+
+/**
+ * When a relationship last seen at `lastSeen` went dormant, or null while it
+ * has not. The moment is the one the end event records.
+ */
+export const relationshipDormantAt = (lastSeen: Date, now: Date): Date | null => {
+  const dormantAt = addUtcMonths(lastSeen, EMAIL_RELATIONSHIP_DORMANCY_MONTHS);
+  return now.getTime() >= dormantAt.getTime() ? dormantAt : null;
+};
