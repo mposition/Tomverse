@@ -45,19 +45,23 @@ owner-only (rule 14).
 | Command Center | Work queue | `/admin/work-queue` | — |
 | Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports` |
 | Customers | Users | `/admin/users` | — |
-| Customers | Support | `/admin/support` | `feedback`, `privacy` |
+| Customers | Support | `/admin/support` | `feedback`, `fixes`, `privacy` |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
 | Revenue | Refunds | `/admin/refunds` | — |
 | Revenue | Credit ledger | `/admin/credit-ledger` | — |
 | AI Platform | Providers | `/admin/providers` | `health`, `usage-cost`, `incidents` |
-| AI Platform | Models | `/admin/models` | — |
+| AI Platform | Models | `/admin/models` | `registry`, `discovery` |
+| AI Platform | Routing | `/admin/routing` | — |
 | Operations | Infrastructure | `/admin/infrastructure` | — |
 | Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
+| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
+| Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
+| Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
 | Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
