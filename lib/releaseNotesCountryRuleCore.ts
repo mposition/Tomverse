@@ -24,18 +24,22 @@
  * refusal standing. So this function answers "what does the law we apply say",
  * and S9's verdict decides what is sent.
  *
- * ## Australian inferred consent is not in effect
+ * ## Australian inferred consent rests on a recorded relationship
  *
  * Section 5.1.1 gives Australia `inferred_consent`, with approval C's
- * condition: it takes effect once the draft's section 4.4 relationship model
- * is built and the policy amendment (E) is in force -- and, since decision B
- * (2026-09-29), only for an account whose sign-up notice disclosed unasked
- * sending (docs/policy/email-notifications.md, the AU paragraph under 5.1.1;
- * draft section 4.4). R4 was decided the same day. None of this exists yet, and
- * the seed's `activationGates` are a record, not what decides. Until then the rule row
- * says what was approved and this verdict refuses to rely on it
- * (`inferred_consent_not_in_effect`); S5b adds the relationship input that
- * would let it. Express consent satisfies either authority regardless.
+ * condition: it takes effect once the draft's section 4.4 relationship model is
+ * built (S5b, lib/auRelationshipCore.ts) and the policy amendment (E) is in
+ * force -- and, since decision B (2026-09-29), only for an account whose
+ * sign-up notice disclosed unasked sending (docs/policy/email-notifications.md,
+ * the AU paragraph under 5.1.1; draft section 4.4). The caller passes
+ * `consent.inferred` only when all of that holds for this person -- an active
+ * relationship under the owner's R4 thresholds (2026-09-29), started under a
+ * disclosing notice, with the amendment published -- and names the
+ * `relationship_started` event it rests on. The seed's `activationGates` are a
+ * record, not what decides. Without it the verdict refuses as before
+ * (`inferred_consent_not_in_effect`). Inferred consent satisfies the
+ * Australian sender authority for every message and an `inferred_consent`
+ * recipient rule; express consent satisfies either regardless.
  *
  * Pure: no database, no clock. The rows come from `lib/releaseNotesCountryRules.ts`.
  */
@@ -291,6 +295,12 @@ export type ReleaseNotesRuleForVerdict = {
 export type ReleaseNotesConsentInput = {
   express: boolean;
   evidenceIds: readonly string[];
+  /**
+   * An active relationship with inferred consent in effect, and the
+   * `relationship_started` event(s) it rests on. Absent or null: no inferred
+   * consent (docs/policy/email-product-news-redesign-draft.md section 4.4).
+   */
+  inferred?: { eventIds: readonly string[] } | null;
 };
 
 const assertConsentInput = (consent: ReleaseNotesConsentInput) => {
@@ -301,6 +311,9 @@ const assertConsentInput = (consent: ReleaseNotesConsentInput) => {
   }
   if (!consent.express && consent.evidenceIds.length > 0) {
     throw new Error("Consent evidence was passed for a consent that is not given.");
+  }
+  if (consent.inferred && consent.inferred.eventIds.length === 0) {
+    throw new Error("An inferred consent must name the relationship event it rests on.");
   }
 };
 
@@ -314,7 +327,10 @@ export type ReleaseNotesAuthorityVerdict = {
   ruleVersion: number | null;
   verdict: "allow" | "deny";
   reason: ReleaseNotesAuthorityRefusal | null;
+  /** ConsentRecord ids the verdict rests on. */
   evidenceIds: string[];
+  /** EmailPermissionEvent ids it rests on -- the relationship, for inferred consent. */
+  eventEvidenceIds?: string[];
 };
 
 const allow = (
@@ -355,6 +371,14 @@ export const recipientAuthority = (input: {
     return allow({ ...cited, basis: "express_consent", evidenceIds: [...consent.evidenceIds] });
   }
   if (rule.basis === "inferred_consent") {
+    if (consent.inferred) {
+      return allow({
+        ...cited,
+        basis: "inferred_consent",
+        evidenceIds: [],
+        eventEvidenceIds: [...consent.inferred.eventIds],
+      });
+    }
     return deny({ ...cited, basis: rule.basis }, "inferred_consent_not_in_effect");
   }
   return deny({ ...cited, basis: rule.basis }, "no_express_consent");
@@ -362,9 +386,9 @@ export const recipientAuthority = (input: {
 
 /**
  * The Australian sender authority. It applies to every message, whatever the
- * recipient's country, and it rests on express or inferred consent. Inferred
- * consent is not in effect (see the header), so today it is express consent or
- * nothing.
+ * recipient's country, and it rests on express or inferred consent -- the
+ * latter only where the caller established an active relationship with the
+ * amendment in force (see the header).
  */
 export const auSenderAuthority = (input: {
   consent: ReleaseNotesConsentInput;
@@ -373,6 +397,14 @@ export const auSenderAuthority = (input: {
   assertConsentInput(input.consent);
   if (input.consent.express) {
     return allow({ ...entry, basis: "express_consent", evidenceIds: [...input.consent.evidenceIds] });
+  }
+  if (input.consent.inferred) {
+    return allow({
+      ...entry,
+      basis: "inferred_consent",
+      evidenceIds: [],
+      eventEvidenceIds: [...input.consent.inferred.eventIds],
+    });
   }
   return deny({ ...entry, basis: null }, "no_au_sender_consent");
 };

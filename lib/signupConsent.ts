@@ -16,6 +16,9 @@ import { recordEstimatedCountry } from "@/lib/emailJurisdiction";
 import { profileForCountry } from "@/lib/emailJurisdictionCore";
 import { normalizeEmailLoginAddress } from "@/lib/emailLogin";
 import { recordNoticeObjection, recordNoticeShown } from "@/lib/inProductConsentNotice";
+import { noticeJurisdictionColumns } from "@/lib/inProductConsentNoticeCore";
+import { recordRelationshipStarted } from "@/lib/auRelationship";
+import { isEmailPolicyPublished } from "@/lib/emailPolicyPublication";
 import {
   SIGNUP_CONSENT_OAUTH_PROVIDERS,
   SIGNUP_CONSENT_TTL_MS,
@@ -329,6 +332,12 @@ export async function finalizeSignupConsentAttempt(input: {
     capturedVia: "signup_form" as const,
   };
 
+  // Read before the transaction: the publication check is cached and reads
+  // on the root client. The relationship it gates starts only under a
+  // sign-up notice that disclosed it (lib/auRelationshipCore.ts).
+  const amendmentInForce = attempt.objected ? false : await isEmailPolicyPublished(now);
+  const jurisdictionColumns = noticeJurisdictionColumns(resolved);
+
   let confirmationRequested = false;
   try {
     await prisma.$transaction(async (tx) => {
@@ -357,6 +366,21 @@ export async function finalizeSignupConsentAttempt(input: {
       }
       await recordNoticeShown({ ...record, client: tx });
       if (attempt.objected) await recordNoticeObjection({ ...record, client: tx });
+      // Section 4.4's start event. Not for a person who used the refusal
+      // control: they told us no, and a relationship is not a way around it.
+      if (!attempt.objected) {
+        await recordRelationshipStarted(tx, {
+          userId: input.userId,
+          emailAddress: user.email as string,
+          copyVersion: attempt.copyVersion,
+          copyHash,
+          channel: attempt.channel,
+          amendmentInForce,
+          jurisdiction: jurisdictionColumns.country,
+          jurisdictionSource: jurisdictionColumns.source,
+          occurredAt: now,
+        });
+      }
 
       // A ticked box ends in a confirmation mail or in nothing at all (section
       // 5.2): if the request cannot be made, the whole consumption rolls back

@@ -232,6 +232,62 @@ test("a verdict is written with the evidence it cited, and sealed", async () => 
   for (const row of stored.evidence) assert.equal(row.consentRecordId, record.id);
 });
 
+test("an inferred consent cites the relationship it rests on, and the ledger accepts it", async () => {
+  // S5b: the start event is the evidence, for both authorities
+  // (docs/policy/email-product-news-redesign-draft.md section 4.4).
+  const user = await account();
+  const started = await prisma.emailPermissionEvent.create({
+    data: {
+      userId: user.id,
+      emailAddress: user.email!,
+      addressNormalizationVersion: "v1",
+      kind: "relationship_started",
+      scopeKey: "marketing",
+      occurredAt: EPOCH,
+      capturedVia: "signup_form",
+      sourceEventKey: `relationship:started:${user.id}`,
+      policyVersionId,
+      evidence: {},
+    },
+    select: { id: true },
+  });
+  const delivery = await seedDelivery(user.email!);
+  const verdict = verdictFor([], {
+    rules: [
+      {
+        countryCode: "AU",
+        ruleKey: "release-notes:AU",
+        ruleVersion: 1,
+        basis: "inferred_consent",
+        status: "open",
+      },
+    ],
+    recipient: {
+      suppressed: false,
+      objected: false,
+      consent: { express: false, evidenceIds: [], inferred: { eventIds: [started.id] } },
+    },
+  });
+  assert.equal(verdict.allowed, true);
+
+  const recorded = await write(verdict, {
+    deliveryId: delivery.id,
+    userId: user.id,
+    emailAddress: user.email!,
+    phase: "send",
+  });
+  assert.equal(recorded.recorded, true);
+  const stored = await prisma.emailPermissionDecision.findUniqueOrThrow({
+    where: { id: recorded.decisionId },
+    select: { evidence: { select: { authority: true, eventId: true, consentRecordId: true } } },
+  });
+  assert.deepEqual(stored.evidence.map((row) => row.authority).sort(), ["au_sender", "recipient"]);
+  for (const row of stored.evidence) {
+    assert.equal(row.eventId, started.id);
+    assert.equal(row.consentRecordId, null);
+  }
+});
+
 test("the consent a verdict cited cannot be deleted from under it", async () => {
   // Why the evidence is rows rather than ids in a blob: "what did this rest on"
   // has to stay answerable.
