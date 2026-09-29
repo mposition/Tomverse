@@ -42,6 +42,8 @@ export const isSelectedAmuxWorkerOwnershipReady = (
       !candidate.worker.paused &&
       !candidate.worker.isolated &&
       !candidate.worker.blocked &&
+      // The same rule as selected_eligible in workerRouterCore.ts: only a
+      // worker that is running, idle and at a dispatch boundary may own.
       candidate.worker.running &&
       candidate.worker.status.toLowerCase() === "idle" &&
       candidate.worker.dispatch_ready,

@@ -26,7 +26,9 @@ use crate::local_card::{
     candidate_card_ids, card_links_attempt, decide_link, local_card_outcome, parse_board_list,
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
-use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask, PulledDelivery};
+use crate::tomverse_api::{
+    ExecutionStartResponse, OwnedTodoTask, PulledDelivery, SelectionRead, BOARD_CAPACITY_EXCEEDED,
+};
 
 pub const WSL_BRIDGE_CODE_LATCH: bool = true;
 
@@ -624,8 +626,8 @@ impl<C> BoardControlPlane for SingleOwnedTask<'_, C>
 where
     C: BoardControlPlane,
 {
-    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
-        Ok(vec![self.task.clone()])
+    async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
+        Ok(SelectionRead::Ready(vec![self.task.clone()]))
     }
 
     async fn execution_start(
@@ -688,7 +690,18 @@ where
         }]);
     }
 
-    let tasks = control.owned_queue().await?;
+    // A board too large for one complete owned-queue response is a known
+    // answer that wrote nothing, not an unknown outcome: no new assignment
+    // this tick, no halt. Attempts already in flight keep their heartbeat and
+    // settlement. Any other failure still returns an error, which halts.
+    let tasks = match control.owned_queue().await? {
+        SelectionRead::Ready(tasks) => tasks,
+        SelectionRead::BoardCapacityExceeded => {
+            return Ok(vec![BridgeTickResult::Idle {
+                reason: BOARD_CAPACITY_EXCEEDED,
+            }]);
+        }
+    };
     let snapshot = sessions.clone();
     let mut seen = HashSet::new();
     let mut results = Vec::new();
@@ -1186,6 +1199,9 @@ pub async fn run_from_env() -> i32 {
                         if matches!(result, BridgeTickResult::Halted { .. }) {
                             halted = true;
                         }
+                        if let Some(warning) = bridge_tick_warning(result) {
+                            eprintln!("{warning}");
+                        }
                         if let BridgeTickResult::Pending { attempt_id } = result {
                             if let Some(delivery) = prompts
                                 .deliveries
@@ -1303,6 +1319,17 @@ pub async fn run_from_env() -> i32 {
             }
             _ = tokio::time::sleep(Duration::from_secs(30)) => {}
         }
+    }
+}
+
+/// The stderr line (journald keeps it) for a tick result that skipped new
+/// assignments without halting.
+fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
+    match result {
+        BridgeTickResult::Idle { reason } if *reason == BOARD_CAPACITY_EXCEEDED => Some(format!(
+            "amux wsl bridge warn: owned queue answered 409 {reason}; no new assignment this tick, not halted"
+        )),
+        _ => None,
     }
 }
 
@@ -1502,14 +1529,9 @@ mod tests {
     fn task() -> OwnedTodoTask {
         OwnedTodoTask {
             id: "TASK-1".into(),
-            title: "Fix the window".into(),
-            description: Some("description".into()),
-            kind: "bug".into(),
-            priority: "p2".into(),
             owner: "claude-impl".into(),
             revision: 2,
-            claimed_at: None,
-            created_at: "2026-09-28T00:00:00Z".into(),
+            ..Default::default()
         }
     }
 
@@ -1534,9 +1556,9 @@ mod tests {
     }
 
     impl BoardControlPlane for FlagControl {
-        async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
+        async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(self.tasks.clone())
+            Ok(SelectionRead::Ready(self.tasks.clone()))
         }
 
         async fn execution_start(
@@ -2091,5 +2113,111 @@ mod tests {
         let invalid = session_allowlist(Some("a/b"));
         assert!(!session_allowed(&invalid, "a/b"));
         assert!(!session_allowed(&invalid, "claude-impl"));
+    }
+
+    /// A one-request HTTP server that answers every request with this status
+    /// and body, for driving the real Tomverse client.
+    fn tomverse_answering(status: &'static str, body: &'static str) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut socket, _)) = listener.accept() {
+                let mut buffer = [0_u8; 4096];
+                let _ = std::io::Read::read(&mut socket, &mut buffer);
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = std::io::Write::write_all(&mut socket, reply.as_bytes());
+            }
+        });
+        format!("http://{address}")
+    }
+
+    fn tomverse_api(base_url: String) -> crate::tomverse_api::TomverseApi {
+        crate::tomverse_api::TomverseApi::for_test_with_timeouts(
+            base_url,
+            Duration::from_millis(500),
+            Duration::from_secs(2),
+        )
+    }
+
+    // The exact body app/api/internal/amux/owned-queue/route.ts sends when the
+    // owned queue exceeds one complete response.
+    const OWNED_QUEUE_CAPACITY_BODY: &str =
+        r#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded"}"#;
+
+    #[tokio::test]
+    async fn an_owned_queue_capacity_refusal_skips_the_tick_without_a_halt() {
+        let prompts = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let results = bridge_tick(
+            &input(true, &prompts, None),
+            tomverse_api(tomverse_answering("409 Conflict", OWNED_QUEUE_CAPACITY_BODY)),
+            running_session(),
+            &mut local,
+        )
+        .await
+        .expect("a capacity refusal is a skipped tick, not an error that halts");
+
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Idle {
+                reason: "board_capacity_exceeded",
+            }]
+        );
+        assert!(!results
+            .iter()
+            .any(|result| matches!(result, BridgeTickResult::Halted { .. })));
+        assert!(local.sends.is_empty());
+        assert_eq!(
+            bridge_tick_warning(&results[0]).as_deref(),
+            Some("amux wsl bridge warn: owned queue answered 409 board_capacity_exceeded; no new assignment this tick, not halted"),
+        );
+    }
+
+    #[tokio::test]
+    async fn any_other_owned_queue_failure_still_halts() {
+        for (status, body) in [
+            ("409 Conflict", r#"{"available":false,"reason":"execution_api_disabled"}"#),
+            ("409 Conflict", r#"{"error":"Queue capacity exceeded.","reason":"other"}"#),
+            (
+                "409 Conflict",
+                r#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded","extra":1}"#,
+            ),
+            ("503 Service Unavailable", r#"{"reason":"amux_outcome_unknown"}"#),
+            ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
+        ] {
+            let prompts = BTreeMap::new();
+            let mut local = LocalExchange::accepting();
+            let result = bridge_tick(
+                &input(true, &prompts, None),
+                tomverse_api(tomverse_answering(status, body)),
+                running_session(),
+                &mut local,
+            )
+            .await;
+            // An error from the tick sets the run loop's halt.
+            assert!(result.is_err(), "{status} {body}");
+            assert!(local.sends.is_empty());
+        }
+    }
+
+    #[test]
+    fn only_the_capacity_skip_writes_the_warning() {
+        assert!(bridge_tick_warning(&BridgeTickResult::Idle {
+            reason: "board_capacity_exceeded",
+        })
+        .is_some());
+        for result in [
+            BridgeTickResult::Idle {
+                reason: "worker_not_running",
+            },
+            BridgeTickResult::Halted {
+                attempt_id: ATTEMPT_ID.into(),
+            },
+        ] {
+            assert!(bridge_tick_warning(&result).is_none());
+        }
     }
 }

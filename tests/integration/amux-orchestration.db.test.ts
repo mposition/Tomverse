@@ -1,20 +1,49 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { POST as claimPost } from "@/app/api/internal/amux/claim/route";
+import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
+import { POST as routingSnapshotPost } from "@/app/api/internal/amux/routing-snapshot/route";
 import { POST as ownedQueuePost } from "@/app/api/internal/amux/owned-queue/route";
+import { POST as workerRegisterPost } from "@/app/api/internal/amux/workers/register/route";
+import { POST as workerHeartbeatPost } from "@/app/api/internal/amux/workers/heartbeat/route";
 import { POST as executionStartPost } from "@/app/api/internal/amux/execution/start/route";
 import { POST as executionHeartbeatPost } from "@/app/api/internal/amux/execution/heartbeat/route";
 import { POST as executionSettlePost } from "@/app/api/internal/amux/execution/settle/route";
 import { POST as deliveryPullPost } from "@/app/api/internal/amux/delivery/pull/route";
 import { POST as deliveryAckPost } from "@/app/api/internal/amux/delivery/ack/route";
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
+import { Prisma } from "@prisma/client";
+import { Client as PgClient } from "pg";
+import { schemaValidAmuxRoutingCandidate } from "../amuxClaimFixture.ts";
 
 import { prisma } from "@/lib/prisma";
-import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
+import { anchorAmuxClaimDeadline } from "@/lib/amux/claimDeadline";
 import {
   AMUX_INCIDENT_SETTING_KEY,
+  parseAmuxIncidentSetting,
   serializeAmuxIncidentState,
 } from "@/lib/amux/incidentCore";
+import {
+  AMUX_DB_BOUNDARIES,
+  AMUX_DB_COMMIT_RESERVE_MS,
+  AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+  AmuxDbBoundaryError,
+  amuxDbTransactionBudgetMs,
+  fenceAmuxRouteDeadline,
+  withAmuxDbBoundary,
+  withAmuxRouteBudget,
+} from "@/lib/amux/dbBoundary";
+import {
+  AMUX_COMMIT_DEADLINE_TRIGGER,
+  AMUX_LATE_COMMIT_MESSAGE,
+  AMUX_LATE_COMMIT_SQLSTATE,
+  isAmuxLateCommitError,
+} from "@/lib/amux/commitDeadlineCore";
+import { readAmuxCommitDeadlineInstallSql } from "../../scripts/amux-commit-deadline-install.mjs";
+import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
 import { scoreAmuxWorkers } from "@/lib/amux/workerRouterCore";
 import {
   amuxWorkerRuntimeByName,
@@ -35,11 +64,25 @@ import {
 } from "@/lib/amux/delivery";
 import {
   claimUnownedTodo,
+  getRoutingSnapshotTask,
   listDispatchable,
+  listOwnedTodos,
   type AmuxDecisionSignals,
 } from "@/lib/amux/store";
 
 const SCORING_VERSION = "amux-global-priority-v1";
+
+// The queue bodies the app sends during the compatibility window, the same
+// file the Rust client parses (tests/fixtures/amux-queue-wire-compat-v1.json).
+const queueWireCompat = JSON.parse(
+  readFileSync(
+    join(process.cwd(), "tests/fixtures/amux-queue-wire-compat-v1.json"),
+    "utf8",
+  ),
+) as {
+  queue_server: Record<string, unknown>;
+  owned_server: Record<string, unknown>;
+};
 
 const makeAmuxSyncSecret = () => `amux-test-${randomUUID()}`;
 
@@ -87,6 +130,262 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+test("AMUX DB statement timeout rolls back the preceding write", async () => {
+  const taskId = await createTodo("AMUX-DB-STATEMENT");
+  try {
+    await assert.rejects(
+      withAmuxDbBoundary(
+        {
+          operation: "statement_timeout_test",
+          prismaCallCeiling: 4,
+          isolation: "mutation",
+        },
+        async (tx) => {
+          await tx.amuxWorkItem.update({
+            where: { id: taskId },
+            data: { priority: "p0" },
+          });
+          await tx.$queryRaw`SELECT pg_sleep(0.35)`;
+        },
+      ),
+    );
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("AMUX idle-in-transaction timeout rolls back a preceding write", async () => {
+  const taskId = await createTodo("AMUX-DB-IDLE");
+  try {
+    await assert.rejects(
+      withAmuxDbBoundary(
+        {
+          operation: "idle_timeout_test",
+          prismaCallCeiling: 4,
+          isolation: "mutation",
+        },
+        async (tx) => {
+          await tx.amuxWorkItem.update({
+            where: { id: taskId },
+            data: { priority: "p0" },
+          });
+          await delay(250);
+          await tx.$queryRaw`SELECT 1`;
+        },
+      ),
+    );
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("AMUX final DB-clock fence rolls back state when its deadline is expired", async () => {
+  const taskId = await createTodo("AMUX-DB-FENCE");
+  try {
+    await assert.rejects(
+      withAmuxDbBoundary(
+        {
+          operation: "expired_fence_test",
+          prismaCallCeiling: 5,
+          isolation: "mutation",
+        },
+        async (tx) => {
+          await tx.amuxWorkItem.update({
+            where: { id: taskId },
+            data: { priority: "p0" },
+          });
+          // Simulate the route's cumulative DB-clock budget being exhausted;
+          // the final fence must reject despite each prior SQL completing.
+          await tx.$queryRaw`
+            SELECT set_config(
+              'tomverse.amux_deadline',
+              (clock_timestamp() - INTERVAL '1 millisecond')::text,
+              true
+            )
+          `;
+        },
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError &&
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED",
+    );
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("AMUX ownership lease is still live at the final DB-clock fence", async () => {
+  const taskId = await createTodo("AMUX-DB-LEASE-FENCE");
+  try {
+    await assert.rejects(
+      withAmuxDbBoundary(
+        {
+          operation: "expired_lease_fence_test",
+          prismaCallCeiling: 3,
+          isolation: "mutation",
+        },
+        async (tx, context) => {
+          await tx.amuxWorkItem.update({
+            where: { id: taskId },
+            data: { priority: "p0" },
+          });
+          context.requireLeaseAt(new Date(context.dbNow.getTime() - 1));
+        },
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError &&
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED",
+    );
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("AMUX final lease fence keeps UTC instants under a non-UTC DB TimeZone", async () => {
+  const sessionZone = await withAmuxDbBoundary(
+    {
+      operation: "non_utc_lease_fence_test",
+      prismaCallCeiling: 5,
+      isolation: "read",
+    },
+    async (tx, context) => {
+      const rows = await tx.$queryRaw<Array<{ zone: string }>>`
+        SELECT set_config('TimeZone', 'Australia/Brisbane', true) AS zone
+      `;
+      context.requireLeaseAt(new Date(context.dbNow.getTime() + 60_000));
+      return rows[0]?.zone;
+    },
+  );
+
+  assert.equal(sessionZone, "Australia/Brisbane");
+});
+
+test("AMUX DB clock context represents the actual instant in every session TimeZone", async () => {
+  const enteredAt = Date.now();
+  const clock = await withAmuxDbBoundary(
+    {
+      operation: "db_clock_instant_test",
+      prismaCallCeiling: 3,
+      isolation: "read",
+    },
+    async (tx, context) => {
+      const rows = await tx.$queryRaw<
+        Array<{ zone: string; dbEpochMs: bigint }>
+      >`
+        SELECT current_setting('TimeZone') AS zone,
+          floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint
+            AS "dbEpochMs"
+      `;
+      return {
+        zone: rows[0]?.zone,
+        dbNowMs: context.dbNow.getTime(),
+        deadlineAtMs: context.deadlineAt.getTime(),
+        dbEpochMs: Number(rows[0]?.dbEpochMs),
+      };
+    },
+  );
+  if (process.env.AMUX_EXPECT_DB_TIMEZONE) {
+    assert.equal(clock.zone, process.env.AMUX_EXPECT_DB_TIMEZONE);
+  }
+  assert.ok(Math.abs(clock.dbNowMs - enteredAt) < 5_000);
+  assert.ok(Math.abs(clock.dbNowMs - clock.dbEpochMs) < 1_000);
+  assert.equal(
+    clock.deadlineAtMs - clock.dbNowMs,
+    amuxDbTransactionBudgetMs({
+      operation: "db_clock_instant_test",
+      prismaCallCeiling: 3,
+      isolation: "read",
+    }),
+  );
+});
+
+test("an anchored route deadline is not renewed by a later claim transaction", async () => {
+  const taskId = await createTodo("AMUX-DB-ABSOLUTE");
+  try {
+    await withAmuxRouteBudget(async () => {
+      await anchorAmuxClaimDeadline();
+      await delay(1_050);
+      await assert.rejects(
+        withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claim, async (tx) => {
+          await tx.amuxWorkItem.update({
+            where: { id: taskId },
+            data: { priority: "p0" },
+          });
+        }),
+        (error: unknown) =>
+          error instanceof AmuxDbBoundaryError &&
+          error.code === "AMUX_DB_DEADLINE_EXCEEDED",
+      );
+    }, 1_000);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("AMUX Prisma-call ceiling refuses N+1 before issuing its SQL", async () => {
+  await assert.rejects(
+    withAmuxDbBoundary(
+      { operation: "ceiling_test", prismaCallCeiling: 3, isolation: "read" },
+      async (tx) => {
+        await tx.$queryRaw`SELECT 1`;
+        await tx.$queryRaw`SELECT 2`;
+        await tx.$queryRaw`SELECT 3`;
+      },
+    ),
+    (error: unknown) =>
+      error instanceof AmuxDbBoundaryError &&
+      error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+  );
+});
+
+test("AMUX LOCAL timeout settings do not leak to another connection use", async () => {
+  await withAmuxDbBoundary(
+    {
+      operation: "local_settings_test",
+      prismaCallCeiling: 3,
+      isolation: "read",
+    },
+    async (tx) => {
+      const values = await tx.$queryRaw<
+        Array<{ statement: string; idle: string }>
+      >`
+        SELECT current_setting('statement_timeout') AS statement,
+          current_setting('idle_in_transaction_session_timeout') AS idle
+      `;
+      assert.equal(values[0]?.statement, "200ms");
+      assert.equal(values[0]?.idle, "100ms");
+    },
+  );
+  const values = await prisma.$queryRaw<
+    Array<{ statement: string; idle: string }>
+  >`
+    SELECT current_setting('statement_timeout') AS statement,
+      current_setting('idle_in_transaction_session_timeout') AS idle
+  `;
+  assert.notEqual(values[0]?.statement, "200ms");
+  assert.notEqual(values[0]?.idle, "100ms");
+});
+
 const signals = (
   overrides: Partial<AmuxDecisionSignals> = {},
 ): AmuxDecisionSignals => ({
@@ -118,6 +417,410 @@ const createTodo = async (prefix: string) => {
   return id;
 };
 
+test("new AMUX rows default to unowned catalog-only backlog while existing Todo remains runnable", async () => {
+  const backlogId = `amux-backlog-default-${randomUUID()}`;
+  const todoId = await createTodo("amux-existing-todo");
+  const worker = `amux-backlog-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+
+  try {
+    const backlog = await prisma.amuxWorkItem.create({
+      data: {
+        id: backlogId,
+        title: "Unapproved catalog card",
+      },
+    });
+
+    assert.equal(backlog.status, "backlog");
+    assert.equal(backlog.owner, null);
+    assert.equal(backlog.claimedAt, null);
+
+    const dispatchable = await listDispatchable();
+    assert.equal(
+      dispatchable.some((task) => task.id === backlogId),
+      false,
+    );
+    assert.equal(
+      dispatchable.some((task) => task.id === todoId),
+      true,
+    );
+    assert.equal(await getRoutingSnapshotTask(backlogId, 0), null);
+    assert.equal(
+      (await listOwnedTodos()).some((task) => task.id === backlogId),
+      false,
+    );
+
+    const claim = await claimUnownedTodo({
+      taskId: backlogId,
+      worker,
+      expectedRevision: 0,
+      schedulerScore: 1,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.deepEqual(claim, { claimed: false, reason: "cas_lost" });
+
+    const base = new Date();
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+    assert.deepEqual(
+      await startAmuxExecution({
+        taskId: backlogId,
+        worker,
+        instanceId,
+        generation: runtime.generation,
+        expectedRevision: 0,
+        now: new Date(base.getTime() + 1_000),
+      }),
+      { started: false, reason: "task_not_startable" },
+    );
+
+    const persisted = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: backlogId },
+    });
+    assert.equal(persisted.status, "backlog");
+    assert.equal(persisted.owner, null);
+    assert.equal(persisted.revision, 0);
+    assert.equal(
+      await prisma.amuxRouteDecision.count({ where: { taskId: backlogId } }),
+      0,
+    );
+    assert.equal(
+      await prisma.amuxExecutionAttempt.count({ where: { taskId: backlogId } }),
+      0,
+    );
+    assert.equal(
+      await prisma.amuxWorkDelivery.count({ where: { taskId: backlogId } }),
+      0,
+    );
+  } finally {
+    await prisma.amuxWorkerRuntime.deleteMany({
+      where: { workerName: worker },
+    });
+    await prisma.amuxWorkItem.deleteMany({
+      where: { id: { in: [backlogId, todoId] } },
+    });
+  }
+});
+
+test("AMUX backlog is excluded by authenticated queue and routing APIs", async () => {
+  const backlogId = `amux-backlog-api-${randomUUID()}`;
+  const secret = makeAmuxSyncSecret();
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+
+  try {
+    await prisma.amuxWorkItem.create({
+      data: { id: backlogId, title: "Catalog card for API isolation" },
+    });
+
+    const queueResponse = await queuePost(
+      new Request("http://localhost/api/internal/amux/queue", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+    );
+    assert.equal(queueResponse.status, 200);
+    const queue = (await queueResponse.json()) as Array<{ id: string }>;
+    assert.equal(
+      queue.some((task) => task.id === backlogId),
+      false,
+    );
+
+    const routingResponse = await routingSnapshotPost(
+      new Request("http://localhost/api/internal/amux/routing-snapshot", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ task_id: backlogId, expected_revision: 0 }),
+      }),
+    );
+    assert.equal(routingResponse.status, 200);
+    assert.deepEqual(await routingResponse.json(), {
+      eligible: false,
+      execution_ready: false,
+      reason: "not_eligible",
+      task: null,
+      candidates: [],
+      telemetry: {},
+    });
+
+    const ownedResponse = await ownedQueuePost(
+      new Request("http://localhost/api/internal/amux/owned-queue", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      }),
+    );
+    assert.equal(ownedResponse.status, 200);
+    const owned = (await ownedResponse.json()) as Array<{ id: string }>;
+    assert.equal(
+      owned.some((task) => task.id === backlogId),
+      false,
+    );
+  } finally {
+    if (previousSecret === undefined)
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    if (previousExecutionApi === undefined)
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
+    await prisma.amuxWorkItem.deleteMany({ where: { id: backlogId } });
+  }
+});
+
+test("catalog-only dependents do not boost Todo priority, but unsatisfied dependencies still block it", async () => {
+  const backlogId = `amux-backlog-dependent-${randomUUID()}`;
+  const todoId = await createTodo("amux-todo-with-catalog-edge");
+
+  try {
+    await prisma.amuxWorkItem.create({
+      data: { id: backlogId, title: "Catalog-only dependent" },
+    });
+    await prisma.amuxWorkDependency.create({
+      data: { taskId: backlogId, dependencyId: todoId },
+    });
+
+    const queueWithCatalogDependent = await listDispatchable();
+    assert.equal(
+      queueWithCatalogDependent.find((task) => task.id === todoId)
+        ?.dependent_count,
+      0,
+    );
+
+    await prisma.amuxWorkDependency.deleteMany({
+      where: { taskId: backlogId, dependencyId: todoId },
+    });
+    await prisma.amuxWorkDependency.create({
+      data: { taskId: todoId, dependencyId: backlogId },
+    });
+
+    // A human-authored dependency is real even when the dependency is catalog-only.
+    assert.equal(
+      (await listDispatchable()).some((task) => task.id === todoId),
+      false,
+    );
+  } finally {
+    await prisma.amuxWorkDependency.deleteMany({
+      where: { taskId: { in: [backlogId, todoId] } },
+    });
+    await prisma.amuxWorkItem.deleteMany({
+      where: { id: { in: [backlogId, todoId] } },
+    });
+  }
+});
+
+test("AMUX source identity is complete, unique, and cannot lend backlog ownership", async () => {
+  const sourceKey = `WORK-${randomUUID().toUpperCase()}`;
+  const ids = [
+    `amux-source-valid-${randomUUID()}`,
+    `amux-source-duplicate-${randomUUID()}`,
+    `amux-source-partial-${randomUUID()}`,
+    `amux-source-metadata-${randomUUID()}`,
+    `amux-backlog-owner-${randomUUID()}`,
+    `amux-source-json-null-${randomUUID()}`,
+    `amux-source-digest-${randomUUID()}`,
+    `amux-source-case-${randomUUID()}`,
+    `amux-source-space-${randomUUID()}`,
+    `amux-source-version-space-${randomUUID()}`,
+    `amux-source-interior-space-${randomUUID()}`,
+    `amux-source-version-tab-${randomUUID()}`,
+    `amux-source-digest-case-${randomUUID()}`,
+  ];
+
+  try {
+    const valid = await prisma.amuxWorkItem.create({
+      data: {
+        id: ids[0],
+        title: "Catalog-only source projection",
+        sourceSystem: "workboard",
+        sourceKey,
+        sourceVersion: "source-commit-test",
+        sourceDigest: "a".repeat(64),
+        sourceSnapshot: { scope: "synthetic", version: 1 },
+      },
+    });
+    assert.equal(valid.status, "backlog");
+
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[1],
+          title: "Duplicate source identity",
+          sourceSystem: "workboard",
+          sourceKey,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: { version: 2 },
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[2],
+          title: "Half source identity",
+          sourceSystem: "workboard",
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[3],
+          title: "Incomplete source metadata",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey}-OTHER`,
+          sourceVersion: "source-commit-test",
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[4],
+          title: "Backlog may not have an owner",
+          status: "backlog",
+          owner: "worker-a",
+          claimedAt: new Date(),
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[5],
+          title: "JSON null is not a snapshot",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey}-JSON-NULL`,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: Prisma.JsonNull,
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[6],
+          title: "Malformed digest",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey}-BAD-DIGEST`,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "x",
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[7],
+          title: "Noncanonical source case",
+          sourceSystem: "workboard",
+          sourceKey: sourceKey.toLowerCase(),
+          sourceVersion: "source-commit-test",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[8],
+          title: "Noncanonical source spacing",
+          sourceSystem: "workboard",
+          sourceKey: ` ${sourceKey}`,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[9],
+          title: "Noncanonical source version spacing",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey}-VERSION-SPACE`,
+          sourceVersion: " source-commit-test ",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[10],
+          title: "Noncanonical source key interior spacing",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey} SPACE`,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "a".repeat(64),
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+    for (const sourceVersion of ["\tsource-commit-test", "source\ncommit"]) {
+      await assert.rejects(
+        prisma.amuxWorkItem.create({
+          data: {
+            id: ids[11],
+            title: "Control whitespace is not a source version",
+            sourceSystem: "workboard",
+            sourceKey: `${sourceKey}-VERSION-CONTROL`,
+            sourceVersion,
+            sourceDigest: "a".repeat(64),
+            sourceSnapshot: { version: 1 },
+          },
+        }),
+      );
+    }
+    await assert.rejects(
+      prisma.amuxWorkItem.create({
+        data: {
+          id: ids[12],
+          title: "Uppercase digest is not canonical SHA-256",
+          sourceSystem: "workboard",
+          sourceKey: `${sourceKey}-DIGEST-CASE`,
+          sourceVersion: "source-commit-test",
+          sourceDigest: "A".repeat(64),
+          sourceSnapshot: { version: 1 },
+        },
+      }),
+    );
+
+    assert.equal(
+      await prisma.amuxWorkItem.count({ where: { id: { in: ids } } }),
+      1,
+    );
+  } finally {
+    await prisma.amuxWorkItem.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
 test("two concurrent claimants produce exactly one owner and one route decision", async () => {
   const taskId = await createTodo("amux-race");
 
@@ -141,8 +844,10 @@ test("two concurrent claimants produce exactly one owner and one route decision"
   ]);
 
   const winners = [left, right].filter((result) => result.claimed);
+  const losers = [left, right].filter((result) => !result.claimed);
 
   assert.equal(winners.length, 1);
+  assert.deepEqual(losers, [{ claimed: false, reason: "cas_lost" }]);
 
   const task = await prisma.amuxWorkItem.findUniqueOrThrow({
     where: { id: taskId },
@@ -163,6 +868,49 @@ test("two concurrent claimants produce exactly one owner and one route decision"
   assert.equal(decisions[0]?.taskRevision, 0);
   assert.equal(decisions[0]?.schedulerScore, 32);
   assert.equal(decisions[0]?.scoringVersion, SCORING_VERSION);
+
+  const audits = await prisma.adminAuditLog.findMany({
+    where: {
+      action: "amux.claim.assigned",
+      targetType: "AmuxWorkItem",
+      targetId: taskId,
+    },
+  });
+
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]?.actorUserId, null);
+  assert.equal(audits[0]?.actorEmail, null);
+  assert.deepEqual(audits[0]?.metadata, {
+    decision_id: decisions[0]?.id,
+    worker: task.owner,
+    prior_task_revision: 0,
+    task_revision: 1,
+    scheduler_score: 32,
+    scoring_version: SCORING_VERSION,
+    measured: true,
+    verdict: "claimed",
+    systemActor: "tomverse-amux-orchestrator",
+  });
+
+  const losingWorker =
+    task.owner === "amux-db-worker-a" ? "amux-db-worker-b" : "amux-db-worker-a";
+  const refusedAudits = await prisma.adminAuditLog.findMany({
+    where: {
+      action: "amux.claim.refused",
+      targetType: "AmuxWorkItem",
+      targetId: taskId,
+    },
+  });
+
+  assert.equal(refusedAudits.length, 1);
+  assert.deepEqual(refusedAudits[0]?.metadata, {
+    reason: "cas_lost",
+    worker: losingWorker,
+    expected_revision: 0,
+    measured: true,
+    verdict: "refused",
+    systemActor: "tomverse-amux-orchestrator",
+  });
 
   // Keep historical route evidence append-only, but keep this fixture out of
   // later dispatchable reads.
@@ -217,31 +965,32 @@ test("project WIP admission serializes claims for different tasks", async () => 
     ]);
 
     assert.equal([first, second].filter((result) => result.claimed).length, 1);
-    const refusal = [first, second].find((result) => !result.claimed);
-    assert.deepEqual(refusal, {
-      claimed: false,
-      reason: "wip_limit_reached",
-    });
+    assert.deepEqual(
+      [first, second].filter((result) => !result.claimed),
+      [{ claimed: false, reason: "wip_limit_reached" }],
+    );
     const refusedTaskId = first.claimed ? secondTaskId : firstTaskId;
+    const refusedWorker = first.claimed
+      ? "amux-wip-worker-b"
+      : "amux-wip-worker-a";
     const refusalAudit = await prisma.adminAuditLog.findFirstOrThrow({
       where: {
         action: "amux.claim.refused",
+        targetType: "AmuxWorkItem",
         targetId: refusedTaskId,
       },
-      orderBy: { createdAt: "desc" },
     });
-    assert.deepEqual(
-      {
-        reason: (refusalAudit.metadata as Record<string, unknown>).reason,
-        measured: (refusalAudit.metadata as Record<string, unknown>).measured,
-        verdict: (refusalAudit.metadata as Record<string, unknown>).verdict,
-      },
-      {
-        reason: "wip_limit_reached",
-        measured: true,
-        verdict: "refused",
-      },
-    );
+    assert.deepEqual(refusalAudit.metadata, {
+      reason: "wip_limit_reached",
+      worker: refusedWorker,
+      expected_revision: 0,
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+      // main's refusal evidence (#1595): the full resource and its count.
+      blocked_resource: { scope: "project", key: projectKey },
+      wip: [{ scope: "project", key: projectKey, limit: 1, current: 1 }],
+    });
     assert.equal(
       await prisma.amuxWorkItem.count({
         where: {
@@ -263,6 +1012,9 @@ test("project WIP admission serializes claims for different tasks", async () => 
   }
 });
 
+// Restored from main (#1595). A develop merge dropped these three; they pin the
+// execution-start refusal audit under incident mode, the attempt budget and the
+// cost guard.
 test("incident admission refusals keep claim and execution-start audits atomic", async () => {
   const claimTaskId = await createTodo("amux-incident-claim");
   const startTaskId = await createTodo("amux-incident-start");
@@ -547,6 +1299,100 @@ test("execution start blocks before spending when the project cost budget is exh
   }
 });
 
+test("incident admission refusal is distinct from CAS loss and audited atomically", async () => {
+  const taskId = await createTodo("amux-incident-refusal");
+  const worker = "amux-incident-worker";
+  const previous = await prisma.appSetting.findUnique({
+    where: { key: AMUX_INCIDENT_SETTING_KEY },
+    select: { value: true },
+  });
+
+  await prisma.appSetting.upsert({
+    where: { key: AMUX_INCIDENT_SETTING_KEY },
+    create: {
+      key: AMUX_INCIDENT_SETTING_KEY,
+      value: serializeAmuxIncidentState({
+        version: 1,
+        state: "frozen",
+        transition_id: null,
+        changed_at: new Date().toISOString(),
+        reason: "Integration test incident freeze.",
+        ticket: "AMUX-TEST-INCIDENT",
+      }),
+    },
+    update: {
+      value: serializeAmuxIncidentState({
+        version: 1,
+        state: "frozen",
+        transition_id: null,
+        changed_at: new Date().toISOString(),
+        reason: "Integration test incident freeze.",
+        ticket: "AMUX-TEST-INCIDENT",
+      }),
+    },
+  });
+
+  try {
+    const outcome = await claimUnownedTodo({
+      taskId,
+      worker,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.deepEqual(outcome, {
+      claimed: false,
+      reason: "incident_admission_blocked",
+    });
+
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    assert.equal(task.owner, null);
+    assert.equal(task.revision, 0);
+
+    const refusalAudit = await prisma.adminAuditLog.findFirstOrThrow({
+      where: {
+        action: "amux.claim.refused",
+        targetType: "AmuxWorkItem",
+        targetId: taskId,
+      },
+    });
+    const stored = await prisma.appSetting.findUniqueOrThrow({
+      where: { key: AMUX_INCIDENT_SETTING_KEY },
+      select: { value: true },
+    });
+    assert.deepEqual(refusalAudit.metadata, {
+      reason: "incident_admission_blocked",
+      worker,
+      expected_revision: 0,
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+      // main's refusal evidence (#1595): which incident blocked admission.
+      incident_state: "frozen",
+      incident_transition_id: null,
+      incident_valid: parseAmuxIncidentSetting(stored.value).valid,
+    });
+  } finally {
+    if (previous) {
+      await prisma.appSetting.update({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+        data: { value: previous.value },
+      });
+    } else {
+      await prisma.appSetting.delete({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+      });
+    }
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { status: "done" },
+    });
+  }
+});
+
 test("cost settlement stays attributed to its reservation budget window", async () => {
   const projectKey = `amux-cost-${randomUUID()}`;
   const taskId = await createTodo("amux-cost-window");
@@ -637,6 +1483,51 @@ test("cost settlement stays attributed to its reservation budget window", async 
   }
 });
 
+test("a lost claim response is reconciled by read-back, not a second mutation", async () => {
+  const taskId = await createTodo("amux-claim-lost-response");
+  const worker = "amux-db-readback-worker";
+  try {
+    await assert.rejects(async () => {
+      const committed = await claimUnownedTodo({
+        taskId,
+        worker,
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      });
+      assert.equal(committed.claimed, true);
+      throw new Error("simulated HTTP response loss after DB commit");
+    }, /simulated HTTP response loss/);
+
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+    const decisions = await prisma.amuxRouteDecision.findMany({
+      where: { taskId },
+    });
+    const audits = await prisma.adminAuditLog.findMany({
+      where: {
+        action: "amux.claim.assigned",
+        targetId: taskId,
+      },
+    });
+    assert.equal(task.owner, worker);
+    assert.equal(task.revision, 1);
+    assert.equal(decisions.length, 1);
+    assert.equal(audits.length, 1);
+    assert.equal(
+      decisions[0]?.id,
+      (audits[0]?.metadata as { decision_id?: string })?.decision_id,
+    );
+  } finally {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { status: "done" },
+    });
+  }
+});
+
 test("a failed route-decision insert rolls the owner claim back", async () => {
   const taskId = await createTodo("amux-rollback");
 
@@ -673,6 +1564,88 @@ test("a failed route-decision insert rolls the owner claim back", async () => {
   await prisma.amuxWorkItem.delete({
     where: { id: taskId },
   });
+});
+
+test("a failed canonical audit insert rolls the owner and route decision back", async () => {
+  const taskId = await createTodo("amux-audit-rollback");
+  const suffix = randomUUID().replaceAll("-", "");
+  const functionName = `amux_reject_claim_audit_${suffix}`;
+  const triggerName = `amux_reject_claim_audit_t_${suffix}`;
+
+  /*
+   * This suite runs only against a disposable dedicated test database and its
+   * runner serializes DB suites. A temporary trigger is the integration seam
+   * that makes the real canonical audit INSERT fail after the owner CAS and
+   * route-decision INSERT have both happened. It is removed in finally even
+   * when an assertion fails.
+   *
+   * Both identifiers contain only the fixed prefix and a dash-free UUID.
+   */
+  await prisma.$executeRawUnsafe(`
+    CREATE FUNCTION "${functionName}"()
+    RETURNS trigger
+    SET search_path = pg_catalog, pg_temp
+    AS $$
+    BEGIN
+      IF NEW."action" = 'amux.claim.assigned' THEN
+        RAISE EXCEPTION 'AMUX test forced audit failure'
+          USING ERRCODE = 'check_violation';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TRIGGER "${triggerName}"
+      BEFORE INSERT ON "AdminAuditLog"
+      FOR EACH ROW
+      EXECUTE FUNCTION "${functionName}"()
+    `);
+
+    await assert.rejects(
+      claimUnownedTodo({
+        taskId,
+        worker: "amux-db-worker-audit-failure",
+        expectedRevision: 0,
+        schedulerScore: 32,
+        scoringVersion: SCORING_VERSION,
+        signals: signals(),
+      }),
+      /AMUX test forced audit failure/,
+    );
+
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+
+    assert.equal(task.owner, null);
+    assert.equal(task.revision, 0);
+    assert.equal(task.claimedAt, null);
+    assert.equal(
+      await prisma.amuxRouteDecision.count({ where: { taskId } }),
+      0,
+    );
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: {
+          action: "amux.claim.assigned",
+          targetType: "AmuxWorkItem",
+          targetId: taskId,
+        },
+      }),
+      0,
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`
+      DROP TRIGGER IF EXISTS "${triggerName}" ON "AdminAuditLog"
+    `);
+    await prisma.$executeRawUnsafe(`
+      DROP FUNCTION IF EXISTS "${functionName}"()
+    `);
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  }
 });
 
 test("cancelled dependencies fail closed while done dependencies unblock work", async () => {
@@ -743,6 +1716,15 @@ test("live dependents contribute to dependent_count exactly once", async () => {
   assert.ok(parent);
   assert.equal(parent.dependent_count, 1);
 
+  // The queue keys an orchestrator built from main before the develop AMUX
+  // port requires, kept for the compatibility window.
+  assert.deepEqual(
+    Object.keys(parent).sort(),
+    Object.keys(queueWireCompat.queue_server).sort(),
+  );
+  assert.equal(parent.status, "todo");
+  assert.deepEqual(parent.dependencies, []);
+
   // The child waits on the unfinished parent.
   assert.equal(
     dispatchable.some((task) => task.id === childId),
@@ -805,6 +1787,50 @@ test("routing snapshot fails closed without an explicit worker catalog", async (
     await prisma.amuxWorkItem.delete({
       where: { id: taskId },
     });
+  }
+});
+
+test("routing snapshot rejects worker names outside the response machine-id contract", async () => {
+  const taskId = await createTodo("amux-routing-invalid-worker-name");
+  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: {
+        classification: {
+          task_kind: "migration",
+          complexity: 8,
+          risk: 2,
+          files_expected: 2,
+        },
+      },
+    });
+    for (const workerName of ["codex-", " codex-a ", "a".repeat(121)]) {
+      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
+        {
+          worker_name: workerName,
+          provider: "codex",
+          routing_roles: ["migration"],
+        },
+      ]);
+
+      assert.deepEqual(await buildAmuxRoutingSnapshot(taskId, 0), {
+        eligible: false,
+        execution_ready: false,
+        reason: "worker_catalog_unavailable",
+        task: null,
+        candidates: [],
+        telemetry: {},
+      });
+    }
+  } finally {
+    if (previousCatalog === undefined) {
+      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+    } else {
+      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
+    }
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
 });
 
@@ -970,8 +1996,9 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
     signals: evidence,
   });
 
-  assert.equal(claim.claimed, true);
-  if (!claim.claimed) throw new Error("expected claim to succeed");
+  if (!claim.claimed) {
+    assert.fail(`claim was refused: ${claim.reason}`);
+  }
 
   const decision = await prisma.amuxRouteDecision.findUniqueOrThrow({
     where: { id: claim.decisionId },
@@ -992,6 +2019,330 @@ test("claim persists scheduler and worker-router evidence in one append-only dec
   });
 });
 
+test("one authenticated claim kill-switch refusal appends one audit without mutating ownership", async () => {
+  const taskId = await createTodo("amux-api-kill-switch");
+  const secret = makeAmuxSyncSecret();
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+
+  try {
+    const auditCountBefore = await prisma.adminAuditLog.count({
+      where: { action: "amux.claim.refused" },
+    });
+
+    const response = await claimPost(
+      new Request("http://localhost/api/internal/amux/claim", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      claimed: false,
+      reason: "execution_api_disabled",
+    });
+
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({
+      where: { id: taskId },
+    });
+
+    assert.equal(task.owner, null);
+    assert.equal(task.revision, 0);
+    assert.equal(task.claimedAt, null);
+    assert.equal(
+      await prisma.amuxRouteDecision.count({ where: { taskId } }),
+      0,
+    );
+
+    const refusalAudits = await prisma.adminAuditLog.findMany({
+      where: { action: "amux.claim.refused" },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+
+    assert.equal(refusalAudits.length, auditCountBefore + 1);
+
+    const refusalAudit = refusalAudits.at(-1);
+
+    assert.ok(refusalAudit);
+    assert.equal(refusalAudit.actorUserId, null);
+    assert.equal(refusalAudit.actorEmail, null);
+    assert.equal(refusalAudit.targetType, "AmuxClaimRequest");
+    assert.equal(refusalAudit.targetId, null);
+    assert.deepEqual(refusalAudit.metadata, {
+      reason: "execution_api_disabled",
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+    });
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    } else {
+      process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    }
+
+    if (previousExecutionApi === undefined) {
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    } else {
+      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
+    }
+
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  }
+});
+
+test("an unauthenticated claim refusal does not append an audit oracle", async () => {
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = makeAmuxSyncSecret();
+
+  try {
+    const auditCountBefore = await prisma.adminAuditLog.count({
+      where: { action: "amux.claim.refused" },
+    });
+
+    const response = await claimPost(
+      new Request("http://localhost/api/internal/amux/claim", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer invalid-amux-secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    assert.equal(response.status, 401);
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: { action: "amux.claim.refused" },
+      }),
+      auditCountBefore,
+    );
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    } else {
+      process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    }
+  }
+});
+
+test("an authenticated not-eligible claim appends one bounded refusal audit", async () => {
+  const taskId = `amux-missing-${randomUUID()}`;
+  const worker = "codex-missing-task";
+  const secret = makeAmuxSyncSecret();
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+
+  try {
+    const response = await claimPost(
+      new Request("http://localhost/api/internal/amux/claim", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          task_id: taskId,
+          worker,
+          expected_revision: 0,
+          decision: {
+            scheduler_score: 32,
+            scoring_version: SCORING_VERSION,
+            signals: {
+              scheduler: signals(),
+              routing: {
+                scoring_version: "amux-worker-router-v1",
+                preferred_worker: null,
+                selected_worker: null,
+                preferred_score: null,
+                selected_score: null,
+                candidates: [schemaValidAmuxRoutingCandidate(worker)],
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      claimed: false,
+      reason: "not_eligible",
+    });
+
+    const audits = await prisma.adminAuditLog.findMany({
+      where: {
+        action: "amux.claim.refused",
+        targetType: "AmuxWorkItem",
+        targetId: taskId,
+      },
+    });
+
+    assert.equal(audits.length, 1);
+    assert.deepEqual(audits[0]?.metadata, {
+      reason: "not_eligible",
+      worker,
+      expected_revision: 0,
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+    });
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    } else {
+      process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    }
+
+    if (previousExecutionApi === undefined) {
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    } else {
+      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
+    }
+  }
+});
+
+test("an authenticated authoritative-worker mismatch appends one bounded refusal audit", async () => {
+  const taskId = await createTodo("amux-api-worker-mismatch");
+  // Under main's selection rule (#1595) only a running, idle, dispatch-ready
+  // worker can be the authoritative choice, so the test registers one; without
+  // it the server finds no authoritative worker at all and refuses for that
+  // reason instead of the mismatch this test is about.
+  const authoritativeWorker = `codex-authoritative-${randomUUID()}`;
+  const requestedWorker = "claude-mismatch";
+  const secret = makeAmuxSyncSecret();
+
+  await prisma.amuxWorkItem.update({
+    where: { id: taskId },
+    data: {
+      classification: {
+        task_kind: "feature",
+        complexity: 4,
+        risk: 1,
+        files_expected: ["a.ts"],
+      },
+    },
+  });
+
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
+    {
+      worker_name: authoritativeWorker,
+      provider: "CODEX",
+      routing_roles: ["feature", "implementation"],
+    },
+  ]);
+
+  try {
+    const instanceId = randomUUID();
+    const runtime = await registerAmuxWorkerRuntime(authoritativeWorker, instanceId, new Date());
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: authoritativeWorker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(),
+    });
+    assert.equal(ready.accepted, true);
+
+    const response = await claimPost(
+      new Request("http://localhost/api/internal/amux/claim", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${secret}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          task_id: taskId,
+          worker: requestedWorker,
+          expected_revision: 0,
+          decision: {
+            scheduler_score: 32,
+            scoring_version: SCORING_VERSION,
+            signals: {
+              scheduler: signals(),
+              routing: {
+                scoring_version: "amux-worker-router-v1",
+                preferred_worker: null,
+                selected_worker: null,
+                preferred_score: null,
+                selected_score: null,
+                candidates: [schemaValidAmuxRoutingCandidate(requestedWorker)],
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      claimed: false,
+      reason: "authoritative_worker_mismatch",
+    });
+
+    const audits = await prisma.adminAuditLog.findMany({
+      where: {
+        action: "amux.claim.refused",
+        targetType: "AmuxWorkItem",
+        targetId: taskId,
+      },
+    });
+
+    assert.equal(audits.length, 1);
+    assert.deepEqual(audits[0]?.metadata, {
+      reason: "authoritative_worker_mismatch",
+      worker: requestedWorker,
+      expected_revision: 0,
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+    });
+  } finally {
+    if (previousSecret === undefined) {
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    } else {
+      process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    }
+
+    if (previousCatalog === undefined) {
+      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+    } else {
+      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
+    }
+
+    if (previousExecutionApi === undefined) {
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    } else {
+      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
+    }
+
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: authoritativeWorker } });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  }
+});
+
+// main's selection rule (#1595): a worker that is not running, idle and at a
+// dispatch boundary is preferred demand, never a selected owner, so a claim for
+// it is refused before any ownership evidence exists.
 test("claim API refuses ownership when no worker is execution-ready", async () => {
   const taskId = await createTodo("amux-api-lifecycle-gate");
   const worker = "codex-evidence";
@@ -1097,6 +2448,24 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
       }),
       0,
     );
+
+    const refusalAudits = await prisma.adminAuditLog.findMany({
+      where: {
+        action: "amux.claim.refused",
+        targetType: "AmuxWorkItem",
+        targetId: taskId,
+      },
+    });
+
+    assert.equal(refusalAudits.length, 1);
+    assert.deepEqual(refusalAudits[0]?.metadata, {
+      reason: "no_authoritative_worker",
+      worker,
+      expected_revision: 0,
+      measured: true,
+      verdict: "refused",
+      systemActor: "tomverse-amux-orchestrator",
+    });
   } finally {
     if (previousSecret === undefined) {
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
@@ -1233,6 +2602,43 @@ test("worker runtime replacement fences the previous generation", async () => {
       finalRuntime.heartbeatAt.getTime(),
       secondHeartbeatAt.getTime(),
     );
+
+    const controlAudits = await prisma.adminAuditLog.findMany({
+      where: {
+        targetType: "AmuxWorkerRuntime",
+        targetId: workerName,
+        action: {
+          in: ["amux.worker.registered", "amux.worker.status_changed"],
+        },
+      },
+    });
+    assert.equal(controlAudits.length, 4);
+    assert.deepEqual(controlAudits.map((row) => row.action).sort(), [
+      "amux.worker.registered",
+      "amux.worker.registered",
+      "amux.worker.status_changed",
+      "amux.worker.status_changed",
+    ]);
+
+    const telemetryRefresh = await heartbeatAmuxWorkerRuntime({
+      workerName,
+      instanceId: secondInstance,
+      generation: 2,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(secondHeartbeatAt.getTime() + 500),
+    });
+    assert.equal(telemetryRefresh.accepted, true);
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: {
+          targetType: "AmuxWorkerRuntime",
+          targetId: workerName,
+          action: "amux.worker.status_changed",
+        },
+      }),
+      2,
+    );
   } finally {
     await prisma.amuxWorkerRuntime.deleteMany({
       where: { workerName },
@@ -1352,6 +2758,555 @@ test("execution start and settle are fenced by task revision and worker generati
   }
 });
 
+/*
+ * Policy version 18, "활성화 증거": a settle whose COMMIT reaches the database
+ * after its DB-clock deadline must not be recorded as success. The final fence
+ * (`withAmuxDbBoundary`) is a check *before* COMMIT; the tests above prove it
+ * rolls back a transaction that is already late when the fence runs. This one
+ * makes the fence pass just before the commit deadline D and lets the COMMIT
+ * itself arrive after it, which is what a GC pause, a stalled event loop or a
+ * slow network between the fence and COMMIT does in production.
+ *
+ * D is the earliest deadline the settle is held to, less
+ * AMUX_DB_COMMIT_RESERVE_MS. Here that is the attempt's lease, set 1.5 s out;
+ * the runtime lease (90 s) and the transaction budget are later. The fence
+ * records D in `AmuxCommitDeadline` and compares the clock with it; the
+ * deferred trigger compares the clock with the same stored D during COMMIT.
+ *
+ * Instrumentation, at the pg driver the Prisma adapter uses, touches only this
+ * settle's connection:
+ * - before the fence it walks the open transaction's clock forward with short
+ *   pg_sleep statements (each under the 200 ms statement timeout, no idle gap)
+ *   until the database clock is FENCE_MARGIN_MS before D -- the same as a
+ *   settle whose own work ended there -- and then lets the real fence run;
+ * - right after the fence it reads back the marker the fence wrote, which is
+ *   how the test knows D and the transaction id without computing either;
+ * - it then holds the COMMIT, with no statement in between, until
+ *   COMMIT_DELAY_MS after the walk ended, so the COMMIT is sent after D and
+ *   while the idle-in-transaction timeout has not fired.
+ *
+ * The setup assertions keep a pass from being vacuous: the fence let the
+ * transaction through with the trigger present, the recorded D is the lease
+ * less the reserve, the COMMIT was sent after D, and the idle gap stayed under
+ * the idle-in-transaction timeout (so the refusal has to come from something
+ * that looks at the deadline, not from that timeout). The refusal is then read
+ * on the raw errors, before any mapping: the pg driver's SQLSTATE and the
+ * adapter error Prisma rethrows at COMMIT both say AX001.
+ */
+test("a settle whose COMMIT lands after its commit deadline is refused by the database", async () => {
+  const FENCE_MARGIN_MS = 40;
+  const COMMIT_DELAY_MS = 70;
+  assert.ok(COMMIT_DELAY_MS > FENCE_MARGIN_MS);
+  assert.ok(COMMIT_DELAY_MS < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS);
+
+  const worker = `amux-late-commit-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const taskId = await createTodo("amux-late-commit");
+  const base = new Date();
+
+  type Query = (this: PgClient, ...args: unknown[]) => unknown;
+  const prototype = PgClient.prototype as unknown as { query: Query };
+  const originalQuery = prototype.query;
+  const probe = {
+    armed: false,
+    client: null as PgClient | null,
+    commitDeadlineMs: 0,
+    walkEndDbMs: null as number | null,
+    walkEndLocalMs: null as number | null,
+    fenceWithinDeadline: null as boolean | null,
+    fenceCommitCheckInstalled: null as boolean | null,
+    markerDeadlineMs: null as number | null,
+    markerTxid: null as string | null,
+    lastStatementDoneLocalMs: null as number | null,
+    commitSentLocalMs: null as number | null,
+    commitAccepted: null as boolean | null,
+    commitError: null as unknown,
+  };
+  const textOf = (args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first === "object" && typeof (first as { text?: unknown }).text === "string") {
+      return (first as { text: string }).text;
+    }
+    return "";
+  };
+  const clockMs = async (client: PgClient) => {
+    const result = (await originalQuery.call(
+      client,
+      `SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"`,
+    )) as { rows: Array<{ nowMs: string }> };
+    return Number(result.rows[0]?.nowMs);
+  };
+  const column = (
+    result: { fields?: Array<{ name: string }>; rows?: unknown[][] },
+    name: string,
+  ) => {
+    const index = result.fields?.findIndex((field) => field.name === name) ?? -1;
+    return index < 0 ? undefined : result.rows?.[0]?.[index];
+  };
+
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { owner: worker, claimedAt: base, revision: 1 },
+    });
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    if (!started.started) {
+      throw new Error(`execution did not start: ${started.reason}`);
+    }
+
+    // The attempt's lease ends 1.5 s from now on the database clock, so the
+    // commit deadline is that less the reserve.
+    const dbNow = await prisma.$queryRaw<Array<{ nowMs: bigint }>>`
+      SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"
+    `;
+    const leaseDeadlineMs = Number(dbNow[0]?.nowMs) + 1_500;
+    probe.commitDeadlineMs = leaseDeadlineMs - AMUX_DB_COMMIT_RESERVE_MS;
+    await prisma.amuxExecutionAttempt.update({
+      where: { id: started.attemptId },
+      data: { leaseExpiresAt: new Date(leaseDeadlineMs) },
+    });
+
+    prototype.query = function (this: PgClient, ...args: unknown[]) {
+      const text = textOf(args);
+      if (probe.armed && probe.client === null && text.includes(`AS "withinDeadline"`)) {
+        probe.client = this;
+        return (async () => {
+          for (;;) {
+            const now = await clockMs(this);
+            const remaining = probe.commitDeadlineMs - FENCE_MARGIN_MS - now;
+            if (remaining <= 0) {
+              probe.walkEndDbMs = now;
+              probe.walkEndLocalMs = performance.now();
+              break;
+            }
+            await originalQuery.call(this, `SELECT pg_sleep(${(Math.min(remaining, 120) / 1_000).toFixed(3)})`);
+          }
+          const result = (await originalQuery.apply(this, args)) as {
+            fields?: Array<{ name: string }>;
+            rows?: unknown[][];
+          };
+          probe.fenceWithinDeadline = column(result, "withinDeadline") === true;
+          probe.fenceCommitCheckInstalled = column(result, "commitCheckInstalled") === true;
+          const marker = (await originalQuery.call(
+            this,
+            `SELECT "txid"::text AS "txid",
+               floor(extract(epoch FROM "deadline") * 1000)::bigint::text AS "deadlineMs"
+             FROM "AmuxCommitDeadline" WHERE "txid" = txid_current()`,
+          )) as { rows: Array<{ txid: string; deadlineMs: string }> };
+          probe.markerTxid = marker.rows[0]?.txid ?? null;
+          probe.markerDeadlineMs = marker.rows[0] ? Number(marker.rows[0].deadlineMs) : null;
+          probe.lastStatementDoneLocalMs = performance.now();
+          return result;
+        })();
+      }
+      if (probe.armed && this === probe.client && text.trim().toUpperCase() === "COMMIT") {
+        probe.armed = false;
+        return (async () => {
+          // A timer can wake a fraction of a millisecond before its delay by
+          // performance.now(), which failed this setup on CI by under 1 ms.
+          // Wait until the target is actually reached.
+          const target = (probe.walkEndLocalMs ?? 0) + COMMIT_DELAY_MS;
+          for (let wait = target - performance.now(); wait > 0; wait = target - performance.now()) {
+            await delay(Math.ceil(wait));
+          }
+          probe.commitSentLocalMs = performance.now();
+          try {
+            const result = await originalQuery.apply(this, args);
+            probe.commitAccepted = true;
+            return result;
+          } catch (error) {
+            probe.commitAccepted = false;
+            probe.commitError = error;
+            throw error;
+          }
+        })();
+      }
+      return originalQuery.apply(this, args);
+    };
+    probe.armed = true;
+
+    let settleError: unknown = null;
+    try {
+      await settleAmuxExecution({
+        attemptId: started.attemptId,
+        worker,
+        instanceId,
+        generation: runtime.generation,
+        taskRevision: started.taskRevision,
+        outcome: "succeeded",
+        toStatus: "review",
+      });
+    } catch (error) {
+      settleError = error;
+    } finally {
+      probe.armed = false;
+      prototype.query = originalQuery;
+    }
+
+    // Setup: the fence let the transaction through with the trigger present,
+    // D is the lease less the reserve, and the COMMIT was sent after D
+    // without the idle timeout firing.
+    assert.equal(probe.fenceWithinDeadline, true, `setup: the fence must pass (${String(settleError)})`);
+    assert.equal(probe.fenceCommitCheckInstalled, true, "setup: the commit deadline trigger must be installed");
+    assert.equal(probe.markerDeadlineMs, probe.commitDeadlineMs, "setup: the fence recorded D = lease - reserve");
+    assert.ok(probe.markerTxid !== null, "setup: the fence recorded its transaction id");
+    assert.ok(
+      probe.walkEndDbMs !== null &&
+        probe.walkEndDbMs >= probe.commitDeadlineMs - FENCE_MARGIN_MS &&
+        probe.walkEndDbMs < probe.commitDeadlineMs,
+      "setup: the fence ran a few ms before D",
+    );
+    assert.ok(
+      probe.commitSentLocalMs !== null &&
+        probe.walkEndLocalMs !== null &&
+        probe.lastStatementDoneLocalMs !== null,
+    );
+    assert.ok(
+      probe.commitSentLocalMs - probe.walkEndLocalMs >= COMMIT_DELAY_MS,
+      "setup: the COMMIT must be sent after D",
+    );
+    assert.ok(
+      probe.commitSentLocalMs - probe.lastStatementDoneLocalMs < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+      "setup: the idle gap before COMMIT exceeded the idle-in-transaction timeout; the run proves nothing",
+    );
+
+    // The raw errors, before any mapping: the database refused the COMMIT with
+    // AX001, and that is the code on the adapter error Prisma rethrew.
+    assert.equal(probe.commitAccepted, false, "the late COMMIT was accepted");
+    const pgError = probe.commitError as { code?: unknown; message?: unknown };
+    assert.equal(pgError.code, AMUX_LATE_COMMIT_SQLSTATE);
+    assert.equal(pgError.message, AMUX_LATE_COMMIT_MESSAGE);
+    assert.ok(settleError instanceof Error);
+    const adapterError = settleError.cause as {
+      name?: unknown;
+      cause?: { kind?: unknown; code?: unknown };
+      meta?: { code?: unknown };
+    };
+    assert.ok(
+      adapterError?.meta?.code === AMUX_LATE_COMMIT_SQLSTATE ||
+        (adapterError?.cause?.kind === "postgres" &&
+          adapterError.cause.code === AMUX_LATE_COMMIT_SQLSTATE),
+      `the error Prisma surfaced at COMMIT does not carry AX001: ${String(adapterError?.name)}`,
+    );
+    assert.equal(isAmuxLateCommitError(adapterError), true);
+
+    // The mapping, and the verdict: a late COMMIT leaves no success behind.
+    assert.ok(settleError instanceof AmuxDbBoundaryError);
+    assert.equal(settleError.code, "AMUX_DB_DEADLINE_EXCEEDED");
+    const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+      where: { id: started.attemptId },
+    });
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(attempt.outcome, "succeeded");
+    assert.notEqual(task.status, "review");
+    assert.equal(
+      await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(probe.markerTxid) } }),
+      0,
+      "the refused transaction's marker was rolled back with it",
+    );
+  } finally {
+    prototype.query = originalQuery;
+    await prisma.amuxWorkDelivery.deleteMany({ where: { taskId } });
+    await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: worker } });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  }
+});
+
+test("the commit deadline trigger is a deferred constraint trigger on insert, as the migration defines it", async () => {
+  const triggers = await prisma.$queryRaw<
+    Array<{
+      name: string;
+      deferrable: boolean;
+      initiallyDeferred: boolean;
+      enabled: string;
+      type: number;
+      functionName: string;
+      constraintType: string | null;
+    }>
+  >`
+    SELECT t.tgname AS "name",
+      t.tgdeferrable AS "deferrable",
+      t.tginitdeferred AS "initiallyDeferred",
+      t.tgenabled::text AS "enabled",
+      t.tgtype::integer AS "type",
+      p.proname::text AS "functionName",
+      k.contype::text AS "constraintType"
+    FROM pg_catalog.pg_trigger t
+    JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+    JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+    LEFT JOIN pg_catalog.pg_constraint k ON k.oid = t.tgconstraint
+    WHERE c.oid = to_regclass('"AmuxCommitDeadline"')
+      AND NOT t.tgisinternal
+  `;
+  assert.deepEqual(triggers, [
+    {
+      name: AMUX_COMMIT_DEADLINE_TRIGGER,
+      deferrable: true,
+      initiallyDeferred: true,
+      enabled: "O",
+      // TRIGGER_TYPE_ROW (1) | TRIGGER_TYPE_INSERT (4): AFTER, FOR EACH ROW, on INSERT only.
+      type: 5,
+      functionName: "amux_commit_deadline_check",
+      constraintType: "t",
+    },
+  ]);
+});
+
+test("a COMMIT whose recorded deadline has passed is refused at COMMIT, not at the insert", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-PAST");
+  const seen = { txid: null as string | null, insertedLate: false };
+  try {
+    let commitError: unknown = null;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+        const rows = await tx.$queryRaw<Array<{ txid: string; late: boolean }>>`
+          INSERT INTO "AmuxCommitDeadline" ("txid", "deadline", "operation")
+          VALUES (txid_current(), clock_timestamp() - INTERVAL '1 millisecond', 'commit_deadline_past_test')
+          RETURNING "txid"::text AS "txid", clock_timestamp() >= "deadline" AS "late"
+        `;
+        seen.txid = rows[0]?.txid ?? null;
+        seen.insertedLate = rows[0]?.late === true;
+      });
+    } catch (error) {
+      commitError = error;
+    }
+    // The insert itself was accepted with a deadline already behind it: the
+    // check is deferred to COMMIT.
+    assert.equal(seen.insertedLate, true);
+    assert.ok(seen.txid !== null);
+    assert.equal(isAmuxLateCommitError(commitError), true, String(commitError));
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(row.priority, "p0", "the refused COMMIT rolled the write back");
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.txid) } }), 0);
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("an on-time COMMIT succeeds and leaves no commit deadline row behind", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-ON-TIME");
+  try {
+    const txid = await withAmuxDbBoundary(
+      { operation: "commit_deadline_on_time_test", prismaCallCeiling: 4, isolation: "mutation" },
+      async (tx) => {
+        await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+        const rows = await tx.$queryRaw<Array<{ txid: string }>>`SELECT txid_current()::text AS "txid"`;
+        return rows[0]?.txid ?? null;
+      },
+    );
+    assert.ok(txid !== null);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(row.priority, "p0");
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(txid) } }), 0);
+    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("a transaction rolled back for another reason leaves no commit deadline row", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-ROLLBACK");
+  try {
+    // The mutation fence inserts its marker and refuses in the same statement.
+    const seen = {
+      refusedTxid: null as string | null,
+      thrownTxid: null as string | null,
+      markerSeen: false,
+    };
+    await assert.rejects(
+      withAmuxDbBoundary(
+        { operation: "commit_deadline_refused_test", prismaCallCeiling: 5, isolation: "mutation" },
+        async (tx) => {
+          await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+          const rows = await tx.$queryRaw<Array<{ txid: string }>>`SELECT txid_current()::text AS "txid"`;
+          seen.refusedTxid = rows[0]?.txid ?? null;
+          await tx.$queryRaw`
+            SELECT set_config(
+              'tomverse.amux_deadline',
+              (clock_timestamp() - INTERVAL '1 millisecond')::text,
+              true
+            )
+          `;
+        },
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_DEADLINE_EXCEEDED",
+    );
+    assert.ok(seen.refusedTxid !== null);
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.refusedTxid) } }), 0);
+
+    // The route fence passes and writes its marker; the transaction then
+    // fails on something else and takes the marker with it.
+    await assert.rejects(
+      prisma.$transaction(async (tx) => {
+        await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_rollback_test");
+        const rows = await tx.$queryRaw<Array<{ txid: string; present: boolean }>>`
+          SELECT txid_current()::text AS "txid",
+            EXISTS (SELECT 1 FROM "AmuxCommitDeadline" WHERE "txid" = txid_current()) AS "present"
+        `;
+        seen.thrownTxid = rows[0]?.txid ?? null;
+        seen.markerSeen = rows[0]?.present === true;
+        throw new Error("rolled back for another reason");
+      }),
+      /rolled back for another reason/,
+    );
+    assert.equal(seen.markerSeen, true);
+    assert.ok(seen.thrownTxid !== null);
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.thrownTxid) } }), 0);
+    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+/*
+ * Nothing here is committed. The trigger is dropped, the fence is run, and the
+ * installer is exercised inside one transaction that the test rolls back, so
+ * a run that dies half way leaves the migrated trigger in place for every test
+ * after it (migrate deploy would not put it back). The route fence runs on
+ * that transaction's own client; its trigger check is the same clause as the
+ * mutation fence's (tests/amuxCommitDeadline.test.mjs), and what
+ * withAmuxDbBoundary does with the refusal is covered through the real Prisma
+ * client in tests/server-contract/amux-commit-deadline-boundary.test.ts.
+ */
+test("without the commit deadline trigger the fence refuses, and the installer restores the migration's definition, all rolled back", async () => {
+  const install = readAmuxCommitDeadlineInstallSql(process.cwd());
+  type CheckState = { count: number; deferred: boolean; body: string | null };
+  const checkState = async (client: Pick<typeof prisma, "$queryRaw">): Promise<CheckState> => {
+    const rows = await client.$queryRaw<CheckState[]>`
+      SELECT count(t.oid)::integer AS "count",
+        coalesce(
+          bool_and(
+            t.tgdeferrable AND t.tginitdeferred AND t.tgtype::integer = 5
+              AND t.tgfoid = to_regprocedure('"amux_commit_deadline_check"()')
+          ),
+          false
+        ) AS "deferred",
+        (
+          SELECT p.prosrc FROM pg_catalog.pg_proc p
+          WHERE p.oid = to_regprocedure('"amux_commit_deadline_check"()')
+        ) AS "body"
+      FROM pg_catalog.pg_trigger t
+      WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
+        AND t.tgname = 'amux_commit_deadline_check'
+    `;
+    const row = rows[0];
+    assert.ok(row);
+    return row;
+  };
+  const migrated = (state: CheckState) =>
+    state.count === 1 && state.deferred && (state.body ?? "").includes("'AX001'");
+
+  assert.equal(migrated(await checkState(prisma)), true, "setup: the migration installed the check");
+  const ROLL_BACK = new Error("roll the catalogue changes back");
+  const seen = {
+    missingRefusal: null as unknown,
+    dropped: null as CheckState | null,
+    installedOnce: null as CheckState | null,
+    installedTwice: null as CheckState | null,
+    stale: null as CheckState | null,
+    refreshed: null as CheckState | null,
+    fencePassedAfterRestore: false,
+  };
+  const warnings = mock.method(console, "warn", () => {});
+  try {
+    await assert.rejects(
+      prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
+          seen.dropped = await checkState(tx);
+
+          // The fence refuses without the trigger. Its marker insert is undone
+          // at the savepoint so the transaction can fence again below.
+          await tx.$executeRaw`SAVEPOINT commit_check_missing`;
+          try {
+            await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_missing_test");
+          } catch (error) {
+            seen.missingRefusal = error;
+          }
+          await tx.$executeRaw`ROLLBACK TO SAVEPOINT commit_check_missing`;
+
+          // The push harnesses' installer puts it back; a second run changes nothing.
+          await tx.$executeRawUnsafe(install);
+          seen.installedOnce = await checkState(tx);
+          await tx.$executeRawUnsafe(install);
+          seen.installedTwice = await checkState(tx);
+
+          // An older function body and a trigger that is not deferred are both
+          // replaced with the migration's.
+          await tx.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
+          await tx.$executeRaw`
+            CREATE OR REPLACE FUNCTION "amux_commit_deadline_check"()
+            RETURNS TRIGGER LANGUAGE plpgsql AS $stale$ BEGIN RETURN NULL; END; $stale$
+          `;
+          await tx.$executeRaw`
+            CREATE CONSTRAINT TRIGGER "amux_commit_deadline_check"
+              AFTER INSERT ON "AmuxCommitDeadline"
+              DEFERRABLE INITIALLY IMMEDIATE
+              FOR EACH ROW EXECUTE FUNCTION "amux_commit_deadline_check"()
+          `;
+          seen.stale = await checkState(tx);
+          await tx.$executeRawUnsafe(install);
+          seen.refreshed = await checkState(tx);
+
+          // With the definition restored the same fence passes.
+          await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_restored_test");
+          seen.fencePassedAfterRestore = true;
+          throw ROLL_BACK;
+        },
+        { timeout: 15_000 },
+      ),
+      (error: unknown) => error === ROLL_BACK,
+    );
+  } finally {
+    warnings.mock.restore();
+  }
+
+  assert.ok(seen.dropped && seen.dropped.count === 0, JSON.stringify(seen.dropped));
+  assert.ok(seen.missingRefusal instanceof AmuxDbBoundaryError);
+  assert.equal(seen.missingRefusal.code, "AMUX_DB_COMMIT_CHECK_MISSING");
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.ok(seen.installedOnce && migrated(seen.installedOnce), JSON.stringify(seen.installedOnce));
+  assert.deepEqual(seen.installedTwice, seen.installedOnce);
+  assert.ok(seen.stale && seen.stale.count === 1 && !seen.stale.deferred, JSON.stringify(seen.stale));
+  assert.equal((seen.stale.body ?? "").includes("AX001"), false);
+  assert.ok(seen.refreshed && migrated(seen.refreshed), JSON.stringify(seen.refreshed));
+  assert.equal(seen.fencePassedAfterRestore, true);
+
+  // The rollback left the migrated check exactly as it was, and it still works.
+  assert.equal(migrated(await checkState(prisma)), true);
+  assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+  const committed = await withAmuxDbBoundary(
+    { operation: "commit_deadline_intact_test", prismaCallCeiling: 2, isolation: "mutation" },
+    async () => "committed",
+  );
+  assert.equal(committed, "committed");
+  assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+});
+
 test("replacement worker generation cannot heartbeat or settle the old execution attempt", async () => {
   const worker = `amux-exec-fence-${randomUUID()}`;
   const firstInstance = randomUUID();
@@ -1418,6 +3373,16 @@ test("replacement worker generation cannot heartbeat or settle the old execution
     });
 
     assert.equal(staleHeartbeat, false);
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: {
+          action: "amux.execution.lease_renewed",
+          targetType: "AmuxWorkItem",
+          targetId: taskId,
+        },
+      }),
+      0,
+    );
 
     const staleSettle = await settleAmuxExecution({
       attemptId: started.attemptId,
@@ -1625,7 +3590,11 @@ test("execution API is fail-closed by default and preserves the execution fences
         targetType: "AmuxWorkItem",
         targetId: taskId,
         action: {
-          in: ["amux.execution.started", "amux.execution.settled"],
+          in: [
+            "amux.execution.started",
+            "amux.execution.lease_renewed",
+            "amux.execution.settled",
+          ],
         },
       },
       orderBy: [
@@ -1645,7 +3614,11 @@ test("execution API is fail-closed by default and preserves the execution fences
 
     assert.deepEqual(
       actions.map((entry) => entry.action),
-      ["amux.execution.started", "amux.execution.settled"],
+      [
+        "amux.execution.started",
+        "amux.execution.lease_renewed",
+        "amux.execution.settled",
+      ],
     );
 
     for (const entry of actions) {
@@ -1808,7 +3781,59 @@ test("expired execution recovery returns only the still-current attempt to Todo 
   }
 });
 
-test("owned queue exposes only runnable owner-assigned Todo work with delivery fields", async () => {
+test("execution-off worker and owned routes cannot touch control state", async () => {
+  const worker = `amux-gated-${randomUUID()}`;
+  const secret = makeAmuxSyncSecret();
+  const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+  process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+  try {
+    const auditBefore = await prisma.adminAuditLog.count({
+      where: { targetType: "AmuxWorkerRuntime", targetId: worker },
+    });
+    const routes = [
+      ["workers/register", workerRegisterPost],
+      ["workers/heartbeat", workerHeartbeatPost],
+      ["owned-queue", ownedQueuePost],
+    ] as const;
+    for (const [path, POST] of routes) {
+      const response = await POST(
+        new Request(`http://localhost/api/internal/amux/${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${secret}` },
+          body: "{malformed body must not be parsed}",
+        }),
+      );
+      assert.equal(response.status, 409, path);
+      assert.equal((await response.json()).reason, "execution_api_disabled");
+    }
+    assert.equal(
+      await prisma.amuxWorkerRuntime.count({ where: { workerName: worker } }),
+      0,
+    );
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: { targetType: "AmuxWorkerRuntime", targetId: worker },
+      }),
+      auditBefore,
+    );
+  } finally {
+    if (previousSecret === undefined)
+      delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    if (previousExecutionApi === undefined)
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
+  }
+});
+
+// The owned queue keeps the seven keys a WSL bridge built from main before the
+// develop AMUX port requires, during the compatibility window; that bridge
+// halts on a body without them (docs/ops/amux/wsl-execution-bridge.md, "Wire
+// compatibility"). description and claimed_at are Options there and are not
+// sent. The key list is the shared fixture the Rust client parses.
+test("owned queue exposes only runnable owner-assigned Todo work in the compatibility shape", async () => {
   const ownedId = await createTodo("amux-owned-queue");
   const unownedId = await createTodo("amux-unowned-queue");
   const worker = `amux-owned-${randomUUID()}`;
@@ -1816,8 +3841,10 @@ test("owned queue exposes only runnable owner-assigned Todo work with delivery f
   const claimedAt = new Date();
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
   try {
     await prisma.amuxWorkItem.update({
@@ -1850,12 +3877,10 @@ test("owned queue exposes only runnable owner-assigned Todo work with delivery f
     const rows = (await response.json()) as Array<{
       id: string;
       title: string;
-      description: string | null;
       kind: string;
       priority: string;
       owner: string;
       revision: number;
-      claimed_at: string | null;
       created_at: string;
     }>;
 
@@ -1866,10 +3891,14 @@ test("owned queue exposes only runnable owner-assigned Todo work with delivery f
     assert.equal(owned.revision, 4);
     assert.equal(owned.kind, "code");
     assert.equal(owned.priority, "p1");
-    assert.equal(owned.description, "Delivery body for the selected worker.");
-    assert.equal(
-      new Date(owned.claimed_at ?? "").getTime(),
-      claimedAt.getTime(),
+    // The stored description never reaches the wire.
+    assert.doesNotMatch(
+      JSON.stringify(rows),
+      /Delivery body for the selected worker/,
+    );
+    assert.deepEqual(
+      Object.keys(owned).sort(),
+      Object.keys(queueWireCompat.owned_server).sort(),
     );
 
     assert.equal(
@@ -1881,6 +3910,11 @@ test("owned queue exposes only runnable owner-assigned Todo work with delivery f
       delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     } else {
       process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSecret;
+    }
+    if (previousExecutionApi === undefined) {
+      delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    } else {
+      process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
     await prisma.amuxWorkItem.deleteMany({
@@ -1899,7 +3933,9 @@ test("execution start atomically creates durable delivery and pull ack remain id
   const instanceId = randomUUID();
   const base = new Date();
 
-  const secret = makeAmuxSyncSecret();
+  const secret = ["amux", "delivery", "integration", "test", "secret"].join(
+    "-",
+  );
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
@@ -2615,16 +4651,18 @@ test("server worker scorer independently reproduces routing weights and determin
 test("claim API persists authoritative routing when consistent client evidence drifts", async () => {
   const taskId = await createTodo("amux-authoritative-routing");
 
-  const secret = makeAmuxSyncSecret();
+  const secret = "amux-authoritative-routing-secret-0123456789";
 
   const previousSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
 
   const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+
   const previousExecutionApi = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
 
   const worker = `a-codex-${randomUUID()}`;
 
   process.env.TOMVERSE_AMUX_SYNC_SECRET = secret;
+
   process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
 
   process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
@@ -2885,6 +4923,23 @@ test("expired delivery receipt rotates and stale acknowledgements are fenced", a
     assert.equal(rotated.available, true);
 
     assert.notEqual(rotated.delivery.receiptId, first.delivery.receiptId);
+
+    const receiptAudits = await prisma.adminAuditLog.findMany({
+      where: {
+        action: "amux.delivery.receipt_issued",
+        targetType: "AmuxWorkItem",
+        targetId: taskId,
+      },
+    });
+    assert.equal(receiptAudits.length, 2);
+    assert.deepEqual(
+      new Set(
+        receiptAudits.map(
+          (row) => (row.metadata as { receipt_id: string }).receipt_id,
+        ),
+      ),
+      new Set([first.delivery.receiptId, rotated.delivery.receiptId]),
+    );
 
     const oldReceiptAck = await acknowledgeAmuxWorkDelivery({
       attemptId: rotated.delivery.attemptId,

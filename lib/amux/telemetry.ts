@@ -7,10 +7,7 @@ import {
   evaluateAmuxQuotaTelemetry,
   type AmuxObservedMetric,
 } from "@/lib/amux/planningCore";
-import {
-  AMUX_DB_BOUNDARIES,
-  withAmuxDbBoundary,
-} from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import { prisma } from "@/lib/prisma";
 
 type WorkerIdentity = { worker_name: string; provider: string };
@@ -46,12 +43,13 @@ const median = (values: readonly number[]) => {
 export async function getAmuxWorkerTelemetry(
   workers: readonly WorkerIdentity[],
   now = new Date(),
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
   if (workers.length === 0) return new Map();
   const names = workers.map((worker) => worker.worker_name);
   const cutoff = new Date(now.getTime() - 90 * 86_400_000);
   const [attempts, quotaRows] = await Promise.all([
-    prisma.$queryRaw<HistoricalAttemptRow[]>`
+    db.$queryRaw<HistoricalAttemptRow[]>`
       SELECT
         ranked."worker",
         ranked."outcome",
@@ -81,7 +79,7 @@ export async function getAmuxWorkerTelemetry(
       WHERE ranked."workerRowNumber" <= 200
       ORDER BY ranked."worker" ASC, ranked."endedAt" DESC
     `,
-    prisma.$queryRaw<QuotaObservationRow[]>`
+    db.$queryRaw<QuotaObservationRow[]>`
       SELECT DISTINCT ON (observation."worker")
         observation."worker",
         observation."provider",

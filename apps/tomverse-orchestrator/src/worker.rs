@@ -15,6 +15,7 @@ const W_COST_EFFICIENCY: f64 = 0.05;
 const INTRINSIC_WEIGHT_TOTAL: f64 = 0.80;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RoutingTaskProfile {
     pub task_kind: String,
     pub complexity: i64,
@@ -23,6 +24,7 @@ pub struct RoutingTaskProfile {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct RoutingWorkerCandidate {
     pub worker_name: String,
     pub provider: String,
@@ -46,6 +48,7 @@ pub struct RoutingWorkerCandidate {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CandidateRoutingSignals {
     pub worker: RoutingWorkerCandidate,
 
@@ -142,10 +145,7 @@ pub fn score_execute_candidates(
     }
 }
 
-fn score_one(
-    task: &RoutingTaskProfile,
-    signals: &CandidateRoutingSignals,
-) -> ScoredWorker {
+fn score_one(task: &RoutingTaskProfile, signals: &CandidateRoutingSignals) -> ScoredWorker {
     let task_fit = task_fit(task, &signals.worker);
 
     let predicted_success = metric(signals.predicted_success);
@@ -166,40 +166,39 @@ fn score_one(
     let low_human_attention = metric(signals.low_human_attention);
     let cost_efficiency = metric(signals.cost_efficiency);
 
-    let selected_score =
-        W_TASK_FIT * task_fit.combined
-            + W_PREDICTED_SUCCESS * predicted_success.value
-            + W_QUOTA_REMAINING * quota_remaining.value
-            + W_EXPECTED_SPEED * expected_speed.value
-            + W_LOW_REWORK * low_rework.value
-            + W_LOW_HUMAN_ATTENTION * low_human_attention.value
-            + W_COST_EFFICIENCY * cost_efficiency.value;
+    let selected_score = W_TASK_FIT * task_fit.combined
+        + W_PREDICTED_SUCCESS * predicted_success.value
+        + W_QUOTA_REMAINING * quota_remaining.value
+        + W_EXPECTED_SPEED * expected_speed.value
+        + W_LOW_REWORK * low_rework.value
+        + W_LOW_HUMAN_ATTENTION * low_human_attention.value
+        + W_COST_EFFICIENCY * cost_efficiency.value;
 
-    let intrinsic_score = (
-        W_TASK_FIT * task_fit.combined
-            + W_PREDICTED_SUCCESS * predicted_success.value
-            + W_EXPECTED_SPEED * expected_speed.value
-            + W_LOW_REWORK * low_rework.value
-            + W_LOW_HUMAN_ATTENTION * low_human_attention.value
-            + W_COST_EFFICIENCY * cost_efficiency.value
-    ) / INTRINSIC_WEIGHT_TOTAL;
+    let intrinsic_score = (W_TASK_FIT * task_fit.combined
+        + W_PREDICTED_SUCCESS * predicted_success.value
+        + W_EXPECTED_SPEED * expected_speed.value
+        + W_LOW_REWORK * low_rework.value
+        + W_LOW_HUMAN_ATTENTION * low_human_attention.value
+        + W_COST_EFFICIENCY * cost_efficiency.value)
+        / INTRINSIC_WEIGHT_TOTAL;
 
-    let operationally_allowed =
-        !signals.worker.archived
-            && !signals.worker.paused
-            && !signals.worker.isolated
-            && !signals.worker.blocked;
+    let operationally_allowed = !signals.worker.archived
+        && !signals.worker.paused
+        && !signals.worker.isolated
+        && !signals.worker.blocked;
 
     // A new ownership claim can only select an immediately dispatchable
-    // worker. The separate board driver can still start a stopped worker for
-    // work that was already owned; it must not strand new claims behind a
-    // busy/stopped high-scoring candidate while another worker is ready.
-    let selected_eligible =
-        operationally_allowed
-            && !signals.provider_exhausted
-            && signals.worker.running
-            && signals.worker.status.eq_ignore_ascii_case("idle")
-            && signals.worker.dispatch_ready;
+    // worker: running, idle and at a recognized delivery boundary. A stopped
+    // or busy worker stays visible as preferred demand, but a new claim must
+    // not be stranded behind it while another worker is ready. main held this
+    // rule (#1595) and a develop merge had reverted it; lib/amux/
+    // workerRouterCore.ts keeps the same rule and the shared golden
+    // (tests/fixtures/amux-worker-routing-v1.json) pins both.
+    let selected_eligible = operationally_allowed
+        && !signals.provider_exhausted
+        && signals.worker.running
+        && signals.worker.status.eq_ignore_ascii_case("idle")
+        && signals.worker.dispatch_ready;
 
     ScoredWorker {
         worker_name: signals.worker.worker_name.clone(),
@@ -221,10 +220,7 @@ fn score_one(
     }
 }
 
-fn best_by(
-    scored: &[ScoredWorker],
-    selected: bool,
-) -> Option<&ScoredWorker> {
+fn best_by(scored: &[ScoredWorker], selected: bool) -> Option<&ScoredWorker> {
     let mut eligible = scored
         .iter()
         .filter(|worker| {
@@ -270,26 +266,16 @@ fn metric(value: Option<f64>) -> MetricBreakdown {
     }
 }
 
-fn task_fit(
-    task: &RoutingTaskProfile,
-    worker: &RoutingWorkerCandidate,
-) -> TaskFitBreakdown {
-    let large_task =
-        task.complexity >= 7 || task.files_expected.unwrap_or(0) >= 6;
+fn task_fit(task: &RoutingTaskProfile, worker: &RoutingWorkerCandidate) -> TaskFitBreakdown {
+    let large_task = task.complexity >= 7 || task.files_expected.unwrap_or(0) >= 6;
 
-    let role_fit = role_fit(
-        &task.task_kind,
-        &worker.routing_roles,
-        large_task,
-    );
+    let role_fit = role_fit(&task.task_kind, &worker.routing_roles, large_task);
 
-    let provider_fit =
-        provider_fit(&task.task_kind, &worker.provider, large_task);
+    let provider_fit = provider_fit(&task.task_kind, &worker.provider, large_task);
 
     // Explicit roles are primary capability evidence.
     // Provider family is only a secondary prior.
-    let combined =
-        (0.75 * role_fit + 0.25 * provider_fit).clamp(0.0, 1.0);
+    let combined = (0.75 * role_fit + 0.25 * provider_fit).clamp(0.0, 1.0);
 
     TaskFitBreakdown {
         role_fit,
@@ -438,8 +424,7 @@ fn role_fit(kind: &str, roles: &[String], large_task: bool) -> f64 {
 fn provider_fit(kind: &str, provider: &str, large_task: bool) -> f64 {
     let provider = provider.trim().to_ascii_lowercase();
 
-    let is_claude =
-        matches!(provider.as_str(), "claude" | "claude-code");
+    let is_claude = matches!(provider.as_str(), "claude" | "claude-code");
     let is_codex = provider == "codex";
     let is_devin = provider == "devin";
 
@@ -576,19 +561,86 @@ fn provider_fit(kind: &str, provider: &str, large_task: bool) -> f64 {
 mod tests {
     use super::*;
 
-    fn worker(
-        name: &str,
-        provider: &str,
-        roles: &[&str],
-    ) -> RoutingWorkerCandidate {
+    #[derive(Deserialize)]
+    struct RoutingGolden {
+        version: String,
+        cases: Vec<RoutingGoldenCase>,
+    }
+
+    #[derive(Deserialize)]
+    struct RoutingGoldenCase {
+        name: String,
+        task: RoutingTaskProfile,
+        candidates: Vec<CandidateRoutingSignals>,
+        expected: RoutingGoldenExpected,
+    }
+
+    #[derive(Deserialize)]
+    struct RoutingGoldenExpected {
+        preferred_worker: Option<String>,
+        selected_worker: Option<String>,
+        preferred_score: Option<f64>,
+        selected_score: Option<f64>,
+        candidate_names: Vec<String>,
+        selected_eligible: Vec<bool>,
+    }
+
+    #[test]
+    fn shared_worker_routing_golden_exercises_the_actual_rust_scorer() {
+        let golden: RoutingGolden = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-worker-routing-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(golden.version, "amux-worker-router-v1");
+        for case in golden.cases {
+            let score = score_execute_candidates(&case.task, &case.candidates);
+            assert_eq!(
+                score.preferred_worker, case.expected.preferred_worker,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                score.selected_worker, case.expected.selected_worker,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                score
+                    .candidates
+                    .iter()
+                    .map(|row| row.worker_name.clone())
+                    .collect::<Vec<_>>(),
+                case.expected.candidate_names,
+                "{}",
+                case.name
+            );
+            assert_eq!(
+                score
+                    .candidates
+                    .iter()
+                    .map(|row| row.breakdown.selected_eligible)
+                    .collect::<Vec<_>>(),
+                case.expected.selected_eligible,
+                "{}",
+                case.name
+            );
+            for (actual, expected) in [
+                (score.preferred_score, case.expected.preferred_score),
+                (score.selected_score, case.expected.selected_score),
+            ] {
+                if let Some(expected) = expected {
+                    assert!((actual.unwrap() - expected).abs() < 1e-12, "{}", case.name);
+                }
+            }
+        }
+    }
+
+    fn worker(name: &str, provider: &str, roles: &[&str]) -> RoutingWorkerCandidate {
         RoutingWorkerCandidate {
             worker_name: name.to_string(),
             provider: provider.to_string(),
             model: None,
-            routing_roles: roles
-                .iter()
-                .map(|role| (*role).to_string())
-                .collect(),
+            routing_roles: roles.iter().map(|role| (*role).to_string()).collect(),
             running: true,
             status: "idle".into(),
             dispatch_ready: true,
@@ -599,9 +651,7 @@ mod tests {
         }
     }
 
-    fn signals(
-        worker: RoutingWorkerCandidate,
-    ) -> CandidateRoutingSignals {
+    fn signals(worker: RoutingWorkerCandidate) -> CandidateRoutingSignals {
         CandidateRoutingSignals {
             worker,
             predicted_success: None,
@@ -633,23 +683,12 @@ mod tests {
         devin.provider_exhausted = true;
         devin.quota_remaining = Some(0.0);
 
-        let codex = signals(worker(
-            "codex-impl",
-            "codex",
-            &["implementation"],
-        ));
+        let codex = signals(worker("codex-impl", "codex", &["implementation"]));
 
-        let result =
-            score_execute_candidates(&task("migration", 8), &[devin, codex]);
+        let result = score_execute_candidates(&task("migration", 8), &[devin, codex]);
 
-        assert_eq!(
-            result.preferred_worker.as_deref(),
-            Some("devin-worker")
-        );
-        assert_eq!(
-            result.selected_worker.as_deref(),
-            Some("codex-impl")
-        );
+        assert_eq!(result.preferred_worker.as_deref(), Some("devin-worker"));
+        assert_eq!(result.selected_worker.as_deref(), Some("codex-impl"));
     }
 
     #[test]
@@ -695,8 +734,7 @@ mod tests {
             &["feature", "implementation"],
         ));
 
-        let result =
-            score_execute_candidates(&task("feature", 4), &[b, a]);
+        let result = score_execute_candidates(&task("feature", 4), &[b, a]);
 
         assert_eq!(
             result.candidates[0].breakdown.task_fit,
@@ -704,19 +742,12 @@ mod tests {
         );
 
         // Equal scores use worker name only as a deterministic final tie-break.
-        assert_eq!(
-            result.selected_worker.as_deref(),
-            Some("anything-a")
-        );
+        assert_eq!(result.selected_worker.as_deref(), Some("anything-a"));
     }
 
     #[test]
     fn selected_score_uses_the_declared_weights_exactly() {
-        let mut candidate = signals(worker(
-            "codex-impl",
-            "codex",
-            &["feature"],
-        ));
+        let mut candidate = signals(worker("codex-impl", "codex", &["feature"]));
 
         candidate.predicted_success = Some(0.8);
         candidate.quota_remaining = Some(0.7);
@@ -725,21 +756,19 @@ mod tests {
         candidate.low_human_attention = Some(0.4);
         candidate.cost_efficiency = Some(0.5);
 
-        let result =
-            score_execute_candidates(&task("feature", 4), &[candidate]);
+        let result = score_execute_candidates(&task("feature", 4), &[candidate]);
 
         let breakdown = &result.candidates[0].breakdown;
 
         assert_eq!(breakdown.task_fit.combined, 1.0);
 
-        let expected =
-            0.30 * 1.0
-                + 0.20 * 0.8
-                + 0.20 * 0.7
-                + 0.10 * 0.6
-                + 0.10 * 0.9
-                + 0.05 * 0.4
-                + 0.05 * 0.5;
+        let expected = 0.30 * 1.0
+            + 0.20 * 0.8
+            + 0.20 * 0.7
+            + 0.10 * 0.6
+            + 0.10 * 0.9
+            + 0.05 * 0.4
+            + 0.05 * 0.5;
 
         assert!(
             (breakdown.selected_score - expected).abs() < 1e-12,
@@ -761,21 +790,13 @@ mod tests {
         unsafe_idle.worker.status = "idle".into();
         unsafe_idle.worker.dispatch_ready = false;
 
-        let mut ready = signals(worker(
-            "codex-impl",
-            "codex",
-            &["implementation", "bugfix"],
-        ));
+        let mut ready = signals(worker("codex-impl", "codex", &["implementation", "bugfix"]));
         ready.worker.dispatch_ready = true;
         ready.quota_remaining = Some(0.24);
 
-        let result =
-            score_execute_candidates(&task("bugfix", 4), &[unsafe_idle, ready]);
+        let result = score_execute_candidates(&task("bugfix", 4), &[unsafe_idle, ready]);
 
-        assert_eq!(
-            result.selected_worker.as_deref(),
-            Some("codex-impl")
-        );
+        assert_eq!(result.selected_worker.as_deref(), Some("codex-impl"));
 
         let devin = result
             .candidates
@@ -797,14 +818,9 @@ mod tests {
         busy.worker.status = "busy".into();
         busy.worker.dispatch_ready = false;
 
-        let ready = signals(worker(
-            "codex-impl",
-            "codex",
-            &["implementation"],
-        ));
+        let ready = signals(worker("codex-impl", "codex", &["implementation"]));
 
-        let result =
-            score_execute_candidates(&task("migration", 8), &[busy, ready]);
+        let result = score_execute_candidates(&task("migration", 8), &[busy, ready]);
 
         assert_eq!(result.preferred_worker.as_deref(), Some("devin-worker"));
         assert_eq!(result.selected_worker.as_deref(), Some("codex-impl"));
@@ -822,8 +838,7 @@ mod tests {
         stopped.worker.status = "stopped".into();
         stopped.worker.dispatch_ready = false;
 
-        let result =
-            score_execute_candidates(&task("migration", 8), &[stopped]);
+        let result = score_execute_candidates(&task("migration", 8), &[stopped]);
 
         assert_eq!(result.preferred_worker.as_deref(), Some("devin-worker"));
         assert_eq!(result.selected_worker, None);
@@ -831,32 +846,14 @@ mod tests {
 
     #[test]
     fn operator_disabled_worker_is_not_selected_or_preferred() {
-        let mut disabled = signals(worker(
-            "claude-disabled",
-            "claude",
-            &["architecture"],
-        ));
+        let mut disabled = signals(worker("claude-disabled", "claude", &["architecture"]));
         disabled.worker.paused = true;
 
-        let fallback = signals(worker(
-            "codex-contract",
-            "codex",
-            &["architecture"],
-        ));
+        let fallback = signals(worker("codex-contract", "codex", &["architecture"]));
 
-        let result = score_execute_candidates(
-            &task("architecture", 5),
-            &[disabled, fallback],
-        );
+        let result = score_execute_candidates(&task("architecture", 5), &[disabled, fallback]);
 
-        assert_eq!(
-            result.preferred_worker.as_deref(),
-            Some("codex-contract")
-        );
-        assert_eq!(
-            result.selected_worker.as_deref(),
-            Some("codex-contract")
-        );
+        assert_eq!(result.preferred_worker.as_deref(), Some("codex-contract"));
+        assert_eq!(result.selected_worker.as_deref(), Some("codex-contract"));
     }
-
 }

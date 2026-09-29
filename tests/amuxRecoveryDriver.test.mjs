@@ -40,28 +40,38 @@ test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cade
   );
   assert.match(api, /pub async fn execution_recover/);
   assert.match(api, /\/api\/internal\/amux\/execution\/recover/);
-  assert.match(api, /\.timeout\(TOMVERSE_INTERNAL_RECOVERY_TIMEOUT\)/);
+  // The recovery client deadline outlasts the twelve-second route budget.
   assert.match(
     api,
-    /TOMVERSE_INTERNAL_RECOVERY_TIMEOUT: Duration = Duration::from_secs\(15\)/,
+    /pub async fn execution_recover[\s\S]*?\.timeout\(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\)/,
   );
+  assert.match(
+    api,
+    /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs\(15\)/,
+  );
+  assert.match(boundary, /AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000/);
   assert.match(api, /pub more: Option<bool>/);
   assert.match(scheduler, /more = outcome\.more\.unwrap_or\(false\)/);
-  assert.match(boundary, /AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000/);
   assert.match(recoverRoute, /withAmuxRouteBudget/);
-  assert.match(recoverRoute, /AMUX_LIFECYCLE_ROUTE_BUDGET_MS/);
   assert.match(recoverRoute, /await sweepExpiredAmuxQuotaObservations\(\)/);
   assert.match(recoverRoute, /if \(!isAmuxExecutionApiEnabled\(\)\)/);
   assert.ok(
     recoverRoute.indexOf("await sweepExpiredAmuxQuotaObservations()") <
       recoverRoute.indexOf("if (!isAmuxExecutionApiEnabled())"),
   );
+  assert.match(recoverRoute, /\}, AMUX_LIFECYCLE_ROUTE_BUDGET_MS\);/);
   assert.match(telemetry, /AMUX_QUOTA_SWEEP_BATCH_SIZE = 200/);
+  assert.match(
+    telemetry,
+    /withAmuxDbBoundary\(\s*AMUX_DB_BOUNDARIES\.quotaObservationSweep/,
+  );
   assert.match(telemetry, /LIMIT \$\{AMUX_QUOTA_SWEEP_BATCH_SIZE\}/);
   assert.match(telemetry, /FOR UPDATE SKIP LOCKED/);
-  assert.match(telemetry, /AMUX_DB_BOUNDARIES\.quotaObservationSweep/);
+  assert.match(boundary, /quotaObservationSweep:[\s\S]*?prismaCallCeiling: 3/);
   assert.match(execution, /AMUX_DB_BOUNDARIES\.executionStart/);
   assert.match(execution, /AMUX_DB_BOUNDARIES\.executionHeartbeat/);
   assert.match(execution, /AMUX_DB_BOUNDARIES\.executionSettle/);
+  // An expiry that also exhausts the attempt budget says so on the attempt
+  // and its escalation, as main recorded it (#1595).
   assert.match(execution, /reason: recoveryReason/);
 });

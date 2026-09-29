@@ -31,19 +31,46 @@ import {
   amuxResourceRefs,
 } from "@/lib/amux/resourcePolicyCore";
 
-const satisfiedDependencyStatuses = (): string[] => ["done"];
-const terminalDependentStatuses = (): string[] => ["done", "cancelled"];
-const PRISMA_INT_MAX = 2_147_483_647;
+export const AMUX_QUEUE_MAX_ITEMS = 512;
+export const AMUX_OWNED_QUEUE_MAX_ITEMS = 512;
+export const PRISMA_INT_MAX = 2_147_483_647;
 
+export class AmuxQueueCapacityError extends Error {
+  readonly code = "AMUX_QUEUE_CAPACITY_EXCEEDED";
+
+  constructor(readonly queue: "selection" | "owned") {
+    super(`AMUX ${queue} queue exceeds the complete-response item ceiling`);
+    this.name = "AmuxQueueCapacityError";
+  }
+}
+
+const satisfiedDependencyStatuses = (): string[] => ["done"];
+const nonScoringDependentStatuses = (): string[] => [
+  "backlog",
+  "done",
+  "cancelled",
+];
+
+/**
+ * The selection queue row.
+ *
+ * `title`, `status` and `dependencies` are a compatibility window, not
+ * selection input (docs/ops/amux/wsl-execution-bridge.md, "Wire
+ * compatibility"). An orchestrator built from main before the develop AMUX
+ * port requires them (non-Option fields of its QueueTask) and fails to parse a
+ * queue without them; the Rust built from this tree accepts the row with or
+ * without them. main also sent `owner`, always null; that Rust reads it as an
+ * Option, so a missing key is None and it is not sent. Removing the rest is its
+ * own change, made once no such orchestrator runs.
+ */
 export type AmuxQueueTask = {
   id: string;
   title: string;
-  status: string;
+  status: "todo";
   kind: string;
   priority: string;
   pinned: boolean;
   drag: number;
-  owner: string | null;
   revision: number;
   created_at: string;
   dependencies: string[];
@@ -102,6 +129,7 @@ const deadlineForRow = (row: SchedulerRow): AmuxDeadlineParse | undefined =>
 
 const schedulerInputsForRows = async <T extends SchedulerRow>(
   rows: readonly T[],
+  db: Prisma.TransactionClient | typeof prisma = prisma,
 ) => {
   const projectKeys = [
     ...new Set(rows.flatMap((row) => (row.projectKey ? [row.projectKey] : []))),
@@ -110,7 +138,7 @@ const schedulerInputsForRows = async <T extends SchedulerRow>(
     ...new Set(rows.flatMap((row) => (row.teamKey ? [row.teamKey] : []))),
   ];
   const [policies, active] = await Promise.all([
-    prisma.amuxResourcePolicy.findMany({
+    db.amuxResourcePolicy.findMany({
       where: {
         active: true,
         capacityPoints: { not: null },
@@ -121,7 +149,7 @@ const schedulerInputsForRows = async <T extends SchedulerRow>(
       },
       select: { scope: true, key: true, capacityPoints: true },
     }),
-    prisma.amuxWorkItem.findMany({
+    db.amuxWorkItem.findMany({
       where: {
         archivedAt: null,
         OR: [{ status: "doing" }, { status: "todo", owner: { not: null } }],
@@ -233,89 +261,95 @@ const runnableDependencyFilter =
  * scoring. The caller ranks the whole returned set deterministically.
  */
 export async function listDispatchable(): Promise<AmuxQueueTask[]> {
-  const incidentRow = await prisma.appSetting.findUnique({
-    where: { key: AMUX_INCIDENT_SETTING_KEY },
-    select: { value: true },
-  });
-  if (parseAmuxIncidentSetting(incidentRow?.value).blocks_admission) return [];
+  return withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.queueRead,
+    async (tx, { dbNow }) => {
+      const incidentRow = await tx.appSetting.findUnique({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+        select: { value: true },
+      });
+      if (parseAmuxIncidentSetting(incidentRow?.value).blocks_admission) {
+        return [];
+      }
 
-  const rows = await prisma.amuxWorkItem.findMany({
-    where: {
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      dueParseState: { in: ["none", "valid"] },
-      dependencies: runnableDependencyFilter(),
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: {
-      id: true,
-      title: true,
-      status: true,
-      kind: true,
-      priority: true,
-      pinned: true,
-      drag: true,
-      owner: true,
-      revision: true,
-      createdAt: true,
-      dueAt: true,
-      duePrecision: true,
-      dueSource: true,
-      dueRaw: true,
-      projectKey: true,
-      teamKey: true,
-      effortPoints: true,
-      dependencies: {
-        select: {
-          dependencyId: true,
+      const rows = await tx.amuxWorkItem.findMany({
+        where: {
+          status: "todo",
+          owner: null,
+          archivedAt: null,
+          dueParseState: { in: ["none", "valid"] },
+          dependencies: runnableDependencyFilter(),
         },
-        orderBy: {
-          dependencyId: "asc",
-        },
-      },
-      _count: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         select: {
-          dependents: {
-            where: {
-              task: {
-                archivedAt: null,
-                status: {
-                  notIn: terminalDependentStatuses(),
+          id: true,
+          title: true,
+          kind: true,
+          priority: true,
+          pinned: true,
+          drag: true,
+          revision: true,
+          createdAt: true,
+          dependencies: {
+            select: { dependencyId: true },
+            orderBy: { dependencyId: "asc" },
+          },
+          dueAt: true,
+          duePrecision: true,
+          dueSource: true,
+          dueRaw: true,
+          projectKey: true,
+          teamKey: true,
+          effortPoints: true,
+          _count: {
+            select: {
+              dependents: {
+                where: {
+                  task: {
+                    archivedAt: null,
+                    status: {
+                      notIn: nonScoringDependentStatuses(),
+                    },
+                  },
                 },
               },
             },
           },
         },
-      },
+        take: AMUX_QUEUE_MAX_ITEMS + 1,
+      });
+
+      if (rows.length > AMUX_QUEUE_MAX_ITEMS) {
+        throw new AmuxQueueCapacityError("selection");
+      }
+
+      const schedulerInputs = await schedulerInputsForRows(rows, tx);
+
+      return rows.map((row) => {
+        const input = schedulerInputs.get(row);
+        if (!input) {
+          throw new Error(`AMUX scheduler inputs missing for ${row.id}`);
+        }
+        const score = scoreAmuxScheduler({ ...input, now: dbNow });
+        return {
+          id: row.id,
+          title: row.title,
+          status: "todo" as const,
+          kind: row.kind,
+          priority: row.priority,
+          pinned: row.pinned,
+          drag: row.drag,
+          revision: row.revision,
+          created_at: row.createdAt.toISOString(),
+          dependencies: row.dependencies.map((edge) => edge.dependencyId),
+          dependent_count: row._count.dependents,
+          scheduler_score: score.total,
+          scoring_version: AMUX_GLOBAL_PRIORITY_VERSION,
+          scheduler_signals: score,
+        };
+      });
     },
-  });
-
-  const schedulerInputs = await schedulerInputsForRows(rows);
-  const observedAt = new Date();
-
-  return rows.map((row) => {
-    const input = schedulerInputs.get(row);
-    if (!input) throw new Error(`AMUX scheduler inputs missing for ${row.id}`);
-    const score = scoreAmuxScheduler({ ...input, now: observedAt });
-    return {
-      id: row.id,
-      title: row.title,
-      status: row.status,
-      kind: row.kind,
-      priority: row.priority,
-      pinned: row.pinned,
-      drag: row.drag,
-      owner: row.owner,
-      revision: row.revision,
-      created_at: row.createdAt.toISOString(),
-      dependencies: row.dependencies.map((edge) => edge.dependencyId),
-      dependent_count: row._count.dependents,
-      scheduler_score: score.total,
-      scoring_version: AMUX_GLOBAL_PRIORITY_VERSION,
-      scheduler_signals: score,
-    };
-  });
+  );
 }
 
 /**
@@ -326,24 +360,29 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
 export async function getRoutingSnapshotTask(
   taskId: string,
   expectedRevision: number,
+  transaction?: Prisma.TransactionClient,
 ): Promise<{
   classification: Prisma.JsonValue | null;
   requiredRoutingRole: string | null;
 } | null> {
-  return prisma.amuxWorkItem.findFirst({
-    where: {
-      id: taskId,
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      revision: expectedRevision,
-      dependencies: runnableDependencyFilter(),
-    },
-    select: {
-      classification: true,
-      requiredRoutingRole: true,
-    },
-  });
+  const read = (tx: Prisma.TransactionClient) =>
+    tx.amuxWorkItem.findFirst({
+      where: {
+        id: taskId,
+        status: "todo",
+        owner: null,
+        archivedAt: null,
+        revision: expectedRevision,
+        dependencies: runnableDependencyFilter(),
+      },
+      select: {
+        classification: true,
+        requiredRoutingRole: true,
+      },
+    });
+  return transaction
+    ? read(transaction)
+    : withAmuxDbBoundary(AMUX_DB_BOUNDARIES.routingTaskRead, read);
 }
 
 /**
@@ -353,9 +392,10 @@ export async function getRoutingSnapshotTask(
  */
 export async function amuxWorkersOwningOpenCards(
   workerNames: string[],
+  client: Prisma.TransactionClient = prisma,
 ): Promise<Set<string>> {
   if (workerNames.length === 0) return new Set();
-  const rows = await prisma.amuxWorkItem.findMany({
+  const rows = await client.amuxWorkItem.findMany({
     where: {
       owner: { in: workerNames },
       archivedAt: null,
@@ -377,45 +417,51 @@ export async function amuxWorkersOwningOpenCards(
 export async function getAuthoritativeSchedulerFacts(
   taskId: string,
   expectedRevision: number,
+  transaction?: Prisma.TransactionClient,
 ): Promise<AmuxAuthoritativeSchedulerInput | null> {
-  const row = await prisma.amuxWorkItem.findFirst({
-    where: {
-      id: taskId,
-      status: "todo",
-      owner: null,
-      archivedAt: null,
-      revision: expectedRevision,
-      dependencies: runnableDependencyFilter(),
-    },
-    select: {
-      pinned: true,
-      createdAt: true,
-      kind: true,
-      priority: true,
-      drag: true,
-      dueAt: true,
-      duePrecision: true,
-      dueSource: true,
-      dueRaw: true,
-      projectKey: true,
-      teamKey: true,
-      effortPoints: true,
-      _count: {
-        select: {
-          dependents: {
-            where: {
-              task: {
-                archivedAt: null,
-                status: { notIn: terminalDependentStatuses() },
+  const read = async (tx: Prisma.TransactionClient) => {
+    const row = await tx.amuxWorkItem.findFirst({
+      where: {
+        id: taskId,
+        status: "todo",
+        owner: null,
+        archivedAt: null,
+        revision: expectedRevision,
+        dependencies: runnableDependencyFilter(),
+      },
+      select: {
+        pinned: true,
+        createdAt: true,
+        kind: true,
+        priority: true,
+        drag: true,
+        dueAt: true,
+        duePrecision: true,
+        dueSource: true,
+        dueRaw: true,
+        projectKey: true,
+        teamKey: true,
+        effortPoints: true,
+        _count: {
+          select: {
+            dependents: {
+              where: {
+                task: {
+                  archivedAt: null,
+                  status: { notIn: nonScoringDependentStatuses() },
+                },
               },
             },
           },
         },
       },
-    },
-  });
-  if (!row) return null;
-  return (await schedulerInputsForRows([row])).get(row) ?? null;
+    });
+    if (!row) return null;
+    return (await schedulerInputsForRows([row], tx)).get(row) ?? null;
+  };
+  return transaction
+    ? read(transaction)
+    : withAmuxDbBoundary(AMUX_DB_BOUNDARIES.routingTaskRead, read);
 }
 
 /**
@@ -445,6 +491,7 @@ export async function claimUnownedTodo(
   return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.claim, async (tx, context) => {
     const incident = await lockAmuxAdmissionAndReadIncident(tx, context.dbNow);
     if (incident.blocks_admission) {
+      // The incident that blocked admission, as main recorded it (#1595).
       await writeAmuxClaimRefusalAudit(
         tx,
         "incident_admission_blocked",
@@ -483,15 +530,12 @@ export async function claimUnownedTodo(
     );
     const wip = await evaluateLockedAmuxWip(tx, policies);
     if (!wip.allowed) {
-      await writeAmuxClaimRefusalAudit(
-        tx,
-        "wip_limit_reached",
-        refusalContext,
-        {
-          blocked_resource: wip.blocked_resource,
-          wip: wip.evidence,
-        },
-      );
+      // The resource that was full and the counts read under its lock, as
+      // main recorded them (#1595).
+      await writeAmuxClaimRefusalAudit(tx, "wip_limit_reached", refusalContext, {
+        blocked_resource: wip.blocked_resource,
+        wip: wip.evidence,
+      });
       return {
         claimed: false as const,
         reason: "wip_limit_reached" as const,
@@ -604,7 +648,9 @@ export async function claimUnownedTodo(
   });
 }
 
-/** Record an authenticated claim refusal without retaining request text. */
+/**
+ * Record an authenticated system refusal without retaining the request body.
+ */
 export async function recordAmuxClaimRefusal(
   reason: AmuxClaimAuditRefusalReason,
   context: AmuxClaimRefusalContext = {},
@@ -643,15 +689,28 @@ async function writeAmuxClaimRefusalAudit(
   });
 }
 
+/**
+ * The owned queue row.
+ *
+ * Only `id`, `owner` and `revision` are execution input. `title`, `kind`,
+ * `priority` and `created_at` are kept for a compatibility window
+ * (docs/ops/amux/wsl-execution-bridge.md, "Wire compatibility"): a WSL bridge
+ * built from main before the develop AMUX port requires them (non-Option
+ * fields of its OwnedTodoTask) and halts on a body without them. main also
+ * sent `description` and `claimed_at`; that bridge reads both as Options and
+ * uses neither, so they are not sent. A description is free text of up to
+ * 50,000 characters, and a few of them would reach the 512 KB response
+ * ceiling that main never had. The Rust built from this tree accepts the row
+ * with or without the compatibility fields and reads none of them. Removing
+ * them is its own change, made once no such bridge runs.
+ */
 export type AmuxOwnedTodo = {
   id: string;
   title: string;
-  description: string | null;
   kind: string;
   priority: string;
   owner: string;
   revision: number;
-  claimed_at: string | null;
   created_at: string;
 };
 
@@ -663,38 +722,45 @@ export type AmuxOwnedTodo = {
  * execution-start CAS.
  */
 export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
-  const rows = await prisma.amuxWorkItem.findMany({
-    where: {
-      status: "todo",
-      owner: {
-        not: null,
-      },
-      archivedAt: null,
-      dependencies: runnableDependencyFilter(),
-    },
-    orderBy: [
-      {
-        claimedAt: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-      {
-        id: "asc",
-      },
-    ],
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      kind: true,
-      priority: true,
-      owner: true,
-      revision: true,
-      claimedAt: true,
-      createdAt: true,
-    },
-  });
+  const rows = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.ownedQueueRead,
+    (tx) =>
+      tx.amuxWorkItem.findMany({
+        where: {
+          status: "todo",
+          owner: {
+            not: null,
+          },
+          archivedAt: null,
+          dependencies: runnableDependencyFilter(),
+        },
+        orderBy: [
+          {
+            claimedAt: "asc",
+          },
+          {
+            createdAt: "asc",
+          },
+          {
+            id: "asc",
+          },
+        ],
+        select: {
+          id: true,
+          title: true,
+          kind: true,
+          priority: true,
+          owner: true,
+          revision: true,
+          createdAt: true,
+        },
+        take: AMUX_OWNED_QUEUE_MAX_ITEMS + 1,
+      }),
+  );
+
+  if (rows.length > AMUX_OWNED_QUEUE_MAX_ITEMS) {
+    throw new AmuxQueueCapacityError("owned");
+  }
 
   return rows.flatMap((row) =>
     row.owner
@@ -702,12 +768,10 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           {
             id: row.id,
             title: row.title,
-            description: row.description,
             kind: row.kind,
             priority: row.priority,
             owner: row.owner,
             revision: row.revision,
-            claimed_at: row.claimedAt?.toISOString() ?? null,
             created_at: row.createdAt.toISOString(),
           },
         ]
