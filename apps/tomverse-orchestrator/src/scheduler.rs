@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{info, warn};
 
-use crate::tomverse_api::{QueueTask, TomverseApi};
+use crate::tomverse_api::{ClaimResponse, QueueTask, TomverseApi};
 
 const SCORING_VERSION: &str = "amux-global-priority-v2";
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
@@ -55,6 +55,27 @@ pub fn current_claim_mode() -> ClaimMode {
 }
 const MAX_ROUTING_PROBES_PER_TICK: usize = 16;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchedulerDisposition {
+    Continue,
+    Dormant,
+}
+
+fn claim_verdict(outcome: &ClaimResponse) -> &'static str {
+    match outcome {
+        ClaimResponse::Claimed { .. } => "claimed",
+        ClaimResponse::CasLost => "claim_lost",
+        ClaimResponse::Refused { reason } => reason.as_str(),
+    }
+}
+
+fn claim_disposition(outcome: &ClaimResponse) -> SchedulerDisposition {
+    match outcome {
+        ClaimResponse::Claimed { .. } => SchedulerDisposition::Continue,
+        ClaimResponse::CasLost | ClaimResponse::Refused { .. } => SchedulerDisposition::Dormant,
+    }
+}
+
 pub fn execution_enabled() -> bool {
     std::env::var("TOMVERSE_AMUX_EXECUTE")
         .ok()
@@ -76,7 +97,7 @@ pub struct ScoreBreakdown {
 }
 
 impl ScoreBreakdown {
-    fn total(&self) -> i64 {
+    pub(crate) fn total(&self) -> i64 {
         self.pin
             + self.age_hours
             + self.type_weight
@@ -92,6 +113,7 @@ impl ScoreBreakdown {
 pub struct Scheduler {
     api: TomverseApi,
     scan_offset: usize,
+    execution_enabled: bool,
 }
 
 impl Scheduler {
@@ -99,6 +121,7 @@ impl Scheduler {
         Self {
             api,
             scan_offset: 0,
+            execution_enabled: execution_enabled(),
         }
     }
 
@@ -136,26 +159,59 @@ impl Scheduler {
                             outcome.quota_observations_deleted.unwrap_or(0),
                         "AMUX execution recovery is disabled; quota evidence swept"
                     ),
-                    Err(error) => warn!(%error, "AMUX recovery sweep failed"),
+                    Err(error) => {
+                        warn!(
+                            %error,
+                            incident_id = %uuid::Uuid::new_v4(),
+                            endpoint = "execution_recover",
+                            error_code = "AMUX_RECOVERY_OUTCOME_UNKNOWN",
+                            measured = false,
+                            verdict = "recovery_outcome_unknown_dormant",
+                            "AMUX recovery sweep outcome is unknown; stopping this process run"
+                        );
+                        return Err(anyhow::anyhow!("AMUX_RECOVERY_OUTCOME_UNKNOWN"));
+                    }
                 }
                 next_recovery = Instant::now() + RECOVERY_INTERVAL;
             }
 
-            if let Err(error) = self.tick().await {
-                warn!(%error, "scheduler tick failed");
+            match self.tick().await {
+                Ok(SchedulerDisposition::Continue) => {}
+                Ok(SchedulerDisposition::Dormant) => {
+                    warn!(
+                        measured = true,
+                        verdict = "dormant_until_process_restart",
+                        "Tomverse AMUX scheduler stopped at a terminal claim containment boundary"
+                    );
+                    return Ok(());
+                }
+                Err(error) => {
+                    warn!(
+                        %error,
+                        incident_id = %uuid::Uuid::new_v4(),
+                        endpoint = "internal_api",
+                        error_code = "AMUX_INTERNAL_API_UNVERIFIED",
+                        measured = false,
+                        verdict = "internal_api_outcome_unknown_dormant",
+                        "scheduler stopped after a bounded internal API failure"
+                    );
+                    return Err(anyhow::anyhow!("AMUX_INTERNAL_API_UNVERIFIED"));
+                }
             }
 
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 
-    async fn tick(&mut self) -> Result<()> {
+    async fn tick(&mut self) -> Result<SchedulerDisposition> {
         let queue = self.api.queue().await?;
         let ranked = rank_global_priority_at(queue, Utc::now());
         // Selection-only observes the highest priority task without taking
         // ownership or reading worker-specific routing state. Both switches
         // together also falls back to selection: never claim on a conflict.
-        let mode = current_claim_mode();
+        // Execution comes from the field fixed at construction; claim-only is
+        // read from its latch and environment on each pass.
+        let mode = claim_mode(self.execution_enabled, claim_only_enabled());
         if mode == ClaimMode::Conflict {
             warn!(
                 measured = true,
@@ -179,10 +235,8 @@ impl Scheduler {
             self.scan_offset = next_routing_offset(queue_len, index);
             info!(
                 task_id = %task.id,
-                title = %task.title,
                 priority = %task.priority,
                 kind = %task.kind,
-                dependency_count = task.dependencies.len(),
                 dependent_count = task.dependent_count,
                 scheduler_score = score.total(),
                 server_scheduler_score = task.scheduler_score,
@@ -199,7 +253,7 @@ impl Scheduler {
                     verdict = "selection_only",
                     "Tomverse AMUX execution disabled; task was not claimed"
                 );
-                return Ok(());
+                return Ok(SchedulerDisposition::Continue);
             }
 
             let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
@@ -300,7 +354,7 @@ impl Scheduler {
                 }
             });
 
-            let outcome = self
+            let claim_result = self
                 .api
                 .claim(
                     &task.id,
@@ -310,35 +364,57 @@ impl Scheduler {
                     scoring_version,
                     signals,
                 )
-                .await?;
+                .await;
+            let outcome = match claim_result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    warn!(
+                        %error,
+                        task_id = %task.id,
+                        task_revision = task.revision,
+                        worker = %worker,
+                        incident_id = %uuid::Uuid::new_v4(),
+                        endpoint = "claim",
+                        error_code = "AMUX_CLAIM_OUTCOME_UNKNOWN",
+                        measured = false,
+                        verdict = "claim_outcome_unknown_dormant",
+                        "Tomverse AMUX stopped after an unverified claim outcome"
+                    );
+                    return Err(anyhow::anyhow!("AMUX_CLAIM_OUTCOME_UNKNOWN"));
+                }
+            };
+            let verdict = claim_verdict(&outcome);
+            let disposition = claim_disposition(&outcome);
+            let (claimed, revision, decision_id, reason) = match &outcome {
+                ClaimResponse::Claimed {
+                    revision,
+                    decision_id,
+                } => (true, Some(*revision), Some(decision_id.as_str()), None),
+                ClaimResponse::CasLost => (false, None, None, None),
+                ClaimResponse::Refused { reason } => (false, None, None, Some(reason.as_str())),
+            };
 
             info!(
                 task_id = %task.id,
                 worker = %worker,
-                claimed = outcome.claimed,
-                revision = ?outcome.revision,
-                decision_id = ?outcome.decision_id,
-                reason = ?outcome.reason,
+                claimed,
+                revision = ?revision,
+                decision_id = ?decision_id,
+                reason = ?reason,
                 measured = true,
-                verdict = if outcome.claimed {
-                    "claimed"
-                } else {
-                    outcome
-                        .reason
-                        .as_ref()
-                        .map(|reason| reason.as_str())
-                        .unwrap_or("claim_lost")
-                },
+                verdict,
                 "Tomverse task claim result"
             );
-            if outcome.claimed {
+            if claimed {
                 self.scan_offset = 0;
-                return Ok(());
+                return Ok(SchedulerDisposition::Continue);
             }
-            // A claim can lose its revision or hard gate after the queue read.
-            // That task must not make every later runnable task invisible.
+            // Claim refusals and ambiguous CAS outcomes are terminal for this
+            // process. A restart performs an authoritative fresh read instead of
+            // duplicating a decision whose outcome may be uncertain.
+            return Ok(disposition);
         }
-        Ok(())
+        Ok(SchedulerDisposition::Continue)
     }
 }
 
@@ -428,9 +504,6 @@ fn rank_global_priority_at(
 ) -> Vec<(QueueTask, ScoreBreakdown)> {
     let mut ranked: Vec<_> = tasks
         .into_iter()
-        .filter(|task| {
-            task.status == "todo" && task.owner.as_deref().unwrap_or("").trim().is_empty()
-        })
         .map(|task| {
             let score = score_at(&task, now);
             (task, score)
@@ -451,21 +524,18 @@ fn rank_global_priority_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tomverse_api::ClaimRefusalReason;
     use chrono::TimeZone;
 
     fn task(id: &str, kind: &str, priority: &str, created_at: &str) -> QueueTask {
         QueueTask {
             id: id.into(),
-            title: id.into(),
-            status: "todo".into(),
             kind: kind.into(),
             priority: priority.into(),
             pinned: false,
             drag: 0,
-            owner: None,
             revision: 0,
             created_at: created_at.into(),
-            dependencies: Vec::new(),
             dependent_count: 0,
             scheduler_score: 0,
             scoring_version: String::new(),
@@ -499,19 +569,28 @@ mod tests {
     }
 
     #[test]
+    fn claim_refusals_and_cas_loss_make_the_scheduler_dormant() {
+        assert_eq!(
+            claim_disposition(&ClaimResponse::CasLost),
+            SchedulerDisposition::Dormant,
+        );
+        for reason in ClaimRefusalReason::CLOSED {
+            let outcome = ClaimResponse::Refused { reason: *reason };
+            assert_eq!(claim_disposition(&outcome), SchedulerDisposition::Dormant);
+            assert_eq!(claim_verdict(&outcome), reason.as_str());
+        }
+    }
+
+    #[test]
     fn legacy_queue_payload_defaults_advanced_signals_for_rolling_deploys() {
         let legacy: QueueTask = serde_json::from_value(serde_json::json!({
             "id": "LEGACY",
-            "title": "legacy",
-            "status": "todo",
             "kind": "code",
             "priority": "p1",
             "pinned": false,
             "drag": 0,
-            "owner": null,
             "revision": 0,
             "created_at": "2026-09-20T12:00:00Z",
-            "dependencies": [],
             "dependent_count": 0
         }))
         .unwrap();
