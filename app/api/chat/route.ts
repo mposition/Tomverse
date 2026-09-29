@@ -251,6 +251,11 @@ import {
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { estimateNativeAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import {
+    estimateImageInputTokens,
+    readImageDimensions,
+} from "@/lib/chatImageInputTokens";
+import { countableChatErrorDetails } from "@/lib/chatRequestRejectionLog";
+import {
     messageAttachmentReferenceSchema,
     turnAttachmentHandle,
     type MessageAttachmentReference,
@@ -1047,6 +1052,16 @@ async function handleChatPost(
         userId: string | null;
         plan: string | null;
     } | null = null;
+    /**
+     * The request's shape, for the one line every refusal leaves behind.
+     * Counts only -- never text, file names or ids -- so the line says how
+     * big the turn was without saying what was in it.
+     */
+    let requestShapeForLog: {
+        messageCount: number;
+        attachmentCount: number;
+        imageAttachmentCount: number;
+    } | null = null;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -1063,6 +1078,23 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        {
+            const attachments = messages.flatMap((message) =>
+                Array.isArray(message.attachments) ? message.attachments : []
+            );
+            requestShapeForLog = {
+                messageCount: messages.length,
+                attachmentCount: attachments.length,
+                imageAttachmentCount: attachments.filter((attachment) => {
+                    const mediaType = (attachment as { mediaType?: unknown })
+                        ?.mediaType;
+                    return (
+                        typeof mediaType === "string" &&
+                        mediaType.startsWith("image/")
+                    );
+                }).length,
+            };
+        }
         const pinnedDeployment = await enterPinnedDeploymentChat({
             authenticatedAccountId: session?.user?.id ?? null,
             traceId,
@@ -1856,6 +1888,10 @@ async function handleChatPost(
         // Both are fed from this one alias so neither can drift from the other
         // -- `tests/chatBudgetBreakdown.test.mjs` pins that they agree.
         const inputEstimate = createTokenEstimateAccumulator();
+        // The part of each image's flat allowance that its measured size does
+        // not account for. Reserved and charged, never counted against the
+        // input limit -- see `lib/chatImageInputTokens.ts`.
+        let reservationOnlyInputTokens = 0;
         const estimateTextTokens = (text: string) => {
             shadowAccumulator?.add(text);
             const raw = estimatePromptTokens(text);
@@ -2284,6 +2320,8 @@ async function handleChatPost(
             ) as IncomingAttachment[];
             const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
+            // One entry per image in `fileParts`, from the bytes sent.
+            const imageInputTokenEstimates: number[] = [];
             const isLatestMessage = msg === latestMessage;
 
             /**
@@ -2370,6 +2408,12 @@ async function handleChatPost(
                         );
                     }
 
+                    imageInputTokenEstimates.push(
+                        estimateImageInputTokens(
+                            modelConfig.provider,
+                            readImageDimensions(normalized)
+                        )
+                    );
                     fileParts.push({
                         type: "file",
                         data: { type: "data", data: new Uint8Array(normalized) },
@@ -2988,11 +3032,21 @@ async function handleChatPost(
                 userText: String(msg.content ?? ""),
                 attachments: textAttachments,
             });
-            const nativeAttachmentTokens = estimateNativeAttachmentTokens(
-                fileParts.length
+            // Not text: what the provider will charge for the attachment
+            // itself. An image counts at its measured size; a native PDF keeps
+            // the flat allowance, since its page count is not read here.
+            const imageInputTokens = imageInputTokenEstimates.reduce(
+                (sum, tokens) => sum + tokens,
+                0
             );
-            // Not text: a per-part allowance for what the provider will charge
-            // for the attachment itself.
+            const nativeAttachmentTokens =
+                imageInputTokens +
+                estimateNativeAttachmentTokens(
+                    fileParts.length - imageInputTokenEstimates.length
+                );
+            reservationOnlyInputTokens +=
+                estimateNativeAttachmentTokens(fileParts.length) -
+                nativeAttachmentTokens;
             inputEstimate.addTokens(nativeAttachmentTokens);
             estimatedInputTokens +=
                 estimateTextTokens(text) + nativeAttachmentTokens;
@@ -3096,6 +3150,7 @@ async function handleChatPost(
                 // drift that puts a marker on a turn whose budget did not
                 // authorise it.
                 promptCachePath,
+                reservationOnlyInputTokens,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -4616,6 +4671,7 @@ async function handleChatPost(
             const planned = planAttemptExecution(candidate, {
                 accessKind: access.kind,
                 inputBreakdown: inputEstimate.breakdown(),
+                reservationOnlyInputTokens,
                 webSearchMode: webSearchMode ?? null,
                 // The same map the primary resolved. A fallback that resolved
                 // its own could disagree with the primary only by reading a
@@ -5840,6 +5896,29 @@ async function handleChatPost(
                         status: error.status,
                         modelId: dispatchModelIdForLog,
                         ...(error.details || {}),
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            } else if (error instanceof ChatAccessError) {
+                // Every other refusal, so a reported trace always has a line
+                // to find. Validation refusals -- an over-long context, a
+                // malformed transcript -- used to leave nothing at all: they
+                // are neither cost-safety codes nor limit decisions, and the
+                // trace a person reported pointed at an empty log.
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_request_rejected",
+                        phase: "chat_request",
+                        traceId,
+                        code: error.code,
+                        status: error.status,
+                        modelId: dispatchModelIdForLog ?? null,
+                        plan: refusalSubjectForLog?.plan ?? null,
+                        ...(requestShapeForLog ?? {}),
+                        // Numbers and flags only. Some refusals name the
+                        // files they are about, and a file name is the
+                        // user's content.
+                        ...countableChatErrorDetails(error.details),
                         timestamp: new Date().toISOString(),
                     })
                 );

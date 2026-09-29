@@ -1148,6 +1148,7 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  otherPanelModelIds={selectedModels}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

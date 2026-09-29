@@ -93,6 +93,12 @@ export type Message = {
   errorCode?: string;
   errorHadAttachments?: boolean;
   /**
+   * Runtime-only: another model's answer shown in this panel because this
+   * panel's model never answered that turn (lib/chatTranscriptGapFill.ts).
+   * Never persisted as this panel's own.
+   */
+  carriedAnswer?: true;
+  /**
    * The stored attachments this turn could not read, from an
    * ATTACHMENT_UNAVAILABLE refusal.
    *
