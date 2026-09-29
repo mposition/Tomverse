@@ -8,6 +8,7 @@ import {
   getWebSearchCapability,
   webSearchIsDispatchable,
   type DispatchableWebSearchCapability,
+  type WebSearchModelRef,
 } from "@/lib/webSearchCapability";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import {
@@ -70,6 +71,7 @@ export function deriveWebSearchComposerState({
   webSearchMode: storedMode,
   selectedModelIds,
   backendReadiness,
+  resolveModel,
 }: {
   webSearchMode: WebSearchMode;
   selectedModelIds: readonly string[];
@@ -85,6 +87,17 @@ export function deriveWebSearchComposerState({
    * cannot run.
    */
   backendReadiness: WebSearchBackendReadiness;
+  /**
+   * The runtime catalogue's own model for a selected id.
+   *
+   * A model adopted through the Provider Model Catalogue exists only as a
+   * registry row, so its id means nothing to the compiled catalogue and its
+   * provider can only come from here. Resolving by id alone made such a model
+   * read as unable to search in the chip while the credit estimate -- which
+   * holds the row -- priced its search: "Web search unavailable" beside a
+   * 9-credit quote. Required for the same reason `backendReadiness` is.
+   */
+  resolveModel: (modelId: string) => WebSearchModelRef | undefined;
 }): WebSearchComposerState {
   // Normalized here as well as at every read path, because this is what the
   // chip, the exception row and the surcharge estimate are all derived from:
@@ -96,7 +109,7 @@ export function deriveWebSearchComposerState({
   let estimatedSurchargeCredits = 0;
 
   for (const modelId of selectedModelIds) {
-    const capability = getWebSearchCapability(modelId);
+    const capability = getWebSearchCapability(resolveModel(modelId) ?? modelId);
     if (modelSupportsWebSearch(capability, backendReadiness)) {
       supportedCount += 1;
     } else {
