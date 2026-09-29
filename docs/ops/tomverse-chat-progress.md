@@ -1552,13 +1552,13 @@ successor 배포가 끝나지 않았으므로, 현재 successor 구현·무료 �
 현재 완료된 무료 검증은 변경 JS/TS 19파일 ESLint exit 0, focused pure/guard
 **68/68**, owner-only stage/run route contract **11/11**이다. 최종 migration에
 결속한 PostgreSQL 4개 suite, 최종 typecheck와 전체 unit은 별도 검증 단계이며,
-새 Cursor 독립 검토, PR/CI, owner merge·deployment 확인도 아직 완료되지 않았다.
+새 Claude Code Max 구독 CLI 독립 검토, PR/CI, owner merge·deployment 확인도 아직 완료되지 않았다.
 이 수치는 quality pass, release readiness, 실제 활성화 또는 launch 승인이 아니다.
 
 ### 이 Cycle 다음 권장 순서
 
 1. 최종 source에 결속한 나머지 무료 DB·typecheck·전체 unit 검사를 완료한다.
-2. exact diff를 새 Cursor 읽기 전용 독립 검토에 제출한다.
+2. exact diff를 새 Claude Code Max 구독 CLI 읽기 전용 독립 검토에 제출한다.
 3. PR과 Linux CI를 통과시킨 뒤 owner가 merge와 successor deployment를 확인한다.
 4. 배포된 exact source에 대해 새 16건 비용 승인, v4 stage 승인, v6 run 승인을
    각각 명시적으로 받는다.

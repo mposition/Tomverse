@@ -73,4 +73,4 @@ deployment-bound stage/run 승인과 별도 비용 승인이 계속 필요하다
 - 190-file TypeScript/PostgreSQL ordered closure 일치, runtime closure 178 유지
 - content-free evidence, no-retry, unknown-stop 경계 유지
 - unit, server-contract, DB integration, typecheck, lint, 저장소 gate 통과
-- 별도 Cursor CLI 독립 검토 승인
+- 별도 Claude Code Max 구독 CLI 독립 검토 승인
