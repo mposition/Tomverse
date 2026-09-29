@@ -157,7 +157,7 @@ export const parseBacklogMetadataRequest = (raw: string): BacklogMetadataParseRe
   if (Buffer.byteLength(raw, "utf8") > BACKLOG_METADATA_RAW_BODY_MAX_BYTES) {
     return { ok: false, code: "too_large" };
   }
-  if (raw.includes("\u0000") || raw.includes("�")) return { ok: false, code: "content_refused" };
+  if (raw.includes("\u0000") || raw.includes("\uFFFD")) return { ok: false, code: "content_refused" };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
