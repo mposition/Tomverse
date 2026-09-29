@@ -1013,7 +1013,7 @@ test.describe("value-moment upgrade prompt", () => {
     );
   });
 
-  test("changing a panel model keeps the conversation's shared user history", async ({
+  test("changing a panel model keeps the shared questions and the answers only the old model gave", async ({
     page,
   }) => {
     await page.route(
@@ -1040,6 +1040,13 @@ test.describe("value-moment upgrade prompt", () => {
                 modelId: "gpt-5-4-mini",
                 status: "normal",
               },
+              {
+                id: "other-panel-answer",
+                role: "assistant",
+                content: "Answer from the other panel",
+                modelId: "claude-haiku-4-5",
+                status: "normal",
+              },
             ],
             messagePage: { hasMore: false, nextCursor: null },
           }),
@@ -1052,6 +1059,16 @@ test.describe("value-moment upgrade prompt", () => {
     await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-3-6-flash");
 
     await expect(firstPanel.getByText("Shared conversation question")).toBeVisible();
-    await expect(firstPanel.getByText("Answer from the previous model")).toHaveCount(0);
+    // Gemini never answered this turn. The answer the replaced model gave is
+    // no longer shown by any panel, so it stays here -- under its own model,
+    // not presented as Gemini's.
+    const carried = firstPanel.locator(
+      '[data-testid="chat-message"][data-carried-answer="true"]'
+    );
+    await expect(carried).toHaveCount(1);
+    await expect(carried).toHaveAttribute("data-model-id", "gpt-5-4-mini");
+    await expect(carried).toContainText("Answer from the previous model");
+    // The other panel still shows its own answer; it is never copied across.
+    await expect(firstPanel.getByText("Answer from the other panel")).toHaveCount(0);
   });
 });

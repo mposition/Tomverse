@@ -30,6 +30,7 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { getZonedDayWindow } from "@/lib/userTimeZone";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import { splitPreflightImageTokens } from "@/lib/chatImageInputTokens";
 import {
     atLeastOneToken,
     createTokenEstimateAccumulator,
@@ -173,10 +174,18 @@ export async function POST(request: Request) {
         const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
             const capability = getWebSearchCapability(model.id);
-            const attachmentTokens = estimatePreflightAttachmentTokens(
-                model,
+            // Images count against the limit at their provider's ceiling and
+            // reserve the rest of the flat allowance -- the split the chat
+            // route makes from real pixels, made here without them.
+            const imageTokens = splitPreflightImageTokens(
+                model.provider,
                 payload.attachments ?? []
             );
+            const attachmentTokens =
+                estimatePreflightAttachmentTokens(
+                    model,
+                    payload.attachments ?? []
+                ) - imageTokens.reservationOnlyInputTokens;
             // Derived as the chat route derives it, from dispatchability
             // rather than from declared support: this probe answers "can I
             // send this right now", and a model whose native search no request
@@ -231,6 +240,8 @@ export async function POST(request: Request) {
                     appManagedSearchEnabled,
                     nativeSearch: nativeSearchReservation.native,
                     searchBackend: nativeSearchReservation.searchBackend,
+                    reservationOnlyInputTokens:
+                        imageTokens.reservationOnlyInputTokens,
                 }
             );
         });

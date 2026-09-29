@@ -1527,6 +1527,7 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  otherPanelModelIds={selectedModels}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}

@@ -181,6 +181,9 @@ export async function GET(
     const searchParams = new URL(req.url).searchParams;
     const cursor = searchParams.get("cursor");
     const requestedModelId = searchParams.get("modelId");
+    // A panel that fills the turns its own model never answered needs every
+    // model's answers, and still names itself so the id is validated.
+    const includeEveryAnswer = searchParams.get("answers") === "all";
     if (cursor && (cursor.length > 100 || !/^[A-Za-z0-9_-]+$/.test(cursor))) {
       return NextResponse.json(
         { error: "Invalid message cursor." },
@@ -235,7 +238,7 @@ export async function GET(
     const messagePage = await prisma.message.findMany({
       where: {
         conversationId,
-        ...(requestedModelId
+        ...(requestedModelId && !includeEveryAnswer
           ? {
               OR: [
                 { role: "user", modelId: null },
