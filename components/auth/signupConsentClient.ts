@@ -115,7 +115,9 @@ export async function storeSignupConsentChoice(input: {
 
 /**
  * After this tab's own sign-in lands: hands the stored choice to the server,
- * and forgets it once the answer is final. Only a landing whose URL carries the
+ * and forgets it once the answer is final. Returns whether the choice was
+ * **consumed** -- the server answered `ok: true` -- which is when the sign-up
+ * recorded its own estimate; a refusal or a rollback recorded nothing. Only a landing whose URL carries the
  * stored attempt's marker counts. The server decides whether this account may
  * consume it; an existing account's sign-in never does.
  */
@@ -135,6 +137,7 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   // a few times from this landing, which is the only one that may consume it.
   // After that the choice is dropped and the attempt expires on its own; the
   // account exists either way (section 5.2).
+  let consumed = false;
   for (const delayMs of FINALIZE_RETRY_DELAYS_MS) {
     if (delayMs > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs));
     try {
@@ -143,8 +146,11 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(stored),
       });
-      await response.body?.cancel().catch(() => undefined);
-      if (response.status === 200) break;
+      const data = (await response.json().catch(() => null)) as { ok?: unknown } | null;
+      if (response.status === 200) {
+        consumed = data?.ok === true;
+        break;
+      }
     } catch {
       // Nothing reached the server; try again.
     }
@@ -158,7 +164,7 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   } catch {
     // The URL keeps the marker; with nothing stored, it does nothing.
   }
-  return true;
+  return consumed;
 }
 
 const FINALIZE_RETRY_DELAYS_MS = [0, 2_000, 8_000];

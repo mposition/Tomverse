@@ -24,9 +24,10 @@ export function SignupConsentFinalizer({ enabled }: { enabled: boolean }) {
     ran.current = true;
     // A landing that consumed a sign-up choice has just recorded the estimate
     // the screen was rendered under; the per-session estimate is for existing
-    // accounts, and running it here would overwrite that one at once.
-    void finalizeStoredSignupConsent().then((handled) =>
-      handled ? undefined : recordJurisdictionEstimateOnce()
+    // accounts, and running it here would overwrite that one at once. A choice
+    // refused or rolled back recorded nothing, so the estimate still runs.
+    void finalizeStoredSignupConsent().then((consumed) =>
+      consumed ? undefined : recordJurisdictionEstimateOnce()
     );
   }, [enabled, status]);
   return null;

@@ -217,7 +217,13 @@ function SignInButtons({
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
-            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
+            // Stored at the first request only. A resend on the code step keeps
+            // the pending attempt: the choice is locked there, and superseding
+            // it before a request that then fails would leave the still-valid
+            // earlier code bound to nothing.
+            if (step === "email" || !consentAttemptId) {
+                setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
+            }
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
