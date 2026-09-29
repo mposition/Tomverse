@@ -1,6 +1,6 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -17,6 +17,7 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 14
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 15
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 16
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 17
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 18
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -37,6 +38,7 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 17
 | 15 | 2026-09-29 mposition | WSL 실행 루프 연결. 로컬 AMUX가 만든 카드를 실행 영수증으로 허용하고 그 종료 상태를 `review`·`blocked` 정산 신호로 쓴다. claim 전용 모드(`TOMVERSE_AMUX_CLAIM`), 승격 카드의 사람 Review 강제, settle의 review PR 번호, backlog 카드 메타데이터 writer(`TOMVERSE_AMUX_BACKLOG_METADATA`), 자동 승격 grant의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개. 새 환경 변수를 설정하지 않고 병합·배포·활성화를 포함하지 않는다. |
 | 16 | 2026-09-29 mposition | 역할 판정과 단계 사이클. 결정적 기준값(`chore`·`implementation`·`contract`)에 LLM 신호는 상향만 한다. LLM 호출은 제품 DB 자격증명 없는 AMUX Orchestrator가 전용 키로 하고, 모델은 owner가 Admin에서 고른다(기본 `gpt-6-sol`). 단계 카드는 `design → develop → test → review`를 지나며 chore는 `develop → review`다. review는 develop의 확인된 실행 provider와 다른 provider가 맡는다. 버전 15의 완료 신호를 review 단계에서만 개정한다. 단계 사이클 코드 래치는 끈 채로 둔다. 환경 변수, worker catalog, WSL 세션은 바꾸지 않는다. |
 | 17 | 2026-09-29 mposition | 버전 7의 추천 풀 Admin 화면 문장 개정. 화면은 owner 전용 `/admin/amux-promotion?tab=recommendation`이고 owner에게만 내비게이션에 나타난다. owner가 아닌 역할의 내비게이션, 검색, 탭에는 나타나지 않는다. 옛 경로는 redirect로 유지한다. 권한, 래치, 환경 변수는 바꾸지 않는다. |
+| 18 | 2026-09-29 mposition | 실행 API 게이트. 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`(true로 출고)와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`(trim 후 `1`)가 모두 참일 때만 실행 API가 열리며 `NODE_ENV`와 무관하다. Phase A 절의 비활성 문장을 이 조건으로 개정한다. local process executor 금지와 engineering adapter 래치는 그대로다. late COMMIT 성공 기록 방지 테스트가 아직 없음을 기록하고, `develop` AMUX의 `main` 병합은 그 테스트가 `routing` 레인에서 head SHA 녹색일 때만 한다. 환경 변수는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -168,7 +170,9 @@ Phase A에서 검증 가능한 AMUX 능력은 queue read와 routing snapshot의 
 실행, 외부 시스템 변경을 뜻하지 않는다.
 
 `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery,
-settlement은 Phase A production에서 비활성이다. local process executor는
+settlement(이하 실행 API)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고,
+환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다(버전 18).
+판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다. local process executor는
 production에서 실행할 수 없으며 환경변수만으로 그 금지를 해제하지 못한다.
 이후 실행 허용은 Agent별 승인 정책, 격리된 실행 서비스, 비용·보존·감사 계약과
 별도 검증·활성화 결정을 요구한다. 선택 전용 route의 production 활성화도 별도
@@ -910,3 +914,50 @@ Authority 절의 앱 경계 1(`/api/internal/amux/*`)에 내부 route 둘을 더
 ### 이 버전이 하지 않는 것
 
 PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가, 자동 승격의 조건 변경을 하지 않는다. 로컬 AMUX의 새 provider adapter(예: Cursor)는 이 저장소 밖의 일이며, 생긴 뒤에도 `AMUX_VERIFIED_PROVIDERS` 개정 전에는 단계 카드를 받지 못한다.
+
+## 버전 18 — 실행 API 게이트
+
+승인자 mposition, 승인일 2026-09-29. 버전 13~17은 유지한다. 이 버전은 「Phase A selection-only boundary」 절의 한 문단과, 두 브랜치가 서로 다르게 구현한 실행 API 게이트를 하나로 정한다.
+
+### 무엇이 달랐나
+
+- `develop`의 `lib/amux/executionGate.ts`는 `NODE_ENV`가 `test`일 때만 실행 API를 연다. 배포된 빌드는 환경 변수로 열 수 없다.
+- `main`의 같은 파일은 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`이면 연다. 버전 13~15의 WSL 실행 루프는 이 경로로 운영 중이다.
+- 「Phase A selection-only boundary」 절은 "claim과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement은 Phase A production에서 비활성이다"라고 적는다. 버전 15는 claim 전용 모드와 실행 루프를 승인했지만, 이 문장을 명시적으로 개정하지 않았다.
+
+### 개정
+
+「Phase A selection-only boundary」 절의 두 번째 문단 첫 문장을 다음으로 바꾼다.
+
+> `claim`과 그 뒤의 worker 등록·heartbeat, owned queue, execution, delivery, settlement(이하 **실행 API**)는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`가 true이고, 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`가 trim 후 정확히 `1`일 때만 열린다. 판정은 `NODE_ENV`와 무관하다. 둘 중 하나라도 아니면 실행 API는 `execution_api_disabled`로 거절한다.
+
+같은 문단의 나머지는 유지한다. 특히 다음은 바뀌지 않는다.
+
+- local process executor는 production에서 실행할 수 없으며, 환경 변수만으로 그 금지를 해제하지 못한다.
+- 실행 API가 열려도 worker 실행은 버전 13의 WSL runner 예외와 버전 12의 승인된 adapter(그 자신의 래치 포함)를 통해서만 일어난다.
+- `queue`와 `routing-snapshot` 같은 선택 전용 route의 production 활성화, 그리고 개별 Agent의 실행 허용은 각자의 승인이다.
+
+### 코드 래치
+
+- `AMUX_EXECUTION_API_CODE_LATCH`는 `lib/amux/executionGate.ts`의 코드 상수이고, 이 버전은 **true로 출고**한다. 버전 15가 이미 운영 중인 실행 루프를 승인했기 때문이다.
+- 게이트는 래치와 환경 변수를 인자로 받는 순수 함수 하나로 판정하고, 공개 함수는 그 함수에 출고 상수와 환경 값을 넘긴다.
+- 테스트가 고정하는 것: 출고 상수가 true다. 래치가 false이면 환경 값이 `1`이어도 닫힌다. 래치가 true이고 환경 값이 `1`이면 `NODE_ENV`가 `production`이어도 열린다. 환경 값이 비었거나 `1`이 아니면 닫힌다.
+- 기존 단위 테스트 `tests/amuxClaimContractParity.test.mjs`의 "a production build cannot activate future execution with an environment flag"는 위 동작으로 바꾼다. 환경 변수를 비우면 `execution_api_disabled`인 기존 DB 통합 테스트는 유지한다.
+- 래치를 false로 되돌리는 것은 닫는 변경이며, 이 문서의 개정 없이 할 수 있다. 여는 변경(false → true)은 이 문서의 개정이다.
+- `lib/amux/dbBoundary.ts`의 "Future execution stays hard-disabled until the DB is proven…" 주석은 게이트를 바꾸는 같은 커밋에서 이 버전과 맞게 고친다.
+
+### 활성화 증거
+
+같은 절의 "실행 경로 활성화 전에는 같은 DB 통합 테스트가 late COMMIT의 성공 기록 방지와 read-back 식별·멱등을 증명해야 한다"는 문장은 유지한다. 이 버전은 다음을 사실로 적는다.
+
+- **late COMMIT의 성공 기록 방지를 증명하는 테스트는 아직 트리에 없다.** 현재 `tests/integration/amux-orchestration.db.test.ts`에 있는 commit fence rollback(COMMIT 전 DB-clock 검사), statement timeout rollback, HTTP 응답 유실 뒤 read-back, delivery pull·ack 멱등은 그 증명이 아니다.
+- 버전 15의 운영 활성화는 운영자가 환경 변수를 켠 결정이며, 그 시점에 위 증명은 없었다. 이 버전은 그 결정을 소급해 증명된 것으로 만들지 않는다.
+- `develop`의 AMUX를 `main`으로 옮기는 병합은 다음을 모두 만족할 때만 한다.
+  1. deadline이 지난 뒤 COMMIT된 실행이 성공으로 기록되면 **실패하는** 새 DB 통합 테스트가, `Credit Finance DB Integration` 워크플로의 matrix `routing` 레인에 들어 있다.
+  2. 그 레인이 병합 대상 PR의 **head SHA**에서 녹색이다. 기존 테스트만의 녹색이나 PR Fast Gate의 녹색은 이 조건을 충족하지 않는다.
+  3. PR 본문에 그 run의 링크와 head SHA를 적는다.
+- 이 레인은 required branch protection이 아니다. 위 조건은 병합하는 사람이 확인하는 규칙이다.
+
+### 이 버전이 하지 않는 것
+
+환경 변수를 설정하거나 바꾸지 않는다. 운영 중인 루프의 동작을 바꾸지 않는다. `main`의 현재 조건 "환경 변수 `1`"에 "래치 true"가 더해질 뿐이다. worker catalog, WSL 세션, 자동 승격, engineering adapter 래치, 단계 사이클 래치를 바꾸지 않는다.
