@@ -52,6 +52,9 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
   // Held until the render is recorded, so an answer can never race it.
   const [busy, setBusy] = useState(true);
   const [failed, setFailed] = useState(false);
+  // "Not now" leaves nothing but the render's record, so it closes only once
+  // that record exists; otherwise the notice would come back.
+  const [shownRecorded, setShownRecorded] = useState(false);
   const asked = useRef(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -109,10 +112,30 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
   // answers wait for it.
   useEffect(() => {
     if (!copyVersion) return;
-    void post("shown").finally(() => setBusy(false));
+    void post("shown").then((recorded) => {
+      setShownRecorded(recorded);
+      setBusy(false);
+    });
   }, [copyVersion, post]);
 
   const close = useCallback(() => setCopyVersion(null), []);
+
+  const dismiss = useCallback(async () => {
+    if (shownRecorded) {
+      close();
+      return;
+    }
+    setBusy(true);
+    setFailed(false);
+    const recorded = await post("shown");
+    setBusy(false);
+    if (!recorded) {
+      setFailed(true);
+      return;
+    }
+    setShownRecorded(true);
+    close();
+  }, [close, post, shownRecorded]);
 
   const answer = useCallback(
     async (action: "object" | "accept") => {
@@ -132,7 +155,9 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
 
   useModalDialog({
     open: copyVersion !== null,
-    onClose: close,
+    onClose: () => {
+      if (!busy) void dismiss();
+    },
     dialogRef,
     panelRef,
     initialFocusRef: acceptRef,
@@ -200,7 +225,7 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
             type="button"
             disabled={busy}
             data-testid="in-product-consent-notice-dismiss"
-            onClick={close}
+            onClick={() => void dismiss()}
             className={`${answerButtonClass} border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900`}
           >
             {text("noticeDismiss")}

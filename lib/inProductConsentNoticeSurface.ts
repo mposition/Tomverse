@@ -16,6 +16,7 @@ import { readConsentKeyring } from "@/lib/emailConsentToken";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
+import { CONSENT_CONFIRMATION_TTL_MS } from "@/lib/emailConsentToken";
 import {
   noticeStateForUser,
   recordNoticeObjection,
@@ -46,6 +47,7 @@ import { noticeCandidatesFor, noticePurposes } from "@/lib/inProductConsentNotic
  */
 
 const SURFACE = "in_product_notice";
+const CONFIRMATION_UNAVAILABLE = Symbol("confirmation_unavailable");
 
 /**
  * Whether the notice may appear at all.
@@ -196,25 +198,59 @@ export async function recordConsentNoticeAction(input: {
       : resolved.source === "ip_estimated"
         ? ("ip_estimated" as const)
         : ("resolved" as const);
-  const requested: string[] = [];
-  for (const purpose of noticePurposes()) {
-    const result = await requestConsentConfirmation({
-      userId: input.userId,
-      purpose,
-      capturedVia: "preference_center",
-      evidenceVia: "in_product_notice",
-      confirmedCountry: resolved.countryCode,
-      jurisdiction: resolved.countryCode,
-      jurisdictionSource: resolved.source,
-      countrySource,
-      language,
-      ip: input.ip ?? null,
-      userAgent: input.userAgent ?? null,
+  // Only what is neither confirmed nor waiting on a live link. A new request
+  // replaces the pending one's id and kills the link already in the inbox
+  // (docs/policy/email-double-opt-in.md), so a pending purpose is left alone.
+  const now = Date.now();
+  const rows = await prisma.emailPreference.findMany({
+    where: { userId: input.userId, purpose: { in: noticePurposes() } },
+    select: {
+      purpose: true,
+      enabled: true,
+      confirmedAt: true,
+      confirmationRequestId: true,
+      confirmationRequestedAt: true,
+    },
+  });
+  const toRequest = noticePurposes().filter((purpose) => {
+    const row = rows.find((entry) => entry.purpose === purpose);
+    if (!row) return true;
+    if (row.enabled && row.confirmedAt) return false;
+    const pending =
+      row.confirmationRequestId !== null &&
+      row.confirmationRequestedAt !== null &&
+      now - row.confirmationRequestedAt.getTime() < CONSENT_CONFIRMATION_TTL_MS;
+    return !pending;
+  });
+
+  // One commit for all of them: a partial "Yes" would leave some mail queued
+  // under a screen that says nothing was saved, and the retry that screen
+  // invites would then replace those links.
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const purpose of toRequest) {
+        const result = await requestConsentConfirmation({
+          userId: input.userId,
+          purpose,
+          capturedVia: "preference_center",
+          evidenceVia: "in_product_notice",
+          confirmedCountry: resolved.countryCode,
+          jurisdiction: resolved.countryCode,
+          jurisdictionSource: resolved.source,
+          countrySource,
+          language,
+          ip: input.ip ?? null,
+          userAgent: input.userAgent ?? null,
+          client: tx,
+        });
+        if (!result.requested) throw CONFIRMATION_UNAVAILABLE;
+      }
     });
-    if (result.requested) requested.push(purpose);
-    else if (result.reason !== "already_confirmed") {
+  } catch (error) {
+    if (error === CONFIRMATION_UNAVAILABLE) {
       return { recorded: false, reason: "confirmation_unavailable" };
     }
+    throw error;
   }
-  return { recorded: true, requested };
+  return { recorded: true, requested: toRequest };
 }

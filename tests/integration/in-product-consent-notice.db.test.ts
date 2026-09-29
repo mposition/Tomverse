@@ -13,6 +13,7 @@ import {
   consentNoticeForViewer,
   recordConsentNoticeAction,
 } from "@/lib/inProductConsentNoticeSurface";
+import { ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // The in-product consent notice as a screen (S8).
@@ -198,4 +199,39 @@ test("an account whose country marketing may not reach is not asked", async () =
     data: { userId: user.id, country: "NL", countrySource: "self_declared", countryUpdatedAt: new Date() },
   });
   assert.deepEqual(await consentNoticeForViewer(user.id), { offered: false });
+});
+
+test("Yes leaves a purpose waiting on a live link alone, and commits all or nothing", async () => {
+  const user = await australian();
+  await action(user.id, "shown");
+  // A confirmation already in the inbox for product updates: a new request
+  // would replace its id and kill that link.
+  await ensureDefaultPreferences(user.id);
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose: "product_updates" } },
+    data: { confirmationRequestId: "pending-request", confirmationRequestedAt: new Date() },
+  });
+  const result = await action(user.id, "accept");
+  assert.equal(result.recorded, true);
+  assert.deepEqual(
+    [...((result as { requested?: string[] }).requested ?? [])].sort(),
+    ["newsletter", "promotions"]
+  );
+  const pending = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "product_updates" } },
+    select: { confirmationRequestId: true },
+  });
+  assert.equal(pending.confirmationRequestId, "pending-request");
+});
+
+test("a Yes that cannot be confirmed queues nothing at all", async () => {
+  const user = await australian();
+  await action(user.id, "shown");
+  await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, false);
+  // The notice itself is then not offered; asked anyway, the answer queues
+  // no mail and no record.
+  const result = await action(user.id, "accept");
+  assert.equal(result.recorded, false);
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
 });
