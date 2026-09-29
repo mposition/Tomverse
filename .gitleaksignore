@@ -368,3 +368,37 @@ f0910bfd4235d11df063600e529219dec1417a90:.gitleaksignore:generic-api-key:272
 # Scope: exactly these two findings in that one commit — nothing wider.
 d5b80fb68da111ac90315310a10c1922264a01dc:tests/engineeringAgentRegistrationGuard.test.mjs:aws-access-token:199
 d5b80fb68da111ac90315310a10c1922264a01dc:tests/engineeringAgentRegistrationGuard.test.mjs:generic-api-key:203
+
+# Commit 13b7d2f3 added a long synthetic AMUX sync-secret fixture to a DB
+# integration test. It was generated solely to satisfy the route's minimum
+# length guard and never authenticated any process. The current test now calls
+# makeAmuxSyncSecret(), so this pins only the immutable introducing commit and
+# does not allowlist a path, value shape, or future finding.
+13b7d2f35661cfdcdc8820d31759ee0df8566b78:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1897
+
+# Synthetic fixtures on branches that are neither main nor develop.
+#
+# The Daily Security Audit runs on main but checks out every ref
+# (fetch-depth: 0), so a commit that exists only on a feature branch is judged
+# with main's list. Run 85 (2026-09-29) counted these seven:
+#
+#  * c65b196b (feat/amux-tomverse-orchestration) and 25f329f9
+#    (amux/to-develop/c65b196b-r2) set a literal test secret as
+#    TOMVERSE_AMUX_SYNC_SECRET in three DB integration tests. The value names
+#    itself a test secret and only ever reached a test database; it is the
+#    same kind of fixture 13b7d2f3 above pins at a different line.
+#  * d3569b09 (claude/engineering-agent-p2-app) puts an AWS-access-key-shaped
+#    string into a patch body so the publisher's content check can be shown to
+#    refuse it ("content_check_failed"). It was invented for the test, like the
+#    d5b80fb pair above.
+#
+# The values are deliberately not quoted.
+#
+# Scope: exactly these seven findings in those three commits -- nothing wider.
+c65b196ba5d8d66b9916882e46caabd02fe84e95:tests/integration/amux-orchestration.db.test.ts:generic-api-key:519
+c65b196ba5d8d66b9916882e46caabd02fe84e95:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1023
+c65b196ba5d8d66b9916882e46caabd02fe84e95:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1401
+25f329f950b603d7cdddda96447c19dc1dc23374:tests/integration/amux-orchestration.db.test.ts:generic-api-key:519
+25f329f950b603d7cdddda96447c19dc1dc23374:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1023
+25f329f950b603d7cdddda96447c19dc1dc23374:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1401
+d3569b097b1d264031ea7b98e2f24684e14d03a2:tests/engineeringAgentPublisher.test.mjs:aws-access-token:180
