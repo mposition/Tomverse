@@ -5,6 +5,7 @@ import {
   prepareGuestPage,
   sendChatMessage,
 } from "./support/app-fixtures";
+import { mockUserUsage } from "./support/chat-state-fixtures";
 
 /**
  * The web-search offer, end to end.
@@ -20,8 +21,12 @@ import {
 
 /** Native OpenAI search, dispatchable -- see lib/webSearchCapability.ts. */
 const SEARCHING_MODEL_ID = "gpt-5-6-luna";
-/** Deliberately `unverified` in the same table: this model cannot search. */
-const NON_SEARCHING_MODEL_ID = "gpt-5-4-mini";
+/**
+ * The one catalogue model that cannot take the switch. Every chat model
+ * searches by one route or another since 2026-09-29; Deep Research runs its
+ * own retrieval flow instead, and is a Pro model.
+ */
+const NON_SEARCHING_MODEL_ID = "perplexity/sonar-deep-research";
 
 const WEATHER_QUESTION = "What is the weather in Seoul today?";
 const ORDINARY_QUESTION =
@@ -218,18 +223,38 @@ const withDefaultCombination = async (
 
 const openChat = async (
   page: Page,
-  options: { selectedModels?: string[]; language?: "en" | "ko" } = {}
+  options: {
+    selectedModels?: string[];
+    language?: "en" | "ko";
+    plan?: "Free" | "Pro";
+  } = {}
 ) => {
   const selectedModels = options.selectedModels ?? [SEARCHING_MODEL_ID];
   const language = options.language ?? "en";
   await prepareGuestPage(page, language);
   await mockAuthenticatedApi(page, { selectedModels });
+  if (options.plan) await mockUserUsage(page, { plan: options.plan });
   const chat = await mockChat(page);
   // Routes have to be in place before the first load: the settings a new
   // conversation is seeded from are read once, on mount.
   await withDefaultCombination(page, selectedModels, language);
   await page.goto(`/chat?lang=${language}`);
+  // The offer exists for a conversation whose switch is off. A new
+  // conversation starts with it on, so it is turned off here -- the state a
+  // user who chose not to search is in.
+  await turnWebSearchOff(page);
   return chat;
+};
+
+const turnWebSearchOff = async (page: Page) => {
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  const toggle = page.getByTestId("tools-web-search-row");
+  await expect(toggle).toHaveAttribute("aria-checked", /^(true|false)$/);
+  if ((await toggle.getAttribute("aria-checked")) === "true") {
+    await toggle.click();
+  }
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
 };
 
 const card = (page: Page) => page.getByTestId("web-search-suggestion");
@@ -346,6 +371,7 @@ test("a model that cannot search says so and offers no search action", async ({
   test.setTimeout(120_000);
   const chat = await openChat(page, {
     selectedModels: [NON_SEARCHING_MODEL_ID],
+    plan: "Pro",
   });
 
   await answerWithoutSearching(page, testInfo, chat);

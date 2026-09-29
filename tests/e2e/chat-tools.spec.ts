@@ -87,12 +87,15 @@ test("the + menu opens a tools sheet with web search, Deep Research, and an unch
 
 test("selecting a web search mode shows a removable status chip", { tag: "@ui-risk" }, async ({ page }) => {
   // The selection is pinned rather than inherited from the app default: this
-  // test is about the state where NO selected model can search, and the
-  // default model moved to gpt-5-6-luna, which has verified provider-native
-  // search. gpt-5-4-mini is still enabled and still "unverified" in
-  // lib/webSearchCapability.ts, so it is what actually produces the blocked
-  // state under test.
-  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+  // test is about the state where NO selected model can search. Every chat
+  // model searches by one route or another since 2026-09-29, so the blocked
+  // state is produced by Deep Research, which runs its own retrieval flow and
+  // never takes the switch. It is a Pro model, hence the plan.
+  await mockAuthenticatedApi(page, {
+    selectedModels: ["perplexity/sonar-deep-research"],
+    webSearchMode: "off",
+  });
+  await asProPlan(page);
   await page.goto("/chat?lang=en");
   // /chat opens on the welcome screen with no active conversation, where the
   // selection is DEFAULT_MODEL_ID rather than anything this fixture seeded.
@@ -107,7 +110,7 @@ test("selecting a web search mode shows a removable status chip", { tag: "@ui-ri
 
   // The chip carries the request state itself instead of echoing the menu
   // label ("Web search - Use web search"): the only selected model here is
-  // gpt-5-4-mini, pinned above, which has no verified provider-native search, so the honest
+  // Deep Research, pinned above, which cannot take the switch, so the honest
   // state is "unavailable" plus a way out -- never a silent fall back to
   // answering without a search.
   const chip = page.getByTestId("web-search-mode-chip");
@@ -137,7 +140,7 @@ test("selecting a web search mode shows a removable status chip", { tag: "@ui-ri
   await expect(page.getByTestId("web-search-unavailable-notice")).toHaveCount(0);
 });
 
-test("web search mode selection does not repeat across a new chat", { tag: "@ui-risk" }, async ({ page }) => {
+test("turning web search off does not repeat across a new chat", { tag: "@ui-risk" }, async ({ page }) => {
   // Seeded with history on purpose. The mobile shell deliberately hides its
   // header "New chat" button while the open conversation is still empty
   // (components/chat/MobileChatShell.tsx), so driving this contract from the
@@ -147,6 +150,7 @@ test("web search mode selection does not repeat across a new chat", { tag: "@ui-
   // same reset through the affordance each shell actually offers.
   await mockAuthenticatedApi(page, {
     selectedModels: ["gpt-5-4-mini"],
+    webSearchMode: "always",
     messages: [
       { id: "seed-user", role: "user", content: "seeded question" },
       {
@@ -165,16 +169,20 @@ test("web search mode selection does not repeat across a new chat", { tag: "@ui-
   // conversation has to actually be opened first.
   await openRecentConversation(page);
 
+  // The switch is per conversation. Turning it off here is this
+  // conversation's choice, and a new chat starts from the default (on) rather
+  // than inheriting it.
+  await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+  await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 
   const newChatButton = page.getByRole("button", { name: "New chat" }).first();
   await expect(newChatButton).toBeVisible();
   await newChatButton.click();
 
-  await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+  await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
 });
 
 test("Deep Research is gated behind login for guests", { tag: "@ui-risk" }, async ({ page }) => {

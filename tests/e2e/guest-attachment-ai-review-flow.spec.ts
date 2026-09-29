@@ -6,6 +6,7 @@ import {
 } from "./support/app-fixtures";
 import {
   freezeAnimations,
+  GUEST_DAILY_CREDIT_LIMIT,
   mockGuestUsage,
   setRootFontSize,
   suppressTransientUi,
@@ -279,7 +280,7 @@ async function startGuestJourney(page: Page, options: JourneyOptions) {
   const { viewport, lang = "en" } = options;
   await prepareGuestPage(page, "en");
   await suppressTransientUi(page);
-  await mockGuestUsage(page, 0, 20, options.guestUsage ?? {});
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT, options.guestUsage ?? {});
   await mockChatStream(page, "Stage the migration and keep a full snapshot.");
   await mockGuestQuickSummary(page);
   const uploads = await mockGuestUpload(page);
