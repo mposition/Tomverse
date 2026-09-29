@@ -96,10 +96,16 @@ export const auRelationshipStanding = (facts: AuRelationshipFacts): AuRelationsh
     return { active: false, reason: "address_changed" };
   }
   if (facts.consentWithdrawn) return { active: false, reason: "consent_withdrawn" };
-  // No recorded sign-in is dormant, not "active since signup": the signup
-  // itself sets `lastLoginAt`, so an account without one is not one we saw.
-  const lastSeen = facts.lastLoginAt;
-  if (lastSeen === null) return { active: false, reason: "dormant" };
+  // Measured from the later of the last sign-in and the relationship's start
+  // -- exactly as the sign-in event's end writer measures it
+  // (`endDormantEmailRelationshipAtSignIn()`). The sign-up's own sign-in stamps
+  // `lastLoginAt` a few minutes before finalize records the start, and two
+  // different clocks would let a sign-in between the two deadlines skip the
+  // end while this already called the relationship dormant.
+  const lastSeen =
+    facts.lastLoginAt && facts.lastLoginAt > facts.started.occurredAt
+      ? facts.lastLoginAt
+      : facts.started.occurredAt;
   if (facts.now >= addUtcMonths(lastSeen, AU_RELATIONSHIP_DORMANCY_MONTHS)) {
     return { active: false, reason: "dormant" };
   }

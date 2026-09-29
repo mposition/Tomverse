@@ -149,9 +149,11 @@ test("a recorded start stands for its own account and mailbox, and a stale sign-
   const other = await account();
   assert.deepEqual(await standing(other), { active: false, reason: "no_relationship" });
 
-  const dormant = await account(new Date(Date.now() - 25 * MONTH_MS));
-  await startedFor(dormant);
-  assert.deepEqual(await standing(dormant), { active: false, reason: "dormant" });
+  // A last sign-in older than the start does not make a new relationship
+  // dormant: the clock runs from the later of the two.
+  const signedInBefore = await account(new Date(Date.now() - 25 * MONTH_MS));
+  const recent = await startedFor(signedInBefore);
+  assert.deepEqual(await standing(signedInBefore), { active: true, eventId: recent.id });
 });
 
 test("a deletion request ends the relationship in its own transaction, once", async () => {
@@ -218,6 +220,8 @@ test("the dormancy clock never runs from before the relationship started", async
     return ended;
   });
   assert.deepEqual(result, { ended: false });
+  // And the send verdict agrees: measured the same way, it is active.
+  assert.equal((await standing(user)).active, true);
 });
 
 test("a relationship older than 24 months ends at the sign-in, once", async () => {

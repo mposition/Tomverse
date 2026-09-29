@@ -39,13 +39,25 @@ test("R4: the relationship lasts 24 months from the last sign-in", () => {
   assert.equal(AU_RELATIONSHIP_DORMANCY_MONTHS, 24);
   assert.deepEqual(auRelationshipStanding(base), { active: true, eventId: "evt_1" });
   const lastLoginAt = new Date("2026-03-15T10:00:00.000Z");
+  const early = { ...base, started: { ...base.started, occurredAt: new Date("2026-01-01T00:00:00Z") } };
   // Exactly 24 months is dormant; a millisecond inside is not.
-  assert.deepEqual(auRelationshipStanding({ ...base, lastLoginAt }), { active: false, reason: "dormant" });
+  assert.deepEqual(auRelationshipStanding({ ...early, lastLoginAt }), { active: false, reason: "dormant" });
   assert.equal(
-    auRelationshipStanding({ ...base, lastLoginAt: new Date(lastLoginAt.getTime() + 1) }).active,
+    auRelationshipStanding({ ...early, lastLoginAt: new Date(lastLoginAt.getTime() + 1) }).active,
     true
   );
-  assert.deepEqual(auRelationshipStanding({ ...base, lastLoginAt: null }), { active: false, reason: "dormant" });
+  // The clock runs from the later of the last sign-in and the start, the same
+  // measure the sign-in event's end writer uses.
+  assert.equal(auRelationshipStanding({ ...base, lastLoginAt: null }).active, true);
+  assert.deepEqual(
+    auRelationshipStanding({ ...base, lastLoginAt: null, now: new Date("2029-01-01T00:00:00.000Z") }),
+    { active: false, reason: "dormant" }
+  );
+  // A sign-in before the start does not move the clock back.
+  assert.equal(
+    auRelationshipStanding({ ...base, lastLoginAt: new Date("2025-01-01T00:00:00Z"), now: new Date("2028-12-31T00:00:00Z") }).active,
+    true
+  );
 });
 
 test("calendar months clamp to the month's last day", () => {
