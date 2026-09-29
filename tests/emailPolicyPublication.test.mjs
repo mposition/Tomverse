@@ -23,10 +23,8 @@ import {
   CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
   CHANGE_NOTICE_TEMPLATE_KEY,
   AMENDED_DOCUMENT_EVIDENCE,
-  APPROVED_AMENDED_CONSENT_COPY_VERSIONS,
   APPROVED_AMENDED_DIGESTS,
   DIGEST_VERIFIED_BY,
-  consentCopyFacts,
   documentFacts,
   emailPolicyPublicationProblems,
 } from "../lib/emailPolicyPublication.ts";
@@ -64,17 +62,9 @@ const notice = (overrides = {}) => ({
   ...overrides,
 });
 
-const copy = (overrides = {}) => ({
-  version: "2026-12-01",
-  approvedAsAmended: true,
-  promiseState: "makes_no_promise",
-  ...overrides,
-});
-
 const refusals = (input) =>
   publicationProblems({
     documents: [amended()],
-    consentCopy: copy(),
     notice: notice(),
     now: NOW,
     ...input,
@@ -166,23 +156,6 @@ test("a notice nobody named is not a notice, and only a legal one counts", () =>
   }
 });
 
-test("the consent copy must be an approved amended version that no longer promises", () => {
-  // All four devices are one version, so one check covers the signup opt-in,
-  // notice and refusal and the in-product notice existing accounts see.
-  assert.deepEqual(refusals({ consentCopy: copy({ approvedAsAmended: false }) }), [
-    "consent_copy_not_amended",
-  ]);
-  // Approved or not, copy that still promises no unrequested send contradicts
-  // sending -- and a version this build cannot read is treated the same way.
-  assert.deepEqual(
-    refusals({ consentCopy: copy({ promiseState: "promises_no_unrequested_send" }) }),
-    ["consent_copy_still_promises"]
-  );
-  assert.deepEqual(refusals({ consentCopy: copy({ promiseState: "unknown_version" }) }), [
-    "consent_copy_still_promises",
-  ]);
-});
-
 test("every refusal the core can produce is in the closed list", () => {
   const seen = new Set();
   const cases = [
@@ -197,8 +170,6 @@ test("every refusal the core can produce is in the closed list", () => {
     { notice: notice({ told: 0, late: 0 }) },
     { notice: notice({ untold: 1 }) },
     { notice: notice({ classification: "transactional" }) },
-    { consentCopy: copy({ approvedAsAmended: false }) },
-    { consentCopy: copy({ promiseState: "unknown_version" }) },
   ];
   for (const input of cases) for (const refusal of refusals(input)) seen.add(refusal);
   assert.deepEqual([...seen].sort(), [...PUBLICATION_REFUSALS].sort());
@@ -206,17 +177,11 @@ test("every refusal the core can produce is in the closed list", () => {
 
 // The repository as it stands.
 
-test("section 10's documents are the ones the gate reads, and the consent copy is read whole", () => {
-  assert.deepEqual([...AMENDED_DOCUMENTS], ["/privacy", "/terms", "login consent sentence"]);
-  // The four consent devices are one versioned table; the gate reads the
-  // version the product renders, so none of them can be left out.
-  const facts = consentCopyFacts();
-  assert.equal(typeof facts.version, "string");
-  assert.deepEqual([...APPROVED_AMENDED_CONSENT_COPY_VERSIONS], []);
-  assert.equal(facts.approvedAsAmended, false);
-  // Today's copy tells existing accounts we will not send product news unless
-  // asked, which is why the gate must not open on it.
-  assert.equal(facts.promiseState, "promises_no_unrequested_send");
+test("the amended documents are the two pages", () => {
+  // The login sentence does not change (email is not bundled into it) and the
+  // consent devices keep their promise under the owner's option B, so neither
+  // is a document this amendment changes.
+  assert.deepEqual([...AMENDED_DOCUMENTS], ["/privacy", "/terms"]);
 });
 
 test("every document the gate calls verified is recomputed here and matches its record", () => {
@@ -273,19 +238,17 @@ test("no version of any document is approved as carrying the amendment yet", () 
 });
 
 test("today, nothing is published and release notes cannot go live", async () => {
-  assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, null);
+  // The notice template exists; its wording is not approved yet, so no
+  // delivery of it counts, and the notice is still unidentified.
+  assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, "policy_change_notice");
   assert.deepEqual([...CHANGE_NOTICE_APPROVED_CONTENT_HASHES], []);
-  assert.equal(documentFacts().length, 3);
+  assert.equal(documentFacts().length, 2);
   const problems = (await emailPolicyPublicationProblems(NOW)).map(
     (problem) => `${problem.subject}:${problem.refusal}`
   );
-  const version = consentCopyFacts().version;
   assert.deepEqual(problems, [
-    `consent copy ${version}:consent_copy_not_amended`,
-    `consent copy ${version}:consent_copy_still_promises`,
     "/privacy:document_state_unrecorded",
     "/terms:document_state_unrecorded",
-    "login consent sentence:document_state_unrecorded",
     "change notice:change_notice_unidentified",
   ]);
 });

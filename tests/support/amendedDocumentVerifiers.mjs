@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { infoPages } from "../../components/marketing/marketingInfoContent.ts";
 import { en } from "../../locales/en.ts";
 import { ko } from "../../locales/ko.ts";
 import { zh } from "../../locales/zh.ts";
@@ -30,8 +31,8 @@ const source = (path) => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 const squash = (text) => text.toLowerCase().replace(/\s+/g, "");
 
 /** Whether every locale's text shows `date` (YYYY-MM-DD) as its formatted date. */
-const showsDateInEveryLocale = (textFor, date) =>
-  Object.entries(PRIVACY_LOCALES).every(([locale, copy]) => {
+const showsDateInEveryLocale = (textFor, date, locales = PRIVACY_LOCALES) =>
+  Object.entries(locales).every(([locale, copy]) => {
     const expected = new Intl.DateTimeFormat(locale, {
       year: "numeric",
       month: "long",
@@ -58,5 +59,16 @@ export const AMENDED_DOCUMENT_VERIFIERS = {
       return digest.digest("hex");
     },
     showsDate: (date) => showsDateInEveryLocale((copy) => copy.privacyPolicy.effective, date),
+  },
+  // Every locale the terms page has, in the object's own order. The shown date
+  // is the "updated" line, which is the date a reader of the page sees.
+  "/terms": {
+    record: "amended",
+    digest: () => {
+      const digest = createHash("sha256");
+      digest.update(JSON.stringify(infoPages.terms));
+      return digest.digest("hex");
+    },
+    showsDate: (date) => showsDateInEveryLocale((copy) => copy.updated, date, infoPages.terms),
   },
 };

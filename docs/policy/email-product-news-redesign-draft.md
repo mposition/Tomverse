@@ -1582,14 +1582,19 @@ EEA·영국을 여는 선행 게이트입니다.
   던집니다** — 판정의 `read()`가 재시도로 바꾸므로, 순간적인 DB 오류가 release
   notes를 영구 skip하지 않습니다(불변식 11).
 
-**남은 것은 전부 소유자 결정입니다.** (1) 세 문서와 동의 문안 새 버전의 개정 문안(7개 언어) 승인,
-(2) 개정을 담은 각 문서 버전의 승인된 digest(`APPROVED_AMENDED_DIGESTS`)와
-현재 digest·시행일(페이지는 `SITEMAP_CONTENT_EVIDENCE`, 가입·로그인 문안처럼
-페이지가 아닌 것은 `AMENDED_DOCUMENT_EVIDENCE`), 그리고 그 현재 digest를 렌더된 원본에서
-다시 계산해 대조하는 테스트(`DIGEST_VERIFIED_BY`에 등록 — 이름만 언급하는 테스트는
-검사가 거부합니다), (3) `legal` 분류의 변경 고지 template — 이 개정 전용으로 새로 만든
-것 — 과 그 승인된 버전의 `contentHash`, 그리고 시행일. 이 셋을 갖추고 고지를 대상 전원에게 기한 안에 넘기면 게이트가
-스스로 열립니다.
+**2026-09-29 소유자 결정으로 정리된 것**: 로그인 화면 동의 문장은 개정하지 않고(이메일을
+묶지 않음), 동의 장치 문안은 결정 B대로 약속을 유지합니다. 그래서 개정 대상은
+`/privacy`와 `/terms` 두 페이지이고, `/terms`의 현재 상태는
+`AMENDED_DOCUMENT_EVIDENCE`에 기록돼 검증기가 다시 계산합니다
+(`tests/support/amendedDocumentVerifiers.mjs`). 변경 고지 template
+`policy_change_notice`가 등록돼 있습니다.
+
+**남은 것은 전부 소유자 결정입니다** —
+[방침·약관 개정 초안](email-policy-amendment-draft.md)의 (1) `/privacy` 개정안 승인,
+(2) 변경 고지 문안 승인(그 template version의 `contentHash`를
+`CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에), (3) 시행일. 그 뒤 게시한 두 페이지의
+digest를 `APPROVED_AMENDED_DIGESTS`에 적고, 고지를 **사람이** 대상 전원에게 기한 안에
+보내면 게이트가 스스로 열립니다.
 `tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
 있음을 고정하므로, 그때 함께 고칩니다.
 

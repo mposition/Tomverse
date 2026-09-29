@@ -18,6 +18,10 @@ import {
   type LoginMethodNoticePayload,
 } from "@/lib/emailLoginEmails";
 import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
+import {
+  buildPolicyChangeNoticeEmail,
+  type PolicyChangeNoticePayload,
+} from "@/lib/policyChangeNoticeEmail";
 import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
 import {
   buildProductAnnouncementEmail,
@@ -191,6 +195,13 @@ export const ADMIN_PLAN_CHANGED_TEMPLATE = "admin_plan_changed";
  */
 export const LOGIN_METHOD_LINKED_TEMPLATE = "login_method_linked";
 export const LOGIN_METHOD_UNLINKED_TEMPLATE = "login_method_unlinked";
+/**
+ * The privacy-policy and terms amendment notice (S10). Legal, so it reaches the
+ * people who turned everything switchable off -- they are who the amendment is
+ * most about. Its wording counts as the notice only once approved
+ * (`CHANGE_NOTICE_APPROVED_CONTENT_HASHES` in lib/emailPolicyPublication.ts).
+ */
+export const POLICY_CHANGE_NOTICE_TEMPLATE = "policy_change_notice";
 
 const definitions: AnyDefinition[] = [
   {
@@ -251,6 +262,19 @@ const definitions: AnyDefinition[] = [
     render: (payload: AccountDeletionScheduledPayload, language) =>
       buildAccountDeletionScheduledEmail({ ...payload, language }),
     placeholderPayload: { scheduledFor: "{{scheduledFor}}" },
+  },
+  {
+    key: POLICY_CHANGE_NOTICE_TEMPLATE,
+    // From the company's ordinary address: it is neither a credential nor money,
+    // and the recipient should recognise it as the service writing about its
+    // own terms.
+    senderRole: "general",
+    classification: "legal",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: PolicyChangeNoticePayload, language) =>
+      buildPolicyChangeNoticeEmail({ ...payload, language, appUrl: appUrl() }),
+    placeholderPayload: { effectiveDate: "{{effectiveDate}}" },
   },
   {
     key: LOGIN_METHOD_LINKED_TEMPLATE,

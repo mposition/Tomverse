@@ -146,6 +146,19 @@ const V2026_09_23: ConsentCopyTable = Object.freeze({
 });
 
 /**
+ * Section 9.2's correction, approved by the owner on 2026-09-29: the Portuguese
+ * in-product notice names its reader in the first clause, as the other pronoun
+ * languages do. Every other string is the 2026-09-23 wording, unchanged.
+ */
+const V2026_09_29: ConsentCopyTable = Object.freeze({
+  ...V2026_09_23,
+  noticeBody: Object.freeze({
+    ...V2026_09_23.noticeBody,
+    pt: "A Tomverse não lhe enviou novidades do produto e não enviará a menos que você peça. Se ativar, enviaremos novidades, boletins e promoções para o endereço da sua conta. Códigos de acesso, recibos e avisos de serviço não mudam. Você pode desativar a qualquer momento, sem fazer login.",
+  }),
+});
+
+/**
  * Every version that has ever been rendered, newest last.
  *
  * Old entries are never removed. A `copyHash` stored against a consent in 2026
@@ -274,6 +287,37 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     ] as const,
     copy: V2026_09_23,
   }),
+  Object.freeze({
+    version: "2026-09-29",
+    approvedBy: "mposition",
+    approvedAt: "2026-09-29",
+    recordSection: "13.",
+    recordDigest: "603df391c7e96642fae67944574e53a9",
+    approvedBodyDigest: "85e686bab6b84858556807ba84b50eb4",
+    deviceCells: {
+      signupOptIn: { section: "11.A", label: null, role: null },
+      signupNotice: { section: "11.B", label: null, role: null },
+      signupRefuse: { section: "11.C", label: null, role: null },
+      noticeTitle: { section: "11.D", label: "제목", role: null },
+      noticeBody: { section: "11.D", label: "본문", role: null },
+      noticeAccept: { section: "11.D", label: "세 버튼", role: "동의" },
+      noticeRefuse: { section: "11.D", label: "세 버튼", role: "거부" },
+      noticeDismiss: { section: "11.D", label: "세 버튼", role: "닫기" },
+    },
+    deviceSummary: {
+      section: "11.0",
+      label: null,
+      rows: [
+        ["#", "장치", "어디에", "무엇을 기록하는가"],
+        ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],
+        ["B", "고지 문장", "가입 흐름, A 옆", "notice_shown"],
+        ["C", "독립 거부 수단", "가입 흐름, A와 별개", "objected"],
+        ["D", "제품 내 일회성 안내", "기존 계정의 다음 접속", "A·B·C와 같은 세 상태"],
+      ],
+    },
+    approvedSections: [["§11", "동의 장치 4개의 문안 — §9.2 포르투갈어 첫 절 수정"]] as const,
+    copy: V2026_09_29,
+  }),
 ]);
 
 /**
@@ -322,7 +366,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
  * decide that by accident.
  */
 export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
-  new Set(["2026-09-23"]);
+  // 2026-09-29 corrects one Portuguese clause and keeps the promise.
+  new Set(["2026-09-23", "2026-09-29"]);
 
 /** Versions that deliberately make no such promise. Empty, and stated. */
 export const MAKES_NO_SEND_PROMISE_VERSIONS: ReadonlySet<string> = new Set([]);

@@ -3,13 +3,13 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { isEmailReleaseNotesEnabled } from "@/lib/appSettings";
 import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
-import { emailTemplateDefinition, EMAIL_TEMPLATE_KEYS } from "@/lib/emailTemplateDefinitions";
+import {
+  emailTemplateDefinition,
+  EMAIL_TEMPLATE_KEYS,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
-import {
-  CURRENT_CONSENT_COPY_VERSION,
-  consentCopyPromiseState,
-} from "@/lib/emailConsentCopy";
 import {
   CHANGE_NOTICE_WINDOW_DAYS,
   TOLD_STATUSES,
@@ -19,7 +19,6 @@ import {
   publicationProblems,
   type AmendedDocument,
   type ChangeNoticeFacts,
-  type ConsentCopyFacts,
   type PublicationProblem,
 } from "@/lib/emailPolicyPublicationCore";
 
@@ -65,15 +64,24 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
 /**
  * The current state of each amended document that is not a sitemap page.
  *
- * `SITEMAP_CONTENT_EVIDENCE` only holds URLs the sitemap lists, and its own test
- * insists on that, so the signup consent copy and the login consent sentence --
- * which are not pages -- could never have been recorded there. They are recorded
- * here, when the amendment is written, beside a test that recomputes them.
- * Checked first; a sitemap entry answers for the pages.
+ * `SITEMAP_CONTENT_EVIDENCE` only holds pages whose shown date the sitemap may
+ * publish, and `/terms` is not one: its "Last updated" line did not move with
+ * every edit (lib/sitemapContentDates.ts). So its state is recorded here, beside
+ * a verifier that recomputes it. Checked first; a sitemap entry answers for
+ * `/privacy`.
+ *
+ * `/terms` today: the July 15 page, before the section 5 clause (docs/policy/
+ * email-consent-copy-draft.md) is added. Recording it is what turns
+ * `document_state_unrecorded` into the true answer, `document_not_amended`.
  */
 export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   Record<string, { date: string; contentSha256: string }>
-> = {};
+> = {
+  "/terms": {
+    date: "2026-07-15",
+    contentSha256: "6bd214059b552e38abd9c89d41eecd6fdfa98cad3a8705f7dec54f0f84929932",
+  },
+};
 
 /**
  * The documents whose current digest and date a test recomputes from the
@@ -91,46 +99,42 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
  */
 export const DIGEST_VERIFIED_BY: Readonly<Record<string, { record: "sitemap" | "amended" }>> = {
   "/privacy": { record: "sitemap" },
+  "/terms": { record: "amended" },
 };
 
 /**
- * Section 10's table: the two pages and the login-screen sentence. None but
- * `/privacy` has a recorded state yet, so the other two are
- * `document_state_unrecorded` -- which is true.
+ * The documents the amendment changes: the two pages.
  *
- * The consent devices are not here. They are versioned together in
- * lib/emailConsentCopy.ts, so they are checked as one version
- * (`consentCopyFacts()`) -- all four, including the in-product notice existing
- * accounts see, which a single "signup consent copy" entry left out.
+ * Section 10's table named two more, and the owner's decisions settled both
+ * (2026-09-29):
+ *
+ * - **The login-screen sentence** stays as it is. The table's question was
+ *   whether email would be bundled into it, and it is not: email consent is
+ *   the separate opt-in device, which is what section 5.1 (L2) requires -- one
+ *   control cannot mean both agreement to the terms and a marketing consent.
+ *   A sentence that does not change is not an amended document.
+ * - **The consent devices** keep the promise "not sent unless you ask". The
+ *   owner chose option B on 2026-09-23 (consent copy draft section 9.1): that
+ *   notice is shown only to people the override does not mail, so the promise
+ *   stays true for everybody who reads it, and the copy is not amended. The
+ *   gate briefly required a version without the promise, which was option C --
+ *   the one not chosen -- and that condition is gone.
  */
-export const AMENDED_DOCUMENTS = ["/privacy", "/terms", "login consent sentence"] as const;
-
-/**
- * The consent copy versions approved as carrying the amendment. Empty until one
- * is: the only version today (2026-09-23) promises no unrequested send.
- */
-export const APPROVED_AMENDED_CONSENT_COPY_VERSIONS: readonly string[] = [];
-
-export const consentCopyFacts = (): ConsentCopyFacts => ({
-  version: CURRENT_CONSENT_COPY_VERSION,
-  approvedAsAmended: APPROVED_AMENDED_CONSENT_COPY_VERSIONS.includes(
-    CURRENT_CONSENT_COPY_VERSION
-  ),
-  promiseState: consentCopyPromiseState(CURRENT_CONSENT_COPY_VERSION),
-});
+export const AMENDED_DOCUMENTS = ["/privacy", "/terms"] as const;
 
 /**
  * The template that carries the amendment notice, and the exact approved
  * wording of it.
  *
- * Both, because a key alone identifies a template and not a text. The only
- * registered `legal` template today is the account-deletion notice; a key
- * pointed at it, or at a new key's retired draft, would have counted mail that
- * said nothing about the amendment. Deliveries count only when their template
+ * Both, because a key alone identifies a template and not a text. The key is
+ * the notice's own (`policy_change_notice`); a key pointed at the account-deletion
+ * notice, the other `legal` template, or at a retired draft, would have counted
+ * mail that said nothing about the amendment. The hash list is empty until the
+ * owner approves the wording (docs/policy/email-policy-amendment-draft.md). Deliveries count only when their template
  * version's `contentHash` is one listed here -- the versions whose wording was
  * approved as this notice. Null or empty is `change_notice_unidentified`.
  */
-export const CHANGE_NOTICE_TEMPLATE_KEY: string | null = null;
+export const CHANGE_NOTICE_TEMPLATE_KEY: string | null = POLICY_CHANGE_NOTICE_TEMPLATE;
 export const CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [];
 
 export const documentFacts = (): AmendedDocument[] =>
@@ -387,7 +391,7 @@ export async function publicationReport(now: Date = new Date()): Promise<Publica
     now
   );
   return {
-    problems: publicationProblems({ documents, consentCopy: consentCopyFacts(), notice, now }),
+    problems: publicationProblems({ documents, notice, now }),
     notice,
   };
 }
