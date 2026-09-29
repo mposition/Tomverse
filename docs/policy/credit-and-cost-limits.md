@@ -946,6 +946,63 @@ application-managed 검색도 같습니다 — backend 요청을 이미 썼고 s
 예약**을 만듭니다(`ATTEMPT_BOUND_FIELDS`에 `appManagedSearch` 포함): 물려받은
 counter는 이미 쓴 allowance를 물려받거나, 지불하지 않은 allowance를 쓰게 합니다.
 
+#### native 도구가 없는 모델은 application-managed로 검색합니다 (2026-09-29)
+
+capability register(`WEB_SEARCH_CAPABILITIES`)는 id로 키를 잡습니다. 그래서
+id가 적혀 있지 않은 모델 — **Provider Model Catalogue로 채택한 모든 모델**과,
+native 검색 도구를 붙이지 않는 provider(xAI · DeepSeek · Mistral · Moonshot ·
+MiniMax · Qwen · Zhipu)의 컴파일된 모델 — 은 전부 `unsupported`로 떨어졌고,
+composer는 그 모델들에 웹 검색을 제공하지 않았습니다.
+
+이제 register에 없는 모델은 **provider로 유도**합니다
+(`inferredWebSearchCapability`).
+
+- Perplexity → `search-model`(deep research는 `unsupported`)
+- 그 밖의 모든 provider → `app-managed`(Brave)
+- provider를 알 수 없는 id → `unsupported`
+
+app-managed를 고른 이유는 그 경로만 모델의 provider에 의존하지 않기
+때문입니다. function tool 하나이고, 상한은 이 프로세스의 counter이며, 가격은
+Brave의 것이므로 **어느 모델이 부르든 최악 비용이 같습니다.** native 도구는
+provider로 유도하지 않습니다 — OpenAI `web_search`는 모델별로 gate되어 있어
+확인되지 않은 모델에 붙이면 검색 없이 답하는 대신 요청이 실패합니다. native
+도구는 여전히 register에 id를 적어야 받습니다. `gpt-5-4-mini`(유일한
+`unverified`)도 같은 이유로 app-managed가 되었습니다.
+
+registry에만 있는 모델은 컴파일된 목록에서 provider를 찾을 수 없으므로,
+모델 행을 가진 호출자는 id가 아니라 행(`{ id, provider, apiModel }`)을
+넘깁니다. backend readiness는 그대로 별개 질문이라, Brave credential이나
+`search-provider:brave` 예산이 없는 배포에서는 여전히 아무 데서도 제안하지
+않습니다. **검색하는 모델이 늘었으므로 `SEARCH_PROVIDER_BRAVE_COST_MICROUSD_PER_{DAY|MONTH}`
+소진 여부를 배포 뒤 확인합니다.**
+
+### 새 대화는 웹 검색 ON으로 시작하고, 게스트 한도를 올렸습니다 (2026-09-29)
+
+답변 품질을 위해 새 대화의 기본 웹 검색 모드를 게스트부터 `always`로
+바꿨습니다(`APP_DEFAULTS.defaultWebSearchMode`, 소유자 승인 2026-09-29).
+**시작 위치일 뿐입니다** — 저장된 대화는 자기 모드를 유지하고, 저장된
+`"auto"`나 읽을 수 없는 값은 여전히 off로 읽습니다(`normalizeWebSearchMode`).
+DB 컬럼 기본값(`"off"`)은 바꾸지 않았습니다. 생성 경로가 값을 명시하므로,
+컬럼 기본값은 값을 빠뜨린 writer에게만 적용되고 그때는 off가 안전한 쪽입니다.
+
+기본값만 바꾸면 게스트가 첫 turn에서 막혔습니다. 세 한도가 각각 막았으므로
+셋 다 함께 올렸습니다.
+
+| 한도 | 이전 | 이후 | 막던 이유 |
+|---|---|---|---|
+| 게스트 일 크레딧 (`CHAT_GUEST_PER_DAY`) | 20 | 50 | 3모델 검색 turn 예약 = 3 + 8×3 = 27 |
+| 게스트 월 크레딧 (`CHAT_GUEST_PER_MONTH`) | 100 | 300 | 일 50이면 이틀 만에 소진 |
+| 게스트 일 비용 guardrail (`CHAT_GUEST_COST_MICROUSD_PER_DAY`) | 20,000 | 300,000 | native 검색 최악값 OpenAI 60,000 · Anthropic 50,000 µUSD |
+| 게스트 월 비용 guardrail (`..._PER_MONTH`) | 100,000 | 3,000,000 | 일 값과 같은 비율 |
+| 게스트 일 토큰 (`CHAT_GUEST_TOKENS_PER_DAY`) | 40,000 | 100,000 | 3모델 검색 turn 예약 ≈ 38,000 |
+| 게스트 월 토큰 (`CHAT_GUEST_TOKENS_PER_MONTH`) | 200,000 | 600,000 | 일 값과 같은 비율 |
+
+크레딧 둘과 비용 guardrail 둘은 소유자가 정한 값입니다. 토큰 둘은 새 결정이
+아니라 **이전 값이 지키던 크레딧당 2,000 토큰 비율을 새 크레딧 한도에 옮긴
+것**입니다. 환경변수 override는 그대로 우선합니다 — **운영 환경에 이전 값이
+설정돼 있으면 코드 기본값은 효과가 없으므로** 배포 전에 확인합니다. 로그인
+계정의 entitlement와 guardrail은 바뀌지 않았습니다.
+
 ### 외부 대화 이어가기의 seed는 모델마다 청구됩니다 (2026-09-01)
 
 **이 절은 새 계약을 만들지 않습니다.** 이어가기가 크레딧 계약 안에서 어디에

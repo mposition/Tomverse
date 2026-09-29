@@ -48,6 +48,22 @@ const hasHorizontalOverflow = (page: Page) =>
       document.documentElement.clientWidth + 1
   );
 
+/**
+ * A new conversation starts with web search on (APP_DEFAULTS). The cards that
+ * arm search, and the ones that put it back, are about a switch the person
+ * left off -- so these tests turn it off first, the state the defects they
+ * pin were found in.
+ */
+const turnWebSearchOff = async (page: Page) => {
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  const toggle = page.getByTestId("tools-web-search-row");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+};
+
 test.describe("Chat starter catalogue", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
@@ -181,6 +197,7 @@ test.describe("Chat starter catalogue", () => {
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     await openWelcome(page);
+    await turnWebSearchOff(page);
 
     const sourced = page.locator('[data-starter-id="sourced-answer"]');
     await expect(sourced).toBeVisible();
@@ -208,6 +225,7 @@ test.describe("Chat starter catalogue", () => {
     await enableStarterFlag(page);
     await mockGuestUsage(page, 0, 1000);
     await openWelcome(page);
+    await turnWebSearchOff(page);
 
     const textarea = page.getByTestId("chat-textarea");
     const sourced = page.locator('[data-starter-id="sourced-answer"]');
@@ -359,6 +377,7 @@ test.describe("Chat starter catalogue", () => {
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     await openWelcome(page);
+    await turnWebSearchOff(page);
 
     await page.locator('[data-starter-id="sourced-answer"]').click();
     await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();

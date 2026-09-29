@@ -210,11 +210,20 @@ test("the filter sheet reports its active count, result count, and resets", { ta
       `${modelId} should be listed under the web search filter`
     ).toHaveCount(1);
   }
+  // Models with no native tool here -- DeepSeek, and gpt-5-4-mini whose
+  // native tool is unconfirmed -- search through the same application-managed
+  // route since 2026-09-29, so they qualify too.
+  for (const modelId of ["deepseek-v4-flash", "gpt-5-4-mini"]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`),
+      `${modelId} should be listed under the web search filter`
+    ).toHaveCount(1);
+  }
+  // Deep Research never takes the switch: it runs its own retrieval flow.
   await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
-  ).toHaveCount(0);
-  await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="gpt-5-4-mini"]')
+    dialog.locator(
+      '[data-testid="model-option"][data-model-id="perplexity/sonar-deep-research"]'
+    )
   ).toHaveCount(0);
 
   await dialog.getByTestId("model-filter-reset-all").click();
@@ -317,9 +326,10 @@ test("long input explains its multiplier beside the send controls", { tag: "@ui-
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  // Guests default to the 3-model brand trio, so the base estimate is the
-  // combined cost of all three selected models (6), not a single model's.
-  await expect(estimate).toContainText("6");
+  // Guests default to the 3-model brand trio with web search on: each
+  // model's 1 credit becomes 2 at 1.5x (6 in all), and each adds the 8-credit
+  // search reservation, which the input multiplier does not scale -- 30.
+  await expect(estimate).toContainText("30");
 
   const estimateBox = await estimate.boundingBox();
   const inputBox = await page.getByTestId("chat-input").boundingBox();

@@ -63,7 +63,10 @@
  * preflight cannot come to quote different numbers for it.
  */
 
-import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  getWebSearchCapability,
+  type WebSearchModelRef,
+} from "@/lib/webSearchCapability";
 
 export const WEB_SEARCH_TURN_STATES = [
   /** This turn will search -- a native tool is attached, or the model always does. */
@@ -86,7 +89,8 @@ export type WebSearchTurnState = (typeof WEB_SEARCH_TURN_STATES)[number];
  * dispatch has decided to enable.
  */
 export const resolveWebSearchTurnState = (input: {
-  modelId: string;
+  /** The id, or the model itself when it may exist only as a registry row. */
+  modelId: WebSearchModelRef;
   /** `webSearchMode === "always" && nativeSearchIsDispatchable(...)`, from the caller. */
   nativeSearchEnabled: boolean;
   /**

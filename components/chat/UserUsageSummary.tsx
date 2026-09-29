@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { BarChart3, Coins } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
   useUserUsage,
   type UserUsageResponse,
@@ -78,7 +79,7 @@ export function UserUsageSummary({
 
   if (isGuestMode) {
     const used = guestMessageCount || 0;
-    const limit = maxGuestMessages || 20;
+    const limit = maxGuestMessages || APP_DEFAULTS.maxGuestMessages;
     return (
       <section
         data-testid={compact ? "sidebar-upgrade-card" : undefined}

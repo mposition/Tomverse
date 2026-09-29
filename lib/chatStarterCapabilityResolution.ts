@@ -41,7 +41,7 @@ export function resolveChatStarterCapabilities(input: {
     // promise. `modelWebSearchIsDispatchable` is the same predicate the chat
     // route uses to decide whether to register the tool at all.
     "web-search": enabledModels.some((model) =>
-      modelWebSearchIsDispatchable(model.id, input.webSearchBackendReadiness)
+      modelWebSearchIsDispatchable(model, input.webSearchBackendReadiness)
     ),
     "image-input": enabledModels.some((model) =>
       modelSupportsImageInput(model)

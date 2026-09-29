@@ -80,12 +80,18 @@ export type SearchProviderBudgetReadiness = {
  * demanding its backend would block a deploy over spend that cannot happen.
  */
 export const requiredWebSearchBackends = (
-  models: readonly { id: string; enabled?: boolean; catalogDeleted?: boolean }[] = AVAILABLE_MODELS
+  models: readonly {
+    id: string;
+    provider?: string;
+    apiModel?: string;
+    enabled?: boolean;
+    catalogDeleted?: boolean;
+  }[] = AVAILABLE_MODELS
 ): WebSearchBackend[] => {
   const required = new Set<WebSearchBackend>();
   for (const model of models) {
     if (model.enabled === false || model.catalogDeleted === true) continue;
-    const capability = getWebSearchCapability(model.id);
+    const capability = getWebSearchCapability(model);
     if (capability.support !== "app-managed") continue;
     if (capability.searchBackend) required.add(capability.searchBackend);
   }

@@ -116,9 +116,10 @@ test("model picker prioritizes exact credits and shows the final input estimate"
   await page.getByTestId("chat-textarea").fill("x".repeat(64_004));
   const estimate = page.getByTestId("request-credit-estimate");
   await expect(estimate).toContainText("1.5×");
-  // Guests default to the 3-model brand trio, so the base estimate is the
-  // combined cost of all three selected models (6), not a single model's.
-  await expect(estimate).toContainText("6");
+  // Guests default to the 3-model brand trio with web search on: each
+  // model's 1 credit becomes 2 at 1.5x (6 in all), and each adds the 8-credit
+  // search reservation, which the input multiplier does not scale -- 30.
+  await expect(estimate).toContainText("30");
   await expect(estimate.getByTestId("credit-coin-icon").first()).toBeVisible();
 });
 
