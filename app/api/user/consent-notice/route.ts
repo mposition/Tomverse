@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
+import { getTrustedClientIp } from "@/lib/clientIp";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import {
   consentNoticeForViewer,
@@ -15,13 +16,14 @@ import {
  * The in-product consent notice for the signed-in account (S8, draft section
  * 5.4). GET says whether it is offered and in which approved wording; POST
  * records what the screen did -- `shown` when it rendered, `object` when the
- * refusal was used. Accepting is not recorded here: "Yes" opens the email
- * settings, where consent is requested and confirmed.
+ * refusal was used, `accept` when "Yes" was used, which requests the
+ * confirmations the approved wording promises. Nothing here is consent until
+ * each confirmation link is used.
  */
 
 const bodySchema = z
   .object({
-    action: z.enum(["shown", "object"]),
+    action: z.enum(["shown", "object", "accept"]),
     language: z.string().trim().max(8).optional(),
     copyVersion: z.string().trim().min(1).max(32),
   })
@@ -55,9 +57,20 @@ export async function POST(req: Request) {
       action: body.action,
       language: body.language ?? null,
       copyVersion: body.copyVersion,
+      ip: (() => {
+        const trusted = getTrustedClientIp(req);
+        return trusted === "unknown" ? null : trusted;
+      })(),
+      userAgent: req.headers.get("user-agent"),
     });
     return NextResponse.json(result, {
-      status: result.recorded || result.reason !== "unknown_version" ? 200 : 400,
+      status: result.recorded
+        ? 200
+        : result.reason === "unknown_version"
+          ? 400
+          : result.reason === "confirmation_unavailable"
+            ? 503
+            : 409,
       headers: NO_STORE,
     });
   } catch (error) {

@@ -14,12 +14,14 @@ import {
 import { consentCopyHash } from "@/lib/emailConsentCopyHash";
 import { readConsentKeyring } from "@/lib/emailConsentToken";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
+import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
 import {
   noticeStateForUser,
   recordNoticeObjection,
   recordNoticeShown,
 } from "@/lib/inProductConsentNotice";
-import { noticeCandidatesFor } from "@/lib/inProductConsentNoticeCore";
+import { noticeCandidatesFor, noticePurposes } from "@/lib/inProductConsentNoticeCore";
 
 /**
  * The in-product consent notice as a screen: when it is offered, and what a
@@ -33,10 +35,13 @@ import { noticeCandidatesFor } from "@/lib/inProductConsentNoticeCore";
  * - **Shown is recorded when it renders**, not when it is closed: that is what
  *   stops it reappearing, and a dismissal leaves nothing else (5.4 -- "닫은
  *   사실은 notice_shown으로 남되 동의도 거부도 아닙니다").
- * - **Accepting is not consent.** "Yes" takes the person to the email settings,
- *   where turning a purpose on asks for their country and sends a
- *   confirmation (docs/policy/email-double-opt-in.md). The notice collects
- *   nothing a confirmation has not confirmed.
+ * - **Accepting requests the confirmations the wording promises.** The
+ *   approved body says turning it on sends product updates, newsletters and
+ *   promotions, so "Yes" requests a confirmation for each of the three
+ *   (docs/policy/email-double-opt-in.md: one confirmation per purpose). Nothing
+ *   is consent until each link is used. The notice is therefore offered only
+ *   where marketing may be sent under the account's resolved country -- where
+ *   it cannot, a "Yes" could not be honoured.
  * - **Refusing is an objection**, recorded against the mailbox.
  */
 
@@ -64,9 +69,12 @@ export type ConsentNoticeView = { offered: false } | { offered: true; copyVersio
 export async function consentNoticeForViewer(userId: string): Promise<ConsentNoticeView> {
   if (!(await consentNoticeCollectionReady())) return { offered: false };
   const offer = await noticeStateForUser({ userId });
-  return offer.offered
-    ? { offered: true, copyVersion: CURRENT_CONSENT_COPY_VERSION }
-    : { offered: false };
+  if (!offer.offered) return { offered: false };
+  // The "Yes" requests confirmations under the resolved country; where
+  // marketing may not go, it could not be honoured.
+  const resolved = await jurisdictionForUser({ userId });
+  if (!marketingJurisdictionVerdict(resolved).allowed) return { offered: false };
+  return { offered: true, copyVersion: CURRENT_CONSENT_COPY_VERSION };
 }
 
 const copyLanguage = (value: string | null | undefined): ConsentCopyLanguage =>
@@ -75,8 +83,17 @@ const copyLanguage = (value: string | null | undefined): ConsentCopyLanguage =>
     : "en";
 
 export type ConsentNoticeActionResult =
-  | { recorded: true }
-  | { recorded: false; reason: "disabled" | "not_offered" | "unknown_version" | "no_address" };
+  | { recorded: true; requested?: string[] }
+  | {
+      recorded: false;
+      reason:
+        | "disabled"
+        | "not_offered"
+        | "unknown_version"
+        | "no_address"
+        | "country_not_allowed"
+        | "confirmation_unavailable";
+    };
 
 /**
  * Records what the screen did: `shown` when it rendered, `object` when the
@@ -89,9 +106,11 @@ export type ConsentNoticeActionResult =
  */
 export async function recordConsentNoticeAction(input: {
   userId: string;
-  action: "shown" | "object";
+  action: "shown" | "object" | "accept";
   language: string | null | undefined;
   copyVersion: string;
+  ip?: string | null;
+  userAgent?: string | null;
 }): Promise<ConsentNoticeActionResult> {
   if (!(await consentNoticeCollectionReady())) return { recorded: false, reason: "disabled" };
   if (!consentCopyVersion(input.copyVersion)) return { recorded: false, reason: "unknown_version" };
@@ -100,9 +119,9 @@ export async function recordConsentNoticeAction(input: {
   // is also accepted right after the render recorded itself -- the screen is
   // still open, and `already_shown` is the render's own trace.
   const offer = await noticeStateForUser({ userId: input.userId });
-  const refusalAfterRender =
-    input.action === "object" && !offer.offered && offer.refusal === "already_shown";
-  if (!offer.offered && !refusalAfterRender) return { recorded: false, reason: "not_offered" };
+  const answerAfterRender =
+    input.action !== "shown" && !offer.offered && offer.refusal === "already_shown";
+  if (!offer.offered && !answerAfterRender) return { recorded: false, reason: "not_offered" };
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
@@ -153,15 +172,49 @@ export async function recordConsentNoticeAction(input: {
     },
   };
 
-  if (input.action === "shown") {
-    await recordNoticeShown(record);
+  // The render first, on the root client: that path survives a concurrent
+  // render request (it re-reads the row on a unique conflict), where a write
+  // inside a transaction would abort it and take the answer with it. Skipped
+  // when the render already recorded itself -- that row is permanent, and
+  // re-describing it could only disagree with it.
+  if (input.action === "shown" || !answerAfterRender) await recordNoticeShown(record);
+  if (input.action === "shown") return { recorded: true };
+
+  if (input.action === "object") {
+    await recordNoticeObjection(record);
     return { recorded: true };
   }
-  await prisma.$transaction(async (tx) => {
-    // The render normally recorded itself already; its row is permanent, and
-    // re-describing it here could only disagree with it.
-    if (!refusalAfterRender) await recordNoticeShown({ ...record, client: tx });
-    await recordNoticeObjection({ ...record, client: tx });
-  });
-  return { recorded: true };
+
+  // Accept: one confirmation per purpose the approved wording names, under the
+  // country the account resolves to.
+  if (!marketingJurisdictionVerdict(resolved).allowed) {
+    return { recorded: false, reason: "country_not_allowed" };
+  }
+  const countrySource =
+    resolved.source === "self_declared"
+      ? ("self_declared" as const)
+      : resolved.source === "ip_estimated"
+        ? ("ip_estimated" as const)
+        : ("resolved" as const);
+  const requested: string[] = [];
+  for (const purpose of noticePurposes()) {
+    const result = await requestConsentConfirmation({
+      userId: input.userId,
+      purpose,
+      capturedVia: "preference_center",
+      evidenceVia: "in_product_notice",
+      confirmedCountry: resolved.countryCode,
+      jurisdiction: resolved.countryCode,
+      jurisdictionSource: resolved.source,
+      countrySource,
+      language,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+    if (result.requested) requested.push(purpose);
+    else if (result.reason !== "already_confirmed") {
+      return { recorded: false, reason: "confirmation_unavailable" };
+    }
+  }
+  return { recorded: true, requested };
 }

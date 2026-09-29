@@ -2096,6 +2096,7 @@ export const fr = {
         dataTabStatus: "Les e-mails de sécurité et de facturation sont toujours activés",
         dataTabOpen: "Ouvrir les notifications par e-mail",
         loadFailed: "Impossible de charger vos réglages d'e-mail. Réessayez dans un instant.",
+        noticeActionFailed: "Votre réponse n'a pas été enregistrée. Veuillez réessayer.",
         lockedNote: "Impossible à désactiver : ces e-mails protègent votre compte et attestent vos paiements.",
         alwaysOn: "Toujours activé",
         withdrawAll: "Désactiver tous les e-mails marketing",

@@ -20,22 +20,38 @@ import {
  *
  * Three answers, three facts, as the approved wording lays them out:
  *
- * - **Yes** opens the email settings. Consent is requested and confirmed
- *   there, with the person's country, and nothing here records a consent.
- * - **No, thank you** is an objection, recorded against the mailbox.
- * - **Not now** closes it. The render was already recorded when it appeared,
- *   which is what keeps it from coming back; closing adds nothing.
+ * - **Yes** requests a confirmation for each purpose the wording names
+ *   (product updates, newsletters, promotions), then opens the email settings
+ *   where they show as waiting. Nothing is consent until each link is used.
+ * - **No, thank you** is an objection, recorded against the mailbox. If it
+ *   cannot be recorded, the notice stays open and says so: a refusal that
+ *   silently became a dismissal is the failure this screen must not have.
+ * - **Not now** closes it. The render was recorded when it appeared, which is
+ *   what keeps it from coming back; closing adds nothing.
  *
- * Asked only where the server says so (`/api/user/consent-notice`), which is
- * off unless the collection gate and a working confirmation both exist. The
- * words are the approved version the server named, never today's by default.
+ * Asked only where the server says so (`/api/user/consent-notice`), and never
+ * on top of another open dialog. The three controls carry the same size and
+ * weight (device D, docs/policy/email-consent-copy-draft.md section 3.D).
  */
+const NOTICE_KEYS: ConsentCopyKey[] = [
+  "noticeTitle",
+  "noticeBody",
+  "noticeAccept",
+  "noticeRefuse",
+  "noticeDismiss",
+];
+
+const answerButtonClass =
+  "min-h-11 rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-60 dark:focus-visible:ring-offset-zinc-950";
+
 export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
   const { status } = useSession();
-  const { lang } = useLanguage();
+  const { lang, t } = useLanguage();
   const router = useRouter();
   const [copyVersion, setCopyVersion] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Held until the render is recorded, so an answer can never race it.
+  const [busy, setBusy] = useState(true);
+  const [failed, setFailed] = useState(false);
   const asked = useRef(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -59,14 +75,10 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
         if (!data.offered || !data.copyVersion) return;
         // Every string of that version must exist before anything is shown:
         // a notice with a missing sentence is not the approved notice.
-        const keys: ConsentCopyKey[] = [
-          "noticeTitle",
-          "noticeBody",
-          "noticeAccept",
-          "noticeRefuse",
-          "noticeDismiss",
-        ];
-        if (keys.some((key) => consentCopy(key, language, data.copyVersion) === null)) return;
+        if (NOTICE_KEYS.some((key) => consentCopy(key, language, data.copyVersion) === null)) return;
+        // Never on top of another dialog: focus and Escape belong to the one
+        // already open, and this one would sit under or over it by accident.
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         setCopyVersion(data.copyVersion);
       } catch {
         // Nothing shown; it is asked again on a later visit.
@@ -74,29 +86,49 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
     })();
   }, [enabled, status, language]);
 
+  /** Posts one answer; true only when the server recorded it. */
   const post = useCallback(
-    async (action: "shown" | "object") => {
-      if (!copyVersion) return;
+    async (action: "shown" | "object" | "accept"): Promise<boolean> => {
+      if (!copyVersion) return false;
       try {
         const response = await fetch("/api/user/consent-notice", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, language, copyVersion }),
         });
-        await discardResponseBody(response);
+        const data = (await response.json().catch(() => null)) as { recorded?: unknown } | null;
+        return response.ok && data?.recorded === true;
       } catch {
-        // Best effort: the render is asked about again on a later visit.
+        return false;
       }
     },
     [copyVersion, language]
   );
 
-  // Recorded as it renders: that is the fact that stops it reappearing.
+  // Recorded as it renders: that is the fact that stops it reappearing. The
+  // answers wait for it.
   useEffect(() => {
-    if (copyVersion) void post("shown");
+    if (!copyVersion) return;
+    void post("shown").finally(() => setBusy(false));
   }, [copyVersion, post]);
 
   const close = useCallback(() => setCopyVersion(null), []);
+
+  const answer = useCallback(
+    async (action: "object" | "accept") => {
+      setBusy(true);
+      setFailed(false);
+      const recorded = await post(action);
+      setBusy(false);
+      if (!recorded) {
+        setFailed(true);
+        return;
+      }
+      close();
+      if (action === "accept") router.push("/settings/notifications");
+    },
+    [close, post, router]
+  );
 
   useModalDialog({
     open: copyVersion !== null,
@@ -113,7 +145,7 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
     <div
       ref={dialogRef}
       data-testid="in-product-consent-notice"
-      className="fixed inset-0 z-[120] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-[150] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="in-product-consent-notice-title"
@@ -135,17 +167,23 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
         >
           {text("noticeBody")}
         </p>
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row-reverse">
+        {failed ? (
+          <p
+            role="alert"
+            data-testid="in-product-consent-notice-failed"
+            className="mt-3 text-sm font-medium text-red-700 dark:text-red-300"
+          >
+            {t("emailNotifications.noticeActionFailed")}
+          </p>
+        ) : null}
+        <div className="mt-5 grid gap-2 sm:grid-cols-3">
           <button
             ref={acceptRef}
             type="button"
             disabled={busy}
             data-testid="in-product-consent-notice-accept"
-            onClick={() => {
-              close();
-              router.push("/settings/notifications");
-            }}
-            className="min-h-11 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-60 dark:focus-visible:ring-offset-zinc-950"
+            onClick={() => void answer("accept")}
+            className={`${answerButtonClass} border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900`}
           >
             {text("noticeAccept")}
           </button>
@@ -153,14 +191,8 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
             type="button"
             disabled={busy}
             data-testid="in-product-consent-notice-refuse"
-            onClick={() => {
-              setBusy(true);
-              void post("object").finally(() => {
-                setBusy(false);
-                close();
-              });
-            }}
-            className="min-h-11 rounded-xl border border-zinc-300 px-4 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            onClick={() => void answer("object")}
+            className={`${answerButtonClass} border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900`}
           >
             {text("noticeRefuse")}
           </button>
@@ -169,7 +201,7 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
             disabled={busy}
             data-testid="in-product-consent-notice-dismiss"
             onClick={close}
-            className="min-h-11 rounded-xl px-4 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60 sm:mr-auto dark:text-zinc-300 dark:hover:bg-zinc-900"
+            className={`${answerButtonClass} border-zinc-300 text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900`}
           >
             {text("noticeDismiss")}
           </button>

@@ -2096,6 +2096,7 @@ export const es = {
         dataTabStatus: "Los correos de seguridad y facturación están siempre activos",
         dataTabOpen: "Abrir notificaciones por correo",
         loadFailed: "No se pudieron cargar tus ajustes de correo. Inténtalo de nuevo en un momento.",
+        noticeActionFailed: "No se guardó tu respuesta. Inténtalo de nuevo.",
         lockedNote: "No se puede desactivar: protege tu cuenta y deja constancia de tus pagos.",
         alwaysOn: "Siempre activo",
         withdrawAll: "Desactivar todo el correo de marketing",

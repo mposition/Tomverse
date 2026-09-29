@@ -119,11 +119,17 @@ export async function requestConsentConfirmation(input: {
    * screen, where the person picks it. `ip_estimated` is the sign-up screen
    * (S4), where the country is the IP estimate the screen rendered under: it is
    * recorded as an estimate, never as something the person said, and never over
-   * a stronger source.
+   * a stronger source. `resolved` is the in-product notice (S8), which asks
+   * under the country the account already resolves to and writes none.
    */
-  countrySource?: "self_declared" | "ip_estimated";
-  /** The screen, for the consent record's evidence. Defaults to the settings screen. */
-  evidenceVia?: "preference_center" | "signup_form";
+  countrySource?: "self_declared" | "ip_estimated" | "resolved";
+  /**
+   * The screen, for the consent record's evidence. Defaults to the settings
+   * screen. `in_product_notice` is the one-time notice (S8): its record's
+   * `capturedVia` stays `preference_center`, the closed list the ledger
+   * accepts, and the evidence names the screen.
+   */
+  evidenceVia?: "preference_center" | "signup_form" | "in_product_notice";
   /**
    * The caller's transaction, when this request has to commit with the caller's
    * own writes -- the sign-up consumption records the choice, the notice and
@@ -216,9 +222,12 @@ export async function requestConsentConfirmation(input: {
             countryUpdatedAt: now,
           },
         });
-      } else {
+      } else if (countrySource === "ip_estimated") {
         await recordEstimatedCountry({ userId: input.userId, ipCountry: country, now, client: tx });
       }
+      // `resolved`: the country is the resolution's own -- billing, an earlier
+      // consent -- and is already recorded where it came from. Writing it again
+      // as something else would turn a billing country into a declaration.
 
       // enabled is left exactly as it is: false for an ordinary request, and
       // true only for a row switched on before this step existed, which the send

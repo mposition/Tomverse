@@ -28,6 +28,7 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "EmailPermissionEvent", "ConsentRecord", "EmailPreference",
+      "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
       "SuppressionCause", "SuppressionEntry",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion",
       "AppSetting", "UserSettings", "User"
@@ -37,6 +38,13 @@ const reset = () =>
 beforeEach(async () => {
   await reset();
   process.env.EMAIL_CONSENT_KEYS = "v1:test-consent-key";
+  process.env.NEXTAUTH_SECRET = "test-secret";
+  process.env.EMAIL_AUDIT_HASH_KEY = "test-audit-key";
+  process.env.EMAIL_SNAPSHOT_KEYS = "v1:test-snapshot-key";
+  process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
+  process.env.EMAIL_UNSUBSCRIBE_KEYS = "v1:test-unsubscribe-key";
+  process.env.RESEND_API_KEY = "test-key";
+  process.env.TRANSACTIONAL_EMAIL_FROM = "Tomverse <no-reply@mail.tomverse.app>";
   await setEmailFeatureFlag(EMAIL_SIGNUP_CONSENT_FLAG_KEY, true);
   await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, true);
   const draft = await ensureJurisdictionPolicyDraft();
@@ -70,7 +78,11 @@ const australian = async () => {
   return user;
 };
 
-const action = (userId: string, kind: "shown" | "object", copyVersion = CURRENT_CONSENT_COPY_VERSION) =>
+const action = (
+  userId: string,
+  kind: "shown" | "object" | "accept",
+  copyVersion = CURRENT_CONSENT_COPY_VERSION
+) =>
   recordConsentNoticeAction({ userId, action: kind, language: "en", copyVersion });
 
 test("a render is recorded with the server's resolution, and the notice is not offered again", async () => {
@@ -145,4 +157,45 @@ test("without a working confirmation nothing is offered or recorded", async () =
     reason: "unknown_version",
   });
   assert.equal(await prisma.emailPermissionEvent.count(), 0);
+});
+
+test("Yes requests a confirmation for each purpose the wording names, and records no consent", async () => {
+  const user = await australian();
+  await action(user.id, "shown");
+  const result = await action(user.id, "accept");
+  assert.equal(result.recorded, true);
+  assert.deepEqual(
+    [...((result as { requested?: string[] }).requested ?? [])].sort(),
+    ["newsletter", "product_updates", "promotions"]
+  );
+  const records = await prisma.consentRecord.findMany({
+    where: { userId: user.id },
+    select: { purpose: true, action: true, evidence: true },
+  });
+  assert.deepEqual(
+    records.map((row) => row.action),
+    ["confirmation_requested", "confirmation_requested", "confirmation_requested"]
+  );
+  for (const row of records) {
+    assert.equal((row.evidence as { via: string }).via, "in_product_notice");
+  }
+  // Nothing is on until each link is used.
+  assert.equal(
+    await prisma.emailPreference.count({ where: { userId: user.id, confirmedAt: { not: null } } }),
+    0
+  );
+  // The resolved country is not rewritten as something else.
+  const settings = await prisma.userSettings.findUniqueOrThrow({ where: { userId: user.id } });
+  assert.deepEqual([settings.country, settings.countrySource], ["AU", "self_declared"]);
+});
+
+test("an account whose country marketing may not reach is not asked", async () => {
+  const user = await prisma.user.create({
+    data: { email: `notice-${randomUUID().slice(0, 8)}@example.test` },
+    select: { id: true },
+  });
+  await prisma.userSettings.create({
+    data: { userId: user.id, country: "NL", countrySource: "self_declared", countryUpdatedAt: new Date() },
+  });
+  assert.deepEqual(await consentNoticeForViewer(user.id), { offered: false });
 });

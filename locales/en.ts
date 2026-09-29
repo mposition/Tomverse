@@ -2107,6 +2107,7 @@ export const en = {
         dataTabStatus: "Security and billing email is always on",
         dataTabOpen: "Open email notifications",
         loadFailed: "Could not load your email settings. Try again in a moment.",
+        noticeActionFailed: "Your answer was not saved. Please try again.",
         lockedNote: "This cannot be turned off: it protects your account and records your payments.",
         alwaysOn: "Always on",
         withdrawAll: "Turn off all marketing email",

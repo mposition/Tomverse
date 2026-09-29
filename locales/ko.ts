@@ -2095,6 +2095,7 @@ export const ko = {
         dataTabStatus: "보안·결제 이메일은 항상 켜져 있습니다",
         dataTabOpen: "이메일 알림 열기",
         loadFailed: "이메일 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        noticeActionFailed: "선택이 저장되지 않았습니다. 다시 시도해 주세요.",
         lockedNote: "끌 수 없습니다. 계정을 보호하고 결제 내역을 남기는 안내입니다.",
         alwaysOn: "항상 켜짐",
         withdrawAll: "모든 마케팅 이메일 끄기",

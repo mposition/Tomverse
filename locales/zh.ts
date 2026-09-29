@@ -2075,6 +2075,7 @@ export const zh = {
         dataTabStatus: "安全与账单邮件始终开启",
         dataTabOpen: "打开邮件通知",
         loadFailed: "无法加载邮件设置，请稍后重试。",
+        noticeActionFailed: "您的选择未能保存，请重试。",
         lockedNote: "无法关闭：这些邮件保护你的账户并记录你的付款。",
         alwaysOn: "始终开启",
         withdrawAll: "关闭所有营销邮件",

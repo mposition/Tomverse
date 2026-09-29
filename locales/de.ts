@@ -2099,6 +2099,7 @@ export const de = {
         dataTabStatus: "Sicherheits- und Zahlungs-E-Mails sind immer aktiv",
         dataTabOpen: "E-Mail-Benachrichtigungen öffnen",
         loadFailed: "Ihre E-Mail-Einstellungen konnten nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+        noticeActionFailed: "Ihre Antwort wurde nicht gespeichert. Bitte versuchen Sie es erneut.",
         lockedNote: "Nicht abschaltbar: Diese E-Mails schützen Ihr Konto und belegen Ihre Zahlungen.",
         alwaysOn: "Immer aktiv",
         withdrawAll: "Alle Marketing-E-Mails abschalten",

@@ -2095,6 +2095,7 @@ export const pt = {
         dataTabStatus: "E-mails de segurança e cobrança estão sempre ativos",
         dataTabOpen: "Abrir notificações por e-mail",
         loadFailed: "Não foi possível carregar suas configurações de e-mail. Tente novamente em instantes.",
+        noticeActionFailed: "Sua resposta não foi salva. Tente novamente.",
         lockedNote: "Não pode ser desligado: protege sua conta e registra seus pagamentos.",
         alwaysOn: "Sempre ativo",
         withdrawAll: "Desligar todos os e-mails de marketing",
