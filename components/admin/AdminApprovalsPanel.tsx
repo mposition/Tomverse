@@ -5,6 +5,7 @@ import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminWorkQueueMessages } from "@/lib/adminMessages/workQueue";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type AdminApprovalRow = {
   id: string;
@@ -47,7 +48,7 @@ export function AdminApprovalsPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/approvals", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/approvals", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as
         | { approvals?: AdminApprovalRow[]; error?: string }
         | null;
@@ -77,7 +78,7 @@ export function AdminApprovalsPanel() {
   const review = async (approvalId: string, status: "approved" | "rejected") => {
     setBusyId(approvalId);
     try {
-      const response = await fetch("/api/admin/approvals", {
+      const response = await adminFetch("/api/admin/approvals", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approvalId, status }),

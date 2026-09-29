@@ -12,6 +12,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -52,6 +53,8 @@ type AmuxReport = {
     budgetWindowStartsAt: string | null;
     budgetWindowEndsAt: string | null;
   }>;
+  escalations_total?: number;
+  escalations_limit?: number;
   escalations: Array<{
     id: string;
     specialty: string | null;
@@ -291,7 +294,7 @@ export function AdminAmuxRoutingPanel() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch("/api/admin/amux/routing", {
+      const response = await adminFetch("/api/admin/amux/routing", {
         cache: "no-store",
       });
       if (!response.ok) {
@@ -348,7 +351,7 @@ export function AdminAmuxRoutingPanel() {
     setDecisionStatusUnknown(false);
     setDecisionStatusChecking(false);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review?escalation_id=${encodeURIComponent(escalationId)}`,
         {
           cache: "no-store",
@@ -393,7 +396,7 @@ export function AdminAmuxRoutingPanel() {
     setProposal(null);
     setDecisionStatusUnknown(false);
     try {
-      const response = await fetch("/api/admin/amux/escalations/proposals", {
+      const response = await adminFetch("/api/admin/amux/escalations/proposals", {
         method: "POST",
         cache: "no-store",
         signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
@@ -465,7 +468,7 @@ export function AdminAmuxRoutingPanel() {
       return;
     }
     try {
-      const response = await fetch("/api/admin/amux/escalations", {
+      const response = await adminFetch("/api/admin/amux/escalations", {
         method: "PATCH",
         cache: "no-store",
         signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
@@ -536,7 +539,7 @@ export function AdminAmuxRoutingPanel() {
         decision_id: identity.decision_id,
         subject_digest: identity.subject_digest,
       });
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review/decision-status?${query}`,
         {
           cache: "no-store",
@@ -629,7 +632,7 @@ export function AdminAmuxRoutingPanel() {
             <p className="mt-1 break-all font-mono text-xs">{m.subjectDigest}: {pendingDecision.subject_digest}</p>
             {reauthenticationRequired && (
               <Link
-                href={adminRecentAuthenticationHref("/admin/routing")}
+                href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 inline-block font-bold underline"
@@ -729,6 +732,12 @@ export function AdminAmuxRoutingPanel() {
                 <p className="mt-2 text-xs leading-5 text-amber-200/80">
                   {m.resolutionAvailability}
                 </p>
+                {typeof report.escalations_total === "number" &&
+                report.escalations_total > report.escalations.length ? (
+                  <p className="mt-2 text-xs text-zinc-400" data-testid="admin-amux-escalations-bounded">
+                    {m.escalationsBounded(report.escalations.length, report.escalations_total)}
+                  </p>
+                ) : null}
                 {report.escalations.length === 0 ? (
                   <p className="mt-2 text-sm text-zinc-500">
                     {m.noEscalations}
@@ -800,7 +809,7 @@ export function AdminAmuxRoutingPanel() {
                       <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
                         {m.reauthenticationRequired}{" "}
                         <Link
-                          href={adminRecentAuthenticationHref("/admin/routing")}
+                          href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-bold underline underline-offset-2"

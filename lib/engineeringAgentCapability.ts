@@ -179,8 +179,12 @@ export type LastLookReading = {
   currentFencingToken: string | null;
   /** The token the publisher presents. */
   presentedFencingToken: string;
-  /** The consumed capability for this work item, if any. */
-  consumed: ConsumedCapability | null;
+  /**
+   * The capability this claim consumed, if any: the two fields the decision
+   * compares. A stored capability keeps its commit fields as a digest, so the
+   * last look reads only these.
+   */
+  consumed: Pick<ConsumedCapability, "workItemId" | "claimFencingToken"> | null;
   workItemId: string;
 };
 

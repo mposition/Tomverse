@@ -18,18 +18,21 @@ import { scoreAmuxScheduler } from "./schedulerScoreCore.ts";
 /**
  * Recommendation pool for one human decision on one backlog card.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 7).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 11).
+ * Decision requests stay at policy version 7. Capacity requests use version 11.
  *
- * Parsing and selection are pure. This module does not open a transaction or
- * write a card. The shipped code latch is false. Nothing here starts a worker
- * or spends credits.
+ * Parsing and selection are pure. This module does not open a transaction,
+ * write a card, or choose a capacity limit. Version 10 ships the code latch
+ * true. Apply still needs the env value exactly `enabled`. Nothing here starts
+ * a worker or spends credits.
  */
 
 export const RECOMMENDATION_POLICY_VERSION = 7;
+export const RECOMMENDATION_CAPACITY_POLICY_VERSION = 11;
 export const RECOMMENDATION_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
 export const RECOMMENDATION_SCORING_VERSION = AMUX_GLOBAL_PRIORITY_VERSION;
 export const RECOMMENDATION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_RECOMMEND";
-export const RECOMMENDATION_CODE_LATCH = false;
+export const RECOMMENDATION_CODE_LATCH = true;
 export const RECOMMENDATION_LOCK_NAME = "tomverse-amux-recommendation:queue";
 export const RECOMMENDATION_SNAPSHOT_BACKSTOP = 10_000;
 export const RECOMMENDATION_REVIEW_AFTER_MAX_MS = 366 * 24 * 60 * 60 * 1000;
@@ -81,8 +84,12 @@ export const RECOMMENDATION_AUDIT_KEYS = [
   "occupied",
   "wipLimit",
 ] as const;
+export const RECOMMENDATION_CAPACITY_AUDIT_KEYS = ["active", "wipLimit"] as const;
+export const RECOMMENDATION_CAPACITY_WIP_MIN = 1;
+export const RECOMMENDATION_CAPACITY_WIP_MAX = 10_000;
 
 const PREPARE_KEYS = ["canonicalizationVersion", "policyVersion"] as const;
+const CAPACITY_KEYS = ["active", "canonicalizationVersion", "policyVersion", "wipLimit"] as const;
 const APPROVE_KEYS = [
   "canonicalizationVersion",
   "decision",
@@ -181,6 +188,13 @@ export type RecommendationHoldRequest = {
 };
 
 export type RecommendationDecisionRequest = RecommendationApproveRequest | RecommendationHoldRequest;
+
+export type RecommendationCapacityRequest = {
+  canonicalizationVersion: typeof RECOMMENDATION_CANONICALIZATION_VERSION;
+  policyVersion: typeof RECOMMENDATION_CAPACITY_POLICY_VERSION;
+  active: boolean;
+  wipLimit: number;
+};
 
 const sameKeys = (value: object, expected: readonly string[]): boolean => {
   const keys = Object.keys(value).sort();
@@ -355,6 +369,39 @@ export const parseRecommendationPrepareRequest = (
     request: {
       canonicalizationVersion: RECOMMENDATION_CANONICALIZATION_VERSION,
       policyVersion: RECOMMENDATION_POLICY_VERSION,
+    },
+  };
+};
+
+export const parseRecommendationCapacityRequest = (
+  raw: string,
+): { ok: true; request: RecommendationCapacityRequest } | { ok: false; code: string } => {
+  const parsed = parseObject(raw);
+  if (!parsed.ok) return parsed;
+  if (!sameKeys(parsed.value, CAPACITY_KEYS)) return { ok: false, code: "schema_rejected" };
+  if (parsed.value.canonicalizationVersion !== RECOMMENDATION_CANONICALIZATION_VERSION) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  if (parsed.value.policyVersion !== RECOMMENDATION_CAPACITY_POLICY_VERSION) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  if (typeof parsed.value.active !== "boolean") return { ok: false, code: "schema_rejected" };
+  const wipLimit = parsed.value.wipLimit;
+  if (
+    typeof wipLimit !== "number" ||
+    !Number.isInteger(wipLimit) ||
+    wipLimit < RECOMMENDATION_CAPACITY_WIP_MIN ||
+    wipLimit > RECOMMENDATION_CAPACITY_WIP_MAX
+  ) {
+    return { ok: false, code: "schema_rejected" };
+  }
+  return {
+    ok: true,
+    request: {
+      canonicalizationVersion: RECOMMENDATION_CANONICALIZATION_VERSION,
+      policyVersion: RECOMMENDATION_CAPACITY_POLICY_VERSION,
+      active: parsed.value.active,
+      wipLimit,
     },
   };
 };

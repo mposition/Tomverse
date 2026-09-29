@@ -151,7 +151,7 @@ test("Google's own grounding would still not be surcharged", () => {
 test("always mode + an unsupported model reserves 0 for that model", () => {
   const estimate = estimateRequestCredits({
     backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
-    models: [getModel("codestral")],
+    models: [getModel("perplexity/sonar-deep-research")],
     estimatedInputTokens: 100,
     webSearchMode: "always",
   });

@@ -81,7 +81,14 @@ export const amuxInternalErrorResponse = (
     );
   }
 
-  if (databaseCode === "P2028") {
+  // A mutation that failed after its callback returned (anything but the
+  // commit deadline trigger's AX001, which is a deadline refusal above) may or
+  // may not have committed: the same answer as a Prisma transaction timeout.
+  if (
+    databaseCode === "P2028" ||
+    (error instanceof AmuxDbBoundaryError &&
+      error.code === "AMUX_DB_OUTCOME_UNKNOWN")
+  ) {
     const incident = reportAmuxOperationalIncident(operation, error);
     return new Response(
       JSON.stringify({
@@ -109,6 +116,31 @@ export const amuxInternalErrorResponse = (
         reason: "amux_database_call_ceiling_exceeded",
       },
       503,
+    );
+  }
+
+  // The fence found no commit deadline trigger that will fire and rolled the
+  // transaction back rather than commit without the check. Nothing was
+  // written, but the database is missing its migration, which an operator has
+  // to see: an incident, with a reason of its own.
+  if (
+    error instanceof AmuxDbBoundaryError &&
+    error.code === "AMUX_DB_COMMIT_CHECK_MISSING"
+  ) {
+    const incident = reportAmuxOperationalIncident(operation, error);
+    return new Response(
+      JSON.stringify({
+        error: "AMUX database commit check is missing.",
+        reason: "amux_commit_check_missing",
+        incident_id: incident.incidentId,
+      }),
+      {
+        status: 503,
+        headers: {
+          ...NO_STORE_HEADERS,
+          "X-AMUX-Incident-ID": incident.incidentId,
+        },
+      },
     );
   }
 

@@ -25,6 +25,17 @@
 -- Additive and reversible by the same shape: the constraint is dropped and
 -- recreated, no row is read or written, and the previous list is one migration
 -- back if it ever has to be restored.
+--
+-- 2026-09-29: the list also carries the four assistant_knowledge_* names that
+-- 20260914123000_assistant_knowledge_guide_analytics_events introduced. That
+-- migration reached main, and so production, before this one did. On the
+-- release that brings this file to production it therefore runs after the
+-- 20260914 check is already in place, and a list without those four names
+-- would either fail validation on rows production already holds or refuse
+-- every later event of those kinds. Where this file runs first (a fresh
+-- database, staging), 20260914 then recreates its own shorter list, and
+-- 20260929180000_product_analytics_event_names_union restores the full one,
+-- so the end state is identical in both orders.
 ALTER TABLE "ProductAnalyticsEvent"
   DROP CONSTRAINT "ProductAnalyticsEvent_name_check";
 
@@ -131,5 +142,9 @@ ALTER TABLE "ProductAnalyticsEvent"
   'web_search_suggestion_accept',
   'web_search_suggestion_dismiss',
   'web_search_retry_success',
-  'web_search_retry_error'
+  'web_search_retry_error',
+  'assistant_knowledge_guide_viewed',
+  'assistant_knowledge_guide_step_opened',
+  'assistant_knowledge_guide_step_completed',
+  'assistant_knowledge_upload_completed'
 ));

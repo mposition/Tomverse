@@ -209,3 +209,38 @@ export async function biennialNoticeReadiness(
 }
 
 export { BIENNIAL_NOTICE_INTERVAL_MONTHS, BIENNIAL_NOTICE_WARN_DAYS };
+
+/**
+ * The earliest Korean deadline, for the send verdict.
+ *
+ * The verdict asks once per recipient, and the full readiness answer is a
+ * jurisdiction lookup per candidate, so it is remembered for a minute. A lookup
+ * that throws is remembered as the error and rethrown: the verdict's `read()`
+ * turns it into a retry, and answering "no deadline" instead would let Korean
+ * sends through on a database hiccup.
+ */
+const DEADLINE_TTL_MS = 60_000;
+let deadlineCache:
+  | { value: Date | null; at: number }
+  | { error: unknown; at: number }
+  | null = null;
+
+export async function earliestBiennialNoticeDueAt(
+  now: Date = new Date()
+): Promise<Date | null> {
+  if (deadlineCache) {
+    const age = now.getTime() - deadlineCache.at;
+    if (age >= 0 && age < DEADLINE_TTL_MS) {
+      if ("error" in deadlineCache) throw deadlineCache.error;
+      return deadlineCache.value;
+    }
+  }
+  try {
+    const value = (await biennialNoticeReadiness(process.env, now)).earliestDueAt;
+    deadlineCache = { value, at: now.getTime() };
+    return value;
+  } catch (error) {
+    deadlineCache = { error, at: now.getTime() };
+    throw error;
+  }
+}

@@ -263,6 +263,11 @@ export async function GET(req: Request) {
       models: models.map(adminModel),
       securityFindings,
       guestLead,
+      // When this list was read, stamped by the server so no browser clock is
+      // involved. The panel sends it back on a write, and the write is refused
+      // if the row has moved since -- see the PATCH handler in
+      // `app/api/admin/models/[modelId]/route.ts`.
+      readAt: new Date().toISOString(),
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
@@ -621,6 +626,9 @@ export async function POST(req: Request) {
       {
         model: adminModel(model),
         ...(retired ? { retired: adminModel(retired) } : {}),
+        // Equal to the row just written, so the next save from this form is
+        // not refused as a conflict with the create itself.
+        readAt: row.updatedAt.toISOString(),
       },
       { status: 201 }
     );

@@ -4,6 +4,7 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
+import { commitBacklogMetadata } from "@/lib/amux/backlogMetadataService";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import {
   commitRecommendationDecision,
@@ -140,7 +141,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("recommendation decisions honour capacity, rollback, and a closed latch", async () => {
+test("recommendation decisions honour capacity, rollback, and an unset env", async () => {
   const storedIncident = await prisma.appSetting.findUnique({ where: { key: INCIDENT_KEY }, select: { value: true } });
   previousIncident = storedIncident?.value ?? null;
   await prisma.appSetting.upsert({
@@ -379,4 +380,147 @@ test("recommendation decisions honour capacity, rollback, and a closed latch", a
   assert.equal(afterCounts.routes, before.routes);
   assert.equal(afterCounts.todos, before.todos + 2);
   assert.equal(occupied >= 0, true);
+});
+
+// Orchestration policy version 15: the backlog card metadata writer. The public
+// apply refuses before a transaction unless the environment value is exactly
+// enabled, so this calls the transaction body directly, like the decisions above.
+test("backlog metadata writes one card's fields and one audit row, and refuses a brief, a todo and a stale revision", async () => {
+  const action = "amux.backlog_metadata.updated";
+  const created: string[] = [];
+  const seedPlain = async (
+    label: string,
+    data: { status?: string; executionBrief?: string; executionBriefDigest?: string } = {},
+  ) => {
+    const card = await prisma.amuxWorkItem.create({
+      data: { title: `backlog metadata ${label}`, status: "backlog", kind: "unknown", priority: "p3", ...data },
+      select: { id: true },
+    });
+    created.push(card.id);
+    return card.id;
+  };
+  const update = (cardId: string, expectedRevision: number) => ({
+    canonicalizationVersion: "amux-json-v1" as const,
+    policyVersion: 15 as const,
+    cardId,
+    expectedRevision,
+    kind: "bug" as const,
+    priority: "p1" as const,
+    estimatedCostMicrousd: 120_000,
+  });
+  const refusedWith = (refusal: string) => (error: unknown) =>
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "conflict" &&
+    (error as { httpStatus?: unknown }).httpStatus === 409 &&
+    (error as { refusal?: unknown }).refusal === refusal;
+  const cardState = (id: string) =>
+    prisma.amuxWorkItem.findUnique({
+      where: { id },
+      select: {
+        status: true,
+        kind: true,
+        priority: true,
+        estimatedCostMicrousd: true,
+        revision: true,
+        owner: true,
+        claimedAt: true,
+        executionBriefDigest: true,
+      },
+    });
+  const before = await counts();
+  try {
+    const open = await seedPlain("open");
+    const result = await prisma.$transaction((tx) =>
+      commitBacklogMetadata(tx, { session, request, update: update(open, 0) }),
+    );
+    assert.deepEqual(result, {
+      status: "updated",
+      cardId: open,
+      kind: "bug",
+      priority: "p1",
+      costPresent: true,
+      revision: 1,
+    });
+    assert.deepEqual(await cardState(open), {
+      status: "backlog",
+      kind: "bug",
+      priority: "p1",
+      estimatedCostMicrousd: BigInt(120_000),
+      revision: 1,
+      owner: null,
+      claimedAt: null,
+      executionBriefDigest: null,
+    });
+    const audits = await prisma.adminAuditLog.findMany({
+      where: { action, targetId: open },
+      select: { actorUserId: true, targetType: true, metadata: true },
+    });
+    assert.equal(audits.length, 1);
+    assert.equal(audits[0]?.actorUserId, actorUserId);
+    assert.equal(audits[0]?.targetType, "AmuxWorkItem");
+    assert.deepEqual(audits[0]?.metadata, {
+      cardId: open,
+      previousKind: "unknown",
+      kind: "bug",
+      previousPriority: "p3",
+      priority: "p1",
+      previousEstimatedCostMicrousd: null,
+      estimatedCostMicrousd: "120000",
+      previousRevision: 0,
+      revision: 1,
+    });
+
+    const refusedAuditsBefore = await prisma.adminAuditLog.count({ where: { action } });
+
+    // The same request again names revision 0, which the first write consumed.
+    await assert.rejects(
+      prisma.$transaction((tx) => commitBacklogMetadata(tx, { session, request, update: update(open, 0) })),
+      refusedWith("revision_mismatch"),
+    );
+    assert.equal((await cardState(open))?.revision, 1);
+
+    const briefed = await seedPlain("briefed", {
+      executionBrief: "Keep the metadata writer away from a card that already has a brief.",
+      executionBriefDigest: "a".repeat(64),
+    });
+    await assert.rejects(
+      prisma.$transaction((tx) => commitBacklogMetadata(tx, { session, request, update: update(briefed, 0) })),
+      refusedWith("brief_present"),
+    );
+    const briefedAfter = await cardState(briefed);
+    assert.equal(briefedAfter?.kind, "unknown");
+    assert.equal(briefedAfter?.priority, "p3");
+    assert.equal(briefedAfter?.estimatedCostMicrousd, null);
+    assert.equal(briefedAfter?.revision, 0);
+
+    const todo = await seedPlain("todo", { status: "todo" });
+    await assert.rejects(
+      prisma.$transaction((tx) => commitBacklogMetadata(tx, { session, request, update: update(todo, 0) })),
+      refusedWith("not_backlog"),
+    );
+    const todoAfter = await cardState(todo);
+    assert.equal(todoAfter?.status, "todo");
+    assert.equal(todoAfter?.kind, "unknown");
+    assert.equal(todoAfter?.revision, 0);
+
+    await assert.rejects(
+      prisma.$transaction((tx) =>
+        commitBacklogMetadata(tx, { session, request, update: update(`c${"z".repeat(24)}`, 0) }),
+      ),
+      refusedWith("not_found"),
+    );
+
+    // A refused write leaves no audit row.
+    assert.equal(await prisma.adminAuditLog.count({ where: { action } }), refusedAuditsBefore);
+
+    const afterCounts = await counts();
+    assert.equal(afterCounts.attempts, before.attempts);
+    assert.equal(afterCounts.deliveries, before.deliveries);
+    assert.equal(afterCounts.routes, before.routes);
+  } finally {
+    if (created.length > 0) {
+      await prisma.amuxWorkItem.deleteMany({ where: { id: { in: created } } });
+    }
+  }
 });

@@ -1,14 +1,20 @@
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
-import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth/next";
-
-import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
-import { getAdminRole } from "@/lib/adminAuth";
-import { authOptions } from "@/lib/auth";
-
-export default async function AdminAmuxBoardImportPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-  return <AmuxBoardImportPanel />;
+/**
+ * Retired route, preserved as a redirect.
+ *
+ * Catalog import is now the AMUX Backlog page's Catalog import section.
+ * The destination is owner-only in the same way this page was: another role
+ * is redirected and then answers 404 there.
+ */
+export default async function AdminAmuxBoardImportRedirectPage({
+  searchParams,
+}: PageProps<"/admin/amux-board-import">) {
+  redirect(
+    adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-board-import"], await searchParams)
+  );
 }

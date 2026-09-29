@@ -269,12 +269,12 @@ test("a candidate with no search path is refused when one was required", () => {
   // to get. A searching turn continued on a model that answers from training
   // data is a different answer, not a substitute.
   const result = planAttemptExecution(
-    modelById("deepseek-v4-flash"),
+    modelById("perplexity/sonar-deep-research"),
     request({ webSearchMode: "always", requireSearchPath: true })
   );
   assert.equal(result.ok, false);
   assert.equal(result.refusal.kind, "search_path_unavailable");
-  assert.equal(result.refusal.modelId, "deepseek-v4-flash");
+  assert.equal(result.refusal.modelId, "perplexity/sonar-deep-research");
   assert.equal(result.refusal.gap, "capability_unsupported");
 });
 

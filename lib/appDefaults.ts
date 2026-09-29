@@ -82,9 +82,20 @@ export const APP_DEFAULTS = {
 
   maxSelectedModels: 3,
   maxGuestSelectedModels: 3,
-  maxGuestMessages: 20,
+  // The guest daily and monthly credit allowances, raised from 20/100 on
+  // 2026-09-29 alongside search-on-by-default: a searching three-model
+  // comparison reserves 3 + 8 x 3 = 27 credits, so the old 20 refused a
+  // guest's very first turn. `lib/chatSecurity.ts` enforces these as its
+  // defaults (`CHAT_GUEST_PER_DAY` / `CHAT_GUEST_PER_MONTH` still override).
+  maxGuestMessages: 50,
+  maxGuestMonthlyCredits: 300,
 
-  defaultWebSearchMode: "off",
+  // The mode a *new* conversation starts in, for guests and signed-in
+  // accounts alike: search on, for answer quality (approved 2026-09-29).
+  // Only a starting position -- the switch stays one click away, a stored
+  // conversation keeps its own mode, and a stored "auto" or an unreadable
+  // value still reads as off (see `normalizeWebSearchMode`).
+  defaultWebSearchMode: "always",
 } as const;
 
 // Per-conversation, not per-message -- see components/chat/ChatInput.tsx's

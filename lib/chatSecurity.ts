@@ -79,7 +79,7 @@ import {
     tokenQuotaRefusalDetails,
     type TokenQuotaScope,
 } from "@/lib/chatTokenQuotaCore";
-import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
+import { APP_DEFAULTS, isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
@@ -855,6 +855,18 @@ export const createChatBudget = (
             maxQueries: number;
             pricingVersion: string;
         } | null;
+        /**
+         * Tokens this turn reserves and is charged for but that do not count
+         * towards the input limit.
+         *
+         * An image's limit estimate comes from its dimensions
+         * (`lib/chatImageInputTokens.ts`); the rest of the flat per-image
+         * allowance arrives here. Added to the credit weight and to the
+         * reservation after the limit check, so neither moves: a turn is
+         * charged and reserved exactly as it was when every image counted in
+         * full, and only the question of whether it is too long changed.
+         */
+        reservationOnlyInputTokens?: number;
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -879,7 +891,17 @@ export const createChatBudget = (
         throw new ChatAccessError(
             413,
             "CHAT_INPUT_TOKEN_LIMIT",
-            "Chat context exceeds the allowed token budget."
+            "Chat context exceeds the allowed token budget.",
+            undefined,
+            {
+                // For the log line only; `internal*` never reaches the client.
+                internalEstimatedInputTokens: Number.isFinite(
+                    estimatedInputTokens
+                )
+                    ? estimatedInputTokens
+                    : -1,
+                internalMaxInputTokens: maxInputTokens,
+            }
         );
     }
 
@@ -895,16 +917,21 @@ export const createChatBudget = (
     // reservation that skipped them would be short by the margin the
     // calibration exists to provide, and the reason would be that this one
     // caller did its own arithmetic.
-    const reservedInputTokens = Math.min(
-        maxInputTokens,
-        toReservedInputTokens(estimatedInput, {
-            toolOverheadTokens: estimateToolInputTokenOverhead({
-                nativeSearchEnabled: options?.nativeSearchEnabled === true,
-                appManagedSearchEnabled:
-                    options?.appManagedSearchEnabled === true,
-            }),
-        })
+    const reservationOnlyInputTokens = Math.max(
+        0,
+        Math.trunc(options?.reservationOnlyInputTokens ?? 0)
     );
+    const reservedInputTokens =
+        Math.min(
+            maxInputTokens,
+            toReservedInputTokens(estimatedInput, {
+                toolOverheadTokens: estimateToolInputTokenOverhead({
+                    nativeSearchEnabled: options?.nativeSearchEnabled === true,
+                    appManagedSearchEnabled:
+                        options?.appManagedSearchEnabled === true,
+                }),
+            })
+        ) + reservationOnlyInputTokens;
     const pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: reservedInputTokens,
     });
@@ -914,7 +941,10 @@ export const createChatBudget = (
         minimumPlan: model.minimumPlan,
         modelUsageClass: model.usageClass,
         usageCredits:
-            getWeightedUsageCredits(model, estimatedInputTokens) +
+            getWeightedUsageCredits(
+                model,
+                estimatedInputTokens + reservationOnlyInputTokens
+            ) +
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         maxOutputTokens: pricing.maxOutputTokens,
@@ -980,8 +1010,8 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): Li
     if (access.kind !== "user") {
         return [
             { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
-            { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, 20) },
-            { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, 100) },
+            { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, APP_DEFAULTS.maxGuestMessages) },
+            { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, APP_DEFAULTS.maxGuestMonthlyCredits) },
         ];
     }
 

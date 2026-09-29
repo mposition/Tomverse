@@ -18,7 +18,14 @@ import { openModelCatalogue, prepareGuestPage } from "./support/app-fixtures";
 // asserted in tests/guestDefaultModels.test.ts; here they are the fixed
 // expectation the UI has to meet.
 const GUEST_MODEL_COUNT = 3;
-const GUEST_CREDITS = 3;
+// A new conversation starts with web search on (APP_DEFAULTS), and every trio
+// model can search, so each one's reservation carries the web search surcharge
+// on top of its 1-credit base.
+const WEB_SEARCH_SURCHARGE = 8;
+const SEARCHING_MODEL_CREDITS = 1 + WEB_SEARCH_SURCHARGE;
+const GUEST_CREDITS = GUEST_MODEL_COUNT * SEARCHING_MODEL_CREDITS;
+// The same trio in a restored conversation whose switch is off.
+const GUEST_CREDITS_SEARCH_OFF = GUEST_MODEL_COUNT;
 const GUEST_SEND_LABEL = `Send · ${GUEST_CREDITS} credits`;
 const GUEST_ENTRY = "/chat?lang=en&entry=guest-preview";
 
@@ -193,11 +200,14 @@ function collectHydrationConsoleErrors(page: Page) {
   return { hydrationMessages, otherMessages };
 }
 
-function expectStableGuestDefault(history: FirstPaintSample[]) {
+function expectStableGuestDefault(
+  history: FirstPaintSample[],
+  credits: number = GUEST_CREDITS
+) {
   expect(history.length).toBeGreaterThan(0);
   expect(modelCountHistory(history)).toEqual([GUEST_MODEL_COUNT]);
-  expect(creditsHistory(history)).toEqual([GUEST_CREDITS]);
-  expect(sendLabelHistory(history)).toEqual([GUEST_SEND_LABEL]);
+  expect(creditsHistory(history)).toEqual([credits]);
+  expect(sendLabelHistory(history)).toEqual([`Send · ${credits} credits`]);
 }
 
 /** Seeds a guest conversation this tab will restore on load. */
@@ -404,7 +414,9 @@ test.describe("guest initial cost hydration", () => {
     await page.goto(GUEST_ENTRY);
     await settleComposer(page);
 
-    expectStableGuestDefault(await readHistory(page));
+    // The models fall back to the trio; the conversation's own switch (off)
+    // is kept from the first frame rather than priced as a new chat first.
+    expectStableGuestDefault(await readHistory(page), GUEST_CREDITS_SEARCH_OFF);
   });
 
   test("an explicit ?models= link is priced from its own selection only", async ({
@@ -415,7 +427,8 @@ test.describe("guest initial cost hydration", () => {
 
     const history = await readHistory(page);
     expect(modelCountHistory(history)).toEqual([2]);
-    expect(creditsHistory(history)).toEqual([2]);
+    // A new conversation, so search is on and both models can search.
+    expect(creditsHistory(history)).toEqual([2 * SEARCHING_MODEL_CREDITS]);
   });
 
   test("changing the selection re-prices immediately and consistently", async ({
@@ -444,11 +457,11 @@ test.describe("guest initial cost hydration", () => {
     await option.click();
     await expect(estimate).toHaveAttribute(
       "aria-label",
-      `Estimated ${GUEST_CREDITS - 1} credits, view breakdown`
+      `Estimated ${GUEST_CREDITS - SEARCHING_MODEL_CREDITS} credits, view breakdown`
     );
     await expect(sendButton).toHaveAttribute(
       "aria-label",
-      `Send · ${GUEST_CREDITS - 1} credits`
+      `Send · ${GUEST_CREDITS - SEARCHING_MODEL_CREDITS} credits`
     );
 
     await option.click();
@@ -463,7 +476,7 @@ test.describe("guest initial cost hydration", () => {
     // other tests would pass vacuously.
     expect(creditsHistory(await readHistory(page))).toEqual([
       GUEST_CREDITS,
-      GUEST_CREDITS - 1,
+      GUEST_CREDITS - SEARCHING_MODEL_CREDITS,
       GUEST_CREDITS,
     ]);
 
@@ -480,14 +493,20 @@ test.describe("guest initial cost hydration", () => {
     const usageDialog = page.getByRole("dialog", { name: "Estimated usage" });
     await expect(usageDialog).toBeVisible();
 
+    // One row per model (each already including its search reservation),
+    // the web search reservation broken out on its own, and the total. Search
+    // is on for a new conversation, which is what adds the middle row.
     const badges = usageDialog.getByTestId("credit-cost-badge");
-    await expect(badges).toHaveCount(GUEST_MODEL_COUNT + 1);
+    await expect(badges).toHaveCount(GUEST_MODEL_COUNT + 2);
     const values = (await badges.allInnerTexts()).map((text) =>
       Number(text.trim())
     );
     const rowTotal = values
       .slice(0, GUEST_MODEL_COUNT)
       .reduce((sum, value) => sum + value, 0);
+    expect(values[GUEST_MODEL_COUNT]).toBe(
+      GUEST_MODEL_COUNT * WEB_SEARCH_SURCHARGE
+    );
     expect(rowTotal).toBe(GUEST_CREDITS);
     expect(values[values.length - 1]).toBe(GUEST_CREDITS);
   });

@@ -22,7 +22,7 @@ const boundedGoogleCapability = {
   maxBillableSearchQueriesPerRequest: 5,
 };
 const perplexityCapability = getWebSearchCapability("perplexity/sonar");
-const unsupportedCapability = getWebSearchCapability("codestral");
+const unsupportedCapability = getWebSearchCapability("perplexity/sonar-deep-research");
 
 test("off mode never claims a search happened, even for a native-capable model", () => {
   const result = normalizeWebSearchExecution({
@@ -214,7 +214,14 @@ test("an unsupported model that had search requested is flagged unsupported, not
 });
 
 test("an unverified model behaves the same as unsupported -- never assumed native", () => {
-  const unverified = getWebSearchCapability("gpt-5-4-mini");
+  // No catalogue model is unverified any more, but the state still exists and
+  // must still never read as a search that ran.
+  const unverified = {
+    support: "unverified",
+    canForceExecution: false,
+    returnsCitations: false,
+    hasAdditionalCost: false,
+  };
   const result = normalizeWebSearchExecution({
     backendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
     capability: unverified,

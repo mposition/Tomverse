@@ -3,14 +3,20 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
-import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import {
+  releaseNotesAudiencePreview,
+  type ReleaseNotesAudiencePreview,
+} from "@/lib/releaseNotesAudience";
 import {
   campaignContentHashes,
   renderCampaignContent,
   type CampaignEmailPreview,
 } from "@/lib/emailCampaignContent";
 import {
+  deliveryContentForLanguage,
   localizedCampaignEventPayload,
+  type CampaignContentByLocale,
 } from "@/lib/emailCampaignContentCore";
 import {
   expandEmailEvent,
@@ -938,6 +944,16 @@ export type MarketingConsentAudienceSummary = {
   autoMigratable: number;
   malformed: number;
   truncated: boolean;
+  /**
+   * The section 7.6 verdict, taken for every candidate without writing a row.
+   *
+   * `estimatedRecipients` is its `allowedWhenLive`: the count of messages the
+   * verdict would send once release notes are switched on, which is the last
+   * step of the activation order and so normally still off when a campaign is
+   * estimated. Before this, the approved number was the count of consents --
+   * a figure the send never looked at.
+   */
+  verdict?: ReleaseNotesAudiencePreview;
 };
 
 export type CampaignAudienceSummary =
@@ -985,6 +1001,7 @@ export const estimateCampaignAudience = async (input: {
       templateKey: true,
       audienceSpec: true,
       replacementModelId: true,
+      contentByLocale: true,
     },
   });
   if (!campaign) {
@@ -1032,6 +1049,34 @@ export const estimateCampaignAudience = async (input: {
         },
       }),
     ]);
+    // The verdict, per candidate, with no rows written -- the preview
+    // section 12 asks S9 for. The language each recipient will be sent in
+    // follows the expansion's own rule, because the template version it picks
+    // is inside the display contract.
+    const localized =
+      campaign.contentByLocale &&
+      typeof campaign.contentByLocale === "object" &&
+      !Array.isArray(campaign.contentByLocale)
+        ? localizedCampaignEventPayload({
+            locales: Object.keys(campaign.contentByLocale),
+            contentByLocale: campaign.contentByLocale as CampaignContentByLocale,
+          })
+        : null;
+    const verdict = await releaseNotesAudiencePreview({
+      purpose: spec.cohort.purpose,
+      templateKey: campaign.templateKey,
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+      languageFor: (preferred) => {
+        if (!localized) return preferred;
+        try {
+          return deliveryContentForLanguage(localized, preferred).language;
+        } catch {
+          // No approved locale at all: the expansion refuses the campaign for
+          // that, and the estimate is not the place to invent a language.
+          return preferred;
+        }
+      },
+    });
     const summary: MarketingConsentAudienceSummary = {
       kind: "marketing_consent",
       purpose: spec.cohort.purpose,
@@ -1044,10 +1089,20 @@ export const estimateCampaignAudience = async (input: {
       excluded: {
         no_email: active - activeWithEmail,
         account_inactive: consented - active,
-        suppressed: 0,
+        // The verdict's suppression blocker covers every live cause, so the
+        // column reads as it always has. It and `no_email` are counted in their
+        // own columns above and left out of the spread below: listing them
+        // twice put the same people in the excluded total twice.
+        suppressed: verdict.refusedBy.suppressed ?? 0,
         plan_incompatible: 0,
+        ...Object.fromEntries(
+          Object.entries(verdict.refusedBy)
+            .filter(([reason]) => reason !== "suppressed" && reason !== "no_email")
+            .map(([reason, count]) => [`verdict_${reason}`, count])
+        ),
       },
-      noticeAudience: activeWithEmail,
+      noticeAudience: verdict.allowedWhenLive,
+      verdict,
       autoMigratable: 0,
       malformed: 0,
       truncated: false,
@@ -1056,7 +1111,7 @@ export const estimateCampaignAudience = async (input: {
     await prisma.emailCampaign.update({
       where: { id: input.campaignId },
       data: {
-        estimatedRecipients: activeWithEmail,
+        estimatedRecipients: verdict.allowedWhenLive,
         audienceVersion: 1,
         estimatedAt,
         estimatedByEmail: input.byEmail,
@@ -1064,7 +1119,7 @@ export const estimateCampaignAudience = async (input: {
       },
     });
     return {
-      estimatedRecipients: activeWithEmail,
+      estimatedRecipients: verdict.allowedWhenLive,
       audienceVersion: 1,
       estimatedAt,
       summary,

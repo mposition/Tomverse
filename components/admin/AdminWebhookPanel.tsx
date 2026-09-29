@@ -5,6 +5,7 @@ import { Loader2, RefreshCw, Webhook } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminWebhooksMessages } from "@/lib/adminMessages/webhooks";
+import { adminFetch } from "@/lib/adminFetch";
 
 type WebhookRow = {
   id: string;
@@ -43,7 +44,7 @@ export function AdminWebhookPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/webhooks", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/webhooks", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as
         | { webhooks?: WebhookRow[]; error?: string }
         | null;
@@ -73,7 +74,7 @@ export function AdminWebhookPanel() {
     if (!row.stripeEventId) return;
     setReprocessingId(row.id);
     try {
-      const response = await fetch(`/api/admin/webhooks/${row.id}/reprocess`, {
+      const response = await adminFetch(`/api/admin/webhooks/${row.id}/reprocess`, {
         method: "POST",
       });
       const data = (await response.json().catch(() => null)) as

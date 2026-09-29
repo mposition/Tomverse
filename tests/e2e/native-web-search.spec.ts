@@ -29,12 +29,28 @@ const toolsMenuTrigger = (page: Page) =>
 // Web search is one switch, flipped in place. The menu deliberately stays
 // open afterwards (the row's own description and cost note are what change),
 // so it is dismissed here rather than closing itself.
+//
+// A new conversation now starts with the switch on (APP_DEFAULTS), so this
+// only flips it when a seeded conversation arrived with it off.
 const setWebSearchModeAlways = async (page: Page) => {
   await toolsMenuTrigger(page).click();
   const toggle = page.getByTestId("tools-web-search-row");
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", /^(true|false)$/);
+  if ((await toggle.getAttribute("aria-checked")) === "false") {
+    await toggle.click();
+  }
   await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+};
+
+// The counterpart, for a test that needs a new conversation's default (on)
+// switched off before it starts.
+const turnWebSearchOff = async (page: Page) => {
+  await toolsMenuTrigger(page).click();
+  const toggle = page.getByTestId("tools-web-search-row");
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
 };
 
@@ -359,11 +375,13 @@ test.describe("native web search (webSearchMode: always)", () => {
       });
     });
 
-    // Default webSearchMode is "off" -- no tools-menu interaction needed.
+    // A new conversation starts with web search on, so it is switched off
+    // here -- the state under test is the one a user chose.
     await page.goto("/chat");
     await expect(page.locator('[data-testid="desktop-model-panel"] select').first()).toBeEnabled();
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
+    await turnWebSearchOff(page);
     await sendChatMessage(page, testInfo, "Just a normal question");
 
     await expect(page.getByText("Plain answer, no search.").first()).toBeVisible();
@@ -377,19 +395,21 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
   });
 
-  test("mixed supported/unsupported selection shows a compact partial-support chip and an unsupported badge", async ({
+  test("each panel's badge reports its own search outcome, including a search unavailable on the turn", async ({
     page,
   }, testInfo) => {
-    // Luna and Haiku both have a native search a request can bound. The third
-    // panel is the one nothing may dispatch -- `gpt-5-4-mini` is `unverified`
-    // in the capability register, which is refused for the same reason an
-    // unbounded one is: nobody confirmed it, and offering it would turn an
-    // unchecked assumption into an answer the account paid a surcharge for.
+    // Luna and Haiku both have a native search a request can bound; the third
+    // panel, gpt-5-4-mini, searches through the application-managed backend.
+    // All three can search, so the chip is the plain on state. What this test
+    // keeps apart is what each *answer* reports: one searched, one could have
+    // and did not, and one came back saying its search was unavailable on
+    // this turn (the server's own `supported: false` -- for instance a backend
+    // that stopped being reachable after the page loaded). The badges must say
+    // three different things.
     //
-    // It used to be Gemini 3.5 Flash-Lite. That model now searches through the
-    // application-managed backend, so it is no longer an example of a panel
-    // that cannot -- and leaving it here would have made this test pass while
-    // asserting the opposite of what the product does.
+    // The partial-support chip for a model that cannot search at all is
+    // covered in web-search-composer-state.spec.ts, through Deep Research --
+    // the only catalogue model left that never takes the switch.
     const models = ["gpt-5-6-luna", "claude-haiku-4-5", "gpt-5-4-mini"];
     const CHAT_ID = "guest_native_search_mixed";
     await prepareGuestPage(page, "en");
@@ -424,9 +444,9 @@ test.describe("native web search (webSearchMode: always)", () => {
       }
       const body = route.request().postDataJSON() as { modelId?: string };
       const modelId = body.modelId || "";
-      // Gemini cannot search on this turn at all; the other two can, and one
-      // of them decided it did not need to. Three different answers to
-      // "did this panel search", which is what the badges have to keep apart.
+      // gpt-5-4-mini's search is unavailable on this turn; the other two
+      // can, and one of them decided it did not need to. Three different
+      // answers to "did this panel search", which the badges keep apart.
       const supported = modelId !== "gpt-5-4-mini";
       const executed = modelId === "gpt-5-6-luna";
       await route.fulfill({
@@ -450,29 +470,20 @@ test.describe("native web search (webSearchMode: always)", () => {
     await openRecentConversation(page, { title: "Native search test" });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 
-    // The mixed selection is the exception case, so it -- and only it -- earns
-    // a visible warning on the chip itself. There is no separate readiness
-    // row any more, and tapping the chip names the models that cannot search.
+    // Every panel can search, so the chip claims no exception and there is
+    // still no separate readiness row.
     const chip = page.getByTestId("web-search-mode-chip");
-    await expect(chip).toHaveAttribute("data-tone", "warning");
-    await expect(chip).toContainText("2/3 supported");
+    await expect(chip).toHaveAttribute("data-tone", "neutral");
+    await expect(chip).toHaveAttribute("data-supported-count", "3");
     await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
-    await expect(page.getByTestId("web-search-exception-detail")).toHaveCount(0);
-    await page.getByTestId("web-search-exception-toggle").click();
-    const detail = page.getByTestId("web-search-exception-detail");
-    await expect(detail).toBeVisible();
-    await expect(detail).toContainText("without a web search");
-    // The panel that cannot search, and not a Gemini beside it -- naming the
-    // wrong model here is the same defect as promising a search that will not
-    // run, told from the other end.
-    await expect(detail).not.toContainText("Gemini");
+    await expect(page.getByTestId("web-search-exception-toggle")).toHaveCount(0);
 
     await sendChatMessage(page, testInfo, "Any current news?");
 
     await expect(page.getByText("Searched and answered.")).toHaveCount(1);
     await expect(page.getByText("Answered without search.")).toHaveCount(2);
     // Three distinct honest statements: one search ran, one could have run and
-    // did not, and one was never possible. None of them says a search happened
+    // did not, and one was not available on this turn. None of them says a search happened
     // where none did.
     await expect(assistantBadge(page, "gpt-5-6-luna")).toHaveAttribute(
       "data-search-status",
@@ -639,6 +650,9 @@ test.describe("native web search (webSearchMode: always)", () => {
     ).toBeEnabled();
     await selectModelsViaPicker(page, ["gpt-5-5", "claude-sonnet-5"]);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
+    // Every test here toggles from off. A new conversation starts on, so the
+    // switch is put in the state these tests' names begin from.
+    await setWebSearchModeOff(page);
   };
 
   test("a submit immediately after switching web search on carries the new mode everywhere", async ({
@@ -798,20 +812,20 @@ test.describe("native web search (webSearchMode: always)", () => {
     // in place and silently split the record across two sets of arrays.
     const { preflightModes, chatModes } = await readModesOnSubmit(page);
 
-    // Conversation one runs with web search on.
-    await setWebSearchModeAlways(page);
+    // Conversation one runs with web search off -- prepareTwoModelChat turned
+    // the new conversation's default off.
     await page.getByTestId("chat-textarea").fill("First conversation question");
     await page.getByTestId("chat-textarea").press("Enter");
     await expect.poll(() => preflightModes.length).toBe(1);
-    expect(preflightModes[0]).toBe("always");
+    expect(preflightModes[0]).not.toBe("always");
     // Both panels, not "at least one": snapshotting mid-flight would put the
     // first conversation's second body on the wrong side of the slice below.
     await expect.poll(() => chatModes.length).toBe(2);
     const firstConversationCount = chatModes.length;
-    expect(new Set(chatModes)).toEqual(new Set(["always"]));
+    expect(chatModes.filter((mode) => mode === "always")).toHaveLength(0);
 
-    // A new conversation resets the mode to the app default; the next submit
-    // must carry that, not conversation one's "always". New Chat also resets
+    // A new conversation resets the mode to the app default (on); the next
+    // submit must carry that, not conversation one's "off". New Chat also resets
     // the panel set to a single default model, and a single-model send skips
     // preflight entirely -- so the two-model selection is restored first,
     // keeping the second submit comparable to the first.
@@ -826,11 +840,11 @@ test.describe("native web search (webSearchMode: always)", () => {
     await page.getByTestId("chat-textarea").press("Enter");
 
     await expect.poll(() => preflightModes.length).toBe(2);
-    expect(preflightModes[1]).not.toBe("always");
+    expect(preflightModes[1]).toBe("always");
     await expect.poll(() => chatModes.length).toBe(firstConversationCount + 2);
-    expect(
-      chatModes.slice(firstConversationCount).filter((mode) => mode === "always")
-    ).toHaveLength(0);
+    expect(new Set(chatModes.slice(firstConversationCount))).toEqual(
+      new Set(["always"])
+    );
   });
 
   test("the credit estimate breakdown shows the web search reservation for native-capable models", async ({
@@ -847,10 +861,12 @@ test.describe("native web search (webSearchMode: always)", () => {
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
 
-    // Before enabling search: only the base model-response total --
-    // gpt-5-5 carries an explicit creditWeight of 16 and claude-sonnet-5
-    // costs its advanced-class 4.
+    // With search off: only the base model-response total -- gpt-5-5
+    // carries an explicit creditWeight of 16 and claude-sonnet-5 costs its
+    // advanced-class 4. A new conversation starts with search on, so it is
+    // switched off first to read the base on its own.
     const estimate = page.getByTestId("request-credit-estimate");
+    await turnWebSearchOff(page);
     await expect(estimate).toContainText("20");
 
     await setWebSearchModeAlways(page);

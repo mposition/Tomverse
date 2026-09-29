@@ -9,7 +9,8 @@ import {
   useState,
 } from "react";
 import { usePathname } from "next/navigation";
-import { ADMIN_SEARCHABLE_PAGES } from "@/lib/adminNavigation";
+import type { AdminRole } from "@/lib/adminAuthCore";
+import { ADMIN_SEARCHABLE_PAGES, adminHrefIsVisibleTo } from "@/lib/adminNavigation";
 
 /**
  * Per-operator console preferences: pinned pages and recently visited routes.
@@ -50,6 +51,11 @@ type PreferencesValue = {
   /** False until the browser store has been read, so nothing flashes. */
   ready: boolean;
   pinLimit: number;
+  /**
+   * The viewer's role, which decided what `pinned` and `recent` hold. Carried
+   * so a consumer looking a pin up in the page list uses the same role.
+   */
+  role: AdminRole | null;
 };
 
 const AdminConsolePreferencesContext = createContext<PreferencesValue | null>(null);
@@ -78,8 +84,15 @@ const writeStringArray = (key: string, value: string[]) => {
 
 export function AdminConsolePreferencesProvider({
   children,
+  role = null,
 }: {
   children: React.ReactNode;
+  /**
+   * The viewer's role. A stored pin or recent route this role may not open is
+   * dropped, like an unknown href: the browser store is shared by whoever
+   * signs in on it, and a link that answers 404 is not a convenience.
+   */
+  role?: AdminRole | null;
 }) {
   const pathname = usePathname();
   const [pinned, setPinned] = useState<string[]>([]);
@@ -95,7 +108,9 @@ export function AdminConsolePreferencesProvider({
     } else {
       // A pin for a route that no longer exists would render a dead link in the
       // sidebar, so unknown hrefs are dropped on read rather than on click.
-      next = stored.filter((href) => KNOWN_HREFS.has(href)).slice(0, PINNED_LIMIT);
+      next = stored
+        .filter((href) => KNOWN_HREFS.has(href) && adminHrefIsVisibleTo(role, href))
+        .slice(0, PINNED_LIMIT);
     }
     // Deferred past the commit, like every other browser-store read in the
     // console: the server cannot produce this value, so writing it during the
@@ -105,19 +120,18 @@ export function AdminConsolePreferencesProvider({
       setPinned(next);
       setReady(true);
     });
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     const stored = readStringArray(RECENT_STORAGE_KEY) || [];
-    const next = [pathname, ...stored.filter((item) => item !== pathname)].slice(
-      0,
-      RECENT_LIMIT
-    );
+    const next = [pathname, ...stored.filter((item) => item !== pathname)]
+      .filter((item) => adminHrefIsVisibleTo(role, item))
+      .slice(0, RECENT_LIMIT);
     // Deferred past the commit: the server never produces this value, so a read
     // during render would give the two renders different content.
     queueMicrotask(() => setRecent(next));
     writeStringArray(RECENT_STORAGE_KEY, next);
-  }, [pathname]);
+  }, [pathname, role]);
 
   const togglePin = useCallback((href: string) => {
     setPinned((current) => {
@@ -137,8 +151,9 @@ export function AdminConsolePreferencesProvider({
       pinLimit: PINNED_LIMIT,
       isPinned: (href: string) => pinned.includes(href),
       togglePin,
+      role,
     }),
-    [pinned, recent, ready, togglePin]
+    [pinned, recent, ready, togglePin, role]
   );
 
   return (

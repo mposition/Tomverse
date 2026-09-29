@@ -15,6 +15,14 @@ export const adminShellMessages = defineAdminMessages({
     notificationCenter: "Notification center",
     viewAll: "View all",
     noNotifications: "No notification records.",
+    alerts: {
+      title: "Notifications could not be read",
+      unavailable: (status: number) =>
+        `The server answered ${status}. This is not an empty inbox — nothing was read, so there may be alerts waiting.`,
+      unreachable:
+        "The request failed before the server answered. This is not an empty inbox — nothing was read, so there may be alerts waiting.",
+      retry: "Try again",
+    },
     breadcrumbRoot: "Admin Console",
     readOnlyFor: (role: string) => `Read-only for ${role}`,
     pinned: "Pinned",
@@ -90,6 +98,14 @@ export const adminShellMessages = defineAdminMessages({
     notificationCenter: "알림 센터",
     viewAll: "모두 보기",
     noNotifications: "알림 기록이 없습니다.",
+    alerts: {
+      title: "알림을 읽지 못했습니다",
+      unavailable: (status: number) =>
+        `서버가 ${status}로 응답했습니다. 알림이 없다는 뜻이 아니라 아무것도 읽지 못한 것이므로, 대기 중인 알림이 있을 수 있습니다.`,
+      unreachable:
+        "서버가 응답하기 전에 요청이 실패했습니다. 알림이 없다는 뜻이 아니라 아무것도 읽지 못한 것이므로, 대기 중인 알림이 있을 수 있습니다.",
+      retry: "다시 시도",
+    },
     breadcrumbRoot: "Admin Console",
     readOnlyFor: (role: string) => `${role} 역할은 읽기 전용`,
     pinned: "고정됨",

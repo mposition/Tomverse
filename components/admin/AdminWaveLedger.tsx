@@ -4,13 +4,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminEmailCampaignDetailMessages } from "@/lib/adminMessages/emailCampaignDetail";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminMessages,
+  useAdminLocale,
+} from "@/components/admin/AdminLocaleProvider";
 import {
   AdminAddressRevealProvider,
   AdminRevealableAddress,
   AdminRevealAddressesButton,
 } from "@/components/admin/AdminAddressReveal";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The people in one wave's expansion ledger.
@@ -85,6 +93,12 @@ export function AdminWaveLedger({
   useEffect(() => {
     loadFailedMessage.current = m.loadFailed;
   }, [m.loadFailed]);
+  const { locale: apiLocale } = useAdminLocale();
+  // Classified rather than thrown as a bare string. `describeAdminApiFailure`
+  // is what tells a queued approval (409) and a stale step-up window (428)
+  // apart from a fault, and the notice below is what gives the second of those
+  // a way back -- rule 7 of docs/ui-contracts/admin-console-ia.md.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [page, setPage] = useState<LedgerPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -104,17 +118,20 @@ export function AdminWaveLedger({
         url.searchParams.set("waveId", waveId);
         if (nextCursor) url.searchParams.set("cursor", nextCursor);
 
-        const response = await fetch(url, { cache: "no-store" });
+        const response = await adminFetch(url, { cache: "no-store" });
         const payload = (await response.json().catch(() => null)) as
           | LedgerPage
           | { error?: string }
           | null;
         if (!response.ok || !payload || !("rows" in payload)) {
-          throw new Error(
-            payload && "error" in payload && payload.error
-              ? payload.error
-              : loadFailedMessage.current
-          );
+          const outcome = describeAdminApiFailure({
+            status: response.status,
+            error: payload && "error" in payload ? payload.error : null,
+            fallback: loadFailedMessage.current,
+            locale: apiLocale,
+          });
+          setApiFailure(outcome);
+          throw new Error(outcome.message);
         }
         setPage(payload);
         setPageEpoch((value) => value + 1);
@@ -129,7 +146,7 @@ export function AdminWaveLedger({
         setLoading(false);
       }
     },
-    [campaignId, waveId]
+    [apiLocale, campaignId, waveId]
   );
 
   useEffect(() => {
@@ -163,6 +180,7 @@ export function AdminWaveLedger({
 
   return (
     <AdminAddressRevealProvider key={pageEpoch}>
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="mt-3" data-testid="admin-wave-ledger">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Says what is on screen and what it is a page of. A list that

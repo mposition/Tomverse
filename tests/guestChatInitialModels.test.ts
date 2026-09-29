@@ -9,6 +9,7 @@ import {
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
   GUEST_CONVERSATIONS_STORAGE_KEY,
   resolveGuestInitialSelectedModels,
+  resolveGuestInitialWebSearchMode,
   type GuestInitialModelEnvironment,
 } from "@/lib/guestChatInitialModels";
 import { getModel, isEnabledModelId } from "@/lib/models";
@@ -263,4 +264,44 @@ test("a ?models= link cannot smuggle credit, plan, or provider-shaped keys into 
 
   assert.deepEqual(Object.keys(resolved).sort(), ["models", "source"]);
   assert.deepEqual(resolved.models, [eligible]);
+});
+
+test("a new guest conversation starts with web search on", () => {
+  assert.equal(resolveGuestInitialWebSearchMode(), "always");
+  assert.equal(resolveGuestInitialWebSearchMode({ search: "" }), "always");
+});
+
+test("a restored guest conversation keeps its own search switch from the first render", () => {
+  // Pricing a restored search-off conversation as a new one for a frame is
+  // the same one-frame price flicker as STG-F006, one input over.
+  assert.equal(
+    resolveGuestInitialWebSearchMode(
+      guestConversationEnvironment("guest_off", { webSearchMode: "off" })
+    ),
+    "off"
+  );
+  assert.equal(
+    resolveGuestInitialWebSearchMode(
+      guestConversationEnvironment("guest_on", { webSearchMode: "always" })
+    ),
+    "always"
+  );
+  // The retired and unreadable values read as off, exactly as the restore
+  // effect reads them -- never as the new-conversation default.
+  for (const webSearchMode of ["auto", undefined, 7]) {
+    assert.equal(
+      resolveGuestInitialWebSearchMode(
+        guestConversationEnvironment("guest_legacy", { webSearchMode })
+      ),
+      "off"
+    );
+  }
+});
+
+test("a models link does not change the restored conversation's search switch", () => {
+  const environment = {
+    ...guestConversationEnvironment("guest_off", { webSearchMode: "off" }),
+    search: "?models=gpt-5-6-luna",
+  };
+  assert.equal(resolveGuestInitialWebSearchMode(environment), "off");
 });

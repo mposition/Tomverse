@@ -671,12 +671,12 @@ const REGISTRY = {
   AmuxCostLedgerEntry_scope_check: {
     owner: "database",
     reason:
-      "Each append-only cost entry charges exactly one configured project or team resource, using the same durable scope vocabulary as policy rows.",
+      "Each append-only cost entry charges exactly one configured project or team resource, using the same durable scope vocabulary as policy rows, or an approved adapter agent's own scope, which no admission sum reads.",
   },
   AmuxCostLedgerEntry_kind_check: {
     owner: "database",
     reason:
-      "Cost evidence records the conservative execution reservation and an optional provider-confirmed settlement delta as separate append-only facts.",
+      "Cost evidence records the conservative execution reservation, an optional provider-confirmed settlement delta and an adapter agent's own model spend as separate append-only facts.",
   },
   AmuxQuotaObservation_source_check: {
     owner: "type_only",
@@ -741,7 +741,7 @@ const REGISTRY = {
     module: "lib/amux/recommendationPoolCore.ts",
     list: "RECOMMENDATION_CAPACITY_IDS",
     reason:
-      "The recommendation ceiling is one row, id queue. Version 7 inserts no row. A missing row means capacity is unconfigured.",
+      "The recommendation ceiling is one row, id queue. Version 11 writes that row only from an owner request that names the limit. A missing, inactive, or null-limit row means capacity is unconfigured.",
   },
   AmuxRecommendationSnapshot_status_check: {
     owner: "list",
@@ -811,7 +811,7 @@ const REGISTRY = {
     module: "lib/amux/autoPromotionCore.ts",
     list: "AUTO_CONSUMPTION_STATUSES",
     reason:
-      "consumed or outcome_unknown. consumed is the only status that accompanies one backlog to todo write, and that write stays behind the shipped-off auto latch.",
+      "consumed or outcome_unknown. consumed is the only status that accompanies one backlog to todo write. Version 9 turns the code latch on. The write still needs the env value exactly enabled plus the version 8 graduation, capacity, cost, and halt checks.",
   },
   AmuxRecommendationAutoHalt_reason_check: {
     owner: "list",
@@ -840,6 +840,83 @@ const REGISTRY = {
     list: "AMUX_INTAKE_APPROVAL_STATUSES",
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
+  EngineeringAgentRun_status_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "RUN_STATUSES",
+    reason:
+      "active, finished, abandoned. A transition trigger allows only the core table's pairs and refuses a finish after the lease.",
+  },
+  EngineeringAgentRun_outcome_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "RUN_OUTCOMES",
+    reason:
+      "How a run ended. Null while active; abandoned only with the abandoned status.",
+  },
+  EngineeringAgentRun_halt_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "HALT_VALUES",
+    reason:
+      "Why the agent stopped taking work, if it did. none is the ordinary value.",
+  },
+  EngineeringAgentRun_modeAtStart_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_MODES",
+    reason:
+      "The mode a run started under. The insert trigger reads it from AppSetting and writes it itself; anything unknown is off, as parseEngineeringAgentMode reads it.",
+  },
+  EngineeringAgentWorkItem_kind_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_WORK_ITEM_KINDS",
+    reason:
+      "The six work item kinds. Each kind's states are a separate CHECK, compared by tests/engineeringAgentSchema.test.mjs.",
+  },
+  EngineeringAgentWorkItem_claimMode_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "WRITE_CLAIM_MODES",
+    reason:
+      "write or lookup; set only while an item is claimed.",
+  },
+  EngineeringAgentApproval_decision_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "ENGINEERING_AGENT_T2_DECISIONS",
+    reason:
+      "A T2 decision's two answers. The table holds T2 decisions only, never a publish approval.",
+  },
+  EngineeringAgentBinding_state_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "BINDING_STATES",
+    reason:
+      "open, closed, pruned; a trigger allows only open to closed and closed to pruned.",
+  },
+  EngineeringAgentRegistration_source_check: {
+    owner: "list",
+    module: "lib/engineeringAgentRegistrationGuard.ts",
+    list: "REGISTRATION_SOURCE_IDS",
+    reason:
+      "The three registration sources the policy names; adding one is a policy revision.",
+  },
+  EngineeringAgentRegistration_result_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "REGISTRATION_RESULTS",
+    reason:
+      "pending until the AMUX writer answers; then written once.",
+  },
+  EngineeringAgentRequest_state_check: {
+    owner: "list",
+    module: "lib/engineeringAgentCore.ts",
+    list: "REQUEST_STATES",
+    reason:
+      "Internal request idempotency; in_progress may stay visible because a COMMIT can land late.",
   },
   AmuxWorkDelivery_status_check: {
     owner: "database",
@@ -1025,6 +1102,103 @@ const REGISTRY = {
     owner: "database",
     reason:
       'Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to "why did this person not get it", which is a question support has to be able to answer without reading the send code.',
+  },
+  PinnedDeploymentExperimentHold_status_check: {
+    owner: "list",
+    module: "lib/pinnedDeploymentExecution.ts",
+    list: "PINNED_EXPERIMENT_HOLD_STATUSES",
+    reason:
+      "held, settled, released, occupied. Released is only a call that was confirmed not to have started. Occupied keeps the reservation when the cost is unknown after dispatch. Settled is a measured cost.",
+  },
+  AvailabilityObservation_source_check: {
+    owner: "database",
+    reason:
+      "real_traffic, synthetic_probe, operator_verification. An operator proving the API answers is not the same claim as real user traffic being served.",
+  },
+  AvailabilityObservation_outcome_check: {
+    owner: "database",
+    reason:
+      "succeeded or failed. A rollup divides one by the total, so a third value would need every consumer to decide which side it counted on.",
+  },
+  AvailabilityObservation_errorClass_check: {
+    owner: "database",
+    reason:
+      "A subset of the attempt error vocabulary. A success has nothing to classify, so the column is nullable.",
+  },
+  AvailabilityRollupApplication_grain_check: {
+    owner: "database",
+    reason:
+      "deployment, endpoint, provider. Applying the provider grain does not record that the deployment grain was applied.",
+  },
+  DeploymentPriceSnapshot_knowledge_check: {
+    owner: "database",
+    reason:
+      "unknown, estimate, verified. Unknown is a missing amount, not zero.",
+  },
+  DeploymentPriceSnapshot_rate_kind_check: {
+    owner: "database",
+    reason:
+      "input, output, cache_read, cache_write. One amount without a kind cannot say which rate it is.",
+  },
+  RoutingRun_allocationMode_check: {
+    owner: "database",
+    reason:
+      "deterministic or explore_bounded, nullable because a run written before an allocator existed recorded neither.",
+  },
+  RoutingRun_allocationSeedGrain_check: {
+    owner: "database",
+    reason:
+      "request or session. An exploration must name its grain; a deterministic allocation names none.",
+  },
+  ModelDeployment_promptCacheSupport_check: {
+    owner: "database",
+    reason:
+      "unproven, verified_absent, verified_automatic, verified_explicit. Unproven is the default and is neither no-cache nor a cache.",
+  },
+  RoutingCandidateVerdict_verdict_check: {
+    owner: "database",
+    reason:
+      "eligible or rejected. An eligible candidate has no rejection reason.",
+  },
+  RoutingCandidateVerdict_reason_check: {
+    owner: "database",
+    reason:
+      "The reasons a candidate filter can give. Nullable because an eligible candidate has no reason.",
+  },
+  QuotaScope_scopeKind_check: {
+    owner: "database",
+    reason:
+      "credential, endpoint_credential, deployment_credential, account, provider. Each kind names its own columns.",
+  },
+  CredentialBinding_billingOwner_check: {
+    owner: "database",
+    reason:
+      "tomverse or account. It decides which budget a call draws down.",
+  },
+  CredentialBinding_status_check: {
+    owner: "database",
+    reason:
+      "disabled, active, revoked. Revoked is a withdrawn secret, not a pause.",
+  },
+  ProviderEndpoint_residencyClass_check: {
+    owner: "database",
+    reason:
+      "proven and unproven. Unproven is the default until a contract names a recipient and a region.",
+  },
+  RoutingIdentityManifestEntry_versionPinStrength_check: {
+    owner: "database",
+    reason:
+      "strong, weak, alias_only. A published entry copies the pin from the deployment.",
+  },
+  ModelDeployment_versionPinStrength_check: {
+    owner: "database",
+    reason:
+      "strong, weak, alias_only. The default is strong, so a row that predates the column cannot drift by omission.",
+  },
+  ModelDeployment_qualityGateStatus_check: {
+    owner: "database",
+    reason:
+      "pending, passed, failed, stale. Stale is evidence that expired, not evidence the model got worse.",
   },
 
   MarketingChannel_channel_check: {

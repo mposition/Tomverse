@@ -220,6 +220,48 @@ export const PROTECTED_TABLES = [
     writers: ["lib/promptRefinerShadowRunStore.ts"],
     contract: "docs/policy/prompt-refiner-observability.md §12",
   },
+  {
+    table: "EngineeringAgentRun",
+    delegate: "engineeringAgentRun",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentWorkItem",
+    delegate: "engineeringAgentWorkItem",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentApproval",
+    delegate: "engineeringAgentApproval",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentCapability",
+    delegate: "engineeringAgentCapability",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentBinding",
+    delegate: "engineeringAgentBinding",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentRegistration",
+    delegate: "engineeringAgentRegistration",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "EngineeringAgentRequest",
+    delegate: "engineeringAgentRequest",
+    writers: ["lib/engineeringAgentStore.ts"],
+    contract: "docs/policy/engineering-agent.md §11",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -320,6 +362,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
   },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "engineeringAgentApproval",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
 ];
 
 /**
@@ -327,6 +375,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentRegistration",
+    tableMentions: 3,
+    writeVerbs: 16,
+    reason:
+      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the sixteen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose.",
+  },
   {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
@@ -366,6 +422,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 3,
     reason:
       "The data-domain registry names the content-free run model and describes retention and deletion. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "EngineeringAgentApproval",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the decision model as prismaModel and in its exclusion reason. It builds no SQL and opens no database connection.",
   },
   {
     path: "lib/promptRefinerShadowRunStore.ts",
@@ -612,10 +676,124 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Adds a CHECK that a claim token and its lease are set together or not at all. The one write verb is that statement's own ALTER TABLE; DDL only and no row mutation.",
   },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 7,
+    writeVerbs: 16,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentCapability",
+    tableMentions: 5,
+    writeVerbs: 16,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentBinding",
+    tableMentions: 2,
+    writeVerbs: 16,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/engineeringAgentStore.ts",
+    table: "EngineeringAgentRun",
+    tableMentions: 4,
+    writeVerbs: 16,
+    reason:
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 76,
+    reason:
+      "The engineering agent state migration adds a restrictive foreign key from the T2 decision table to AdminAuditLog. It never writes AdminAuditLog; its write verbs create and constrain the seven engineering tables and their triggers.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 30,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentWorkItem",
+    tableMentions: 48,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentWorkItem and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentApproval",
+    tableMentions: 11,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentApproval and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentCapability",
+    tableMentions: 17,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentCapability and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentBinding",
+    tableMentions: 26,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentBinding and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentRegistration",
+    tableMentions: 21,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentRegistration and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    table: "EngineeringAgentRequest",
+    tableMentions: 11,
+    writeVerbs: 76,
+    reason:
+      "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
+    count: 1,
+    reason:
+      "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",
+    count: 1,
+    reason:
+      "The AMUX commit deadline trigger deletes its own AmuxCommitDeadline row during COMMIT with EXECUTE over TG_TABLE_SCHEMA and TG_TABLE_NAME -- the table the trigger is attached to -- because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. Both names are the trigger's own, never input, quoted with %I; the transaction id is bound with USING. It touches no protected table.",
+  },
+  {
+    path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
+    count: 21,
+    reason:
+      "The engineering agent triggers read their sibling tables, AMUX and AppSetting's mode row, all with EXECUTE over a name built from TG_TABLE_SCHEMA, for the reason the permission ledger gives: an unqualified name resolves through the session search path, where a temporary table of the same name answers for the real one, and a hard-coded public. is wrong under ?schema=. Every function pins search_path to pg_catalog, pg_temp. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
   {
     path: "prisma/migrations/20260928100000_release_notes_rule_obligation/migration.sql",
     count: 3,

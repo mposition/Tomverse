@@ -23,6 +23,7 @@ import {
   MARKETING_CONSOLE_SWITCH_CONTROLS,
   type MarketingConsoleSection,
 } from "@/lib/marketingConsoleSections";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Availability = { available: true } | { available: false; stage: "S4" | "S5" };
 
@@ -105,7 +106,7 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/marketing?section=${encodeURIComponent(initial.section)}`,
         { cache: "no-store" }
       );

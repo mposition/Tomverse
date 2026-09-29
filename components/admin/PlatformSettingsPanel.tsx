@@ -16,11 +16,19 @@ import {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminMessages,
+  useAdminLocale,
+} from "@/components/admin/AdminLocaleProvider";
 import { adminPlatformMemoryMessages } from "@/lib/adminMessages/platformMemory";
 import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * Where the reauthentication CTA brings the operator back to.
@@ -197,7 +205,7 @@ export function PlatformSettingsPanel({
     if (packageImportBusy) return;
     setPackageImportBusy(true);
     try {
-      const response = await fetch("/api/admin/assistant-package-import", {
+      const response = await adminFetch("/api/admin/assistant-package-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled, rationale: packageImportRationale }),
@@ -272,6 +280,12 @@ export function PlatformSettingsPanel({
   // taking with it the one instruction ("sign in again") that a retry cannot
   // substitute for, which left Save as the only visible action and every press
   // of it producing the same 428.
+  // 428 keeps its own alert below -- it is the recovery, not a message about
+  // one. Everything else the endpoint refuses with was flattened into a
+  // generic "not saved" toast, including the 409 that means the change is
+  // queued for a second administrator and must not be re-sent.
+  const { locale: apiLocale } = useAdminLocale();
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [reauthenticationRequired, setReauthenticationRequired] =
     useState(false);
   const selectedModel =
@@ -366,7 +380,7 @@ export function PlatformSettingsPanel({
     if (isLoading || isSaving) return;
     setIsLoading(true);
     try {
-      const response = await fetch("/api/admin/app-settings", {
+      const response = await adminFetch("/api/admin/app-settings", {
         cache: "no-store",
       });
       const data = (await response.json().catch(() => null)) as
@@ -398,7 +412,7 @@ export function PlatformSettingsPanel({
     if (isLoading || isSaving || reauthenticationRequired) return;
     setIsSaving(true);
     try {
-      const response = await fetch("/api/admin/app-settings", {
+      const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -435,12 +449,16 @@ export function PlatformSettingsPanel({
           );
           return;
         }
-        dispatchAppToast(
-          data?.error
-            ? m.toast.notSavedWithError(data.error)
-            : m.toast.notSaved,
-          "error"
-        );
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: (data as { code?: string | null } | null)?.code,
+          approvalId: (data as { approvalId?: string | null } | null)?.approvalId,
+          fallback: m.toast.notSaved,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        dispatchAppToast(outcome.message, outcome.tone);
         return;
       }
       applyOperationalSettings(
@@ -467,7 +485,7 @@ export function PlatformSettingsPanel({
     setLeadSaving(true);
     setLeadError(null);
     try {
-      const response = await fetch("/api/admin/app-settings", {
+      const response = await adminFetch("/api/admin/app-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ guestDefaultModelId }),
@@ -496,7 +514,7 @@ export function PlatformSettingsPanel({
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/admin/models", { cache: "no-store" })
+    void adminFetch("/api/admin/models", { cache: "no-store" })
       .then((response) => response.json())
       .then((data: { models?: typeof registryModels }) => {
         if (!cancelled && Array.isArray(data?.models)) setRegistryModels(data.models);
@@ -546,6 +564,7 @@ export function PlatformSettingsPanel({
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="border-b border-zinc-800 bg-zinc-900/60 p-5">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
           <div>

@@ -8,6 +8,7 @@ import {
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
 } from "@/lib/emailFeatureFlags";
 import {
   isEmailCampaignsEnabled,
@@ -120,6 +121,9 @@ test("a non-marketing message is untouched by the marketing flag", async () => {
 
 test("turning the flag on lets the same message through", async () => {
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  // The launch template carries product_updates, which is also behind the
+  // release-notes switch; this test is about the marketing one.
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
 
   const result = await enqueueStandardEmail({
     templateKey: MODEL_LAUNCH_TEMPLATE,
@@ -137,6 +141,7 @@ test("turning the flag on lets the same message through", async () => {
 
 test("the campaign fan-out is gated too, or the flag would be a lie", async () => {
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
   const queued = await enqueueStandardEmail({
     templateKey: MODEL_LAUNCH_TEMPLATE,
     emailAddress: "person@example.test",

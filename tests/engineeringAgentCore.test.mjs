@@ -103,7 +103,15 @@ test("every pair in every table is reachable by some legitimate event", () => {
       { event: "expire_ttl" },
       { event: "lease_expired" },
       ...["write", "lookup"].flatMap((claimMode) =>
-        outcomes.map((outcome) => ({ event: "result", claimMode, outcome, fencingMatches: true })),
+        [false, true].flatMap((capabilityConsumed) =>
+          outcomes.map((outcome) => ({
+            event: "result",
+            claimMode,
+            outcome,
+            fencingMatches: true,
+            capabilityConsumed,
+          })),
+        ),
       ),
     ];
     for (const [from, to] of writeItemTransitions(kind)) {
@@ -224,12 +232,50 @@ test("claimed -> queued rests only on a refusal before writing or a proven absen
         claimMode,
         outcome,
         fencingMatches,
+        capabilityConsumed: false,
       }).allowed;
     assert.equal(result("write", "refused_before_write"), true);
     assert.equal(result("lookup", "lookup_no_prior_write"), true);
     assert.equal(result("write", "lookup_no_prior_write"), false);
     assert.equal(result("lookup", "refused_before_write"), false);
     assert.equal(result("write", "refused_before_write", false), false);
+  }
+});
+
+test("proven unwritten work returns to the queue whatever was consumed, and nothing publishes without a consumption", () => {
+  const publish = (to, claimMode, outcome, capabilityConsumed) =>
+    decideWriteItemTransition("publish", "claimed", to, {
+      event: "result",
+      claimMode,
+      outcome,
+      fencingMatches: true,
+      capabilityConsumed,
+    }).allowed;
+  // Refused before writing, or proven not written: the work returns to the
+  // queue (docs/policy/engineering-agent.md §10). The consumed capability stays consumed; the next write claim
+  // is judged again under a new one. It never ends as a refusal.
+  assert.equal(publish("queued", "write", "refused_before_write", true), true);
+  assert.equal(publish("publish_refused", "write", "refused_before_write", true), false);
+  assert.equal(publish("queued", "lookup", "lookup_no_prior_write", true), true);
+  assert.equal(publish("publish_refused", "lookup", "lookup_no_prior_write", true), false);
+  assert.equal(publish("queued", "write", "refused_before_write", false), true);
+  assert.equal(publish("queued", "lookup", "lookup_no_prior_write", false), true);
+  // A publish, by the write or by the lookup that finds it, rests on consumption.
+  assert.equal(publish("published", "write", "confirmed", false), false);
+  assert.equal(publish("published", "lookup", "lookup_found_result", false), false);
+  assert.equal(publish("published", "lookup", "lookup_found_result", true), true);
+  // The maintenance kinds have no capability to report.
+  for (const kind of ["expire_close", "prune"]) {
+    assert.deepEqual(
+      decideWriteItemTransition(kind, "claimed", "queued", {
+        event: "result",
+        claimMode: "write",
+        outcome: "refused_before_write",
+        fencingMatches: true,
+        capabilityConsumed: true,
+      }),
+      { allowed: false, reason: "only_a_publish_item_has_a_capability" },
+    );
   }
 });
 
@@ -241,6 +287,7 @@ test("every result needs the claim's fencing token", () => {
         claimMode: "write",
         outcome: "confirmed",
         fencingMatches: false,
+        capabilityConsumed: kind === "publish",
       }),
       { allowed: false, reason: "stale_fencing_token" },
     );
@@ -286,6 +333,9 @@ test("each write's five paths lead to exactly one state", () => {
           claimMode,
           outcome,
           fencingMatches: true,
+          // A publish claim has consumed its capability unless it is
+          // reporting that nothing was written.
+          capabilityConsumed: kind === "publish" && target !== "queued",
         });
         assert.equal(verdict.allowed, to === target, `${kind} ${claimMode}/${outcome} -> ${to}`);
       }
@@ -299,6 +349,7 @@ test("each write's five paths lead to exactly one state", () => {
           claimMode: "write",
           outcome: "pr_create_rejected",
           fencingMatches: true,
+          capabilityConsumed: false,
         }).allowed,
         false,
         `${kind} has no PR creation`,
@@ -311,6 +362,7 @@ test("each write's five paths lead to exactly one state", () => {
       claimMode: "lookup",
       outcome: "confirmed",
       fencingMatches: true,
+      capabilityConsumed: true,
     }).allowed,
     false,
     "a lookup claim cannot report a write it did not make",

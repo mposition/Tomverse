@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -231,4 +233,59 @@ test("routing accepts complete telemetry evidence and rejects extra metric field
       false,
     );
   }
+});
+
+// The orchestrator deserializes this body with `deny_unknown_fields`, so a
+// top-level key the server adds and Rust lacks fails every routing snapshot of
+// a non-empty queue at runtime. `telemetry` did exactly that. The key list is
+// therefore pinned three ways: the server schema, the Rust struct, and one
+// fixture that both sides parse (apps/tomverse-orchestrator/src/tomverse_api.rs
+// reads the same file in its own tests).
+const routingFixturePath = "tests/fixtures/amux-routing-snapshot-v1.json";
+const routingFixtures = JSON.parse(
+  readFileSync(join(process.cwd(), routingFixturePath), "utf8"),
+) as Record<"eligible" | "refusal", Record<string, unknown>>;
+const rustApiSource = readFileSync(
+  join(process.cwd(), "apps", "tomverse-orchestrator", "src", "tomverse_api.rs"),
+  "utf8",
+);
+
+const rustRoutingSnapshotFields = () => {
+  const struct = rustApiSource.match(
+    /#\[serde\(deny_unknown_fields\)\]\s*pub struct RoutingSnapshotResponse \{([\s\S]*?)\n\}/,
+  );
+  assert.ok(
+    struct,
+    "RoutingSnapshotResponse must keep deny_unknown_fields directly on the struct",
+  );
+  // A field attribute (rename, default, flatten) would break the one-to-one
+  // name mapping this test relies on, or make a contract field optional.
+  assert.doesNotMatch(struct[1], /#\[serde\(/);
+  return [...struct[1].matchAll(/^\s*pub ([a-z_][a-z0-9_]*):/gm)]
+    .map((match) => match[1])
+    .sort();
+};
+
+test("the routing snapshot has one top-level key list on the server, in Rust and in the shared fixture", () => {
+  const rustFields = rustRoutingSnapshotFields();
+  assert.ok(rustFields.includes("telemetry"));
+  assert.equal(amuxRoutingResponseSchema.options.length, 2);
+  for (const branch of amuxRoutingResponseSchema.options) {
+    assert.deepEqual(Object.keys(branch.shape).sort(), rustFields);
+  }
+  for (const name of ["eligible", "refusal"] as const) {
+    const parsed = amuxRoutingResponseSchema.safeParse(routingFixtures[name]);
+    assert.equal(
+      parsed.success,
+      true,
+      parsed.success ? undefined : `${name}: ${parsed.error.message}`,
+    );
+    assert.deepEqual(Object.keys(routingFixtures[name]).sort(), rustFields, name);
+  }
+  assert.equal(routingFixtures.eligible.eligible, true);
+  assert.equal(routingFixtures.refusal.eligible, false);
+  assert.ok(
+    rustApiSource.includes(`"../../../${routingFixturePath}"`),
+    "the Rust tests must parse the same fixture",
+  );
 });

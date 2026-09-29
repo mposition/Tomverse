@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
   dbIntegrationGroupOf,
@@ -158,6 +159,28 @@ if (schemaSource === "push") {
     ["node_modules/prisma/build/index.js", "db", "push"],
     "Synchronizing the current Prisma schema"
   );
+  // `db push` creates the AmuxCommitDeadline table and not the deferred
+  // trigger that refuses a late COMMIT; without it every AMUX write is refused
+  // with AMUX_DB_COMMIT_CHECK_MISSING. Applied from the migration's own text:
+  // the function is always replaced, a trigger whose definition differs is
+  // recreated, and a second run changes nothing.
+  console.log(
+    "\n[db-integration] Installing the AMUX commit deadline check from its migration"
+  );
+  const commitDeadlineCheck = spawnSync(
+    process.execPath,
+    ["node_modules/prisma/build/index.js", "db", "execute", "--stdin"],
+    {
+      cwd: resolve(import.meta.dirname, ".."),
+      env: testEnvironment,
+      input: readAmuxCommitDeadlineInstallSql(resolve(import.meta.dirname, "..")),
+      stdio: ["pipe", "inherit", "inherit"],
+    }
+  );
+  if (commitDeadlineCheck.error) throw commitDeadlineCheck.error;
+  if (commitDeadlineCheck.status !== 0) {
+    process.exit(commitDeadlineCheck.status || 1);
+  }
 } else {
   // `db push` regenerates the client as part of its work; `migrate deploy`
   // does not. Without this, a schema change that has been migrated but not
@@ -217,6 +240,18 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // Engineering adapter: the run is written in the AMUX writer's own
+    // transaction after every AMUX lock, one fact or neither, and its
+    // settlement meets delivery ack and expired recovery without a deadlock.
+    "tests/integration/engineering-agent-amux-adapter.db.test.ts",
+    // Engineering agent store: every change commits with its audit entry
+    // under the right actor, and results go where the core says. It closes
+    // what it opens, so it passes whichever engineering file runs first.
+    "tests/integration/engineering-agent-store.db.test.ts",
+    // Engineering agent state: the triggers refuse a late success, a claim
+    // without the next fencing token, a draft closed without its decision, a
+    // second capability consumption and a rewritten snapshot, whoever writes.
+    "tests/integration/engineering-agent-schema.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -229,6 +264,11 @@ run(
     "tests/integration/prompt-refiner-shadow-run.db.test.ts",
     "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
+    // The hash chain is walked in batches now, and a cursor that skips or
+    // repeats a row is silent: a skipped row is reported as verified, and a
+    // repeated one compares an entry against its own hash and invents a
+    // linkage break in a sound chain.
+    "tests/integration/admin-audit-integrity-walk.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
@@ -305,6 +345,10 @@ run(
     // waiver has to name a sealed approval of the waiver kind. All three are
     // constraints and a trigger, so only the database can answer for them.
     "tests/integration/release-notes-rule-obligation.db.test.ts",
+    // The send verdict written down: the evidence it cited is rows the database
+    // will not lose, the seal closes the set in the same transaction, and one
+    // phase of one delivery is recorded once however many times it is evaluated.
+    "tests/integration/release-notes-send-decision.db.test.ts",
     // The two statutory display checks, whose question is which (policy version,
     // profile) a message could still be composed under. Both earlier readings of
     // that were wrong in ways only rows show: the active version alone, and a

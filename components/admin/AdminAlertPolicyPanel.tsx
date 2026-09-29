@@ -5,6 +5,7 @@ import { BellRing, Loader2, Save } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminAlertPolicyMessages } from "@/lib/adminMessages/alertPolicy";
+import { adminFetch } from "@/lib/adminFetch";
 
 type AlertPolicyRow = {
   id: string;
@@ -46,7 +47,7 @@ export function AdminAlertPolicyPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/alert-policy", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/alert-policy", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as
         | { policies?: AlertPolicyRow[]; error?: string }
         | null;
@@ -79,7 +80,7 @@ export function AdminAlertPolicyPanel() {
   const save = async (policy: AlertPolicyRow) => {
     setSavingId(policy.id);
     try {
-      const response = await fetch("/api/admin/alert-policy", {
+      const response = await adminFetch("/api/admin/alert-policy", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

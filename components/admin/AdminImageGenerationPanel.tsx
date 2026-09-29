@@ -5,6 +5,7 @@ import { Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminImageGenerationMessages } from "@/lib/adminMessages/imageGeneration";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 // The operations view over GET /api/admin/image-generation (PR 4): budget
 // configuration vs enforcement vs usage, reservation vs settlement, failure
@@ -141,7 +142,7 @@ export function AdminImageGenerationPanel() {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/admin/image-generation", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/image-generation", { cache: "no-store" });
       setError(null);
       const data = (await response.json().catch(() => null)) as
         | AdminImageGenerationReport

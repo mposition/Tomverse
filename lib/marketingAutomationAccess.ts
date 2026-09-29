@@ -328,17 +328,45 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * evidence-spec requirement applies to every v4-or-later shadow run. No model,
  * column, constraint, webhook writer, descriptor or admission decision changes;
  * the fingerprint moves because schema comments are watched bytes too.
- * 2026-09-29: current v5 manifest binds 190 files (stage v4/run v6); only schema comments changed, not models, webhook inputs, descriptor or admission decisions.
+ *
  * 2026-09-27: the AMUX back-merge adds the latched-off recommendation pool
  * and the closed auto-promotion gate. Neither is a marketing model or a
  * webhook input. The digest moves because the whole Prisma schema is
  * deliberately watched.
  *
- * Both notes stand because both changes are in this tree, and the value below
- * is computed over the merged schema rather than taken from either side.
+ * 2026-09-28: the engineering agent's seven state tables
+ * (EngineeringAgentRun through EngineeringAgentRequest) and their back
+ * relations on AmuxWorkItem, AmuxExecutionAttempt and AdminAuditLog. None is
+ * a marketing model or a webhook input, and no descriptor, webhook writer or
+ * admission decision changes. The digest moves because the whole Prisma
+ * schema is deliberately watched. develop moved the schema in the same days,
+ * so the value below is computed over the merged schema, not either side's.
+ *
+ * 2026-09-29: the AMUX back-merge of orchestration policy v15 binds
+ * auto-promotion grants to one item and one cent amount (three nullable
+ * columns on `AmuxRecommendationAutoGrant`) and adds
+ * `AmuxRecommendationAutoUnknown`. Neither is a marketing model or a webhook
+ * input. The digest moves because the whole Prisma schema is deliberately
+ * watched.
+ *
+ * 2026-09-29: `AmuxCommitDeadline`, the marker a deferred trigger reads to
+ * refuse an AMUX COMMIT that arrives after its deadline (orchestration policy
+ * version 18). Not a marketing model, not a webhook input, and no descriptor,
+ * webhook writer or admission decision changes. The digest moves because the
+ * whole Prisma schema is deliberately watched.
+ *
+ * 2026-09-29: the release-notes send verdict (S9) -- the permission ledger's
+ * decision columns and `EmailDelivery`'s display-contract pin -- merged with
+ * develop. Not a marketing webhook input and no descriptor or admission
+ * decision changes; the value below is computed over the merged schema.
+ *
+ * 2026-09-29: the current Prompt Refiner v5 manifest binds 190 files (stage
+ * v4/run v6). Only schema comments changed, not models, webhook inputs,
+ * descriptor or admission decisions. All dated notes above stand in this
+ * tree; the fingerprint is computed over the merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "ef1f8fccc9e10f643393737ca66316f51c7760a31813b2db4256fd6d2dba6c97";
+  "f4b326b974a6a54b5166bb548e29d5ba2e1ba9a7320c774864273df5183a8dc0";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

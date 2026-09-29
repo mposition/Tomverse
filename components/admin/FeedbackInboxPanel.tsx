@@ -36,6 +36,7 @@ import {
   useServerSyncedRows,
   useSupportInboxRefresh,
 } from "@/components/admin/useSupportInboxRefresh";
+import { adminFetch } from "@/lib/adminFetch";
 
 type FeedbackInboxMessages = AdminMessageShape<
   (typeof adminFeedbackInboxMessages)["en"]
@@ -362,7 +363,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     if (busyId) return false;
     setBusyId(id);
     try {
-      const response = await fetch(`/api/admin/feedback/${id}`, {
+      const response = await adminFetch(`/api/admin/feedback/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -430,7 +431,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     if (busyId) return;
     setBusyId(feedback.id);
     try {
-      const response = await fetch(`/api/admin/feedback/${feedback.id}/resend-reply`, {
+      const response = await adminFetch(`/api/admin/feedback/${feedback.id}/resend-reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
