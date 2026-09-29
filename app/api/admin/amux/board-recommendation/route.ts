@@ -21,6 +21,7 @@ import {
 import { BOARD_PROMOTION_RAW_BODY_MAX_BYTES } from "@/lib/amux/boardPromotionCore";
 import { RECOMMENDATION_CODE_LATCH } from "@/lib/amux/recommendationPoolCore";
 import {
+  configureRecommendationCapacity,
   decideRecommendation,
   markRecommendationOutcomeUnknown,
   prepareRecommendation,
@@ -34,7 +35,7 @@ const withNoStore = (response: Response) => {
   return response;
 };
 
-const ACTIONS = new Set(["preview", "prepare", "decide"]);
+const ACTIONS = new Set(["preview", "prepare", "decide", "capacity"]);
 const previewHits = new Map<string, number[]>();
 
 const requireOwner = async () => {
@@ -72,6 +73,17 @@ export async function POST(request: Request) {
     }
     if (!boardImportContentTypeAccepted(request.headers.get("content-type"))) {
       return NextResponse.json({ error: "content_type_refused" }, { status: 415, headers: noStoreHeaders });
+    }
+    if (action === "capacity") {
+      await consumeApiRateLimit(request, auth.session.user.id, "admin-amux-board-recommendation-capacity", {
+        minute: 10,
+        day: 100,
+      });
+      const raw = await readLimitedText(request, BOARD_PROMOTION_RAW_BODY_MAX_BYTES);
+      return NextResponse.json(
+        await configureRecommendationCapacity({ session: auth.session, request, raw }),
+        { headers: noStoreHeaders },
+      );
     }
     if (action !== "preview") {
       await consumeApiRateLimit(request, auth.session.user.id, `admin-amux-board-recommendation-${action}`, {

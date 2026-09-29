@@ -39,6 +39,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { adminBillingMessages } from "@/lib/adminMessages/billing";
 import { publishPromotionDraftState } from "@/lib/promotionDiagnosticsEvents";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type BillingConfigPayload = {
   plans: BillingPlanConfig[];
@@ -993,7 +994,7 @@ export function BillingAdminPanel({
     if (isRefreshing || isSaving) return;
     setIsRefreshing(true);
     try {
-      const response = await fetch("/api/admin/billing", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/billing", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
       if (!response.ok || !data?.plans || !data?.promotions || !data?.priceCatalog) {
         throw new Error(data?.error || "Billing refresh failed");
@@ -1019,7 +1020,7 @@ export function BillingAdminPanel({
     setIsSaving(true);
     setShowSaveReview(false);
     try {
-      const response = await fetch("/api/admin/billing", {
+      const response = await adminFetch("/api/admin/billing", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1058,7 +1059,7 @@ export function BillingAdminPanel({
     if (isValidatingStripe) return;
     setIsValidatingStripe(true);
     try {
-      const response = await fetch("/api/admin/stripe/validate", {
+      const response = await adminFetch("/api/admin/stripe/validate", {
         method: "POST",
       });
       const data = (await response.json().catch(() => null)) as

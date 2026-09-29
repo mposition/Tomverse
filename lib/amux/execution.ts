@@ -20,10 +20,20 @@ import {
 } from "@/lib/amux/executionBudgetCore";
 import { openAmuxHumanEscalation } from "@/lib/amux/escalation";
 import {
+  AMUX_DEFAULT_REVIEW_SPECIALTY,
+  amuxBridgeSettleReason,
+  amuxHumanReviewRequired,
+  amuxReviewPrNumberAccepted,
+} from "@/lib/amux/humanReviewCore";
+import {
   evaluateLockedAmuxCostAdmission,
   lockAmuxResourcePolicies,
 } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
+import {
+  buildAmuxDeliveryPrompt,
+  classifyApprovedExecutionBrief,
+} from "@/lib/amux/deliveryPrompt";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -110,6 +120,8 @@ type TaskLockRow = {
   estimatedCostMicrousd: bigint | null;
   requiresHumanReview: boolean;
   reviewSpecialty: string | null;
+  executionBrief: string | null;
+  executionBriefDigest: string | null;
 };
 
 const executionLeaseExpiry = (now: Date) =>
@@ -176,6 +188,8 @@ const lockTask = async (
       ,"estimatedCostMicrousd"
       ,"requiresHumanReview"
       ,"reviewSpecialty"
+      ,"executionBrief"
+      ,"executionBriefDigest"
     FROM "AmuxWorkItem"
     WHERE "id" = ${taskId}
     FOR UPDATE
@@ -206,71 +220,6 @@ const validSettlement = (
   (outcome === "succeeded" && (toStatus === "review" || toStatus === "done")) ||
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
-
-const buildAmuxDeliveryPrompt = (input: {
-  taskId: string;
-  title: string;
-  description: string | null;
-  kind: string;
-  priority: string;
-  worker: string;
-  attemptId: string;
-  attemptNumber: number;
-  taskRevision: number;
-  previousAttempt: {
-    outcome: string | null;
-    toStatus: string | null;
-  } | null;
-}) => {
-  if (
-    Buffer.byteLength(input.title, "utf8") > 4 * 1_024 ||
-    Buffer.byteLength(input.description ?? "", "utf8") > 64 * 1_024
-  ) {
-    throw new Error("AMUX delivery source exceeds byte ceiling");
-  }
-  const description = input.description?.trim() || "(no description)";
-  const reportedOutcome = input.previousAttempt?.outcome;
-  const previousOutcome =
-    reportedOutcome === "succeeded" ||
-    reportedOutcome === "failed" ||
-    reportedOutcome === "blocked" ||
-    reportedOutcome === "expired"
-      ? reportedOutcome
-      : "unknown";
-  const reportedStatus = input.previousAttempt?.toStatus;
-  const previousStatus =
-    reportedStatus === "todo" ||
-    reportedStatus === "review" ||
-    reportedStatus === "done" ||
-    reportedStatus === "blocked" ||
-    reportedStatus === "cancelled"
-      ? reportedStatus
-      : "unknown";
-
-  const prompt = [
-    "[Tomverse AMUX work]",
-    `Task: ${input.taskId}`,
-    `Title: ${input.title}`,
-    `Kind: ${input.kind}`,
-    `Priority: ${input.priority}`,
-    `Worker: ${input.worker}`,
-    `Execution attempt: ${input.attemptId}`,
-    `Attempt number: ${input.attemptNumber}`,
-    `Task revision: ${input.taskRevision}`,
-    ...(input.previousAttempt
-      ? [
-          `Previous outcome: ${previousOutcome}`,
-          `Previous status: ${previousStatus}`,
-        ]
-      : []),
-    "",
-    description,
-  ].join("\n");
-  if (Buffer.byteLength(prompt, "utf8") > 96 * 1_024) {
-    throw new Error("AMUX delivery envelope exceeds byte ceiling");
-  }
-  return prompt;
-};
 
 /**
  * Starts execution only for the currently-owned Todo and the currently-live
@@ -306,7 +255,8 @@ export async function startAmuxExecution(
         | "incident_frozen"
         | "cost_estimate_missing"
         | "cost_budget_exhausted"
-        | "cost_budget_window_inactive";
+        | "cost_budget_window_inactive"
+        | "execution_brief_unverified";
     }
 > {
   if (input.expectedRevision > AMUX_MAX_EXPECTED_REVISION) {
@@ -491,6 +441,17 @@ export async function startAmuxExecution(
         };
       }
 
+      const approvedBrief = classifyApprovedExecutionBrief(
+        lockedTask.executionBrief,
+        lockedTask.executionBriefDigest,
+      );
+      if (approvedBrief.state === "unverified") {
+        return {
+          started: false as const,
+          reason: "execution_brief_unverified" as const,
+        };
+      }
+
       const taskRevision = input.expectedRevision + 1;
 
       const task = await tx.amuxWorkItem.updateMany({
@@ -608,6 +569,8 @@ export async function startAmuxExecution(
         attemptId,
         attemptNumber: budget.next_attempt_number,
         taskRevision,
+        executionBrief: lockedTask.executionBrief,
+        executionBriefDigest: lockedTask.executionBriefDigest,
         previousAttempt,
       });
 
@@ -820,6 +783,7 @@ export async function settleAmuxExecution(
     toStatus: AmuxExecutionToStatus;
     reason?: string | null;
     actualCostMicrousd?: bigint | null;
+    reviewPrNumber?: number | null;
     /** An adapter agent's own model spend for this attempt; recorded apart from its cost. */
     agentUsage?: AmuxAgentUsage | null;
     now?: Date;
@@ -833,6 +797,15 @@ export async function settleAmuxExecution(
     throw new Error(
       `Invalid AMUX execution settlement: ${input.outcome} -> ${input.toStatus}`,
     );
+  }
+  if (
+    !amuxReviewPrNumberAccepted({
+      outcome: input.outcome,
+      toStatus: input.toStatus,
+      reviewPrNumber: input.reviewPrNumber,
+    })
+  ) {
+    throw new Error("Invalid AMUX review PR number for this settlement");
   }
   if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
     return { settled: false, reason: "fenced_out" };
@@ -923,10 +896,28 @@ export async function settleAmuxExecution(
         requested_status: input.toStatus,
         attempt_number: attempt.attemptNumber,
       });
+      // Policy version 15: a promoted card (approved brief) or one that asks
+      // for review never settles to done; it goes to human review.
+      const humanReviewRequired = amuxHumanReviewRequired(task);
       const effectiveToStatus =
-        budgetDestination.to_status === "done" && task.requiresHumanReview
+        budgetDestination.to_status === "done" && humanReviewRequired
           ? "review"
           : budgetDestination.to_status;
+      // A settlement that names the review PR field (even as null) replaces
+      // the stored number, so a retried card never keeps the previous
+      // attempt's PR. A caller that omits the field leaves it untouched.
+      const replacesReviewPr =
+        effectiveToStatus === "review" && input.reviewPrNumber !== undefined;
+      const recordedReviewPrNumber = replacesReviewPr ? (input.reviewPrNumber ?? null) : null;
+      const bridgeReason = amuxBridgeSettleReason(input.reason);
+      // AmuxWorkItem_review_pr_check needs requiresHumanReview with a stored
+      // PR, and AmuxWorkItem_human_review_shape_check needs a specialty with
+      // that flag. A promoted card has neither, so recording its first PR
+      // sets both; an existing specialty is kept.
+      const marksHumanReview = replacesReviewPr && recordedReviewPrNumber !== null;
+      const reviewSpecialty = marksHumanReview
+        ? (task.reviewSpecialty ?? AMUX_DEFAULT_REVIEW_SPECIALTY)
+        : task.reviewSpecialty;
 
       const moved = await tx.amuxWorkItem.updateMany({
         where: {
@@ -942,6 +933,8 @@ export async function settleAmuxExecution(
                 status: effectiveToStatus,
                 owner: null,
                 claimedAt: null,
+                ...(replacesReviewPr ? { reviewPrNumber: recordedReviewPrNumber } : {}),
+                ...(marksHumanReview ? { requiresHumanReview: true, reviewSpecialty } : {}),
                 revision: {
                   increment: 1,
                 },
@@ -979,7 +972,9 @@ export async function settleAmuxExecution(
           endedBy: input.worker,
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : effectiveToStatus === "review"
+            : bridgeReason !== null
+              ? bridgeReason
+              : effectiveToStatus === "review"
               ? "human_review_required"
               : input.outcome === "succeeded"
                 ? "execution_succeeded"
@@ -1045,10 +1040,12 @@ export async function settleAmuxExecution(
         });
       }
 
-      if (effectiveToStatus === "review" && task.requiresHumanReview) {
+      // Every card that lands in review needs a person: review -> done runs
+      // only through the human review route, which requires an escalation.
+      if (effectiveToStatus === "review") {
         await openAmuxHumanEscalation(tx, {
           taskId: attempt.taskId,
-          specialty: task.reviewSpecialty,
+          specialty: reviewSpecialty,
           reason: "human_review_required",
           openedBy: input.worker,
         });
@@ -1058,7 +1055,9 @@ export async function settleAmuxExecution(
           specialty: "execution-recovery",
           reason: budgetDestination.exhausted_limit
             ? "attempt_budget_exhausted"
-            : "execution_blocked",
+            : bridgeReason !== null && bridgeReason !== "local_card_done"
+              ? bridgeReason
+              : "execution_blocked",
           openedBy: input.worker,
         });
       }
@@ -1083,6 +1082,7 @@ export async function settleAmuxExecution(
           to_status: effectiveToStatus,
           human_review_forced:
             input.toStatus === "done" && effectiveToStatus === "review",
+          review_pr_number: recordedReviewPrNumber,
           reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
           settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
           agent_usage_microusd: input.agentUsage?.amountMicrousd.toString() ?? null,

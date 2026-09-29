@@ -205,7 +205,8 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
     ["delivery/ack", ["deliveryAck"], "delivery_ack"],
     ["execution/start", ["executionStart"], "execution_start"],
     ["execution/heartbeat", ["executionHeartbeat"], "execution_heartbeat"],
-    ["execution/settle", ["executionSettle"], "execution_settle"],
+    // execution_settle delegates to this one, which makes the HTTP call.
+    ["execution/settle", ["executionSettle"], "execution_settle_with_review_pr"],
     [
       "execution/recover",
       [
@@ -248,6 +249,13 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
     const source = rustSource.slice(start, next < 0 ? undefined : next);
     assert.match(source, /\.timeout\(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\)/);
   }
+
+  // The plain settle carries no request of its own: it only forwards.
+  const settleStart = rustSource.indexOf("pub async fn execution_settle(");
+  const settleEnd = rustSource.indexOf("\n    pub async fn ", settleStart + 1);
+  const settle = rustSource.slice(settleStart, settleEnd);
+  assert.match(settle, /self\.execution_settle_with_review_pr\(/);
+  assert.doesNotMatch(settle, /\.send\(\)/);
 });
 
 test("selection reads reserve connect and response time beyond both route budgets", () => {

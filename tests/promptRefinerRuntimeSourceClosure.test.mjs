@@ -256,12 +256,33 @@ const compilerOptions = parsedConfig.options;
 // access. The count remains 228 and the position-free inventory remains
 // 9aa7ec49..., so only source positions moved. Merged with develop's notes
 // above, the digest below is computed over the merged tree.
+//
+// 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
+// gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
+// Standard profile. Both files are in this closure. Neither addition is a
+// computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-29, AMUX policy v15 back-merge: `lib/adminAuditSystemActors.ts`
+// gains the `amux-auto-promoter` system actor and
+// `lib/marketingAutomationAccess.ts` gains a dated note and the pipeline
+// fingerprint recomputed over the merged schema. Both files are in this
+// closure. Neither change is a computed element access. The count remains 228
+// and the position-free inventory remains 9aa7ec49..., so only source
+// positions moved.
+//
+// 2026-09-29, engineering agent branch takes develop: the system actor list
+// now holds both the engineering actors and `amux-auto-promoter`, and the
+// fingerprint note in `lib/marketingAutomationAccess.ts` carries both dated
+// entries. Neither adds a computed element access. The count remains 228 and
+// the position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin over the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "745e417d2a51795692d5659abf18d024",
-  "77fdd9f6447e557f999d7865f0f0a9ea",
+  "7ce424964e5e788c69fcc8139957894b",
+  "67037095a9e43d703cfbcc6c590d3364",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

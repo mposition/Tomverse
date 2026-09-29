@@ -13,31 +13,28 @@
  *
  * ## What is here now, and what is not
  *
- * Every entry is `unproven`. That is not a placeholder: it is the accurate
- * state. No provider's terms have been read and confirmed to answer what a
- * notice prints -- the recipient, where content is stored and where it is
- * processed, training, retention, onward use -- and the owner's contract
- * review is what will supply them. Until then:
+ * Sixteen rows are `proven`. The owner confirmed the reviewed rows on
+ * 2026-09-28, including MiniMax: the account page has no training switch,
+ * and the owner accepted the privacy-policy sentence as both the training
+ * answer (no) and the ban on sale and advertising. A field the contract
+ * does not pin stays `NOT_SPECIFIED`. The Privacy page lists every row,
+ * and only while every enrolled row is disclosable. One unproven row
+ * takes the whole table off the page.
  *
- * - **Nothing here renders to a user.** The Privacy page today says data goes
- *   "potentially in a different country", which is the sentence that cannot
- *   name a destination and is exactly what this work exists to replace.
- *   Replacing it with a table whose every row says "not established" is not a
- *   better notice; it is the same absence, louder. The page changes when the
- *   contract review lands.
- * - **Nothing here admits a request.** An `unproven` provider is not a
- *   candidate for traffic carrying a residency constraint.
+ * - **An unproven row still does not render.** A partial table would leave
+ *   that provider out of the notice.
+ * - **Nothing here admits a request.** Proven is a disclosure fact. It does
+ *   not cut traffic or change a host.
  * - **Nothing becomes `proven` without an `evidenceRef`.** A destination that
  *   somebody was fairly sure about is the failure this file exists to prevent:
  *   data sent overseas on an assumption does not come back.
  *
- * ## Why this is a report and not yet a gate
+ * ## Why this stays a report
  *
- * Every active provider is `unproven`, so a gate here would refuse the whole
- * catalogue on the first run. `npm run report:provider-data-destinations`
- * lists coverage and status without blocking, in the position
- * `report:model-credit-weights` holds for the same reason. It becomes a gate
- * when there is something for it to hold.
+ * Every enrolled row is proven today. The report stays a report: a provider
+ * added later without a reviewed row is an enrolment miss the test already
+ * names, and refusing live traffic for it would be a separate decision.
+ * `npm run report:provider-data-destinations` lists coverage without blocking.
  *
  * Pure: no database, no clock, no network.
  */
@@ -270,6 +267,172 @@ const unproven = (provider: AiProvider): ProviderDataDestination => ({
     status: "unproven",
 });
 
+const located = (
+    mode: "COMMITTED_LOCATIONS" | "DISCLOSED_POSSIBLE_LOCATIONS",
+    countryCodes: readonly string[],
+    evidenceRef: string,
+    macroRegions: readonly string[] = [],
+): ContentGeography => ({
+    mode,
+    countryCodes,
+    macroRegions,
+    evidenceRef,
+});
+
+const unlocated = (
+    mode: "NOT_PINNED" | "NOT_SPECIFIED" | "NO_PERSISTENT_CONTENT_STORAGE",
+    evidenceRef: string,
+): ContentGeography => ({
+    mode,
+    countryCodes: [],
+    macroRegions: [],
+    evidenceRef,
+});
+
+const kept = (
+    behavior: RetentionBehavior,
+    evidenceRef: string,
+    maxDays: number | null = null,
+): RetentionFact => ({ behavior, maxDays, evidenceRef });
+
+const unspecified = (evidenceRef: string): RetentionFact =>
+    kept("NOT_SPECIFIED", evidenceRef);
+
+/**
+ * Owner confirmation, 2026-09-28. These ten may be printed. A cell the
+ * contract does not pin is `NOT_SPECIFIED`, which is a finished answer.
+ * Named places stay as the owner recorded them.
+ */
+const ready = (input: {
+    provider: AiProvider;
+    recipientEntity: string;
+    recipientCountryCodes: readonly string[];
+    evidenceRef: string;
+    storage: ContentGeography;
+    processing: ContentGeography;
+    trains: boolean;
+    trainsEvidenceRef: string;
+    retention: ProviderDataDestination["retention"];
+    commercialUseProhibited: boolean;
+    commercialEvidenceRef: string;
+    zeroDataRetention?: ProviderDataDestination["zeroDataRetention"];
+}): ProviderDataDestination => ({
+    ...unproven(input.provider),
+    recipientEntity: input.recipientEntity,
+    recipientCountryCodes: input.recipientCountryCodes,
+    customerContentStorage: input.storage,
+    processing: input.processing,
+    destinationRegions: [...input.storage.countryCodes, ...input.storage.macroRegions],
+    trainsOnCustomerContent: { value: input.trains, evidenceRef: input.trainsEvidenceRef },
+    retention: input.retention,
+    zeroDataRetention: input.zeroDataRetention ?? { mode: "UNKNOWN", evidenceRef: null },
+    independentCommercialUseProhibited: {
+        value: input.commercialUseProhibited,
+        evidenceRef: input.commercialEvidenceRef,
+    },
+    evidenceRef: input.evidenceRef,
+    status: "proven",
+});
+
+const GEMINI_TERMS = "https://ai.google.dev/gemini-api/terms";
+const GEMINI_ENTITY = "https://cloud.google.com/terms/google-entity";
+const GEMINI_USAGE = "https://ai.google.dev/gemini-api/docs/usage-policies";
+const GEMINI_DPA = "https://cloud.google.com/terms/data-processing-addendum";
+const OPENAI_DATA = "https://developers.openai.com/api/docs/guides/your-data";
+const OPENAI_DPA = "https://openai.com/policies/data-processing-addendum/";
+const KIMI_OPENPLATFORM_PRIVACY = "https://platform.kimi.ai/docs/agreement/userprivacy";
+const DEEPSEEK_PRIVACY = "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html";
+const DEEPSEEK_TERMS_OF_USE = "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html";
+const DEEPSEEK_OPEN_PLATFORM_TERMS =
+    "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html";
+const ANTHROPIC_SERVERS =
+    "https://privacy.anthropic.com/en/articles/7996890-where-are-your-servers-located-do-you-host-your-models-on-eu-servers";
+const ANTHROPIC_RETENTION =
+    "https://privacy.anthropic.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data";
+const GROQ_DATA = "https://console.groq.com/docs/your-data";
+const GROQ_DPA = "https://console.groq.com/docs/legal/customer-data-processing-addendum";
+const XAI_DPA = "https://x.ai/legal/data-processing-addendum";
+const XAI_TERMS = "https://x.ai/legal/terms-of-service-enterprise";
+const PERPLEXITY_TERMS = "https://www.perplexity.ai/hub/legal/perplexity-api-terms-of-service";
+const PERPLEXITY_DPA = "https://www.perplexity.ai/hub/legal/dpa";
+const DEEPINFRA_PRIVACY = "https://docs.deepinfra.com/account/data-privacy";
+const DEEPINFRA_TERMS = "https://deepinfra.com/terms";
+const OPENROUTER_PRIVACY = "https://openrouter.ai/privacy/";
+const OPENROUTER_TERMS = "https://openrouter.ai/terms/";
+const QWEN_REGIONS = "https://www.alibabacloud.com/help/en/model-studio/regions";
+const QWEN_MEMBERSHIP =
+    "https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-membership-agreement";
+const ZHIPU_PRIVACY = "https://docs.z.ai/legal-agreement/privacy-policy";
+const TOGETHER_PRIVACY = "https://www.together.ai/privacy";
+const TOGETHER_TERMS = "https://www.together.ai/terms-of-service";
+const MISTRAL_TERMS = "https://legal.mistral.ai/terms/commercial-terms-of-service/";
+const MISTRAL_DPA = "https://legal.mistral.ai/terms/data-processing-addendum/";
+const MISTRAL_STORAGE =
+    "https://help.mistral.ai/en/articles/347629-where-do-you-store-my-data-or-my-organization-s-data";
+const MISTRAL_TRAINING =
+    "https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training";
+const MISTRAL_ZDR =
+    "https://help.mistral.ai/en/articles/347612-can-i-activate-zero-data-retention-zdr";
+const MINIMAX_PRIVACY = "https://platform.minimax.io/protocol/privacy-policy";
+const MINIMAX_PAID = "https://platform.minimax.io/protocol/paid-agreement";
+const SAIL_DPA = "https://docs.sailresearch.com/dpa";
+const SAIL_TERMS = "https://www.sailresearch.com/terms";
+
+/**
+ * MiniMax is ready. The account page has no training switch. On 2026-09-28
+ * the owner accepted the privacy-policy sentence, which says input personal
+ * data is not used to infer characteristics or for training that profiles
+ * or targets consumers, as both the training answer and the sale ban.
+ */
+const minimaxDestination = (): ProviderDataDestination =>
+    ready({
+        provider: "minimax",
+        recipientEntity: "Nanonoble Pte. Ltd.",
+        recipientCountryCodes: ["SG"],
+        evidenceRef: MINIMAX_PAID,
+        storage: unlocated("NOT_SPECIFIED", MINIMAX_PRIVACY),
+        processing: unlocated("NOT_SPECIFIED", MINIMAX_PRIVACY),
+        trains: false,
+        trainsEvidenceRef: MINIMAX_PRIVACY,
+        retention: {
+            content: unspecified(MINIMAX_PRIVACY),
+            safetyLogs: unspecified(MINIMAX_PRIVACY),
+            inMemoryCache: unspecified(MINIMAX_PRIVACY),
+            persistentFeatureState: unspecified(MINIMAX_PRIVACY),
+            systemMetadata: unspecified(MINIMAX_PRIVACY),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: MINIMAX_PRIVACY,
+    });
+
+/**
+ * DeepSeek is ready. Storage stays `NOT_SPECIFIED`: the consumer privacy
+ * policy's China sentence is not API customer-content storage. On
+ * 2026-09-28 the chat Data switch was grey, which is off, so training is
+ * no. The owner accepted the privacy policy sentence that DeepSeek does not
+ * sell personal data or use it for targeted advertising or profiling.
+ */
+const deepseekDestination = (): ProviderDataDestination =>
+    ready({
+        provider: "deepseek",
+        recipientEntity: "Hangzhou DeepSeek Artificial Intelligence Co., Ltd.",
+        recipientCountryCodes: ["CN"],
+        evidenceRef: DEEPSEEK_OPEN_PLATFORM_TERMS,
+        storage: unlocated("NOT_SPECIFIED", DEEPSEEK_OPEN_PLATFORM_TERMS),
+        processing: unlocated("NOT_SPECIFIED", DEEPSEEK_OPEN_PLATFORM_TERMS),
+        trains: false,
+        trainsEvidenceRef: DEEPSEEK_TERMS_OF_USE,
+        retention: {
+            content: unspecified(DEEPSEEK_OPEN_PLATFORM_TERMS),
+            safetyLogs: unspecified(DEEPSEEK_OPEN_PLATFORM_TERMS),
+            inMemoryCache: unspecified(DEEPSEEK_OPEN_PLATFORM_TERMS),
+            persistentFeatureState: unspecified(DEEPSEEK_OPEN_PLATFORM_TERMS),
+            systemMetadata: unspecified(DEEPSEEK_OPEN_PLATFORM_TERMS),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: DEEPSEEK_PRIVACY,
+    });
+
 /**
  * Every provider the catalogue can reach.
  *
@@ -280,22 +443,290 @@ const unproven = (provider: AiProvider): ProviderDataDestination => ({
  * when one is missing.
  */
 export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
-    unproven("openai"),
-    unproven("anthropic"),
-    unproven("google"),
-    unproven("groq"),
-    unproven("xai"),
-    unproven("deepseek"),
-    unproven("mistral"),
-    unproven("moonshot"),
-    unproven("minimax"),
-    unproven("qwen"),
-    unproven("zhipu"),
-    unproven("perplexity"),
-    unproven("deepinfra"),
-    unproven("together"),
-    unproven("openrouter"),
-    unproven("sail"),
+    ready({
+        provider: "openai",
+        recipientEntity: "OpenAI OpCo, LLC",
+        recipientCountryCodes: ["US"],
+        evidenceRef: OPENAI_DPA,
+        storage: unlocated("NOT_PINNED", OPENAI_DATA),
+        processing: unlocated("NOT_PINNED", OPENAI_DATA),
+        // 2026-09-28 organization Sharing page: model feedback, evaluation and
+        // fine-tuning data, and inputs and outputs were each Disabled.
+        trains: false,
+        trainsEvidenceRef: OPENAI_DATA,
+        retention: {
+            content: kept("CUSTOMER_CONTROLLED", OPENAI_DATA),
+            safetyLogs: kept("BOUNDED", OPENAI_DATA, 30),
+            inMemoryCache: unspecified(OPENAI_DATA),
+            persistentFeatureState: kept("CUSTOMER_CONTROLLED", OPENAI_DATA),
+            systemMetadata: unspecified(OPENAI_DATA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: OPENAI_DPA,
+    }),
+    ready({
+        provider: "anthropic",
+        recipientEntity: "Anthropic, PBC",
+        recipientCountryCodes: ["US"],
+        evidenceRef: "https://www.anthropic.com/legal/commercial-terms",
+        storage: located("COMMITTED_LOCATIONS", ["US"], ANTHROPIC_SERVERS),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["US", "AU"], ANTHROPIC_SERVERS, ["EUROPE", "ASIA"]),
+        trains: false,
+        trainsEvidenceRef: "https://privacy.anthropic.com/en/articles/7996868-is-my-data-used-for-model-training",
+        retention: {
+            content: kept("BOUNDED", ANTHROPIC_RETENTION, 30),
+            safetyLogs: unspecified(ANTHROPIC_RETENTION),
+            inMemoryCache: unspecified(ANTHROPIC_RETENTION),
+            persistentFeatureState: unspecified(ANTHROPIC_RETENTION),
+            systemMetadata: unspecified(ANTHROPIC_RETENTION),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: "https://privacy.anthropic.com/en/articles/9267385-does-anthropic-act-as-a-data-processor-or-controller",
+    }),
+    ready({
+        provider: "google",
+        recipientEntity: "Google Asia Pacific Pte. Ltd.; Google Australia Pty Ltd.",
+        recipientCountryCodes: ["SG", "AU"],
+        evidenceRef: GEMINI_ENTITY,
+        storage: unlocated("NOT_PINNED", GEMINI_TERMS),
+        processing: unlocated("NOT_PINNED", GEMINI_TERMS),
+        // 2026-09-28 AI Studio billing: the Tomverse project is Gemini API
+        // paid tier 1 with a billing account linked. Paid terms do not use
+        // those prompts to improve products.
+        trains: false,
+        trainsEvidenceRef: GEMINI_TERMS,
+        retention: {
+            content: kept("TRANSIENT", GEMINI_TERMS),
+            safetyLogs: kept("BOUNDED", GEMINI_USAGE, 55),
+            inMemoryCache: kept("TRANSIENT", GEMINI_TERMS),
+            persistentFeatureState: unspecified(GEMINI_TERMS),
+            systemMetadata: unspecified(GEMINI_TERMS),
+        },
+        // Owner accepted the processor addendum: customer data is processed
+        // on instruction, and the CCPA section forbids sale and ad sharing.
+        commercialUseProhibited: true,
+        commercialEvidenceRef: GEMINI_DPA,
+    }),
+    ready({
+        provider: "groq",
+        recipientEntity: "Groq LLC",
+        recipientCountryCodes: ["US"],
+        evidenceRef: "https://console.groq.com/docs/legal/services-agreement",
+        storage: located("COMMITTED_LOCATIONS", ["US"], GROQ_DATA),
+        processing: unlocated("NOT_PINNED", GROQ_DATA),
+        trains: false,
+        trainsEvidenceRef: GROQ_DPA,
+        retention: {
+            content: kept("NO_PERSISTENT_STORAGE", GROQ_DATA),
+            safetyLogs: kept("BOUNDED", GROQ_DATA, 30),
+            inMemoryCache: unspecified(GROQ_DATA),
+            persistentFeatureState: unspecified(GROQ_DATA),
+            systemMetadata: unspecified(GROQ_DATA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: GROQ_DPA,
+    }),
+    ready({
+        provider: "xai",
+        recipientEntity: "SpaceXAI LLC",
+        recipientCountryCodes: ["US"],
+        evidenceRef: XAI_DPA,
+        storage: unlocated("NOT_SPECIFIED", XAI_DPA),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["US", "GB"], "https://x.ai/legal/subprocessor-list"),
+        trains: false,
+        trainsEvidenceRef: XAI_TERMS,
+        retention: {
+            content: kept("BOUNDED", XAI_TERMS, 30),
+            safetyLogs: unspecified(XAI_DPA),
+            inMemoryCache: unspecified(XAI_DPA),
+            persistentFeatureState: unspecified(XAI_DPA),
+            systemMetadata: unspecified(XAI_DPA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: XAI_DPA,
+    }),
+    deepseekDestination(),
+    ready({
+        provider: "mistral",
+        recipientEntity: "Mistral AI",
+        recipientCountryCodes: ["FR"],
+        evidenceRef: MISTRAL_TERMS,
+        storage: located("COMMITTED_LOCATIONS", [], MISTRAL_STORAGE, ["EU"]),
+        processing: unlocated("NOT_PINNED", MISTRAL_STORAGE),
+        // 2026-09-28 admin Privacy page: "Allow the use of your API calls to
+        // train Mistral's AI models" was off, and Labs models were off.
+        trains: false,
+        trainsEvidenceRef: MISTRAL_TRAINING,
+        retention: {
+            content: unspecified(MISTRAL_ZDR),
+            safetyLogs: unspecified(MISTRAL_DPA),
+            inMemoryCache: unspecified(MISTRAL_DPA),
+            persistentFeatureState: unspecified(MISTRAL_DPA),
+            systemMetadata: unspecified(MISTRAL_DPA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: MISTRAL_DPA,
+    }),
+    ready({
+        provider: "moonshot",
+        recipientEntity: "MOONSHOT AI PTE. LTD.",
+        recipientCountryCodes: ["SG"],
+        evidenceRef: KIMI_OPENPLATFORM_PRIVACY,
+        storage: located("COMMITTED_LOCATIONS", ["SG"], KIMI_OPENPLATFORM_PRIVACY),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["SG"], KIMI_OPENPLATFORM_PRIVACY),
+        trains: true,
+        trainsEvidenceRef: KIMI_OPENPLATFORM_PRIVACY,
+        retention: {
+            content: unspecified(KIMI_OPENPLATFORM_PRIVACY),
+            safetyLogs: unspecified(KIMI_OPENPLATFORM_PRIVACY),
+            inMemoryCache: unspecified(KIMI_OPENPLATFORM_PRIVACY),
+            persistentFeatureState: unspecified(KIMI_OPENPLATFORM_PRIVACY),
+            systemMetadata: unspecified(KIMI_OPENPLATFORM_PRIVACY),
+        },
+        commercialUseProhibited: false,
+        commercialEvidenceRef: KIMI_OPENPLATFORM_PRIVACY,
+    }),
+    minimaxDestination(),
+    ready({
+        provider: "qwen",
+        recipientEntity: "Alibaba Cloud (Singapore) Private Limited",
+        recipientCountryCodes: ["SG"],
+        evidenceRef: QWEN_MEMBERSHIP,
+        storage: located("COMMITTED_LOCATIONS", ["SG"], QWEN_REGIONS),
+        processing: unlocated("NOT_PINNED", QWEN_REGIONS),
+        trains: false,
+        trainsEvidenceRef: QWEN_MEMBERSHIP,
+        retention: {
+            content: unspecified(QWEN_REGIONS),
+            safetyLogs: unspecified(QWEN_REGIONS),
+            inMemoryCache: unspecified(QWEN_REGIONS),
+            persistentFeatureState: unspecified(QWEN_REGIONS),
+            systemMetadata: unspecified(QWEN_REGIONS),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: QWEN_MEMBERSHIP,
+    }),
+    ready({
+        provider: "zhipu",
+        recipientEntity: "JINGSHENG HENGXING TECHNOLOGY PTE.LTD",
+        recipientCountryCodes: ["SG"],
+        evidenceRef: "https://docs.z.ai/legal-agreement/terms-of-use",
+        storage: unlocated("NO_PERSISTENT_CONTENT_STORAGE", ZHIPU_PRIVACY),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["SG"], ZHIPU_PRIVACY),
+        trains: false,
+        trainsEvidenceRef: ZHIPU_PRIVACY,
+        retention: {
+            content: kept("NO_PERSISTENT_STORAGE", ZHIPU_PRIVACY),
+            safetyLogs: unspecified(ZHIPU_PRIVACY),
+            inMemoryCache: unspecified(ZHIPU_PRIVACY),
+            persistentFeatureState: unspecified(ZHIPU_PRIVACY),
+            systemMetadata: unspecified(ZHIPU_PRIVACY),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: ZHIPU_PRIVACY,
+        zeroDataRetention: { mode: "CONTRACTUAL_NO_CONTENT_STORAGE", evidenceRef: ZHIPU_PRIVACY },
+    }),
+    ready({
+        provider: "perplexity",
+        recipientEntity: "Perplexity AI, Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: PERPLEXITY_TERMS,
+        storage: unlocated("NOT_SPECIFIED", PERPLEXITY_DPA),
+        processing: unlocated("NOT_PINNED", PERPLEXITY_TERMS),
+        trains: false,
+        trainsEvidenceRef: PERPLEXITY_TERMS,
+        retention: {
+            content: unspecified(PERPLEXITY_DPA),
+            safetyLogs: unspecified(PERPLEXITY_DPA),
+            inMemoryCache: unspecified(PERPLEXITY_DPA),
+            persistentFeatureState: unspecified(PERPLEXITY_DPA),
+            systemMetadata: unspecified(PERPLEXITY_DPA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: PERPLEXITY_DPA,
+    }),
+    ready({
+        provider: "deepinfra",
+        recipientEntity: "Deep Infra Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: DEEPINFRA_TERMS,
+        storage: unlocated("NO_PERSISTENT_CONTENT_STORAGE", DEEPINFRA_PRIVACY),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["US"], "https://deepinfra.com/"),
+        trains: false,
+        trainsEvidenceRef: DEEPINFRA_PRIVACY,
+        retention: {
+            content: kept("NO_PERSISTENT_STORAGE", DEEPINFRA_PRIVACY),
+            safetyLogs: unspecified(DEEPINFRA_TERMS),
+            inMemoryCache: kept("TRANSIENT", DEEPINFRA_PRIVACY),
+            persistentFeatureState: unspecified(DEEPINFRA_TERMS),
+            systemMetadata: unspecified(DEEPINFRA_TERMS),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: DEEPINFRA_TERMS,
+        zeroDataRetention: { mode: "CONTRACTUAL_NO_CONTENT_STORAGE", evidenceRef: DEEPINFRA_TERMS },
+    }),
+    ready({
+        provider: "together",
+        recipientEntity: "Together Computer, Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: TOGETHER_TERMS,
+        storage: unlocated("NOT_SPECIFIED", TOGETHER_PRIVACY),
+        processing: unlocated("NOT_SPECIFIED", TOGETHER_PRIVACY),
+        // 2026-09-28 organization Privacy: prompt storage, third-party
+        // passthrough, and training were each No. The privacy policy calls
+        // that choice zero data retention and bars secondary use.
+        trains: false,
+        trainsEvidenceRef: TOGETHER_PRIVACY,
+        retention: {
+            content: kept("CUSTOMER_CONTROLLED", TOGETHER_PRIVACY),
+            safetyLogs: unspecified(TOGETHER_PRIVACY),
+            inMemoryCache: unspecified(TOGETHER_PRIVACY),
+            persistentFeatureState: kept("CUSTOMER_CONTROLLED", TOGETHER_PRIVACY),
+            systemMetadata: unspecified(TOGETHER_PRIVACY),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: TOGETHER_PRIVACY,
+        zeroDataRetention: { mode: "ZDR", evidenceRef: TOGETHER_PRIVACY },
+    }),
+    ready({
+        provider: "openrouter",
+        recipientEntity: "OpenRouter, Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: OPENROUTER_TERMS,
+        storage: unlocated("NOT_SPECIFIED", OPENROUTER_PRIVACY),
+        processing: unlocated("NOT_SPECIFIED", OPENROUTER_PRIVACY),
+        trains: false,
+        trainsEvidenceRef: OPENROUTER_PRIVACY,
+        retention: {
+            content: kept("CUSTOMER_CONTROLLED", OPENROUTER_TERMS),
+            safetyLogs: unspecified(OPENROUTER_PRIVACY),
+            inMemoryCache: unspecified(OPENROUTER_TERMS),
+            persistentFeatureState: kept("CUSTOMER_CONTROLLED", OPENROUTER_TERMS),
+            systemMetadata: unspecified(OPENROUTER_PRIVACY),
+        },
+        commercialUseProhibited: false,
+        commercialEvidenceRef: OPENROUTER_PRIVACY,
+    }),
+    ready({
+        provider: "sail",
+        recipientEntity: "Sail Research Co.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: SAIL_TERMS,
+        storage: unlocated("NOT_SPECIFIED", SAIL_DPA),
+        processing: unlocated("NOT_SPECIFIED", SAIL_DPA),
+        trains: false,
+        trainsEvidenceRef: SAIL_DPA,
+        retention: {
+            content: kept("BOUNDED", SAIL_DPA, 2),
+            safetyLogs: unspecified(SAIL_DPA),
+            inMemoryCache: kept("TRANSIENT", SAIL_DPA),
+            persistentFeatureState: unspecified(SAIL_DPA),
+            systemMetadata: unspecified(SAIL_DPA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: SAIL_DPA,
+        zeroDataRetention: { mode: "NOT_SUPPORTED", evidenceRef: SAIL_TERMS },
+    }),
 ];
 
 export const providerDataDestination = (
@@ -332,8 +763,8 @@ export const providerDestinationIsEstablished = (
 /**
  * The entries a user-facing notice may print.
  *
- * Empty today, deliberately. A notice is a promise, and this is the list of
- * promises that can currently be kept.
+ * The Privacy page prints this list only when its length equals the
+ * enrolment. A shorter list would leave a live provider out of the notice.
  */
 export const disclosableDataDestinations = (): readonly ProviderDataDestination[] =>
     PROVIDER_DATA_DESTINATIONS.filter(destinationIsDisclosable);

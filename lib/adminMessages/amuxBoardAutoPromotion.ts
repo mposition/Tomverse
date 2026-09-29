@@ -1,0 +1,58 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxBoardAutoPromotionMessages = defineAdminMessages({
+  en: {
+    title: "AMUX auto-promotion",
+    description:
+      "Preview reads the graduation count, the open halt and the active grants, and writes nothing. Grant records your pre-approval of one backlog card with its item and a cent amount; it does not change the card. Consume moves that one card to todo when the server reports that auto-promotion is permitted. The system tick consumes bound grants on its own schedule under the same checks. This screen cannot set that permission, choose cards, or start a worker.",
+    requestLabel: "Grant or consume request",
+    haltLabel: "Halt id",
+    preview: "Preview",
+    grant: "Grant",
+    consume: "Consume",
+    expireDue: "Expire due",
+    resume: "Resume",
+    applyDisabled: "Grant and consume are disabled. The server refuses them even if these controls are bypassed.",
+    applyWaiting: "Grant and consume open once a preview reports that auto-promotion is permitted.",
+    renewSignIn: "Renew administrator sign-in",
+    graduation: (count: number, days: number) =>
+      `Human decisions: ${count}, spanning ${days} days. Graduation needs 20 decisions spanning 14 days.`,
+    graduated: (value: string) => `Graduated: ${value}`,
+    noHalt: "No open halt.",
+    openHalt: (reason: string, code: string) => `Open halt: ${reason} (${code}).`,
+    activeGrants: (count: number) => `Active grants: ${count}.`,
+    error: (code: string) => `Error: ${code}`,
+    status: (status: string) => `Status: ${status}`,
+    refusal: (code: string) => `Refusal: ${code}`,
+    applyPermitted: (permitted: string) => `Auto-promotion permitted: ${permitted}`,
+    expired: (count: number) => `Grants expired: ${count}.`,
+    cleared: "The halt is cleared. The switch is unchanged.",
+  },
+  ko: {
+    title: "AMUX 자동 승격",
+    description:
+      "미리보기는 졸업 건수, 열린 halt, 활성 grant를 읽고 아무것도 쓰지 않습니다. grant는 backlog 카드 하나에 대한 사전 승인을 그 항목과 cent 금액과 함께 기록하며 카드를 바꾸지 않습니다. 소비는 서버가 자동 승격을 허용했다고 보고할 때만 그 카드 하나를 todo로 옮깁니다. 시스템 주기 호출은 같은 검사로 결속된 grant를 소비합니다. 이 화면은 그 허용을 켜거나, 카드를 고르거나, 워커를 시작하지 않습니다.",
+    requestLabel: "grant 또는 소비 요청",
+    haltLabel: "halt ID",
+    preview: "미리보기",
+    grant: "grant 기록",
+    consume: "소비",
+    expireDue: "기한 지난 grant 만료",
+    resume: "재개",
+    applyDisabled: "grant와 소비는 꺼져 있습니다. 이 버튼을 우회해도 서버가 거절합니다.",
+    applyWaiting: "미리보기가 자동 승격 허용을 보고하면 grant와 소비가 열립니다.",
+    renewSignIn: "관리자 로그인을 갱신",
+    graduation: (count: number, days: number) =>
+      `사람 결정 ${count}건, 기간 ${days}일. 졸업에는 14일 이상에 걸친 20건이 필요합니다.`,
+    graduated: (value: string) => `졸업: ${value}`,
+    noHalt: "열린 halt가 없습니다.",
+    openHalt: (reason: string, code: string) => `열린 halt: ${reason} (${code}).`,
+    activeGrants: (count: number) => `활성 grant ${count}건.`,
+    error: (code: string) => `오류: ${code}`,
+    status: (status: string) => `상태: ${status}`,
+    refusal: (code: string) => `거절 사유: ${code}`,
+    applyPermitted: (permitted: string) => `자동 승격 허용: ${permitted}`,
+    expired: (count: number) => `만료한 grant ${count}건.`,
+    cleared: "halt를 해제했습니다. 스위치는 바뀌지 않았습니다.",
+  },
+});

@@ -5,6 +5,7 @@ import { Clipboard, FileText, Loader2 } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminReportsMessages } from "@/lib/adminMessages/reports";
+import { adminFetch } from "@/lib/adminFetch";
 
 type ReportRow = {
   id: string;
@@ -30,7 +31,7 @@ export function AdminReportsPanel() {
     if (busy) return;
     setBusy(true);
     try {
-      const response = await fetch("/api/admin/reports", {
+      const response = await adminFetch("/api/admin/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "Tomverse weekly operations report" }),

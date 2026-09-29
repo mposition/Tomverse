@@ -54,14 +54,14 @@ test("48-case bridge retains all catalogue rows, 96 calls and 2/94/0 durable res
   assert.equal(report.mockCollection.repeatedCompletedCalls, 0);
   assert.equal(report.mockCollection.finalTerminalRecords, 96);
   assert.equal(report.score.summary.catalogueRows, 48 * AVAILABLE_MODELS.length);
-  assert.equal(report.score.summary.catalogueRows, 2016);
+  assert.equal(report.score.summary.catalogueRows, 2064);
   assert.equal(report.score.summary.submitted, 96);
   assert.deepEqual({ passed: report.score.summary.passed, incorrect: report.score.summary.incorrect,
     blank: report.score.summary.blank, invalidJson: report.score.summary.invalidJson, failed: report.score.summary.failed },
   { passed: 92, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
   assert.equal(report.score.summary.correctnessRate, null);
-  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2016);
-  assert.equal(report.selectionCoverage.overall.planned, 720);
+  assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2064);
+  assert.equal(report.selectionCoverage.overall.planned, 768);
   assert.equal(report.selectionCoverage.overall.refused, 1296);
   assert.equal(report.selectionCoverage.overall.selected + report.selectionCoverage.overall.unselectedEligible, report.selectionCoverage.overall.planned);
 });
@@ -74,7 +74,7 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
   assert.equal(report.selectionCoverage.byFamily.length, 12);
   assert.ok(report.selectionCoverage.byFamily.every((family) => family.selected === 8));
   assert.equal(report.selectionCoverage.byModel.length, AVAILABLE_MODELS.length);
-  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), 2016);
+  assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.catalogueRows, 0), 2064);
   assert.equal(report.selectionCoverage.byModel.reduce((sum, model) => sum + model.selected, 0), 96);
   assert.equal(report.selectionCoverage.byModel.filter((model) => model.selected === 48).length, 2);
   assert.ok(report.selectionCoverage.byModel.every((model) => model.selectedNotObserved === 0));

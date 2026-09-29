@@ -109,6 +109,7 @@ test("Luna and every OpenAI native-search model is dispatchable; Gemini is not",
     "gemini-3-5-flash",
     "gemini-3-1-pro",
     "gemini-2-5-flash",
+    "gemini-flash-lite-latest",
     "gpt-5-4-mini",
     "codestral",
   ]) {

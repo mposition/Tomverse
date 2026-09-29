@@ -71,8 +71,8 @@ const REPRO_VIEWPORT = { width: 390, height: 844 } as const;
 const REPRO_ROOT_FONT = 32;
 const REPRO_KEYBOARD_INSET = 320;
 
-/** The guest's default model (see prepareGuestPage), so it is always selected. */
-const IMPACTED_MODEL = "gemini-2-5-flash";
+/** Gemini slot of the guest trio, so a new guest comparison always has it selected. */
+const IMPACTED_MODEL = "gemini-flash-lite-latest";
 // Guest-selectable on purpose. The banner filters replacement candidates by
 // the viewer's entitlement (see ProviderStatusBanner's canSelectModel), so a
 // Free-tier model offered to a guest collapses these scenarios into

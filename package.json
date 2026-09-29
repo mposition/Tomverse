@@ -224,6 +224,7 @@
     "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
+    "report:provider-data-destinations": "node --conditions=react-server --import tsx scripts/report-provider-data-destinations.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
     "check:capacitor-local-bundle": "node scripts/check-capacitor-local-bundle.mjs",
@@ -316,16 +317,16 @@
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^22.20.3",
+    "@types/node": "^22.20.4",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
-    "tsx": "^4.23.13",
+    "tsx": "^4.23.15",
     "typescript": "^6",
-    "vite": "^8.3.0"
+    "vite": "^8.3.1"
   },
   "overrides": {
     "@eslint/config-array": {

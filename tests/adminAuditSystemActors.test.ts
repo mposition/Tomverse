@@ -24,12 +24,14 @@ test("the system actor list is closed and changes only by review", () => {
   // The policy names the publisher (docs/policy/marketing-automation.md §4);
   // retention and guard are the S1 plan's other two writers. This pins the
   // reviewed list, not a quotation of the policy.
+  // amux-auto-promoter: orchestration policy version 15, "자동 승격 개정".
   assert.deepEqual([...SYSTEM_AUDIT_ACTORS], [
     "marketing-publisher",
     "marketing-retention",
     "marketing-guard",
     "prompt-refiner-shadow-runner",
     "tomverse-amux-orchestrator",
+    "amux-auto-promoter",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
@@ -39,6 +41,11 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
+  assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
+  assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
+  assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
+  // The column marker is not an audit actor name.
+  assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);
   assert.equal(isSystemAuditActor(undefined), false);
 });
 

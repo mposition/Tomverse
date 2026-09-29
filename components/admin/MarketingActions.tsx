@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The controls beside a Marketing row, and the one request path behind them.
@@ -144,7 +145,7 @@ export function MarketingActionRail({
       setFailure(null);
       setDone(null);
       try {
-        const response = await fetch(action.path, {
+        const response = await adminFetch(action.path, {
           method: action.method ?? "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),

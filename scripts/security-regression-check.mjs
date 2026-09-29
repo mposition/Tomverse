@@ -3551,6 +3551,31 @@ const checks = [
     },
   },
   {
+    // 2026-09-28: the weekly full-history scan failed while Railway was waiting
+    // on d07ae95 and both production deployments were SKIPPED. The push scan
+    // of that commit had passed. continue-on-error is only for the events
+    // that scan history without being the release verdict. A pull request or
+    // a push to main still fails the suite.
+    name: "A scheduled secret-history scan cannot skip the production deploy",
+    file: ".github/workflows/secret-history-scan.yml",
+    test: (source) => {
+      const jobsAt = source.indexOf("\njobs:");
+      const job = jobsAt < 0 ? "" : source.slice(jobsAt);
+      return (
+        source.includes("pull_request:") &&
+        source.includes("push:") &&
+        source.includes("branches: [main]") &&
+        source.includes('cron: "45 22 * * 0"') &&
+        source.includes("gitleaks/gitleaks-action@v3") &&
+        source.includes('GITLEAKS_ENABLE_COMMENTS: "false"') &&
+        job.includes(
+          'continue-on-error: "${{ github.event_name == \'schedule\' || github.event_name == \'workflow_dispatch\' }}"'
+        ) &&
+        !job.includes("continue-on-error: true")
+      );
+    },
+  },
+  {
     // #232 replaced a manual recovery step with this workflow, and the release
     // checklist now says to verify rather than perform it. What makes that
     // safe is the `verify` job: without it, a back-merge that conflicted or was

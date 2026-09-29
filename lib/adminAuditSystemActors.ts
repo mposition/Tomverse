@@ -18,6 +18,13 @@
 export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
 
 /**
+ * The internal auto-promotion tick (orchestration policy version 15,
+ * "자동 승격 개정"). It expires due grants and consumes a grant an owner
+ * already bound to one item and one cent amount. It records nothing else.
+ */
+export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
+
+/**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
  * names the service or app path whose action the entry records; none of them
  * is a person, so none of them is approval evidence.
@@ -38,6 +45,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "marketing-guard",
   "prompt-refiner-shadow-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
+  AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];

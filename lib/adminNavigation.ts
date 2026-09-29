@@ -70,7 +70,31 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     href: "/admin/overview",
     description: "Operational snapshot, attention queue, and recent activity",
     group: "Command Center",
-    aliases: ["home", "dashboard", "kpi", "status", "health", "snapshot"],
+    aliases: [
+      "home",
+      "dashboard",
+      "kpi",
+      "status",
+      "health",
+      "snapshot",
+      "health score",
+      "score",
+      "environment",
+      "env",
+      "variables",
+    ],
+    tabs: [
+      {
+        id: "summary",
+        label: "Summary",
+        description: "Operational snapshot, attention queue, and recent activity",
+      },
+      {
+        id: "health",
+        label: "Health score",
+        description: "How the score was arrived at, and what to do about each line",
+      },
+    ],
   },
   {
     id: "work-queue",
@@ -691,6 +715,16 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 
 export const ADMIN_DETAIL_ROUTES = [
   {
+    // Owner-only and unlisted like the other AMUX screens.
+    id: "amux-backlog-metadata",
+    pattern: /^\/admin\/amux-backlog-metadata$/,
+    label: "AMUX backlog metadata",
+    description: "Owner-only kind, priority and cost estimate for one backlog card, with apply left off",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
     // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
     // catalog import is owner-only and must not be advertised to roles that
     // receive a 404 from the page and the API.
@@ -733,6 +767,26 @@ export const ADMIN_DETAIL_ROUTES = [
     parentLabel: "Models",
     parentHref: "/admin/models",
     group: "AI Platform" as const,
+  },
+  {
+    // Owner-only and unlisted like the other AMUX screens.
+    id: "amux-board-auto-promotion",
+    pattern: /^\/admin\/amux-board-auto-promotion$/,
+    label: "AMUX auto-promotion",
+    description: "Owner-only auto-promotion grants, halt and resume, behind the server switch",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
+  },
+  {
+    // Owner-only like the other AMUX screens, and unlisted for the same reason.
+    id: "amux-cards",
+    pattern: /^\/admin\/amux-cards$/,
+    label: "AMUX cards",
+    description: "Owner-only read-only list of AMUX cards and their execution state",
+    parentLabel: "Overview",
+    parentHref: "/admin/overview",
+    group: "Command Center" as const,
   },
   {
     id: "amux-intake",

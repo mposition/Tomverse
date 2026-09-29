@@ -31,6 +31,8 @@ import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
   adoptionReplacementRefusal,
+  creditFloorExceptionVerdict,
+  GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION,
 } from "@/lib/modelAdoptionDraft";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { getModel, type AiModel } from "@/lib/models";
@@ -169,6 +171,11 @@ const readAdoptionContext = async (
      * it answers about a world the write is not in.
      */
     tx?: Prisma.TransactionClient;
+    /**
+     * The acknowledgement query parameter. Both preflights have to see it, or
+     * the door accepts an exception the till then refuses.
+     */
+    creditFloorExceptionAck?: string | null;
   }
 ): Promise<Parameters<typeof adoptionPreflightRefusal>[0]> => {
   const client = options?.tx ?? prisma;
@@ -233,6 +240,7 @@ const readAdoptionContext = async (
     worstCaseInputTokens,
     inputPriceMultiplier:
       body.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+    creditFloorExceptionAck: options?.creditFloorExceptionAck ?? null,
   };
 };
 
@@ -255,6 +263,11 @@ export async function GET(req: Request) {
       models: models.map(adminModel),
       securityFindings,
       guestLead,
+      // When this list was read, stamped by the server so no browser clock is
+      // involved. The panel sends it back on a write, and the write is refused
+      // if the row has moved since -- see the PATCH handler in
+      // `app/api/admin/models/[modelId]/route.ts`.
+      readAt: new Date().toISOString(),
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
@@ -317,6 +330,11 @@ export async function POST(req: Request) {
     // `replacementModelId` and is disabled in the same transaction as the
     // create. Absent on an ordinary adoption.
     const replacesModelId = url.searchParams.get("replacesModelId")?.trim() || null;
+    // Named under-floor exception. Kept out of the registry body so `.strict()`
+    // stays the registry contract. Compared to the exception id, not treated as
+    // a boolean.
+    const creditFloorExceptionAck =
+      url.searchParams.get("creditFloorExceptionAck")?.trim() || null;
     if (replacesModelId && !workItemId) {
       return NextResponse.json(
         { error: "Choosing a model to replace is part of adopting a discovered model." },
@@ -338,7 +356,9 @@ export async function POST(req: Request) {
       }
     }
 
-    const adoptionContext = workItemId ? await readAdoptionContext(workItemId, body) : null;
+    const adoptionContext = workItemId
+      ? await readAdoptionContext(workItemId, body, { creditFloorExceptionAck })
+      : null;
     const adoptionRefusal = adoptionContext
       ? adoptionPreflightRefusal(adoptionContext)
       : null;
@@ -358,6 +378,27 @@ export async function POST(req: Request) {
         status: body.status,
         workItemId,
         ...(replacesModelId ? { replacesModelId } : {}),
+        ...(adoptionContext &&
+        creditFloorExceptionVerdict({
+          provider: body.provider,
+          apiModel: body.apiModel,
+          usageClass: body.usageClass,
+          creditWeight: body.creditWeight,
+          inputUsdPerMillionTokens:
+            body.inputUsdPerMillionTokens ??
+            adoptionContext.profilePrice?.inputUsdPerMillionTokens ??
+            null,
+          outputUsdPerMillionTokens:
+            body.outputUsdPerMillionTokens ??
+            adoptionContext.profilePrice?.outputUsdPerMillionTokens ??
+            null,
+          cachedInputPriceMultiplier: body.cachedInputPriceMultiplier ?? null,
+          maxOutputTokens:
+            body.maxOutputTokens ?? adoptionContext.profilePrice?.maxOutputTokens ?? null,
+          acknowledgement: creditFloorExceptionAck,
+        }) === "accepted"
+          ? { creditFloorException: GEMINI_35_FLASH_LITE_STANDARD_CREDIT_EXCEPTION.id }
+          : {}),
       },
     });
     let adoptedTo: string | null = null;
@@ -431,7 +472,11 @@ export async function POST(req: Request) {
         `);
         const workItem = locked[0] ?? null;
         const refusal = adoptionPreflightRefusal(
-          await readAdoptionContext(workItemId, body, { workItem, tx })
+          await readAdoptionContext(workItemId, body, {
+            workItem,
+            tx,
+            creditFloorExceptionAck,
+          })
         );
         if (refusal) throw new AdoptionRefused(refusal.message);
       }
@@ -581,6 +626,9 @@ export async function POST(req: Request) {
       {
         model: adminModel(model),
         ...(retired ? { retired: adminModel(retired) } : {}),
+        // Equal to the row just written, so the next save from this form is
+        // not refused as a conflict with the create itself.
+        readAt: row.updatedAt.toISOString(),
       },
       { status: 201 }
     );

@@ -1266,7 +1266,9 @@ domains:
       account deletion must not rewrite recommendation evidence. The row stores
       digests and counts, not a customer's prompt or file. Operator requests
       are handled through the manual PrivacyRequest path, together with the
-      linked tamper-evident AdminAuditLog entry.
+      linked tamper-evident AdminAuditLog entry. A row the auto-promotion tick
+      wrote carries the marker `system:amux-auto-promoter` instead of an
+      operator id.
 
   - domain: amuxRecommendationDecision
     prismaModel: AmuxRecommendationDecision
@@ -1353,6 +1355,8 @@ domains:
     note: >-
       actorUserId is the operator id and intentionally has no User foreign key.
       The row stores identifiers and a digest, not a customer's prompt or file.
+      A row the auto-promotion tick wrote carries the marker
+      `system:amux-auto-promoter` instead of an operator id.
 
   - domain: amuxRecommendationAutoHalt
     prismaModel: AmuxRecommendationAutoHalt
@@ -1380,7 +1384,9 @@ domains:
     note: >-
       actorUserId is the operator id and intentionally has no User foreign key.
       The row stores a violation code, not a free-text reason and not a
-      customer's prompt or file.
+      customer's prompt or file. A row the auto-promotion tick
+      wrote carries the marker `system:amux-auto-promoter` instead of an
+      operator id.
 
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft

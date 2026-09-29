@@ -19,6 +19,7 @@ import {
   reclaimExpiredAmuxExecutions,
 } from "@/lib/amux/execution";
 import { isAmuxExecutionApiEnabled } from "@/lib/amux/executionGate";
+import { amuxRecoverFailureFields, type AmuxRecoverStep } from "@/lib/amux/recoverFailure";
 import { sweepExpiredAmuxQuotaObservations } from "@/lib/amux/telemetry";
 
 const requestSchema = z.object({}).strict();
@@ -35,11 +36,13 @@ export async function POST(request: Request) {
   }
 
   return withAmuxRouteBudget(async () => {
+    let step: AmuxRecoverStep = "request";
     try {
       await readLimitedJson(request, 1 * 1_024, requestSchema);
 
       // Selection-only can still accept quota telemetry. Keep its 90-day
       // evidence bounded without opening execution mutations during that phase.
+      step = "quota_sweep";
       const quotaObservationsDeleted =
         await sweepExpiredAmuxQuotaObservations();
 
@@ -58,6 +61,7 @@ export async function POST(request: Request) {
       }
 
       let more = false;
+      step = "reclaim_executions";
       const reclaimed = await reclaimExpiredAmuxExecutions({
         onMoreWork: () => {
           more = true;
@@ -66,6 +70,7 @@ export async function POST(request: Request) {
 
       let reclaimedClaims = 0;
       if (amuxRouteHasBudgetFor(AMUX_DB_BOUNDARIES.ownershipRecoveryRead)) {
+        step = "reclaim_claims";
         reclaimedClaims = await reclaimExpiredAmuxClaims({
           onMoreWork: () => {
             more = true;
@@ -93,6 +98,8 @@ export async function POST(request: Request) {
       if (isAmuxInputError(error)) {
         return amuxJsonNoStore({ error: "Invalid request." }, 400);
       }
+      // The response stays opaque; the log names the step and error class only.
+      console.error("AMUX recovery failed", amuxRecoverFailureFields(step, error));
       return amuxInternalErrorResponse("execution_recover", error);
     }
   }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
