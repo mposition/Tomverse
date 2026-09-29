@@ -1,0 +1,108 @@
+{
+  "version": "amux-main-rust-wire-v1",
+  "note": "Request bodies exactly as the Rust client built from main 7724fd683 serializes them (apps/tomverse-orchestrator/src/main_wire_compat.rs holds a frozen copy of its structs), and the response bodies this app's routes return for them. tests/server-contract/amux-main-rust-wire-parity.test.ts sends each request to the real route and requires the exact response; the Rust tests parse each response with the frozen structs and with the current ones.",
+  "exchanges": [
+    {
+      "name": "worker_register",
+      "path": "workers/register",
+      "request": { "worker_name": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f" },
+      "status": 200,
+      "response": { "registered": true, "generation": 3, "lease_expires_at": "2026-09-29T00:01:30.000Z" }
+    },
+    {
+      "name": "worker_register_unconfigured",
+      "path": "workers/register",
+      "request": { "worker_name": "not-in-catalog", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f" },
+      "status": 409,
+      "response": { "registered": false, "reason": "worker_not_configured" }
+    },
+    {
+      "name": "worker_heartbeat",
+      "path": "workers/heartbeat",
+      "request": { "worker_name": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "status": "idle", "dispatch_ready": true },
+      "status": 200,
+      "response": { "accepted": true, "lease_expires_at": "2026-09-29T00:01:30.000Z" }
+    },
+    {
+      "name": "delivery_pull",
+      "path": "delivery/pull",
+      "request": { "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3 },
+      "status": 200,
+      "response": {
+        "available": true,
+        "delivery": {
+          "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f",
+          "task_id": "TASK-1",
+          "worker": "claude-impl",
+          "task_revision": 3,
+          "prompt": "Execution attempt: 4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f",
+          "receipt_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          "lease_expires_at": "2026-09-29T00:01:30.000Z"
+        }
+      }
+    },
+    {
+      "name": "delivery_ack",
+      "path": "delivery/ack",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "receipt_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3 },
+      "status": 200,
+      "response": { "acknowledged": true, "idempotent": false }
+    },
+    {
+      "name": "execution_start",
+      "path": "execution/start",
+      "request": { "task_id": "TASK-1", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "expected_revision": 2 },
+      "status": 200,
+      "response": { "started": true, "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "task_revision": 3, "lease_expires_at": "2026-09-29T00:01:30.000Z" }
+    },
+    {
+      "name": "execution_heartbeat",
+      "path": "execution/heartbeat",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3 },
+      "status": 200,
+      "response": { "accepted": true }
+    },
+    {
+      "name": "execution_settle_review_with_pr",
+      "path": "execution/settle",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3, "outcome": "succeeded", "to_status": "review", "reason": null, "review_pr_number": 1740 },
+      "status": 200,
+      "response": { "settled": true, "taskRevision": 4 }
+    },
+    {
+      "name": "execution_settle_review_without_pr",
+      "path": "execution/settle",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3, "outcome": "succeeded", "to_status": "review", "reason": null, "review_pr_number": null },
+      "status": 200,
+      "response": { "settled": true, "taskRevision": 4 }
+    },
+    {
+      "name": "execution_settle_blocked",
+      "path": "execution/settle",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3, "outcome": "blocked", "to_status": "blocked", "reason": "local_card_unlinked" },
+      "status": 200,
+      "response": { "settled": true, "taskRevision": 4 }
+    },
+    {
+      "name": "execution_settle_fenced",
+      "path": "execution/settle",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 2, "outcome": "blocked", "to_status": "blocked", "reason": "local_card_ambiguous" },
+      "status": 409,
+      "response": { "settled": false, "reason": "fenced_out" }
+    }
+  ],
+  "claim_responses": [
+    { "status": 200, "response": { "claimed": true, "revision": 1, "decision_id": "cm1abcdefghijklmnopqrstuv" } },
+    { "status": 200, "response": { "claimed": false } },
+    { "status": 409, "response": { "claimed": false, "reason": "execution_api_disabled" } },
+    { "status": 409, "response": { "claimed": false, "reason": "not_eligible" } },
+    { "status": 409, "response": { "claimed": false, "reason": "unclassified" } },
+    { "status": 409, "response": { "claimed": false, "reason": "worker_catalog_unavailable" } },
+    { "status": 409, "response": { "claimed": false, "reason": "no_authoritative_worker" } },
+    { "status": 409, "response": { "claimed": false, "reason": "authoritative_worker_mismatch" } },
+    { "status": 409, "response": { "claimed": false, "reason": "incident_admission_blocked" } },
+    { "status": 409, "response": { "claimed": false, "reason": "wip_limit_reached" } },
+    { "status": 409, "response": { "claimed": false, "reason": "execution_lifecycle_unavailable" } },
+    { "status": 409, "response": { "claimed": false, "reason": "invalid_routing_evidence" } }
+  ]
+}

@@ -599,6 +599,12 @@ impl TomverseApi {
     }
 }
 
+// Frozen copy of the Rust client running in production before this tree, and
+// the wire fixtures it shares with the app's route tests.
+#[cfg(test)]
+#[path = "main_wire_compat.rs"]
+mod main_wire_compat;
+
 #[cfg(test)]
 mod tests {
     use super::*;
