@@ -13,7 +13,12 @@
  * 계정 생성은 성공").
  */
 
-const STORAGE_KEY = "tomverse.signupConsent.v1";
+/**
+ * One slot per channel. An OAuth click on the code step must not replace the
+ * email attempt the code in the inbox is bound to; if the OAuth round trip is
+ * abandoned, the code still finds its attempt.
+ */
+const STORAGE_KEY = "tomverse.signupConsent.v2";
 /**
  * The query parameter this tab's own sign-in lands with. The finalizer acts
  * only on a landing that carries the stored attempt's id: a session that
@@ -23,28 +28,81 @@ const STORAGE_KEY = "tomverse.signupConsent.v1";
 export const SIGNUP_CONSENT_MARKER_PARAM = "signupConsent";
 const ESTIMATE_KEY = "tomverse.jurisdictionEstimate.v1";
 
-type StoredAttempt = { attemptId: string; nonce: string };
+type Channel = "oauth" | "email_code";
 
-const readStored = (): StoredAttempt | null => {
+/**
+ * What the tab keeps for one attempt: the proof (id and nonce) and the choice
+ * it recorded, so a reload shows the choice that is actually stored rather
+ * than the screen's unticked defaults.
+ */
+type StoredAttempt = {
+  attemptId: string;
+  nonce: string;
+  expiresAt: number;
+  optIn: boolean;
+  objected: boolean;
+  email?: string;
+};
+
+type Slots = Partial<Record<Channel, StoredAttempt>>;
+
+const isStoredAttempt = (value: unknown): value is StoredAttempt => {
+  const entry = value as Partial<StoredAttempt> | null;
+  return (
+    !!entry &&
+    typeof entry.attemptId === "string" &&
+    typeof entry.nonce === "string" &&
+    typeof entry.expiresAt === "number" &&
+    typeof entry.optIn === "boolean" &&
+    typeof entry.objected === "boolean"
+  );
+};
+
+const readSlots = (): Slots => {
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<StoredAttempt>;
-    return typeof parsed.attemptId === "string" && typeof parsed.nonce === "string"
-      ? { attemptId: parsed.attemptId, nonce: parsed.nonce }
-      : null;
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const slots: Slots = {};
+    if (isStoredAttempt(parsed.oauth)) slots.oauth = parsed.oauth;
+    if (isStoredAttempt(parsed.email_code)) slots.email_code = parsed.email_code;
+    return slots;
   } catch {
-    return null;
+    return {};
   }
 };
 
-const forget = () => {
+const writeSlots = (slots: Slots) => {
   try {
-    window.sessionStorage.removeItem(STORAGE_KEY);
+    if (!slots.oauth && !slots.email_code) window.sessionStorage.removeItem(STORAGE_KEY);
+    else window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(slots));
   } catch {
-    // Storage blocked: nothing to forget.
+    // Storage blocked: the choice simply is not kept.
   }
 };
+
+const live = (entry: StoredAttempt | undefined, margin = 0): entry is StoredAttempt =>
+  !!entry && entry.expiresAt - margin > Date.now();
+
+/**
+ * The choice this tab has stored and not yet used, for the screen to show
+ * after a reload. The email attempt first: its code may already be in the inbox.
+ */
+export function readStoredSignupConsentChoice(): { optIn: boolean; objected: boolean } | null {
+  const slots = readSlots();
+  const entry = live(slots.email_code) ? slots.email_code : live(slots.oauth) ? slots.oauth : null;
+  return entry ? { optIn: entry.optIn, objected: entry.objected } : null;
+}
+
+/**
+ * The pending email attempt's id, for a sign-in link opened in this same tab
+ * (`/auth/email/verify`), so its landing carries the marker too. A link opened
+ * in another tab has no storage and consumes nothing.
+ */
+export function storedEmailAttemptId(): string | null {
+  const entry = readSlots().email_code;
+  return live(entry) ? entry.attemptId : null;
+}
 
 /**
  * `callbackUrl` with this attempt's marker added, so the landing of this
@@ -76,7 +134,19 @@ export async function storeSignupConsentChoice(input: {
   objected: boolean;
   language: string;
 }): Promise<string | null> {
-  const previous = readStored();
+  const slots = readSlots();
+  const previous = slots[input.channel];
+  // The same choice for the same address, still well inside its life: keep the
+  // pending attempt. Replacing it before a request that may fail would leave
+  // the code already in the inbox bound to a superseded attempt.
+  if (
+    live(previous, 60_000) &&
+    previous.optIn === input.expressOptInRequested &&
+    previous.objected === input.objected &&
+    (input.channel !== "email_code" || previous.email === input.email)
+  ) {
+    return previous.attemptId;
+  }
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 3_000);
   try {
@@ -90,18 +160,26 @@ export async function storeSignupConsentChoice(input: {
         expressOptInRequested: input.expressOptInRequested,
         objected: input.objected,
         language: input.language,
-        ...(previous ? { supersede: previous } : {}),
+        ...(previous ? { supersede: { attemptId: previous.attemptId, nonce: previous.nonce } } : {}),
       }),
       signal: controller.signal,
     });
     const data = (await response.json().catch(() => null)) as
-      | { ok?: boolean; attemptId?: string; nonce?: string }
+      | { ok?: boolean; attemptId?: string; nonce?: string; expiresAt?: string }
       | null;
     if (response.ok && data?.ok && data.attemptId && data.nonce) {
-      window.sessionStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ attemptId: data.attemptId, nonce: data.nonce })
-      );
+      const expiresAt = data.expiresAt ? Date.parse(data.expiresAt) : Number.NaN;
+      writeSlots({
+        ...slots,
+        [input.channel]: {
+          attemptId: data.attemptId,
+          nonce: data.nonce,
+          expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 15 * 60_000,
+          optIn: input.expressOptInRequested,
+          objected: input.objected,
+          ...(input.email ? { email: input.email } : {}),
+        },
+      });
       return data.attemptId;
     }
     return null;
@@ -122,15 +200,21 @@ export async function storeSignupConsentChoice(input: {
  * consume it; an existing account's sign-in never does.
  */
 export async function finalizeStoredSignupConsent(): Promise<boolean> {
-  const stored = readStored();
-  if (!stored) return false;
+  const slots = readSlots();
+  if (!slots.oauth && !slots.email_code) return false;
   let url: URL;
   try {
     url = new URL(window.location.href);
   } catch {
     return false;
   }
-  if (url.searchParams.get(SIGNUP_CONSENT_MARKER_PARAM) !== stored.attemptId) return false;
+  const marker = url.searchParams.get(SIGNUP_CONSENT_MARKER_PARAM);
+  const channel = (["oauth", "email_code"] as const).find(
+    (key) => slots[key]?.attemptId === marker
+  );
+  const entry = channel ? slots[channel] : undefined;
+  if (!channel || !entry) return false;
+  const stored = { attemptId: entry.attemptId, nonce: entry.nonce };
   // 200 is a final answer: consumed, or refused for good. Anything else -- the
   // confirmation lane briefly gone (503), a rate limit, a server error, the
   // network -- rolled back and left the attempt pending, so it is tried again
@@ -155,7 +239,9 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
       // Nothing reached the server; try again.
     }
   }
-  forget();
+  // This landing used its attempt; both slots are spent, since the account now
+  // exists and no other sign-up can follow from this tab's choice.
+  writeSlots({});
   // Removed only now: a reload during the retries is still this landing, and
   // finds the attempt either consumed (a final answer) or still pending.
   url.searchParams.delete(SIGNUP_CONSENT_MARKER_PARAM);

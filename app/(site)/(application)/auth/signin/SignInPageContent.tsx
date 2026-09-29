@@ -23,6 +23,7 @@ import {
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
 import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
 import {
+    readStoredSignupConsentChoice,
     storeSignupConsentChoice,
     withSignupConsentMarker,
 } from "@/components/auth/signupConsentClient";
@@ -121,6 +122,15 @@ function SignInButtons({
     // The sign-up consent devices (S4). Both start unset: an opt-in is never
     // pre-ticked, and not ticking it is not a refusal.
     const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    // After a reload the screen shows the choice this tab actually stored, not
+    // the unticked defaults: sending again then keeps that attempt instead of
+    // replacing it with an empty one.
+    useEffect(() => {
+        // Read after hydration (storage is the browser's), applied as the
+        // effect's callback rather than synchronously in its body.
+        const stored = readStoredSignupConsentChoice();
+        if (stored) queueMicrotask(() => setConsentChoice(stored));
+    }, []);
     // The attempt the code request stored, so the verify step's landing carries
     // its marker.
     const [consentAttemptId, setConsentAttemptId] = useState<string | null>(null);
@@ -221,9 +231,10 @@ function SignInButtons({
             // the pending attempt: the choice is locked there, and superseding
             // it before a request that then fails would leave the still-valid
             // earlier code bound to nothing.
-            if (step === "email" || !consentAttemptId) {
-                setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
-            }
+            // The store keeps the pending attempt when the choice and address
+            // are unchanged (always so on the code step, where the devices are
+            // locked), and replaces it only when the person changed the choice.
+            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {

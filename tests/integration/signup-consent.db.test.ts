@@ -426,3 +426,67 @@ test("an estimate never replaces a declaration, and replaces an earlier estimate
   const moved = await prisma.userSettings.findUniqueOrThrow({ where: { userId: estimated.id } });
   assert.deepEqual([moved.country, moved.countrySource], ["NZ", "ip_estimated"]);
 });
+
+test("an account another tab's sign-up created is not this sign-in's to consume", async () => {
+  // Tab A stores a choice; tab B signs up and creates the account; tab A then
+  // signs into it with the marker. The account is new and matches the binding,
+  // but tab A's session did not create it.
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "google",
+    expressOptInRequested: true,
+    objected: false,
+    language: "en",
+    ipCountry: "AU",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  const user = await oauthAccount(later(issuedAt));
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: false,
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    }),
+    { ok: false, reason: "not_created_by_this_sign_in" }
+  );
+  assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 0);
+});
+
+test("the attempt is stamped with the clock the account rows are stamped with", async () => {
+  // No \`now\`: the attempt takes LOCALTIMESTAMP, the value the column default
+  // stores, and an account the database then creates by its own default is
+  // created at or after it.
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "google",
+    expressOptInRequested: false,
+    objected: false,
+    language: "en",
+    ipCountry: "AU",
+  });
+  assert.ok(issued.ok);
+  const user = await prisma.user.create({
+    data: { email: `${randomUUID()}@example.test` },
+    select: { id: true },
+  });
+  await prisma.account.create({
+    data: { userId: user.id, type: "oauth", provider: "google", providerAccountId: randomUUID() },
+  });
+  const [attempt, account] = await Promise.all([
+    prisma.signupConsentAttempt.findUniqueOrThrow({ where: { id: issued.attemptId } }),
+    prisma.user.findUniqueOrThrow({ where: { id: user.id }, select: { createdAt: true } }),
+  ]);
+  assert.ok(account.createdAt!.getTime() >= attempt.createdAt.getTime());
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: true,
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    }),
+    { ok: true, confirmationRequested: false }
+  );
+});

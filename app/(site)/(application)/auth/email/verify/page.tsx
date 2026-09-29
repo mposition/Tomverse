@@ -6,6 +6,10 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import {
+    storedEmailAttemptId,
+    withSignupConsentMarker,
+} from "@/components/auth/signupConsentClient";
 
 function EmailLinkVerifier() {
     const searchParams = useSearchParams();
@@ -26,16 +30,20 @@ function EmailLinkVerifier() {
 
         void (async () => {
             try {
+                // Opened in the tab that made the sign-up choice, the landing
+                // carries its marker like the code form's does. Opened anywhere
+                // else there is nothing stored and nothing is consumed.
+                const landing = withSignupConsentMarker(callbackUrl, storedEmailAttemptId());
                 const result = await signIn("email-code", {
                     redirect: false,
                     linkToken: token,
-                    callbackUrl,
+                    callbackUrl: landing,
                 });
                 if (result?.error) {
                     setStatus("error");
                     return;
                 }
-                window.location.href = result?.url || callbackUrl;
+                window.location.href = result?.url || landing;
             } catch {
                 setStatus("error");
             }
