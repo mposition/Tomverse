@@ -15,10 +15,11 @@ export type SignupConsentChannel = (typeof SIGNUP_CONSENT_CHANNELS)[number];
 
 /**
  * How long a choice waits for its account. Long enough for an OAuth round trip
- * or for somebody to fetch a code from their mailbox; short enough that a tab
- * left open does not consume a stale choice the next day.
+ * or for somebody to fetch a code from their mailbox (the code itself lives ten
+ * minutes); short, because a choice left in a tab is a choice somebody else
+ * could sign up under in the same browser.
  */
-export const SIGNUP_CONSENT_TTL_MS = 60 * 60 * 1_000;
+export const SIGNUP_CONSENT_TTL_MS = 15 * 60 * 1_000;
 
 export type SignupConsentAttemptState = "pending" | "consumed" | "superseded" | "expired";
 
@@ -75,7 +76,12 @@ export const signupConsentRefusal = (input: {
     providers: readonly string[];
     alreadyConsumed: boolean;
   };
-  /** The email login attempt consumed for this address since the attempt, if any. */
+  /**
+   * An email login for this address that was **requested** after the choice
+   * was made and has been consumed, if any. Requested after, not merely
+   * consumed after: a code asked for before the choice existed -- another
+   * sign-in, a reactivation -- is not this flow.
+   */
   emailLoginSince: { id: string } | null;
   now: Date;
 }): SignupConsentRefusal | null => {
@@ -118,7 +124,12 @@ export type SignupConsentCandidate = {
  */
 export const estimatedCountryFromHeader = (value: string | null | undefined): string | null => {
   const candidate = value?.trim().toUpperCase();
+  // Letters only: Cloudflare's `T1` has a digit, and was passing a two-letter
+  // test it was never meant to.
   if (!candidate || !/^[A-Z]{2}$/.test(candidate)) return null;
-  if (candidate === "XX" || candidate === "ZZ") return null;
+  if (NOT_COUNTRIES.has(candidate)) return null;
   return candidate;
 };
+
+/** Codes a country header can carry that name no country. */
+const NOT_COUNTRIES = new Set(["XX", "ZZ", "T1", "A1", "A2", "AP", "EU"]);

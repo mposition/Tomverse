@@ -235,15 +235,122 @@ test("a superseded choice is not consumed, and the replacing one is", async () =
   );
 });
 
-test("without a country the choice is still recorded, and nothing is requested", async () => {
+test("without a country, or a confirmation that can be sent, there is no choice to store", async () => {
+  // The page shows no devices then (signupConsentAvailable), and the issue
+  // route refuses the same way: a ticked box must end in a confirmation mail.
+  for (const ipCountry of ["XX", "T1", null]) {
+    assert.deepEqual(
+      await issueSignupConsentAttempt({
+        channel: "oauth",
+        provider: "google",
+        expressOptInRequested: true,
+        objected: false,
+        language: "ko",
+        ipCountry,
+        now: new Date(),
+      }),
+      { ok: false, reason: "disabled" },
+      String(ipCountry)
+    );
+  }
+  await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, false);
+  assert.deepEqual(
+    await issueSignupConsentAttempt({
+      channel: "oauth",
+      provider: "google",
+      expressOptInRequested: true,
+      objected: false,
+      language: "ko",
+      ipCountry: "AU",
+      now: new Date(),
+    }),
+    { ok: false, reason: "disabled" }
+  );
+  assert.equal(await prisma.signupConsentAttempt.count(), 0);
+});
+
+test("an opt-in whose confirmation cannot be requested rolls back, and can be finalized later", async () => {
   const issuedAt = new Date();
   const issued = await issueSignupConsentAttempt({
     channel: "oauth",
     provider: "google",
     expressOptInRequested: true,
     objected: false,
-    language: "ko",
-    ipCountry: "XX",
+    language: "en",
+    ipCountry: "AU",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  const user = await oauthAccount(later(issuedAt));
+
+  // The confirmation lane goes away between the screen and the landing.
+  await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, false);
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    { ok: false, reason: "confirmation_unavailable" }
+  );
+  // Nothing of it committed: the attempt is still pending, and no notice, no
+  // estimate and no consent history exist.
+  const pending = await prisma.signupConsentAttempt.findUniqueOrThrow({ where: { id: issued.attemptId } });
+  assert.equal(pending.consumedAt, null);
+  assert.equal(pending.userId, null);
+  assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.userSettings.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+
+  await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, true);
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    { ok: true, confirmationRequested: true }
+  );
+});
+
+test("a code requested before the choice is not this flow's code", async () => {
+  // A reactivation or an earlier sign-in's code, consumed after the choice,
+  // used to satisfy "consumed since"; it has to have been asked for after it.
+  const issuedAt = new Date();
+  const email = `${randomUUID()}@example.test`;
+  const issued = await issueSignupConsentAttempt({
+    channel: "email_code",
+    email,
+    expressOptInRequested: false,
+    objected: false,
+    language: "en",
+    ipCountry: "US",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  await prisma.emailLoginAttempt.create({
+    data: {
+      email,
+      codeHash: "hash",
+      linkTokenHash: randomUUID(),
+      expiresAt: later(issuedAt, 600_000),
+      createdAt: new Date(issuedAt.getTime() - 1_000),
+      consumedAt: later(issuedAt),
+    },
+  });
+  const user = await prisma.user.create({
+    data: { email, createdAt: later(issuedAt, 2_000) },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({ userId: user.id, attemptId: issued.attemptId, nonce: issued.nonce }),
+    { ok: false, reason: "binding_mismatch" }
+  );
+});
+
+test("an estimate whose country has no profile is recorded on the notice as unresolved", async () => {
+  // Japan has no jurisdiction profile: the send verdicts hold it back, and
+  // the permanent notice row must not record it as settled.
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "google",
+    expressOptInRequested: false,
+    objected: false,
+    language: "en",
+    ipCountry: "JP",
     now: issuedAt,
   });
   assert.ok(issued.ok);
@@ -256,7 +363,6 @@ test("without a country the choice is still recorded, and nothing is requested",
     where: { userId: user.id, kind: "notice_shown" },
   });
   assert.deepEqual([shown.jurisdiction, shown.jurisdictionSource], ["ZZ", "unresolved"]);
-  assert.equal(await prisma.userSettings.count({ where: { userId: user.id } }), 0);
 });
 
 test("a wrong nonce, and a switched-off gate, consume nothing", async () => {

@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
-import { finalizeSignupConsentAttempt } from "@/lib/signupConsent";
+import { finalizeSignupConsentAttempt, TERMINAL_FINALIZE_REFUSALS } from "@/lib/signupConsent";
 
 /**
  * Consumes the sign-up screen's consent choice for the account this sign-in
@@ -15,9 +15,11 @@ import { finalizeSignupConsentAttempt } from "@/lib/signupConsent";
  * Contract: docs/policy/email-product-news-redesign-draft.md section 5.2 (S4).
  * The session says who is asking; `finalizeSignupConsentAttempt()` decides
  * whether this account was created by the flow the choice belongs to, and an
- * existing account's sign-in never consumes one. Every refusal answers 200 with
- * its reason: the tab then forgets the choice, and the account exists either
- * way.
+ * existing account's sign-in never consumes one. A refusal after which the
+ * choice can never be consumed answers 200 with its reason, and the tab then
+ * forgets it; one that rolled back and left the attempt pending
+ * (`confirmation_unavailable`) answers 503, and the landing tries again a few
+ * times before dropping it. The account exists either way.
  */
 
 const bodySchema = z
@@ -43,7 +45,11 @@ export async function POST(req: Request) {
       attemptId: body.attemptId,
       nonce: body.nonce,
     });
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    const retryable = !result.ok && !TERMINAL_FINALIZE_REFUSALS.has(result.reason);
+    return NextResponse.json(result, {
+      status: retryable ? 503 : 200,
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (error) {
     const secured = apiSecurityResponse(error);
     if (secured) return secured;

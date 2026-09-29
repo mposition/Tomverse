@@ -22,7 +22,10 @@ import {
 } from "@/lib/productAnalyticsClient";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
 import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
-import { storeSignupConsentChoice } from "@/components/auth/signupConsentClient";
+import {
+    storeSignupConsentChoice,
+    withSignupConsentMarker,
+} from "@/components/auth/signupConsentClient";
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -118,6 +121,9 @@ function SignInButtons({
     // The sign-up consent devices (S4). Both start unset: an opt-in is never
     // pre-ticked, and not ticking it is not a refusal.
     const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    // The attempt the code request stored, so the verify step's landing carries
+    // its marker.
+    const [consentAttemptId, setConsentAttemptId] = useState<string | null>(null);
     const storeConsent = (channel: "oauth" | "email_code", extra: { provider?: string; email?: string }) =>
         signupConsentEnabled
             ? storeSignupConsentChoice({
@@ -127,7 +133,7 @@ function SignInButtons({
                   objected: consentChoice.objected,
                   language: lang,
               })
-            : Promise.resolve();
+            : Promise.resolve(null);
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -211,7 +217,7 @@ function SignInButtons({
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
-            await storeConsent("email_code", { email: email.trim() });
+            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
@@ -266,7 +272,7 @@ function SignInButtons({
                 redirect: false,
                 email: email.trim(),
                 code: code.trim(),
-                callbackUrl,
+                callbackUrl: withSignupConsentMarker(callbackUrl, consentAttemptId),
             });
             // next-auth v4 collapses every authorize() rejection into the
             // generic "CredentialsSignin" code, so a specific "locked" vs
@@ -276,7 +282,8 @@ function SignInButtons({
                 setFormError(t("auth.emailLoginInvalidCode"));
                 return;
             }
-            window.location.href = result?.url || callbackUrl;
+            window.location.href =
+                result?.url || withSignupConsentMarker(callbackUrl, consentAttemptId);
         } catch {
             setFormError(t("auth.emailLoginInvalidCode"));
         } finally {
@@ -361,8 +368,12 @@ function SignInButtons({
                 type="button"
                 onClick={() => {
                     markSignupStarted("google");
-                    void storeConsent("oauth", { provider: "google" }).then(() =>
-                        signIn("google", { callbackUrl }, oauthAuthorizationParams)
+                    void storeConsent("oauth", { provider: "google" }).then((attemptId) =>
+                        signIn(
+                            "google",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
                     );
                 }}
                 className={providerButtonClass}
@@ -377,8 +388,12 @@ function SignInButtons({
                 type="button"
                 onClick={() => {
                     markSignupStarted("azure-ad");
-                    void storeConsent("oauth", { provider: "azure-ad" }).then(() =>
-                        signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams)
+                    void storeConsent("oauth", { provider: "azure-ad" }).then((attemptId) =>
+                        signIn(
+                            "azure-ad",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
                     );
                 }}
                 className={providerButtonClass}

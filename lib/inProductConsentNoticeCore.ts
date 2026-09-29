@@ -257,7 +257,12 @@ export const noticeJurisdictionColumns = (resolved: {
   confidence: string;
   source: string;
 }): NoticeJurisdiction =>
-  (resolved.confidence === "high" || resolved.confidence === "estimated") &&
+  // An estimate settles the column only where this policy has a profile for
+  // its country (docs/policy/email-notifications.md §6.3): the marketing and
+  // send verdicts already hold the rest back, and the permanent notice row
+  // must not record as settled what they treat as unknown.
+  (resolved.confidence === "high" ||
+    (resolved.confidence === "estimated" && resolved.profileKey !== "ZZ")) &&
   resolved.countryCode !== "ZZ"
     ? { country: resolved.countryCode, source: resolved.source }
     : {

@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { getTrustedIpCountry } from "@/lib/trustedIpCountry";
 import { getServerSession } from "next-auth/next";
 
 import { authOptions } from "@/lib/auth";
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
     });
     const result = await recordSignInEstimatedCountry({
       userId: session.user.id,
-      ipCountry: req.headers.get("cf-ipcountry"),
+      ipCountry: getTrustedIpCountry(req.headers),
     });
     // No country in the answer: the page has no use for it, and it is a
     // location signal.

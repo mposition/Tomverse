@@ -501,6 +501,23 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
   그 `EmailLoginAttempt`가 만든 사용자), 그 사용자에게 소비된 attempt가 아직
   없을 때(`userId` unique)만 소비합니다.
 - **기존 사용자의 로그인은 절대 소비하지 않습니다.**
+- **구현 결정(S4, 2026-09-29 검토 반영)** —
+  - 이 탭의 로그인만 소비합니다. 저장한 attempt의 id를 로그인 `callbackUrl`의
+    표지(`signupConsent`)로 싣고, finalize는 **그 표지를 가진 착지에서만** 요청합니다.
+    다른 탭의 세션 알림이나 같은 브라우저의 다른 가입은 표지가 없으므로 소비하지
+    않습니다. 표지는 착지 즉시 주소창에서 지웁니다. 유효 시간은 15분입니다.
+  - email_code의 binding은 **선택 이후에 요청되어** 소비된 로그인 코드입니다. 선택 전에
+    요청된 코드(다른 로그인, 재활성화)는 이 흐름이 아닙니다.
+  - attempt의 시각은 **DB 시계**로 찍습니다. `User.createdAt`·`EmailLoginAttempt.createdAt`
+    이 DB가 찍은 값이므로, 앱 인스턴스 시계로 찍으면 두 시계를 비교하게 됩니다.
+  - 체크한 opt-in은 **확인 메일로 끝나거나 아무것도 남기지 않습니다.** 확인 요청이
+    불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
+    503), 그 착지가 몇 번 다시 시도합니다. 그래서 화면은 **수집 게이트·확인 게이트와
+    키·신뢰할 수 있는 국가**가 모두 있을 때만 장치를 보여 주고, 하나라도 없으면 장치
+    없이 예전처럼 로그인합니다.
+  - 국가는 **origin secret으로 Cloudflare 경유가 증명된 요청**의 `cf-ipcountry`만 씁니다.
+    `T1`(Tor)·`XX` 등 국가가 아닌 코드는 버리고, profile 없는 국가의 추정은 알림 행에
+    `unresolved`로 남깁니다(docs/policy/email-notifications.md §6.3).
 - 체크 해제 후 재시도는 이전 행을 `supersededAt`으로 무효화하고, 무효화와 새 행
   발급은 한 transaction입니다.
 - 소비 실패·만료·탭 닫힘에도 **계정 생성은 성공**합니다.

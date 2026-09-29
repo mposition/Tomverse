@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { estimatedCountryFromHeader } from "@/lib/signupConsentCore";
 import {
   normalizeCountry,
   resolveEmailJurisdiction,
@@ -128,10 +129,10 @@ export async function recordEstimatedCountry(input: {
   now?: Date;
   client?: Prisma.TransactionClient;
 }): Promise<{ recorded: boolean; country: string | null }> {
-  const country = normalizeCountry(input.ipCountry);
-  // `XX` is Cloudflare's "unknown", and `ZZ` is this system's own sentinel.
-  // Two capital letters each, and neither is a country.
-  if (!country || country === "XX" || country === "ZZ") return { recorded: false, country: null };
+  // One list of codes that name no country (Cloudflare's `XX` and `T1`, this
+  // system's `ZZ`, and the rest), shared with the sign-up screen.
+  const country = estimatedCountryFromHeader(input.ipCountry);
+  if (!country) return { recorded: false, country: null };
   const db = input.client ?? prisma;
   const now = input.now ?? new Date();
   const existing = await db.userSettings.findUnique({

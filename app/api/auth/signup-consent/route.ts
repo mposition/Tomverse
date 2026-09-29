@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import { getTrustedIpCountry } from "@/lib/trustedIpCountry";
 import { isValidLoginEmail, MAX_LOGIN_EMAIL_LENGTH } from "@/lib/emailValidation";
 import { issueSignupConsentAttempt } from "@/lib/signupConsent";
 
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
       expressOptInRequested: body.expressOptInRequested,
       objected: body.objected,
       language: body.language ?? null,
-      ipCountry: req.headers.get("cf-ipcountry"),
+      ipCountry: getTrustedIpCountry(req.headers),
       supersede: body.supersede ?? null,
     });
     if (!result.ok) {

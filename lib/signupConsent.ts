@@ -3,7 +3,8 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 
 import { prisma } from "@/lib/prisma";
-import { isEmailSignupConsentEnabled } from "@/lib/appSettings";
+import { isEmailConsentConfirmationEnabled, isEmailSignupConsentEnabled } from "@/lib/appSettings";
+import { readConsentKeyring } from "@/lib/emailConsentToken";
 import {
   CONSENT_COPY_LANGUAGES,
   CURRENT_CONSENT_COPY_VERSION,
@@ -61,6 +62,43 @@ const copyLanguage = (value: string | null | undefined): ConsentCopyLanguage =>
  */
 export const SIGNUP_OPT_IN_PURPOSE = "product_updates";
 
+/**
+ * Whether the sign-up screen may show its devices, for a request whose trusted
+ * country header is `ipCountry`.
+ *
+ * All three are needed, because the devices are one screen (section 5.1): the
+ * collection gate; a confirmation that can actually be sent (its gate and its
+ * keys) -- ticking A must end in a confirmation mail, and a box that silently
+ * records nothing is a promise the screen breaks; and a country, because the
+ * confirmation and the notice are both decided under one. Missing any, the
+ * screen shows none of them and signs the person in as before.
+ */
+export async function signupConsentAvailable(ipCountry: string | null | undefined): Promise<boolean> {
+  if (!estimatedCountryFromHeader(ipCountry)) return false;
+  if (!readConsentKeyring(process.env)) return false;
+  const [collection, confirmation] = await Promise.all([
+    isEmailSignupConsentEnabled(),
+    isEmailConsentConfirmationEnabled(),
+  ]);
+  return collection && confirmation;
+}
+
+/**
+ * The database's clock, in the naive-UTC form the timestamp columns store.
+ *
+ * An attempt is compared with `User.createdAt` and `EmailLoginAttempt.createdAt`,
+ * which the database stamps. Stamping the attempt with this process's clock
+ * compared two clocks, and an instance running behind let an account created
+ * just before the choice pass as created after it.
+ */
+const databaseNow = async (
+  db: Pick<typeof prisma, "$queryRaw"> = prisma
+): Promise<Date> => {
+  const [row] = await db.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS "now"`;
+  if (!row) throw new Error("The database did not report its clock.");
+  return row.now;
+};
+
 export type IssueSignupConsentResult =
   | { ok: true; attemptId: string; nonce: string; expiresAt: Date }
   | { ok: false; reason: "disabled" | "invalid" };
@@ -78,7 +116,9 @@ export async function issueSignupConsentAttempt(input: {
   supersede?: { attemptId: string; nonce: string } | null;
   now?: Date;
 }): Promise<IssueSignupConsentResult> {
-  if (!(await isEmailSignupConsentEnabled())) return { ok: false, reason: "disabled" };
+  // The same answer the page rendered from: without it there were no devices
+  // on the screen, and nothing may be stored as though there were.
+  if (!(await signupConsentAvailable(input.ipCountry))) return { ok: false, reason: "disabled" };
   // Two answers to one question: ticking the box and pressing the refusal
   // cannot both be the choice.
   if (input.expressOptInRequested && input.objected) return { ok: false, reason: "invalid" };
@@ -98,7 +138,7 @@ export async function issueSignupConsentAttempt(input: {
     return { ok: false, reason: "invalid" };
   }
 
-  const now = input.now ?? new Date();
+  const now = input.now ?? (await databaseNow());
   const language = copyLanguage(input.language);
   const copyVersion = CURRENT_CONSENT_COPY_VERSION;
   const copyHash = consentCopyHash("signupNotice", language, copyVersion);
@@ -157,9 +197,27 @@ export async function issueSignupConsentAttempt(input: {
 
 export type FinalizeSignupConsentResult =
   | { ok: true; confirmationRequested: boolean }
-  | { ok: false; reason: "disabled" | "not_found" | SignupConsentRefusal };
+  | {
+      ok: false;
+      reason: "disabled" | "not_found" | "confirmation_unavailable" | SignupConsentRefusal;
+    };
+
+/**
+ * The refusals after which the choice can never be consumed, so the tab may
+ * forget it. Everything else -- above all `confirmation_unavailable`, which
+ * rolled back and left the attempt pending -- is worth another try.
+ */
+export const TERMINAL_FINALIZE_REFUSALS: ReadonlySet<string> = new Set([
+  "not_found",
+  "not_pending",
+  "account_predates_attempt",
+  "account_age_unknown",
+  "binding_mismatch",
+  "account_already_consumed",
+]);
 
 const RACED = Symbol("raced");
+const CONFIRMATION_UNAVAILABLE = Symbol("confirmation_unavailable");
 
 /**
  * Consumes the choice for the account this sign-in just created.
@@ -177,7 +235,7 @@ export async function finalizeSignupConsentAttempt(input: {
   now?: Date;
 }): Promise<FinalizeSignupConsentResult> {
   if (!(await isEmailSignupConsentEnabled())) return { ok: false, reason: "disabled" };
-  const now = input.now ?? new Date();
+  const now = input.now ?? (await databaseNow());
 
   const attempt = await prisma.signupConsentAttempt.findUnique({ where: { id: input.attemptId } });
   if (!attempt || attempt.nonceHash !== nonceHash(input.nonce)) {
@@ -199,7 +257,11 @@ export async function finalizeSignupConsentAttempt(input: {
   const emailLoginSince =
     attempt.channel === "email_code" && attempt.bindingEmail
       ? await prisma.emailLoginAttempt.findFirst({
-          where: { email: attempt.bindingEmail, consumedAt: { gte: attempt.createdAt } },
+          where: {
+            email: attempt.bindingEmail,
+            createdAt: { gte: attempt.createdAt },
+            consumedAt: { not: null },
+          },
           orderBy: { consumedAt: "desc" },
           select: { id: true },
         })
@@ -276,10 +338,13 @@ export async function finalizeSignupConsentAttempt(input: {
       await recordNoticeShown({ ...record, client: tx });
       if (attempt.objected) await recordNoticeObjection({ ...record, client: tx });
 
-      // Confirmation needs a country, and the IP estimate is the one the screen
-      // rendered under. Without one, the choice stays recorded on the attempt
-      // and the settings screen -- which asks for the country -- is the route.
-      if (attempt.expressOptInRequested && candidate) {
+      // A ticked box ends in a confirmation mail or in nothing at all (section
+      // 5.2): if the request cannot be made, the whole consumption rolls back
+      // and the attempt stays pending for the tab to try again. The page only
+      // shows the box where a country and the confirmation lane exist, so this
+      // is the lane going away between the two, not an ordinary path.
+      if (attempt.expressOptInRequested) {
+        if (!candidate) throw CONFIRMATION_UNAVAILABLE;
         const requested = await requestConsentConfirmation({
           userId: input.userId,
           purpose: SIGNUP_OPT_IN_PURPOSE,
@@ -293,11 +358,13 @@ export async function finalizeSignupConsentAttempt(input: {
           now,
           client: tx,
         });
-        confirmationRequested = requested.requested;
+        if (!requested.requested) throw CONFIRMATION_UNAVAILABLE;
+        confirmationRequested = true;
       }
     });
   } catch (error) {
     if (error === RACED) return { ok: false, reason: "not_pending" };
+    if (error === CONFIRMATION_UNAVAILABLE) return { ok: false, reason: "confirmation_unavailable" };
     throw error;
   }
   return { ok: true, confirmationRequested };
