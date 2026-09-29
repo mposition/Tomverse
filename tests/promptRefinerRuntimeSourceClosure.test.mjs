@@ -306,12 +306,21 @@ const compilerOptions = parsedConfig.options;
 // computed element access is added. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so the digest below is a repin
 // over the merged tree.
+//
+// 2026-09-29, sign-up consent (S0, S4): `lib/emailJurisdictionCore.ts` gains
+// the IP-estimate signal and `isDeterminativeConfidence()`, `lib/appSettings.ts`
+// the sign-up collection reader and `lib/emailFeatureFlags.ts` its key. None
+// adds an element access -- the resolver reads named fields and the conflict
+// pair is an array literal -- so the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., and this repins positions only. The watched-
+// schema note in `lib/marketingAutomationAccess.ts` for the same model is
+// comment only and moves the positions below it.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "46a27a8846c2ab134e07ba7f6e5d86f8",
-  "f1060ee3689800d063ce1a6e4a121eba",
+  "a9e77a41348da19a197467fa88e3e336",
+  "1d442a50267a08aabe4dc353ab348824",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

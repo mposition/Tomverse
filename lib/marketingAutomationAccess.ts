@@ -362,9 +362,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * decision columns and `EmailDelivery`'s display-contract pin -- merged with
  * develop. Not a marketing webhook input and no descriptor or admission
  * decision changes; the value below is computed over the merged schema.
+ *
+ * 2026-09-29: sign-up consent (S4) adds the `SignupConsentAttempt` model and
+ * its relation on `User`. Neither is a marketing model or a webhook input; the
+ * digest moves because the whole Prisma schema is deliberately watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "a148d94931b13fdcc425fcca5dc785edf78d173c0eeab6ca445412a83c8500ce";
+  "6894c2c9655d36268cb3cd67fc52bf85db1d196b1a125507a8f8e3b77bfc45b6";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
