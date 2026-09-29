@@ -26,13 +26,13 @@ test("full 42x24 manifest stays within existing JSON byte and node limits", () =
   const manifest = manifestFor(eligible, { maxTotalMicroUsd: 1_000_000_000_000, maxRequestMicroUsd: 1_000_000_000_000 });
   const text = canonicalBenchmarkJson(manifest);
   assert.ok(Buffer.byteLength(text) < 16_777_216);
-  assert.equal(manifest.plan.rows.length, 1008);
-  assert.equal(manifest.calls.length, 360);
+  assert.equal(manifest.plan.rows.length, 1032);
+  assert.equal(manifest.calls.length, 384);
   assert.equal(manifest.plan.summary.refusedRows, 648);
   assert.equal(manifest.status, "proposal");
   assert.equal(manifest.completionPossibleWithinLimits, true);
   assert.throws(() => validateCollectionApproval(manifest, manifest, now()));
-  assert.equal(new Set(eligible.map((row) => row.modelId)).size, 15);
+  assert.equal(new Set(eligible.map((row) => row.modelId)).size, 16);
   assert.ok(eligible.every((row) => isCollectionProviderSupported(row.provider)));
 });
 
@@ -44,9 +44,9 @@ test("a new catalogue context window cannot silently admit an unparsed provider 
   const futurePlan = buildDevelopmentPlan({ corpus, models, source, createdAt: at, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
   const selected = futurePlan.rows.find((row) => row.modelId === "qwen3.7-max" && row.benchmarkEligibility.eligible);
   assert.ok(selected, "the fixture must pass the original static benchmark admission");
-  assert.equal(futurePlan.rows.length, 1008);
+  assert.equal(futurePlan.rows.length, 1032);
   assert.throws(() => buildCollectionManifest({ plan: futurePlan, models, collectorSource: source, selectedRowIds: [selected.rowId], limits }), /collector_provider_family_unsupported/);
-  assert.equal(plan.rows.filter((row) => row.benchmarkEligibility.eligible).length, 360);
+  assert.equal(plan.rows.filter((row) => row.benchmarkEligibility.eligible).length, 384);
   assert.equal(plan.rows.filter((row) => !row.benchmarkEligibility.eligible).length, 648);
 });
 
@@ -62,8 +62,8 @@ test("unavailable unsupported-provider observations remain held and block resume
   assert.equal(report.stopReason, "measurement_or_execution_unknown");
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.committedReservationMicroUsd, manifest.calls[0].reserve.reservedMicroUsd);
-  assert.equal(report.rows.length, 1008);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
+  assert.equal(report.rows.length, 1032);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 383);
   await collectDevelopment(input);
   assert.equal(calls, 1);
   await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
@@ -81,12 +81,12 @@ test("permanent reservations stop a selected population explicitly and completed
   assert.equal(report.dispatchIntents, 1);
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.actualInvoiceMicroUsd, null);
-  assert.equal(report.rows.length, 1008);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
+  assert.equal(report.rows.length, 1032);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 383);
   assert.equal(report.rows.filter((row) => row.selected).length, 2);
   assert.equal(report.rows.filter((row) => row.selected && row.outcome === "returned").length, 1);
   assert.equal(report.rows.filter((row) => row.selected && row.outcome === "not_run").length, 1);
-  assert.equal(report.rows.filter((row) => !row.selected && row.outcome === "not_run").length, 358);
+  assert.equal(report.rows.filter((row) => !row.selected && row.outcome === "not_run").length, 382);
   assert.equal(report.rows.filter((row) => row.outcome === "refused").length, 648);
   assert.ok(report.rows.filter((row) => row.outcome === "refused").every((row) => row.selected === false));
   assert.ok(report.rows.every((row) => typeof row.selected === "boolean"));
@@ -99,7 +99,7 @@ test("permanent reservations stop a selected population explicitly and completed
   const results = await exportDevelopmentCollection(input);
   assert.equal(results.rows[0].metrics.providerCostUsd, null);
   const score = scoreDevelopmentResults(corpus, plan, results);
-  assert.equal(score.summary.notRun, 359);
+  assert.equal(score.summary.notRun, 383);
   assert.equal(score.summary.correctnessRate, null);
 });
 
@@ -113,7 +113,7 @@ test("confirmed blank and invalid JSON answers remain returned records for the f
   assert.equal(score.summary.blank, 1);
   assert.equal(score.summary.invalidJson, 1);
   assert.equal(score.summary.submitted, 2);
-  assert.equal(score.summary.notRun, 358);
+  assert.equal(score.summary.notRun, 382);
 });
 
 test("unsupported billing on any terminal stops later rows and resume and refuses the whole export", async () => {
@@ -129,7 +129,7 @@ test("unsupported billing on any terminal stops later rows and resume and refuse
   const report = await collectDevelopment(input);
   assert.equal(report.stopReason, "measurement_or_execution_unknown");
   assert.equal(calls, 1);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 383);
   await collectDevelopment(input);
   assert.equal(calls, 1);
   await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
@@ -156,8 +156,8 @@ for (const [name, counters] of [
   assert.equal(report.terminalRecords, 1);
   assert.equal(report.committedReservationMicroUsd, first.reserve.reservedMicroUsd);
   assert.equal(report.actualInvoiceMicroUsd, null);
-  assert.equal(report.rows.length, 1008);
-  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
+  assert.equal(report.rows.length, 1032);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 383);
   const state = replayCollectionJournal(readFileSync(collectorPaths(temporary, approval.approvalId).ledger, "utf8"), manifest, approval);
   const terminal = state.attempts.get(first.rowId).terminal;
   assert.equal(terminal.tokenUsageAtFrozenRatesMicroUsd, null);

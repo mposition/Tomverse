@@ -14,6 +14,7 @@ import {
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNotificationsMessages } from "@/lib/adminMessages/notifications";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type AdminNotificationRow = {
   id: string;
@@ -151,7 +152,7 @@ export function AdminNotificationsPanel() {
           status,
         });
         if (cursor) params.set("cursor", cursor);
-        const response = await fetch(`/api/admin/notifications?${params}`, {
+        const response = await adminFetch(`/api/admin/notifications?${params}`, {
           cache: "no-store",
         });
         const data = (await response.json().catch(() => null)) as
@@ -242,7 +243,7 @@ export function AdminNotificationsPanel() {
     if (busyId) return;
     setBusyId(id);
     try {
-      const response = await fetch(`/api/admin/notifications/${id}`, {
+      const response = await adminFetch(`/api/admin/notifications/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "acknowledge" }),

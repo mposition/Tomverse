@@ -39,6 +39,7 @@ const koreanDescriptions: Record<string, string> = {
   "gemini-3-1-pro": "상세한 멀티모달 분석과 복잡한 문서",
   "gemini-2-5-pro": "이전 세대 멀티모달 분석",
   "gemini-2-5-flash": "빠른 문서 분석과 대량 일상 작업",
+  "gemini-flash-lite-latest": "빠른 문서 분석과 대량 일상 작업",
   // Retired ids keep their Korean blurbs so admin history and any surface
   // that resolves a stored conversation's model still reads in Korean. They
   // are never reachable from the picker itself.
@@ -448,7 +449,7 @@ export const getModelPickerFeatures = (
   // application-managed one whose backend this deployment cannot reach: the
   // badge tells the user this model answers from the live web, and a model that
   // will never be allowed to run a search does not.
-  if (modelWebSearchIsDispatchable(model.id, searchBackendReadiness)) {
+  if (modelWebSearchIsDispatchable(model, searchBackendReadiness)) {
     features.push("search");
   }
   if (model.reasoning && model.reasoning !== "none") features.push("reasoning");
@@ -484,7 +485,7 @@ export const modelMatchesCapability = (
     // The same answer the badge gives, from the same helper -- a filter that
     // admitted a model the badge would not mark would list rows with no reason
     // on them for being there.
-    return modelWebSearchIsDispatchable(model.id, searchBackendReadiness);
+    return modelWebSearchIsDispatchable(model, searchBackendReadiness);
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
   return ["mini", "flash", "haiku", "small", "lite", "luna"].some((term) =>

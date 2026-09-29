@@ -12,6 +12,7 @@ import {
   freezeAnimations,
   installChatModelStub,
   mockDeepResearchStatus,
+  GUEST_DAILY_CREDIT_LIMIT,
   mockGuestUsage,
   mockUserUsage,
   restoreActiveConversation,
@@ -55,14 +56,17 @@ test.beforeEach(async ({}, testInfo) => {
   );
 });
 
-/** 2 of these 3 can search on a request -- gpt-5-4-mini cannot, so the
- *  composer sits in the partial-support state the contract calls out. */
-const MODEL_A = "gpt-5-4-mini";
+const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
+/** 2 of these 3 can search on a request -- Deep Research cannot, so the
+ *  composer sits in the partial-support state the contract calls out. Every
+ *  chat model searches by one route or another since 2026-09-29; Deep
+ *  Research runs its own retrieval flow and never takes the switch. */
+const MODEL_A = DEEP_RESEARCH_MODEL;
 const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gpt-5-6-luna";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
-/** Neither of these can search: the fully blocked state. */
-const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
+/** None of these can search: the fully blocked state. */
+const NO_SEARCH_MODELS = [DEEP_RESEARCH_MODEL];
 /**
  * All three dispatchable: the full-support state.
  *
@@ -75,7 +79,6 @@ const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
  * than pixels.
  */
 const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gpt-5-6-luna"];
-const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 
 /** The contract's floor: the input keeps ~all of the composer's inner width. */
 const MIN_WIDTH_RATIO = 0.9;
@@ -127,8 +130,18 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
     await installChatModelStub(page, {
       [DEEP_RESEARCH_MODEL]: { kind: "async-job", jobId: "qa-job-progress" },
     });
-    await mockUserUsage(page, { plan: "Pro" });
     await mockDeepResearchStatus(page, "hold");
+  }
+  if (deepResearch || models.includes(DEEP_RESEARCH_MODEL)) {
+    // Deep Research is a Pro model; on the default Free account it would be
+    // trimmed from the selection before the composer ever saw it. Pro's own
+    // 300-credit day, because Deep Research's 16 plus two searching models'
+    // reservations is more than the fixture's default 30.
+    await mockUserUsage(page, {
+      plan: "Pro",
+      balances: { dailyRemainingCredits: 300 },
+      limits: { creditsDay: 300 },
+    });
   }
 
   await page.setViewportSize(viewport);
@@ -148,7 +161,7 @@ async function startDeepResearch(page: Page) {
   await page.getByTestId("deep-research-confirm-start").click();
   // Wait for the sheet (and its full-screen backdrop) to actually close.
   await expect(page.getByTestId("deep-research-confirm-start")).toHaveCount(0);
-  // This fixture starts at the model cap (THREE_MODELS, Pro), so the run has
+  // This fixture starts at the model cap (ALL_SEARCH_MODELS, Pro), so the run has
   // no free slot and asks which model to give up rather than dropping one on
   // the user's behalf -- the panels are drawn from `selectedModels`, and a
   // dropped model takes its answers out of the conversation. Choosing here is
@@ -493,7 +506,11 @@ test.describe("Mobile composer: two chips at once", { tag: "@ui-risk" }, () => {
     test(`${width}px wraps a second chip instead of taking the input row`, async ({
       page,
     }) => {
+      // Three models that search, at the cap: the run has to ask which one to
+      // give up (see startDeepResearch). The default fixture already holds
+      // Deep Research as its model that cannot search, so it would not ask.
       await enterMobileComposer(page, {
+        models: ALL_SEARCH_MODELS,
         viewport: { width, height: 680 },
         deepResearch: true,
       });
@@ -1180,7 +1197,7 @@ async function enterGuestMobileComposer(
 ) {
   const { lang = "ko", viewport } = options;
   await prepareGuestPage(page, "en");
-  await mockGuestUsage(page, 0, 20);
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   const upload = await mockGuestAttachmentUpload(page, {
     failWith: options.uploadFailure,
   });

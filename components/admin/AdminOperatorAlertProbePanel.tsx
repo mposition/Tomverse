@@ -10,6 +10,7 @@ import type {
   OperatorAlertPath,
   OperatorAlertProbeResult,
 } from "@/lib/operatorAlertProbeCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * Test sends through the two operator-alert email paths.
@@ -51,7 +52,7 @@ export function AdminOperatorAlertProbePanel() {
   const run = async (path: OperatorAlertPath) => {
     setRunning(path);
     try {
-      const response = await fetch("/api/admin/email-alert-probe", {
+      const response = await adminFetch("/api/admin/email-alert-probe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path }),

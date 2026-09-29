@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Command, FileClock, Loader2, Pin, Search, X } from "lucide-react";
-import { ADMIN_NAV_GROUPS } from "@/lib/adminNavigation";
+import type { AdminRole } from "@/lib/adminAuthCore";
+import { ADMIN_NAV_GROUPS, adminHrefIsVisibleTo } from "@/lib/adminNavigation";
 import {
   adminNavGroupLabel,
   localizeAdminPageMeta,
@@ -15,6 +16,7 @@ import { adminShellMessages } from "@/lib/adminMessages/shell";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNavIcon } from "@/components/admin/adminNavigationIcons";
 import { useAdminConsolePreferences } from "@/components/admin/AdminConsolePreferences";
+import { adminFetch } from "@/lib/adminFetch";
 
 type SearchResult = {
   type: string;
@@ -63,12 +65,22 @@ const pageOption = (page: LocalizedAdminSearchablePage, prefix: string): Option 
  * That is what lets the query, the fetched records and the keyboard cursor
  * reset without an effect that writes state on every `open` transition.
  */
-export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
+export function AdminCommandPalette({
+  onClose,
+  role,
+}: {
+  onClose: () => void;
+  /** Pages this role may not open are neither listed nor matched. */
+  role: AdminRole;
+}) {
   const router = useRouter();
   const { pinned, recent } = useAdminConsolePreferences();
   const { locale } = useAdminLocale();
   const m = useAdminMessages(adminShellMessages).palette;
-  const searchablePages = useMemo(() => localizedAdminSearchablePages(locale), [locale]);
+  const searchablePages = useMemo(
+    () => localizedAdminSearchablePages(locale, role),
+    [locale, role]
+  );
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -108,7 +120,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
     queueMicrotask(() => setSearching(true));
     searchTimer.current = setTimeout(async () => {
       try {
-        const response = await fetch(
+        const response = await adminFetch(
           `/api/admin/search?q=${encodeURIComponent(normalized)}&take=6`,
           { cache: "no-store" }
         );
@@ -174,8 +186,8 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
     const recentOptions = recent
       .map((path) => ({ path, meta: localizeAdminPageMeta(path, locale) }))
       // A recent route the table no longer describes is dropped rather than
-      // shown under a borrowed title.
-      .filter(({ meta }) => meta.isKnown)
+      // shown under a borrowed title, and so is one this role may not open.
+      .filter(({ path, meta }) => meta.isKnown && adminHrefIsVisibleTo(role, path))
       .map(({ path, meta }) => ({
         key: `recent:${path}`,
         href: path,
@@ -215,7 +227,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
         ),
       },
     ].filter((section) => section.options.length > 0);
-  }, [isSearch, locale, m, normalized, pinned, recent, results, searchablePages, searching]);
+  }, [isSearch, locale, m, normalized, pinned, recent, results, role, searchablePages, searching]);
 
   const options = useMemo(
     () => sections.flatMap((section) => section.options),

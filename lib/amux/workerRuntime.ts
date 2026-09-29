@@ -3,10 +3,18 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
-import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import {
+  AMUX_DB_BOUNDARIES,
+  amuxBoundaryWithAttachment,
+  withAmuxDbBoundary,
+  type AmuxAttachment,
+} from "@/lib/amux/dbBoundary";
 import { AMUX_PRISMA_INT_MAX } from "@/lib/amux/claimContract";
 
 export const AMUX_WORKER_RUNTIME_LEASE_MS = 90_000;
+
+/** What an attachment to a registration sees: the generation it created. */
+export type AmuxWorkerRegisteredFact = { workerName: string; generation: number };
 
 export type AmuxWorkerRuntimeStatus =
   "starting" | "idle" | "busy" | "error" | "stopped";
@@ -38,9 +46,10 @@ export async function registerAmuxWorkerRuntime(
   workerName: string,
   instanceId: string,
   suppliedNow?: Date,
+  attachment?: AmuxAttachment<AmuxWorkerRegisteredFact>,
 ): Promise<RegisterRow> {
   const rows = await withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.workerRegister,
+    amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.workerRegister, attachment),
     async (tx, context) => {
       const now = suppliedNow ?? context.dbNow;
       const leaseExpiresAt = leaseExpiry(now);
@@ -101,6 +110,13 @@ export async function registerAmuxWorkerRuntime(
           },
           tx,
         });
+        if (attachment) {
+          await attachment.work(
+            context.attachedTransaction,
+            { workerName, generation: registered[0].generation },
+            { dbNow: context.dbNow },
+          );
+        }
       }
       return registered;
     },

@@ -32,6 +32,8 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
+import { splitPreflightImageTokens } from "@/lib/chatImageInputTokens";
+import { countableChatErrorDetails } from "@/lib/chatRequestRejectionLog";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
 import {
     isExternalContinuationEnabledCached,
@@ -416,7 +418,7 @@ export async function POST(request: Request) {
             // `nativeSearchEnabled`, so computing it from the raw mode would
             // report a forced search on a model whose search is not native --
             // and the artifact tool is refused on precisely that combination.
-            const modelSearchCapability = getWebSearchCapability(model.id);
+            const modelSearchCapability = getWebSearchCapability(model);
             // `nativeSearchIsDispatchable`, exactly as the chat route derives
             // it: a native capability with no enforceable per-request cost
             // ceiling attaches no tool, so priced as though it did this quote
@@ -466,10 +468,17 @@ export async function POST(request: Request) {
                         : message.role === "assistant" && message.modelId === model.id;
                 if (belongsToModel) estimate.addText(message.content);
             }
-            const attachmentTokens = estimatePreflightAttachmentTokens(
-                model,
+            // Images count against the limit at their provider's ceiling --
+            // never below what the chat route will compute from the real
+            // pixels, so this stays the stricter of the two -- and reserve the
+            // rest of the flat allowance, so the quote is unchanged.
+            const imageTokens = splitPreflightImageTokens(
+                model.provider,
                 payload.attachments
             );
+            const attachmentTokens =
+                estimatePreflightAttachmentTokens(model, payload.attachments) -
+                imageTokens.reservationOnlyInputTokens;
             // Attachment cost is a per-model estimate, not text.
             estimate.addTokens(attachmentTokens);
             const breakdown = atLeastOneToken(estimate.breakdown());
@@ -513,6 +522,8 @@ export async function POST(request: Request) {
                     appManagedSearchEnabled: modelAppManagedSearchEnabled,
                     nativeSearch: nativeSearchReservation.native,
                     searchBackend: nativeSearchReservation.searchBackend,
+                    reservationOnlyInputTokens:
+                        imageTokens.reservationOnlyInputTokens,
                 }
             );
         });
@@ -668,6 +679,26 @@ export async function POST(request: Request) {
                         traceId,
                         code: error.code,
                         status: error.status,
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            } else if (
+                error instanceof ChatAccessError &&
+                !isChatCostSafetyCode(error.code)
+            ) {
+                // Every other refusal, the same line the chat route writes,
+                // so a trace from a refused comparison is never an empty log.
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_request_rejected",
+                        phase: "comparison_preflight",
+                        traceId,
+                        code: error.code,
+                        status: error.status,
+                        modelIds: modelIdsForLog,
+                        inputTokensByModel: inputTokensByModelForLog,
+                        plan: refusalSubjectForLog?.plan ?? null,
+                        ...countableChatErrorDetails(error.details),
                         timestamp: new Date().toISOString(),
                     })
                 );

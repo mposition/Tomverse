@@ -2265,6 +2265,7 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
   @@index([createdAt, entryHash])
+  engineeringAgentApprovals EngineeringAgentApproval[]
 }
 
 model AdminActionApproval {
@@ -7063,6 +7064,8 @@ model AmuxWorkItem {
   @@index([projectKey, status, owner])
   @@index([teamKey, status, owner])
   @@index([dueAt, status])
+  engineeringAgentRuns          EngineeringAgentRun[]          @relation("EngineeringAgentRunCard")
+  engineeringAgentRegistrations EngineeringAgentRegistration[] @relation("EngineeringAgentRegistrationCard")
 }
 
 model AmuxWorkDependency {
@@ -7119,6 +7122,7 @@ model AmuxExecutionAttempt {
   @@index([taskId, startedAt])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+  engineeringAgentRun EngineeringAgentRun?
 }
 
 model AmuxCostLedgerEntry {
@@ -7681,6 +7685,8 @@ model AmuxRecommendationCapacity {
 }
 
 /// Immutable recommendation view. Preparing one does not change a card status.
+/// The auto-promotion tick writes a one-row system snapshot inside its consume
+/// transaction (actorUserId `system:amux-auto-promoter`, policyVersion 15).
 model AmuxRecommendationSnapshot {
   id                      String    @id
   status                  String
@@ -7748,8 +7754,10 @@ model AmuxRecommendationDecision {
   @@unique([snapshotId, workItemId])
 }
 
-/// One human pre-approval for a later auto-promotion. Version 8 inserts no
-/// row from the public route. A grant does not change the card.
+/// One human pre-approval for a later auto-promotion. A grant does not change
+/// the card. Since orchestration policy version 15 a grant binds one promotion
+/// item and one cent amount (1..500); the three binding columns are null
+/// together on a legacy row, which the system tick never consumes.
 model AmuxRecommendationAutoGrant {
   id                      String   @id
   workItemId              String
@@ -7759,16 +7767,41 @@ model AmuxRecommendationAutoGrant {
   requestDigest           String
   grantedAt               DateTime
   expiresAt               DateTime
+  itemBindings            Json?
+  itemBindingsDigest      String?
+  amountCents             Int?
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
   workItem     AmuxWorkItem                        @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   consumptions AmuxRecommendationAutoConsumption[]
+  unknowns     AmuxRecommendationAutoUnknown[]
 
   @@index([workItemId, status])
 }
 
-/// One consumed auto-promotion. Version 8's public route does not insert a row.
+/// One lost auto-promotion consume outcome, written by read-back after the
+/// caller could not tell whether the consume committed. The id is the
+/// consumption id that was attempted; `consumptionFound` is what the read-back
+/// saw. It counts toward the halt rule and keeps its grant from being consumed
+/// again. The actor is on the linked audit row, so this table stores no user id.
+model AmuxRecommendationAutoUnknown {
+  id                      String   @id
+  grantId                 String?
+  consumptionFound        Boolean
+  authorizationAuditLogId String   @unique
+  recordedAt              DateTime
+  createdAt               DateTime @default(now())
+
+  grant AmuxRecommendationAutoGrant? @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([grantId])
+  @@index([recordedAt])
+}
+
+/// One consumed auto-promotion, by the owner route or by the system tick
+/// (actorUserId `system:amux-auto-promoter`, no User foreign key). Each row has
+/// exactly one cost entry written in the same transaction.
 model AmuxRecommendationAutoConsumption {
   id                      String    @id
   grantId                 String    @unique
@@ -7790,7 +7823,8 @@ model AmuxRecommendationAutoConsumption {
   @@index([workItemId, status])
 }
 
-/// Operational USD cents for the auto-promotion path. Version 8 writes none.
+/// Operational USD cents for the auto-promotion path. Since version 15 every
+/// consumption writes one row in its own transaction, at the transaction clock.
 model AmuxRecommendationAutoCostEntry {
   id            String   @id
   consumptionId String   @unique
@@ -7801,7 +7835,9 @@ model AmuxRecommendationAutoCostEntry {
   consumption AmuxRecommendationAutoConsumption @relation(fields: [consumptionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 }
 
-/// An open halt has clearedAt null. Version 8 has no resume writer.
+/// An open halt has clearedAt null. Since version 15 the owner's resume writer
+/// sets clearedAt, and the system tick may open one (actorUserId
+/// `system:amux-auto-promoter`, no User foreign key).
 model AmuxRecommendationAutoHalt {
   id                      String    @id
   reason                  String
@@ -7928,4 +7964,178 @@ model AmuxIntakeApproval {
   @@index([status, createdAt])
   @@index([actorUserId, createdAt])
   @@index([workItemId])
+}
+
+/// The commit deadline of one AMUX mutation transaction (orchestration policy
+/// version 18). The fence in lib/amux/dbBoundary.ts inserts the row as that
+/// transaction's last statement; the deferred constraint trigger
+/// `amux_commit_deadline_check` runs during its COMMIT, fails the COMMIT with
+/// SQLSTATE AX001 once the database clock has reached `deadline`, and
+/// otherwise deletes the row. The function and trigger exist only in migration
+/// 20260929200000_amux_commit_deadline_check; `prisma db push` creates neither.
+model AmuxCommitDeadline {
+  /// txid_current() of the transaction that inserted the row.
+  txid      BigInt   @id
+  deadline  DateTime @db.Timestamptz(3)
+  operation String
+}
+
+/// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
+/// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
+/// migration 20260928120000_engineering_agent_state, which also holds the
+/// foreign keys to AMUX and to the audit log that are not modelled here.
+model EngineeringAgentRun {
+  id             String    @id
+  amuxAttemptId  String    @unique
+  cardId         String
+  cardKind       String
+  baseSha        String
+  status         String    @default("active")
+  outcome        String?
+  halt           String    @default("none")
+  /// The mode the run started under, read by the insert trigger from AppSetting.
+  modeAtStart    String    @default("off")
+  startedAt      DateTime  @default(now())
+  leaseExpiresAt DateTime
+  endedAt        DateTime?
+
+  attempt   AmuxExecutionAttempt       @relation(fields: [amuxAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  card      AmuxWorkItem               @relation("EngineeringAgentRunCard", fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workItems EngineeringAgentWorkItem[]
+  bindings  EngineeringAgentBinding[]
+
+  @@index([status, leaseExpiresAt])
+  @@index([endedAt])
+  @@index([modeAtStart, startedAt])
+}
+
+model EngineeringAgentWorkItem {
+  id             String    @id
+  kind           String
+  state          String
+  causeKey       String    @unique
+  runId          String?
+  patchBody      String?
+  patchDigest    String?
+  baseSha        String?
+  expectedTreeId String?
+  reason         String?
+  claimMode      String?
+  fencingToken   BigInt    @default(0)
+  leaseExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  closedAt       DateTime?
+
+  run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approval   EngineeringAgentApproval?
+  capabilities EngineeringAgentCapability[]
+
+  @@index([kind, state])
+  @@index([runId])
+  @@index([state, leaseExpiresAt])
+}
+
+/// A T2 decision and nothing else: written once, before the draft closes.
+model EngineeringAgentApproval {
+  id          String   @id
+  workItemId  String   @unique
+  decision    String
+  patchDigest String
+  baseSha     String
+  actorUserId String
+  auditLogId  String   @unique
+  decidedAt   DateTime @default(now())
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Permission for one publish: issued once, consumed at most once, then immutable.
+model EngineeringAgentCapability {
+  id                   String    @id
+  workItemId           String
+  /// The work item while this capability is live (unconsumed, unlapsed); the
+  /// unique constraint is one live capability per item. Written by the trigger.
+  unconsumedWorkItemId String?   @unique
+  baseSha           String
+  patchDigest       String
+  expectedTreeId    String
+  verifierVersion   Int
+  policyVersion     Int
+  branch            String
+  commitDigest      String
+  issuedAt          DateTime  @default(now())
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  claimFencingToken BigInt?
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workItemId])
+}
+
+/// A published pull request as the app bound it. The snapshot never changes; a
+/// replacement is a new row, and `currentPrNumber` (set by the trigger while a
+/// row is not superseded) keeps one current row per pull request.
+model EngineeringAgentBinding {
+  id                  String    @id
+  runId               String
+  prNumber            Int
+  headSha             String
+  verifiedHeadSha     String
+  ref                 String
+  state               String    @default("open")
+  snapshot            Json
+  approvalObservation Json?
+  mergeObservation    Json?
+  reviewerGithubId    BigInt?
+  reviewerLogin       String?
+  reviewerRecordedAt  DateTime?
+  supersededAt        DateTime?
+  currentPrNumber     Int?      @unique
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  run EngineeringAgentRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([runId])
+  @@index([state])
+}
+
+/// A registration proposal's source, digests and result; never its body.
+model EngineeringAgentRegistration {
+  id             String    @id
+  source         String
+  pinnedCommit   String
+  itemKey        String
+  itemDigest     String
+  proposalDigest String
+  guardResult    String
+  roundId        String
+  result         String    @default("pending")
+  amuxCardId     String?
+  createdAt      DateTime  @default(now())
+  decidedAt      DateTime?
+  resolvedAt     DateTime?
+
+  amuxCard AmuxWorkItem? @relation("EngineeringAgentRegistrationCard", fields: [amuxCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([source, itemKey, itemDigest])
+  @@index([roundId])
+  @@index([result, createdAt])
+}
+
+/// Internal request idempotency.
+model EngineeringAgentRequest {
+  key           String   @id
+  route         String
+  requestDigest String
+  state         String   @default("accepted")
+  /// The run a start created or the item a claim took; set once, with `committed`.
+  resultRef     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([state, createdAt])
 }

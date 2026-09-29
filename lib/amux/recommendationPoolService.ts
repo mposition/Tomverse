@@ -20,6 +20,7 @@ import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from "@/lib/amux/
 import {
   RECOMMENDATION_APPLY_ENV,
   RECOMMENDATION_AUDIT_KEYS,
+  RECOMMENDATION_CAPACITY_AUDIT_KEYS,
   RECOMMENDATION_CAPACITY_ID,
   RECOMMENDATION_CODE_LATCH,
   RECOMMENDATION_EXPIRY_MS,
@@ -31,6 +32,7 @@ import {
   type RecommendationCardFact,
   type RecommendationDecisionRequest,
   type RecommendationRow,
+  parseRecommendationCapacityRequest,
   parseRecommendationDecisionRequest,
   parseRecommendationPrepareRequest,
   recommendationApplyPermitted,
@@ -45,12 +47,13 @@ import { prisma } from "@/lib/prisma";
 /**
  * Recommendation pool writer.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 7).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 11).
+ * Decision requests stay at policy version 7.
  *
  * Preview writes nothing. Prepare and decide throw before a transaction unless
- * the environment value is exactly enabled and the shipped code latch is true.
- * Version 7 ships that latch false. This file does not insert a capacity row,
- * start a worker, or spend credits.
+ * the environment value is exactly enabled and the code latch is true.
+ * Capacity writes the single queue row from the owner request. It does not
+ * choose a limit, change a card, start a worker, or spend credits.
  */
 
 const TARGET_TYPE = "AmuxRecommendationSnapshot";
@@ -63,6 +66,7 @@ const summaries: Record<string, string> = {
   "amux.recommendation.expired": "Expired an AMUX recommendation snapshot.",
   "amux.recommendation.consumed": "Consumed an AMUX recommendation approval.",
   "amux.recommendation.outcome_unknown": "Recorded an unknown AMUX recommendation outcome.",
+  "amux.recommendation_capacity.updated": "Recorded the AMUX recommendation capacity row.",
 };
 
 const actorId = (session: Session): string => {
@@ -126,7 +130,7 @@ const withRecommendationTransaction = async <T>(
 const requireBoundAudit = async (
   tx: Prisma.TransactionClient,
   auditId: string,
-  expected: { actorUserId: string; action: string; targetId: string },
+  expected: { actorUserId: string; action: string; targetId: string; targetType: string; keys: readonly string[] },
 ) => {
   const row = await tx.adminAuditLog.findUnique({
     where: { id: auditId },
@@ -148,7 +152,7 @@ const requireBoundAudit = async (
   if (
     !row ||
     row.action !== expected.action ||
-    row.targetType !== TARGET_TYPE ||
+    row.targetType !== expected.targetType ||
     row.targetId !== expected.targetId ||
     typeof row.entryHash !== "string" ||
     !SHA256.test(row.entryHash) ||
@@ -166,7 +170,7 @@ const requireBoundAudit = async (
     ? (row.metadata as Record<string, unknown>)
     : {};
   for (const key of Object.keys(metadata)) {
-    if (!(RECOMMENDATION_AUDIT_KEYS as readonly string[]).includes(key)) {
+    if (!expected.keys.includes(key)) {
       throw new BoardImportError("audit_unbound", 500, expected.targetId);
     }
   }
@@ -196,20 +200,58 @@ const writeHumanAudit = async (
   request: Request,
   action: string,
   targetId: string,
-  metadata: Record<string, string | number | null>,
+  metadata: Record<string, string | number | boolean | null>,
+  targetType = TARGET_TYPE,
+  keys: readonly string[] = RECOMMENDATION_AUDIT_KEYS,
 ) => {
   const auditId = await writeAdminAuditLog({
     session,
     request,
     action,
-    targetType: TARGET_TYPE,
+    targetType,
     targetId,
     summary: summaries[action] ?? "Recorded an AMUX recommendation.",
     metadata,
     tx,
   });
-  await requireBoundAudit(tx, auditId, { actorUserId: actorId(session), action, targetId });
+  await requireBoundAudit(tx, auditId, { actorUserId: actorId(session), action, targetId, targetType, keys });
   return auditId;
+};
+
+export async function configureRecommendationCapacity(input: {
+  session: Session;
+  request: Request;
+  raw: string;
+}): Promise<{ id: "queue"; active: boolean; wipLimit: number }> {
+  const parsed = parseRecommendationCapacityRequest(input.raw);
+  if (!parsed.ok) throw new BoardImportError(parsed.code, 400);
+  const body = parsed.request;
+  return withRecommendationTransaction(null, async (tx) => {
+    await writeHumanAudit(
+      tx,
+      input.session,
+      input.request,
+      "amux.recommendation_capacity.updated",
+      RECOMMENDATION_CAPACITY_ID,
+      { active: body.active, wipLimit: body.wipLimit },
+      "AmuxRecommendationCapacity",
+      RECOMMENDATION_CAPACITY_AUDIT_KEYS,
+    );
+    const written = await tx.amuxRecommendationCapacity.upsert({
+      where: { id: RECOMMENDATION_CAPACITY_ID },
+      create: { id: RECOMMENDATION_CAPACITY_ID, active: body.active, wipLimit: body.wipLimit },
+      update: { active: body.active, wipLimit: body.wipLimit },
+      select: { id: true, active: true, wipLimit: true },
+    });
+    if (
+      written.id !== RECOMMENDATION_CAPACITY_ID ||
+      written.active !== body.active ||
+      written.wipLimit !== body.wipLimit
+    ) {
+      throw new BoardImportError("audit_unbound", 500);
+    }
+    return { id: "queue", active: body.active, wipLimit: body.wipLimit };
+  });
 };
 
 const loadCards = async (db: Db, now: Date): Promise<RecommendationCardFact[]> => {
@@ -326,6 +368,39 @@ const selectionFor = async (db: Db, now: Date) => {
   return selectRecommendationRows({ cards, capacity, occupied, blocksAdmission, now });
 };
 
+/**
+ * The version 7 selection inside the caller's transaction. The caller already
+ * holds the `tomverse-amux-recommendation:queue` advisory lock. The
+ * auto-promotion system consume (orchestration policy version 15) builds its
+ * one-row snapshot from this, so it uses the same filter as prepare.
+ */
+export const recommendationSelectionLocked = (tx: Prisma.TransactionClient, now: Date) => selectionFor(tx, now);
+
+/**
+ * The included rows carry what an approve item must repeat (revision and
+ * source digest), and the excluded rows carry their exclusion code, so the
+ * owner can build a decision from the screen instead of a database read.
+ * Titles, source keys and briefs stay out of this view.
+ */
+const includedView = (rows: readonly RecommendationRow[]) =>
+  rows
+    .filter((row) => row.disposition === "included")
+    .map((row) => ({
+      cardId: row.cardId,
+      scoreTotal: row.scoreTotal,
+      expectedRevision: row.expectedRevision,
+      sourceDigest: row.sourceDigest,
+    }));
+
+const excludedView = (rows: readonly RecommendationRow[]) =>
+  rows
+    .filter((row) => row.disposition !== "included")
+    .map((row) => ({
+      cardId: row.cardId,
+      scoreTotal: row.scoreTotal,
+      exclusionCode: row.exclusionCode,
+    }));
+
 const viewOf = (
   selection: ReturnType<typeof selectRecommendationRows>,
   applyPermitted: boolean,
@@ -337,13 +412,8 @@ const viewOf = (
   wipLimit: selection.wipLimit,
   includedCount: selection.includedCount,
   excludedCount: selection.rows.length - selection.includedCount,
-  included: selection.rows
-    .filter((row) => row.disposition === "included")
-    .map((row) => ({
-      cardId: row.cardId,
-      scoreTotal: row.scoreTotal,
-      expectedRevision: row.expectedRevision,
-    })),
+  included: includedView(selection.rows),
+  excluded: excludedView(selection.rows),
   workerCapacity: "closed" as const,
   classificationCapacity: "closed" as const,
 });
@@ -371,6 +441,7 @@ export async function previewRecommendation(raw: string) {
         includedCount: 0,
         excludedCount: 0,
         included: [],
+        excluded: [],
         workerCapacity: "closed" as const,
         classificationCapacity: "closed" as const,
       };
@@ -442,6 +513,7 @@ export async function commitRecommendationSnapshot(
     includedCount: selection.includedCount,
     rowCount: selection.rows.length,
     applyPermitted: true,
+    included: includedView(selection.rows),
   };
 }
 

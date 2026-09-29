@@ -25,7 +25,12 @@ const GUEST_DEFAULT_MODEL_ID = "gpt-5-6-luna";
 // The OpenAI slot moved from gpt-5-4-mini to gpt-5-6-luna with the default
 // switch. Both are Guest-tier Standard models at 1 credit, so the trio still
 // costs a guest exactly 3 credits per comparison.
-export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
+//
+// The Gemini slot moved from gemini-2-5-flash to gemini-flash-lite-latest on
+// 2026-09-28. The old id stays in the catalogue; this only changes which
+// Google model a new guest comparison opens with. The lead stays
+// gpt-5-6-luna unless an administrator reorders the trio.
+export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-flash-lite-latest"];
 
 // Backstops used only if one of the brand trio above is itself disabled or
 // ineligible, so the guest default still comes out to 3 distinct models
@@ -77,9 +82,20 @@ export const APP_DEFAULTS = {
 
   maxSelectedModels: 3,
   maxGuestSelectedModels: 3,
-  maxGuestMessages: 20,
+  // The guest daily and monthly credit allowances, raised from 20/100 on
+  // 2026-09-29 alongside search-on-by-default: a searching three-model
+  // comparison reserves 3 + 8 x 3 = 27 credits, so the old 20 refused a
+  // guest's very first turn. `lib/chatSecurity.ts` enforces these as its
+  // defaults (`CHAT_GUEST_PER_DAY` / `CHAT_GUEST_PER_MONTH` still override).
+  maxGuestMessages: 50,
+  maxGuestMonthlyCredits: 300,
 
-  defaultWebSearchMode: "off",
+  // The mode a *new* conversation starts in, for guests and signed-in
+  // accounts alike: search on, for answer quality (approved 2026-09-29).
+  // Only a starting position -- the switch stays one click away, a stored
+  // conversation keeps its own mode, and a stored "auto" or an unreadable
+  // value still reads as off (see `normalizeWebSearchMode`).
+  defaultWebSearchMode: "always",
 } as const;
 
 // Per-conversation, not per-message -- see components/chat/ChatInput.tsx's

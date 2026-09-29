@@ -30,8 +30,12 @@ canonical checklist다.
   origin을 `TOMVERSE_AMUX_REVIEW_INTERNAL_ORIGIN`에 설정한다. readiness는 명시적
   port가 Railway의 `PORT`와 같고 hostname이 `127.0.0.1` 또는 같은 app service의
   `RAILWAY_PRIVATE_DOMAIN`과 정확히 같지 않으면 fail-closed다.
-- Phase A production build에서는 execution API가 코드에서 hard-disabled다.
-  flag 변경만으로 D의 future lifecycle을 시험하거나 활성화할 수 없다.
+- 정책 버전 18부터 execution API는 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`(true로
+  출고)와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`(trim 후 정확히 `1`)가 모두 참일 때만
+  열린다. `NODE_ENV`와 무관하므로 flag를 켜면 production에서도 claim·시작·정산·
+  delivery가 실제로 열린다. local process executor는 여전히 코드에서 금지다.
+- 운영 보류(코드가 아니라 사람의 규칙): DB의 late COMMIT 성공 기록 방지가 증명되기
+  전에는 staging 검증 목적으로 flag를 켜지 않는다.
 - 검증 과정에서 production DB를 직접 수정하지 않는다.
 - secret/token 값은 기록에 복사하지 않는다.
 - execution(Stage 2)으로 갈 회차라면 `docs/ops/amux/executor-protocol.md`의
@@ -79,7 +83,8 @@ AMUX orchestrator가 완전히 꺼진 상태를 먼저 검증한다.
 Phase A deployment에서는 local execution을 허용할 수 없으므로 `n/a`로 기록하고
 그 근거(하드 비활성, server `execution_ready=false`)를 적는다. DB final fence와
 COMMIT 사이 경합, 불명확한 commit read-back, 실제 DB 통합 회귀가 해결되기
-전에는 D를 통과로 올리거나 execution code gate를 해제하지 않는다.
+전에는 D를 통과로 올리지 않는다. 버전 18의 code latch는 true로 출고되므로, 이 보류는
+flag를 켜지 않는 운영 규칙으로 지킨다.
 
 - [ ] worker runtime identity가 instance id + generation으로 fenced된다.
 - [ ] stale/replacement generation은 heartbeat/settlement 권한을 잃는다.

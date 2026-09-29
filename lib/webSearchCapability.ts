@@ -12,11 +12,13 @@
 // 4.0.8, which export openai.tools.webSearch, anthropic.tools.webSearch_20250305,
 // and google.tools.googleSearch respectively). Any catalog model whose
 // support could not be confirmed against those docs is deliberately left
-// as "unverified" rather than assumed -- see STG web-search-native task
+// off the native tool rather than assumed -- see STG web-search-native task
 // notes for the exact sources checked. Groq and xAI expose separate
 // provider-side search products, but this app routes them through plain
-// Chat Completions without those server tools, so their models intentionally
-// remain unsupported here.
+// Chat Completions without those server tools, so they never get a native
+// entry. Models without one -- including every model adopted through the
+// Provider Model Catalogue -- search through the application-managed backend
+// instead; see `inferredWebSearchCapability`.
 
 import {
   APP_MANAGED_SEARCH_LIMITS,
@@ -24,6 +26,7 @@ import {
   type WebSearchBackend,
   type WebSearchBackendReadiness,
 } from "@/lib/webSearchBackends";
+import { getModel } from "@/lib/models";
 
 export type WebSearchSupport =
   /** The model's own provider ships the search tool and runs it. */
@@ -293,13 +296,6 @@ const SEARCH_MODEL: WebSearchCapability = {
   hasAdditionalCost: false,
 };
 
-const UNVERIFIED: WebSearchCapability = {
-  support: "unverified",
-  canForceExecution: false,
-  returnsCitations: false,
-  hasAdditionalCost: false,
-};
-
 const UNSUPPORTED: WebSearchCapability = {
   support: "unsupported",
   canForceExecution: false,
@@ -315,8 +311,11 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   "gpt-5-6-luna": NATIVE_OPENAI,
   "gpt-5-5": NATIVE_OPENAI,
   "gpt-5-5-thinking": NATIVE_OPENAI,
-  // apiModel "gpt-5.4-mini" is not in the confirmed-supported list above.
-  "gpt-5-4-mini": UNVERIFIED,
+  // apiModel "gpt-5.4-mini" is not in the confirmed-supported list above, so
+  // it does not get OpenAI's native tool. It searches through the
+  // application-managed backend instead, which needs only function calling --
+  // verified for this model in lib/generatedArtifactToolPolicy.ts.
+  "gpt-5-4-mini": APP_MANAGED_BRAVE,
 
   // Anthropic -- web_search_20250305 is GA and enabled per-organization
   // rather than narrowly model-gated; confirmed for all four current-
@@ -339,8 +338,11 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   "gemini-3-1-pro": APP_MANAGED_BRAVE,
   // Stable Tomverse ID; upstream apiModel is gemini-3.5-flash-lite.
   "gemini-2-5-flash": APP_MANAGED_BRAVE,
-  // Disabled in the catalog; left out entirely (falls through to unsupported
-  // via the lookup fallback) since it can't be selected today anyway.
+  // Unversioned alias. Same application-managed search path as the other
+  // active Google chat models; Google's own grounding stays undispatchable.
+  "gemini-flash-lite-latest": APP_MANAGED_BRAVE,
+  // Disabled Google entries are left out; the lookup fallback gives them the
+  // same application-managed route should they ever be re-enabled.
 
   // Perplexity search-capable chat models search unconditionally as part of
   // normal completion -- no AI SDK tool involved, unchanged by this feature.
@@ -351,8 +353,81 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   // flow and never reaches the "always" web-search-mode code path.
 };
 
-export const getWebSearchCapability = (modelId: string): WebSearchCapability =>
-  WEB_SEARCH_CAPABILITIES[modelId] ?? UNSUPPORTED;
+/** The register's own answer, or undefined for a model it does not list. */
+const registeredWebSearchCapability = (modelId: string): WebSearchCapability | undefined =>
+  WEB_SEARCH_CAPABILITIES[modelId];
+
+/**
+ * What a caller can tell this module about a model.
+ *
+ * A bare id is enough for a model in the compiled catalogue, because the
+ * provider is looked up from there. A model adopted at runtime through the
+ * Provider Model Catalogue exists only as a registry row, so a caller that
+ * holds the row passes it (or any object with `id`, `provider` and `apiModel`)
+ * and the provider is read from it.
+ */
+export type WebSearchModelRef =
+  | string
+  | { id: string; provider?: string | null; apiModel?: string | null };
+
+/**
+ * Providers whose models never search through the application-managed tool.
+ *
+ * Perplexity's chat models already search inside every completion, and its
+ * deep-research model runs through a separate flow; a function tool on top of
+ * either would be a second search the user pays for twice.
+ */
+const SEARCH_MODEL_PROVIDERS: ReadonlySet<string> = new Set(["perplexity"]);
+
+/**
+ * The capability of a model that has no entry in `WEB_SEARCH_CAPABILITIES`.
+ *
+ * Every model the Provider Model Catalogue adopts -- and every compiled model
+ * whose provider has no native search tool this app attaches (xAI, DeepSeek,
+ * Mistral, Moonshot, MiniMax, Qwen, Zhipu) -- used to land on `UNSUPPORTED`
+ * here, because the register was keyed by id and nobody had written the id
+ * down. The composer then showed the switch as unavailable for exactly the
+ * models the catalogue was meant to add.
+ *
+ * They search through the application-managed backend. That route is the one
+ * that does not depend on the model's provider: it is an ordinary function
+ * declaration this application executes, bounded by a counter in this process
+ * and billed by the search vendor, so it has the same worst case whichever
+ * model calls it. Whether the deployment can reach the backend is still asked
+ * separately, through `WebSearchBackendReadiness`, so a deployment without a
+ * key still offers nothing.
+ *
+ * Native provider tools are deliberately *not* inferred from the provider:
+ * OpenAI's `web_search` is model-gated and an unconfirmed model would fail the
+ * request rather than answer without search. Adding a model to the explicit
+ * register above is still how a model gets its provider's native tool.
+ */
+const inferredWebSearchCapability = (
+  provider: string,
+  apiModel: string
+): WebSearchCapability => {
+  if (SEARCH_MODEL_PROVIDERS.has(provider)) {
+    return /deep-research/i.test(apiModel) ? UNSUPPORTED : SEARCH_MODEL;
+  }
+  return APP_MANAGED_BRAVE;
+};
+
+export const getWebSearchCapability = (
+  model: WebSearchModelRef
+): WebSearchCapability => {
+  const id = typeof model === "string" ? model : model.id;
+  const registered = registeredWebSearchCapability(id);
+  if (registered) return registered;
+  const compiled = getModel(id);
+  const provider =
+    (typeof model === "string" ? null : model.provider) ?? compiled?.provider;
+  if (!provider) return UNSUPPORTED;
+  const apiModel =
+    (typeof model === "string" ? null : model.apiModel) ??
+    compiled?.apiModel ??
+    id;
+  return inferredWebSearchCapability(provider, apiModel);
+};
 
 /**
  * Whether a capability can actually run a search on a request today, as
@@ -479,9 +554,9 @@ export const webSearchIsDispatchable = (
 
 /** The same question, for a caller that holds a model id rather than a capability. */
 export const modelWebSearchIsDispatchable = (
-  modelId: string,
+  model: WebSearchModelRef,
   readiness: WebSearchBackendReadiness
-) => webSearchIsDispatchable(getWebSearchCapability(modelId), readiness);
+) => webSearchIsDispatchable(getWebSearchCapability(model), readiness);
 
 /**
  * The ceiling this turn's application-managed executor must enforce, if any.

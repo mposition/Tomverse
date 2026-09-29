@@ -776,6 +776,7 @@ export function ChatMessageList({
                 data-message-id={msg.id || undefined}
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
+                data-carried-answer={msg.carriedAnswer ? "true" : undefined}
                 data-message-source={imported ? "imported" : "native"}
                 data-search-focused={highlightedMessageId === msg.id ? "true" : undefined}
                 className={`flex w-full flex-col rounded-2xl transition-shadow focus:outline-none ${isUser ? "items-end" : "items-start"} ${
@@ -874,7 +875,7 @@ export function ChatMessageList({
                       const nativeSearchSurcharged =
                         status === "executed" &&
                         modelEligibleForWebSearchSurcharge(
-                          getWebSearchCapability(modelInfo.id),
+                          getWebSearchCapability(modelInfo),
                           searchBackendReadiness
                         );
                       const label =

@@ -546,7 +546,13 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
  * When this fails, a workflow change moved the credential posture. Run the
  * analysis, read what changed with the owner, and only then update the digest.
  */
-const POSTURE_DIGEST = "bf75543a1333";
+//
+// 62ba14563ed8 (2026-09-28): .github/workflows/engineering-agent-image.yml adds
+// one credentialed job -- the image build, packages: write through the job's
+// own token, on push to main only. The analysis gives it no reason and no path
+// rule: no event the agent raises reaches it. Flagged for the owner's review in
+// the pull request that adds it.
+const POSTURE_DIGEST = "62ba14563ed8";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({

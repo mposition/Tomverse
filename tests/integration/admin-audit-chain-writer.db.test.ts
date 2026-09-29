@@ -30,6 +30,7 @@ const reset = () =>
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "EngineeringAgentApproval",
       "AdminAuditLog"
     RESTART IDENTITY
   `);

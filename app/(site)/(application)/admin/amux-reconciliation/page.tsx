@@ -1,14 +1,20 @@
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
-import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth/next";
-
-import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
-import { getAdminRole } from "@/lib/adminAuth";
-import { authOptions } from "@/lib/auth";
-
-export default async function AdminAmuxReconciliationPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-  return <AmuxReconciliationPanel />;
+/**
+ * Retired route, preserved as a redirect.
+ *
+ * Source reconciliation is now the AMUX Backlog page's Source reconciliation section.
+ * The destination is owner-only in the same way this page was: another role
+ * is redirected and then answers 404 there.
+ */
+export default async function AdminAmuxReconciliationRedirectPage({
+  searchParams,
+}: PageProps<"/admin/amux-reconciliation">) {
+  redirect(
+    adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-reconciliation"], await searchParams)
+  );
 }

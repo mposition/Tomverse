@@ -9,6 +9,7 @@ import {
 import {
   freezeAnimations,
   installChatModelStub,
+  GUEST_DAILY_CREDIT_LIMIT,
   mockGuestUsage,
   mockUserUsage,
   restoreActiveConversation,
@@ -286,7 +287,7 @@ test.describe("comparison readiness states", { tag: "@ui-risk" }, () => {
     // cases need that answer to be the ordinary one -- otherwise every
     // assertion below reads the fail-closed "still checking" state instead of
     // the readiness state it is about.
-    await mockGuestUsage(page, 0, 20);
+    await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   });
 
   test("a conversation with no answers at all offers no rail", async ({ page }) => {
@@ -484,7 +485,7 @@ async function openGuestComparison(
   }
 ) {
   await prepareGuestPage(page, "en");
-  await mockGuestUsage(page, 0, 20, {
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT, {
     creditsAvailable: options.creditsAvailable,
     aiReviewTrial: options.aiReviewTrial,
   });

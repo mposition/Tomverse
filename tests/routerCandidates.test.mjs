@@ -7,6 +7,7 @@ import {
     filterRouterCandidates,
 } from "../lib/routerCandidates.ts";
 import { buildTaskProfile } from "../lib/taskProfileCore.ts";
+import { ALL_WEB_SEARCH_BACKENDS_READY } from "../lib/webSearchBackends.ts";
 
 /**
  * Router Pass 1's hard filters.
@@ -154,9 +155,14 @@ test("a turn needing current information refuses a model that cannot search", ()
         text: "anything",
         webSearchRequested: true,
     });
-    // An id the capability register does not carry falls back to unsupported,
-    // which is that register's decision and not this filter's to reinterpret.
-    const result = filterRouterCandidates(base({ profile }));
+    // A model the register says cannot search is refused, which is that
+    // register's decision and not this filter's to reinterpret.
+    const result = filterRouterCandidates(
+        base({
+            profile,
+            models: [model({ provider: "perplexity", apiModel: "sonar-deep-research" })],
+        })
+    );
     assert.equal(reasonFor(result, "m-1"), "web_search_unsupported");
 
     const searching = filterRouterCandidates(
@@ -165,16 +171,26 @@ test("a turn needing current information refuses a model that cannot search", ()
     assert.equal(searching.eligible.length, 1);
 });
 
-test("unverified search support is a refusal, not a maybe", () => {
-    // The register marks a model unverified because nobody confirmed it. Auto
-    // choosing it would turn an unchecked assumption into a failed answer the
-    // account paid for -- so it is refused separately from "confirmed not to
-    // support search", which is a different fact worth counting differently.
+test("a model without a native tool searches through the app and stays a candidate", () => {
+    // gpt-5-4-mini was the register's one unverified model. It now searches
+    // through the application-managed backend, as does every model adopted
+    // through the Provider Model Catalogue, so a turn that needs the web keeps
+    // it -- the backend's own readiness is the remaining question.
     const profile = buildTaskProfile({ text: "x", webSearchRequested: true });
     const result = filterRouterCandidates(
+        base({
+            profile,
+            models: [model({ id: "gpt-5-4-mini" })],
+            searchBackendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+        })
+    );
+    assert.equal(reasonFor(result, "gpt-5-4-mini"), undefined);
+    // With no reachable backend the same model is refused on readiness,
+    // never on capability.
+    const unreachable = filterRouterCandidates(
         base({ profile, models: [model({ id: "gpt-5-4-mini" })] })
     );
-    assert.equal(reasonFor(result, "gpt-5-4-mini"), "web_search_unverified");
+    assert.equal(reasonFor(unreachable, "gpt-5-4-mini"), "web_search_cost_unbounded");
 });
 
 test("an unbounded search cost is a refusal, and its own one", () => {

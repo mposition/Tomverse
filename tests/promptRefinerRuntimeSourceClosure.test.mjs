@@ -257,12 +257,61 @@ const compilerOptions = parsedConfig.options;
 // only its recomputed fingerprint string. The count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so this is again a repin of
 // positions below the new lines.
+//
+// 2026-09-28, engineering agent state: `lib/adminAuditSystemActors.ts` gains
+// the engineering agent's system actors, and the marketing webhook
+// fingerprint note in `lib/marketingAutomationAccess.ts` records the
+// engineering tables in the watched schema. Neither adds a computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved. Merged with develop's notes
+// above, the digest below is computed over the merged tree.
+//
+// 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
+// gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
+// Standard profile. Both files are in this closure. Neither addition is a
+// computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-29, AMUX policy v15 back-merge: `lib/adminAuditSystemActors.ts`
+// gains the `amux-auto-promoter` system actor and
+// `lib/marketingAutomationAccess.ts` gains a dated note and the pipeline
+// fingerprint recomputed over the merged schema. Both files are in this
+// closure. Neither change is a computed element access. The count remains 228
+// and the position-free inventory remains 9aa7ec49..., so only source
+// positions moved.
+//
+// 2026-09-29, engineering agent branch takes develop: the system actor list
+// now holds both the engineering actors and `amux-auto-promoter`, and the
+// fingerprint note in `lib/marketingAutomationAccess.ts` carries both dated
+// entries. Neither adds a computed element access. The count remains 228 and
+// the position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin over the merged tree.
+//
+// 2026-09-29, image input-limit estimate: `lib/chatSecurity.ts` gains the
+// `reservationOnlyInputTokens` budget option and numeric `internal*` details
+// on the CHAT_INPUT_TOKEN_LIMIT refusal. No import is added and neither change
+// is a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so the digest below is a repin of
+// source positions over the tree merged with the entry above.
+//
+// 2026-09-29, AMUX commit deadline (policy v18): the fingerprint note in
+// `lib/marketingAutomationAccess.ts` records `AmuxCommitDeadline` in the
+// watched schema and the fingerprint is recomputed. No import is added and
+// the note is not a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
+//
+// 2026-09-29, release-notes stack takes develop: the S9 send-verdict branch
+// merges develop, so the notes above stand together and the fingerprint in
+// `lib/marketingAutomationAccess.ts` is recomputed over the merged schema. No
+// computed element access is added. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so the digest below is a repin
+// over the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "64c460c5cb4b8351f2515c9d1ad77905",
-  "aa3bb508fb6c7cb43fef94edfa294029",
+  "46a27a8846c2ab134e07ba7f6e5d86f8",
+  "f1060ee3689800d063ce1a6e4a121eba",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -3,6 +3,7 @@ import test from "node:test";
 import { getModel, PUBLIC_MODELS } from "../lib/models.ts";
 import {
   getWebSearchCapability,
+  modelWebSearchIsDispatchable,
   nativeSearchIsDispatchable,
   webSearchIsDispatchable,
   NATIVE_GOOGLE_GROUNDING,
@@ -42,16 +43,18 @@ test("confirmed-native models report the right tool provider and force/cost flag
 });
 
 test("every active Google model searches through the application-managed backend", () => {
-  // The four active Google models plus the stable id whose upstream apiModel is
-  // gemini-3.5-flash-lite. Listed by hand rather than derived from the
-  // catalogue, because the point of the test is that this exact set is what the
-  // register says -- a derivation would pass by agreeing with itself.
+  // The active Google models, the stable id whose upstream apiModel is
+  // gemini-3.5-flash-lite, and the unversioned flash-lite alias. Listed by
+  // hand rather than derived from the catalogue, because the point of the
+  // test is that this exact set is what the register says -- a derivation
+  // would pass by agreeing with itself.
   const googleModelIds = [
     "gemini-3-7-flash",
     "gemini-3-6-flash",
     "gemini-3-5-flash",
     "gemini-3-1-pro",
     "gemini-2-5-flash",
+    "gemini-flash-lite-latest",
   ];
   const expected = getWebSearchCapability("gemini-3-7-flash");
   assert.equal(expected.support, "app-managed");
@@ -115,16 +118,82 @@ test("Perplexity search models are search-model support, not native", () => {
   }
 });
 
-test("models without a confirmed doc match are unverified, not assumed native", () => {
-  assert.equal(getWebSearchCapability("gpt-5-4-mini").support, "unverified");
+test("models without a confirmed doc match search through the app, never assumed native", () => {
+  const capability = getWebSearchCapability("gpt-5-4-mini");
+  assert.equal(capability.support, "app-managed");
+  assert.equal(capability.provider, undefined);
+  assert.equal(capability.searchBackend, "brave");
 });
 
-test("models with no registry entry default to unsupported", () => {
-  assert.equal(getWebSearchCapability("codestral").support, "unsupported");
-  // A retired id still has to resolve rather than throw when old history is read.
-  assert.equal(getWebSearchCapability("llama-3-1").support, "unsupported");
-  assert.equal(getWebSearchCapability("grok-4-3").support, "unsupported");
+test("compiled models with no register entry search through the app by provider", () => {
+  for (const id of [
+    "grok-4-5",
+    "deepseek-v4-flash",
+    "mistral-small-4",
+    "mistral-medium-3-1",
+    "kimi-k2.7-code",
+    "minimax-m3",
+    "qwen3.7-max",
+    "glm-5.2",
+    // A retired id still has to resolve rather than throw when old history is read.
+    "codestral",
+    "llama-3-1",
+  ]) {
+    const capability = getWebSearchCapability(id);
+    assert.equal(capability.support, "app-managed", id);
+    assert.equal(capability.searchBackend, "brave", id);
+    assert.equal(capability.provider, undefined, id);
+  }
+});
+
+test("a model adopted through the Provider Model Catalogue can search", () => {
+  // A registry-only row: its id is in no compiled table, so the provider has
+  // to come from the row itself.
+  for (const provider of ["openai", "anthropic", "google", "mistral", "deepseek", "zhipu"]) {
+    const capability = getWebSearchCapability({
+      id: `catalogue-${provider}-model`,
+      provider,
+      apiModel: `catalogue-${provider}-model`,
+    });
+    assert.equal(capability.support, "app-managed", provider);
+    assert.equal(capability.searchBackend, "brave", provider);
+    assert.equal(
+      modelWebSearchIsDispatchable(
+        { id: `catalogue-${provider}-model`, provider },
+        ALL_WEB_SEARCH_BACKENDS_READY
+      ),
+      true,
+      provider
+    );
+    assert.equal(
+      modelWebSearchIsDispatchable(
+        { id: `catalogue-${provider}-model`, provider },
+        NO_WEB_SEARCH_BACKENDS
+      ),
+      false,
+      provider
+    );
+  }
+});
+
+test("catalogue Perplexity rows search inside the completion, deep research does not", () => {
+  assert.equal(
+    getWebSearchCapability({ id: "sonar-2", provider: "perplexity", apiModel: "sonar-2" }).support,
+    "search-model"
+  );
+  assert.equal(
+    getWebSearchCapability({
+      id: "sonar-deep-research-2",
+      provider: "perplexity",
+      apiModel: "sonar-deep-research-2",
+    }).support,
+    "unsupported"
+  );
+});
+
+test("a model whose provider cannot be determined stays unsupported", () => {
   assert.equal(getWebSearchCapability("not-a-real-model-id").support, "unsupported");
+  assert.equal(getWebSearchCapability("perplexity/sonar-deep-research").support, "unsupported");
 });
 
 test("every public model resolves to a capability without throwing", () => {

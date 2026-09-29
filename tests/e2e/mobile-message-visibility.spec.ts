@@ -8,6 +8,7 @@ import {
 import {
   freezeAnimations,
   restoreActiveConversation,
+  mockUserUsage,
 } from "./support/chat-state-fixtures";
 import {
   modelWebSearchIsDispatchable,
@@ -50,11 +51,15 @@ test.beforeEach(async ({}, testInfo) => {
 // `gpt-5-6-luna` because mini is UNVERIFIED and Gemini had stopped counting,
 // leaving one supported model out of three. On 2026-08-27 the swap reversed:
 // Gemini searches through the application-managed backend now, so it is
-// supported, and mini comes back as the one model that cannot search. Both are
-// Guest/standard tier, so the tiering of the fixture is unchanged.
+// supported, and mini comes back as the one model that cannot search. On
+// 2026-09-29 mini began searching through the same backend, as does every
+// chat model without a native tool, so the one model that cannot is Deep
+// Research, which runs its own retrieval flow. It is a Pro model, so the
+// fixture account is Pro (see enterMobileComparison).
+const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 const MODEL_A = "gpt-5-6-luna";
 const MODEL_B = "gemini-3-6-flash";
-const MODEL_C = "gpt-5-4-mini";
+const MODEL_C = DEEP_RESEARCH_MODEL;
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 
 /** The answer canvas must keep at least this share of the mobile shell. */
@@ -96,6 +101,16 @@ async function enterMobileComparison(page: Page, options: EnterOptions) {
     messages: seededMessages(models),
     webSearchMode,
   });
+  if (models.includes(DEEP_RESEARCH_MODEL)) {
+    // A Pro model; a Free account would have it trimmed from the selection.
+    // Pro's own 300-credit day: Deep Research's 16 plus two searching
+    // models' reservations is more than the fixture's default 30.
+    await mockUserUsage(page, {
+      plan: "Pro",
+      balances: { dailyRemainingCredits: 300 },
+      limits: { creditsDay: 300 },
+    });
+  }
   await restoreActiveConversation(page);
 
   await page.setViewportSize(viewport);
@@ -339,7 +354,7 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
     // The one model in the fixture that cannot search, named. Gemini is in
     // this selection and must *not* appear here: naming a model that will
     // search as one that will not is the same defect as the reverse.
-    await expect(detail).toContainText("GPT-5.4 mini");
+    await expect(detail).toContainText("Perplexity Sonar Deep Research");
     await expect(detail).not.toContainText("Gemini");
     // The detail belongs below the chip that opened it, not above the textarea.
     const detailBox = await detail.boundingBox();
@@ -351,13 +366,11 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
   test("a fully blocked search keeps its full-width notice, not just an icon", async ({
     page,
   }) => {
-    // Neither of these can dispatch a search, so "always" with only these two
-    // is the all-unsupported state. Not a Gemini: they searched through no
-    // route at all when this was written and now search through the
-    // application-managed backend, which would turn the fixture into the
-    // one-of-two case the test above already covers -- the chip would correctly
-    // read "warning" and this would read it as a defect.
-    const blockedPair = ["gpt-5-4-mini", "deepseek-v4-flash"] as const;
+    // Deep Research cannot dispatch a search, so "always" with only it is the
+    // all-unsupported state. It is the only such model: every chat model
+    // searches through one route or another since 2026-09-29, and any of them
+    // would turn the fixture into the partial case the test above covers.
+    const blockedPair = [DEEP_RESEARCH_MODEL] as const;
     for (const modelId of blockedPair) {
       // The dispatchability question, not `support !== "native"`. That older
       // check would pass for an `app-managed` model, which is not native and
@@ -407,6 +420,11 @@ test.describe("Composer tool status", { tag: "@ui-risk" }, () => {
       selectedModels: THREE_MODELS,
       messages: seededMessages(THREE_MODELS),
       webSearchMode: "always",
+    });
+    await mockUserUsage(page, {
+      plan: "Pro",
+      balances: { dailyRemainingCredits: 300 },
+      limits: { creditsDay: 300 },
     });
     await restoreActiveConversation(page);
     await page.setViewportSize({ width: 1440, height: 900 });
