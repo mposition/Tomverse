@@ -78,16 +78,19 @@ mock.module(mod("lib/amux/workerRuntime.ts"), {
       record("registerAmuxWorkerRuntime", { workerName, instanceId });
       return { generation: 3, leaseExpiresAt: LEASE };
     },
-    heartbeatAmuxWorkerRuntime: async (input: unknown) => {
+    heartbeatAmuxWorkerRuntime: async (input: { generation: number }) => {
       record("heartbeatAmuxWorkerRuntime", input);
-      return { accepted: true, leaseExpiresAt: LEASE };
+      return input.generation === 3
+        ? { accepted: true, leaseExpiresAt: LEASE }
+        : { accepted: false, leaseExpiresAt: LEASE, reason: "active_execution" };
     },
   },
 });
 mock.module(mod("lib/amux/delivery.ts"), {
   namedExports: {
-    pullAmuxWorkDelivery: async (input: unknown) => {
+    pullAmuxWorkDelivery: async (input: { generation: number }) => {
       record("pullAmuxWorkDelivery", input);
+      if (input.generation !== 3) return { available: false, reason: "none" };
       return {
         available: true,
         delivery: {
@@ -101,16 +104,21 @@ mock.module(mod("lib/amux/delivery.ts"), {
         },
       };
     },
-    acknowledgeAmuxWorkDelivery: async (input: unknown) => {
+    acknowledgeAmuxWorkDelivery: async (input: { taskRevision: number }) => {
       record("acknowledgeAmuxWorkDelivery", input);
-      return { acknowledged: true, idempotent: false };
+      return input.taskRevision === 3
+        ? { acknowledged: true, idempotent: false }
+        : { acknowledged: false, reason: "fenced_out" };
     },
   },
 });
 mock.module(mod("lib/amux/execution.ts"), {
   namedExports: {
-    startAmuxExecution: async (input: unknown) => {
+    startAmuxExecution: async (input: { expectedRevision: number }) => {
       record("startAmuxExecution", input);
+      if (input.expectedRevision !== 2) {
+        return { started: false, reason: "task_not_startable" };
+      }
       return {
         started: true,
         attemptId: ATTEMPT,
@@ -118,9 +126,9 @@ mock.module(mod("lib/amux/execution.ts"), {
         leaseExpiresAt: LEASE,
       };
     },
-    heartbeatAmuxExecution: async (input: unknown) => {
+    heartbeatAmuxExecution: async (input: { taskRevision: number }) => {
       record("heartbeatAmuxExecution", input);
-      return true;
+      return input.taskRevision === 3;
     },
     settleAmuxExecution: async (input: { taskRevision: number }) => {
       record("settleAmuxExecution", input);

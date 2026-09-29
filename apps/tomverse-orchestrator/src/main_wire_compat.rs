@@ -290,6 +290,21 @@ mod frozen {
     }
 }
 
+// Two serde facts about the frozen structs that the compatibility argument
+// rests on, pinned here because a review read them the other way:
+//
+// 1. A missing key for an `Option<T>` field is `None`. serde derive treats an
+//    absent `Option` field as `None` without `#[serde(default)]`, so main's
+//    Rust parses the reason-less success bodies and the field-less refusal
+//    bodies the server sends. Production parses them today.
+// 2. main 7724fd683 has no `#[serde(deny_unknown_fields)]` on any API struct:
+//    `git grep deny_unknown_fields 7724fd683 -- apps/tomverse-orchestrator/src`
+//    finds it only in executor.rs (the local lane configuration), never in
+//    tomverse_api.rs, scheduler.rs or worker.rs. So main's Rust ignores keys it
+//    does not know, such as the routing snapshot's `telemetry` and
+//    `scheduler_signals.total`. The frozen copies above carry no
+//    `deny_unknown_fields` either, because the originals have none.
+
 fn wire() -> Value {
     serde_json::from_str(include_str!(
         "../../../tests/fixtures/amux-main-rust-wire-v1.json"
@@ -297,14 +312,15 @@ fn wire() -> Value {
     .unwrap()
 }
 
+fn exchanges() -> Vec<Value> {
+    wire()["exchanges"].as_array().unwrap().clone()
+}
+
 fn exchange(name: &str) -> Value {
-    wire()["exchanges"]
-        .as_array()
-        .unwrap()
-        .iter()
+    exchanges()
+        .into_iter()
         .find(|entry| entry["name"] == name)
         .unwrap_or_else(|| panic!("fixture exchange {name}"))
-        .clone()
 }
 
 fn str_at<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -331,6 +347,19 @@ fn routing_wire(name: &str) -> Value {
     fixtures[name].clone()
 }
 
+fn response(name: &str) -> Value {
+    exchange(name)["response"].clone()
+}
+
+/// The keys the server leaves out of this body. Each must be absent, so a
+/// parse of it proves the missing-key behaviour and not a present `null`.
+fn assert_absent(body: &Value, keys: &[&str], name: &str) {
+    let object = body.as_object().unwrap_or_else(|| panic!("{name} is an object"));
+    for key in keys {
+        assert!(!object.contains_key(*key), "{name} must omit {key}");
+    }
+}
+
 /// Serializes the fixture request with the frozen struct and the current one;
 /// both must equal the body the server accepted.
 fn assert_request_parity<A: serde::Serialize, B: serde::Serialize>(name: &str, frozen: A, current: B) {
@@ -339,154 +368,144 @@ fn assert_request_parity<A: serde::Serialize, B: serde::Serialize>(name: &str, f
     assert_eq!(serde_json::to_value(current).unwrap(), expected, "current {name}");
 }
 
-fn response(name: &str) -> Value {
-    exchange(name)["response"].clone()
-}
-
 #[test]
 fn every_request_body_is_what_main_and_this_tree_serialize() {
-    let register = exchange("worker_register")["request"].clone();
-    assert_request_parity(
-        "worker_register",
-        frozen::WorkerRegisterRequest {
-            worker_name: str_at(&register, "worker_name"),
-            instance_id: str_at(&register, "instance_id"),
-        },
-        WorkerRegisterRequest {
-            worker_name: str_at(&register, "worker_name"),
-            instance_id: str_at(&register, "instance_id"),
-        },
-    );
-
-    let heartbeat = exchange("worker_heartbeat")["request"].clone();
-    assert_request_parity(
-        "worker_heartbeat",
-        frozen::WorkerHeartbeatRequest {
-            worker_name: str_at(&heartbeat, "worker_name"),
-            instance_id: str_at(&heartbeat, "instance_id"),
-            generation: i64_at(&heartbeat, "generation"),
-            status: str_at(&heartbeat, "status"),
-            dispatch_ready: true,
-        },
-        WorkerHeartbeatRequest {
-            worker_name: str_at(&heartbeat, "worker_name"),
-            instance_id: str_at(&heartbeat, "instance_id"),
-            generation: i64_at(&heartbeat, "generation"),
-            status: str_at(&heartbeat, "status"),
-            dispatch_ready: true,
-        },
-    );
-
-    let pull = exchange("delivery_pull")["request"].clone();
-    assert_request_parity(
-        "delivery_pull",
-        frozen::DeliveryPullRequest {
-            worker: str_at(&pull, "worker"),
-            instance_id: str_at(&pull, "instance_id"),
-            generation: i64_at(&pull, "generation"),
-        },
-        DeliveryPullRequest {
-            worker: str_at(&pull, "worker"),
-            instance_id: str_at(&pull, "instance_id"),
-            generation: i64_at(&pull, "generation"),
-        },
-    );
-
-    let ack = exchange("delivery_ack")["request"].clone();
-    assert_request_parity(
-        "delivery_ack",
-        frozen::DeliveryAckRequest {
-            attempt_id: str_at(&ack, "attempt_id"),
-            receipt_id: str_at(&ack, "receipt_id"),
-            worker: str_at(&ack, "worker"),
-            instance_id: str_at(&ack, "instance_id"),
-            generation: i64_at(&ack, "generation"),
-            task_revision: i64_at(&ack, "task_revision"),
-        },
-        DeliveryAckRequest {
-            attempt_id: str_at(&ack, "attempt_id"),
-            receipt_id: str_at(&ack, "receipt_id"),
-            worker: str_at(&ack, "worker"),
-            instance_id: str_at(&ack, "instance_id"),
-            generation: i64_at(&ack, "generation"),
-            task_revision: i64_at(&ack, "task_revision"),
-        },
-    );
-
-    let start = exchange("execution_start")["request"].clone();
-    assert_request_parity(
-        "execution_start",
-        frozen::ExecutionStartRequest {
-            task_id: str_at(&start, "task_id"),
-            worker: str_at(&start, "worker"),
-            instance_id: str_at(&start, "instance_id"),
-            generation: i64_at(&start, "generation"),
-            expected_revision: i64_at(&start, "expected_revision"),
-        },
-        ExecutionStartRequest {
-            task_id: str_at(&start, "task_id"),
-            worker: str_at(&start, "worker"),
-            instance_id: str_at(&start, "instance_id"),
-            generation: i64_at(&start, "generation"),
-            expected_revision: i64_at(&start, "expected_revision"),
-        },
-    );
-
-    let execution_heartbeat = exchange("execution_heartbeat")["request"].clone();
-    assert_request_parity(
-        "execution_heartbeat",
-        frozen::ExecutionHeartbeatRequest {
-            attempt_id: str_at(&execution_heartbeat, "attempt_id"),
-            worker: str_at(&execution_heartbeat, "worker"),
-            instance_id: str_at(&execution_heartbeat, "instance_id"),
-            generation: i64_at(&execution_heartbeat, "generation"),
-            task_revision: i64_at(&execution_heartbeat, "task_revision"),
-        },
-        ExecutionHeartbeatRequest {
-            attempt_id: str_at(&execution_heartbeat, "attempt_id"),
-            worker: str_at(&execution_heartbeat, "worker"),
-            instance_id: str_at(&execution_heartbeat, "instance_id"),
-            generation: i64_at(&execution_heartbeat, "generation"),
-            task_revision: i64_at(&execution_heartbeat, "task_revision"),
-        },
-    );
-
-    // Settle: the PR number is a number, an explicit null, or absent.
-    for (name, review_pr_number) in [
-        ("execution_settle_review_with_pr", Some(Some(1740))),
-        ("execution_settle_review_without_pr", Some(None)),
-        ("execution_settle_blocked", None),
-        ("execution_settle_fenced", None),
-    ] {
-        let settle = exchange(name)["request"].clone();
-        let reason = settle["reason"].as_str();
-        assert_request_parity(
-            name,
-            frozen::ExecutionSettleRequest {
-                attempt_id: str_at(&settle, "attempt_id"),
-                worker: str_at(&settle, "worker"),
-                instance_id: str_at(&settle, "instance_id"),
-                generation: i64_at(&settle, "generation"),
-                task_revision: i64_at(&settle, "task_revision"),
-                outcome: str_at(&settle, "outcome"),
-                to_status: str_at(&settle, "to_status"),
-                reason,
-                cost_microusd: None,
-                review_pr_number,
-            },
-            ExecutionSettleRequest {
-                attempt_id: str_at(&settle, "attempt_id"),
-                worker: str_at(&settle, "worker"),
-                instance_id: str_at(&settle, "instance_id"),
-                generation: i64_at(&settle, "generation"),
-                task_revision: i64_at(&settle, "task_revision"),
-                outcome: str_at(&settle, "outcome"),
-                to_status: str_at(&settle, "to_status"),
-                reason,
-                cost_microusd: None,
-                review_pr_number,
-            },
-        );
+    for entry in exchanges() {
+        let name = str_at(&entry, "name").to_owned();
+        let request = entry["request"].clone();
+        match str_at(&entry, "path") {
+            "workers/register" => assert_request_parity(
+                &name,
+                frozen::WorkerRegisterRequest {
+                    worker_name: str_at(&request, "worker_name"),
+                    instance_id: str_at(&request, "instance_id"),
+                },
+                WorkerRegisterRequest {
+                    worker_name: str_at(&request, "worker_name"),
+                    instance_id: str_at(&request, "instance_id"),
+                },
+            ),
+            "workers/heartbeat" => assert_request_parity(
+                &name,
+                frozen::WorkerHeartbeatRequest {
+                    worker_name: str_at(&request, "worker_name"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    status: str_at(&request, "status"),
+                    dispatch_ready: request["dispatch_ready"].as_bool().unwrap(),
+                },
+                WorkerHeartbeatRequest {
+                    worker_name: str_at(&request, "worker_name"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    status: str_at(&request, "status"),
+                    dispatch_ready: request["dispatch_ready"].as_bool().unwrap(),
+                },
+            ),
+            "delivery/pull" => assert_request_parity(
+                &name,
+                frozen::DeliveryPullRequest {
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                },
+                DeliveryPullRequest {
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                },
+            ),
+            "delivery/ack" => assert_request_parity(
+                &name,
+                frozen::DeliveryAckRequest {
+                    attempt_id: str_at(&request, "attempt_id"),
+                    receipt_id: str_at(&request, "receipt_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    task_revision: i64_at(&request, "task_revision"),
+                },
+                DeliveryAckRequest {
+                    attempt_id: str_at(&request, "attempt_id"),
+                    receipt_id: str_at(&request, "receipt_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    task_revision: i64_at(&request, "task_revision"),
+                },
+            ),
+            "execution/start" => assert_request_parity(
+                &name,
+                frozen::ExecutionStartRequest {
+                    task_id: str_at(&request, "task_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    expected_revision: i64_at(&request, "expected_revision"),
+                },
+                ExecutionStartRequest {
+                    task_id: str_at(&request, "task_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    expected_revision: i64_at(&request, "expected_revision"),
+                },
+            ),
+            "execution/heartbeat" => assert_request_parity(
+                &name,
+                frozen::ExecutionHeartbeatRequest {
+                    attempt_id: str_at(&request, "attempt_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    task_revision: i64_at(&request, "task_revision"),
+                },
+                ExecutionHeartbeatRequest {
+                    attempt_id: str_at(&request, "attempt_id"),
+                    worker: str_at(&request, "worker"),
+                    instance_id: str_at(&request, "instance_id"),
+                    generation: i64_at(&request, "generation"),
+                    task_revision: i64_at(&request, "task_revision"),
+                },
+            ),
+            "execution/settle" => {
+                // The PR number is a number, an explicit null, or absent.
+                let review_pr_number = match request.get("review_pr_number") {
+                    None => None,
+                    Some(Value::Null) => Some(None),
+                    Some(value) => Some(Some(value.as_i64().unwrap())),
+                };
+                let reason = request["reason"].as_str();
+                assert_request_parity(
+                    &name,
+                    frozen::ExecutionSettleRequest {
+                        attempt_id: str_at(&request, "attempt_id"),
+                        worker: str_at(&request, "worker"),
+                        instance_id: str_at(&request, "instance_id"),
+                        generation: i64_at(&request, "generation"),
+                        task_revision: i64_at(&request, "task_revision"),
+                        outcome: str_at(&request, "outcome"),
+                        to_status: str_at(&request, "to_status"),
+                        reason,
+                        cost_microusd: None,
+                        review_pr_number,
+                    },
+                    ExecutionSettleRequest {
+                        attempt_id: str_at(&request, "attempt_id"),
+                        worker: str_at(&request, "worker"),
+                        instance_id: str_at(&request, "instance_id"),
+                        generation: i64_at(&request, "generation"),
+                        task_revision: i64_at(&request, "task_revision"),
+                        outcome: str_at(&request, "outcome"),
+                        to_status: str_at(&request, "to_status"),
+                        reason,
+                        cost_microusd: None,
+                        review_pr_number,
+                    },
+                );
+            }
+            other => panic!("no request parity for {other}"),
+        }
     }
 }
 
@@ -524,72 +543,157 @@ fn the_claim_request_and_routing_snapshot_request_are_unchanged_since_main() {
 }
 
 #[test]
-fn main_structs_parse_every_lifecycle_response_the_server_sends() {
-    let register: frozen::WorkerRegisterResponse =
-        serde_json::from_value(response("worker_register")).unwrap();
-    assert!(register.registered);
-    assert_eq!(register.generation, Some(3));
-    let refused: frozen::WorkerRegisterResponse =
-        serde_json::from_value(response("worker_register_unconfigured")).unwrap();
-    assert!(!refused.registered);
+fn mains_structs_read_every_key_the_server_omits_as_none() {
+    // Fact 1. Each body is exactly what the route sends
+    // (tests/server-contract/amux-main-rust-wire-parity.test.ts requires the
+    // real routes to answer these bytes), and each listed key is absent.
 
-    let heartbeat: frozen::WorkerHeartbeatResponse =
-        serde_json::from_value(response("worker_heartbeat")).unwrap();
-    assert!(heartbeat.accepted);
-
-    let pull: frozen::DeliveryPullResponse =
-        serde_json::from_value(response("delivery_pull")).unwrap();
-    assert!(pull.available);
-    assert_eq!(pull.delivery.unwrap().task_revision, 3);
-
-    let ack: frozen::DeliveryAckResponse =
-        serde_json::from_value(response("delivery_ack")).unwrap();
-    assert!(ack.acknowledged);
-
-    let start: frozen::ExecutionStartResponse =
-        serde_json::from_value(response("execution_start")).unwrap();
-    assert!(start.started);
-    assert_eq!(start.task_revision, Some(3));
-
-    let execution_heartbeat: frozen::ExecutionHeartbeatResponse =
-        serde_json::from_value(response("execution_heartbeat")).unwrap();
-    assert!(execution_heartbeat.accepted);
-
-    for name in [
-        "execution_settle_review_with_pr",
-        "execution_settle_review_without_pr",
-        "execution_settle_blocked",
-    ] {
-        let settled: frozen::ExecutionSettleResponse =
-            serde_json::from_value(response(name)).unwrap();
-        assert!(settled.settled, "{name}");
-        assert_eq!(settled.task_revision, Some(4), "{name}");
+    // Claim: success without reason; lost CAS without revision, decision_id or
+    // reason; refusal without revision or decision_id.
+    for entry in wire()["claim_responses"].as_array().unwrap() {
+        let body = entry["response"].clone();
+        let claim: frozen::ClaimResponse = serde_json::from_value(body.clone()).unwrap();
+        if claim.claimed {
+            assert_absent(&body, &["reason"], "claim success");
+            assert!(claim.revision.is_some() && claim.decision_id.is_some());
+            assert!(claim.reason.is_none());
+        } else if body.get("reason").is_some() {
+            assert_absent(&body, &["revision", "decision_id"], "claim refusal");
+            assert!(claim.revision.is_none() && claim.decision_id.is_none());
+            assert!(claim.reason.is_some());
+        } else {
+            assert_absent(&body, &["revision", "decision_id", "reason"], "lost claim");
+            assert!(claim.revision.is_none() && claim.decision_id.is_none());
+            assert!(claim.reason.is_none());
+        }
     }
-    let fenced: frozen::ExecutionSettleResponse =
-        serde_json::from_value(response("execution_settle_fenced")).unwrap();
-    assert!(!fenced.settled);
-    assert_eq!(fenced.reason.as_deref(), Some("fenced_out"));
+
+    let body = response("worker_register");
+    assert_absent(&body, &["reason"], "worker_register");
+    let register: frozen::WorkerRegisterResponse = serde_json::from_value(body).unwrap();
+    assert!(register.registered && register.reason.is_none());
+    let body = response("worker_register_unconfigured");
+    assert_absent(&body, &["generation", "lease_expires_at"], "worker_register_unconfigured");
+    let register: frozen::WorkerRegisterResponse = serde_json::from_value(body).unwrap();
+    assert!(!register.registered);
+    assert!(register.generation.is_none() && register.lease_expires_at.is_none());
+
+    let body = response("worker_heartbeat");
+    assert_absent(&body, &["reason"], "worker_heartbeat");
+    let heartbeat: frozen::WorkerHeartbeatResponse = serde_json::from_value(body).unwrap();
+    assert!(heartbeat.accepted && heartbeat.reason.is_none());
+    let body = response("worker_heartbeat_active_execution");
+    assert_absent(&body, &["lease_expires_at"], "worker_heartbeat_active_execution");
+    let heartbeat: frozen::WorkerHeartbeatResponse = serde_json::from_value(body).unwrap();
+    assert!(!heartbeat.accepted && heartbeat.lease_expires_at.is_none());
+    assert_eq!(heartbeat.reason.as_deref(), Some("active_execution"));
+
+    let body = response("delivery_pull");
+    assert_absent(&body, &["reason"], "delivery_pull");
+    let pull: frozen::DeliveryPullResponse = serde_json::from_value(body).unwrap();
+    assert!(pull.available && pull.delivery.is_some() && pull.reason.is_none());
+    let body = response("delivery_pull_none");
+    assert_absent(&body, &["delivery"], "delivery_pull_none");
+    let pull: frozen::DeliveryPullResponse = serde_json::from_value(body).unwrap();
+    assert!(!pull.available && pull.delivery.is_none());
+
+    let body = response("delivery_ack");
+    assert_absent(&body, &["reason"], "delivery_ack");
+    let ack: frozen::DeliveryAckResponse = serde_json::from_value(body).unwrap();
+    assert!(ack.acknowledged && ack.reason.is_none());
+    let body = response("delivery_ack_fenced");
+    assert_absent(&body, &["idempotent"], "delivery_ack_fenced");
+    let ack: frozen::DeliveryAckResponse = serde_json::from_value(body).unwrap();
+    assert!(!ack.acknowledged && ack.idempotent.is_none());
+
+    let body = response("execution_start");
+    assert_absent(&body, &["reason"], "execution_start");
+    let start: frozen::ExecutionStartResponse = serde_json::from_value(body).unwrap();
+    assert!(start.started && start.reason.is_none());
+    let body = response("execution_start_refused");
+    assert_absent(
+        &body,
+        &["attempt_id", "task_revision", "lease_expires_at"],
+        "execution_start_refused",
+    );
+    let start: frozen::ExecutionStartResponse = serde_json::from_value(body).unwrap();
+    assert!(!start.started);
+    assert!(start.attempt_id.is_none() && start.task_revision.is_none());
+    assert!(start.lease_expires_at.is_none());
+
+    let body = response("execution_heartbeat");
+    assert_absent(&body, &["reason"], "execution_heartbeat");
+    let heartbeat: frozen::ExecutionHeartbeatResponse = serde_json::from_value(body).unwrap();
+    assert!(heartbeat.accepted && heartbeat.reason.is_none());
+
+    let body = response("execution_settle_fenced");
+    assert_absent(&body, &["taskRevision"], "execution_settle_fenced");
+    let settle: frozen::ExecutionSettleResponse = serde_json::from_value(body).unwrap();
+    assert!(!settle.settled && settle.task_revision.is_none());
+}
+
+#[test]
+fn mains_structs_ignore_keys_they_do_not_know() {
+    // Fact 2. The routing snapshot carries `telemetry`, which main's struct
+    // does not declare.
+    for name in ["eligible", "refusal"] {
+        let body = routing_wire(name);
+        assert!(body.get("telemetry").is_some(), "{name} carries telemetry");
+        let snapshot: frozen::RoutingSnapshotResponse = serde_json::from_value(body)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(snapshot.eligible, name == "eligible");
+    }
+
+    // The queue's scheduler_signals carries `total`, which main's
+    // ScoreBreakdown does not declare.
+    for name in ["queue_main", "queue_server"] {
+        let body = queue_wire(name);
+        assert_eq!(body["scheduler_signals"]["total"], 32, "{name} carries total");
+        let queue: frozen::QueueTask = serde_json::from_value(body).unwrap();
+        assert_eq!(queue.scheduler_signals.type_weight, 12, "{name}");
+        assert_eq!(queue.scheduler_signals.priority_weight, 20, "{name}");
+    }
+
+    // And any key at all, on every response the server sends.
+    for entry in exchanges() {
+        let name = str_at(&entry, "name").to_owned();
+        let mut body = entry["response"].clone();
+        body["future_field"] = serde_json::json!(true);
+        let parsed = match str_at(&entry, "path") {
+            "workers/register" => serde_json::from_value::<frozen::WorkerRegisterResponse>(body).map(|_| ()),
+            "workers/heartbeat" => serde_json::from_value::<frozen::WorkerHeartbeatResponse>(body).map(|_| ()),
+            "delivery/pull" => serde_json::from_value::<frozen::DeliveryPullResponse>(body).map(|_| ()),
+            "delivery/ack" => serde_json::from_value::<frozen::DeliveryAckResponse>(body).map(|_| ()),
+            "execution/start" => serde_json::from_value::<frozen::ExecutionStartResponse>(body).map(|_| ()),
+            "execution/heartbeat" => serde_json::from_value::<frozen::ExecutionHeartbeatResponse>(body).map(|_| ()),
+            "execution/settle" => serde_json::from_value::<frozen::ExecutionSettleResponse>(body).map(|_| ()),
+            other => panic!("no response struct for {other}"),
+        };
+        parsed.unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+    for entry in wire()["claim_responses"].as_array().unwrap() {
+        let mut body = entry["response"].clone();
+        body["future_field"] = serde_json::json!(true);
+        serde_json::from_value::<frozen::ClaimResponse>(body).unwrap();
+    }
 }
 
 #[test]
 fn current_structs_parse_every_lifecycle_response_the_server_sends() {
-    serde_json::from_value::<WorkerRegisterResponse>(response("worker_register")).unwrap();
-    serde_json::from_value::<WorkerRegisterResponse>(response("worker_register_unconfigured"))
-        .unwrap();
-    serde_json::from_value::<WorkerHeartbeatResponse>(response("worker_heartbeat")).unwrap();
-    serde_json::from_value::<DeliveryPullResponse>(response("delivery_pull")).unwrap();
-    serde_json::from_value::<DeliveryAckResponse>(response("delivery_ack")).unwrap();
-    serde_json::from_value::<ExecutionStartResponse>(response("execution_start")).unwrap();
-    serde_json::from_value::<ExecutionHeartbeatResponse>(response("execution_heartbeat"))
-        .unwrap();
-    for name in [
-        "execution_settle_review_with_pr",
-        "execution_settle_review_without_pr",
-        "execution_settle_blocked",
-        "execution_settle_fenced",
-    ] {
-        serde_json::from_value::<ExecutionSettleResponse>(response(name))
-            .unwrap_or_else(|error| panic!("{name}: {error}"));
+    for entry in exchanges() {
+        let name = str_at(&entry, "name").to_owned();
+        let body = entry["response"].clone();
+        let parsed = match str_at(&entry, "path") {
+            "workers/register" => serde_json::from_value::<WorkerRegisterResponse>(body).map(|_| ()),
+            "workers/heartbeat" => serde_json::from_value::<WorkerHeartbeatResponse>(body).map(|_| ()),
+            "delivery/pull" => serde_json::from_value::<DeliveryPullResponse>(body).map(|_| ()),
+            "delivery/ack" => serde_json::from_value::<DeliveryAckResponse>(body).map(|_| ()),
+            "execution/start" => serde_json::from_value::<ExecutionStartResponse>(body).map(|_| ()),
+            "execution/heartbeat" => serde_json::from_value::<ExecutionHeartbeatResponse>(body).map(|_| ()),
+            "execution/settle" => serde_json::from_value::<ExecutionSettleResponse>(body).map(|_| ()),
+            other => panic!("no response struct for {other}"),
+        };
+        parsed.unwrap_or_else(|error| panic!("{name}: {error}"));
     }
 }
 
@@ -620,18 +724,27 @@ fn main_and_current_structs_parse_every_claim_response_the_server_sends() {
 
 #[test]
 fn main_structs_parse_the_queue_owned_queue_and_routing_bodies_the_server_sends() {
-    let queue: frozen::QueueTask = serde_json::from_value(queue_wire("queue_server")).unwrap();
-    assert_eq!(queue.title, "Fix the window");
-    assert_eq!(queue.status, "todo");
-    assert_eq!(queue.owner, None);
-    assert_eq!(queue.dependencies, vec!["TASK-0".to_owned()]);
-    assert_eq!(queue.scheduler_signals.type_weight, 12);
+    // The server sends *_server; *_main is what main's server sent. Both parse.
+    for name in ["queue_main", "queue_server"] {
+        let queue: frozen::QueueTask = serde_json::from_value(queue_wire(name)).unwrap();
+        assert_eq!(queue.title, "Fix the window", "{name}");
+        assert_eq!(queue.status, "todo", "{name}");
+        assert_eq!(queue.owner, None, "{name}");
+        assert_eq!(queue.dependencies, vec!["TASK-0".to_owned()], "{name}");
+    }
+    assert_absent(&queue_wire("queue_server"), &["owner"], "queue_server");
     // The minimal shape is what a later server may send; main's Rust cannot
-    // read it, which is why the server keeps the full shape for now.
+    // read it, which is why the server keeps the required fields for now.
     assert!(serde_json::from_value::<frozen::QueueTask>(queue_wire("queue_minimal")).is_err());
 
-    let owned: frozen::OwnedTodoTask = serde_json::from_value(queue_wire("owned_server")).unwrap();
-    assert_eq!(owned.owner, "claude-impl");
+    for name in ["owned_main", "owned_server"] {
+        let owned: frozen::OwnedTodoTask = serde_json::from_value(queue_wire(name)).unwrap();
+        assert_eq!(owned.owner, "claude-impl", "{name}");
+        assert_eq!(owned.kind, "code", "{name}");
+    }
+    let server: frozen::OwnedTodoTask = serde_json::from_value(queue_wire("owned_server")).unwrap();
+    assert_absent(&queue_wire("owned_server"), &["description", "claimed_at"], "owned_server");
+    assert!(server.description.is_none() && server.claimed_at.is_none());
     assert!(serde_json::from_value::<frozen::OwnedTodoTask>(queue_wire("owned_minimal")).is_err());
 
     for name in ["eligible", "refusal"] {

@@ -24,6 +24,13 @@
       "response": { "accepted": true, "lease_expires_at": "2026-09-29T00:01:30.000Z" }
     },
     {
+      "name": "worker_heartbeat_active_execution",
+      "path": "workers/heartbeat",
+      "request": { "worker_name": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 4, "status": "idle", "dispatch_ready": true },
+      "status": 409,
+      "response": { "accepted": false, "reason": "active_execution" }
+    },
+    {
       "name": "delivery_pull",
       "path": "delivery/pull",
       "request": { "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3 },
@@ -42,11 +49,25 @@
       }
     },
     {
+      "name": "delivery_pull_none",
+      "path": "delivery/pull",
+      "request": { "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 4 },
+      "status": 200,
+      "response": { "available": false, "reason": "none" }
+    },
+    {
       "name": "delivery_ack",
       "path": "delivery/ack",
       "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "receipt_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3 },
       "status": 200,
       "response": { "acknowledged": true, "idempotent": false }
+    },
+    {
+      "name": "delivery_ack_fenced",
+      "path": "delivery/ack",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "receipt_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 2 },
+      "status": 409,
+      "response": { "acknowledged": false, "reason": "fenced_out" }
     },
     {
       "name": "execution_start",
@@ -56,11 +77,25 @@
       "response": { "started": true, "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "task_revision": 3, "lease_expires_at": "2026-09-29T00:01:30.000Z" }
     },
     {
+      "name": "execution_start_refused",
+      "path": "execution/start",
+      "request": { "task_id": "TASK-1", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "expected_revision": 5 },
+      "status": 409,
+      "response": { "started": false, "reason": "task_not_startable" }
+    },
+    {
       "name": "execution_heartbeat",
       "path": "execution/heartbeat",
       "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 3 },
       "status": 200,
       "response": { "accepted": true }
+    },
+    {
+      "name": "execution_heartbeat_fenced",
+      "path": "execution/heartbeat",
+      "request": { "attempt_id": "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f", "worker": "claude-impl", "instance_id": "7d9e2f10-5a3b-4c8d-9e1f-2a3b4c5d6e7f", "generation": 3, "task_revision": 2 },
+      "status": 409,
+      "response": { "accepted": false, "reason": "fenced_out" }
     },
     {
       "name": "execution_settle_review_with_pr",
