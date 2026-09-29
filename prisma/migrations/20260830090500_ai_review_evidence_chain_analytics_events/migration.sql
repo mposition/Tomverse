@@ -33,8 +33,9 @@
 -- 20260914 check is already in place, and a list without those four names
 -- would either fail validation on rows production already holds or refuse
 -- every later event of those kinds. Where this file runs first (a fresh
--- database, staging), 20260914 recreates the same union afterwards, so the
--- end state is identical in both orders.
+-- database, staging), 20260914 then recreates its own shorter list, and
+-- 20260929180000_product_analytics_event_names_union restores the full one,
+-- so the end state is identical in both orders.
 ALTER TABLE "ProductAnalyticsEvent"
   DROP CONSTRAINT "ProductAnalyticsEvent_name_check";
 

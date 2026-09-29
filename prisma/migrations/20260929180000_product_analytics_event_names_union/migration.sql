@@ -1,14 +1,22 @@
--- Assistant + Knowledge education and activation analytics events.
+-- One event-name check for every database, whatever order it met the two
+-- earlier rebuilds in.
 --
--- The event-name check is a closed list mirroring PRODUCT_ANALYTICS_EVENT_NAMES
--- in lib/productAnalyticsShared.ts. The four new names distinguish a guide
--- view, a guide explanation opened, a real setup step completed, and a
--- successful Knowledge upload. Their only new property is a closed step enum;
--- profile ids, filenames, instructions, prompts, bytes and chunk counts have
--- no property through which they can travel.
+-- 20260914123000_assistant_knowledge_guide_analytics_events reached main, and
+-- production, carrying main's list at the time. develop later held a different
+-- copy of that file, the union with the AI Review events. The release keeps
+-- main's bytes, because production already ran them and an applied migration
+-- is not rewritten (.github/RELEASE_CHECKLIST.md, "What an edited applied
+-- migration actually costs").
 --
--- Additive and reversible: the constraint is recreated without reading or
--- writing ProductAnalyticsEvent rows.
+-- With main's 20260914 restored, a database that applies migrations in name
+-- order (CI, a recreated staging) would end on that file's shorter list, while
+-- production, which ran 20260914 before 20260830090500, would end on the
+-- longer one. This migration runs last in both and recreates the check with
+-- the full list, so they agree. It mirrors PRODUCT_ANALYTICS_EVENT_NAMES in
+-- lib/productAnalyticsShared.ts (tests/productAnalyticsDatabaseConstraint.test.ts).
+--
+-- Additive: every name either earlier list allowed is still allowed, so no
+-- existing row can fail the validation. No row is read or written.
 ALTER TABLE "ProductAnalyticsEvent"
   DROP CONSTRAINT "ProductAnalyticsEvent_name_check";
 
@@ -26,6 +34,8 @@ ALTER TABLE "ProductAnalyticsEvent"
   'comparison_review_started',
   'comparison_review_completed',
   'comparison_review_failed',
+  'comparison_review_item_verified',
+  'comparison_review_item_feedback',
   'followup_sent',
   'file_attached',
   'conversation_saved',
@@ -44,6 +54,7 @@ ALTER TABLE "ProductAnalyticsEvent"
   'promotion_pass_activated',
   'return_day_1',
   'return_day_7',
+  'return_day_30',
   'subscription_cancelled',
   'model_finder_viewed',
   'model_finder_started',

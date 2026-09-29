@@ -50,9 +50,22 @@ test("the 2026-08-30 rebuild keeps every name production's 2026-09-14 list allow
   // replaces the 20260914 one in place, and it validates existing rows, so a
   // name missing here would fail the deploy or refuse those events for good.
   // CI cannot see this: it applies migrations to an empty database in name
-  // order, where 20260914 always runs last.
+  // order, where 20260914 runs after 20260830.
   const later = constraintNamesIn("20260914123000_assistant_knowledge_guide_analytics_events");
   const earlier = constraintNamesIn("20260830090500_ai_review_evidence_chain_analytics_events");
   assert.deepEqual([...later].filter((name) => !earlier.has(name)), []);
-  assert.deepEqual([...earlier].filter((name) => !later.has(name)), []);
+});
+
+test("the union rebuild allows every name either earlier rebuild allows", () => {
+  // 20260914 holds main's bytes (the list production ran), which is shorter
+  // than 20260830's. The two apply in opposite orders in production and in a
+  // fresh database, so this rebuild runs last in both and restores the full
+  // list; the test above pins it to the application registry.
+  const union = constraintNamesIn("20260929180000_product_analytics_event_names_union");
+  for (const directory of [
+    "20260830090500_ai_review_evidence_chain_analytics_events",
+    "20260914123000_assistant_knowledge_guide_analytics_events",
+  ]) {
+    assert.deepEqual([...constraintNamesIn(directory)].filter((name) => !union.has(name)), [], directory);
+  }
 });
