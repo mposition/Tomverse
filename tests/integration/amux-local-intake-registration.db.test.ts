@@ -4,7 +4,7 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
-import { localIntakeCardDigest } from "@/lib/amux/localIntakeCore";
+import { localIntakeCardDigest, type LocalIntakeCard } from "@/lib/amux/localIntakeCore";
 import { commitLocalIntakeRegistration, readLocalIntakeRegistration } from "@/lib/amux/localIntakeRegistration";
 import { previewLocalIntakeCard } from "@/lib/amux/localIntakeRegistrationCore";
 import { prisma } from "@/lib/prisma";
@@ -56,7 +56,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-const card = (title: string) => ({
+const card = (title: string): LocalIntakeCard => ({
   localId: "card-01",
   title,
   problem: "The operator needs one confirmed backlog card.",

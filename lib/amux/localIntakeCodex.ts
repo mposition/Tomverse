@@ -31,8 +31,8 @@ export type LocalIntakeCodexConfig = {
   timeoutMs: number;
 };
 
-export const localIntakeChildEnv = (parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
-  const env: NodeJS.ProcessEnv = {};
+export const localIntakeChildEnv = (parent: NodeJS.ProcessEnv): Record<string, string> => {
+  const env: Record<string, string> = {};
   for (const key of ENV_ALLOWLIST) {
     const value = parent[key];
     if (typeof value === "string" && value.length > 0) env[key] = value;
@@ -78,7 +78,7 @@ export const buildCodexIntakeArgs = (config: LocalIntakeCodexConfig): string[] =
 export type CodexSpawn = (
   executable: string,
   args: readonly string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv; shell: false; signal: AbortSignal },
+  options: { cwd: string; env: Record<string, string>; shell: false; signal: AbortSignal },
 ) => Promise<{ stdout: string; code: number | null }>;
 
 export const spawnCodexIntake = async (
@@ -94,7 +94,7 @@ export const spawnCodexIntake = async (
     (async (executable, command, options) => {
       const child = spawn(executable, command, {
         cwd: options.cwd,
-        env: options.env,
+        env: options.env as NodeJS.ProcessEnv,
         shell: false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
