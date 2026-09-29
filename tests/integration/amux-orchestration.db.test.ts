@@ -2577,8 +2577,13 @@ test("a settle whose COMMIT lands after its commit deadline is refused by the da
       if (probe.armed && this === probe.client && text.trim().toUpperCase() === "COMMIT") {
         probe.armed = false;
         return (async () => {
-          const wait = (probe.walkEndLocalMs ?? 0) + COMMIT_DELAY_MS - performance.now();
-          if (wait > 0) await delay(wait);
+          // A timer can wake a fraction of a millisecond before its delay by
+          // performance.now(), which failed this setup on CI by under 1 ms.
+          // Wait until the target is actually reached.
+          const target = (probe.walkEndLocalMs ?? 0) + COMMIT_DELAY_MS;
+          for (let wait = target - performance.now(); wait > 0; wait = target - performance.now()) {
+            await delay(Math.ceil(wait));
+          }
           probe.commitSentLocalMs = performance.now();
           try {
             const result = await originalQuery.apply(this, args);
