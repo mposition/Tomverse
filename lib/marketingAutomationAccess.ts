@@ -328,7 +328,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * evidence-spec requirement applies to every v4-or-later shadow run. No model,
  * column, constraint, webhook writer, descriptor or admission decision changes;
  * the fingerprint moves because schema comments are watched bytes too.
- *
+ * 2026-09-29: current v5 manifest binds 190 files (stage v4/run v6); only schema comments changed, not models, webhook inputs, descriptor or admission decisions.
  * 2026-09-27: the AMUX back-merge adds the latched-off recommendation pool
  * and the closed auto-promotion gate. Neither is a marketing model or a
  * webhook input. The digest moves because the whole Prisma schema is
