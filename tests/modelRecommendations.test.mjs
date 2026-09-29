@@ -302,13 +302,26 @@ test("a non-English interface prefers a multilingual cost-efficient model", () =
   // gpt-5-6-luna heads both the "everyday" and "value" candidate lists, but a
   // model is only ever recommended once per response, so once it takes the
   // everyday slot as the app default the value slot falls to the next
-  // candidate.
+  // candidate: the guest trio's Gemini slot.
   assert.equal(
     english.find((item) => item.useCase === "value").modelId,
-    "gemini-2-5-flash"
+    "gemini-flash-lite-latest"
   );
   assert.equal(
     korean.find((item) => item.useCase === "value").modelId,
     "mistral-small-4"
   );
+});
+
+test("every guest trio model is a recommendation candidate, so a new guest sees its selection in the picker", async () => {
+  const { GUEST_BRAND_TRIO_MODEL_IDS } = await import("../lib/appDefaults.ts");
+  const recommendations = getModelRecommendations({
+    ...guestInput,
+    selectedModelIds: [...GUEST_BRAND_TRIO_MODEL_IDS],
+  });
+  for (const modelId of GUEST_BRAND_TRIO_MODEL_IDS) {
+    const item = recommendations.find((entry) => entry.modelId === modelId);
+    assert.ok(item, `${modelId} is recommended to a guest`);
+    assert.equal(item.isSelected, true);
+  }
 });
