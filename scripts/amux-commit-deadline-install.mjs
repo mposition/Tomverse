@@ -18,10 +18,21 @@ import { join } from "node:path";
  * read from the migration file between its install markers. There is no
  * second copy of the function to drift from the one production runs.
  *
- * The text runs inside one DO block that takes an advisory lock and creates
- * nothing when the trigger is already there, because a pushed database keeps
- * its triggers across pushes and Playwright workers may reach this at once.
- * No database connection is opened here.
+ * The text runs inside one DO block under an advisory lock, because a pushed
+ * database keeps its function and trigger across pushes and Playwright workers
+ * may reach this at once. Under that lock it
+ *
+ * - always replaces the function with the migration's text, so a database
+ *   pushed before the migration changed does not keep an old body;
+ * - drops a trigger of that name whose definition is not the migration's --
+ *   compared attribute by attribute in the catalogue, not by text, since
+ *   PostgreSQL prints a definition its own way;
+ * - creates the trigger when none is left.
+ *
+ * Running it again changes nothing. The attributes compared are those of the
+ * one trigger shape this file knows (TRIGGER_SHAPE); a migration whose trigger
+ * reads differently is refused here, so the comparison cannot go stale
+ * silently. No database connection is opened here.
  */
 
 export const AMUX_COMMIT_DEADLINE_MIGRATION =
@@ -33,6 +44,34 @@ const TRIGGER_START = "CREATE CONSTRAINT TRIGGER ";
 const FUNCTION_START = "CREATE OR REPLACE FUNCTION ";
 const OUTER_TAG = "$amux_commit_deadline_install$";
 const STATEMENT_TAGS = ["$amux_commit_deadline_fn$", "$amux_commit_deadline_trigger$"];
+
+/**
+ * The trigger statement this installer can compare, and the catalogue
+ * attributes that statement produces: AFTER INSERT FOR EACH ROW is tgtype 5
+ * (TRIGGER_TYPE_ROW | TRIGGER_TYPE_INSERT), a constraint trigger has a
+ * pg_constraint row, and there is no WHEN clause, argument or column list.
+ */
+const TRIGGER_SHAPE =
+  /^CREATE CONSTRAINT TRIGGER "amux_commit_deadline_check"\s+AFTER INSERT ON "AmuxCommitDeadline"\s+DEFERRABLE INITIALLY DEFERRED\s+FOR EACH ROW EXECUTE FUNCTION "amux_commit_deadline_check"\(\)$/;
+
+/** The trigger of that name on the table the unqualified name resolves to. */
+export const AMUX_COMMIT_DEADLINE_THIS_TRIGGER = [
+  `t.tgrelid = pg_catalog.to_regclass('"AmuxCommitDeadline"')`,
+  "t.tgname = 'amux_commit_deadline_check'",
+];
+
+/** What that trigger looks like in pg_trigger when it is the migration's. */
+export const AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES = [
+  "t.tgdeferrable",
+  "t.tginitdeferred",
+  "t.tgenabled = 'O'",
+  "t.tgtype::integer = 5",
+  "t.tgconstraint <> 0",
+  "t.tgqual IS NULL",
+  "t.tgnargs = 0",
+  "pg_catalog.array_length(t.tgattr::pg_catalog.int2[], 1) IS NULL",
+  `t.tgfoid = pg_catalog.to_regprocedure('"amux_commit_deadline_check"()')`,
+];
 
 const once = (text, marker) => {
   const first = text.indexOf(marker);
@@ -63,6 +102,11 @@ export const amuxCommitDeadlineInstallStatements = (migrationSql) => {
       "The AMUX commit deadline install block must be one function followed by one trigger.",
     );
   }
+  if (!TRIGGER_SHAPE.test(statements[1])) {
+    throw new Error(
+      "The AMUX commit deadline trigger no longer has the shape this installer compares; update TRIGGER_SHAPE and AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES with it.",
+    );
+  }
   for (const statement of statements) {
     for (const tag of [OUTER_TAG, ...STATEMENT_TAGS]) {
       if (statement.includes(tag)) {
@@ -74,21 +118,32 @@ export const amuxCommitDeadlineInstallStatements = (migrationSql) => {
 };
 
 /**
- * One idempotent statement that installs the function and the trigger when
- * the trigger is absent from the table the unqualified name resolves to.
+ * One idempotent statement: replace the function, drop a trigger of that name
+ * whose definition differs, create the trigger when none is left.
  */
 export const amuxCommitDeadlineInstallSql = (migrationSql) => {
   const [functionSql, triggerSql] = amuxCommitDeadlineInstallStatements(migrationSql);
+  const thisTrigger = AMUX_COMMIT_DEADLINE_THIS_TRIGGER.join("\n      AND ");
+  const matches = AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES.join("\n        AND ");
   return [
     `DO ${OUTER_TAG}`,
     "BEGIN",
     "  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('amux_commit_deadline_check:install'));",
+    `  EXECUTE ${STATEMENT_TAGS[0]}\n${functionSql}\n${STATEMENT_TAGS[0]};`,
+    "  IF EXISTS (",
+    "    SELECT 1 FROM pg_catalog.pg_trigger t",
+    `    WHERE ${thisTrigger}`,
+    "      AND NOT COALESCE(",
+    `        ${matches},`,
+    "        false",
+    "      )",
+    "  ) THEN",
+    `    EXECUTE 'DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"';`,
+    "  END IF;",
     "  IF NOT EXISTS (",
     "    SELECT 1 FROM pg_catalog.pg_trigger t",
-    `    WHERE t.tgrelid = pg_catalog.to_regclass('"AmuxCommitDeadline"')`,
-    "      AND t.tgname = 'amux_commit_deadline_check'",
+    `    WHERE ${thisTrigger}`,
     "  ) THEN",
-    `    EXECUTE ${STATEMENT_TAGS[0]}\n${functionSql}\n${STATEMENT_TAGS[0]};`,
     `    EXECUTE ${STATEMENT_TAGS[1]}\n${triggerSql}\n${STATEMENT_TAGS[1]};`,
     "  END IF;",
     "END",

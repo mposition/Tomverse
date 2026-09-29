@@ -161,8 +161,9 @@ if (schemaSource === "push") {
   );
   // `db push` creates the AmuxCommitDeadline table and not the deferred
   // trigger that refuses a late COMMIT; without it every AMUX write is refused
-  // with AMUX_DB_COMMIT_CHECK_MISSING. Applied from the migration's own text,
-  // and a no-op when a previous push already has it.
+  // with AMUX_DB_COMMIT_CHECK_MISSING. Applied from the migration's own text:
+  // the function is always replaced, a trigger whose definition differs is
+  // recreated, and a second run changes nothing.
   console.log(
     "\n[db-integration] Installing the AMUX commit deadline check from its migration"
   );

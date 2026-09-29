@@ -15,6 +15,8 @@ import {
 import { autoTransactionFailure } from "../lib/amux/autoPromotionCore.ts";
 import {
   AMUX_COMMIT_DEADLINE_MIGRATION,
+  AMUX_COMMIT_DEADLINE_THIS_TRIGGER,
+  AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES,
   amuxCommitDeadlineInstallSql,
   amuxCommitDeadlineInstallStatements,
   readAmuxCommitDeadlineInstallSql,
@@ -264,14 +266,59 @@ test("the push harnesses install the migration's own function and trigger, idemp
   const install = readAmuxCommitDeadlineInstallSql(root);
   assert.equal(install, amuxCommitDeadlineInstallSql(migration));
   assert.ok(install.includes(functionSql) && install.includes(triggerSql));
-  assert.match(install, /pg_advisory_xact_lock\(/);
-  assert.match(install, /IF NOT EXISTS \([\s\S]*?t\.tgname = 'amux_commit_deadline_check'[\s\S]*?\) THEN/);
+
+  // Under the lock, in this order: the function is always replaced, a
+  // differing trigger is dropped, a missing one is created.
+  const lock = install.indexOf("pg_advisory_xact_lock(");
+  const replaceFunction = install.indexOf(functionSql);
+  const dropIfDiffers = install.indexOf("  IF EXISTS (");
+  const drop = install.indexOf(`EXECUTE 'DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"';`);
+  const createIfMissing = install.indexOf("  IF NOT EXISTS (");
+  const create = install.indexOf(triggerSql);
+  assert.ok(lock > 0);
+  assert.ok(lock < replaceFunction && replaceFunction < dropIfDiffers, "the function is replaced before any condition");
+  assert.ok(dropIfDiffers < drop && drop < createIfMissing && createIfMissing < create);
+  const aroundFunction =
+    install.slice(lock, replaceFunction) + install.slice(replaceFunction + functionSql.length, dropIfDiffers);
+  assert.doesNotMatch(aroundFunction, /\bIF\b/, "replacing the function is unconditional");
+  assert.equal(install.split("IF EXISTS (").length, 2);
+  assert.equal(install.split("IF NOT EXISTS (").length, 2);
+
+  // "Differs" is every attribute the migration's statement fixes.
+  const differs = install.slice(dropIfDiffers, drop);
+  for (const attribute of AMUX_COMMIT_DEADLINE_THIS_TRIGGER) assert.ok(differs.includes(attribute), attribute);
+  assert.match(differs, /AND NOT COALESCE\(/);
+  for (const attribute of AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES) assert.ok(differs.includes(attribute), attribute);
+  assert.deepEqual(AMUX_COMMIT_DEADLINE_TRIGGER_MATCHES, [
+    "t.tgdeferrable",
+    "t.tginitdeferred",
+    "t.tgenabled = 'O'",
+    "t.tgtype::integer = 5",
+    "t.tgconstraint <> 0",
+    "t.tgqual IS NULL",
+    "t.tgnargs = 0",
+    "pg_catalog.array_length(t.tgattr::pg_catalog.int2[], 1) IS NULL",
+    `t.tgfoid = pg_catalog.to_regprocedure('"amux_commit_deadline_check"()')`,
+  ]);
+  const createGuard = install.slice(createIfMissing, create);
+  for (const attribute of AMUX_COMMIT_DEADLINE_THIS_TRIGGER) assert.ok(createGuard.includes(attribute), attribute);
+  // Same input, same statement: nothing in it depends on when or where it runs.
+  assert.equal(amuxCommitDeadlineInstallSql(migration), install);
 
   assert.throws(() => amuxCommitDeadlineInstallStatements("CREATE TABLE x ();"), /exactly once/);
   assert.throws(
     () => amuxCommitDeadlineInstallStatements(migration.replace("CREATE CONSTRAINT TRIGGER", "CREATE TRIGGER")),
     /exactly once/,
   );
+  // A trigger the comparison above does not describe is refused, not installed.
+  for (const changed of [
+    migration.replace("AFTER INSERT ON", "AFTER INSERT OR UPDATE ON"),
+    migration.replace("DEFERRABLE INITIALLY DEFERRED", "DEFERRABLE INITIALLY IMMEDIATE"),
+    migration.replace("FOR EACH ROW EXECUTE", "FOR EACH ROW WHEN (NEW.\"txid\" > 0) EXECUTE"),
+  ]) {
+    assert.notEqual(changed, migration);
+    assert.throws(() => amuxCommitDeadlineInstallSql(changed), /no longer has the shape this installer compares/);
+  }
 
   // Admin E2E: installed once per process before the first reset, then proven.
   const database = withoutComments(read("tests/e2e-admin/support/database.ts"));
