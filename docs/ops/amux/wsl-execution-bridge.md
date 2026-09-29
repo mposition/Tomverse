@@ -42,6 +42,8 @@ Tomverse 내부 호출에는 호출별 deadline이 있고 연결은 1초다. wor
 
 worker heartbeat가 `runtime_lease_lost`로 거절되면 다시 등록하지 않고 halt한다. 등록은 generation을 올리는데, 서버의 등록은 열린 attempt를 확인하지 않는다. ack는 됐지만 이 프로세스의 pending에 없는 attempt가 서버에 열려 있을 수 있으므로, 사람이 attempt 상태를 확인한 뒤 다시 시작한다.
 
+Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 알려진 결과로 본다. 닫힌 사유 목록의 거절과 CAS 패배는 소유권을 바꾸지 않았으므로 같은 창의 다음 후보로 넘어간다. 전송 오류, 예상 밖 상태 코드·본문 같은 결과 불명 claim과 queue·routing snapshot·recover 호출의 실패는 프로세스를 0이 아닌 종료 코드로 끝낸다. 다시 시작한 프로세스는 queue를 새로 읽는다.
+
 ## halt와 재시작
 
 halt는 runner가 스스로 풀지 않는다. 원인은 사라진 전송, 거절된 heartbeat, 응답 없는 Tomverse 호출 같은 결과 불명이고, 다시 시작해도 되는지는 사람이 판단한다. halt한 runner는 진행 중인 attempt가 남지 않으면 종료 코드 3으로 끝나고 stderr에 한 줄을 남긴다. 종료 코드 0은 정상 종료, 1은 시작 실패다.

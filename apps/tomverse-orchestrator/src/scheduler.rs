@@ -55,10 +55,20 @@ pub fn current_claim_mode() -> ClaimMode {
 }
 const MAX_ROUTING_PROBES_PER_TICK: usize = 16;
 
+/// What the scan does after a claim answer the server actually gave. An
+/// answer it did not give (transport error, unexpected status or body) is an
+/// unknown outcome and stops the process instead (AMUX_CLAIM_OUTCOME_UNKNOWN).
+///
+/// A refusal from the closed vocabulary and a lost CAS are known outcomes:
+/// no ownership changed. main's scheduler moved on to the next candidate after
+/// either (#1595), so one task the server refuses cannot hide every later
+/// runnable task, and the claim-only orchestrator that runs the production
+/// loop keeps running through a routine refusal such as one open card per
+/// worker. A develop merge had made both terminal for the process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SchedulerDisposition {
-    Continue,
-    Dormant,
+enum ClaimFollowUp {
+    EndTick,
+    NextCandidate,
 }
 
 fn claim_verdict(outcome: &ClaimResponse) -> &'static str {
@@ -69,10 +79,10 @@ fn claim_verdict(outcome: &ClaimResponse) -> &'static str {
     }
 }
 
-fn claim_disposition(outcome: &ClaimResponse) -> SchedulerDisposition {
+fn claim_follow_up(outcome: &ClaimResponse) -> ClaimFollowUp {
     match outcome {
-        ClaimResponse::Claimed { .. } => SchedulerDisposition::Continue,
-        ClaimResponse::CasLost | ClaimResponse::Refused { .. } => SchedulerDisposition::Dormant,
+        ClaimResponse::Claimed { .. } => ClaimFollowUp::EndTick,
+        ClaimResponse::CasLost | ClaimResponse::Refused { .. } => ClaimFollowUp::NextCandidate,
     }
 }
 
@@ -175,35 +185,24 @@ impl Scheduler {
                 next_recovery = Instant::now() + RECOVERY_INTERVAL;
             }
 
-            match self.tick().await {
-                Ok(SchedulerDisposition::Continue) => {}
-                Ok(SchedulerDisposition::Dormant) => {
-                    warn!(
-                        measured = true,
-                        verdict = "dormant_until_process_restart",
-                        "Tomverse AMUX scheduler stopped at a terminal claim containment boundary"
-                    );
-                    return Ok(());
-                }
-                Err(error) => {
-                    warn!(
-                        %error,
-                        incident_id = %uuid::Uuid::new_v4(),
-                        endpoint = "internal_api",
-                        error_code = "AMUX_INTERNAL_API_UNVERIFIED",
-                        measured = false,
-                        verdict = "internal_api_outcome_unknown_dormant",
-                        "scheduler stopped after a bounded internal API failure"
-                    );
-                    return Err(anyhow::anyhow!("AMUX_INTERNAL_API_UNVERIFIED"));
-                }
+            if let Err(error) = self.tick().await {
+                warn!(
+                    %error,
+                    incident_id = %uuid::Uuid::new_v4(),
+                    endpoint = "internal_api",
+                    error_code = "AMUX_INTERNAL_API_UNVERIFIED",
+                    measured = false,
+                    verdict = "internal_api_outcome_unknown_dormant",
+                    "scheduler stopped after a bounded internal API failure"
+                );
+                return Err(anyhow::anyhow!("AMUX_INTERNAL_API_UNVERIFIED"));
             }
 
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
 
-    async fn tick(&mut self) -> Result<SchedulerDisposition> {
+    async fn tick(&mut self) -> Result<()> {
         let queue = self.api.queue().await?;
         let ranked = rank_global_priority_at(queue, Utc::now());
         // Selection-only observes the highest priority task without taking
@@ -253,7 +252,7 @@ impl Scheduler {
                     verdict = "selection_only",
                     "Tomverse AMUX execution disabled; task was not claimed"
                 );
-                return Ok(SchedulerDisposition::Continue);
+                return Ok(());
             }
 
             let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
@@ -384,7 +383,7 @@ impl Scheduler {
                 }
             };
             let verdict = claim_verdict(&outcome);
-            let disposition = claim_disposition(&outcome);
+            let follow_up = claim_follow_up(&outcome);
             let (claimed, revision, decision_id, reason) = match &outcome {
                 ClaimResponse::Claimed {
                     revision,
@@ -405,16 +404,18 @@ impl Scheduler {
                 verdict,
                 "Tomverse task claim result"
             );
-            if claimed {
-                self.scan_offset = 0;
-                return Ok(SchedulerDisposition::Continue);
+            match follow_up {
+                ClaimFollowUp::EndTick => {
+                    self.scan_offset = 0;
+                    return Ok(());
+                }
+                // A refusal or a lost CAS changed no ownership. The next
+                // candidate in the bounded window is tried; the next tick
+                // re-reads the queue.
+                ClaimFollowUp::NextCandidate => continue,
             }
-            // Claim refusals and ambiguous CAS outcomes are terminal for this
-            // process. A restart performs an authoritative fresh read instead of
-            // duplicating a decision whose outcome may be uncertain.
-            return Ok(disposition);
         }
-        Ok(SchedulerDisposition::Continue)
+        Ok(())
     }
 }
 
@@ -569,16 +570,21 @@ mod tests {
     }
 
     #[test]
-    fn claim_refusals_and_cas_loss_make_the_scheduler_dormant() {
+    fn claim_refusals_and_cas_loss_move_to_the_next_candidate() {
         assert_eq!(
-            claim_disposition(&ClaimResponse::CasLost),
-            SchedulerDisposition::Dormant,
+            claim_follow_up(&ClaimResponse::CasLost),
+            ClaimFollowUp::NextCandidate,
         );
         for reason in ClaimRefusalReason::CLOSED {
             let outcome = ClaimResponse::Refused { reason: *reason };
-            assert_eq!(claim_disposition(&outcome), SchedulerDisposition::Dormant);
+            assert_eq!(claim_follow_up(&outcome), ClaimFollowUp::NextCandidate);
             assert_eq!(claim_verdict(&outcome), reason.as_str());
         }
+        let claimed = ClaimResponse::Claimed {
+            revision: 2,
+            decision_id: "decision".into(),
+        };
+        assert_eq!(claim_follow_up(&claimed), ClaimFollowUp::EndTick);
     }
 
     #[test]

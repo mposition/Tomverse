@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("unroutable tasks fall through but uncertain claim outcomes become dormant", async () => {
+// A refusal or a lost CAS is a known outcome and the scan moves on (main,
+// #1595): one refused task cannot hide later runnable work, and the claim-only
+// orchestrator keeps running through a routine refusal. Only an unknown claim
+// outcome stops the process.
+test("unroutable and refused tasks fall through but an unknown claim outcome stops the process", async () => {
   const [scheduler, api] = await Promise.all([
     readFile(
       new URL(
@@ -36,8 +40,14 @@ test("unroutable tasks fall through but uncertain claim outcomes become dormant"
   assert.match(scheduler, /verdict = "no_selected_worker"[\s\S]*?continue;/);
   assert.match(
     scheduler,
-    /ClaimResponse::CasLost \| ClaimResponse::Refused \{ \.\. \} => SchedulerDisposition::Dormant/,
+    /ClaimResponse::CasLost \| ClaimResponse::Refused \{ \.\. \} => ClaimFollowUp::NextCandidate/,
   );
+  assert.match(scheduler, /ClaimFollowUp::NextCandidate => continue,/);
+  assert.match(
+    scheduler,
+    /ClaimFollowUp::EndTick => \{\s*self\.scan_offset = 0;\s*return Ok\(\(\)\);/,
+  );
+  assert.doesNotMatch(scheduler, /Dormant/);
   assert.match(
     scheduler,
     /return Err\(anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)\)/,
