@@ -2,7 +2,11 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
+import {
+  emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES } from "@/lib/policyChangeNoticeEmail";
 import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import {
   releaseNotesAudiencePreview,
@@ -109,8 +113,34 @@ export type CampaignDraft = {
   }[];
 };
 
+/**
+ * The amendment notice goes out only in wording the owner approved.
+ *
+ * It is a `legal` template, so a campaign on it reaches everybody, including
+ * people who turned everything off -- which is what the notice is for, and why
+ * a draft wording must never be sent as it. Refused while no version is
+ * approved, and at approval unless every pinned version is one of the approved
+ * ones (docs/policy/email-policy-amendment-draft.md section 4).
+ */
+const assertChangeNoticeWordingApproved = (
+  templateKey: string,
+  pinnedContentHashes?: readonly string[]
+) => {
+  if (templateKey !== POLICY_CHANGE_NOTICE_TEMPLATE) return;
+  const approved = POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES;
+  if (
+    approved.length === 0 ||
+    (pinnedContentHashes ?? []).some((hash) => !approved.includes(hash))
+  ) {
+    throw new Error(
+      "The amendment notice's wording is not approved, so it cannot be sent as a campaign."
+    );
+  }
+};
+
 export const createCampaignDraft = async (input: CampaignDraft) => {
   await assertCampaignsEnabled();
+  assertChangeNoticeWordingApproved(input.templateKey);
   // Reject an unknown template here rather than at send: a draft naming a
   // template that does not exist cannot be approved into anything.
   const definition = emailTemplateDefinition(input.templateKey);
@@ -225,6 +255,16 @@ export const approveCampaign = async (input: {
       templateVersionId: version.templateVersionId,
       contentHash: current[language],
     });
+  }
+  if (campaign.templateKey === POLICY_CHANGE_NOTICE_TEMPLATE) {
+    const versions = await prisma.templateVersion.findMany({
+      where: { id: { in: pinned.map((entry) => entry.templateVersionId) } },
+      select: { contentHash: true },
+    });
+    assertChangeNoticeWordingApproved(
+      campaign.templateKey,
+      versions.map((version) => version.contentHash)
+    );
   }
 
   return prisma.emailCampaign.update({

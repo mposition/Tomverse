@@ -10,6 +10,7 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES } from "@/lib/policyChangeNoticeEmail";
 import {
   CHANGE_NOTICE_WINDOW_DAYS,
   TOLD_STATUSES,
@@ -71,8 +72,10 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
  * `/privacy`.
  *
  * `/terms` today: the July 15 page, before the section 5 clause (docs/policy/
- * email-consent-copy-draft.md) is added. Recording it is what turns
- * `document_state_unrecorded` into the true answer, `document_not_amended`.
+ * email-consent-copy-draft.md) is added. The gate still reports it as
+ * `document_state_unrecorded` while no amended version is approved; the record
+ * is what an approved digest will be compared against, and what the verifier
+ * holds to the page now.
  */
 export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   Record<string, { date: string; contentSha256: string }>
@@ -135,7 +138,8 @@ export const AMENDED_DOCUMENTS = ["/privacy", "/terms"] as const;
  * approved as this notice. Null or empty is `change_notice_unidentified`.
  */
 export const CHANGE_NOTICE_TEMPLATE_KEY: string | null = POLICY_CHANGE_NOTICE_TEMPLATE;
-export const CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [];
+export const CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] =
+  POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES;
 
 export const documentFacts = (): AmendedDocument[] =>
   AMENDED_DOCUMENTS.map((path) => {

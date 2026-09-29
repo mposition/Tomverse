@@ -378,7 +378,7 @@ docs/policy/email-notifications.md §11.3의 "수신거부에 로그인을
 기록을 고치는 것이고, §10이 금지하는 편집입니다 — 문안을 바꾸려면 새 버전과 새
 승인을 추가합니다.
 
-## 9. 승인 이후 발견된 것 — 9.1 결정됨(B), 9.2 결정됨(§11), 9.3 결정됨(누락, §12)
+## 9. 승인 이후 발견된 것 — 9.1 결정됨(B), 9.2 결정됨(§11), 9.3 결정됨(누락)
 
 독립 검토(2026-09-23, Cursor/Grok 4.7 xHigh)가 승인 **이후** 두 가지를 찾았습니다.
 문안은 승인됐으므로 **고치지 않았습니다.** 9.1은 소유자가 B로 결정했고, 9.2는
@@ -566,7 +566,9 @@ zh `向您发送`). 한국어는 `보내드린`의 경어로 표시하므로 해
 
 기한은 2028년이므로 급하지 않지만, 늦게 답하면 비용이 새 버전 하나로 올라갑니다.
 
-**소유자 결정 대기.** 독립 검토(18차, Cursor)가 찾았습니다.
+**결정됨(소유자, 2026-09-29): 누락.** 영어 본문 초안은
+[방침·약관 개정 초안](email-policy-amendment-draft.md) §8에 있고 승인을 기다립니다.
+독립 검토(18차, Cursor)가 찾았습니다.
 
 ## 10. 승인 이후 이 문서를 고치는 법
 
@@ -797,29 +799,7 @@ zh `向您发送`). 한국어는 `보내드린`의 경어로 표시하므로 해
 | 거부 | 받지 않겠습니다 | No, thank you | Nein, danke | No, gracias | Non, merci | Não, obrigado | 不用了 |
 | 닫기 | 나중에 | Not now | Später | Ahora no | Plus tard | Agora não | 以后再说 |
 
-## 12. §4.3 2년 고지의 영어 본문 — 초안, 승인 대기
-
-§9.3의 결정(소유자, 2026-09-29): **누락**입니다. §4.1·§4.2처럼 §4.3도 영어
-본문을 가집니다. 아래는 한국어 본문을 옮긴 초안이며, **문안은 아직 승인되지
-않았습니다** — 승인하시면 다음 버전의 승인표에 이 절을 올립니다. 첫 발송
-기한이 2028년이라 그 전에 승인하면 됩니다.
-
-**본문 (en)**
-
-> Tomverse Pty Ltd holds your consent to receive marketing email, as follows.
->
-> Address: {{emailAddress}}
-> Two-yearly notice reference date: {{anchorLabel}} ({{anchorDate}})
-> What you receive: {{purposeList}}
->
-> If you want to keep receiving it, you do not need to do anything. If you do
-> not, use the unsubscribe link below; it works straight away, without signing
-> in.
-
-`{{anchorLabel}}`의 영어 값은 §4.3의 표 그대로입니다(`consent date` /
-`sign-up date`).
-
-## 13. 버전 2026-09-29 승인란
+## 12. 버전 2026-09-29 승인란
 
 | 절 | 내용 | 승인 |
 |---|---|---|
