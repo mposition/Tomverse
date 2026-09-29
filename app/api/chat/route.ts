@@ -1491,7 +1491,7 @@ async function handleChatPost(
         // provider-native search tool when its exact catalog id is
         // confirmed-supported -- it never adds or swaps in a different
         // model (see lib/webSearchCapability.ts for the support matrix).
-        const webSearchCapability = getWebSearchCapability(modelConfig.id);
+        const webSearchCapability = getWebSearchCapability(modelConfig);
         const webSearchRequested = webSearchMode === "always";
         // Which search backends this process can actually reach, resolved once
         // and read by everything below. The composer, the picker, preflight and

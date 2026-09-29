@@ -195,7 +195,7 @@ export function filterRouterCandidates(
             continue;
         }
         if (input.profile.needsCurrentInformation) {
-            const capability = getWebSearchCapability(model.id);
+            const capability = getWebSearchCapability(model);
             if (capability.support === "unsupported") {
                 reject(model.id, "web_search_unsupported");
                 continue;

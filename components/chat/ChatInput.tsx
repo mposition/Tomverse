@@ -824,7 +824,7 @@ export function ChatInput({
   selectedModels,
   disabledModelIds = [],
   guestMessageCount = 0,
-  maxGuestMessages = 20,
+  maxGuestMessages = APP_DEFAULTS.maxGuestMessages,
   onToggleModel,
   onSwapModel,
   modelSwapRequest = null,

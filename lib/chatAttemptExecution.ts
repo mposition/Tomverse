@@ -228,7 +228,7 @@ export const planAttemptExecution = (
     modelConfig: AiModel,
     request: AttemptExecutionRequest
 ): AttemptExecutionResult => {
-    const capability = getWebSearchCapability(modelConfig.id);
+    const capability = getWebSearchCapability(modelConfig);
     // Dispatchability, not declared support. A candidate whose native search
     // has no enforceable per-request ceiling cannot carry one, and enabling it
     // here would build a plan whose only possible end is the 503 the

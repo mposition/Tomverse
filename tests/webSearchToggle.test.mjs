@@ -73,6 +73,9 @@ test("the switch writes back the two modes it can be in", () => {
   assert.equal(isWebSearchEnabled(webSearchModeForToggle(false)), false);
 });
 
-test("a new conversation starts with the switch off", () => {
-  assert.equal(normalizeWebSearchMode(APP_DEFAULTS.defaultWebSearchMode), "off");
+test("a new conversation starts with the switch on", () => {
+  // Approved 2026-09-29 for answer quality, guests included. Checked through
+  // `normalizeWebSearchMode` so a default of "auto" -- which reads as off --
+  // cannot pass for "on".
+  assert.equal(normalizeWebSearchMode(APP_DEFAULTS.defaultWebSearchMode), "always");
 });

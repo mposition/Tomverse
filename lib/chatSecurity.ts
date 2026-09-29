@@ -78,7 +78,11 @@ import {
     tokenQuotaRefusalDetails,
     type TokenQuotaScope,
 } from "@/lib/chatTokenQuotaCore";
-import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
+import {
+    APP_DEFAULTS,
+    isWebSearchMode,
+    type WebSearchMode,
+} from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
     NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
@@ -979,8 +983,20 @@ const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): Li
     if (access.kind !== "user") {
         return [
             { period: "minute", limit: positiveInteger(process.env.CHAT_GUEST_PER_MINUTE, 5) },
-            { period: "day", limit: positiveInteger(process.env.CHAT_GUEST_PER_DAY, 20) },
-            { period: "month", limit: positiveInteger(process.env.CHAT_GUEST_PER_MONTH, 100) },
+            {
+                period: "day",
+                limit: positiveInteger(
+                    process.env.CHAT_GUEST_PER_DAY,
+                    APP_DEFAULTS.maxGuestMessages
+                ),
+            },
+            {
+                period: "month",
+                limit: positiveInteger(
+                    process.env.CHAT_GUEST_PER_MONTH,
+                    APP_DEFAULTS.maxGuestMonthlyCredits
+                ),
+            },
         ];
     }
 

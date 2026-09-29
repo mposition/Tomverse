@@ -130,7 +130,7 @@ export const estimateRequestCredits = ({
   backendReadiness: WebSearchBackendReadiness;
 }): RequestCreditEstimate => {
   const perModel = models.map((model): ModelCreditEstimate => {
-    const capability = getWebSearchCapability(model.id);
+    const capability = getWebSearchCapability(model);
     const surcharge = getWebSearchSurchargeCredits(
       webSearchMode,
       capability,

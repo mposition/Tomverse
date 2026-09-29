@@ -1402,7 +1402,7 @@ export function ChatPageClient({
     aiReviewTrial: { limit: number; used: number; remaining: number } | null;
   } | null>(null);
   const guestMessageCount = guestUsage?.used ?? 0;
-  const MAX_GUEST_MESSAGES = guestUsage?.limit ?? 20;
+  const MAX_GUEST_MESSAGES = guestUsage?.limit ?? APP_DEFAULTS.maxGuestMessages;
   const refreshGuestUsage = useCallback(() => {
     if (!isGuestMode) return;
     fetch("/api/user/guest-usage", { cache: "no-store" })

@@ -118,8 +118,8 @@ test("setting a retired variable cannot lower the guardrail", () => {
 
 test("guest guardrails stay absolute and independently configured", () => {
   assert.deepEqual(getGuestCostGuardrailLimits({}), {
-    day: 20_000,
-    month: 100_000,
+    day: 300_000,
+    month: 3_000_000,
   });
 });
 

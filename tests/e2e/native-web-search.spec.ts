@@ -29,11 +29,16 @@ const toolsMenuTrigger = (page: Page) =>
 // Web search is one switch, flipped in place. The menu deliberately stays
 // open afterwards (the row's own description and cost note are what change),
 // so it is dismissed here rather than closing itself.
+//
+// A new conversation now starts with the switch on (APP_DEFAULTS), so this
+// only flips it when a seeded conversation arrived with it off.
 const setWebSearchModeAlways = async (page: Page) => {
   await toolsMenuTrigger(page).click();
   const toggle = page.getByTestId("tools-web-search-row");
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", /^(true|false)$/);
+  if ((await toggle.getAttribute("aria-checked")) === "false") {
+    await toggle.click();
+  }
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 };
