@@ -7,13 +7,13 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-09-22
+- Last reviewed: 2026-09-29
 
 ## Scope
 
 | Area | File |
 | --- | --- |
-| Route table, groups, aliases, tabs, redirect map | `lib/adminNavigation.ts` |
+| Route table, groups, aliases, tabs, view roles, redirect map | `lib/adminNavigation.ts` |
 | Icon per entry | `components/admin/adminNavigationIcons.ts` |
 | Badge shape and per-entry derivation (client-safe) | `lib/adminNavigationBadges.ts` |
 | Badge loader (server-only) | `lib/adminNavigationCounts.ts` |
@@ -30,11 +30,14 @@
 | Request deadline for every panel | `lib/adminFetch.ts` |
 | Whether a polling panel may issue a request | `lib/adminPollTick.ts` |
 | Refusal copy, and the notice that renders it | `lib/adminApiOutcome.ts`, `components/admin/AdminApiFailureNotice.tsx` |
-| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/adminOverviewFigures.test.mjs`, `tests/adminFetchDeadline.test.mjs`, `tests/adminPollTick.test.mjs`, `tests/adminWriteRouteGuards.test.mjs`, `tests/adminReauthenticationCta.test.mjs`, `tests/e2e-admin/**` |
+| AMUX section status chips, read from each section's switch | `lib/adminAmuxTabStatus.ts` |
+| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminAmuxTabStatus.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/adminOverviewFigures.test.mjs`, `tests/adminFetchDeadline.test.mjs`, `tests/adminPollTick.test.mjs`, `tests/adminWriteRouteGuards.test.mjs`, `tests/adminReauthenticationCta.test.mjs`, `tests/e2e-admin/**` |
 
 ## The navigation
 
-Six groups, twenty-three entries. One page, one job.
+Seven groups, twenty-six entries. One page, one job. The owner sees all
+twenty-six; every other role sees twenty-four, because two AMUX entries are
+owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
@@ -57,6 +60,9 @@ Six groups, twenty-three entries. One page, one job.
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Platform settings | `/admin/platform` | — |
+| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
+| AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
+| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment` |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -82,6 +88,33 @@ this slice. Reading takes ordinary admin authentication; every control takes
 `engineering-agent:write` and a recent sign-in, checked by its own route, and
 `t1` is not a mode this screen can set.
 
+**AMUX** is the development-agent work board
+(`docs/policy/development-agent-orchestration.md`). Its eight screens used to
+be eight unlisted owner-only routes, left out of the table because the table
+fed every role's palette and every other role gets a 404 from them. They are
+now sections of three pages, listed by role (rule 14): **Backlog** (what
+enters the backlog and what is recorded about a card) and **Promotion** (how a
+card reaches Todo) are owner-only; **Execution** opens to every admin role on
+**Assignment** -- why AMUX assigned the work, and the escalations waiting on a
+person, which used to sit on Routing -- while its **Cards** section stays
+owner-only. The owner opens Execution on Cards, everyone else on Assignment,
+and a non-owner who names `?tab=cards` gets a 404 rather than another section.
+The panels are the same components and send what they sent; each page loads
+only its open section.
+
+Execution and its Assignment tab carry the count of AMUX escalations still
+`open` or `acknowledged`, from the same status list the section reads
+(`AMUX_ESCALATION_AWAITING_STATUSES`). Each gated section's tab carries a chip
+-- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
+switch on" for auto-promotion -- computed by `lib/adminAmuxTabStatus.ts` from
+the environment variable and shipped code latch that section's own route
+reads (rule 8). Cards reads "Read only" because the card list issues no
+request and writes nothing; Assignment reads "Read only" to a role without
+`ops:write`, the permission every decision route checks.
+
+**Routing** keeps Chat shadow routing only, and one line pointing at AMUX ›
+Execution, because runbooks written before the move send operators there.
+
 Plus three routes with no sidebar entry: `/admin/search` ("Global search",
 reachable from the header control, `Ctrl/Cmd+K` and the palette's "View all
 results"), `/admin/users/[userId]` and `/admin/providers/[provider]`.
@@ -94,7 +127,7 @@ Nothing was deleted. Every previously reachable URL still resolves, and it
 resolves to the *section* it named rather than to the first tab of whichever
 page absorbed it. `tests/adminNavigation.test.mjs` fails if a retired route
 loses its redirect route or points at a tab that does not exist, and
-`tests/e2e-admin/admin-shell-navigation.spec.ts` drives all eight in a browser.
+`tests/e2e-admin/admin-shell-navigation.spec.ts` drives all sixteen in a browser.
 
 | Old route | New destination | Why |
 | --- | --- | --- |
@@ -106,6 +139,18 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/jobs` | `/admin/automation?tab=jobs` | Scheduled work supervised, not performed, by an operator |
 | `/admin/webhooks` | `/admin/automation?tab=webhooks` | As above |
 | `/admin/approvals` | `/admin/work-queue` | Two-person approval was retired; the address still opens the queue |
+| `/admin/amux-intake` | `/admin/amux-backlog?tab=intake` | The AMUX screens became sections of the AMUX group |
+| `/admin/amux-board-import` | `/admin/amux-backlog?tab=import` | As above |
+| `/admin/amux-reconciliation` | `/admin/amux-backlog?tab=reconciliation` | As above |
+| `/admin/amux-backlog-metadata` | `/admin/amux-backlog?tab=metadata` | As above |
+| `/admin/amux-board-recommendation` | `/admin/amux-promotion?tab=recommendation` | As above |
+| `/admin/amux-board-promotion` | `/admin/amux-promotion?tab=promotion` | As above |
+| `/admin/amux-board-auto-promotion` | `/admin/amux-promotion?tab=auto-promotion` | As above |
+| `/admin/amux-cards` | `/admin/amux-execution?tab=cards` | As above |
+
+The AMUX redirects decide nothing about access. A role the destination refuses
+is redirected and then gets the destination's 404, as it got one from the old
+address; the redirect page itself never reads the session.
 
 `/admin?tab=<value>` — the console's addressing scheme before every workspace
 got its own route — is mapped by `ADMIN_LEGACY_TAB_ROUTES` and covers both the
@@ -209,6 +254,14 @@ never its own `tab`, which the lookup has already consumed.
      process it read started. On 2026-09-14 three variables were set on the
      host and reported missing, and the panel's wording sent the diagnosis
      toward generating keys that already existed.
+   - **A switch state is read, never written.** A chip that says a section's
+     writes are off is a claim about a switch, so it is computed from that
+     switch -- the AMUX section chips from the same environment variable and
+     shipped code latch the section's own route passes to the same permit
+     function (`lib/adminAmuxTabStatus.ts`). Written as a string it would go on
+     saying "off" the day apply was turned on, and
+     `tests/adminAmuxTabStatus.test.mjs` pins each chip to its route's
+     variable.
 
 9. **A number an operator is asked to act on can be taken apart.** The health
    score links to `?tab=health`, which renders every factor — including the
@@ -254,10 +307,23 @@ never its own `tab`, which the lookup has already consumed.
 13. **Role, re-authentication, two-person approval, audit, credit/cost and
    provider-budget policy are out of scope for this contract** and were not
    changed by it. `writeRoles` in the route table drives the sidebar's "Read"
-   marker only; authorization is still decided server-side by
-   `lib/adminAuth.ts` and each `/api/admin/**` route handler. Rule 7 is not an
-   exception to this: *whether* to refuse is that policy's decision, and what
-   the screen owes the operator once refused is this contract's.
+   marker only, and `viewRoles` (rule 14) what the console lists;
+   authorization is still decided server-side by `lib/adminAuth.ts`, each page
+   and each `/api/admin/**` route handler. Rule 7 is not an exception to this:
+   *whether* to refuse is that policy's decision, and what the screen owes the
+   operator once refused is this contract's.
+
+14. **A page or section a role cannot open is not offered to it.** An entry or
+    a tab may declare `viewRoles`; the sidebar, the command palette, pins,
+    recents and the tab strip then show it to those roles alone
+    (`adminNavigationFor`, `adminSearchablePagesFor`, `adminHrefIsVisibleTo`,
+    `adminVisibleTabs`). A role that cannot be determined sees only what every
+    role sees. This is visibility, not authorization: the page still refuses
+    on its own, with `notFound()`, and `tests/adminNavigation.test.mjs` keeps
+    the two equal -- a listed page that answers 404 advertises what it hides,
+    and a hidden page that would open is a way in nobody can find. A request
+    that names a section its role may not open is a 404, not a different
+    section: substituting one would confirm the named section exists.
 
 ## Language
 

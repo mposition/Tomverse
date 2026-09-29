@@ -25,7 +25,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
-import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
+import {
+  APP_DEFAULTS,
+  WEB_SEARCH_MODES,
+  isWebSearchMode,
+  normalizeWebSearchMode,
+} from "@/lib/appDefaults";
 import {
   apiSecurityResponse,
   assertConversationCapacity,
@@ -229,9 +234,11 @@ export const createConversationForProduct = async (
           projectId: newConversation.projectId || null,
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
           disabledPanels: safeParse(newConversation.disabledPanels, []),
+          // An unreadable stored value reads as off, not as the new-chat
+          // default: nothing consented to a search on a row nobody can read.
           webSearchMode: isWebSearchMode(newConversation.webSearchMode)
             ? newConversation.webSearchMode
-            : APP_DEFAULTS.defaultWebSearchMode,
+            : normalizeWebSearchMode(newConversation.webSearchMode),
           isLocked: !!newConversation.password,
           messageCount: 0,
           // Server-computed, so the screen never has to work out which

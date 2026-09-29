@@ -12,6 +12,13 @@ export const amuxHumanReviewRequired = (task: {
 export const AMUX_REVIEW_PR_NUMBER_MAX = 2_147_483_647;
 
 /**
+ * Escalation statuses that still wait on a person. The routing report lists
+ * these and the Admin Console's Execution badge counts them, from this one
+ * constant, so the badge cannot count a set the section does not show.
+ */
+export const AMUX_ESCALATION_AWAITING_STATUSES = ["open", "acknowledged"] as const;
+
+/**
  * The review specialty a card gets when a settlement first records its PR and
  * it had none (AmuxWorkItem_human_review_shape_check pairs the flag with a
  * specialty). It matches the planning key pattern.

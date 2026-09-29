@@ -107,11 +107,12 @@ test("enqueuing writes an outbox row and sends nothing yet", async () => {
 
 test("the personalisation snapshot is stored encrypted", async () => {
   const user = await someone();
+  const payload = { plan: "Pro", billingInterval: "monthly", periodEnd: null };
   const rows = enqueuedRow(await enqueueStandardEmail({
     templateKey: BILLING_WELCOME_TEMPLATE,
     emailAddress: user.email,
     userId: user.id,
-    payload: { plan: "Pro", billingInterval: "monthly", periodEnd: null },
+    payload,
   }));
 
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
@@ -120,7 +121,33 @@ test("the personalisation snapshot is stored encrypted", async () => {
 
   // The plan name must not be readable from the row itself: this table is what
   // a database dump, a backup or a replica exposes.
-  assert.equal(JSON.stringify(delivery.renderDataSnapshot).includes("Pro"), false);
+  //
+  // Not a substring search for the plan name: "Pro" is three characters of the
+  // base64 alphabet, so random ciphertext contains it often enough to fail CI.
+  // Instead the row must be the envelope and nothing else -- so no side field
+  // can carry the plan -- and neither the base64 text nor the decoded
+  // ciphertext may hold the plaintext the cipher was given.
+  const stored = delivery.renderDataSnapshot as Record<string, unknown>;
+  assert.deepEqual(
+    Object.keys(stored).sort(),
+    ["ct", "dk", "dkIv", "dkTag", "iv", "keyVersion", "tag", "v"]
+  );
+  assert.equal(stored.v, 1);
+  assert.equal(stored.keyVersion, "v1");
+  const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
+  for (const field of ["ct", "dk", "dkIv", "dkTag", "iv", "tag"]) {
+    assert.match(String(stored[field]), base64, `${field} is not base64`);
+  }
+
+  const plaintext = JSON.stringify(payload);
+  const serialized = JSON.stringify(stored);
+  assert.equal(serialized.includes(plaintext), false);
+  assert.equal(serialized.includes(Buffer.from(plaintext).toString("base64")), false);
+  assert.equal(
+    Buffer.from(String(stored.ct), "base64").includes(Buffer.from(plaintext)),
+    false,
+    "ciphertext holds the payload in the clear"
+  );
 
   const keyring = readSnapshotKeyring(process.env)!;
   assert.deepEqual(decryptSnapshot(delivery.renderDataSnapshot, keyring), {

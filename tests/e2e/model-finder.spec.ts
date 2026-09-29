@@ -240,6 +240,17 @@ test("selecting two models suggests one complementary model instead of the full 
 }) => {
   await mockAuthenticatedApi(page);
   await page.goto("/chat?lang=ko");
+  // A new conversation starts with web search on, and three models' search
+  // reservations on top of their base cost exceed the Free account's 30
+  // daily credits -- the limit banner would cover the picker. This test is
+  // about the combination suggestion, so it runs with search off.
+  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("tools-web-search-row").click();
+  await expect(page.getByTestId("tools-web-search-row")).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
+  await page.keyboard.press("Escape");
 
   await modelMenuTrigger(page).click();
   await openModelCatalogue(page);

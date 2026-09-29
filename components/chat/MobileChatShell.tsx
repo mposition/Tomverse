@@ -1610,6 +1610,7 @@ export function MobileChatShell({
               >
                 <ChatApp
                   transcriptScope={transcriptScope}
+                  otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}

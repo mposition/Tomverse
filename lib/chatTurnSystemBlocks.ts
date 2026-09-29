@@ -219,7 +219,7 @@ export const buildChatTurnSystemBlocks = (
   });
 
   const webSearchTurnState = resolveWebSearchTurnState({
-    modelId: input.modelId,
+    modelId: { id: input.modelId, provider: input.provider },
     nativeSearchEnabled: input.nativeSearchEnabled,
     appManagedSearchEnabled: input.appManagedSearchEnabled,
   });

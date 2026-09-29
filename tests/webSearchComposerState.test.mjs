@@ -16,7 +16,10 @@ const APP_MANAGED = "gemini-3-7-flash";
 // Picked from the capability registry rather than hard-coded assumptions, so
 // the test keeps meaning if a model's verified support changes.
 const NATIVE = "gpt-5-5";
-const UNSUPPORTED = "gpt-5-4-mini";
+// Deep research runs through its own flow and never takes the search switch.
+// Every chat model can search by one route or another, so this is the one
+// catalogue model left that genuinely cannot.
+const UNSUPPORTED = "perplexity/sonar-deep-research";
 
 test("the fixtures still have the support this suite depends on", () => {
   assert.equal(getWebSearchCapability(NATIVE).support, "native");

@@ -102,6 +102,14 @@ export type AttemptExecutionRequest = {
     /** `"guest"` or the signed-in kind; decides the input ceiling. */
     accessKind: Parameters<typeof createChatBudget>[0];
     inputBreakdown: TokenEstimateBreakdown;
+    /**
+     * The primary's `reservationOnlyInputTokens`: the image allowance its
+     * measured sizes did not use. Carried as is rather than re-measured for
+     * this candidate, so the fallback reserves and charges exactly what the
+     * primary would have, and the turn meets the same input limit it was
+     * admitted under.
+     */
+    reservationOnlyInputTokens?: number;
     webSearchMode: WebSearchMode | null;
     /**
      * Which application-managed search backends this deployment can reach.
@@ -228,7 +236,7 @@ export const planAttemptExecution = (
     modelConfig: AiModel,
     request: AttemptExecutionRequest
 ): AttemptExecutionResult => {
-    const capability = getWebSearchCapability(modelConfig.id);
+    const capability = getWebSearchCapability(modelConfig);
     // Dispatchability, not declared support. A candidate whose native search
     // has no enforceable per-request ceiling cannot carry one, and enabling it
     // here would build a plan whose only possible end is the 503 the
@@ -341,6 +349,7 @@ export const planAttemptExecution = (
                 // below, so a fallback's provider budget authorises the cache
                 // write its own request may make.
                 promptCachePath: "chat_fallback_turn",
+                reservationOnlyInputTokens: request.reservationOnlyInputTokens,
             }
         );
     } catch (error) {
