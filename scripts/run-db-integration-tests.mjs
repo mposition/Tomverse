@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
   dbIntegrationGroupOf,
@@ -158,6 +159,27 @@ if (schemaSource === "push") {
     ["node_modules/prisma/build/index.js", "db", "push"],
     "Synchronizing the current Prisma schema"
   );
+  // `db push` creates the AmuxCommitDeadline table and not the deferred
+  // trigger that refuses a late COMMIT; without it every AMUX write is refused
+  // with AMUX_DB_COMMIT_CHECK_MISSING. Applied from the migration's own text,
+  // and a no-op when a previous push already has it.
+  console.log(
+    "\n[db-integration] Installing the AMUX commit deadline check from its migration"
+  );
+  const commitDeadlineCheck = spawnSync(
+    process.execPath,
+    ["node_modules/prisma/build/index.js", "db", "execute", "--stdin"],
+    {
+      cwd: resolve(import.meta.dirname, ".."),
+      env: testEnvironment,
+      input: readAmuxCommitDeadlineInstallSql(resolve(import.meta.dirname, "..")),
+      stdio: ["pipe", "inherit", "inherit"],
+    }
+  );
+  if (commitDeadlineCheck.error) throw commitDeadlineCheck.error;
+  if (commitDeadlineCheck.status !== 0) {
+    process.exit(commitDeadlineCheck.status || 1);
+  }
 } else {
   // `db push` regenerates the client as part of its work; `migrate deploy`
   // does not. Without this, a schema change that has been migrated but not
