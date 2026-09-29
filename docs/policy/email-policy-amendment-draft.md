@@ -96,7 +96,9 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 
 `legal` 분류, purpose 없음, 수신거부 링크 없음. 수신거부한 분에게도 갑니다
 ([이메일 알림](email-notifications.md) §3.1의 5번 유형). 문안은
-`lib/policyChangeNoticeEmail.ts`에 7개 언어로 있습니다. 영어 본문은 이렇습니다.
+`lib/emailTemplateDefinitions.ts`의 amendment notice 절에 7개 언어로 있고(Prompt
+Refiner의 봉인된 closure를 늘리지 않으려고 그 파일에 둡니다), 승인 목록과 승인 판정은
+`lib/policyChangeNoticeEmail.ts`에 있습니다. 영어 본문은 이렇습니다.
 
 > We are updating the Tomverse Privacy Policy and Terms and Conditions. The
 > changes take effect on {{effectiveDate}}.

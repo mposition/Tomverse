@@ -38,7 +38,7 @@
  * other pins exist. Not a claim that the owner approved every byte: the approval
  * covers sections 1 to 6 and says so.
  */
-export const APPROVED_DOCUMENT_DIGEST = "7f6fed76dfeb7424873c7444ce6bcba4";
+export const APPROVED_DOCUMENT_DIGEST = "7eba134fcc7ee373d36210c99e67ddb9";
 
 /**
  * The depth-2 sections no version owns, in document order.
@@ -62,4 +62,4 @@ export const UNVERSIONED_SECTIONS = ["0.", "7.", "9.", "10."];
  * byte, because a partition with a gap is how three earlier attempts at this got
  * through.
  */
-export const UNVERSIONED_SECTIONS_DIGEST = "6c463b8b8dab2fae0d994b0a0f72d447";
+export const UNVERSIONED_SECTIONS_DIGEST = "a3611aae276ca90ca4165692edfa2d06";

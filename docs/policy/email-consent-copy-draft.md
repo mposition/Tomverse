@@ -520,9 +520,10 @@ IP를 그대로 쓰고, production 밖에서는 `x-real-ip`도 씁니다. 동의
 게이트 뒤에 있고, marketing flag는 기본값이 off입니다. **production의 flag 값과 승인 봉인 여부는 이 문서가
 말할 수 있는 사실이 아닙니다** — 저장소가 아니라 운영 DB가 가진 값이고, 보내기
 전에 확인해야 하는 것입니다. 원장과
-봉인 장치(S3)는 develop에 있고, cohort 판정(S8a)은 아직 병합되지 않았으며, 발송은
-S9입니다. `EmailPreference`까지 채우면 S9를 기다리지 않고 보낼 수 있다는 점은
-사실입니다 — 그 대가가 위의 목록입니다.
+봉인 장치(S3), cohort 판정(S8a), 발송 판정(S9)이 이 경로를 이룹니다. 이 계정들을
+위해 `EmailPreference`를 채우면 안 됩니다 — 확인된 preference는 release notes의
+후보가 되므로, 그 행들은 봉인된 cohort가 아니라 **express consent로** 나가고, 그것이
+위 목록이 말하는 지어낸 동의입니다.
 
 이 절은 그 판단을 기록해 둔 것이지 결정을 막는 것이 아닙니다. 다르게 정하시면
 그때 기록하겠습니다.

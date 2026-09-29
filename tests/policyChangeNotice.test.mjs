@@ -66,6 +66,19 @@ test("every language says may, not will", () => {
     assert.ok(!/with two exceptions|à deux exceptions|mit zwei Ausnahmen|con dos excepciones|com duas exceções/.test(text), language);
   }
   assert.match(buildPolicyChangeNoticeEmail({ language: "en", appUrl: APP }).text, /Tomverse may send product update emails/);
+  // And every language closes the case: otherwise only if asked.
+  const closing = {
+    en: /Otherwise we send them only if you ask/,
+    ko: /그 밖에는 신청하신 경우에만 보냅니다/,
+    zh: /其他情况下，只有在您申请后才会发送/,
+    fr: /Sinon, nous ne les envoyons que si vous les demandez/,
+    de: /Andernfalls senden wir sie nur auf Ihre Anforderung/,
+    es: /En los demás casos solo las enviamos si las pides/,
+    pt: /Nos demais casos, só enviamos se você pedir/,
+  };
+  for (const language of LANGUAGES) {
+    assert.match(buildPolicyChangeNoticeEmail({ language, appUrl: APP }).text, closing[language], language);
+  }
   assert.match(buildPolicyChangeNoticeEmail({ language: "ko", appUrl: APP }).text, /보낼 수 있습니다/);
 });
 
