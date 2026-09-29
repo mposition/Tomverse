@@ -23,6 +23,10 @@ test("TypeScript and Rust keep one closed AMUX claim refusal vocabulary", async 
   assert.match(route, /recordAmuxClaimRefusal\("invalid_request"\)/);
   assert.match(store, /reason: "incident_admission_blocked" as const/);
   assert.match(store, /reason: "wip_limit_reached" as const/);
+  // One open card per worker; the refusal reuses the closed vocabulary so the
+  // Rust wire enum needs no new variant.
+  assert.match(store, /reason: "execution_lifecycle_unavailable" as const/);
+  assert.ok(store.includes('status: { in: ["todo", "doing"] }'));
   assert.match(store, /AMUX_DB_BOUNDARIES\.claim/);
   assert.match(store, /AMUX_DB_BOUNDARIES\.claimRefusal/);
   assert.match(store, /action: "amux\.claim\.refused"/);

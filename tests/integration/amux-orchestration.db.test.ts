@@ -3166,3 +3166,50 @@ test("a PR number on any settlement other than succeeded to review is refused be
     /Invalid AMUX review PR number/,
   );
 });
+
+test("a worker that already owns an open card is not claimed a second one", async () => {
+  const worker = `amux-one-at-a-time-${randomUUID()}`;
+  const first = await createTodo("amux-one-first");
+  const second = await createTodo("amux-one-second");
+  try {
+    const claimed = await claimUnownedTodo({
+      taskId: first,
+      worker,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.equal(claimed.claimed, true);
+
+    const refused = await claimUnownedTodo({
+      taskId: second,
+      worker,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.deepEqual(refused, { claimed: false, reason: "execution_lifecycle_unavailable" });
+    const untouched = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: second } });
+    assert.equal(untouched.owner, null);
+    assert.equal(untouched.revision, 0);
+    assert.equal(await prisma.amuxRouteDecision.count({ where: { taskId: second } }), 0);
+
+    // Once the first card leaves todo/doing the worker can take the next one.
+    await prisma.amuxWorkItem.update({ where: { id: first }, data: { status: "done" } });
+    const next = await claimUnownedTodo({
+      taskId: second,
+      worker,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.equal(next.claimed, true);
+  } finally {
+    // Route decisions are append-only evidence; keep the fixtures out of later
+    // dispatchable reads the same way the other claim tests do.
+    await prisma.amuxWorkItem.updateMany({ where: { id: { in: [first, second] } }, data: { status: "done" } });
+  }
+});
