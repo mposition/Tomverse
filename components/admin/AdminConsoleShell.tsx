@@ -65,7 +65,7 @@ const statusTone = (status: Props["apiStatus"]) =>
 
 export function AdminConsoleShell(props: Props) {
   return (
-    <AdminConsolePreferencesProvider>
+    <AdminConsolePreferencesProvider role={props.role}>
       <AdminConsoleChrome {...props} />
     </AdminConsolePreferencesProvider>
   );
@@ -505,7 +505,7 @@ function AdminConsoleChrome({
 
       {/* Mounted only while open: its state is per-session, not persistent. */}
       {commandOpen ? (
-        <AdminCommandPalette onClose={() => setCommandOpen(false)} />
+        <AdminCommandPalette role={role} onClose={() => setCommandOpen(false)} />
       ) : null}
     </div>
   );

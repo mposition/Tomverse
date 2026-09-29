@@ -1,8 +1,10 @@
+import type { AdminRole } from "@/lib/adminAuthCore";
 import type { AdminLocale } from "@/lib/adminLocale";
 import {
   ADMIN_DETAIL_ROUTES,
   ADMIN_NAVIGATION,
   ADMIN_UNLISTED_PAGES,
+  adminNavigationFor,
   findAdminNavItem,
   resolveAdminPageMeta,
   type AdminNavGroup,
@@ -43,6 +45,8 @@ export const ADMIN_NAV_GROUP_LABELS_KO: Readonly<Record<AdminNavGroup, string>> 
   Revenue: "매출",
   "AI Platform": "AI 플랫폼",
   Operations: "운영",
+  // A product name, and product names are not translated.
+  AMUX: "AMUX",
   Governance: "거버넌스",
 };
 
@@ -159,7 +163,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   routing: {
     label: "라우팅",
-    description: "Shadow Auto Router 결정과 실제 실행 결과 비교",
+    description: "Chat shadow 라우팅",
     aliases: ["자동", "라우터", "섀도", "작업 프로필", "후보"],
   },
   infrastructure: {
@@ -240,6 +244,36 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     description: "제품 기본값과 긴급 기능 제어",
     aliases: ["설정", "기본값", "기능 플래그", "킬 스위치", "게스트 기본"],
   },
+  "amux-backlog": {
+    label: "백로그",
+    description: "카드 등록, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
+    aliases: ["백로그", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정"],
+    tabs: {
+      intake: { label: "등록", description: "명시적 카드 등록 한 건을 미리 보고 등록" },
+      import: { label: "카탈로그 이관", description: "현황판 카탈로그를 미리 보고 승인한 뒤 이관" },
+      reconciliation: { label: "소스 재조정", description: "카드별 새 소스 개정을 수락하거나 거절" },
+      metadata: { label: "카드 메타데이터", description: "backlog 카드 한 건의 kind, priority, 비용 추정" },
+    },
+  },
+  "amux-promotion": {
+    label: "승격",
+    description: "backlog 카드의 추천 풀, 수동 승격, 자동 승격",
+    aliases: ["승격", "추천", "추천 풀", "수동 승격", "자동 승격", "grant", "중지", "재개"],
+    tabs: {
+      recommendation: { label: "추천 풀", description: "backlog snapshot과 카드별 사람의 결정" },
+      promotion: { label: "수동 승격", description: "사람이 고른 backlog 카드 1~3건 승격" },
+      "auto-promotion": { label: "자동 승격", description: "제한 자동 승격의 grant, halt와 재개" },
+    },
+  },
+  "amux-execution": {
+    label: "실행",
+    description: "AMUX 카드와 실행 상태, AMUX가 작업을 배정한 이유",
+    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고"],
+    tabs: {
+      cards: { label: "카드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
+      assignment: { label: "배정", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
+    },
+  },
   "email-policy": {
     label: "이메일 정책",
     description: "발신 메일의 관할권 프로필과 현재 적용 중인 버전",
@@ -274,41 +308,9 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
-  "amux-backlog-metadata": {
-    label: "AMUX backlog 메타데이터",
-    description: "owner 전용 backlog 카드 한 건의 kind, priority, 비용 추정, 꺼진 운영 적용",
-  },
-  "amux-board-import": {
-    label: "AMUX 카탈로그 이관",
-    description: "owner 전용 미리보기와 승인. 이 화면에서 운영 적용은 꺼져 있다.",
-  },
   "prompt-refiner-shadow": {
     label: "Prompt Refiner shadow 실행",
     description: "동결된 합성 shadow run의 owner 전용 승인과 실행",
-  },
-  "amux-board-promotion": {
-    label: "AMUX 카드 승격",
-    description: "owner 전용 backlog 카드 1~3건 승격, 꺼진 운영 적용",
-  },
-  "amux-board-recommendation": {
-    label: "AMUX 추천 풀",
-    description: "owner 전용 backlog 추천 snapshot, 꺼진 운영 적용",
-  },
-  "amux-board-auto-promotion": {
-    label: "AMUX 자동 승격",
-    description: "owner 전용 자동 승격 grant, halt와 재개, 서버 스위치 뒤",
-  },
-  "amux-cards": {
-    label: "AMUX 카드",
-    description: "owner 전용 AMUX 카드와 실행 상태 읽기 전용 목록",
-  },
-  "amux-intake": {
-    label: "AMUX 등록",
-    description: "owner 전용 명시적 등록 미리보기, 꺼진 운영 적용",
-  },
-  "amux-reconciliation": {
-    label: "AMUX 소스 재조정",
-    description: "owner 전용 카드별 소스 개정 미리보기, 꺼진 운영 적용",
   },
   "user-detail": {
     label: "고객 상세",
@@ -420,9 +422,16 @@ export type LocalizedAdminSearchablePage = {
  * console who types "환불".
  */
 export const localizedAdminSearchablePages = (
-  locale: AdminLocale
+  locale: AdminLocale,
+  /**
+   * The viewer's role. A page restricted to other roles is left out, and so
+   * is every restricted page when the role is not known: the palette must not
+   * offer a page that answers 404.
+   */
+  role?: AdminRole | null
 ): LocalizedAdminSearchablePage[] => [
-  ...ADMIN_NAVIGATION.map((item) => {
+  // The entries this role's sidebar lists, so the two cannot disagree.
+  ...adminNavigationFor(role).map((item) => {
     const ko = ADMIN_NAV_ITEMS_KO[item.id];
     const shown = localizeAdminNavItem(item, locale);
     return {

@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminNavItemTabs,
+  adminSearchablePagesFor,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 import {
   BOARD_PROMOTION_APPLY_CODE_LATCH,
   boardPromotionApplyPermitted,
@@ -178,9 +184,24 @@ test("the route cannot turn the latch on and the page stays unlisted", () => {
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
-  const page = resolveAdminPageMeta("/admin/amux-board-promotion");
-  assert.equal(page.label, "AMUX card promotion");
-  assert.equal(page.isKnown, true);
+  // The screen moved into Promotion's Manual promotion section; its old address
+  // still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-promotion"], "/admin/amux-promotion?tab=promotion");
+  const movedTo = resolveAdminPageMeta("/admin/amux-promotion");
+  assert.equal(movedTo.label, "Promotion");
+  assert.equal(movedTo.isKnown, true);
+  assert.equal(
+    adminNavItemTabs("amux-promotion").find((tab) => tab.id === "promotion")?.label,
+    "Manual promotion",
+  );
+  // Listed to the owner only: every other role would receive a 404.
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(
+      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-promotion"),
+      false,
+      role,
+    );
+  }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-board-promotion"),
     false,

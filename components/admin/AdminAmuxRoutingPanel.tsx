@@ -630,7 +630,7 @@ export function AdminAmuxRoutingPanel() {
             <p className="mt-1 break-all font-mono text-xs">{m.subjectDigest}: {pendingDecision.subject_digest}</p>
             {reauthenticationRequired && (
               <Link
-                href={adminRecentAuthenticationHref("/admin/routing")}
+                href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 inline-block font-bold underline"
@@ -801,7 +801,7 @@ export function AdminAmuxRoutingPanel() {
                       <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-100">
                         {m.reauthenticationRequired}{" "}
                         <Link
-                          href={adminRecentAuthenticationHref("/admin/routing")}
+                          href={adminRecentAuthenticationHref("/admin/amux-execution?tab=assignment")}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-bold underline underline-offset-2"

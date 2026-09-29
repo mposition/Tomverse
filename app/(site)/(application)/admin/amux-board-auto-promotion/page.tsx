@@ -1,14 +1,20 @@
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
-import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth/next";
-
-import { AmuxBoardAutoPromotionPanel } from "@/components/admin/AmuxBoardAutoPromotionPanel";
-import { getAdminRole } from "@/lib/adminAuth";
-import { authOptions } from "@/lib/auth";
-
-export default async function AdminAmuxBoardAutoPromotionPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-  return <AmuxBoardAutoPromotionPanel />;
+/**
+ * Retired route, preserved as a redirect.
+ *
+ * Auto-promotion is now the AMUX Promotion page's Auto-promotion section.
+ * The destination is owner-only in the same way this page was: another role
+ * is redirected and then answers 404 there.
+ */
+export default async function AdminAmuxBoardAutoPromotionRedirectPage({
+  searchParams,
+}: PageProps<"/admin/amux-board-auto-promotion">) {
+  redirect(
+    adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-board-auto-promotion"], await searchParams)
+  );
 }

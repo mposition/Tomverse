@@ -2,17 +2,32 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminHrefIsVisibleTo,
+  adminNavItemTabs,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("the AMUX card list is an owner-only detail route that is not advertised", async () => {
-  const page = await read("app/(site)/(application)/admin/amux-cards/page.tsx");
+test("the AMUX card list is an owner-only section that is not advertised to other roles", async () => {
+  // The list moved from /admin/amux-cards to Execution's Cards section, and
+  // the old address redirects there.
+  const page = await read("app/(site)/(application)/admin/amux-execution/page.tsx");
   assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
   assert.match(page, /await listAmuxCardsForAdmin\(\)/);
-  const meta = resolveAdminPageMeta("/admin/amux-cards");
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], "/admin/amux-execution?tab=cards");
+  const meta = resolveAdminPageMeta("/admin/amux-execution");
   assert.equal(meta.isKnown, true);
-  assert.equal(meta.label, "AMUX cards");
+  assert.equal(meta.label, "Execution");
+  const cards = adminNavItemTabs("amux-execution").find((tab) => tab.id === "cards");
+  assert.equal(cards?.label, "Cards");
+  assert.deepEqual(cards?.viewRoles, ["owner"]);
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(adminHrefIsVisibleTo(role, "/admin/amux-execution?tab=cards"), false, role);
+  }
   assert.equal(ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-cards"), false);
 });
 

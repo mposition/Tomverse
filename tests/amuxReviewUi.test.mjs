@@ -54,7 +54,13 @@ test("a proposal is bound to the subject seen and final confirmation carries its
 test("disabled approval and stale step-up have explicit bilingual operator guidance", () => {
   assert.match(panel, /AMUX_AGENT_APPROVAL_UNAVAILABLE/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
-  assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/routing"\)/);
+  // The step-up returns to where the panel now lives: AMUX › Execution's
+  // Assignment section, which it left /admin/routing for.
+  assert.match(
+    panel,
+    /adminRecentAuthenticationHref\("\/admin\/amux-execution\?tab=assignment"\)/
+  );
+  assert.doesNotMatch(panel, /adminRecentAuthenticationHref\("\/admin\/routing"\)/);
   assert.match(panel, /reviewOutcomes = hasReviewSubject\(review\)/);
   assert.match(messages, /No review subject with a verifiable digest/);
   assert.match(messages, /검증 가능한 digest를 가진 검토 대상/);

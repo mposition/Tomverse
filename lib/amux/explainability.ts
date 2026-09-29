@@ -7,6 +7,7 @@ import {
   AMUX_INCIDENT_SETTING_KEY,
 } from "@/lib/amux/incidentCore";
 import { publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
+import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 import { prisma } from "@/lib/prisma";
 
 const asRecord = (value: Prisma.JsonValue | null | undefined) =>
@@ -214,7 +215,7 @@ export async function getAmuxExplainabilityReport() {
       },
     }),
     prisma.amuxHumanEscalation.findMany({
-      where: { status: { in: ["open", "acknowledged"] } },
+      where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       take: 100,
       select: {
