@@ -2001,7 +2001,10 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   }
 });
 
-test("claim API refuses ownership before execution lifecycle is ready", async () => {
+// main's selection rule (#1595): a worker that is not running, idle and at a
+// dispatch boundary is preferred demand, never a selected owner, so a claim for
+// it is refused before any ownership evidence exists.
+test("claim API refuses ownership when no worker is execution-ready", async () => {
   const taskId = await createTodo("amux-api-lifecycle-gate");
   const worker = "codex-evidence";
   const secret = makeAmuxSyncSecret();
@@ -2034,9 +2037,8 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
   try {
     /*
-     * This test targets the execution lifecycle gate, not routing evidence.
-     * Build the exact server-owned routing evidence first so authoritative
-     * routing validation succeeds and the request reaches execution_ready.
+     * An unavailable runtime remains a demand preference, not a selected
+     * owner; the claim must refuse before creating any ownership evidence.
      */
     const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
 
@@ -2048,7 +2050,9 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     const routing = scoreAmuxWorkers(snapshot.task, snapshot.candidates);
 
-    assert.equal(routing.selected_worker, worker);
+    assert.equal(routing.preferred_worker, worker);
+    assert.equal(routing.selected_worker, null);
+    assert.equal(snapshot.execution_ready, false);
 
     const evidence = {
       scheduler: signals(),
@@ -2088,7 +2092,7 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     assert.deepEqual(body, {
       claimed: false,
-      reason: "execution_lifecycle_unavailable",
+      reason: "no_authoritative_worker",
     });
 
     const task = await prisma.amuxWorkItem.findUniqueOrThrow({
@@ -2116,7 +2120,7 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     assert.equal(refusalAudits.length, 1);
     assert.deepEqual(refusalAudits[0]?.metadata, {
-      reason: "execution_lifecycle_unavailable",
+      reason: "no_authoritative_worker",
       worker,
       expected_revision: 0,
       measured: true,

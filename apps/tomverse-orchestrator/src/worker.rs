@@ -187,17 +187,18 @@ fn score_one(task: &RoutingTaskProfile, signals: &CandidateRoutingSignals) -> Sc
         && !signals.worker.isolated
         && !signals.worker.blocked;
 
-    // A stopped worker remains selectable because the later execution layer
-    // owns worker startup.
-    //
-    // Running + idle-looking + no recognized delivery boundary is different:
-    // do not strand new ownership there. It remains visible as preferred demand.
-    let idle_without_boundary = signals.worker.running
+    // A new ownership claim can only select an immediately dispatchable
+    // worker: running, idle and at a recognized delivery boundary. A stopped
+    // or busy worker stays visible as preferred demand, but a new claim must
+    // not be stranded behind it while another worker is ready. main held this
+    // rule (#1595) and a develop merge had reverted it; lib/amux/
+    // workerRouterCore.ts keeps the same rule and the shared golden
+    // (tests/fixtures/amux-worker-routing-v1.json) pins both.
+    let selected_eligible = operationally_allowed
+        && !signals.provider_exhausted
+        && signals.worker.running
         && signals.worker.status.eq_ignore_ascii_case("idle")
-        && !signals.worker.dispatch_ready;
-
-    let selected_eligible =
-        operationally_allowed && !signals.provider_exhausted && !idle_without_boundary;
+        && signals.worker.dispatch_ready;
 
     ScoredWorker {
         worker_name: signals.worker.worker_name.clone(),
@@ -808,7 +809,25 @@ mod tests {
     }
 
     #[test]
-    fn stopped_worker_remains_selectable_for_start_for_dispatch() {
+    fn busy_high_scoring_worker_does_not_block_idle_lower_scoring_worker() {
+        let mut busy = signals(worker(
+            "devin-worker",
+            "devin",
+            &["migration", "multi_file"],
+        ));
+        busy.worker.status = "busy".into();
+        busy.worker.dispatch_ready = false;
+
+        let ready = signals(worker("codex-impl", "codex", &["implementation"]));
+
+        let result = score_execute_candidates(&task("migration", 8), &[busy, ready]);
+
+        assert_eq!(result.preferred_worker.as_deref(), Some("devin-worker"));
+        assert_eq!(result.selected_worker.as_deref(), Some("codex-impl"));
+    }
+
+    #[test]
+    fn stopped_worker_remains_preferred_but_is_not_selected_for_new_ownership() {
         let mut stopped = signals(worker(
             "devin-worker",
             "devin",
@@ -821,7 +840,8 @@ mod tests {
 
         let result = score_execute_candidates(&task("migration", 8), &[stopped]);
 
-        assert_eq!(result.selected_worker.as_deref(), Some("devin-worker"));
+        assert_eq!(result.preferred_worker.as_deref(), Some("devin-worker"));
+        assert_eq!(result.selected_worker, None);
     }
 
     #[test]
