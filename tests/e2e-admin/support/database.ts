@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { resolvePostgresConnectionConfig } from "../../../lib/postgresConnectionConfigCore.mjs";
+import { readAmuxCommitDeadlineInstallSql } from "../../../scripts/amux-commit-deadline-install.mjs";
 import { staticModelRegistrySeedRows } from "../../../lib/modelRegistryShared";
 import { userChatUsageKey } from "../../../lib/chatUsageKey";
 import {
@@ -143,7 +144,44 @@ const assertAdminSchemaPresent = async () => {
       "The admin E2E database has no tables. Run `npm run test:e2e:admin`, which pushes the Prisma schema before starting Playwright."
     );
   }
+  await ensureAmuxCommitDeadlineCheck();
   schemaAsserted = true;
+};
+
+/**
+ * Installs the AMUX commit deadline check, then proves it is there.
+ *
+ * `prisma db push` builds this database with the `AmuxCommitDeadline` table
+ * and without the deferred trigger that fails a late COMMIT, so every AMUX
+ * mutation the server attempts would be refused with
+ * AMUX_DB_COMMIT_CHECK_MISSING. The text comes from the migration file itself
+ * (scripts/amux-commit-deadline-install.mjs), not from a copy here. It always
+ * replaces the function, replaces a trigger whose definition differs, and
+ * leaves a matching one alone, so running it again changes nothing. Done once
+ * per process, before the first reset, so it precedes every test.
+ */
+const ensureAmuxCommitDeadlineCheck = async () => {
+  const prisma = adminFixtureDatabase();
+  await prisma.$executeRawUnsafe(
+    readAmuxCommitDeadlineInstallSql(process.cwd())
+  );
+  const triggers = await prisma.$queryRaw<
+    { deferrable: boolean; initiallyDeferred: boolean }[]
+  >`
+    SELECT t.tgdeferrable AS "deferrable", t.tginitdeferred AS "initiallyDeferred"
+    FROM pg_catalog.pg_trigger t
+    WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
+      AND t.tgname = 'amux_commit_deadline_check'
+  `;
+  if (
+    triggers.length !== 1 ||
+    triggers[0].deferrable !== true ||
+    triggers[0].initiallyDeferred !== true
+  ) {
+    throw new Error(
+      "The admin E2E database has no deferred AMUX commit deadline trigger after the install step."
+    );
+  }
 };
 
 /**
