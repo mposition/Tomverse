@@ -127,14 +127,16 @@ test("an OAuth sign-up consumes its choice, and everything it implies commits to
   assert.equal(requested.jurisdictionSource, "ip_estimated");
   assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 1);
 
-  // Once.
+  // Once: the same account asking again is told it is consumed, and nothing
+  // is written twice -- no second confirmation mail.
   const again = await finalizeSignupConsentAttempt({
     userId: user.id,
     createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
-  assert.equal(again.ok, false);
+  assert.equal(again.ok, true);
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 1);
 });
 
 test("an existing account's sign-in never consumes a choice", async () => {

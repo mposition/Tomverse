@@ -272,7 +272,17 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   // Consumed: the account exists, and no other sign-up follows from this
   // tab's choice, so both slots go. Dead: only the slot the marker named.
   // Otherwise nothing is dropped.
-  if (consumed) writeSlots({});
+  if (consumed) {
+    writeSlots({});
+    // The sign-up recorded its own estimate: this session's per-landing
+    // estimate (for existing accounts) must not overwrite it on a later
+    // full reload either.
+    try {
+      window.sessionStorage.setItem(ESTIMATE_KEY, "1");
+    } catch {
+      // Storage blocked: nothing to remember.
+    }
+  }
   else if (spent) writeSlots({ ...slots, [channel]: undefined });
   // Removed only now: a reload during the retries is still this landing, and
   // finds the attempt either consumed (a final answer) or still pending.

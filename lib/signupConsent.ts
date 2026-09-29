@@ -383,7 +383,18 @@ export async function finalizeSignupConsentAttempt(input: {
       }
     });
   } catch (error) {
-    if (error === RACED) return { ok: false, reason: "not_pending" };
+    if (error === RACED) {
+      // Lost the race to a concurrent request -- the same answer if that one
+      // was this account's own.
+      const winner = await prisma.signupConsentAttempt.findUnique({
+        where: { id: attempt.id },
+        select: { consumedAt: true, userId: true },
+      });
+      if (winner?.consumedAt && winner.userId === input.userId) {
+        return { ok: true, confirmationRequested: false };
+      }
+      return { ok: false, reason: "not_pending" };
+    }
     if (error === CONFIRMATION_UNAVAILABLE) return { ok: false, reason: "confirmation_unavailable" };
     throw error;
   }
