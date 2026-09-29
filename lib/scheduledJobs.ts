@@ -154,25 +154,79 @@ export async function recordAutoFixResult(input: {
   });
 }
 
-export async function getScheduledJobsDashboard(now = new Date()) {
-  const recentRuns = await prisma.scheduledJobRun.findMany({
-    where: {
-      jobKey: { in: SCHEDULED_JOB_DEFINITIONS.map((job) => job.key) },
-    },
-    orderBy: { startedAt: "desc" },
-    take: 150,
-  });
+/** The columns the dashboard reads from a run, and nothing else. */
+const DASHBOARD_RUN_SELECT = {
+  status: true,
+  startedAt: true,
+  completedAt: true,
+  processedCount: true,
+  error: true,
+} as const;
 
-  return SCHEDULED_JOB_DEFINITIONS.map((definition) => {
-    const runs = recentRuns.filter((run) => run.jobKey === definition.key);
-    const lastRun = runs[0] || null;
-    const lastSuccess = runs.find((run) => run.status === "succeeded") || null;
-    const lastFailure = runs.find((run) => run.status === "failed") || null;
-    let consecutiveFailures = 0;
-    for (const run of runs) {
-      if (run.status === "failed") consecutiveFailures += 1;
-      else if (run.status === "succeeded") break;
-    }
+/**
+ * One job's latest run, latest success, latest failure, and the failures since
+ * that success -- each read for that job alone.
+ *
+ * This used to be one shared read of the newest 150 rows across every job,
+ * with each job's rows picked out of it afterwards. The every-15-minute jobs
+ * and the 10-minute probe write most of those rows, so the window held only a
+ * few hours, and a daily job's run -- `retention_cleanup` at 03:00, the two
+ * provider jobs around midnight -- fell out of it the same morning. The job
+ * had run and recorded it; the dashboard simply no longer read that far back,
+ * reported `lastRunAt: null`, took the silence as infinite and showed a
+ * healthy daily job as `delayed` / "not run" on the Jobs screen, in the admin
+ * header's delayed count and in the work queue. It was a display error, never
+ * a missed execution.
+ *
+ * Every lookup here is bounded by `jobKey`, so no job's history can be pushed
+ * out by another's, and each is served by an existing index
+ * (`[jobKey, startedAt]`, `[jobKey, status, startedAt]`).
+ *
+ * Semantics are unchanged from the windowed version, only no longer truncated:
+ * "latest" is by `startedAt`, a `running` row neither counts as a failure nor
+ * ends the streak, and the streak is every failure newer than the latest
+ * success (all of them, for a job that has never succeeded).
+ */
+async function readJobRunSummary(jobKey: ScheduledJobKey) {
+  const newest = { startedAt: "desc" } as const;
+  const [lastRun, lastSuccess, lastFailure] = await Promise.all([
+    prisma.scheduledJobRun.findFirst({
+      where: { jobKey },
+      orderBy: newest,
+      select: DASHBOARD_RUN_SELECT,
+    }),
+    prisma.scheduledJobRun.findFirst({
+      where: { jobKey, status: "succeeded" },
+      orderBy: newest,
+      select: DASHBOARD_RUN_SELECT,
+    }),
+    prisma.scheduledJobRun.findFirst({
+      where: { jobKey, status: "failed" },
+      orderBy: newest,
+      select: DASHBOARD_RUN_SELECT,
+    }),
+  ]);
+  const consecutiveFailures =
+    lastFailure &&
+    (!lastSuccess || lastFailure.startedAt > lastSuccess.startedAt)
+      ? await prisma.scheduledJobRun.count({
+          where: {
+            jobKey,
+            status: "failed",
+            ...(lastSuccess ? { startedAt: { gt: lastSuccess.startedAt } } : {}),
+          },
+        })
+      : 0;
+  return { lastRun, lastSuccess, lastFailure, consecutiveFailures };
+}
+
+export async function getScheduledJobsDashboard(now = new Date()) {
+  const summaries = await Promise.all(
+    SCHEDULED_JOB_DEFINITIONS.map((definition) => readJobRunSummary(definition.key))
+  );
+
+  return SCHEDULED_JOB_DEFINITIONS.map((definition, index) => {
+    const { lastRun, lastSuccess, lastFailure, consecutiveFailures } = summaries[index];
     const { delayed, stuck } = evaluateScheduledJobTiming({
       now,
       maximumSilenceMs: definition.maximumSilenceMs,
