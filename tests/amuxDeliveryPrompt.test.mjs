@@ -80,17 +80,22 @@ test("the prompt tells the worker how to close its local card, before any card t
   // The fixed rules come before the brief and the untrusted card text.
   assert.ok(prompt.indexOf(rules) < prompt.indexOf("Approved execution brief:"));
   assert.ok(prompt.indexOf(rules) < prompt.indexOf("Card description:"));
-  // The terminal statuses named match what the bridge settles on (policy v15).
-  // The statuses named match what the bridge settles on (policy v15): done
-  // goes to review, discarded to blocked, anything else is still running.
+  // The statuses named match local_card_outcome (policy v15): done and
+  // verified settle to review; discarded, cancelled and quarantined to
+  // blocked; the rest are still running.
   assert.match(rules, /set the card to done/);
   assert.match(rules, /Set this card to discarded/);
   assert.match(rules, /keep this card in doing and keep fixing/);
   assert.match(rules, /needs no pull request, set this card to done/);
+  assert.match(rules, /Do not use verified, cancelled or quarantined/);
+  assert.match(rules, /backlog, todo, doing, review, failed and needsyou mean still running/);
   assert.match(rules, /Do not merge the pull request/);
-  // The bridge reads the PR number from evidence only (local_card.rs), and
-  // only for this repository's pull URLs.
-  assert.match(rules, /in this card's evidence, then set the card to done/);
+  // review_pr_number_from reads evidence first and takes its first matching
+  // URL; last_result only when evidence has none; never the title,
+  // description or messages. Only this repository's pull URLs count.
+  assert.match(rules, /evidence hold exactly one URL/);
+  assert.match(rules, /takes the first such URL in evidence; only if evidence has none does it look at last_result/);
+  assert.match(rules, /title, description or messages is never read/);
   assert.match(rules, /https:\/\/github\.com\/mposition\/Tomverse\/pull\//);
   // The precedence line comes after the untrusted description, so a
   // description that says otherwise is followed by the rule that wins.
