@@ -20,6 +20,7 @@ import {
     PROMPT_REFINER_RESERVATION_STAGE_ID,
     PROMPT_REFINER_RESERVATION_STAGE_IDS,
     PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
+    PROMPT_REFINER_RESERVATION_STAGE_V4_ID,
     PROMPT_REFINER_RESERVATION_STAGE_STATUSES,
     PROMPT_REFINER_RESERVATION_STATUSES,
     PROMPT_REFINER_RESERVATION_TTL_MS,
@@ -47,15 +48,17 @@ const validStage = (overrides = {}) => ({
 test("reservation contract freezes one bounded, content-free authority", () => {
     assert.equal(
         PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
-        "prompt-refiner-reservation-authority-v3"
+        "prompt-refiner-reservation-authority-v4"
     );
-    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v3");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, "prompt-refiner-shadow-v4");
     assert.equal(PROMPT_REFINER_RESERVATION_STAGE_V3_ID, "prompt-refiner-shadow-v3");
-    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, PROMPT_REFINER_RESERVATION_STAGE_V3_ID);
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_V4_ID, "prompt-refiner-shadow-v4");
+    assert.equal(PROMPT_REFINER_RESERVATION_STAGE_ID, PROMPT_REFINER_RESERVATION_STAGE_V4_ID);
     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_IDS], [
         "prompt-refiner-shadow-v1",
         "prompt-refiner-shadow-v2",
         "prompt-refiner-shadow-v3",
+        "prompt-refiner-shadow-v4",
     ]);
     assert.equal(PROMPT_REFINER_RESERVATION_TTL_MS, 300_000);
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.perRequestCostMicroUsd, 24_916);
@@ -63,7 +66,7 @@ test("reservation contract freezes one bounded, content-free authority", () => {
     assert.equal(PROMPT_REFINER_RESERVATION_CONTRACT.costCeilingMicroUsd, 2_491_600);
     assert.equal(
         PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
-        "sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72"
+        "sha256:681c85cfd79b6e1fff2a2857dfbbd9166f7691848b4415eee231a587cca9ad0f"
     );
     assert.deepEqual([...PROMPT_REFINER_RESERVATION_STAGE_STATUSES], [
         "approved",

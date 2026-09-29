@@ -27,6 +27,7 @@ import {
   PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
   PROMPT_REFINER_RESERVATION_STAGE_ID,
   PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
+  PROMPT_REFINER_RESERVATION_STAGE_V4_ID,
 } from "@/lib/promptRefinerReservationCore";
 import {
   PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
@@ -322,9 +323,14 @@ const promptRefinerStageAuditMetadata = (stage: StoredStage) => ({
   maxReservations: stage.maxReservations,
   costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
   approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
-  ...(stage.id === PROMPT_REFINER_RESERVATION_STAGE_V3_ID
-    ? { runApprovalEnabled: true, executionEnabled: true }
-    : {}),
+  ...(
+    ([
+      PROMPT_REFINER_RESERVATION_STAGE_V3_ID,
+      PROMPT_REFINER_RESERVATION_STAGE_V4_ID,
+    ] as readonly string[]).includes(stage.id)
+      ? { runApprovalEnabled: true, executionEnabled: true }
+      : {}
+  ),
   approvedAt: stage.approvedAt.toISOString(),
   approvalExpiresAt: stage.approvalExpiresAt.toISOString(),
   reason: PROMPT_REFINER_STAGE_REASON,

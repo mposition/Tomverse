@@ -17,6 +17,7 @@ import {
   PROMPT_REFINER_SHADOW_CASE_IDS,
   PROMPT_REFINER_SHADOW_INVOCATION_BUDGET_MS,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT,
+  PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
   PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
   PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
   PROMPT_REFINER_SHADOW_RUN_ID,
@@ -24,6 +25,7 @@ import {
   PROMPT_REFINER_SHADOW_RUN_UNKNOWN_AFTER_MS,
   PROMPT_REFINER_SHADOW_ROUTE_MAX_DURATION_SECONDS,
   PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS,
+  PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION,
   PROMPT_REFINER_SHADOW_TERMINAL_WRITE_MARGIN_MS,
   PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING,
   PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE,
@@ -44,6 +46,13 @@ import {
 } from "../lib/promptRefinerShadowEvidenceCore.ts";
 
 test("shadow run contract narrows the durable stage to the frozen 16-case run", () => {
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION, "prompt-refiner-shadow-run-v6");
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_ID, "prompt-refiner-shadow-run-v6");
+  assert.equal(PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION, "prompt-refiner-shadow-run-source-v4");
+  assert.equal(
+    PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
+    "sha256:3e3b176a3fad32221c09fc0aa5b48763f23edec78d350c955bf75017366d8fc1",
+  );
   assert.equal(PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES, 16);
   assert.equal(
     PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
@@ -126,7 +135,7 @@ test("shadow run contract narrows the durable stage to the frozen 16-case run", 
   assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
 });
 
-test("v4 admits only the owner-only shadow entry point, never the product path", () => {
+test("v6 admits only the owner-only shadow entry point, never the product path", () => {
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, true);
   assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.runApprovalPreviewReady, true);
@@ -145,6 +154,8 @@ test("run source manifest is exact, bounded and commit-bound", () => {
     "docs/ops/prompt-refiner-shadow/evidence-spec-v1.json",
     "prisma/schema.prisma",
     "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
   ]) {
     assert.ok(PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS.includes(requiredPath));
   }

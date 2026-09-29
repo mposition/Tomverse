@@ -34,8 +34,8 @@ export const PROMPT_REFINER_SHADOW_EXECUTION_PATH =
   "/api/admin/prompt-refiner/shadow-run/execute" as const;
 
 export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
-  stageId: "prompt-refiner-shadow-v3",
-  runId: "prompt-refiner-shadow-run-v5",
+  stageId: "prompt-refiner-shadow-v4",
+  runId: "prompt-refiner-shadow-run-v6",
   environment: "staging",
   provider: "openai",
   modelId: "gpt-5-6-luna",
@@ -53,11 +53,11 @@ export const PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT = Object.freeze({
   tokenizerEncoding: "o200k_base",
   maxInputTokens: 100_000,
   stageConfirmation:
-    "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES",
+    "APPROVE PROMPT REFINER SHADOW STAGE V4 FOR 60 MINUTES",
   runConfirmation:
-    "APPROVE PROMPT REFINER SHADOW RUN V5 FOR THE DISPLAYED COST CEILING",
+    "APPROVE PROMPT REFINER SHADOW RUN V6 FOR THE DISPLAYED COST CEILING",
   executionConfirmation:
-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V5 ONCE",
+    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V6 ONCE",
 });
 
 type UnknownRecord = Record<string, unknown>;

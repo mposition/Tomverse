@@ -1236,8 +1236,8 @@ mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 calle
 않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
 seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
 
-후속 confirmatory v3/v5 현재 계약은 exact 189-file runtime import-closure source manifest를
-사용한다. 178개 runtime source와 11개 metadata/schema/세 migration 파일이며, v1의 187-file
+후속 confirmatory v4/v6 현재 계약은 exact 190-file runtime import-closure source manifest를
+사용한다. 178개 runtime source와 12개 metadata/schema/네 migration 파일이며, v1의 187-file
 행과 manifest는 수정하거나 소급 재해석하지 않는다.
 
 ### 한눈에 보는 전체 Chat 진척
@@ -1527,3 +1527,41 @@ release disposition 뒤에만 진행한다.
    연결한다.
 7. accept/keep/stale 증거 뒤에만 Router/Auto shadow 결합을 ROUTE-03 아래 별도
    실험으로 진행한다.
+
+## 2026-09-28 Prompt Refiner confirmatory successor v4/v6 구현 회차
+
+기존 `prompt-refiner-shadow-v3` stage와 `prompt-refiner-shadow-run-v5` 실행 권한은
+이미 소진·만료된 역사 기록이며 재사용하지 않는다. 그 v5 실행의 content-free
+결과는 16건 모두 terminal, deterministic quality 판정 14 pass·2 fail,
+overall gate **FAIL**, 총비용 2,829 microUSD로 그대로 보존한다.
+
+이번 변경은 같은 고정 16건, 최대 398,656 microUSD, retry 0, 동일 quality 기준을
+새 `prompt-refiner-shadow-v4` stage와 `prompt-refiner-shadow-run-v6` source 계약에
+결속하는 후속 구현이다. 새 migration은 기존 v1–v3 stage와 v3–v5 run 기록을
+계속 읽되 새 INSERT만 v4/v6으로 닫는다. 이 회차에서 stage/run 승인, provider 호출,
+새 16건 generation, flag 변경, 제품 traffic 연결은 수행하지 않았다.
+
+### 한눈에 보는 전체 Chat 진척
+
+`chat-scope-readiness-v1`의 **전체 기술 구현**은 현재 **약 83%**
+(주관적 불확실성 **±10%p**)로 추정한다. 이는 9월 25일의 약 79% 이후 완료된
+후속 기능·배포를 누적해 반영한 세션 추정이다. 아직 독립 검토·PR/CI·병합·이번
+successor 배포가 끝나지 않았으므로, 현재 successor 구현·무료 검증 회차 자체의
+증분은 **0%p**로 둔다. 검증 건수나 승인 횟수만으로 진척률을 올리지 않는다.
+
+현재 완료된 무료 검증은 변경 JS/TS 19파일 ESLint exit 0, focused pure/guard
+**68/68**, owner-only stage/run route contract **11/11**이다. 최종 migration에
+결속한 PostgreSQL 4개 suite, 최종 typecheck와 전체 unit은 별도 검증 단계이며,
+새 Claude Code Max 구독 CLI 독립 검토, PR/CI, owner merge·deployment 확인도 아직 완료되지 않았다.
+이 수치는 quality pass, release readiness, 실제 활성화 또는 launch 승인이 아니다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 최종 source에 결속한 나머지 무료 DB·typecheck·전체 unit 검사를 완료한다.
+2. exact diff를 새 Claude Code Max 구독 CLI 읽기 전용 독립 검토에 제출한다.
+3. PR과 Linux CI를 통과시킨 뒤 owner가 merge와 successor deployment를 확인한다.
+4. 배포된 exact source에 대해 새 16건 비용 승인, v4 stage 승인, v6 run 승인을
+   각각 명시적으로 받는다.
+5. 승인된 한 번의 confirmatory 결과를 기존 deterministic quality gate로 판정한다.
+6. gate pass와 사람 disposition 뒤에만 제안형 UI를 default-off로 연결한다.
+7. 사용자 accept/keep/stale 증거 뒤에만 Auto/Router 통합을 별도 실험한다.

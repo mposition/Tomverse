@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { before, beforeEach, test } from "node:test";
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -25,6 +26,7 @@ import {
     PROMPT_REFINER_STAGE_REASON,
     prefixedPromptRefinerDigest,
 } from "@/lib/promptRefinerStageAdmissionCore";
+import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 
 const INPUT_PRICE_ENV = "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION";
@@ -180,14 +182,19 @@ const createStage = async (input: { status?: "approved" | "closed" } = {}) => {
     return stage;
 };
 
-const legacyStageFixture = async (version: 1 | 2) => {
+const legacyStageFixture = async (version: 1 | 2 | 3) => {
     const facts = await loadPromptRefinerStageAdmissionFacts();
     const stageId = `prompt-refiner-shadow-v${version}`;
-    const contractDigest = version === 1
-        ? "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f"
-        : "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1";
+    const contractDigest = {
+        1: "sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f",
+        2: "sha256:6b60c957793effe904d82748d9f7353d6490d150eff66ba4a02f1aac63f376d1",
+        3: "sha256:3d1ed8d096a6c0530ee8a20b61b479c67fe8e658f4ebcd31062311ff2079ce72",
+    }[version];
     const removedPaths = new Set([
-        "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+        "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
+        ...(version <= 2
+            ? ["prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql"]
+            : []),
         ...(version === 1
             ? ["prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql"]
             : []),
@@ -210,7 +217,7 @@ const legacyStageFixture = async (version: 1 | 2) => {
     executionManifest.stageId = stageId;
     executionManifest.reservationContractDigest = contractDigest;
     executionManifest.runtimeSource = {
-        fileCount: version === 1 ? 187 : 188,
+        fileCount: 186 + version,
         maxFileBytes: 8 * 1024 * 1024,
         maxTotalBytes: 16 * 1024 * 1024,
     };
@@ -241,6 +248,9 @@ const legacyStageFixture = async (version: 1 | 2) => {
             maxReservations: 100,
             costCeilingMicroUsd: 2_491_600,
             approvalTtlMinutes: PROMPT_REFINER_STAGE_APPROVAL_TTL_MS / 60_000,
+            ...(version === 3
+                ? { runApprovalEnabled: true, executionEnabled: true }
+                : {}),
             approvedAt: approvedAt.toISOString(),
             approvalExpiresAt: approvalExpiresAt.toISOString(),
             reason: PROMPT_REFINER_STAGE_REASON,
@@ -308,15 +318,17 @@ const insertLegacyStageFixture = async (
 );
 
 const legacyRunFixture = (
-    version: 3 | 4,
+    version: 3 | 4 | 5,
     stage: Awaited<ReturnType<typeof legacyStageFixture>>
 ) => ({
     id: `legacy-shadow-run-v${version}`,
     stageId: stage.stageId,
     runContractVersion: `prompt-refiner-shadow-run-v${version}`,
-    runContractDigest: version === 3
-        ? "sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280"
-        : "sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7",
+    runContractDigest: {
+        3: "sha256:7c487a9b88258f5be3e704bcea0c491def7a9f96830b66c6cbd3512361ecf280",
+        4: "sha256:16051b8c1c10d1d14b85e65dc3697cf7230dd6c9bce8a30bb03d328f963eafd7",
+        5: "sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd",
+    }[version],
     evidenceSpecDigest: version === 3
         ? null
         : "7794b9fbbd8fba1f16d19f935a977098f3f7a8d302014d6e7de3fe00813ae4c1",
@@ -471,23 +483,26 @@ beforeEach(async () => {
     await reset();
 });
 
-test("successor migration preserves exact legacy v1/v2 manifests and rejects a re-digested tamper", async () => {
+test("successor migration preserves exact legacy v1/v2/v3 manifests and rejects a re-digested tamper", async () => {
     const v1 = await legacyStageFixture(1);
     const v2 = await legacyStageFixture(2);
+    const v3 = await legacyStageFixture(3);
     await prisma.$executeRawUnsafe(
         'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
     );
     try {
         await insertLegacyStageFixture(v1);
         await insertLegacyStageFixture(v2);
+        await insertLegacyStageFixture(v3);
         const preserved = await prisma.promptRefinerReservationStage.findMany({
-            where: { id: { in: [v1.stageId, v2.stageId] } },
+            where: { id: { in: [v1.stageId, v2.stageId, v3.stageId] } },
             orderBy: { id: "asc" },
             select: { id: true, executionManifestDigest: true },
         });
         assert.deepEqual(preserved, [
             { id: v1.stageId, executionManifestDigest: v1.executionManifestDigest },
             { id: v2.stageId, executionManifestDigest: v2.executionManifestDigest },
+            { id: v3.stageId, executionManifestDigest: v3.executionManifestDigest },
         ]);
 
         const tampered = structuredClone(v1.executionManifest);
@@ -522,11 +537,13 @@ test("successor migration preserves exact legacy v1/v2 manifests and rejects a r
     }
 });
 
-test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", async () => {
+test("successor migration preserves exact legacy v3/v4/v5 runs and attempt pairs", async () => {
     const stageV1 = await legacyStageFixture(1);
     const stageV2 = await legacyStageFixture(2);
+    const stageV3 = await legacyStageFixture(3);
     const runV3 = legacyRunFixture(3, stageV1);
     const runV4 = legacyRunFixture(4, stageV2);
+    const runV5 = legacyRunFixture(5, stageV3);
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "PromptRefinerReservationStage"
         DISABLE TRIGGER "prompt_refiner_stage_guard_trigger";
@@ -542,9 +559,11 @@ test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", 
     try {
         await insertLegacyStageFixture(stageV1);
         await insertLegacyStageFixture(stageV2);
+        await insertLegacyStageFixture(stageV3);
         await insertLegacyRunFixture(runV3);
         await insertLegacyRunFixture(runV4);
-        assert.equal(await prisma.promptRefinerShadowRun.count(), 2);
+        await insertLegacyRunFixture(runV5);
+        assert.equal(await prisma.promptRefinerShadowRun.count(), 3);
 
         await assert.rejects(
             insertLegacyRunFixture({
@@ -569,6 +588,13 @@ test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", 
             requestId: "legacy-request-v4",
             contractDigest: stageV2.contractDigest,
             createdAt: stageV2.approvedAt,
+        });
+        await insertLegacyReservationFixture({
+            id: "legacy-reservation-v5",
+            stageId: stageV3.stageId,
+            requestId: "legacy-request-v5",
+            contractDigest: stageV3.contractDigest,
+            createdAt: stageV3.approvedAt,
         });
         await insertLegacyReservationFixture({
             id: "legacy-reservation-tampered",
@@ -599,7 +625,18 @@ test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", 
             runContractDigest: runV4.runContractDigest,
             createdAt: stageV2.approvedAt,
         });
-        assert.equal(await prisma.promptRefinerShadowAttempt.count(), 2);
+        await insertLegacyAttemptFixture({
+            id: "legacy-attempt-v5",
+            runId: runV5.id,
+            reservationId: "legacy-reservation-v5",
+            requestId: "legacy-request-v5",
+            caseIndex: 2,
+            stageId: stageV3.stageId,
+            reservationContractDigest: stageV3.contractDigest,
+            runContractDigest: runV5.runContractDigest,
+            createdAt: stageV3.approvedAt,
+        });
+        assert.equal(await prisma.promptRefinerShadowAttempt.count(), 3);
 
         await assert.rejects(
             insertLegacyAttemptFixture({
@@ -607,7 +644,7 @@ test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", 
                 runId: runV3.id,
                 reservationId: "legacy-reservation-tampered",
                 requestId: "legacy-request-tampered",
-                caseIndex: 2,
+                caseIndex: 3,
                 stageId: stageV1.stageId,
                 reservationContractDigest: stageV2.contractDigest,
                 runContractDigest: runV3.runContractDigest,
@@ -629,6 +666,199 @@ test("successor migration preserves exact legacy v3/v4 runs and attempt pairs", 
             ENABLE TRIGGER "prompt_refiner_stage_guard_trigger";
         `);
     }
+});
+
+test("current v5 runtime manifest missing or JSON-null keys fail at the actual insert constraint", async () => {
+    const data = await stageCreateData();
+    const manifest = structuredClone(data.runtimeSourceManifest) as Record<string, unknown>;
+    const mutations = [
+        ["schemaVersion", "missing"],
+        ["schemaVersion", "null"],
+        ["commitSha", "missing"],
+        ["commitSha", "null"],
+        ["files", "missing"],
+        ["files", "null"],
+        ["totalSizeBytes", "missing"],
+        ["totalSizeBytes", "null"],
+    ] as const;
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+    );
+    try {
+        for (const [key, mode] of mutations) {
+            const candidate = structuredClone(manifest);
+            if (mode === "missing") delete candidate[key];
+            else candidate[key] = null;
+            await assert.rejects(
+                prisma.promptRefinerReservationStage.create({
+                    data: {
+                        ...data,
+                        runtimeSourceManifest: candidate as Prisma.InputJsonValue,
+                        runtimeSourceManifestDigest: prefixedPromptRefinerDigest(candidate),
+                    },
+                }),
+                /PromptRefinerReservationStage_runtime_identity_check/,
+                `${key}:${mode}`
+            );
+            assert.equal(await prisma.promptRefinerReservationStage.count(), 0);
+        }
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+        );
+    }
+});
+
+test("current v5 successor-only manifest mutations fail at the actual insert constraint", async () => {
+    const data = await stageCreateData();
+    const manifest = data.runtimeSourceManifest as unknown as {
+        schemaVersion: string;
+        files: Array<Record<string, unknown>>;
+        [key: string]: unknown;
+    };
+    assert.equal(data.id, "prompt-refiner-shadow-v4");
+    assert.equal(manifest.schemaVersion, "prompt-refiner-runtime-source-manifest-v5");
+    assert.equal(manifest.files.length, 190);
+    assert.equal(
+        manifest.files[8]!.path,
+        "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql"
+    );
+    const mutations: Array<{
+        name: string;
+        changesSourceIdentity: boolean;
+        mutate: (candidate: typeof manifest) => void;
+    }> = [
+        {
+            name: "files[8]:wrong-path",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.path = "lib/x.ts";
+                assert.equal(candidate.files[8]!.path, "lib/x.ts");
+            },
+        },
+        {
+            name: "files[8]:extra-key",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.extra = 1;
+                assert.equal(candidate.files[8]!.extra, 1);
+            },
+        },
+        {
+            name: "files[8]:string-sizeBytes",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.sizeBytes = String(candidate.files[8]!.sizeBytes);
+                assert.equal(candidate.files[8]!.sizeBytes, String(manifest.files[8]!.sizeBytes));
+            },
+        },
+        {
+            name: "files[8]:uppercase-sha256",
+            changesSourceIdentity: true,
+            mutate: (candidate) => {
+                candidate.files[8]!.sha256 = "A".repeat(64);
+                assert.equal(candidate.files[8]!.sha256, "A".repeat(64));
+            },
+        },
+        {
+            name: "manifest:extra-key",
+            changesSourceIdentity: false,
+            mutate: (candidate) => {
+                candidate.extra = 1;
+                assert.equal(candidate.extra, 1);
+            },
+        },
+        {
+            name: "manifest:string-totalSizeBytes",
+            changesSourceIdentity: false,
+            mutate: (candidate) => {
+                candidate.totalSizeBytes = String(candidate.totalSizeBytes);
+                assert.equal(candidate.totalSizeBytes, String(manifest.totalSizeBytes));
+            },
+        },
+    ];
+    assert.equal(mutations.length, 6);
+    await prisma.$executeRawUnsafe(
+        'ALTER TABLE "PromptRefinerReservationStage" DISABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+    );
+    try {
+        const [disabled] = await prisma.$queryRaw<Array<{ enabled: string }>>`
+            SELECT "tgenabled"::text AS "enabled" FROM pg_trigger
+            WHERE "tgrelid" = '"PromptRefinerReservationStage"'::regclass
+              AND "tgname" = 'prompt_refiner_stage_guard_trigger'
+        `;
+        assert.equal(disabled?.enabled, "D");
+        for (const { name, changesSourceIdentity, mutate } of mutations) {
+            const candidate = {
+                ...data,
+                runtimeSourceManifest: structuredClone(data.runtimeSourceManifest),
+            };
+            mutate(candidate.runtimeSourceManifest as unknown as typeof manifest);
+            recomputeRuntimeManifestDigests(candidate);
+            const candidateManifest = candidate.runtimeSourceManifest as unknown as typeof manifest;
+            const candidateSourceIdentity = { files: candidateManifest.files };
+            const [databaseParity] = await prisma.$queryRawUnsafe<Array<{
+                manifestCanonicalJson: string;
+                manifestDigest: string;
+                sourceIdentityCanonicalJson: string;
+                sourceIdentityDigest: string;
+            }>>(
+                `SELECT
+                    "prompt_refiner_canonical_json"($1::jsonb) AS "manifestCanonicalJson",
+                    "prompt_refiner_sha256_json"($1::jsonb) AS "manifestDigest",
+                    "prompt_refiner_canonical_json"($2::jsonb) AS "sourceIdentityCanonicalJson",
+                    "prompt_refiner_sha256_json"($2::jsonb) AS "sourceIdentityDigest"`,
+                JSON.stringify(candidateManifest),
+                JSON.stringify(candidateSourceIdentity)
+            );
+            assert.equal(
+                databaseParity?.manifestCanonicalJson,
+                canonicalBenchmarkJson(candidateManifest),
+                `${name}:manifest-canonical-json`
+            );
+            assert.equal(
+                databaseParity?.manifestDigest,
+                candidate.runtimeSourceManifestDigest,
+                `${name}:manifest-digest`
+            );
+            assert.equal(
+                databaseParity?.sourceIdentityCanonicalJson,
+                canonicalBenchmarkJson(candidateSourceIdentity),
+                `${name}:source-identity-canonical-json`
+            );
+            assert.equal(
+                databaseParity?.sourceIdentityDigest,
+                candidate.runtimeSourceIdentityDigest,
+                `${name}:source-identity-digest`
+            );
+            assert.equal(
+                candidate.runtimeSourceIdentityDigest !== data.runtimeSourceIdentityDigest,
+                changesSourceIdentity,
+                name
+            );
+            assert.notEqual(candidate.runtimeSourceManifestDigest, data.runtimeSourceManifestDigest, name);
+            await assert.rejects(
+                prisma.promptRefinerReservationStage.create({ data: candidate }),
+                /PromptRefinerReservationStage_runtime_identity_check/,
+                name
+            );
+            assert.equal(await prisma.promptRefinerReservationStage.count(), 0, name);
+        }
+        const inserted = await prisma.promptRefinerReservationStage.create({ data });
+        assert.equal(inserted.id, "prompt-refiner-shadow-v4");
+        assert.deepEqual(inserted.runtimeSourceManifest, data.runtimeSourceManifest);
+        assert.equal(await prisma.promptRefinerReservationStage.count(), 1);
+    } finally {
+        await prisma.$executeRawUnsafe(
+            'ALTER TABLE "PromptRefinerReservationStage" ENABLE TRIGGER "prompt_refiner_stage_guard_trigger"'
+        );
+    }
+    const [restored] = await prisma.$queryRaw<Array<{ enabled: string }>>`
+        SELECT "tgenabled"::text AS "enabled" FROM pg_trigger
+        WHERE "tgrelid" = '"PromptRefinerReservationStage"'::regclass
+          AND "tgname" = 'prompt_refiner_stage_guard_trigger'
+    `;
+    assert.equal(restored?.enabled, "O");
 });
 
 test("reserve uses the DB clock and atomically binds one exact permanent slot", async () => {

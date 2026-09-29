@@ -262,6 +262,7 @@ run(
     // One-run approval, atomic dispatch-intent/reservation consume, immutable
     // terminal receipts and stop-without-retry unknown recovery.
     "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
     // repeats a row is silent: a skipped row is reported as verified, and a
