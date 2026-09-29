@@ -96,7 +96,7 @@
 
 | 남은 S0 항목 | 언제까지 |
 |---|---|
-| **IP 추정 국가** — 6.1·6.2와 `AGENTS.md` | **IP 추정을 구현하기 전에.** 지금 6절은 fail-closed이고 추정 국가를 쓰지 않습니다 |
+| ~~**IP 추정 국가** — 6.1·6.2와 `AGENTS.md`~~ | **개정됨(소유자 승인 2026-09-29).** 기록된 IP 추정은 더 강한 신호가 없고 모순이 없을 때 `estimated`로 판정에 쓰입니다(6.2 4단계). profile 없는 국가의 추정은 여전히 marketing을 열지 않습니다 |
 | **기록 세 층과 승인 원장** — 10.2의 데이터 모델 | **S3 구현 전에** |
 | **7.7·7.8** 한국 의무와 의무 상태 기록 | 해당 단계(S6) 전에 |
 | **webhook·suppression 절 동기화** — 9.6, 12.3, 12.4, 13.5, 13.7, 14.4 | 해당 단계 전에. 13.2·13.3·10.1·10.2는 v26~v28이 이미 옮겼습니다 |
@@ -4523,7 +4523,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
 | D4 | ~~**전역 opt-in(C1)**, **soft opt-in 미사용(C8)**~~ → **국가 rule + 호주 발신자 authority의 이중 판정** | 5.1, 5.1.1, 5.6 — **2026-09-15 승인(`mposition`) 뒤 2026-09-16에 개정됐습니다**(승인 A·C, 제품 소식 재설계 초안 §11). 21절 Q2는 개정 이전 상태에 대한 해소입니다 |
-| D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
+| D5 | 관할권은 **요청마다 관측한 IP로 판정하지 않음**. marketing은 판정된 관할권(`high`, 또는 2026-09-29 개정 뒤의 기록된 IP 추정 `estimated`)을 요구하고, 미확정이면 보류 | 6.2, 6.3 — 2026-09-29에 개정됐습니다(S0). `lib/emailJurisdictionSeed.ts`의 ZZ profile 설명 문장("high가 아니면 거절")은 seed 내용이라 그대로 두었고, ZZ에서는 profile이 없어 여전히 marketing이 나가지 않습니다 |
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
 | D8 | `renderedHash`는 **키 있는 HMAC + 키 버전**, 검증 키 보관 하한은 legal 7년 | 10.3-6, 10.3-7 |
