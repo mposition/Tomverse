@@ -45,6 +45,7 @@ import {
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { fitChatRequestTranscript } from "@/lib/chatRequestLimits";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
@@ -1567,19 +1568,24 @@ function ChatAppComponent({
             // message is appended exactly once -- `messages` is the pre-send
             // snapshot, and the id filter keeps a re-render or a resend from
             // duplicating it.
-            messages: requestTranscriptForScope(
-              messages,
-              userMessage,
-              transcriptScope
-            )
-              // A retry is a new visible turn but is still verified against
-              // the original durable question. Preserve the earlier
-              // user/error ordering, and change only the newly appended
-              // request copy to the persisted source identity.
-              .map((message) => message === userMessage
-                ? { ...message, id: sourceUserMessageId }
-                : message)
-              .map(toChatRequestMessage),
+            // The newest part that fits the request limits: a conversation
+            // has no length limit, and one sent whole could not be continued
+            // past them (lib/chatRequestLimits.ts).
+            messages: fitChatRequestTranscript(
+              requestTranscriptForScope(
+                messages,
+                userMessage,
+                transcriptScope
+              )
+                // A retry is a new visible turn but is still verified against
+                // the original durable question. Preserve the earlier
+                // user/error ordering, and change only the newly appended
+                // request copy to the persisted source identity.
+                .map((message) => message === userMessage
+                  ? { ...message, id: sourceUserMessageId }
+                  : message)
+                .map(toChatRequestMessage)
+            ),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
