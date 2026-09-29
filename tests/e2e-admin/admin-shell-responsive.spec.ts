@@ -30,15 +30,20 @@ const NAV_LABELS = [
   "Credit ledger",
   "Providers",
   "Models",
+  "Routing",
   "Infrastructure",
   "Automation",
   "Alerts",
+  "Email campaigns",
+  "Email delivery",
   "Marketing",
+  "Engineering agent",
   "Platform settings",
   // The AMUX group, listed in full to the owner these tests sign in as.
   "Backlog",
   "Promotion",
   "Execution",
+  "Email policy",
   "Audit log",
   "Retention",
   "Admin access",
@@ -167,6 +172,9 @@ test.describe("admin console on a narrow viewport", () => {
           `${label} is not reachable at ${JSON.stringify(probe.where)}`
         ).toContain(label);
       }
+      // Every link in the drawer is one of the entries above, so none can go
+      // unchecked: a twenty-seventh entry would fail here until it is listed.
+      await expect(navigation.getByRole("link")).toHaveCount(NAV_LABELS.length);
     });
   }
 
