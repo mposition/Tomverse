@@ -27,6 +27,22 @@ export const classifyApprovedExecutionBrief = (
   return { state: "verified", brief, digest };
 };
 
+/**
+ * How the worker closes its local card. Tomverse reads only that card's
+ * status (policy version 15): done or verified settles the attempt to review,
+ * discarded, cancelled or quarantined settles it to blocked, and anything else
+ * is still in progress. Without these lines the first claim-only run left its
+ * card in backlog "waiting on CI" with the pull request open and green, and
+ * the attempt stayed live until its lease expired (2026-09-29).
+ */
+export const AMUX_DELIVERY_COMPLETION_RULES = [
+  "How to finish:",
+  "- When the pull request is open and its required checks pass, set this card to done. Put the pull request URL in the card.",
+  "- If you cannot finish, set this card to discarded and say why in the card.",
+  "- Do not leave this card in backlog or waiting. Tomverse treats any other status as still running.",
+  "- Do not merge the pull request. A person reviews and merges it.",
+] as const;
+
 export const buildAmuxDeliveryPrompt = (input: {
   taskId: string;
   title: string;
@@ -98,6 +114,8 @@ export const buildAmuxDeliveryPrompt = (input: {
           `Previous status: ${previousStatus}`,
         ]
       : []),
+    "",
+    ...AMUX_DELIVERY_COMPLETION_RULES,
     "",
     "Approved execution brief:",
     briefText,

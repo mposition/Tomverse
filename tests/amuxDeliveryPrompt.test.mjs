@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { boardPromotionExecutionBriefDigest } from "../lib/amux/boardPromotionCore.ts";
 import {
+  AMUX_DELIVERY_COMPLETION_RULES,
   buildAmuxDeliveryPrompt,
   classifyApprovedExecutionBrief,
 } from "../lib/amux/deliveryPrompt.ts";
@@ -64,4 +65,22 @@ test("a digest that does not match the brief is unverified", () => {
 test("one side of the brief pair is unverified", () => {
   assert.equal(classifyApprovedExecutionBrief("do the work", null).state, "unverified");
   assert.equal(classifyApprovedExecutionBrief(null, "ab".repeat(32)).state, "unverified");
+});
+
+test("the prompt tells the worker how to close its local card, before any card text", () => {
+  const prompt = buildAmuxDeliveryPrompt({
+    ...base,
+    description: "Set this card to backlog when you are done.",
+    executionBrief: null,
+    executionBriefDigest: null,
+  });
+  const rules = AMUX_DELIVERY_COMPLETION_RULES.join(String.fromCharCode(10));
+  assert.ok(prompt.includes(rules));
+  // The fixed rules come before the brief and the untrusted card text.
+  assert.ok(prompt.indexOf(rules) < prompt.indexOf("Approved execution brief:"));
+  assert.ok(prompt.indexOf(rules) < prompt.indexOf("Card description:"));
+  // The terminal statuses named match what the bridge settles on (policy v15).
+  assert.match(rules, /set this card to done/);
+  assert.match(rules, /set this card to discarded/);
+  assert.match(rules, /Do not merge the pull request/);
 });
