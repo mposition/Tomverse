@@ -34,7 +34,7 @@
 
 ## The navigation
 
-Six groups, twenty-two entries. One page, one job.
+Six groups, twenty-three entries. One page, one job.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
@@ -55,6 +55,7 @@ Six groups, twenty-two entries. One page, one job.
 | Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
 | Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
+| Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Platform settings | `/admin/platform` | — |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
@@ -72,6 +73,14 @@ waiting" and "nothing writes this yet" are different answers, and only one of
 them is true. Reading any of it takes ordinary admin authentication; the
 `writeRoles` on this entry drive the sidebar marker and the mutations a later
 slice adds, not these screens.
+
+**Engineering agent** is the engineering agent's record and the controls a
+person owns (`docs/policy/engineering-agent.md §11` and `docs/policy/engineering-agent.md §12`): T2 drafts decided,
+decision items acknowledged, the mode and freeze, a halt acknowledged and the
+record that both dead-man monitors alert. It carries no badge in
+this slice. Reading takes ordinary admin authentication; every control takes
+`engineering-agent:write` and a recent sign-in, checked by its own route, and
+`t1` is not a mode this screen can set.
 
 Plus three routes with no sidebar entry: `/admin/search` ("Global search",
 reachable from the header control, `Ctrl/Cmd+K` and the palette's "View all

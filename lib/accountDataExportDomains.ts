@@ -903,6 +903,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     exclusionReason:
       "Operator approval evidence for a catalog import, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
+  {
+    domain: "engineeringAgentApproval",
+    publicName: "engineering_agent_approvals",
+    prismaModel: "EngineeringAgentApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator decision evidence for an engineering agent draft, not customer data. The actor id is the administrator who decided and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
 ];
 
 /** Domains whose data reaches the export at all. */

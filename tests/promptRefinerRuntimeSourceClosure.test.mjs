@@ -249,6 +249,14 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory remains 9aa7ec49..., so the digest below is a
 // repin of source positions and not a review of new computed access.
 //
+// 2026-09-28, engineering agent state: `lib/adminAuditSystemActors.ts` gains
+// the engineering agent's system actors, and the marketing webhook
+// fingerprint note in `lib/marketingAutomationAccess.ts` records the
+// engineering tables in the watched schema. Neither adds a computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved. Merged with develop's notes
+// above, the digest below is computed over the merged tree.
+//
 // 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
 // gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
 // Standard profile. Both files are in this closure. Neither addition is a
@@ -263,17 +271,25 @@ const compilerOptions = parsedConfig.options;
 // and the position-free inventory remains 9aa7ec49..., so only source
 // positions moved.
 //
+// 2026-09-29, engineering agent branch takes develop: the system actor list
+// now holds both the engineering actors and `amux-auto-promoter`, and the
+// fingerprint note in `lib/marketingAutomationAccess.ts` carries both dated
+// entries. Neither adds a computed element access. The count remains 228 and
+// the position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin over the merged tree.
+//
 // 2026-09-29, image input-limit estimate: `lib/chatSecurity.ts` gains the
 // `reservationOnlyInputTokens` budget option and numeric `internal*` details
 // on the CHAT_INPUT_TOKEN_LIMIT refusal. No import is added and neither change
 // is a computed element access. The count remains 228 and the position-free
-// inventory remains 9aa7ec49..., so only source positions moved.
+// inventory remains 9aa7ec49..., so the digest below is a repin of
+// source positions over the tree merged with the entry above.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "806342cdc33feacfc2eecee7d5143185",
-  "f09d35a8d691e20a1084337bc3c05658",
+  "a64ebe33eb8ca8235002ef7f314f3fb8",
+  "f516e0f461c494853e7cf3afd675f7db",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

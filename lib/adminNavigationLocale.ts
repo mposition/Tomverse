@@ -203,6 +203,20 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
     },
   },
+  "engineering-agent": {
+    label: "엔지니어링 에이전트",
+    description: "결정을 기다리는 T2 초안, run, 에이전트가 연 pull request, 모드",
+    aliases: ["엔지니어링", "에이전트", "T2 초안", "패치", "풀 리퀘스트", "게시 서비스", "러너", "동결"],
+    tabs: {
+      queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
+      runs: { label: "Run", description: "각 run과 시작 모드, 종료 결과, 정지 여부" },
+      "pull-requests": {
+        label: "Pull request",
+        description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
+      },
+      settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
+    },
+  },
   "email-campaigns": {
     label: "이메일 캠페인",
     description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",

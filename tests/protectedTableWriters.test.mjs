@@ -289,7 +289,12 @@ test("the listed runtime-SQL spellings are inventoried, in both directions", () 
     []
   );
 
-  const [entry] = RUNTIME_SQL_ALLOWLIST.filter((candidate) => candidate.count > 1);
+  // A path with a runtime-SQL entry and nothing else, so the findings below
+  // are that entry's alone and not also its raw-sql neighbours'.
+  const rawSqlPaths = new Set(RAW_SQL_ALLOWLIST.map((candidate) => candidate.path));
+  const [entry] = RUNTIME_SQL_ALLOWLIST.filter(
+    (candidate) => candidate.count > 1 && !rawSqlPaths.has(candidate.path),
+  );
   const gone = checkProtectedTableWriters({
     sources: [{ path: entry.path, text: "export const nothing = 1;" }],
   }).filter((finding) => finding.path === entry.path);

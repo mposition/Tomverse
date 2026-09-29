@@ -2265,6 +2265,7 @@ model AdminAuditLog {
   @@index([targetType, targetId])
   @@index([actorUserId, createdAt])
   @@index([createdAt, entryHash])
+  engineeringAgentApprovals EngineeringAgentApproval[]
 }
 
 model AdminActionApproval {
@@ -7011,6 +7012,8 @@ model AmuxWorkItem {
   @@index([projectKey, status, owner])
   @@index([teamKey, status, owner])
   @@index([dueAt, status])
+  engineeringAgentRuns          EngineeringAgentRun[]          @relation("EngineeringAgentRunCard")
+  engineeringAgentRegistrations EngineeringAgentRegistration[] @relation("EngineeringAgentRegistrationCard")
 }
 
 model AmuxWorkDependency {
@@ -7067,6 +7070,7 @@ model AmuxExecutionAttempt {
   @@index([taskId, startedAt])
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
+  engineeringAgentRun EngineeringAgentRun?
 }
 
 model AmuxCostLedgerEntry {
@@ -7908,4 +7912,164 @@ model AmuxIntakeApproval {
   @@index([status, createdAt])
   @@index([actorUserId, createdAt])
   @@index([workItemId])
+}
+
+/// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
+/// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
+/// migration 20260928120000_engineering_agent_state, which also holds the
+/// foreign keys to AMUX and to the audit log that are not modelled here.
+model EngineeringAgentRun {
+  id             String    @id
+  amuxAttemptId  String    @unique
+  cardId         String
+  cardKind       String
+  baseSha        String
+  status         String    @default("active")
+  outcome        String?
+  halt           String    @default("none")
+  /// The mode the run started under, read by the insert trigger from AppSetting.
+  modeAtStart    String    @default("off")
+  startedAt      DateTime  @default(now())
+  leaseExpiresAt DateTime
+  endedAt        DateTime?
+
+  attempt   AmuxExecutionAttempt       @relation(fields: [amuxAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  card      AmuxWorkItem               @relation("EngineeringAgentRunCard", fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workItems EngineeringAgentWorkItem[]
+  bindings  EngineeringAgentBinding[]
+
+  @@index([status, leaseExpiresAt])
+  @@index([endedAt])
+  @@index([modeAtStart, startedAt])
+}
+
+model EngineeringAgentWorkItem {
+  id             String    @id
+  kind           String
+  state          String
+  causeKey       String    @unique
+  runId          String?
+  patchBody      String?
+  patchDigest    String?
+  baseSha        String?
+  expectedTreeId String?
+  reason         String?
+  claimMode      String?
+  fencingToken   BigInt    @default(0)
+  leaseExpiresAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  closedAt       DateTime?
+
+  run        EngineeringAgentRun?        @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approval   EngineeringAgentApproval?
+  capabilities EngineeringAgentCapability[]
+
+  @@index([kind, state])
+  @@index([runId])
+  @@index([state, leaseExpiresAt])
+}
+
+/// A T2 decision and nothing else: written once, before the draft closes.
+model EngineeringAgentApproval {
+  id          String   @id
+  workItemId  String   @unique
+  decision    String
+  patchDigest String
+  baseSha     String
+  actorUserId String
+  auditLogId  String   @unique
+  decidedAt   DateTime @default(now())
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Permission for one publish: issued once, consumed at most once, then immutable.
+model EngineeringAgentCapability {
+  id                   String    @id
+  workItemId           String
+  /// The work item while this capability is live (unconsumed, unlapsed); the
+  /// unique constraint is one live capability per item. Written by the trigger.
+  unconsumedWorkItemId String?   @unique
+  baseSha           String
+  patchDigest       String
+  expectedTreeId    String
+  verifierVersion   Int
+  policyVersion     Int
+  branch            String
+  commitDigest      String
+  issuedAt          DateTime  @default(now())
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  claimFencingToken BigInt?
+
+  workItem EngineeringAgentWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workItemId])
+}
+
+/// A published pull request as the app bound it. The snapshot never changes; a
+/// replacement is a new row, and `currentPrNumber` (set by the trigger while a
+/// row is not superseded) keeps one current row per pull request.
+model EngineeringAgentBinding {
+  id                  String    @id
+  runId               String
+  prNumber            Int
+  headSha             String
+  verifiedHeadSha     String
+  ref                 String
+  state               String    @default("open")
+  snapshot            Json
+  approvalObservation Json?
+  mergeObservation    Json?
+  reviewerGithubId    BigInt?
+  reviewerLogin       String?
+  reviewerRecordedAt  DateTime?
+  supersededAt        DateTime?
+  currentPrNumber     Int?      @unique
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  run EngineeringAgentRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([runId])
+  @@index([state])
+}
+
+/// A registration proposal's source, digests and result; never its body.
+model EngineeringAgentRegistration {
+  id             String    @id
+  source         String
+  pinnedCommit   String
+  itemKey        String
+  itemDigest     String
+  proposalDigest String
+  guardResult    String
+  roundId        String
+  result         String    @default("pending")
+  amuxCardId     String?
+  createdAt      DateTime  @default(now())
+  decidedAt      DateTime?
+  resolvedAt     DateTime?
+
+  amuxCard AmuxWorkItem? @relation("EngineeringAgentRegistrationCard", fields: [amuxCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([source, itemKey, itemDigest])
+  @@index([roundId])
+  @@index([result, createdAt])
+}
+
+/// Internal request idempotency.
+model EngineeringAgentRequest {
+  key           String   @id
+  route         String
+  requestDigest String
+  state         String   @default("accepted")
+  /// The run a start created or the item a claim took; set once, with `committed`.
+  resultRef     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([state, createdAt])
 }
