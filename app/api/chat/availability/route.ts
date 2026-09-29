@@ -172,7 +172,7 @@ export async function POST(request: Request) {
         // request the dispatch refuses.
         const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
-            const capability = getWebSearchCapability(model);
+            const capability = getWebSearchCapability(model.id);
             const attachmentTokens = estimatePreflightAttachmentTokens(
                 model,
                 payload.attachments ?? []
