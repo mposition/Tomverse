@@ -799,35 +799,109 @@ export async function withdrawAllMarketing(input: {
   onConsentRecorded?: ConsentRecordedHook;
   now?: Date;
 }) {
-  const results: PreferenceChangeResult[] = [];
-  // One request, one processing result, reported once the whole request has
-  // succeeded. Each purpose commits on its own, so a notice queued with the
-  // first would say "all marketing is off" while a later purpose failed and
-  // stayed on. The first recorded change is noted, and the notice is queued
-  // after the last purpose commits.
-  let first: Parameters<ConsentRecordedHook>[1] | null = null;
-  const note: ConsentRecordedHook | undefined = input.onConsentRecorded
-    ? async (_tx, record) => {
-        if (!first) first = record;
-      }
-    : undefined;
+  // Without a hook, the per-purpose path as before: nothing has to commit
+  // together.
+  if (!input.onConsentRecorded) {
+    const results: PreferenceChangeResult[] = [];
+    for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+      results.push(
+        await setPreference({
+          ...input,
+          purpose,
+          enabled: false,
+          viaToken: input.source === "unsubscribe_link",
+        })
+      );
+    }
+    return results;
+  }
+
+  // With one, the whole request is one transaction, and its processing result
+  // commits with it. Split per purpose, a notice queued with the first said
+  // "all marketing is off" while a later purpose could still fail; queued
+  // after the last in its own transaction, a failure there left the
+  // withdrawals committed and a retry -- finding nothing left to change --
+  // never queued it.
+  //
+  // Reported once, when this request changed anything: a consent withdrawn, a
+  // refusal recorded, or a switch that was on without a confirmation turned
+  // off (that one writes no consent record, and is still an unsubscribe). A
+  // retry that changes nothing reports nothing, so a double click sends one.
+  const hook = input.onConsentRecorded;
+  const now = input.now ?? new Date();
   for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
-    results.push(
-      await setPreference({
+    const decision = preferenceChangeDecision({
+      purpose,
+      enabled: false,
+      viaToken: input.source === "unsubscribe_link",
+      confirmed: false,
+    });
+    if (!decision.allowed) return BULK_UNSUBSCRIBE_PURPOSES.map(() => ({ changed: false, reason: decision.reason }));
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { email: true },
+  });
+  if (!user?.email) {
+    return BULK_UNSUBSCRIBE_PURPOSES.map(() => ({ changed: false, reason: "unknown_purpose" as const }));
+  }
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  await ensureDefaultPreferences(input.userId);
+
+  return prisma.$transaction(async (tx) => {
+    let first: Parameters<ConsentRecordedHook>[1] | null = null;
+    const note: ConsentRecordedHook = async (_tx, record) => {
+      if (!first) first = record;
+    };
+    const results: PreferenceChangeResult[] = [];
+    let changed = false;
+    for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+      const outcome = await applyPreferenceChange(tx, {
         ...input,
-        purpose,
+        purpose: purpose as EmailPurpose,
         enabled: false,
         viaToken: input.source === "unsubscribe_link",
-        ...(note ? { onConsentRecorded: note } : {}),
-      })
-    );
-  }
-  const reported = first as Parameters<ConsentRecordedHook>[1] | null;
-  if (input.onConsentRecorded && reported) {
-    const hook = input.onConsentRecorded;
-    await prisma.$transaction((tx) => hook(tx, reported));
-  }
-  return results;
+        onConsentRecorded: note,
+        now,
+        policyVersionId,
+        confirmedCountry: null,
+      });
+      if (outcome === "changed" || outcome === "cancelled") changed = true;
+      results.push(
+        outcome === "changed" || outcome === "cancelled"
+          ? { changed: true, purpose: purpose as EmailPurpose, enabled: false }
+          : {
+              changed: false,
+              reason:
+                outcome === "no_address" || outcome === "address_changed"
+                  ? outcome === "no_address"
+                    ? "unknown_purpose"
+                    : "address_changed"
+                  : outcome === "already_set"
+                    ? "already_set"
+                    : outcome === "superseded"
+                      ? "superseded"
+                      : "suppressed",
+            }
+      );
+    }
+    const recorded = first as Parameters<ConsentRecordedHook>[1] | null;
+    if (recorded || changed) {
+      const email = normalizeSuppressionAddress(user.email as string);
+      await hook(
+        tx,
+        recorded ?? {
+          id: `withdraw-all:${input.userId}:${now.toISOString()}`,
+          referenceType: "suppression_event",
+          userId: input.userId,
+          emailAddress: email,
+          action: "withdrawn",
+          occurredAt: now,
+        }
+      );
+    }
+    return results;
+  });
 }
 
 /**

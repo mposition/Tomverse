@@ -22,9 +22,10 @@ import type { ConsentRecordedHook } from "@/lib/emailPreferences";
  * wording, in lib/emailTemplateDefinitions.ts).
  *
  * - **Queued with the change it reports.** The hook runs inside the transaction
- *   that wrote the consent record (`onConsentRecorded` in lib/emailPreferences.ts),
- *   so a committed consent or withdrawal always has its notice in the outbox and
- *   a rolled-back one never does.
+ *   that wrote the change (`onConsentRecorded` in lib/emailPreferences.ts; a
+ *   turn-off-all request is one transaction for all its purposes), so a
+ *   committed consent or all-marketing withdrawal always has its notice in the
+ *   outbox and a rolled-back one never does.
  * - **Prepared before that transaction.** The template versions and the policy
  *   version may insert rows; they run here, outside the caller's transaction,
  *   the way every other standard-lane writer does.

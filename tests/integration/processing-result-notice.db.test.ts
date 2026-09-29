@@ -184,3 +184,35 @@ test("an unsubscribe by somebody who never consented is reported too", async () 
   assert.equal(notices.length, 1);
   assert.equal(notices[0]!.event.referenceType, "suppression_event");
 });
+
+test("turning off switches that were on without a confirmation is reported once, and a retry adds nothing", async () => {
+  // The pre-confirmation era: enabled, never confirmed, no consent record to
+  // withdraw. Turning everything off is still an unsubscribe to report.
+  const user = await prisma.user.create({
+    data: { email: `legacy-${randomUUID().slice(0, 8)}@example.test` },
+    select: { id: true },
+  });
+  await prisma.userSettings.create({ data: { userId: user.id, language: "en" } });
+  await ensureDefaultPreferences(user.id);
+  for (const purpose of ["product_updates", "newsletter", "promotions"]) {
+    await prisma.emailPreference.update({
+      where: { userId_purpose: { userId: user.id, purpose } },
+      data: { enabled: true, confirmedAt: null },
+    });
+  }
+  const turnOffAll = async () =>
+    withdrawAllMarketing({
+      userId: user.id,
+      capturedVia: "preference_center",
+      source: "preference_center",
+      onConsentRecorded: await prepareProcessingResultNotice(user.id, { stopsAllMarketing: true }),
+    });
+  await turnOffAll();
+  assert.equal((await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE)).length, 1);
+  await turnOffAll();
+  assert.equal((await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE)).length, 1);
+  assert.equal(
+    await prisma.emailPreference.count({ where: { userId: user.id, enabled: true } }),
+    0
+  );
+});
