@@ -27,18 +27,18 @@ import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
  * cannot create a stage, reserve a slot, call a provider, or enable a flag.
  */
 export const PROMPT_REFINER_STAGE_ADMISSION_VERSION =
-  "prompt-refiner-stage-admission-v3" as const;
+  "prompt-refiner-stage-admission-v4" as const;
 export const PROMPT_REFINER_RUNTIME_SOURCE_MANIFEST_VERSION =
-  "prompt-refiner-runtime-source-manifest-v4" as const;
+  "prompt-refiner-runtime-source-manifest-v5" as const;
 export const PROMPT_REFINER_EXECUTION_MANIFEST_VERSION =
-  "prompt-refiner-shadow-execution-manifest-v3" as const;
+  "prompt-refiner-shadow-execution-manifest-v4" as const;
 export const PROMPT_REFINER_STAGE_APPROVAL_TTL_MS = 60 * 60 * 1_000;
 export const PROMPT_REFINER_STAGE_ENVIRONMENT = "staging" as const;
 export const PROMPT_REFINER_STAGE_CONFIRMATION =
-  "APPROVE PROMPT REFINER SHADOW STAGE V3 FOR 60 MINUTES" as const;
+  "APPROVE PROMPT REFINER SHADOW STAGE V4 FOR 60 MINUTES" as const;
 export const PROMPT_REFINER_STAGE_REASON =
   "bounded_staging_shadow_cost_approval" as const;
-export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 189 as const;
+export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 190 as const;
 export const PROMPT_REFINER_RUNTIME_SOURCE_FILE_MAX_BYTES = 8 * 1024 * 1024;
 export const PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -66,6 +66,7 @@ export const PROMPT_REFINER_RUNTIME_SOURCE_PATHS = Object.freeze([
   "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
   "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
   "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+  "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
   "apps/mobile/package.json",
   "packages/chat-core/package.json",
   "packages/ui-tokens/package.json",

@@ -408,6 +408,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The unclear-commit read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxIntakeDraft and AmuxIntakeApproval only. This file never writes AdminAuditLog.",
   },
   {
+    path: "lib/amux/localIntakeRegistration.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "The local-intake read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxLocalIntakeNormalized and AmuxLocalIntakeApproval only. This file never writes AdminAuditLog.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -590,6 +598,30 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 22,
     reason:
       "The migration admits v5 attempt bindings while preserving historical v3/v4 attempts. It contains no attempt DML and seeds no evidence.",
+  },
+  {
+    path: "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The confirmatory-successor migration reads exact human/system audit rows from replacement guards and changes validation DDL only. It preserves all legacy approvals and seeds no stage, reservation, run, attempt or audit row.",
+  },
+  {
+    path: "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
+    table: "PromptRefinerShadowRun",
+    tableMentions: 10,
+    writeVerbs: 22,
+    reason:
+      "The migration admits only the new v6 run contract while delegating legacy v3/v4/v5 validation. It contains no run DML and seeds no authority.",
+  },
+  {
+    path: "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
+    table: "PromptRefinerShadowAttempt",
+    tableMentions: 6,
+    writeVerbs: 22,
+    reason:
+      "The migration admits v6 attempt bindings while preserving historical v3/v4/v5 attempts. It contains no attempt DML and seeds no evidence.",
   },
   {
     path: "scripts/report-unswept-tables-core.mjs",

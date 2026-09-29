@@ -28,7 +28,7 @@ import {
 } from "@/lib/promptRefinerShadowEvidenceCore";
 
 export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
-    "prompt-refiner-shadow-run-v5" as const;
+    "prompt-refiner-shadow-run-v6" as const;
 export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
     "prompt-refiner-openai-sdk-adapter-v1" as const;
 export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
@@ -36,17 +36,17 @@ export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE = "js-tiktoken" as const;
 export const PROMPT_REFINER_SHADOW_TOKENIZER_PACKAGE_VERSION = "1.0.21" as const;
 export const PROMPT_REFINER_SHADOW_TOKENIZER_ENCODING = "o200k_base" as const;
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MANIFEST_VERSION =
-    "prompt-refiner-shadow-run-source-v3" as const;
+    "prompt-refiner-shadow-run-source-v4" as const;
 export const PROMPT_REFINER_SHADOW_RUN_APPROVAL_FLAG =
     "PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED" as const;
 export const PROMPT_REFINER_SHADOW_RUN_CONFIRMATION =
-    "APPROVE PROMPT REFINER SHADOW RUN V5 FOR THE DISPLAYED COST CEILING" as const;
+    "APPROVE PROMPT REFINER SHADOW RUN V6 FOR THE DISPLAYED COST CEILING" as const;
 export const PROMPT_REFINER_SHADOW_RUN_ID =
-    "prompt-refiner-shadow-run-v5" as const;
+    "prompt-refiner-shadow-run-v6" as const;
 export const PROMPT_REFINER_SHADOW_EXECUTION_FLAG =
     "PROMPT_REFINER_SHADOW_EXECUTION_ENABLED" as const;
 export const PROMPT_REFINER_SHADOW_EXECUTION_CONFIRMATION =
-    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V5 ONCE" as const;
+    "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V6 ONCE" as const;
 // Unknown sweeps persist this threshold as terminal telemetry. Deriving it
 // from the evidence ceiling prevents the sweep from producing a receipt that
 // the writer or the durable aggregate reader must reject.
@@ -109,6 +109,7 @@ export const PROMPT_REFINER_SHADOW_RUN_SOURCE_PATHS = Object.freeze([
     "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
     "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
     "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql",
+    "prisma/migrations/20260928130000_prompt_refiner_confirmatory_successor_v4/migration.sql",
 ] as const);
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_FILE_BYTES = 2 * 1024 * 1024;
 export const PROMPT_REFINER_SHADOW_RUN_SOURCE_MAX_TOTAL_BYTES = 4 * 1024 * 1024;
@@ -222,7 +223,7 @@ const computedDigest = `sha256:${createHash("sha256")
 
 // Replaced with the computed literal before review. A mismatch fails import.
 export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
-    "sha256:774dd559f20a69c7c94f55b1204245b77dc93769771e6b5abd0f60c5099415fd" as const;
+    "sha256:3e3b176a3fad32221c09fc0aa5b48763f23edec78d350c955bf75017366d8fc1" as const;
 
 if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
     throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);

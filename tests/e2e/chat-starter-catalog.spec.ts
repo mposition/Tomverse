@@ -33,6 +33,53 @@ const enableImageFlag = async (page: Page) => {
   ]);
 };
 
+/**
+ * Korean, over the English `beforeEach` already set up.
+ *
+ * Only the language key: calling `prepareGuestPage` a second time would
+ * register its whole init script -- the Turnstile stand-in included -- twice.
+ * Init scripts run in registration order, so this one's value is the one the
+ * page reads.
+ */
+const useKorean = (page: Page) =>
+  page.addInitScript(() => localStorage.setItem("tomverse_language", "ko"));
+
+/**
+ * Waits until the Korean labels are on screen in the Korean webface, before
+ * anything measures them.
+ *
+ * Two races, both seen while writing these tests. LanguageProvider restores
+ * the stored language in an effect, so the gallery can be visible and still
+ * English -- and an English label has no Korean word to split, so a word
+ * check would pass on nothing. And Noto Sans KR is self-hosted with
+ * `preload: false` (docs/ui-contracts/typography.md): measured before it
+ * applies, the same labels at 390px came out 93/106/83px wide instead of
+ * 125px, which moves every line break and the guidance sentence with them.
+ *
+ * Only the label's FIRST family is checked, at the label's own weight. The
+ * stack behind it names `local()` fallbacks ("Noto Sans KR Fallback", Apple
+ * SD Gothic Neo) that a Linux runner does not have; those faces end in
+ * `error`, and asking about the whole stack makes `document.fonts.load`
+ * reject and `check` stay false even after the webface is in.
+ */
+const waitForKoreanWebfont = async (page: Page) => {
+  const label = page.getByTestId("chat-starter-label").first();
+  await expect(label, "the starter labels never switched to Korean").toHaveText(/[가-힣]/);
+  await expect
+    .poll(
+      () =>
+        label.evaluate(async (node) => {
+          const style = getComputedStyle(node);
+          const primary = style.fontFamily.split(",")[0].trim();
+          const font = `${style.fontWeight} ${style.fontSize} ${primary}`;
+          await document.fonts.load(font, "가").catch(() => []);
+          return document.fonts.check(font, "가");
+        }),
+      { message: "the Korean webfont never loaded for the starter labels" }
+    )
+    .toBe(true);
+};
+
 const gallery = (page: Page) => page.getByTestId("chat-starter-gallery");
 const cards = (page: Page) => page.getByTestId("chat-starter-card");
 
@@ -63,6 +110,92 @@ const turnWebSearchOff = async (page: Page) => {
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
 };
+
+/**
+ * Where an element sits on the FIRST screen of the region that scrolls it.
+ *
+ * Three answers, because two of them used to be one. `visible`: wholly inside
+ * the region as it first renders. `clipped`: it crosses the region's edge, so
+ * the first screen shows part of it -- staging 2026-09-16 finding 6, the
+ * guidance sentence cut in half at the bottom dock. `below_fold`: wholly past
+ * the edge, reached only by scrolling. A check that only asked "can it be
+ * scrolled to" passed the clipped case, which is why that finding shipped.
+ *
+ * Measured against the nearest scrolling ancestor at its initial scroll
+ * offset, in one evaluate so every rectangle is from the same frame.
+ */
+type FirstScreenPlacement = "visible" | "clipped" | "below_fold";
+
+const firstScreenPlacement = (page: Page, testId: string) =>
+  page.evaluate((id): { placement: FirstScreenPlacement; scrollTop: number; detail: string } => {
+    const node = document.querySelector(`[data-testid="${id}"]`);
+    if (!node) throw new Error(`${id} is not on the page`);
+    let region: HTMLElement | null = node.parentElement;
+    while (region) {
+      const overflowY = getComputedStyle(region).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") break;
+      region = region.parentElement;
+    }
+    if (!region) throw new Error(`${id} has no scrolling region`);
+    const box = node.getBoundingClientRect();
+    const edge = region.getBoundingClientRect();
+    const top = Math.max(edge.top, 0);
+    const bottom = Math.min(edge.bottom, window.innerHeight);
+    const placement: FirstScreenPlacement =
+      box.top >= top - 0.5 && box.bottom <= bottom + 0.5
+        ? "visible"
+        : box.top >= bottom - 0.5 || box.bottom <= top + 0.5
+          ? "below_fold"
+          : "clipped";
+    return {
+      placement,
+      scrollTop: region.scrollTop,
+      detail: `element ${box.top.toFixed(1)}..${box.bottom.toFixed(1)}, region ${top.toFixed(1)}..${bottom.toFixed(1)}`,
+    };
+  }, testId);
+
+/**
+ * Every word of every card label that the layout split across two lines.
+ *
+ * A word is a whitespace-delimited run of characters; for Korean that is the
+ * 어절. Each character's own Range gives its line, so a run whose characters
+ * sit on more than one line was broken inside itself. Text inside `.sr-only`
+ * (the attachment hint's spoken name) is not on screen and is skipped.
+ */
+const splitLabelWords = (page: Page) =>
+  page.evaluate(() => {
+    const split: string[] = [];
+    for (const label of Array.from(
+      document.querySelectorAll('[data-testid="chat-starter-label"]')
+    )) {
+      const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+      let word = "";
+      let tops = new Set<number>();
+      const flush = () => {
+        if (word && tops.size > 1) split.push(word);
+        word = "";
+        tops = new Set<number>();
+      };
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        if (node.parentElement?.closest(".sr-only")) continue;
+        const text = node.textContent ?? "";
+        for (let index = 0; index < text.length; index += 1) {
+          if (/\s/.test(text[index])) {
+            flush();
+            continue;
+          }
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          tops.add(Math.round(range.getBoundingClientRect().top));
+          word += text[index];
+        }
+      }
+      flush();
+    }
+    return split;
+  });
 
 test.describe("Chat starter catalogue", () => {
   test.beforeEach(async ({ page }) => {
@@ -318,6 +451,166 @@ test.describe("Chat starter catalogue", () => {
         box.y + box.height > composerBox.y;
       expect(overlaps, `card ${index} overlaps the composer`).toBe(false);
     });
+  });
+
+  test("the guidance sentence is on the first screen, not cut at the dock, on a 412px phone at 125% text", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // The staging shape of finding 6 (2026-09-16): a 412px Galaxy phone, the
+    // OS text size one step up, signed in, so the recent-chats row is there
+    // too. Before this change the sentence was the last thing above the dock
+    // and crossed its edge here: `clipped`, whole only after a scroll.
+    await page.setViewportSize({ width: 412, height: 780 });
+    await useKorean(page);
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+    await expect(page.getByTestId("recent-conversations-disclosure")).toBeVisible();
+    await setRootFontSize(page, 20);
+    await expect(page.getByTestId("chat-starter-preview")).toBeVisible();
+    await waitForKoreanWebfont(page);
+
+    const hint = await firstScreenPlacement(page, "chat-starter-preview");
+    expect(hint.scrollTop, "the first screen is the unscrolled one").toBe(0);
+    expect(hint.placement, `the guidance sentence on the first screen: ${hint.detail}`).toBe(
+      "visible"
+    );
+  });
+
+  test("a sentence reached only by scrolling is not a clipped one, and nothing is ever cut at 320px and 200% text", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // The no-clip rule, kept: at the contract's narrowest shape the welcome
+    // group is far taller than the space above the dock, and scrolling it is
+    // the expected way through. What may never happen is a label cut short
+    // sideways, or a sentence that scrolling cannot bring whole into view.
+    await page.setViewportSize({ width: 320, height: 568 });
+    await useKorean(page);
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+    await setRootFontSize(page, 32);
+    await expect(gallery(page)).toBeVisible();
+    await waitForKoreanWebfont(page);
+    expect(await hasHorizontalOverflow(page)).toBe(false);
+
+    // Whatever the first screen shows, it is reported as one of the three
+    // placements, so a clipped sentence can never pass as a scrolled-to one.
+    const first = await firstScreenPlacement(page, "chat-starter-preview");
+    expect(["visible", "clipped", "below_fold"]).toContain(first.placement);
+
+    // Reached by scrolling: brought into view, it is whole.
+    await page.getByTestId("chat-starter-preview").scrollIntoViewIfNeeded();
+    const reached = await page.getByTestId("chat-starter-preview").evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return box.top >= -0.5 && box.bottom <= window.innerHeight + 0.5;
+    });
+    expect(reached, "the guidance sentence cannot be scrolled whole into view").toBe(true);
+
+    // No label is cut sideways -- `keep-all` must not trade a mid-word break
+    // for an overflow; `break-words` is what lets a long word still wrap.
+    const cutLabels = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-testid="chat-starter-label"]'))
+        .filter((label) => {
+          const card = label.closest('[data-testid="chat-starter-card"]');
+          if (!card) return true;
+          const labelBox = label.getBoundingClientRect();
+          const cardBox = card.getBoundingClientRect();
+          return (
+            label.scrollWidth > label.clientWidth + 1 ||
+            labelBox.right > cardBox.right + 1
+          );
+        })
+        .map((label) => label.textContent)
+    );
+    expect(cutLabels, "card labels cut short at 320px and 200% text").toEqual([]);
+  });
+
+  // Finding 7 (2026-09-16): the two-column tiles broke "PDF 붙여 여러 모 /
+  // 델에 질문" inside a word. Both shapes below split Korean words in the
+  // previous build ("모델에", "비교", "받기", "묻기" at 390px; "나란히",
+  // "받기", "오류" at 412px with 125% text), so this is not a pass by luck of
+  // where a line happened to end. 412x915 at 100% is not used: there every
+  // break already fell on a space.
+  for (const shape of [
+    { width: 390, height: 844, rootFont: 16 },
+    { width: 412, height: 780, rootFont: 20 },
+  ] as const) {
+    test(`starter labels keep whole Korean words at ${shape.width}px and ${shape.rootFont}px text`, { tag: "@ui-risk" }, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: shape.width, height: shape.height });
+      await useKorean(page);
+      await enableStarterFlag(page);
+      await mockAuthenticatedApi(page);
+      await mockUserUsage(page, { plan: "Pro" });
+      await openWelcome(page);
+      await expect(gallery(page)).toBeVisible();
+      if (shape.rootFont !== 16) await setRootFontSize(page, shape.rootFont);
+      await waitForKoreanWebfont(page);
+
+      expect(
+        await splitLabelWords(page),
+        "Korean words split across lines in starter labels"
+      ).toEqual([]);
+    });
+  }
+
+  test("keep-all is on the starter labels and nowhere else on the screen", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Scoped to the card label: the page, the guidance line and the composer
+    // -- where a person types, and so where line breaks in their own words
+    // come from -- keep the default wrapping.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await useKorean(page);
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+    await expect(gallery(page)).toBeVisible();
+    // The class follows the language, so read it only once Korean is applied.
+    await waitForKoreanWebfont(page);
+
+    const wordBreak = await page.evaluate(() => {
+      const of = (selector: string) => {
+        const node = document.querySelector(selector);
+        return node ? getComputedStyle(node).wordBreak : null;
+      };
+      return {
+        label: of('[data-testid="chat-starter-label"]'),
+        body: getComputedStyle(document.body).wordBreak,
+        guidance: of('[data-testid="chat-starter-preview"]'),
+        composer: of('[data-testid="chat-textarea"]'),
+      };
+    });
+    expect(wordBreak.label).toBe("keep-all");
+    expect(wordBreak.body).not.toBe("keep-all");
+    expect(wordBreak.guidance).not.toBe("keep-all");
+    expect(wordBreak.composer).not.toBe("keep-all");
+  });
+
+  test("starter labels in English keep the default wrapping", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // `keep-all` is a Korean rule; lib/displayHeading.ts applies it for ko
+    // only, and the card label goes through that same helper.
+    // A guest: the signed-in fixture's saved settings are Korean whatever the
+    // browser was told, which is why the English tests in this file are guests.
+    await enableStarterFlag(page);
+    await mockGuestUsage(page, 0, 1000);
+    await openWelcome(page);
+    await expect(gallery(page)).toBeVisible();
+    // The same language race as waitForKoreanWebfont, the other way round:
+    // the first render can still be Korean until the stored English is
+    // restored, and a Korean label is supposed to be keep-all.
+    const label = page.getByTestId("chat-starter-label").first();
+    await expect(label, "the starter labels never switched to English").not.toHaveText(/[가-힣]/);
+    await expect(label).toHaveText(/[A-Za-z]/);
+    const labelWordBreak = await label.evaluate((node) => getComputedStyle(node).wordBreak);
+    expect(labelWordBreak).not.toBe("keep-all");
   });
 
   test("the image card is locked for a Free account rather than hidden", { tag: "@ui-risk" }, async ({

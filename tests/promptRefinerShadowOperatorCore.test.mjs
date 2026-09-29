@@ -66,6 +66,14 @@ test("the duplicated browser contract exactly matches server-owned constants", (
   });
 });
 
+test("the duplicated browser contract pins the current immutable successor literals", () => {
+  assert.equal(contract.stageId, "prompt-refiner-shadow-v4");
+  assert.equal(contract.runId, "prompt-refiner-shadow-run-v6");
+  assert.equal(contract.stageConfirmation, "APPROVE PROMPT REFINER SHADOW STAGE V4 FOR 60 MINUTES");
+  assert.equal(contract.runConfirmation, "APPROVE PROMPT REFINER SHADOW RUN V6 FOR THE DISPLAYED COST CEILING");
+  assert.equal(contract.executionConfirmation, "EXECUTE THE APPROVED PROMPT REFINER SHADOW RUN V6 ONCE");
+});
+
 const stageBody = () => ({
   preview: {
     stageId: contract.stageId,

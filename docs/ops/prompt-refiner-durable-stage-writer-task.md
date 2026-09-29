@@ -14,11 +14,11 @@ flag·credential·receipt writer를 연결하지 않는다.
 
 - 기존 `PromptRefinerReservationStage`의 additive migration
 - 승인 시점의 DB-owned 시각과 고정 60분 TTL
-- staging 환경, runtime commit, Railway deployment id, 189-file/16 MiB bounded exact-byte
+- staging 환경, runtime commit, Railway deployment id, 190-file/16 MiB bounded exact-byte
   runtime import-closure source manifest
 - 완료된 v1 proposal은 역사적 byte identity로 보존하고 현행
-  `prompt-refiner-reservation-authority-v3`는
-  `prompt-refiner-shadow-execution-manifest-v3`에 별도로 결속
+  `prompt-refiner-reservation-authority-v4`는
+  `prompt-refiner-shadow-execution-manifest-v4`에 별도로 결속
 - 과거 proposal/evidence/corpus/source identity와 현재 execution manifest의 immutable 결속
 - owner 전용 관리자 GET preview와 POST create-only writer
 - advisory lock, DB rate limit, fixed confirmation, 최근 인증, 전역 CSRF
@@ -38,7 +38,7 @@ flag·credential·receipt writer를 연결하지 않는다.
 ## 4. 완료 기준
 
 1. 최초 `20260918130000_prompt_refiner_stage_admission` migration의 unexpected-row abort는
-   historical 동작이다. successor는 exact legacy v1/v2 stage와 manifest를 보존·검증하고,
+   historical 동작이다. successor는 exact legacy v1/v2/v3 stage와 manifest를 보존·검증하고,
    그 밖의 ID 또는 manifest를 CHECK/guard로 거부하며 어떤 행도 seed/backfill하지 않는다.
 2. GET은 DB를 변경하지 않는 content-free preview만 반환한다.
 3. POST는 서버가 다시 계산한 세 digest, environment/deployment/commit과 고정

@@ -291,7 +291,7 @@ test("stage audit freshness uses UTC under a non-UTC database session", async ()
   );
 });
 
-test("the v3 stage trigger rejects missing or false activation facts in the audit", async () => {
+test("the v4 stage trigger rejects missing or false activation facts in the audit", async () => {
   const created = await create();
   const sourceAudit = await prisma.adminAuditLog.findUniqueOrThrow({
     where: { id: created.stage.authorizationAuditLogId },

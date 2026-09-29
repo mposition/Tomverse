@@ -1,6 +1,13 @@
 # Prompt Refiner confirmatory shadow v5 successor 계약
 
-상태: **구현 검증 중, provider 실행·제품 노출 미승인**
+상태: **historical · superseded — 신규 provider 실행·제품 노출 미승인**
+
+이 문서는 v5 당시의 stage v3 / run v5 및 **189개 고정 source 파일** 계약을
+보존하는 역사 기록이다. 해당 stage/run의 새 실행 권한은 소진·만료됐으며, 현행
+successor는 [`prompt-refiner-confirmatory-shadow-v6.md`](prompt-refiner-confirmatory-shadow-v6.md)의
+stage v4 / run v6 및 **190개 고정 source 파일** 계약이다. 아래 v5 수치를 현행
+승인 권한으로 읽거나 190으로 소급 변경하지 않는다. 기존 v5 실행의 16건 중
+14건 PASS·2건 FAIL, 전체 gate FAIL 판정도 그대로 보존한다.
 
 ## 1. 목적
 

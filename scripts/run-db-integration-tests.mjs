@@ -233,6 +233,11 @@ run(
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
     "tests/integration/amux-intake-registration.db.test.ts",
+    // Local intake writes one backlog card, one normalized row, one consumed
+    // approval and one audit, and no dependency rows. apply returns before
+    // the transaction while the code latch is false, so this test calls the
+    // commit function directly.
+    "tests/integration/amux-local-intake-registration.db.test.ts",
     // Source reconciliation appends one consumed run and per-card revisions.
     // Accept moves only the revision pointer. Reject leaves the pointer. The
     // public apply function returns before the transaction while the code
@@ -262,6 +267,7 @@ run(
     // One-run approval, atomic dispatch-intent/reservation consume, immutable
     // terminal receipts and stop-without-retry unknown recovery.
     "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
     // repeats a row is silent: a skipped row is reported as verified, and a

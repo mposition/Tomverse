@@ -10,7 +10,7 @@
 //
 // The procedure is docs/ops/tomverse-chat-router-evaluation-set.md §3.
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -39,10 +39,13 @@ const baseRef = () => {
 
 const atBase = (path) => {
   try {
-    const base = execSync(`git merge-base HEAD ${baseRef()}`, { stdio: ["ignore", "pipe", "ignore"] })
+    // Arguments, not a shell string: the base ref comes from the environment.
+    const base = execFileSync("git", ["merge-base", "HEAD", baseRef()], { stdio: ["ignore", "pipe", "ignore"] })
       .toString()
       .trim();
-    return JSON.parse(execSync(`git show ${base}:${path}`, { stdio: ["ignore", "pipe", "ignore"] }).toString());
+    return JSON.parse(
+      execFileSync("git", ["show", `${base}:${path}`], { stdio: ["ignore", "pipe", "ignore"] }).toString()
+    );
   } catch {
     // No base, or the file is new there. Either way there is no earlier
     // version to compare against, and a new file is not an edit.
