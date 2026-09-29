@@ -81,7 +81,14 @@ export const amuxInternalErrorResponse = (
     );
   }
 
-  if (databaseCode === "P2028") {
+  // A mutation that failed after its callback returned (anything but the
+  // commit deadline trigger's AX001, which is a deadline refusal above) may or
+  // may not have committed: the same answer as a Prisma transaction timeout.
+  if (
+    databaseCode === "P2028" ||
+    (error instanceof AmuxDbBoundaryError &&
+      error.code === "AMUX_DB_OUTCOME_UNKNOWN")
+  ) {
     const incident = reportAmuxOperationalIncident(operation, error);
     return new Response(
       JSON.stringify({

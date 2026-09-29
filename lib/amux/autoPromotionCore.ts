@@ -15,6 +15,7 @@ import {
   parseBoardPromotionItems,
   parseBoardPromotionRequest,
 } from "./boardPromotionCore.ts";
+import { isAmuxLateCommitError } from "./commitDeadlineCore.ts";
 
 /**
  * Gate for one pre-approved card.
@@ -568,7 +569,10 @@ export type AutoTransactionPhase = "starting" | "running" | "committing";
  *   retried, and it counts toward the halt rule.
  * - `conflict`: a unique key refused a row. Nothing committed.
  * - `deadline_exceeded`: a statement, transaction or pool deadline ran out
- *   before COMMIT was sent. Nothing committed.
+ *   before COMMIT was sent, or the COMMIT itself was refused by the commit
+ *   deadline trigger (SQLSTATE AX001, lib/amux/commitDeadlineCore.ts). Nothing
+ *   committed. AX001 is read before the phase: it arrives while committing,
+ *   but PostgreSQL has already rolled the transaction back.
  * - `rolled_back`: any other failure before COMMIT was sent, a lost connection
  *   included. Nothing committed.
  *
@@ -605,6 +609,7 @@ export const autoTransactionStatementCancelled = (error: unknown): boolean => {
 };
 
 export const autoTransactionFailure = (phase: AutoTransactionPhase, error: unknown): AutoTransactionFailure => {
+  if (isAmuxLateCommitError(error)) return "deadline_exceeded";
   if (phase === "committing") return "outcome_unknown";
   const code = errorField(error, "code");
   if (code === "P2002") return "conflict";

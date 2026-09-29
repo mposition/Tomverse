@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  AMUX_DB_COMMIT_RESERVE_MS,
   AmuxDbBoundaryError,
   amuxRouteHasBudgetForMs,
   anchorAmuxRouteDeadline,
@@ -62,14 +63,51 @@ test("the route deadline is anchored on the first transaction's database clock a
 });
 
 test("the fence rolls a transaction back once the database clock reaches the deadline", async () => {
+  // The fence records the route deadline less the commit reserve for the
+  // COMMIT-time trigger and compares the clock with that same stored value
+  // (orchestration policy version 18).
   const deadline = new Date("2026-09-29T00:00:27.000Z");
-  const inTime = fakeTransaction([{ withinDeadline: true }]);
+  const inTime = fakeTransaction([{ withinDeadline: true, commitCheckInstalled: true }]);
   await fenceAmuxRouteDeadline(inTime, deadline, "test");
-  assert.match(inTime.calls[0].sql, /clock_timestamp\(\) < \?::timestamptz/);
-  assert.deepEqual(inTime.calls[0].values, [deadline.toISOString()]);
+  assert.equal(inTime.calls.length, 1);
+  assert.match(inTime.calls[0].sql, /\?::timestamptz -\s+\? \* INTERVAL '1 millisecond'/);
+  assert.match(inTime.calls[0].sql, /INSERT INTO "AmuxCommitDeadline"/);
+  assert.match(inTime.calls[0].sql, /clock_timestamp\(\) < marker\."deadline" AS "withinDeadline"/);
+  assert.deepEqual(inTime.calls[0].values, [
+    deadline.toISOString(),
+    AMUX_DB_COMMIT_RESERVE_MS,
+    "test",
+    "amux_commit_deadline_check",
+  ]);
 
-  for (const row of [{ withinDeadline: false }, { withinDeadline: null }, {}]) {
+  for (const row of [
+    { withinDeadline: false, commitCheckInstalled: true },
+    { withinDeadline: null, commitCheckInstalled: true },
+  ]) {
     const late = fakeTransaction([row]);
     await assert.rejects(() => fenceAmuxRouteDeadline(late, deadline, "test"), isDeadline);
   }
+});
+
+test("the fence refuses when the commit deadline trigger is not there to fire", async () => {
+  const deadline = new Date("2026-09-29T00:00:27.000Z");
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    for (const row of [
+      { withinDeadline: true, commitCheckInstalled: false },
+      { withinDeadline: true, commitCheckInstalled: null },
+      { withinDeadline: false, commitCheckInstalled: false },
+      {},
+    ]) {
+      await assert.rejects(
+        () => fenceAmuxRouteDeadline(fakeTransaction([row]), deadline, "test"),
+        (error) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_COMMIT_CHECK_MISSING",
+      );
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 4);
 });
