@@ -3213,3 +3213,100 @@ test("a worker that already owns an open card is not claimed a second one", asyn
     await prisma.amuxWorkItem.updateMany({ where: { id: { in: [first, second] } }, data: { status: "done" } });
   }
 });
+
+test("routing does not offer a worker that already owns an open card", async () => {
+  const busy = `amux-route-busy-${randomUUID()}`;
+  const free = `amux-route-free-${randomUUID()}`;
+  const owned = await createTodo("amux-route-owned");
+  const next = await createTodo("amux-route-next");
+  const previousCatalog = process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+  process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = JSON.stringify([
+    { worker_name: busy, provider: "codex", routing_roles: ["implementation"] },
+    { worker_name: free, provider: "codex", routing_roles: ["implementation"] },
+  ]);
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: next },
+      data: {
+        classification: { task_kind: "implementation", complexity: 3, risk: 1 },
+      },
+    });
+    for (const worker of [busy, free]) {
+      const instanceId = randomUUID();
+      const runtime = await registerAmuxWorkerRuntime(worker, instanceId, new Date());
+      const ready = await heartbeatAmuxWorkerRuntime({
+        workerName: worker,
+        instanceId,
+        generation: runtime.generation,
+        status: "idle",
+        dispatchReady: true,
+        now: new Date(),
+      });
+      assert.equal(ready.accepted, true);
+    }
+    const claimed = await claimUnownedTodo({
+      taskId: owned,
+      worker: busy,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.equal(claimed.claimed, true);
+
+    const snapshot = await buildAmuxRoutingSnapshot(next, 0);
+    if (!snapshot.eligible) assert.fail("expected an eligible routing snapshot");
+    const readiness = Object.fromEntries(
+      snapshot.candidates.map((candidate) => [
+        candidate.worker.worker_name,
+        candidate.worker.dispatch_ready,
+      ]),
+    );
+    assert.deepEqual(readiness, { [busy]: false, [free]: true });
+    assert.equal(snapshot.execution_ready, true);
+  } finally {
+    if (previousCatalog === undefined) {
+      delete process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON;
+    } else {
+      process.env.TOMVERSE_AMUX_WORKER_CATALOG_JSON = previousCatalog;
+    }
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: { in: [busy, free] } } });
+    await prisma.amuxWorkItem.updateMany({ where: { id: { in: [owned, next] } }, data: { status: "done" } });
+  }
+});
+
+test("a claim under both project and team WIP policies fits the claim call ceiling", async () => {
+  const projectKey = `amux-ceiling-project-${randomUUID()}`;
+  const teamKey = `amux-ceiling-team-${randomUUID()}`;
+  const taskId = await createTodo("amux-ceiling");
+  await Promise.all([
+    prisma.amuxWorkItem.update({ where: { id: taskId }, data: { projectKey, teamKey } }),
+    prisma.amuxResourcePolicy.create({
+      data: { scope: "project", key: projectKey, displayName: projectKey, wipLimit: 5 },
+    }),
+    prisma.amuxResourcePolicy.create({
+      data: { scope: "team", key: teamKey, displayName: teamKey, wipLimit: 5 },
+    }),
+  ]);
+  try {
+    const claimed = await claimUnownedTodo({
+      taskId,
+      worker: `amux-ceiling-worker-${randomUUID()}`,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.equal(claimed.claimed, true);
+  } finally {
+    await prisma.amuxWorkItem.updateMany({ where: { id: taskId }, data: { status: "done" } });
+    await prisma.amuxResourcePolicy.deleteMany({
+      where: {
+        OR: [
+          { scope: "project", key: projectKey },
+          { scope: "team", key: teamKey },
+        ],
+      },
+    });
+  }
+});

@@ -347,6 +347,27 @@ export async function getRoutingSnapshotTask(
 }
 
 /**
+ * Workers that already own an open (todo or doing) card. The router treats
+ * them as not dispatch-ready, so one tick hands the next card to another
+ * worker instead of re-selecting one the claim would refuse.
+ */
+export async function amuxWorkersOwningOpenCards(
+  workerNames: string[],
+): Promise<Set<string>> {
+  if (workerNames.length === 0) return new Set();
+  const rows = await prisma.amuxWorkItem.findMany({
+    where: {
+      owner: { in: workerNames },
+      archivedAt: null,
+      status: { in: ["todo", "doing"] },
+    },
+    select: { owner: true },
+    distinct: ["owner"],
+  });
+  return new Set(rows.flatMap((row) => (row.owner ? [row.owner] : [])));
+}
+
+/**
  * Re-read scheduler inputs from the database immediately before claim.
  *
  * The orchestrator's score is a proposal. This snapshot is the authority

@@ -6,11 +6,12 @@ import { AMUX_CLAIM_CLOSED_REFUSAL_REASONS } from "../lib/amux/auditContract.ts"
 const refusalReasons = [...AMUX_CLAIM_CLOSED_REFUSAL_REASONS];
 
 test("TypeScript and Rust keep one closed AMUX claim refusal vocabulary", async () => {
-  const [contract, rust, route, store] = await Promise.all([
+  const [contract, rust, route, store, routing] = await Promise.all([
     readFile("lib/amux/auditContract.ts", "utf8"),
     readFile("apps/tomverse-orchestrator/src/tomverse_api.rs", "utf8"),
     readFile("app/api/internal/amux/claim/route.ts", "utf8"),
     readFile("lib/amux/store.ts", "utf8"),
+    readFile("lib/amux/routing.ts", "utf8"),
   ]);
 
   for (const reason of refusalReasons) {
@@ -27,6 +28,9 @@ test("TypeScript and Rust keep one closed AMUX claim refusal vocabulary", async 
   // Rust wire enum needs no new variant.
   assert.match(store, /reason: "execution_lifecycle_unavailable" as const/);
   assert.ok(store.includes('status: { in: ["todo", "doing"] }'));
+  // The router agrees, so a tick does not re-select a worker the claim refuses:
+  // both the readiness summary and each candidate exclude busy owners.
+  assert.equal(routing.split("!busyOwners.has(worker.worker_name)").length - 1, 2);
   assert.match(store, /AMUX_DB_BOUNDARIES\.claim/);
   assert.match(store, /AMUX_DB_BOUNDARIES\.claimRefusal/);
   assert.match(store, /action: "amux\.claim\.refused"/);
