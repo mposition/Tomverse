@@ -30,7 +30,9 @@ export type AmuxDbBoundary = {
 };
 
 export const AMUX_DB_BOUNDARIES = {
-  claim: { operation: "claim", prismaCallCeiling: 17, isolation: "mutation" },
+  // 18: the one-open-card-per-worker count added a read to the success path,
+  // which with project and team WIP policies and a signed audit reached 18.
+  claim: { operation: "claim", prismaCallCeiling: 18, isolation: "mutation" },
   claimRefusal: {
     operation: "claim_refusal",
     prismaCallCeiling: 6,

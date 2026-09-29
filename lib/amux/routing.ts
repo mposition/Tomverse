@@ -2,7 +2,10 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { getRoutingSnapshotTask } from "@/lib/amux/store";
+import {
+  amuxWorkersOwningOpenCards,
+  getRoutingSnapshotTask,
+} from "@/lib/amux/store";
 import { amuxWorkerRuntimeByName } from "@/lib/amux/workerRuntime";
 import { getAmuxWorkerTelemetry } from "@/lib/amux/telemetry";
 
@@ -201,6 +204,11 @@ export async function buildAmuxRoutingSnapshot(
     workers.map((worker) => worker.worker_name),
   );
   const telemetryByWorker = await getAmuxWorkerTelemetry(workers, now);
+  // A worker holds one open card at a time (the claim refuses a second), so
+  // one that already owns todo or doing work is not a dispatch candidate.
+  const busyOwners = await amuxWorkersOwningOpenCards(
+    workers.map((worker) => worker.worker_name),
+  );
 
   const filesExpected = classification.data.files_expected;
 
@@ -222,6 +230,7 @@ export async function buildAmuxRoutingSnapshot(
         runtime.leaseExpiresAt.getTime() > now.getTime() &&
         runtime.status === "idle" &&
         runtime.dispatchReady &&
+        !busyOwners.has(worker.worker_name) &&
         !worker.archived &&
         !worker.paused &&
         !worker.isolated &&
@@ -262,6 +271,7 @@ export async function buildAmuxRoutingSnapshot(
         running &&
         runtime.status === "idle" &&
         runtime.dispatchReady &&
+        !busyOwners.has(worker.worker_name) &&
         !worker.archived &&
         !worker.paused &&
         !worker.isolated &&

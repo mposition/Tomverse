@@ -200,7 +200,11 @@ export type AmuxClaimOutcome =
     }
   | {
       claimed: false;
-      reason: "cas_lost" | "incident_admission_blocked" | "wip_limit_reached";
+      reason:
+        | "cas_lost"
+        | "incident_admission_blocked"
+        | "wip_limit_reached"
+        | "execution_lifecycle_unavailable";
     };
 
 type AmuxClaimRefusalContext = {
@@ -343,6 +347,27 @@ export async function getRoutingSnapshotTask(
 }
 
 /**
+ * Workers that already own an open (todo or doing) card. The router treats
+ * them as not dispatch-ready, so one tick hands the next card to another
+ * worker instead of re-selecting one the claim would refuse.
+ */
+export async function amuxWorkersOwningOpenCards(
+  workerNames: string[],
+): Promise<Set<string>> {
+  if (workerNames.length === 0) return new Set();
+  const rows = await prisma.amuxWorkItem.findMany({
+    where: {
+      owner: { in: workerNames },
+      archivedAt: null,
+      status: { in: ["todo", "doing"] },
+    },
+    select: { owner: true },
+    distinct: ["owner"],
+  });
+  return new Set(rows.flatMap((row) => (row.owner ? [row.owner] : [])));
+}
+
+/**
  * Re-read scheduler inputs from the database immediately before claim.
  *
  * The orchestrator's score is a proposal. This snapshot is the authority
@@ -470,6 +495,33 @@ export async function claimUnownedTodo(
       return {
         claimed: false as const,
         reason: "wip_limit_reached" as const,
+      };
+    }
+
+    // A worker takes one card at a time: a runner drives at most one owned
+    // task per worker per tick, and the runtime stays idle and dispatch-ready
+    // between a claim and its execution start. Without this, one ready worker
+    // collected every runnable card within seconds (seen on the first
+    // claim-only run on 2026-09-29) and the extras sat owned until their
+    // reservation expired. The admission lock above serialises claims, so the
+    // count cannot race another claim for the same worker.
+    const ownedOpen = await tx.amuxWorkItem.count({
+      where: {
+        owner: worker,
+        archivedAt: null,
+        status: { in: ["todo", "doing"] },
+      },
+    });
+    if (ownedOpen > 0) {
+      await writeAmuxClaimRefusalAudit(
+        tx,
+        "execution_lifecycle_unavailable",
+        refusalContext,
+        { owned_open_cards: ownedOpen },
+      );
+      return {
+        claimed: false as const,
+        reason: "execution_lifecycle_unavailable" as const,
       };
     }
 
