@@ -42,9 +42,10 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 6,
     isolation: "read",
   },
+  // 7: the busy-owner read (one open card per worker) joined the snapshot.
   routingSnapshot: {
     operation: "routing_snapshot",
-    prismaCallCeiling: 6,
+    prismaCallCeiling: 7,
     isolation: "read",
   },
   routingTaskRead: {
@@ -67,7 +68,8 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
-  claim: { operation: "claim", prismaCallCeiling: 17, isolation: "mutation" },
+  // 18: the one-open-card-per-worker count added a read to the success path.
+  claim: { operation: "claim", prismaCallCeiling: 18, isolation: "mutation" },
   claimRefusal: {
     operation: "claim_refusal",
     prismaCallCeiling: 6,
