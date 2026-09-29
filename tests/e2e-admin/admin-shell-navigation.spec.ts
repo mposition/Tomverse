@@ -41,6 +41,11 @@ const NAVIGATION = [
     href: "/admin/email-campaigns",
   },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
+  // Listed to the owner, who is who this describe block signs in as. Every
+  // other role sees Execution alone (the "AMUX group by role" block below).
+  { group: "AMUX", label: "Backlog", href: "/admin/amux-backlog" },
+  { group: "AMUX", label: "Promotion", href: "/admin/amux-promotion" },
+  { group: "AMUX", label: "Execution", href: "/admin/amux-execution" },
   { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },
   { group: "Governance", label: "Retention", href: "/admin/retention" },
@@ -87,7 +92,42 @@ const LEGACY_ROUTES = [
     to: "/admin/work-queue",
     heading: "Work queue",
   },
+  // The eight owner-only AMUX screens, now sections of the AMUX group.
+  { from: "/admin/amux-intake", to: "/admin/amux-backlog?tab=intake", heading: "Backlog" },
+  {
+    from: "/admin/amux-board-import",
+    to: "/admin/amux-backlog?tab=import",
+    heading: "Backlog",
+  },
+  {
+    from: "/admin/amux-reconciliation",
+    to: "/admin/amux-backlog?tab=reconciliation",
+    heading: "Backlog",
+  },
+  {
+    from: "/admin/amux-backlog-metadata",
+    to: "/admin/amux-backlog?tab=metadata",
+    heading: "Backlog",
+  },
+  {
+    from: "/admin/amux-board-recommendation",
+    to: "/admin/amux-promotion?tab=recommendation",
+    heading: "Promotion",
+  },
+  {
+    from: "/admin/amux-board-promotion",
+    to: "/admin/amux-promotion?tab=promotion",
+    heading: "Promotion",
+  },
+  {
+    from: "/admin/amux-board-auto-promotion",
+    to: "/admin/amux-promotion?tab=auto-promotion",
+    heading: "Promotion",
+  },
+  { from: "/admin/amux-cards", to: "/admin/amux-execution?tab=cards", heading: "Execution" },
 ] as const;
+
+const NOT_FOUND_HEADING = "We couldn't find that page";
 
 /** `/admin/search` is a real page with no sidebar entry, and says so. */
 const SEARCH_VIEW = { href: "/admin/search", heading: "Global search" } as const;
@@ -550,4 +590,114 @@ test.describe("admin console shell", () => {
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(consoleHeading(page)).toHaveText("Support");
   });
+
+  test("Routing keeps shadow routing and points at where AMUX assignment went", async ({
+    page,
+  }) => {
+    await page.goto("/admin/routing");
+    await expect(consoleHeading(page)).toHaveText("Routing");
+    await expect(page.getByTestId("admin-amux-routing-panel")).toHaveCount(0);
+
+    const moved = page.getByRole("link", { name: "AMUX › Execution" });
+    await expect(moved).toHaveAttribute("href", "/admin/amux-execution?tab=assignment");
+    await moved.click();
+
+    await expect(page).toHaveURL("/admin/amux-execution?tab=assignment");
+    await expect(consoleHeading(page)).toHaveText("Execution");
+    await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
+  });
+
+  test("the owner opens Execution on Cards and sees every AMUX section", async ({
+    page,
+  }) => {
+    await page.goto("/admin/amux-execution");
+    const strip = page.getByRole("navigation", { name: "Execution sections" });
+    await expect(strip.getByRole("link")).toHaveCount(2);
+    await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
+      "href",
+      /tab=cards$/
+    );
+    await expect(page.getByTestId("amux-card-list-panel")).toBeVisible();
+    // One heading per page: the panel's title no longer competes with it.
+    await expect(consoleHeading(page)).toHaveCount(1);
+
+    await page.goto("/admin/amux-backlog");
+    const backlog = page.getByRole("navigation", { name: "Backlog sections" });
+    await expect(backlog.getByRole("link")).toHaveCount(4);
+    // Catalog import's code latch ships closed, so its chip reads off in any
+    // environment; the chip is read from that latch, not written.
+    await expect(
+      backlog.getByRole("link", { name: /^Catalog import, Preview · apply off$/ })
+    ).toBeVisible();
+
+    await page.goto("/admin/amux-promotion");
+    await expect(
+      page.getByRole("navigation", { name: "Promotion sections" }).getByRole("link")
+    ).toHaveCount(3);
+  });
+});
+
+test.describe("the AMUX group by role", () => {
+  test("another role sees Execution alone, opening on Assignment", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("ops");
+    await page.goto("/admin/overview");
+    const navigation = sidebarNav(page);
+
+    await expect(navigation.getByRole("button", { name: "AMUX" })).toBeVisible();
+    await expect(navigation.locator('a[href="/admin/amux-execution"]')).toHaveCount(1);
+    // Not advertised: these answer 404 to this role.
+    await expect(navigation.locator('a[href="/admin/amux-backlog"]')).toHaveCount(0);
+    await expect(navigation.locator('a[href="/admin/amux-promotion"]')).toHaveCount(0);
+
+    await page.goto("/admin/amux-execution");
+    await expect(consoleHeading(page)).toHaveText("Execution");
+    const strip = page.getByRole("navigation", { name: "Execution sections" });
+    await expect(strip.getByRole("link")).toHaveCount(1);
+    await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
+      "href",
+      /tab=assignment$/
+    );
+    await expect(page.getByTestId("admin-amux-routing-panel")).toBeVisible();
+    await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
+  });
+
+  test("the palette does not offer another role the owner's AMUX pages", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("readonly");
+    await page.goto("/admin/overview");
+    const palette = await openCommandPalette(page);
+    const amux = palette
+      .locator("section")
+      .filter({ has: page.getByRole("heading", { name: "AMUX", exact: true }) });
+    await expect(amux.getByRole("option")).toHaveCount(1);
+    await expect(amux.getByRole("option", { name: /^Execution/ })).toBeVisible();
+  });
+
+  for (const url of [
+    "/admin/amux-backlog",
+    "/admin/amux-promotion?tab=promotion",
+    "/admin/amux-execution?tab=cards",
+    // A retired address redirects first and is refused where it lands.
+    "/admin/amux-cards",
+    "/admin/amux-board-import",
+  ]) {
+    test(`another role is refused ${url}`, async ({ page, signInAs }) => {
+      await signInAs("ops");
+      await page.goto(url);
+
+      // Asserted on the page rather than the status: notFound() runs after
+      // the shell has streamed, so the response is already a 200 (see
+      // admin-email-campaigns.spec.ts).
+      await expect(page.getByRole("heading", { name: NOT_FOUND_HEADING })).toBeVisible();
+      await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
+      await expect(page.getByTestId("amux-board-import-panel")).toHaveCount(0);
+      await expect(page.getByTestId("amux-intake-panel")).toHaveCount(0);
+      await expect(page.getByTestId("amux-board-promotion-panel")).toHaveCount(0);
+    });
+  }
 });

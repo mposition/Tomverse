@@ -6,6 +6,7 @@ import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import { AUTOFIX_OPERATOR_ACTION_STATES } from "@/lib/feedbackAutoFixCore";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
+import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -30,6 +31,17 @@ export {
 const settled = <T>(result: PromiseSettledResult<T>): T | null =>
   result.status === "fulfilled" ? result.value : null;
 
+/**
+ * AMUX escalations waiting on a person, with the same `where` the routing
+ * report lists them by (`lib/amux/explainability.ts`), so the Execution badge
+ * and the Assignment section count one set. Exported because the Execution
+ * page puts the same number on its Assignment tab.
+ */
+export const countAwaitingAmuxEscalations = () =>
+  prisma.amuxHumanEscalation.count({
+    where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
+  });
+
 export async function getAdminNavigationCounts(): Promise<{
   counts: AdminNavigationCounts;
   /** Whether every read succeeded, which the footer reports as API/DB health. */
@@ -50,6 +62,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmail,
     openModelLifecycle,
     overdueCampaignWaves,
+    openAmuxEscalations,
   ] = await Promise.allSettled([
     prisma.feedback.count({
       where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
@@ -82,6 +95,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmailCount(),
     countOpenWorkItems(),
     overdueCampaignWaveCount({ now }),
+    countAwaitingAmuxEscalations(),
   ]);
 
   const jobsValue = settled(jobs);
@@ -101,6 +115,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmail: settled(abandonedLegalEmail),
     openModelLifecycle: settled(openModelLifecycle),
     overdueCampaignWaves: settled(overdueCampaignWaves),
+    openAmuxEscalations: settled(openAmuxEscalations),
   };
 
   return {

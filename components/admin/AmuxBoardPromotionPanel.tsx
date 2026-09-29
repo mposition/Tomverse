@@ -7,7 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxBoardPromotionMessages } from "@/lib/adminMessages/amuxBoardPromotion";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-board-promotion");
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-promotion?tab=promotion");
 
 type PromotionBody = {
   approvalId?: string;
@@ -66,7 +66,7 @@ export function AmuxBoardPromotionPanel() {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-board-promotion-panel">
-      <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h1>
+      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
       <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-board-promotion-request">
         {messages.requestLabel}

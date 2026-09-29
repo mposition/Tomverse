@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminNavItemTabs,
+  adminSearchablePagesFor,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 import {
   BOARD_IMPORT_SCANNER_RULESET_DIGEST,
   BOARD_IMPORT_SCANNER_VERSION,
@@ -230,8 +236,26 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.match(panel, /applyReady \? messages\.applyPermitted : messages\.applyDisabled/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
-  const page = resolveAdminPageMeta("/admin/amux-reconciliation");
-  assert.equal(page.label, "AMUX source reconciliation");
-  assert.equal(page.isKnown, true);
-  assert.equal(ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-reconciliation"), false);
+  // The screen moved into Backlog's Source reconciliation section; its old address
+  // still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-reconciliation"], "/admin/amux-backlog?tab=reconciliation");
+  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
+  assert.equal(movedTo.label, "Backlog");
+  assert.equal(movedTo.isKnown, true);
+  assert.equal(
+    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "reconciliation")?.label,
+    "Source reconciliation",
+  );
+  // Listed to the owner only: every other role would receive a 404.
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(
+      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
+      false,
+      role,
+    );
+  }
+  assert.equal(
+    ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-reconciliation"),
+    false,
+  );
 });

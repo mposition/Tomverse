@@ -20,6 +20,7 @@ export const ADMIN_NAV_GROUPS = [
   "Revenue",
   "AI Platform",
   "Operations",
+  "AMUX",
   "Governance",
 ] as const;
 
@@ -41,12 +42,24 @@ export type AdminNavBadgeKey =
   | "automation"
   | "alerts"
   | "modelLifecycle"
-  | "emailCampaigns";
+  | "emailCampaigns"
+  | "amuxEscalations";
 
 export type AdminNavTab = {
   id: string;
   label: string;
   description: string;
+  /**
+   * Roles the tab strip shows this section to. Absent means every admin role.
+   *
+   * Visibility only, like `writeRoles`: the page still decides on its own
+   * whether to render the section, and answers 404 to a role it refuses.
+   * `tests/adminNavigation.test.mjs` keeps the two equal, so the strip never
+   * offers a section that answers 404 and never hides one that would open.
+   */
+  viewRoles?: readonly AdminRole[];
+  /** Counter shown beside the tab, from the same counts as the sidebar. */
+  badge?: AdminNavBadgeKey;
 };
 
 export type AdminNavItem = {
@@ -58,6 +71,16 @@ export type AdminNavItem = {
   /** Extra search terms the command palette matches on. */
   aliases: readonly string[];
   writeRoles?: readonly AdminRole[];
+  /**
+   * Roles the sidebar, the palette, pins and recents show this entry to.
+   * Absent means every admin role.
+   *
+   * A page that answers 404 to a role is not advertised to it. Before this
+   * field existed the owner-only AMUX screens were left out of the table
+   * altogether, because the table fed every role's palette. Visibility is not
+   * authorization: the page and its API routes still refuse on their own.
+   */
+  viewRoles?: readonly AdminRole[];
   badge?: AdminNavBadgeKey;
   tabs?: readonly AdminNavTab[];
 };
@@ -317,13 +340,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "routing",
     label: "Routing",
     href: "/admin/routing",
-    description: "Chat shadow routing and AMUX assignment evidence",
+    description: "Chat shadow routing",
     group: "AI Platform",
     aliases: [
       "auto",
       "router",
       "shadow",
-      "amux",
       "task profile",
       "candidates",
     ],
@@ -481,6 +503,130 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "guest default",
     ],
   },
+  // AMUX: the development-agent work board (docs/policy/development-agent-orchestration.md).
+  // Backlog and Promotion are owner-only -- the pages and every API route
+  // behind them answer 404 to any other role -- so they are shown to the owner
+  // alone. Execution opens to every admin because its Assignment section does;
+  // its Cards section is owner-only like the page it replaced.
+  {
+    id: "amux-backlog",
+    label: "Backlog",
+    href: "/admin/amux-backlog",
+    description:
+      "Card registration, catalog import, source reconciliation and card metadata",
+    group: "AMUX",
+    writeRoles: ["owner"],
+    viewRoles: ["owner"],
+    aliases: [
+      "amux",
+      "intake",
+      "register card",
+      "catalog import",
+      "board import",
+      "reconciliation",
+      "source revision",
+      "metadata",
+      "priority",
+      "cost estimate",
+    ],
+    tabs: [
+      {
+        id: "intake",
+        label: "Intake",
+        description: "Preview one explicit card registration, then register it",
+      },
+      {
+        id: "import",
+        label: "Catalog import",
+        description: "Preview a workboard catalog, approve it, then import it",
+      },
+      {
+        id: "reconciliation",
+        label: "Source reconciliation",
+        description: "Accept or reject each card's new source revision",
+      },
+      {
+        id: "metadata",
+        label: "Card metadata",
+        description: "Kind, priority and cost estimate for one backlog card",
+      },
+    ],
+  },
+  {
+    id: "amux-promotion",
+    label: "Promotion",
+    href: "/admin/amux-promotion",
+    description:
+      "Recommendation pool, manual promotion and auto-promotion of backlog cards",
+    group: "AMUX",
+    writeRoles: ["owner"],
+    viewRoles: ["owner"],
+    aliases: [
+      "amux",
+      "recommendation",
+      "recommendation pool",
+      "promote",
+      "promotion",
+      "auto-promotion",
+      "grant",
+      "halt",
+      "todo",
+    ],
+    tabs: [
+      {
+        id: "recommendation",
+        label: "Recommendation pool",
+        description: "A backlog snapshot and a person's decision on each card",
+      },
+      {
+        id: "promotion",
+        label: "Manual promotion",
+        description: "Promote one to three backlog cards a person picked",
+      },
+      {
+        id: "auto-promotion",
+        label: "Auto-promotion",
+        description: "Grants, halt and resume for limited automatic promotion",
+      },
+    ],
+  },
+  {
+    id: "amux-execution",
+    label: "Execution",
+    href: "/admin/amux-execution",
+    description: "AMUX cards, their execution state, and why AMUX assigned the work",
+    group: "AMUX",
+    // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
+    // route checks it); the card list writes nothing.
+    writeRoles: ["owner", "ops"],
+    badge: "amuxEscalations",
+    aliases: [
+      "amux",
+      "cards",
+      "execution",
+      "worker",
+      "attempt",
+      "assignment",
+      "escalation",
+      "human review",
+      "review",
+      "incident",
+    ],
+    tabs: [
+      {
+        id: "cards",
+        label: "Cards",
+        description: "Every AMUX card stored in Tomverse and its execution state",
+        viewRoles: ["owner"],
+      },
+      {
+        id: "assignment",
+        label: "Assignment",
+        description: "Why AMUX assigned the work, and escalations waiting on a person",
+        badge: "amuxEscalations",
+      },
+    ],
+  },
   {
     id: "email-policy",
     label: "Email policy",
@@ -611,84 +757,6 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
 
 export const ADMIN_DETAIL_ROUTES = [
   {
-    // Owner-only and unlisted like the other AMUX screens.
-    id: "amux-backlog-metadata",
-    pattern: /^\/admin\/amux-backlog-metadata$/,
-    label: "AMUX backlog metadata",
-    description: "Owner-only kind, priority and cost estimate for one backlog card, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
-    // catalog import is owner-only and must not be advertised to roles that
-    // receive a 404 from the page and the API.
-    id: "amux-board-import",
-    pattern: /^\/admin\/amux-board-import$/,
-    label: "AMUX catalog import",
-    description: "Owner-only catalog preview and approval, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    id: "amux-board-promotion",
-    pattern: /^\/admin\/amux-board-promotion$/,
-    label: "AMUX card promotion",
-    description: "Owner-only promotion of one to three backlog cards, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    id: "amux-board-recommendation",
-    pattern: /^\/admin\/amux-board-recommendation$/,
-    label: "AMUX recommendation pool",
-    description: "Owner-only backlog recommendation snapshot, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    // Owner-only and unlisted like the other AMUX screens.
-    id: "amux-board-auto-promotion",
-    pattern: /^\/admin\/amux-board-auto-promotion$/,
-    label: "AMUX auto-promotion",
-    description: "Owner-only auto-promotion grants, halt and resume, behind the server switch",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    // Owner-only like the other AMUX screens, and unlisted for the same reason.
-    id: "amux-cards",
-    pattern: /^\/admin\/amux-cards$/,
-    label: "AMUX cards",
-    description: "Owner-only read-only list of AMUX cards and their execution state",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    id: "amux-intake",
-    pattern: /^\/admin\/amux-intake$/,
-    label: "AMUX intake",
-    description: "Owner-only preview of one explicit registration, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
-    id: "amux-reconciliation",
-    pattern: /^\/admin\/amux-reconciliation$/,
-    label: "AMUX source reconciliation",
-    description: "Owner-only preview of per-card source revisions, with apply left off",
-    parentLabel: "Overview",
-    parentHref: "/admin/overview",
-    group: "Command Center" as const,
-  },
-  {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
@@ -726,7 +794,15 @@ export const ADMIN_DETAIL_ROUTES = [
  * behaviour titled `/admin/search` -- and any recent route that had since been
  * renamed -- "Overview", which reads as a wrong page rather than an unknown one.
  */
-export const resolveAdminPageMeta = (pathname: string): AdminPageMeta => {
+export const resolveAdminPageMeta = (
+  pathname: string,
+  /**
+   * When given, an entry this role may not view resolves as unknown, so the
+   * shell does not title a page the role is about to receive a 404 for.
+   * Omitted means unfiltered, for callers that are not rendering for a role.
+   */
+  role?: AdminRole | null,
+): AdminPageMeta => {
   const detail = ADMIN_DETAIL_ROUTES.find((route) => route.pattern.test(pathname));
   if (detail) {
     return {
@@ -754,7 +830,7 @@ export const resolveAdminPageMeta = (pathname: string): AdminPageMeta => {
   }
 
   const item = findAdminNavItem(pathname);
-  if (item) {
+  if (item && (role === undefined || adminIsVisibleTo(role, item))) {
     return {
       label: item.label,
       description: item.description,
@@ -791,6 +867,19 @@ export const ADMIN_LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/admin/jobs": "/admin/automation?tab=jobs",
   "/admin/webhooks": "/admin/automation?tab=webhooks",
   "/admin/approvals": "/admin/work-queue",
+  // The eight owner-only AMUX screens, gathered under the AMUX group. Policy
+  // documents and runbooks name these addresses, so each lands on its own
+  // section. A role the destination refuses is redirected and then answers
+  // 404 there, exactly as it did here: the redirect confirms nothing the
+  // destination would not.
+  "/admin/amux-intake": "/admin/amux-backlog?tab=intake",
+  "/admin/amux-board-import": "/admin/amux-backlog?tab=import",
+  "/admin/amux-reconciliation": "/admin/amux-backlog?tab=reconciliation",
+  "/admin/amux-backlog-metadata": "/admin/amux-backlog?tab=metadata",
+  "/admin/amux-board-recommendation": "/admin/amux-promotion?tab=recommendation",
+  "/admin/amux-board-promotion": "/admin/amux-promotion?tab=promotion",
+  "/admin/amux-board-auto-promotion": "/admin/amux-promotion?tab=auto-promotion",
+  "/admin/amux-cards": "/admin/amux-execution?tab=cards",
 };
 
 /**
@@ -889,7 +978,103 @@ export const adminItemIsWritable = (
   item: Pick<AdminNavItem, "writeRoles">
 ) => !item.writeRoles || item.writeRoles.includes(role);
 
-/** Every page the command palette can jump to, listed and unlisted alike. */
+/**
+ * Whether the console may show an entry or a section to a role.
+ *
+ * `null` -- a role the caller could not determine -- sees only what every role
+ * sees. Failing closed here costs a restricted entry its listing; failing open
+ * would advertise a page that answers 404.
+ */
+export const adminIsVisibleTo = (
+  role: AdminRole | null | undefined,
+  entry: { viewRoles?: readonly AdminRole[] }
+) => !entry.viewRoles || (role != null && entry.viewRoles.includes(role));
+
+/** The sections of a page a role may be shown, in declared order. */
+export const adminVisibleTabs = <T extends AdminNavTab>(
+  tabs: readonly T[],
+  role: AdminRole | null | undefined
+): T[] => tabs.filter((tab) => adminIsVisibleTo(role, tab));
+
+/**
+ * The route table as one role sees it: entries it may open, each carrying only
+ * the sections it may open. An entry whose every section is hidden is dropped
+ * with them, rather than listed as a page with nothing on it.
+ */
+export const adminNavigationFor = (
+  role: AdminRole | null | undefined
+): AdminNavItem[] =>
+  ADMIN_NAVIGATION.flatMap((item) => {
+    if (!adminIsVisibleTo(role, item)) return [];
+    if (!item.tabs) return [item];
+    const tabs = adminVisibleTabs(item.tabs, role);
+    return tabs.length === 0 ? [] : [{ ...item, tabs }];
+  });
+
+/** `ADMIN_NAV_ITEMS_BY_GROUP` for one role; a group left empty is dropped. */
+export const adminNavItemsByGroupFor = (
+  role: AdminRole | null | undefined
+): Array<{ label: AdminNavGroup; items: AdminNavItem[] }> => {
+  const items = adminNavigationFor(role);
+  return ADMIN_NAV_GROUPS.map((label) => ({
+    label,
+    items: items.filter((item) => item.group === label),
+  })).filter((group) => group.items.length > 0);
+};
+
+/**
+ * Whether a stored href -- a pin or a recent route -- may be shown to a role.
+ *
+ * An href outside the route table is left to the caller's own rule (pins drop
+ * unknown hrefs, recents drop unknown titles). A `?tab=` naming a section the
+ * role may not open hides the link as well, so a shared browser does not hand
+ * the owner's recent `/admin/amux-execution?tab=cards` to another role.
+ */
+export const adminHrefIsVisibleTo = (
+  role: AdminRole | null | undefined,
+  href: string
+): boolean => {
+  const [path, search = ""] = href.split("?");
+  const item = findAdminNavItem(path);
+  if (!item) return true;
+  if (!adminIsVisibleTo(role, item)) return false;
+  // An entry with sections but none this role may open is not listed either.
+  if (item.tabs && adminVisibleTabs(item.tabs, role).length === 0) return false;
+  const tabId = new URLSearchParams(search).get("tab");
+  const tab = tabId ? item.tabs?.find((entry) => entry.id === tabId) : undefined;
+  return !tab || adminIsVisibleTo(role, tab);
+};
+
+/**
+ * The section a page opens on for a role, or `null` when the request named a
+ * section that exists but is not this role's to open.
+ *
+ * `null` is the page's cue to answer 404: silently swapping in another section
+ * would tell the requester the one they asked for exists and is withheld,
+ * while falling back is still right for a stale or misspelt `?tab=` that names
+ * no section at all. Missing and unknown values open the first section the
+ * role may see, which is how a page can default to different sections for
+ * different roles without a second rule.
+ */
+export const resolveAdminTabFor = <T extends AdminNavTab>(
+  tabs: readonly T[],
+  role: AdminRole | null | undefined,
+  requested: QueryValue
+): { tab: T; visible: T[] } | null => {
+  const visible = adminVisibleTabs(tabs, role);
+  if (visible.length === 0) return null;
+  const value = Array.isArray(requested) ? requested[0] : requested;
+  const named = tabs.find((tab) => tab.id === value);
+  if (named && !visible.includes(named)) return null;
+  return { tab: resolveAdminTab(visible, value), visible };
+};
+
+/**
+ * Every page the command palette can jump to, listed and unlisted alike.
+ *
+ * Every role's pages. The palette lists `adminSearchablePagesFor(role)`; this
+ * full list is what a stored pin is checked against for still existing.
+ */
 export const ADMIN_SEARCHABLE_PAGES = [
   ...ADMIN_NAVIGATION.map((item) => ({
     id: item.id,
@@ -898,6 +1083,7 @@ export const ADMIN_SEARCHABLE_PAGES = [
     description: item.description,
     group: item.group as AdminNavGroup | null,
     aliases: item.aliases,
+    viewRoles: item.viewRoles as readonly AdminRole[] | undefined,
   })),
   ...ADMIN_UNLISTED_PAGES.map((page) => ({
     id: page.id,
@@ -906,10 +1092,24 @@ export const ADMIN_SEARCHABLE_PAGES = [
     description: page.description,
     group: null as AdminNavGroup | null,
     aliases: page.aliases,
+    viewRoles: undefined as readonly AdminRole[] | undefined,
   })),
 ];
 
 export type AdminSearchablePage = (typeof ADMIN_SEARCHABLE_PAGES)[number];
+
+/**
+ * The pages one role's palette may offer: exactly the entries its sidebar
+ * lists (`adminNavigationFor`), plus the unlisted pages it may open.
+ */
+export const adminSearchablePagesFor = (
+  role: AdminRole | null | undefined
+): AdminSearchablePage[] => {
+  const listed = new Set(adminNavigationFor(role).map((item) => item.href));
+  return ADMIN_SEARCHABLE_PAGES.filter((page) =>
+    page.group === null ? adminIsVisibleTo(role, page) : listed.has(page.href)
+  );
+};
 
 /**
  * Matches a page on its label, description, group and aliases.

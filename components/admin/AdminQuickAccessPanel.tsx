@@ -25,10 +25,10 @@ import {
  * and its effect match.
  */
 export function AdminQuickAccessPanel() {
-  const { pinned, togglePin, ready, pinLimit } = useAdminConsolePreferences();
+  const { pinned, togglePin, ready, pinLimit, role } = useAdminConsolePreferences();
   const { locale } = useAdminLocale();
   const m = useAdminMessages(adminQuickAccessMessages);
-  const searchablePages = localizedAdminSearchablePages(locale);
+  const searchablePages = localizedAdminSearchablePages(locale, role);
   const pages = pinned
     .map((href) => searchablePages.find((page) => page.href === href))
     .filter((page): page is LocalizedAdminSearchablePage => Boolean(page));

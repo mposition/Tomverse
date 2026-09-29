@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminNavItemTabs,
+  adminSearchablePagesFor,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 import { amuxIntakeDraftDigest, parseAmuxIntakeDraft } from "../lib/amux/intakeCore.ts";
 import {
   AMUX_INTAKE_DRIFT_OWNERS,
@@ -207,8 +213,26 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.equal(panel.slice(panel.indexOf("outcome_unknown")).includes('send("register")'), false);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
-  const page = resolveAdminPageMeta("/admin/amux-intake");
-  assert.equal(page.label, "AMUX intake");
-  assert.equal(page.isKnown, true);
-  assert.equal(ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-intake"), false);
+  // The screen moved into Backlog's Intake section; its old address
+  // still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=intake");
+  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
+  assert.equal(movedTo.label, "Backlog");
+  assert.equal(movedTo.isKnown, true);
+  assert.equal(
+    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "intake")?.label,
+    "Intake",
+  );
+  // Listed to the owner only: every other role would receive a 404.
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(
+      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
+      false,
+      role,
+    );
+  }
+  assert.equal(
+    ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-intake"),
+    false,
+  );
 });
