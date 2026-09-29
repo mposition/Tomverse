@@ -68,3 +68,17 @@ test("every language says may, not will", () => {
   assert.match(buildPolicyChangeNoticeEmail({ language: "en", appUrl: APP }).text, /Tomverse may send product update emails/);
   assert.match(buildPolicyChangeNoticeEmail({ language: "ko", appUrl: APP }).text, /보낼 수 있습니다/);
 });
+
+test("the notice names only the case the send rules can reach", () => {
+  // Accounts registered before the announcement (the sealed list). No
+  // relationship case: no approved sign-up notice discloses relationship
+  // sending, and a relationship is judged against the recipient rule at send
+  // time, not where the account was opened.
+  const countries = /Australia|United States|호주|미국|澳大利亚|美国|Australie|États-Unis|Australien|Vereinigten Staaten|Estados Unidos|Austrália|Estados Unidos/;
+  for (const language of LANGUAGES) {
+    const { text, html } = buildPolicyChangeNoticeEmail({ language, appUrl: APP });
+    assert.doesNotMatch(text, countries, language);
+    assert.doesNotMatch(html, countries, language);
+    assert.doesNotMatch(text, /24/, language);
+  }
+});

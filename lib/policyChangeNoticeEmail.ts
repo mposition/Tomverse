@@ -61,7 +61,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `We are updating the Tomverse Privacy Policy and Terms and Conditions. The changes take effect on ${date}.`,
     releaseNotes:
-      "Tomverse may send product update emails (news about the Tomverse service) without your asking in two cases: to accounts that were registered before this change was announced, and to accounts opened in Australia or the United States after this change takes effect that have signed in within the last 24 months. Otherwise we send them only if you ask. You can turn them off at any time in your email settings or with the unsubscribe link in any such message, without signing in. Sign-in codes, receipts and service notices are not affected.",
+      "Tomverse may send product update emails (news about the Tomverse service) without your asking to accounts that were registered before this change was announced. Otherwise we send them only if you ask. You can turn them off at any time in your email settings or with the unsubscribe link in any such message, without signing in. Sign-in codes, receipts and service notices are not affected.",
     consent:
       "A marketing email consent stays in effect until you withdraw it. If you receive marketing email in Korea, we will remind you of that consent every two years.",
     read: "Read the updated documents:",
@@ -72,7 +72,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `Tomverse 개인정보 처리방침과 서비스 이용약관이 변경됩니다. 변경 사항은 ${date}부터 적용됩니다.`,
     releaseNotes:
-      "Tomverse는 두 경우에 신청하지 않으셨어도 제품 소식(Tomverse 서비스 소식) 메일을 보낼 수 있습니다. 이 변경이 안내되기 전에 가입한 계정, 그리고 이 변경이 적용된 뒤 호주나 미국에서 가입해 최근 24개월 안에 로그인한 계정입니다. 그 밖에는 신청하신 경우에만 보냅니다. 이메일 설정 또는 해당 메일의 수신거부 링크에서 로그인 없이 언제든 끄실 수 있습니다. 로그인 코드, 영수증, 서비스 공지는 영향을 받지 않습니다.",
+      "Tomverse는 이 변경이 안내되기 전에 가입한 계정에는 신청하지 않으셨어도 제품 소식(Tomverse 서비스 소식) 메일을 보낼 수 있습니다. 그 밖에는 신청하신 경우에만 보냅니다. 이메일 설정 또는 해당 메일의 수신거부 링크에서 로그인 없이 언제든 끄실 수 있습니다. 로그인 코드, 영수증, 서비스 공지는 영향을 받지 않습니다.",
     consent:
       "광고성 이메일 수신동의는 철회하실 때까지 유효합니다. 한국에서 수신 중이신 경우, 2년마다 수신동의 사실을 알려 드립니다.",
     read: "변경된 문서 보기:",
@@ -82,7 +82,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     subject: "Tomverse 隐私政策和条款变更通知",
     intro: (date) => `我们正在更新 Tomverse 隐私政策和服务条款，变更自 ${date} 起生效。`,
     releaseNotes:
-      "在以下两种情况下，即使您没有申请，Tomverse 也可能向您发送产品动态邮件（关于 Tomverse 服务的消息）：在本次变更公布之前注册的账户，以及本次变更生效后在澳大利亚或美国开设、并在过去 24 个月内登录过的账户。其他情况下，只有在您申请后才会发送。您可以随时在邮件设置中或通过此类邮件中的退订链接关闭，无需登录。登录验证码、收据和服务通知不受影响。",
+      "对于在本次变更公布之前注册的账户，即使您没有申请，Tomverse 也可能向您发送产品动态邮件（关于 Tomverse 服务的消息）。其他情况下，只有在您申请后才会发送。您可以随时在邮件设置中或通过此类邮件中的退订链接关闭，无需登录。登录验证码、收据和服务通知不受影响。",
     consent: "营销邮件同意在您撤回之前一直有效。如果您在韩国接收营销邮件，我们会每两年提醒您一次该同意。",
     read: "查看更新后的文件：",
     why: "这是关于您账户条款的通知，无论您的邮件设置如何都会发送。",
@@ -92,7 +92,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `Nous mettons à jour la politique de confidentialité et les conditions générales de Tomverse. Les modifications prennent effet le ${date}.`,
     releaseNotes:
-      "Tomverse peut envoyer des actualités produit (des nouvelles du service Tomverse) sans demande de votre part dans deux cas : aux comptes inscrits avant l'annonce de ce changement, et aux comptes ouverts en Australie ou aux États-Unis après son entrée en vigueur qui se sont connectés au cours des 24 derniers mois. Sinon, nous ne les envoyons que si vous les demandez. Vous pouvez les désactiver à tout moment dans vos paramètres e-mail ou avec le lien de désabonnement de ces messages, sans vous connecter. Les codes de connexion, les reçus et les avis de service ne sont pas concernés.",
+      "Tomverse peut envoyer des actualités produit (des nouvelles du service Tomverse) sans demande de votre part aux comptes inscrits avant l'annonce de ce changement. Sinon, nous ne les envoyons que si vous les demandez. Vous pouvez les désactiver à tout moment dans vos paramètres e-mail ou avec le lien de désabonnement de ces messages, sans vous connecter. Les codes de connexion, les reçus et les avis de service ne sont pas concernés.",
     consent:
       "Un consentement aux e-mails marketing reste valable jusqu'à ce que vous le retiriez. Si vous recevez des e-mails marketing en Corée, nous vous le rappellerons tous les deux ans.",
     read: "Consulter les documents mis à jour :",
@@ -103,7 +103,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `Wir aktualisieren die Datenschutzerklärung und die Geschäftsbedingungen von Tomverse. Die Änderungen gelten ab dem ${date}.`,
     releaseNotes:
-      "Tomverse kann Produkt-Updates (Neuigkeiten zum Tomverse-Dienst) in zwei Fällen ohne Ihre Anforderung senden: an Konten, die vor der Ankündigung dieser Änderung registriert wurden, und an Konten, die nach Inkrafttreten dieser Änderung in Australien oder den Vereinigten Staaten eröffnet wurden und sich in den letzten 24 Monaten angemeldet haben. Andernfalls senden wir sie nur auf Ihre Anforderung. Sie können sie jederzeit in Ihren E-Mail-Einstellungen oder über den Abmeldelink in einer solchen Nachricht deaktivieren, ohne sich anzumelden. Anmeldecodes, Belege und Servicehinweise sind davon nicht betroffen.",
+      "Tomverse kann Produkt-Updates (Neuigkeiten zum Tomverse-Dienst) ohne Ihre Anforderung an Konten senden, die vor der Ankündigung dieser Änderung registriert wurden. Andernfalls senden wir sie nur auf Ihre Anforderung. Sie können sie jederzeit in Ihren E-Mail-Einstellungen oder über den Abmeldelink in einer solchen Nachricht deaktivieren, ohne sich anzumelden. Anmeldecodes, Belege und Servicehinweise sind davon nicht betroffen.",
     consent:
       "Eine Einwilligung in Werbe-E-Mails gilt, bis Sie sie widerrufen. Wenn Sie Werbe-E-Mails in Korea erhalten, erinnern wir Sie alle zwei Jahre an diese Einwilligung.",
     read: "Die aktualisierten Dokumente lesen:",
@@ -114,7 +114,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `Estamos actualizando la Política de privacidad y los Términos y condiciones de Tomverse. Los cambios entran en vigor el ${date}.`,
     releaseNotes:
-      "Tomverse puede enviar novedades del producto (noticias sobre el servicio Tomverse) sin que las pidas en dos casos: a las cuentas registradas antes de anunciarse este cambio, y a las cuentas abiertas en Australia o Estados Unidos después de que entre en vigor que han iniciado sesión en los últimos 24 meses. En los demás casos solo las enviamos si las pides. Puedes desactivarlas en cualquier momento en la configuración de correo o con el enlace para darte de baja de esos mensajes, sin iniciar sesión. Los códigos de acceso, los recibos y los avisos de servicio no cambian.",
+      "Tomverse puede enviar novedades del producto (noticias sobre el servicio Tomverse) sin que las pidas a las cuentas registradas antes de anunciarse este cambio. En los demás casos solo las enviamos si las pides. Puedes desactivarlas en cualquier momento en la configuración de correo o con el enlace para darte de baja de esos mensajes, sin iniciar sesión. Los códigos de acceso, los recibos y los avisos de servicio no cambian.",
     consent:
       "El consentimiento para correos de marketing sigue vigente hasta que lo retires. Si recibes correos de marketing en Corea, te lo recordaremos cada dos años.",
     read: "Consulta los documentos actualizados:",
@@ -125,7 +125,7 @@ const NOTICE_COPY: Record<EmailLanguage, NoticeCopy> = {
     intro: (date) =>
       `Estamos atualizando a Política de Privacidade e os Termos e Condições da Tomverse. As alterações entram em vigor em ${date}.`,
     releaseNotes:
-      "A Tomverse pode enviar novidades do produto (notícias sobre o serviço Tomverse) sem que você peça em dois casos: para contas cadastradas antes do anúncio desta mudança, e para contas abertas na Austrália ou nos Estados Unidos depois que ela entrar em vigor e que fizeram login nos últimos 24 meses. Nos demais casos, só enviamos se você pedir. Você pode desativá-las a qualquer momento nas configurações de e-mail ou pelo link de descadastro dessas mensagens, sem fazer login. Códigos de acesso, recibos e avisos de serviço não mudam.",
+      "A Tomverse pode enviar novidades do produto (notícias sobre o serviço Tomverse) sem que você peça para contas cadastradas antes do anúncio desta mudança. Nos demais casos, só enviamos se você pedir. Você pode desativá-las a qualquer momento nas configurações de e-mail ou pelo link de descadastro dessas mensagens, sem fazer login. Códigos de acesso, recibos e avisos de serviço não mudam.",
     consent:
       "O consentimento para e-mails de marketing vale até que você o retire. Se você recebe e-mails de marketing na Coreia, vamos lembrá-lo desse consentimento a cada dois anos.",
     read: "Leia os documentos atualizados:",

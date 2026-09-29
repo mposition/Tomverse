@@ -1504,8 +1504,11 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     });
     const current = definition.render(definition.placeholderPayload, delivery.language);
     if (!approved || pinned?.contentHash !== templateContentHash(current)) {
-      await prisma.emailDelivery.update({
-        where: { id: delivery.id },
+      // Only while the claim is still this worker's: a stale claim may have
+      // been taken by another, and an unconditional write would overwrite that
+      // worker's outcome.
+      const failed = await prisma.emailDelivery.updateMany({
+        where: { id: delivery.id, status: "pending", claimedAt: delivery.claimedAt },
         data: {
           status: "failed",
           attempts: delivery.attempts,
@@ -1514,7 +1517,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           claimedAt: null,
         },
       });
-      await reportOperationalIncident({
+      if (failed.count === 1) await reportOperationalIncident({
         code: "EMAIL_POLICY_NOTICE_WORDING_UNAPPROVED",
         title: "An amendment notice was not sent: its wording is not the approved wording it was queued with",
         severity: "error",
