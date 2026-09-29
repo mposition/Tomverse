@@ -7047,6 +7047,8 @@ model AmuxWorkItem {
   reviewProposals   AmuxReviewProposal[]
   intakeDrafts      AmuxIntakeDraft[]
   intakeApprovals   AmuxIntakeApproval[]
+  localIntakeNormalized AmuxLocalIntakeNormalized[]
+  localIntakeApprovals AmuxLocalIntakeApproval[]
   recommendationItems AmuxRecommendationSnapshotItem[]
   recommendationDecisions AmuxRecommendationDecision[]
   autoGrants AmuxRecommendationAutoGrant[]
@@ -7966,6 +7968,56 @@ model AmuxIntakeApproval {
   @@index([actorUserId, createdAt])
   @@index([workItemId])
 }
+
+/// Bounded normalized analysis for one local-agent intake card.
+/// Raw operator text and the model transcript are not stored.
+/// Catalog cards and codex-conversation cards have no row here.
+model AmuxLocalIntakeNormalized {
+  id               String   @id
+  workItemId       String   @unique
+  sourceSystem     String
+  sourceKey        String
+  normalizedDigest String
+  packageDigest    String
+  snapshotDigest   String
+  policyVersion    Int
+  schemaVersion    Int
+  scannerVersion   String
+  priority         String
+  normalized       Json
+  actorUserId      String
+  createdAt        DateTime @default(now())
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, sourceKey])
+  @@index([actorUserId, createdAt])
+}
+
+/// Human approval consumed in the same transaction as one local intake card.
+model AmuxLocalIntakeApproval {
+  id                      String    @id
+  status                  String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  draftDigest             String
+  sourceDigest            String
+  policyVersion           Int
+  scannerVersion          String
+  cardCount               Int
+  workItemId              String
+  consumedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([workItemId])
+}
+
 
 /// The commit deadline of one AMUX mutation transaction (orchestration policy
 /// version 18). The fence in lib/amux/dbBoundary.ts inserts the row as that
