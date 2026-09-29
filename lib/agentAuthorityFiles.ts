@@ -42,6 +42,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "components",
   "config",
   "crates",
+  "docker",
   "docs",
   "lib",
   "locales",
@@ -106,8 +107,12 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/agent*",
   "lib/engineeringAgent*",
   "packages/engineering-agent/**",
+  // The services' image and their operating runbook (§8, §12).
+  "docker/**",
+  "docs/ops/engineering-agent*",
   "tests/agent*",
   "tests/engineeringAgent*",
+  "tests/**/engineering-agent*",
   "tests/security*",
   // §4-4: administration and authentication.
   "app/api/admin/**",
@@ -116,6 +121,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminAuditSystemActors.ts",
   "lib/adminAuth*",
   "lib/adminMessages/amux*",
+  "lib/adminMessages/engineeringAgent*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",

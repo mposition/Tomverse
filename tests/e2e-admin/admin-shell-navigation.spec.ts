@@ -41,6 +41,11 @@ const NAVIGATION = [
     href: "/admin/email-campaigns",
   },
   { group: "Operations", label: "Marketing", href: "/admin/marketing" },
+  {
+    group: "Operations",
+    label: "Engineering agent",
+    href: "/admin/engineering-agent",
+  },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
   { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },

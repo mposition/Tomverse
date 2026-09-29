@@ -334,6 +334,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * webhook input. The digest moves because the whole Prisma schema is
  * deliberately watched.
  *
+ * 2026-09-28: the engineering agent's seven state tables
+ * (EngineeringAgentRun through EngineeringAgentRequest) and their back
+ * relations on AmuxWorkItem, AmuxExecutionAttempt and AdminAuditLog. None is
+ * a marketing model or a webhook input, and no descriptor, webhook writer or
+ * admission decision changes. The digest moves because the whole Prisma
+ * schema is deliberately watched. develop moved the schema in the same days,
+ * so the value below is computed over the merged schema, not either side's.
+ *
  * 2026-09-29: the AMUX back-merge of orchestration policy v15 binds
  * auto-promotion grants to one item and one cent amount (three nullable
  * columns on `AmuxRecommendationAutoGrant`) and adds
@@ -345,7 +353,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * is computed over the merged schema rather than taken from either side.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c477a1d7590ad6d0763b9ef9f477fb72e14b80b07737051a003b092244e478aa";
+  "02a0b870f730ce767cf0de5de3f1a1dfcbc3c3864821f5c0284b49b069ef9646";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

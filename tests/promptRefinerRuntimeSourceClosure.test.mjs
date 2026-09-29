@@ -249,6 +249,14 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory remains 9aa7ec49..., so the digest below is a
 // repin of source positions and not a review of new computed access.
 //
+// 2026-09-28, engineering agent state: `lib/adminAuditSystemActors.ts` gains
+// the engineering agent's system actors, and the marketing webhook
+// fingerprint note in `lib/marketingAutomationAccess.ts` records the
+// engineering tables in the watched schema. Neither adds a computed element
+// access. The count remains 228 and the position-free inventory remains
+// 9aa7ec49..., so only source positions moved. Merged with develop's notes
+// above, the digest below is computed over the merged tree.
+//
 // 2026-09-28, guest trio Gemini slot: `lib/models.ts` gains the
 // gemini-flash-lite-latest catalogue row and `lib/modelPricing.ts` gains its
 // Standard profile. Both files are in this closure. Neither addition is a
@@ -262,12 +270,19 @@ const compilerOptions = parsedConfig.options;
 // closure. Neither change is a computed element access. The count remains 228
 // and the position-free inventory remains 9aa7ec49..., so only source
 // positions moved.
+//
+// 2026-09-29, engineering agent branch takes develop: the system actor list
+// now holds both the engineering actors and `amux-auto-promoter`, and the
+// fingerprint note in `lib/marketingAutomationAccess.ts` carries both dated
+// entries. Neither adds a computed element access. The count remains 228 and
+// the position-free inventory remains 9aa7ec49..., so the digest below is a
+// repin over the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "0c29bca0c6b8b2eab72ad1d1b6a1597e",
-  "38a6818f684db88fe52654fade9419f3",
+  "7ce424964e5e788c69fcc8139957894b",
+  "67037095a9e43d703cfbcc6c590d3364",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

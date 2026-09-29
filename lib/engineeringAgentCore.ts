@@ -96,7 +96,10 @@ export const writeItemTerminalStates = <K extends WriteItemKind>(kind: K) => {
  *   consume no capability.
  * - A lease expiry sends `claimed` to `needs_lookup`, never back to `queued`.
  * - `claimed -> queued` is a write claim's refusal before any GitHub write, or
- *   a lookup that proved no earlier write happened.
+ *   a lookup that proved no earlier write happened. A consumed capability
+ *   stays consumed (§10); the returned item's next write claim is judged
+ *   again under a new capability, so a publish item holds several over its
+ *   life, at most one of them live.
  * - Only an unclaimed publish item expires by TTL; the maintenance kinds are
  *   created when they are due and are not left waiting.
  */
@@ -124,6 +127,56 @@ export const PUBLISH_TRANSITIONS = writeItemTransitions("publish");
 export const PUBLISH_STATES = writeItemStates("publish");
 export const PUBLISH_TERMINAL_STATES = writeItemTerminalStates("publish");
 export type PublishState = WriteItemState<"publish">;
+
+/**
+ * The three kinds of work item that wait on a person (policy §7, §12): a T2
+ * draft waits for its decision, a decision item for acknowledgement, a state
+ * mismatch for a person's fix. Each opens once and closes once; nothing
+ * reopens it. A T2 draft and a decision item expire by the owner queue's TTL
+ * (`QUEUE_TTL_DAYS.decision`); a state mismatch never does, because it halts
+ * the agent until a person acts.
+ */
+export const OWNER_ITEM_KINDS = ["t2_draft", "decision", "state_mismatch"] as const;
+export type OwnerItemKind = (typeof OWNER_ITEM_KINDS)[number];
+
+const OWNER_ITEM_TABLES: Readonly<Record<OwnerItemKind, ReadonlyArray<readonly [string, string]>>> = {
+  t2_draft: [
+    ["open", "approved"],
+    ["open", "rejected"],
+    ["open", "expired"],
+  ],
+  decision: [
+    ["open", "acknowledged"],
+    ["open", "expired"],
+  ],
+  state_mismatch: [["open", "resolved"]],
+};
+
+/** A T2 decision's two answers (policy §7); the approval table allows no other. */
+export const ENGINEERING_AGENT_T2_DECISIONS = ["approved", "rejected"] as const;
+
+export const ownerItemTransitions = (kind: OwnerItemKind): readonly Transition<string>[] =>
+  OWNER_ITEM_TABLES[kind];
+
+export const ownerItemStates = (kind: OwnerItemKind): string[] => [
+  "open",
+  ...OWNER_ITEM_TABLES[kind].map(([, to]) => to),
+];
+
+const isWriteItemKind = (kind: EngineeringAgentWorkItemKind): kind is WriteItemKind =>
+  (WRITE_ITEM_KINDS as readonly string[]).includes(kind);
+
+/** Every state of a work item of any kind: the table the store's trigger is checked against. */
+export const workItemStates = (kind: EngineeringAgentWorkItemKind): string[] =>
+  isWriteItemKind(kind) ? writeItemStates(kind) : ownerItemStates(kind);
+
+/** Every transition of a work item of any kind: the table the store's trigger is checked against. */
+export const workItemTransitions = (kind: EngineeringAgentWorkItemKind): readonly Transition<string>[] =>
+  isWriteItemKind(kind) ? writeItemTransitions(kind) : ownerItemTransitions(kind);
+
+/** The state a work item of this kind is created in. */
+export const workItemInitialState = (kind: EngineeringAgentWorkItemKind) =>
+  isWriteItemKind(kind) ? "queued" : "open";
 
 /**
  * How a write item was claimed. A write claim may write; a lookup claim exists
@@ -178,6 +231,12 @@ export type WriteTransitionContext =
       claimMode: WriteClaimMode;
       fencingMatches: boolean;
       outcome: WriteResultOutcome;
+      /**
+       * Whether the capability this result rests on has been consumed: for a
+       * write claim, by this claim; for a lookup claim, by an earlier write
+       * claim. Only a publish item has capabilities; for the others it is false.
+       */
+      capabilityConsumed: boolean;
     };
 
 export type TransitionVerdict = { allowed: true } | { allowed: false; reason: string };
@@ -185,6 +244,21 @@ export type TransitionVerdict = { allowed: true } | { allowed: false; reason: st
 const refuse = (reason: string): TransitionVerdict => ({ allowed: false, reason });
 
 const resultTarget = (
+  kind: WriteItemKind,
+  mode: WriteClaimMode,
+  outcome: WriteResultOutcome,
+  capabilityConsumed: boolean,
+): string | null => {
+  const target = unconditionalResultTarget(kind, mode, outcome);
+  if (kind !== "publish" || target === null) return target;
+  const terminals = WRITE_ITEM_TERMINALS.publish;
+  // Nothing is published without a consumed capability. A return to the
+  // queue leaves a consumed one consumed; the next claim needs a new one.
+  if (target === terminals.success && !capabilityConsumed) return null;
+  return target;
+};
+
+const unconditionalResultTarget = (
   kind: WriteItemKind,
   mode: WriteClaimMode,
   outcome: WriteResultOutcome,
@@ -281,7 +355,15 @@ export const decideWriteItemTransition = <K extends WriteItemKind>(
     case "result": {
       if (from !== "claimed") return refuse("result_only_from_claimed");
       if (!context.fencingMatches) return refuse("stale_fencing_token");
-      const expected = resultTarget(kind, context.claimMode, context.outcome);
+      if (kind !== "publish" && context.capabilityConsumed) {
+        return refuse("only_a_publish_item_has_a_capability");
+      }
+      const expected = resultTarget(
+        kind,
+        context.claimMode,
+        context.outcome,
+        context.capabilityConsumed,
+      );
       if (expected === null) return refuse("outcome_not_valid_for_claim_mode");
       return expected === to ? { allowed: true } : refuse("outcome_does_not_lead_to_target");
     }
@@ -294,6 +376,23 @@ export const decideWriteItemTransition = <K extends WriteItemKind>(
  * lookup that settles the result closes the decision with it.
  */
 export const opensDecisionOnEntry = (to: string) => to === "outcome_unknown";
+
+/**
+ * The cause key of the decision item an entry into `outcome_unknown` opens:
+ * one per item and claim, so a later entry opens its own. The migration builds
+ * the same key in a deferred trigger and refuses the commit without it.
+ */
+export const UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX = "unknown:";
+export const unknownOutcomeDecisionCauseKey = (workItemId: string, fencingToken: bigint | number) =>
+  `${UNKNOWN_OUTCOME_DECISION_CAUSE_PREFIX}${workItemId}:${fencingToken}`;
+
+/**
+ * The cause key of the decision item a partial registration opens (§12,
+ * "등록 결과 불명"). The owner queue counts that item, not the registration.
+ */
+export const PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX = "registration:";
+export const partialRegistrationDecisionCauseKey = (registrationId: string) =>
+  `${PARTIAL_REGISTRATION_DECISION_CAUSE_PREFIX}${registrationId}`;
 
 /**
  * A branch left behind by a PR creation that GitHub rejected is only ever
@@ -380,23 +479,87 @@ export type RegistrationResult = (typeof REGISTRATION_RESULTS)[number];
  * A registration result is written once. `pending` only exists between the
  * guard passing and the AMUX writer answering; an unclear answer is resolved
  * by AMUX's read-back into `absent` or `partial`, never by a retry.
+ *
+ * `partial` opens an owner decision item in the same transaction. It is
+ * resolved -- to the card that turned out to exist, or to its confirmed
+ * absence -- only after that item has been acknowledged or has expired, and
+ * the resolution is recorded beside the first answer, not over it.
  */
 export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[] = [
   ["pending", "registered"],
   ["pending", "registration_refused"],
   ["pending", "absent"],
   ["pending", "partial"],
+  ["partial", "registered"],
+  ["partial", "absent"],
 ] as const;
 
 /* ------------------------------------------------------------------------- */
 /* Mode and switches                                                          */
 /* ------------------------------------------------------------------------- */
 
+/**
+ * The approved policy version this code implements (docs/policy/engineering-agent.md,
+ * "정책 버전"). A capability records it at issue and is consumed only while it
+ * is still current; tests/engineeringAgentStore.test.mjs compares it with the
+ * policy header, so a new policy version cannot go unnoticed.
+ */
+export const ENGINEERING_AGENT_POLICY_VERSION = 1;
+
+/**
+ * Why an approval observation is not an approval (§9-10). The binding's JSON
+ * CHECK lists the same values; tests/engineeringAgentSchema.test.mjs compares.
+ */
+export const ENGINEERING_AGENT_NOT_APPROVED_REASONS = [
+  "base_not_develop",
+  "head_not_verified",
+  "required_check_failed",
+  "no_authorised_review",
+  "review_not_valid",
+  "snapshot_changed",
+  "review_before_snapshot",
+  "merged_without_approval",
+] as const;
+
+/** Who merged, as a kind and never as an identity (§9-10: the merger is an observation only). */
+export const ENGINEERING_AGENT_MERGER_KINDS = ["user", "bot", "app", "unknown"] as const;
+
 export const ENGINEERING_AGENT_MODE_SETTING_KEY = "feature.engineeringAgentMode";
 export const ENGINEERING_AGENT_FREEZE_SETTING_KEY = "feature.engineeringAgentFreeze";
 export const ENGINEERING_AGENT_REGISTRATION_SETTING_KEY =
   "feature.engineeringAgentRegistration";
 export const ENGINEERING_AGENT_KILL_SWITCH_ENV = "ENGINEERING_AGENT_KILL_SWITCH";
+
+/**
+ * Instants the app keeps beside the switches, each written by one recorded
+ * act: the Admin acknowledgement that clears a halt (§12), each
+ * service's report that a cycle ran to its end, and the operator's record that
+ * both dead-man monitors are active and alerting (the armed gate, §12). An
+ * absent or unparseable value is no record at all.
+ */
+export const ENGINEERING_AGENT_HALT_ACKNOWLEDGED_SETTING_KEY = "engineeringAgent.haltAcknowledgedAt";
+export const ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY = "engineeringAgent.runnerLastFinishAt";
+export const ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY = "engineeringAgent.publisherLastFinishAt";
+export const ENGINEERING_AGENT_MONITORS_CONFIRMED_SETTING_KEY = "engineeringAgent.monitorsConfirmedAt";
+/**
+ * The latest unbound pull request or ref the runner observed outside a run,
+ * as `{"halt":"unbound_app_pr","at":"<ISO instant>"}`. It halts like a halt a
+ * run recorded, until a person acknowledges it (§12).
+ */
+export const ENGINEERING_AGENT_OBSERVED_HALT_SETTING_KEY = "engineeringAgent.observedHalt";
+
+/** The halts an observation outside a run may record: what only GitHub shows. */
+export const OBSERVABLE_HALTS = ["unbound_app_pr", "unbound_app_ref"] as const;
+export type ObservableHalt = (typeof OBSERVABLE_HALTS)[number];
+
+const SETTING_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
+/** A stored instant, in exactly the form `Date.prototype.toISOString` writes, or no record. */
+export const parseSettingInstant = (raw: string | null | undefined): Date | null => {
+  if (typeof raw !== "string" || !SETTING_INSTANT.test(raw)) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+};
 
 export const ENGINEERING_AGENT_MODES = ["off", "shadow", "t1"] as const;
 export type EngineeringAgentMode = (typeof ENGINEERING_AGENT_MODES)[number];
@@ -435,15 +598,14 @@ export type EffectiveSwitches = {
   maintenanceAllowed: boolean;
 };
 
+/** Anything set other than empty, `0` or `false` engages the kill switch. */
+export const killSwitchEngaged = (raw: string | null | undefined): boolean =>
+  raw !== undefined && raw !== null && raw !== "" && raw !== "0" && raw.toLowerCase() !== "false";
+
 export const resolveEngineeringAgentSwitches = (
   reading: SwitchReading,
 ): EffectiveSwitches => {
-  const killed =
-    reading.killSwitch !== undefined &&
-    reading.killSwitch !== null &&
-    reading.killSwitch !== "" &&
-    reading.killSwitch !== "0" &&
-    reading.killSwitch.toLowerCase() !== "false";
+  const killed = killSwitchEngaged(reading.killSwitch);
   const mode =
     reading.readFailed || killed ? "off" : parseEngineeringAgentMode(reading.mode);
   // A freeze that cannot be read is a freeze.
@@ -480,9 +642,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export type QueueReading = {
   /** Bindings with an open PR or a remaining branch. */
   openPrBindings: number;
-  /** Undecided decision items: T2 drafts, mismatches, repeated failures, observation failures, partial registrations. */
+  /**
+   * Open decision work items: T2 drafts, mismatches, and the decision items
+   * opened for repeated failures, observation failures, unknown write
+   * outcomes and partial registrations.
+   */
   pendingDecisions: number;
-  /** When mode first became `t1`, or null if it never has. */
+  /**
+   * When the first run that started under mode `t1` started (the earliest
+   * EngineeringAgentRun whose `modeAtStart` is `t1`), or null if none has.
+   * That is never earlier than the mode change, so the window it opens is
+   * never shorter than the policy's.
+   */
   t1StartedAt: Date | null;
   now: Date;
 };
@@ -536,6 +707,19 @@ export type HaltReading = {
  * `none`: without it the unbound checks cannot run, and a check that cannot
  * run is not a check that passed.
  */
+/** The policy's priority among halts, highest first (the order decideHalt tests them in). */
+export const HALT_PRIORITY: readonly HaltValue[] = [
+  "config_missing",
+  "circuit_open",
+  "unbound_app_pr",
+  "unbound_app_ref",
+  "state_mismatch",
+  "none",
+];
+
+export const higherHalt = (a: HaltValue, b: HaltValue): HaltValue =>
+  HALT_PRIORITY.indexOf(a) <= HALT_PRIORITY.indexOf(b) ? a : b;
+
 export const decideHalt = (reading: HaltReading): HaltValue => {
   if (!reading.appIdentityConfigured) return "config_missing";
   if (reading.circuitLatched) return "circuit_open";
@@ -544,6 +728,34 @@ export const decideHalt = (reading: HaltReading): HaltValue => {
   if (reading.openStateMismatches > 0) return "state_mismatch";
   return "none";
 };
+
+/**
+ * What a runner may report when its run ends: the readings only it can make
+ * -- the publisher App's identity, unbound App pull requests and refs. A
+ * latched circuit and an open state mismatch are the app's to read, never a
+ * runner's to assert: one report of `circuit_open` would otherwise latch the
+ * circuit without the repeated failures that are its definition (§12).
+ */
+export const RUNNER_REPORTABLE_HALTS = ["none", "config_missing", "unbound_app_pr", "unbound_app_ref"] as const;
+export type RunnerReportableHalt = (typeof RUNNER_REPORTABLE_HALTS)[number];
+
+/**
+ * The halt a run ends with: the runner's report combined with what the app
+ * holds, in the policy's priority, so a report of `none` can never lower a
+ * halt the app can see.
+ */
+export const combineRunHalt = (input: {
+  reported: RunnerReportableHalt;
+  circuitLatched: boolean;
+  openStateMismatches: number;
+}): HaltValue =>
+  decideHalt({
+    appIdentityConfigured: input.reported !== "config_missing",
+    circuitLatched: input.circuitLatched,
+    unboundAppPrs: input.reported === "unbound_app_pr" ? 1 : 0,
+    unboundAppRefs: input.reported === "unbound_app_ref" ? 1 : 0,
+    openStateMismatches: input.openStateMismatches,
+  });
 
 export const CIRCUIT_WINDOW_DAYS = 30;
 export const CIRCUIT_INCIDENT_LIMIT = 3;
@@ -604,6 +816,25 @@ export const isCircuitLatched = (input: {
  * halted. Mode `off`, a freeze or the kill switch still send it -- the monitor
  * watches whether the service is alive, not whether it did work (policy §12).
  */
+/**
+ * A halt value the app reported to a service, or `unknown` when it reported
+ * none it knows -- never `none` by default, because `none` is what lets a
+ * success signal out (§12).
+ */
+export const reportedHalt = (value: unknown): HaltValue | "unknown" =>
+  typeof value === "string" && (HALT_VALUES as readonly string[]).includes(value) ? (value as HaltValue) : "unknown";
+
+/**
+ * The success signal after a round: the round finished, the halt the round
+ * saw was none, and the halt read again after the round -- right before the
+ * signal -- is none too (§12, §13-17).
+ */
+export const finalSignalIsSuccess = (input: {
+  finishedNormally: boolean;
+  roundHalt: HaltValue | "unknown";
+  haltAfter: HaltValue | "unknown";
+}) => input.finishedNormally && input.roundHalt === "none" && input.haltAfter === "none";
+
 export const shouldSendSuccessHeartbeat = (input: {
   finishedNormally: boolean;
   halt: HaltValue;
@@ -694,6 +925,17 @@ export const prBodyCarriesMarker = (body: string, runId: string) =>
   body.split("\n", 1)[0] === prBodyMarker(runId);
 
 export type CommitIdentity = { name: string; email: string };
+
+/**
+ * The one identity a published commit carries, as author and committer. The
+ * app issues capabilities with it and the publisher builds commits with it; a
+ * commit object is compared byte for byte, so a second copy of these strings
+ * anywhere is a mismatch waiting to happen.
+ */
+export const ENGINEERING_AGENT_COMMIT_IDENTITY: CommitIdentity = Object.freeze({
+  name: "Tomverse Engineering Agent",
+  email: "engineering-agent@users.noreply.github.com",
+});
 
 export type ExpectedCommit = {
   tree: string;

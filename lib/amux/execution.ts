@@ -10,7 +10,9 @@ import { cancelPendingAmuxWorkDelivery } from "@/lib/amux/delivery";
 import {
   AMUX_DB_BOUNDARIES,
   AmuxDbBoundaryError,
+  amuxBoundaryWithAttachment,
   withAmuxDbBoundary,
+  type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
 import {
   decideAmuxAttemptBudget,
@@ -45,6 +47,44 @@ export const AMUX_CLAIM_RESERVATION_MS = 180_000;
 export type AmuxExecutionOutcome = "succeeded" | "failed" | "blocked";
 
 export type AmuxExecutionToStatus = "todo" | "review" | "done" | "blocked";
+
+/**
+ * The agents whose own model spend a settlement may record, under the
+ * ledger's `agent` scope (orchestration policy, Authority, version 12). It is
+ * never part of the attempt's reservation, its settlement delta or admission.
+ */
+export const AMUX_AGENT_USAGE_AGENTS = ["engineering-agent"] as const;
+export type AmuxAgentUsage = { agentId: (typeof AMUX_AGENT_USAGE_AGENTS)[number]; amountMicrousd: bigint };
+
+/** The UTC calendar month an agent usage row is charged to. */
+export const amuxAgentUsageWindow = (at: Date): { startsAt: Date; endsAt: Date } => ({
+  startsAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1)),
+  endsAt: new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1)),
+});
+
+/** What an attachment to execution start sees: the attempt that now exists. */
+export type AmuxExecutionStartedFact = {
+  attemptId: string;
+  taskId: string;
+  taskRevision: number;
+  leaseExpiresAt: Date;
+};
+
+/** What an attachment to an execution heartbeat sees: the renewed lease. */
+export type AmuxExecutionRenewedFact = {
+  attemptId: string;
+  taskId: string;
+  leaseExpiresAt: Date;
+};
+
+/** What an attachment to settlement sees: where the task actually went. */
+export type AmuxExecutionSettledFact = {
+  attemptId: string;
+  taskId: string;
+  outcome: AmuxExecutionOutcome;
+  toStatus: AmuxExecutionToStatus;
+  taskRevision: number;
+};
 
 type RuntimeLockRow = {
   workerName: string;
@@ -189,14 +229,17 @@ const validSettlement = (
  * creation are one transaction.
  * Failure at any later write rolls the todo->doing transition back.
  */
-export async function startAmuxExecution(input: {
-  taskId: string;
-  worker: string;
-  instanceId: string;
-  generation: number;
-  expectedRevision: number;
-  now?: Date;
-}): Promise<
+export async function startAmuxExecution(
+  input: {
+    taskId: string;
+    worker: string;
+    instanceId: string;
+    generation: number;
+    expectedRevision: number;
+    now?: Date;
+  },
+  attachment?: AmuxAttachment<AmuxExecutionStartedFact>,
+): Promise<
   | {
       started: true;
       attemptId: string;
@@ -221,7 +264,7 @@ export async function startAmuxExecution(input: {
   }
 
   return withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.executionStart,
+    amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.executionStart, attachment),
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -281,6 +324,11 @@ export async function startAmuxExecution(input: {
           started: false as const,
           reason: "task_not_startable" as const,
         };
+      }
+
+      // Every row this start locks is locked; nothing is written yet.
+      if (attachment?.beforeWrite) {
+        await attachment.beforeWrite(context.attachedTransaction, { taskId: input.taskId });
       }
 
       const costAdmission = await evaluateLockedAmuxCostAdmission(
@@ -589,6 +637,14 @@ export async function startAmuxExecution(input: {
         tx,
       });
 
+      if (attachment) {
+        await attachment.work(
+          context.attachedTransaction,
+          { attemptId, taskId: input.taskId, taskRevision, leaseExpiresAt },
+          { dbNow: context.dbNow },
+        );
+      }
+
       context.requireLeaseAt(runtime.leaseExpiresAt);
       return {
         started: true as const,
@@ -607,16 +663,19 @@ export async function startAmuxExecution(input: {
  * 2. worker runtime instance/generation,
  * 3. task owner/status/revision.
  */
-export async function heartbeatAmuxExecution(input: {
-  attemptId: string;
-  worker: string;
-  instanceId: string;
-  generation: number;
-  taskRevision: number;
-  now?: Date;
-}): Promise<boolean> {
+export async function heartbeatAmuxExecution(
+  input: {
+    attemptId: string;
+    worker: string;
+    instanceId: string;
+    generation: number;
+    taskRevision: number;
+    now?: Date;
+  },
+  attachment?: AmuxAttachment<AmuxExecutionRenewedFact>,
+): Promise<boolean> {
   return withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.executionHeartbeat,
+    amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.executionHeartbeat, attachment),
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
@@ -690,6 +749,17 @@ export async function heartbeatAmuxExecution(input: {
         },
         tx,
       });
+      if (attachment) {
+        await attachment.work(
+          context.attachedTransaction,
+          {
+            attemptId: input.attemptId,
+            taskId: attempt.taskId,
+            leaseExpiresAt: nextLease,
+          },
+          { dbNow: context.dbNow },
+        );
+      }
       return true;
     },
   );
@@ -702,19 +772,24 @@ export async function heartbeatAmuxExecution(input: {
  * revision, changed owner or changed lifecycle state all fence the callback
  * out before it can modify either row.
  */
-export async function settleAmuxExecution(input: {
-  attemptId: string;
-  worker: string;
-  instanceId: string;
-  generation: number;
-  taskRevision: number;
-  outcome: AmuxExecutionOutcome;
-  toStatus: AmuxExecutionToStatus;
-  reason?: string | null;
-  actualCostMicrousd?: bigint | null;
-  reviewPrNumber?: number | null;
-  now?: Date;
-}): Promise<
+export async function settleAmuxExecution(
+  input: {
+    attemptId: string;
+    worker: string;
+    instanceId: string;
+    generation: number;
+    taskRevision: number;
+    outcome: AmuxExecutionOutcome;
+    toStatus: AmuxExecutionToStatus;
+    reason?: string | null;
+    actualCostMicrousd?: bigint | null;
+    reviewPrNumber?: number | null;
+    /** An adapter agent's own model spend for this attempt; recorded apart from its cost. */
+    agentUsage?: AmuxAgentUsage | null;
+    now?: Date;
+  },
+  attachment?: AmuxAttachment<AmuxExecutionSettledFact>,
+): Promise<
   | { settled: true; taskRevision: number }
   | { settled: false; reason: "fenced_out" }
 > {
@@ -735,9 +810,18 @@ export async function settleAmuxExecution(input: {
   if (input.taskRevision > AMUX_MAX_EXPECTED_REVISION) {
     return { settled: false, reason: "fenced_out" };
   }
+  if (
+    input.agentUsage != null &&
+    (!(AMUX_AGENT_USAGE_AGENTS as readonly string[]).includes(input.agentUsage.agentId) ||
+      typeof input.agentUsage.amountMicrousd !== "bigint" ||
+      input.agentUsage.amountMicrousd < BigInt(0) ||
+      input.agentUsage.amountMicrousd > BigInt(Number.MAX_SAFE_INTEGER))
+  ) {
+    throw new Error("Invalid AMUX agent usage");
+  }
 
   return withAmuxDbBoundary(
-    AMUX_DB_BOUNDARIES.executionSettle,
+    amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.executionSettle, attachment),
     async (tx, context) => {
       const now = input.now ?? context.dbNow;
       const planning = await tx.amuxExecutionAttempt.findUnique({
@@ -939,6 +1023,23 @@ export async function settleAmuxExecution(input: {
         }
       }
 
+      if (input.agentUsage != null) {
+        // Its own scope and kind: no admission sum, reservation or delta reads it.
+        const window = amuxAgentUsageWindow(now);
+        await tx.amuxCostLedgerEntry.create({
+          data: {
+            scope: "agent",
+            resourceKey: input.agentUsage.agentId,
+            budgetWindowStartsAt: window.startsAt,
+            budgetWindowEndsAt: window.endsAt,
+            taskId: attempt.taskId,
+            attemptId: input.attemptId,
+            kind: "agent_usage",
+            amountMicrousd: input.agentUsage.amountMicrousd,
+          },
+        });
+      }
+
       // Every card that lands in review needs a person: review -> done runs
       // only through the human review route, which requires an escalation.
       if (effectiveToStatus === "review") {
@@ -984,12 +1085,27 @@ export async function settleAmuxExecution(input: {
           review_pr_number: recordedReviewPrNumber,
           reserved_cost_microusd: attempt.reservedCostMicrousd.toString(),
           settled_cost_microusd: input.actualCostMicrousd?.toString() ?? null,
+          agent_usage_microusd: input.agentUsage?.amountMicrousd.toString() ?? null,
           attempt_number: attempt.attemptNumber,
           exhausted_limit: budgetDestination.exhausted_limit,
           max_attempts: budgetDestination.max_attempts,
         },
         tx,
       });
+
+      if (attachment) {
+        await attachment.work(
+          context.attachedTransaction,
+          {
+            attemptId: input.attemptId,
+            taskId: attempt.taskId,
+            outcome: input.outcome,
+            toStatus: effectiveToStatus,
+            taskRevision: input.taskRevision + 1,
+          },
+          { dbNow: context.dbNow },
+        );
+      }
 
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);

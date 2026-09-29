@@ -32,6 +32,11 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-shadow-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
+    "engineering-agent-runner",
+    "engineering-agent-publisher",
+    "engineering-agent-retention",
+    "engineering-agent-observer",
+    "engineering-agent-registrar",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
