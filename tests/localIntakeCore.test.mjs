@@ -78,11 +78,12 @@ const context = (raw, extra = {}) => ({
   raw,
 });
 
-test("the shipped latch stays off and the environment value alone does not open it", () => {
-  assert.equal(LOCAL_INTAKE_APPLY_CODE_LATCH, false);
-  assert.equal(localIntakeApplyPermitted("enabled"), false);
-  assert.equal(localIntakeApplyPermitted("enabled", true), true);
-  assert.equal(localIntakeApplyPermitted("true", true), false);
+test("the shipped latch is on and the environment value is still required", () => {
+  assert.equal(LOCAL_INTAKE_APPLY_CODE_LATCH, true);
+  assert.equal(localIntakeApplyPermitted("enabled"), true);
+  assert.equal(localIntakeApplyPermitted(undefined), false);
+  assert.equal(localIntakeApplyPermitted("true"), false);
+  assert.equal(localIntakeApplyPermitted("enabled", false), false);
 });
 
 test("a valid package previews one backlog card and writes nothing", () => {
@@ -334,6 +335,7 @@ test("the child environment is an allowlist and the server files do not import a
   assert.equal(ko.notRegistered, "아직 등록되지 않음");
   assert.equal(ko.backlogMeaning, "backlog 등록은 실행이나 todo 승격이 아님");
   assert.equal(ko.perCard, "등록할 카드별로 운영자 확인 필요");
+  assert.equal(ko.registerPermitted, "등록은 backlog 카드 한 건을 만듭니다. 카드를 승격하거나 워커를 시작하지 않습니다.");
   assert.match(en.backlogMeaning, /does not promote it to todo/);
   assert.match(read("components/admin/AmuxLocalIntakePanel.tsx"), /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(read("components/admin/AmuxLocalIntakePanel.tsx"), /adminRecentAuthenticationHref\("\/admin\/amux-backlog\?tab=intake"\)/);

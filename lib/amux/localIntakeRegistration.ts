@@ -26,9 +26,10 @@ import { prisma } from "@/lib/prisma";
  *
  * docs/policy/amux-intake.md (policy version 3).
  *
- * applyLocalIntakeRegistration checks the shipped latch before it opens a
- * transaction. The latch ships false. commitLocalIntakeRegistration is the
- * transaction body and writes one backlog card, one normalized row, one
+ * applyLocalIntakeRegistration checks the shipped latch and
+ * TOMVERSE_AMUX_INTAKE_LOCAL_APPLY before it opens a transaction. The latch
+ * is true. The environment value must be exactly enabled. commitLocalIntakeRegistration
+ * is the transaction body and writes one backlog card, one normalized row, one
  * consumed approval and one human audit. It does not write a dependency, a
  * draft body, an execution brief, or any execution or credit row.
  */
