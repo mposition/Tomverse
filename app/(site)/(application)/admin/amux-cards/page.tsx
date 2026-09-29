@@ -1,16 +1,20 @@
-export const dynamic = "force-dynamic";
+import { redirect } from "next/navigation";
+import {
+  ADMIN_LEGACY_ROUTES,
+  adminRedirectTarget,
+} from "@/lib/adminNavigation";
 
-import { notFound } from "next/navigation";
-import { getServerSession } from "next-auth/next";
-
-import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
-import { getAdminRole } from "@/lib/adminAuth";
-import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
-import { authOptions } from "@/lib/auth";
-
-export default async function AdminAmuxCardsPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-  const { rows, total, limit } = await listAmuxCardsForAdmin();
-  return <AmuxCardListPanel rows={rows} total={total} limit={limit} />;
+/**
+ * Retired route, preserved as a redirect.
+ *
+ * The card list is now the AMUX Execution page's Cards section.
+ * The destination is owner-only in the same way this page was: another role
+ * is redirected and then answers 404 there.
+ */
+export default async function AdminAmuxCardsRedirectPage({
+  searchParams,
+}: PageProps<"/admin/amux-cards">) {
+  redirect(
+    adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], await searchParams)
+  );
 }

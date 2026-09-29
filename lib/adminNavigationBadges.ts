@@ -38,6 +38,15 @@ export type AdminNavigationCounts = {
    */
   overdueCampaignWaves: number | null;
   /**
+   * AMUX escalations waiting on a person: `open` and `acknowledged`, the same
+   * statuses the Assignment section lists (AMUX_ESCALATION_AWAITING_STATUSES).
+   *
+   * An escalation is AMUX handing a card back to a human -- a review to
+   * approve, retry or block, or a blocked attempt. Nothing else moves it, so
+   * without the count it waits until someone happens to open the section.
+   */
+  openAmuxEscalations: number | null;
+  /**
    * Reports that have not closed -- `open` and `reviewing` both, as named by
    * FEEDBACK_AWAITING_OPERATOR_STATUSES. Not `status: "open"`: a
    * verified-trace report arrives as `reviewing`, and counting only `open`
@@ -69,6 +78,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   abandonedLegalEmail: null,
   openModelLifecycle: null,
   overdueCampaignWaves: null,
+  openAmuxEscalations: null,
   openFeedback: null,
   supportFeedback: null,
   autoFixActionCases: null,
@@ -132,6 +142,8 @@ export const adminNavigationBadge = (
       return counts.openModelLifecycle;
     case "emailCampaigns":
       return counts.overdueCampaignWaves;
+    case "amuxEscalations":
+      return counts.openAmuxEscalations;
     default:
       return null;
   }

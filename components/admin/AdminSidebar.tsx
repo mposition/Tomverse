@@ -4,11 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ExternalLink, Pin, PinOff } from "lucide-react";
 import {
-  ADMIN_NAV_ITEMS_BY_GROUP,
-  ADMIN_NAVIGATION,
   type AdminNavGroup,
   type AdminNavItem,
   adminItemIsWritable,
+  adminNavItemsByGroupFor,
   findAdminNavItem,
 } from "@/lib/adminNavigation";
 import {
@@ -63,6 +62,10 @@ export function AdminSidebar({
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeItem = findAdminNavItem(pathname);
   const activeGroup = activeItem?.group || null;
+  // The route table as this role sees it. An entry the role would get a 404
+  // from is not listed, pinned or counted into its group's badge.
+  const groups = useMemo(() => adminNavItemsByGroupFor(role), [role]);
+  const visibleItems = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 
   useEffect(() => {
     // Read after the commit: the server cannot know this value, so reading it
@@ -97,9 +100,9 @@ export function AdminSidebar({
   const pinnedItems = useMemo(
     () =>
       pinned
-        .map((href) => ADMIN_NAVIGATION.find((item) => item.href === href))
+        .map((href) => visibleItems.find((item) => item.href === href))
         .filter((item): item is AdminNavItem => Boolean(item)),
-    [pinned]
+    [pinned, visibleItems]
   );
 
   /**
@@ -271,7 +274,7 @@ export function AdminSidebar({
         ) : null}
 
         <nav aria-label={m.navigation}>
-          {ADMIN_NAV_ITEMS_BY_GROUP.map((group) => {
+          {groups.map((group) => {
             const open = isOpen(group.label);
             const panelId = `admin-nav-group-${group.label
               .toLowerCase()

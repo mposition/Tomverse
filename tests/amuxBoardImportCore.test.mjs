@@ -6,7 +6,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { computeAdminAuditEntryHash } from "../lib/adminAuditIntegrityCore.ts";
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminNavItemTabs,
+  adminSearchablePagesFor,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 import {
   BOARD_IMPORT_APPLY_CODE_LATCH,
   BOARD_IMPORT_MAX_ITEMS,
@@ -503,9 +509,24 @@ test("preview does not write, apply has no caller latch, and the worker boundary
   assert.match(panel, /applyReady \? messages\.applyPermitted\("true"\) : messages\.applyDisabled/);
   assert.match(panel, /dark:bg-zinc-950 dark:text-zinc-100/);
   assert.match(panel, /send\("apply"/);
-  const page = resolveAdminPageMeta("/admin/amux-board-import");
-  assert.equal(page.label, "AMUX catalog import");
-  assert.equal(page.isKnown, true);
+  // The screen moved into Backlog's Catalog import section; its old address
+  // still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-board-import"], "/admin/amux-backlog?tab=import");
+  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
+  assert.equal(movedTo.label, "Backlog");
+  assert.equal(movedTo.isKnown, true);
+  assert.equal(
+    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "import")?.label,
+    "Catalog import",
+  );
+  // Listed to the owner only: every other role would receive a 404.
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(
+      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
+      false,
+      role,
+    );
+  }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-board-import"),
     false,

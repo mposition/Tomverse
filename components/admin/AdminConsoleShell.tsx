@@ -18,7 +18,11 @@ import {
 import { AdminCommandPalette } from "@/components/admin/AdminCommandPalette";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
-import { adminItemIsWritable, findAdminNavItem } from "@/lib/adminNavigation";
+import {
+  adminIsVisibleTo,
+  adminItemIsWritable,
+  findAdminNavItem,
+} from "@/lib/adminNavigation";
 import { localizeAdminPageMeta } from "@/lib/adminNavigationLocale";
 import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
@@ -65,7 +69,7 @@ const statusTone = (status: Props["apiStatus"]) =>
 
 export function AdminConsoleShell(props: Props) {
   return (
-    <AdminConsolePreferencesProvider>
+    <AdminConsolePreferencesProvider role={props.role}>
       <AdminConsoleChrome {...props} />
     </AdminConsolePreferencesProvider>
   );
@@ -108,8 +112,11 @@ function AdminConsoleChrome({
   // browser last refreshed", which the server cannot know.
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const page = localizeAdminPageMeta(pathname, locale);
-  const activeItem = findAdminNavItem(pathname);
+  // Filtered by role: a page this role will receive a 404 for is neither
+  // titled nor treated as the active entry.
+  const page = localizeAdminPageMeta(pathname, locale, role);
+  const navItem = findAdminNavItem(pathname);
+  const activeItem = navItem && adminIsVisibleTo(role, navItem) ? navItem : null;
   const pageWritable = activeItem
     ? adminItemIsWritable(role, activeItem)
     : role === "owner";
@@ -505,7 +512,7 @@ function AdminConsoleChrome({
 
       {/* Mounted only while open: its state is per-session, not persistent. */}
       {commandOpen ? (
-        <AdminCommandPalette onClose={() => setCommandOpen(false)} />
+        <AdminCommandPalette role={role} onClose={() => setCommandOpen(false)} />
       ) : null}
     </div>
   );

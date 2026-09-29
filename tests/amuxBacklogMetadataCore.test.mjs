@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { ADMIN_SEARCHABLE_PAGES, resolveAdminPageMeta } from "../lib/adminNavigation.ts";
+import {
+  ADMIN_LEGACY_ROUTES,
+  ADMIN_SEARCHABLE_PAGES,
+  adminNavItemTabs,
+  adminSearchablePagesFor,
+  resolveAdminPageMeta,
+} from "../lib/adminNavigation.ts";
 import {
   BACKLOG_METADATA_APPLY_ENV,
   BACKLOG_METADATA_AUDIT_ACTION,
@@ -310,22 +316,37 @@ test("the service writes one card row and never status, owner or execution rows"
   assert.equal(/\bstatus\b|\bowner\b|\bclaimedAt\b|\bexecutionBrief/.test(data), false);
 });
 
-test("the page is owner-only, unlisted, and offers the step-up link", () => {
-  const page = read("app/(site)/(application)/admin/amux-backlog-metadata/page.tsx");
-  assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
+test("the page is owner-only, listed to the owner alone, and offers the step-up link", () => {
+  const backlog = read("app/(site)/(application)/admin/amux-backlog/page.tsx");
+  assert.match(backlog, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
   const panel = read("components/admin/AmuxBacklogMetadataPanel.tsx");
   assert.match(panel, /\/api\/admin\/amux\/backlog-metadata\?action=/);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
-  assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/amux-backlog-metadata"\)/);
+  assert.match(panel, /adminRecentAuthenticationHref\("\/admin\/amux-backlog\?tab=metadata"\)/);
   // Apply needs a preview of the exact text on screen that reported valid and permitted.
   assert.match(
     panel,
     /previewed !== null &&\s*previewed\.valid === true &&\s*previewed\.applyPermitted === true &&\s*previewed\.text === requestText/,
   );
   assert.match(panel, /disabled=\{pending \|\| !applyReady\}/);
-  const meta = resolveAdminPageMeta("/admin/amux-backlog-metadata");
-  assert.equal(meta.label, "AMUX backlog metadata");
-  assert.equal(meta.isKnown, true);
+  // The screen moved into Backlog's Card metadata section; its old address
+  // still resolves there.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-backlog-metadata"], "/admin/amux-backlog?tab=metadata");
+  const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
+  assert.equal(movedTo.label, "Backlog");
+  assert.equal(movedTo.isKnown, true);
+  assert.equal(
+    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "metadata")?.label,
+    "Card metadata",
+  );
+  // Listed to the owner only: every other role would receive a 404.
+  for (const role of ["billing", "support", "ops", "readonly"]) {
+    assert.equal(
+      adminSearchablePagesFor(role).some((entry) => entry.href === "/admin/amux-backlog"),
+      false,
+      role,
+    );
+  }
   assert.equal(
     ADMIN_SEARCHABLE_PAGES.some((entry) => entry.href === "/admin/amux-backlog-metadata"),
     false,
