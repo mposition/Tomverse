@@ -853,7 +853,7 @@ export function ChatMessageList({
                       const nativeSearchSurcharged =
                         status === "executed" &&
                         modelEligibleForWebSearchSurcharge(
-                          getWebSearchCapability(modelInfo.id),
+                          getWebSearchCapability(modelInfo),
                           searchBackendReadiness
                         );
                       const label =

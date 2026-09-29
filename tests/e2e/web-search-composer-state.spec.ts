@@ -1,10 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
   openModelPickerCatalogue,
   openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { mockUserUsage } from "./support/chat-state-fixtures";
 
 // The composer used to render the web-search *mode* and its *readiness* as two
 // separate blocks -- "Web search - Use web search" on one row, "Search-ready 1
@@ -18,7 +20,17 @@ import {
 // provider-native search; gpt-5-4-mini is unverified and DeepSeek V4 Flash is
 // unsupported. All three are guest-selectable.
 const SUPPORTED = "claude-haiku-4-5";
-const UNSUPPORTED = ["gpt-5-4-mini", "deepseek-v4-flash"];
+/**
+ * The one catalogue model that cannot take the search switch.
+ *
+ * Every chat model searches by one route or another since 2026-09-29 -- the
+ * ones without a native tool through the application's own backend -- so the
+ * partial and blocked states are reached through Deep Research, which runs its
+ * own retrieval flow and never registers a search tool. It is a Pro model, so
+ * these states are exercised on a Pro account rather than a guest.
+ */
+const UNSUPPORTED = "perplexity/sonar-deep-research";
+const UNSUPPORTED_NAME = "Perplexity Sonar Deep Research";
 /**
  * Searches, and not through its own provider.
  *
@@ -82,6 +94,27 @@ const seedGuestConversation = async (
     },
     { chatId: CHAT_ID, models, title: TITLE, webSearchMode }
   );
+};
+
+/** A Pro account whose open conversation holds `models`, search on. */
+const openProConversation = async (page: Page, models: string[]) => {
+  await mockAuthenticatedApi(page, {
+    selectedModels: models,
+    webSearchMode: "always",
+    messages: [
+      { id: "seed-user", role: "user", content: "Hello" },
+      {
+        id: "seed-assistant",
+        role: "assistant",
+        content: "Hi there.",
+        modelId: models[0],
+      },
+    ],
+  });
+  await mockUserUsage(page, { plan: "Pro" });
+  await page.goto("/chat?lang=en");
+  await openRecentConversation(page);
+  await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
 };
 
 const open = async (page: Page) => {
@@ -176,28 +209,26 @@ test("the composer does not grow extra rows just to say the normal state", { tag
 test("partial support is the only case that earns a visible exception", { tag: "@ui-risk" }, async ({
   page,
 }) => {
-  await seedGuestConversation(page, [UNSUPPORTED[0], SUPPORTED, UNSUPPORTED[1]], "always");
-  await open(page);
+  await openProConversation(page, [UNSUPPORTED, SUPPORTED]);
 
   await expect(chip(page)).toHaveAttribute("data-tone", "warning");
   await expectChipLabel(page, {
-    full: "1/3 supported",
-    compact: "Web search 1/3",
+    full: "1/2 supported",
+    compact: "Web search 1/2",
   });
   await expect(page.getByTestId("web-search-exception-detail")).toHaveCount(0);
 
   await page.getByTestId("web-search-exception-toggle").click();
   const detail = page.getByTestId("web-search-exception-detail");
   await expect(detail).toBeVisible();
-  await expect(detail).toContainText("GPT-5.4 mini");
+  await expect(detail).toContainText(UNSUPPORTED_NAME);
   await expect(detail).toContainText("without a web search");
 });
 
 test("no capable model blocks with a way out instead of a silent fallback", { tag: "@ui-risk" }, async ({
   page,
 }) => {
-  await seedGuestConversation(page, UNSUPPORTED, "always");
-  await open(page);
+  await openProConversation(page, [UNSUPPORTED]);
 
   await expect(chip(page)).toHaveAttribute("data-tone", "blocked");
   await expectChipLabel(page, {
@@ -223,7 +254,7 @@ test(
   // into standing permission to search and to spend the surcharge, so it opens
   // off -- indistinguishable from off, with nothing left over that promises a
   // search.
-  await seedGuestConversation(page, [SUPPORTED, ...UNSUPPORTED], "auto");
+  await seedGuestConversation(page, [SUPPORTED, "gpt-5-4-mini"], "auto");
   await open(page);
 
   await expect(chip(page)).toHaveCount(0);
@@ -241,8 +272,7 @@ test(
 test("adding a model that cannot search updates the chip and the reservation together", { tag: "@ui-risk" }, async ({
   page,
 }) => {
-  await seedGuestConversation(page, [SUPPORTED], "always");
-  await open(page);
+  await openProConversation(page, [SUPPORTED]);
 
   await expect(chip(page)).toHaveAttribute("data-supported-count", "1");
   await expect(chip(page)).toHaveAttribute("data-unsupported-count", "0");
@@ -252,7 +282,7 @@ test("adding a model that cannot search updates the chip and the reservation tog
 
   const dialog = await openModelPickerCatalogue(page);
   await dialog
-    .locator(`[data-testid="model-option"][data-model-id="${UNSUPPORTED[0]}"]`)
+    .locator(`[data-testid="model-option"][data-model-id="${UNSUPPORTED}"]`)
     .click();
   await dialog.getByTestId("model-picker-done").click();
 
@@ -310,8 +340,7 @@ test("a Google-only selection is not blocked", { tag: "@ui-risk" }, async ({
 test("a Google model mixed with one that cannot search shows the exception, and names the right one", { tag: "@ui-risk" }, async ({
   page,
 }) => {
-  await seedGuestConversation(page, [APP_MANAGED, UNSUPPORTED[0]], "always");
-  await open(page);
+  await openProConversation(page, [APP_MANAGED, UNSUPPORTED]);
 
   await expect(chip(page)).toHaveAttribute("data-tone", "warning");
   await expect(chip(page)).toHaveAttribute("data-supported-count", "1");

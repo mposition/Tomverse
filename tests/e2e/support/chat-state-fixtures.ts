@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { mockAuthenticatedApi, type AuthenticatedQaState } from "./app-fixtures";
 import { skipUnlessCanonicalVisualBrowser } from "./canonical-visual";
 
@@ -475,6 +476,14 @@ export async function installDeepResearchStatusController(
     },
   };
 }
+
+/**
+ * The guest daily credit allowance the server reports by default. Read from
+ * APP_DEFAULTS rather than written down, so a mocked guest has the allowance a
+ * real one has: a new conversation searches by default, and a searching
+ * three-model turn reserves more than the old 20.
+ */
+export const GUEST_DAILY_CREDIT_LIMIT = APP_DEFAULTS.maxGuestMessages;
 
 export type GuestUsagePatch = {
   /** Spendable guest credits, as the server would report them. */

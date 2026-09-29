@@ -7,6 +7,7 @@ import {
 } from "./support/app-fixtures";
 import {
   freezeAnimations,
+  GUEST_DAILY_CREDIT_LIMIT,
   mockGuestUsage,
   restoreActiveConversation,
   setDeterministicTheme,
@@ -320,7 +321,7 @@ const mockVoiceEndpoint = async (
  */
 const openComposerWithVoice = async (page: Page) => {
   await prepareGuestPage(page, "ko");
-  await mockGuestUsage(page, 0, 20);
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   await installFakeMicrophone(page);
@@ -348,7 +349,7 @@ const openComposerWithVoice = async (page: Page) => {
  */
 const openTwoGuestConversations = async (page: Page) => {
   await prepareGuestPage(page, "ko");
-  await mockGuestUsage(page, 0, 20);
+  await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
   await installFakeMicrophone(page);
@@ -625,7 +626,7 @@ test.describe("voice input in the composer", () => {
 
   test("with the flag off there is no microphone at all", async ({ page }) => {
     await prepareGuestPage(page, "ko");
-    await mockGuestUsage(page, 0, 20);
+    await mockGuestUsage(page, 0, GUEST_DAILY_CREDIT_LIMIT);
     await suppressTransientUi(page);
     await page.goto("/chat?lang=ko");
     await expect(page.getByTestId("chat-textarea")).toBeVisible();

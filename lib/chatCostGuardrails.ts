@@ -197,14 +197,24 @@ export const getCostGuardrailLimits = (
     };
 };
 
-/** Guest guardrails stay small and absolute: a guest has no credit entitlement. */
+/**
+ * Guest guardrails stay absolute: a guest has no credit entitlement.
+ *
+ * US$0.30 a day and US$3.00 a month, raised from US$0.02 / US$0.10 on
+ * 2026-09-29 when web search became the default for new conversations. A
+ * native search turn reserves its worst-case search cost here -- OpenAI
+ * 6 x US$0.01, Anthropic 5 x US$0.01 -- so the old US$0.02 refused every
+ * guest search on GPT-5.6 Luna and Claude Haiku 4.5 before it started. The
+ * new figure covers two or three worst-case three-model searching turns,
+ * which is what the 50-credit guest day allows.
+ */
 export const getGuestCostGuardrailLimits = (
     environment: Record<string, string | undefined> = process.env
 ) => ({
-    day: positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_DAY) ?? 20_000,
+    day: positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_DAY) ?? 300_000,
     month:
         positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_MONTH) ??
-        100_000,
+        3_000_000,
 });
 
 // The provider-wide budget used to live here. It moved to

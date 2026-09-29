@@ -418,7 +418,7 @@ export async function POST(request: Request) {
             // `nativeSearchEnabled`, so computing it from the raw mode would
             // report a forced search on a model whose search is not native --
             // and the artifact tool is refused on precisely that combination.
-            const modelSearchCapability = getWebSearchCapability(model.id);
+            const modelSearchCapability = getWebSearchCapability(model);
             // `nativeSearchIsDispatchable`, exactly as the chat route derives
             // it: a native capability with no enforceable per-request cost
             // ceiling attaches no tool, so priced as though it did this quote

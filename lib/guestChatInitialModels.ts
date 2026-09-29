@@ -1,6 +1,8 @@
 import {
   APP_DEFAULTS,
+  normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
+  type WebSearchMode,
 } from "@/lib/appDefaults";
 
 // Same keys app/(site)/(application)/chat/ChatPageClient.tsx persists guest state
@@ -104,6 +106,57 @@ export const createGuestSelectionClamp =
       .filter(isGuestEligible)
       .slice(0, APP_DEFAULTS.maxGuestSelectedModels);
 
+/** The guest conversation this tab had open, as stored, if there is one. */
+const readRestoredGuestConversation = (
+  environment: GuestInitialModelEnvironment
+): { selectedModels?: unknown; webSearchMode?: unknown } | undefined => {
+  const activeChatId = readItem(
+    environment.sessionStorage,
+    GUEST_ACTIVE_CHAT_STORAGE_KEY
+  );
+  const rawConversations = readItem(
+    environment.localStorage,
+    GUEST_CONVERSATIONS_STORAGE_KEY
+  );
+  if (!activeChatId || !rawConversations) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawConversations);
+  } catch {
+    return undefined;
+  }
+  return Array.isArray(parsed)
+    ? (parsed.find(
+        (conversation) =>
+          conversation &&
+          typeof conversation === "object" &&
+          (conversation as { id?: unknown }).id === activeChatId
+      ) as { selectedModels?: unknown; webSearchMode?: unknown } | undefined)
+    : undefined;
+};
+
+/**
+ * The guest web search mode to render before anything else runs.
+ *
+ * The same reason as the model selection below: the search reservation is
+ * part of the estimate, so a restored conversation whose switch is off must
+ * not be priced as a new conversation (switch on) for one frame and then
+ * corrected by the restore effect. A restored conversation keeps its own
+ * mode, read through `normalizeWebSearchMode` exactly as the effect reads
+ * it; with nothing to restore the answer is the new-conversation default.
+ *
+ * Independent of the model priority: a `?models=` link replaces the models
+ * of the conversation it opens into, not its search switch.
+ */
+export const resolveGuestInitialWebSearchMode = (
+  environment: GuestInitialModelEnvironment = {}
+): WebSearchMode => {
+  const restored = readRestoredGuestConversation(environment);
+  return restored
+    ? normalizeWebSearchMode(restored.webSearchMode)
+    : APP_DEFAULTS.defaultWebSearchMode;
+};
+
 /**
  * The guest model selection to render *before anything else runs* -- no
  * effects, no fetches, no post-mount corrections.
@@ -151,39 +204,16 @@ export const resolveGuestInitialSelectedModels = ({
     return { models: requestedModels, source: "url_models_param" };
   }
 
-  const activeChatId = readItem(
-    environment.sessionStorage,
-    GUEST_ACTIVE_CHAT_STORAGE_KEY
-  );
-  const rawConversations = readItem(
-    environment.localStorage,
-    GUEST_CONVERSATIONS_STORAGE_KEY
-  );
-  if (activeChatId && rawConversations) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawConversations);
-    } catch {
-      parsed = null;
-    }
-    const restored = Array.isArray(parsed)
-      ? (parsed.find(
-          (conversation) =>
-            conversation &&
-            typeof conversation === "object" &&
-            (conversation as { id?: unknown }).id === activeChatId
-        ) as { selectedModels?: unknown } | undefined)
-      : undefined;
-    if (restored) {
-      const savedModels = normalizeStringArray(restored.selectedModels);
-      const restoredModels = savedModels ? clamp(savedModels) : [];
-      // A saved selection that is empty, unreadable, or names only models the
-      // catalogue no longer serves falls through to the guest default rather
-      // than to an empty composer -- the same deterministic answer the server
-      // would have produced, so there is still nothing to correct later.
-      if (restoredModels.length > 0) {
-        return { models: restoredModels, source: "restored_conversation" };
-      }
+  const restored = readRestoredGuestConversation(environment);
+  if (restored) {
+    const savedModels = normalizeStringArray(restored.selectedModels);
+    const restoredModels = savedModels ? clamp(savedModels) : [];
+    // A saved selection that is empty, unreadable, or names only models the
+    // catalogue no longer serves falls through to the guest default rather
+    // than to an empty composer -- the same deterministic answer the server
+    // would have produced, so there is still nothing to correct later.
+    if (restoredModels.length > 0) {
+      return { models: restoredModels, source: "restored_conversation" };
     }
   }
 

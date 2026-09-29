@@ -5,6 +5,7 @@ import Link from "next/link";
 import { UserRound, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModalDialog } from "@/components/useModalDialog";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 type ModeInfoSheetProps = {
   mode: "guest" | null;
@@ -18,7 +19,7 @@ export function ModeInfoSheet({
   mode,
   onClose,
   guestMessageCount = 0,
-  maxGuestMessages = 20,
+  maxGuestMessages = APP_DEFAULTS.maxGuestMessages,
   activeModelCount = 1,
 }: ModeInfoSheetProps) {
   const { t } = useLanguage();

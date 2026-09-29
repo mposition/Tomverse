@@ -41,9 +41,13 @@ reused rather than re-derived:
 
 **Web search capability is already per model and already fails closed.**
 `lib/webSearchCapability.ts` is keyed by catalog model id, not by provider,
-because two models from one provider differ; anything not confirmed against
-provider documentation is `unverified` rather than assumed supported. Router
-capability filtering should read this module, not re-infer support.
+because two models from one provider differ; a provider's *native* tool is
+never assumed for a model not confirmed against provider documentation. A model
+with no entry -- including every model adopted through the Provider Model
+Catalogue -- searches through the application-managed backend instead, which
+does not depend on the model's provider (2026-09-29,
+docs/policy/credit-and-cost-limits.md). Router capability filtering should
+read this module, not re-infer support.
 
 It carries three routes, not one, and they are deliberately separate values of
 `support` rather than shades of "native" (2026-08-27):

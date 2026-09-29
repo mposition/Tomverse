@@ -138,6 +138,7 @@ import {
   GUEST_ACTIVE_CHAT_STORAGE_KEY,
   GUEST_CONVERSATIONS_STORAGE_KEY,
   readGuestInitialModelEnvironment,
+  resolveGuestInitialWebSearchMode,
   resolveGuestInitialSelectedModels,
 } from "@/lib/guestChatInitialModels";
 import {
@@ -994,8 +995,15 @@ export function ChatPageClient({
   // Per-conversation, reset/restored on chat switch the same way
   // selectedModels/disabledPanels are -- must never leak between
   // conversations (see components/chat/ChatInput.tsx's tools sheet).
-  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
-    APP_DEFAULTS.defaultWebSearchMode
+  //
+  // A guest's first value comes from the conversation this tab restores, for
+  // the same reason as `initialGuestModels`: the search reservation is part of
+  // the estimate, and a restored conversation with search off must not be
+  // priced as a new one (search on) for a frame before the restore effect.
+  const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(() =>
+    isGuestMode
+      ? resolveGuestInitialWebSearchMode(readGuestInitialModelEnvironment())
+      : APP_DEFAULTS.defaultWebSearchMode
   );
   // §8.1 invariant 1, per conversation exactly like webSearchMode above. The
   // stored value, not the resolved one: `inherit` has to survive so the
@@ -1402,7 +1410,7 @@ export function ChatPageClient({
     aiReviewTrial: { limit: number; used: number; remaining: number } | null;
   } | null>(null);
   const guestMessageCount = guestUsage?.used ?? 0;
-  const MAX_GUEST_MESSAGES = guestUsage?.limit ?? 20;
+  const MAX_GUEST_MESSAGES = guestUsage?.limit ?? APP_DEFAULTS.maxGuestMessages;
   const refreshGuestUsage = useCallback(() => {
     if (!isGuestMode) return;
     fetch("/api/user/guest-usage", { cache: "no-store" })
