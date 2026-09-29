@@ -42,6 +42,10 @@ type StoredAttempt = {
   optIn: boolean;
   objected: boolean;
   email?: string;
+  /** The OAuth provider the attempt is bound to; another provider needs its own. */
+  provider?: string;
+  /** The language the screen showed, which names the notice wording recorded. */
+  language?: string;
 };
 
 type Slots = Partial<Record<Channel, StoredAttempt>>;
@@ -139,11 +143,17 @@ export async function storeSignupConsentChoice(input: {
   // The same choice for the same address, still well inside its life: keep the
   // pending attempt. Replacing it before a request that may fail would leave
   // the code already in the inbox bound to a superseded attempt.
+  // Everything the attempt is bound to has to match: the choice, the
+  // language whose wording it records, and the channel's own binding -- the
+  // address for a code, the provider for OAuth.
   if (
     live(previous, 60_000) &&
     previous.optIn === input.expressOptInRequested &&
     previous.objected === input.objected &&
-    (input.channel !== "email_code" || previous.email === input.email)
+    previous.language === input.language &&
+    (input.channel === "email_code"
+      ? previous.email === input.email
+      : previous.provider === input.provider)
   ) {
     return previous.attemptId;
   }
@@ -178,6 +188,8 @@ export async function storeSignupConsentChoice(input: {
           optIn: input.expressOptInRequested,
           objected: input.objected,
           ...(input.email ? { email: input.email } : {}),
+          ...(input.provider ? { provider: input.provider } : {}),
+          language: input.language,
         },
       });
       return data.attemptId;
@@ -222,6 +234,11 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   // After that the choice is dropped and the attempt expires on its own; the
   // account exists either way (section 5.2).
   let consumed = false;
+  // Whether the attempt itself is spent. A refusal about this account
+  // (`binding_mismatch`, `account_predates_attempt`, `not_created_by_this_sign_in`)
+  // leaves the attempt pending for the account it does belong to, so the tab
+  // keeps it; only a consumed or dead attempt is dropped.
+  let spent = false;
   for (const delayMs of FINALIZE_RETRY_DELAYS_MS) {
     if (delayMs > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs));
     try {
@@ -230,18 +247,24 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(stored),
       });
-      const data = (await response.json().catch(() => null)) as { ok?: unknown } | null;
+      const data = (await response.json().catch(() => null)) as
+        | { ok?: unknown; reason?: unknown }
+        | null;
       if (response.status === 200) {
         consumed = data?.ok === true;
+        spent =
+          consumed || data?.reason === "not_found" || data?.reason === "not_pending";
         break;
       }
     } catch {
       // Nothing reached the server; try again.
     }
   }
-  // This landing used its attempt; both slots are spent, since the account now
-  // exists and no other sign-up can follow from this tab's choice.
-  writeSlots({});
+  // Consumed: the account exists, and no other sign-up follows from this
+  // tab's choice, so both slots go. Dead: only the slot the marker named.
+  // Otherwise nothing is dropped.
+  if (consumed) writeSlots({});
+  else if (spent) writeSlots({ ...slots, [channel]: undefined });
   // Removed only now: a reload during the retries is still this landing, and
   // finds the attempt either consumed (a final answer) or still pending.
   url.searchParams.delete(SIGNUP_CONSENT_MARKER_PARAM);
