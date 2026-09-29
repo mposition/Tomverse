@@ -110,13 +110,14 @@ COMMIT이 됐든 안 됐든 DB 상태는 같다. 결과 불명 규칙(정책 Pha
 - Railway 문서(docs.railway.com/deployments/restart-policy) 기준 기본값은 `On Failure`,
   최대 10회이고, `On Failure`는 0이 아닌 종료 코드면 다시 시작한다. 21:55에 1초 안에 다시
   시작된 것은 이 기본값과 맞는다. 21:57 뒤 다시 시작되지 않은 이유는 확인하지 못했다.
-- orchestrator는 멈출 때 언제나 종료 코드 1로 끝난다(`main`이 `Err`를 돌려준다). 결과
+- orchestrator가 오류로 멈출 때는 종료 코드 1로 끝난다(`main`이 `Err`를 돌려준다). `TOMVERSE_AMUX_ENABLED`가 꺼져서 끝나는 경우는 `Ok`라 0이다. 결과
   불명 claim(`AMUX_CLAIM_OUTCOME_UNKNOWN`), 결과 불명 recover
   (`AMUX_RECOVERY_OUTCOME_UNKNOWN`), 그 밖의 내부 API 실패
   (`AMUX_INTERNAL_API_UNVERIFIED`)가 모두 같다. Railway는 종료 코드별로 가르지 못하므로
   `On Failure`는 쓰기의 결과 불명 뒤에도 사람의 확인 없이 다시 시작한다. 21:55의 recover
   종료가 그렇게 다시 시작됐다. 결과 불명 규칙(새 claim이나 재시도를 만들지 않고 사람에게
   넘긴다)과 WSL bridge의 `RestartPreventExitStatus=3`은 그 반대를 요구한다.
+- 읽기 busy에는 도달 실패(`P1001`, `ENOTFOUND`, `ECONNREFUSED`)도 들어간다. 호스트 설정이 잘못돼 계속 실패해도 orchestrator는 incident 없이 매 tick을 건너뛰고, 로그의 `amux_database_busy` WARN이 반복되는 것으로만 드러난다. 그 WARN이 몇 분 넘게 이어지면 연결 설정을 확인한다. `08004`(서버가 연결 거절)와 `08P01`(protocol violation)은 busy가 아니라 500 incident다.
 - 이번 사건의 원인인 읽기 busy는 이제 프로세스를 끝내지 않는다. 재시작 정책으로 덮을
   일이 아니다.
 

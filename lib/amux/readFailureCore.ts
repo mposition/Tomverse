@@ -62,10 +62,11 @@ const TRANSIENT_SQLSTATES = new Set([
   "08000",
   "08001",
   "08003",
-  "08004",
   "08006",
   "08007",
-  "08P01",
+  // Not 08004 (the server rejected the connection) or 08P01 (protocol
+  // violation): both describe a configuration or client fault that a retry in
+  // five seconds will meet again, so they stay a 500 incident.
   // admin_shutdown, crash_shutdown, cannot_connect_now.
   "57P01",
   "57P02",

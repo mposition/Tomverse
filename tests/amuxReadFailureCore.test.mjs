@@ -47,7 +47,6 @@ test("the pool, the transaction API, the statement timeout and a lost connection
     [{ code: "P2010", meta: { code: "57014" } }, "57014"],
     // Connection exceptions and shutdowns.
     [postgres("08006"), "08006"],
-    [postgres("08P01"), "08P01"],
     [postgres("57P01"), "57P01"],
     [postgres("57P03"), "57P03"],
     [new DriverAdapterError({ kind: "TooManyConnections", cause: "x" }), "TooManyConnections"],
@@ -75,6 +74,9 @@ test("everything else keeps its old answer", () => {
     { code: "P2010", meta: { driverAdapterError: postgres("AX001") } },
     // Bugs and schema problems are not transient.
     postgres("42P01"),
+    // A rejected connection and a protocol violation are not waited out.
+    postgres("08004"),
+    postgres("08P01"),
     postgres("22P02"),
     { code: "P2002" },
     { code: "P2025" },
