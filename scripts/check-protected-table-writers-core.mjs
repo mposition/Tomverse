@@ -753,6 +753,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",
+    count: 1,
+    reason:
+      "The AMUX commit deadline trigger deletes its own AmuxCommitDeadline row during COMMIT with EXECUTE over TG_TABLE_SCHEMA and TG_TABLE_NAME -- the table the trigger is attached to -- because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. Both names are the trigger's own, never input, quoted with %I; the transaction id is bound with USING. It touches no protected table.",
+  },
+  {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     count: 21,
     reason:

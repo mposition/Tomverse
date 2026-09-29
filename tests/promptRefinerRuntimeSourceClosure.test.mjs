@@ -284,12 +284,18 @@ const compilerOptions = parsedConfig.options;
 // is a computed element access. The count remains 228 and the position-free
 // inventory remains 9aa7ec49..., so the digest below is a repin of
 // source positions over the tree merged with the entry above.
+//
+// 2026-09-29, AMUX commit deadline (policy v18): the fingerprint note in
+// `lib/marketingAutomationAccess.ts` records `AmuxCommitDeadline` in the
+// watched schema and the fingerprint is recomputed. No import is added and
+// the note is not a computed element access. The count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a64ebe33eb8ca8235002ef7f314f3fb8",
-  "f516e0f461c494853e7cf3afd675f7db",
+  "8aed708c604040e65f52d0df0eef64e5",
+  "8e66830cb3f283f9340e2da97a05f493",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

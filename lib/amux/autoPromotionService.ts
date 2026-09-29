@@ -193,12 +193,14 @@ const tickHasRoomFor = (transactions: number): boolean =>
  * per-transaction maximum no longer fits does not start, its first statement
  * after the timeout anchors the route's database-clock deadline, and its last
  * statement fences on it: one whose fence finds the deadline passed rolls back
- * (docs/policy/development-agent-orchestration.md, Phase A). The fence is a
- * statement before COMMIT, not the COMMIT: a stall between the two can still
- * let a COMMIT land after the deadline. These transactions set no
- * idle-in-transaction timeout, so that gap is bounded only by the transaction
- * timeout. Policy version 18 records that no test yet shows a late COMMIT is
- * kept from being recorded as success.
+ * (docs/policy/development-agent-orchestration.md, Phase A). The fence also
+ * records the commit deadline, so a COMMIT that a stall pushes past it is
+ * refused by the database with SQLSTATE AX001, which is a known rollback here
+ * (`autoTransactionFailure` reads it before the phase). These transactions set
+ * no idle-in-transaction timeout, so the gap before COMMIT is bounded only by
+ * the transaction timeout, and what the check cannot cover is the commit
+ * record's own write and flush after it. The owner's transactions carry no
+ * route deadline and get no commit deadline.
  *
  * A failure is classified by where the transaction was
  * (`autoTransactionFailure`), not by its message: only a failure after the

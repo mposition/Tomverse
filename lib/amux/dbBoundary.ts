@@ -3,6 +3,10 @@ import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  AMUX_COMMIT_DEADLINE_TRIGGER,
+  isAmuxLateCommitError,
+} from "@/lib/amux/commitDeadlineCore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
@@ -14,11 +18,16 @@ export const AMUX_DB_MAX_WAIT_MS = 250;
 // but the derived transaction budget is an application estimate. This code
 // does not set transaction_timeout: PostgreSQL 17 could bound occupancy only
 // from an in-transaction SET (not BEGIN-to-SET or durable COMMIT); PostgreSQL
-// 16 lacks that setting. Policy version 18 opens the execution API behind a
-// code latch and an environment variable; it does not claim the DB prevents a
-// late run from being recorded as success. No test proves that yet, and moving
-// this code to main waits on one. Neither a SQL statement-count cap nor a
+// 16 lacks that setting. Neither a SQL statement-count cap nor a
 // whole-transaction time bound is itself required.
+//
+// What the database does enforce (policy version 18) is that a mutation
+// transaction with a deadline does not COMMIT after it: its fence inserts an
+// `AmuxCommitDeadline` row, and a deferred constraint trigger fails the COMMIT
+// with SQLSTATE AX001 once the database clock has reached the same deadline
+// the fence used (lib/amux/commitDeadlineCore.ts). What stays outside it is
+// the commit record's own write and flush after that check, which the commit
+// reserve exists to cover, and the time before the first statement.
 export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // Single-operation future lifecycle routes have a shared DB-clock deadline.
 // The Rust client allows fifteen seconds for connect, route and response
@@ -147,15 +156,32 @@ export const AMUX_DB_BOUNDARIES = {
   },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
+/**
+ * - `AMUX_DB_DEADLINE_EXCEEDED`: refused before COMMIT, or at COMMIT by the
+ *   commit deadline trigger (SQLSTATE AX001). Rolled back either way.
+ * - `AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED`: refused before the call. Rolled back.
+ * - `AMUX_DB_COMMIT_CHECK_MISSING`: the fence found no commit deadline trigger
+ *   that will fire, so it refused rather than commit without the check. Rolled
+ *   back.
+ * - `AMUX_DB_OUTCOME_UNKNOWN`: a mutation transaction failed after its callback
+ *   returned, for any reason but AX001. The COMMIT may or may not have taken
+ *   effect; the caller reads back and never retries blindly.
+ */
+export type AmuxDbBoundaryErrorCode =
+  | "AMUX_DB_DEADLINE_EXCEEDED"
+  | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
+  | "AMUX_DB_COMMIT_CHECK_MISSING"
+  | "AMUX_DB_OUTCOME_UNKNOWN";
+
 export class AmuxDbBoundaryError extends Error {
-  readonly code:
-    "AMUX_DB_DEADLINE_EXCEEDED" | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED";
+  readonly code: AmuxDbBoundaryErrorCode;
 
   constructor(
-    code: "AMUX_DB_DEADLINE_EXCEEDED" | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+    code: AmuxDbBoundaryErrorCode,
     operation: string,
+    options?: { cause?: unknown },
   ) {
-    super(`${code}:${operation}`);
+    super(`${code}:${operation}`, options);
     this.name = "AmuxDbBoundaryError";
     this.code = code;
   }
@@ -201,10 +227,12 @@ export const amuxRouteHasBudgetFor = (boundary: AmuxDbBoundary): boolean =>
  * `withAmuxDbBoundary` does, and refuses when less than `transactionMaxMs`
  * is left. It returns the deadline, or null outside a route budget.
  *
- * `fenceAmuxRouteDeadline` runs last, just before COMMIT, and refuses once the
- * database clock has reached the deadline, so the transaction rolls back
- * instead of committing late. Like the bounded fence it is a decision before
- * COMMIT, not proof of when COMMIT completed.
+ * `fenceAmuxRouteDeadline` runs last, just before COMMIT. Like the bounded
+ * mutation fence it records the commit deadline — the route deadline less
+ * `AMUX_DB_COMMIT_RESERVE_MS` — for the COMMIT-time trigger, and refuses once
+ * the database clock has reached that same deadline, so the transaction rolls
+ * back instead of committing late. A COMMIT that then arrives after it fails
+ * with SQLSTATE AX001.
  */
 export async function anchorAmuxRouteDeadline(
   tx: Prisma.TransactionClient,
@@ -240,14 +268,114 @@ export async function fenceAmuxRouteDeadline(
   operation: string,
 ): Promise<void> {
   if (deadlineAt === null) return;
-  const fence = await tx.$queryRaw<Array<{ withinDeadline: boolean }>>`
-    SELECT clock_timestamp() < ${deadlineAt.toISOString()}::timestamptz
-      AS "withinDeadline"
+  // One statement: record the commit deadline for the COMMIT-time trigger,
+  // confirm that trigger will fire, and compare the clock with the same
+  // deadline. See `withAmuxDbBoundary` for why each clause is written so.
+  const fence = await tx.$queryRaw<AmuxCommitFenceRow[]>`
+    WITH commit_deadline AS MATERIALIZED (
+      SELECT date_trunc(
+        'milliseconds',
+        ${deadlineAt.toISOString()}::timestamptz -
+          ${AMUX_DB_COMMIT_RESERVE_MS} * INTERVAL '1 millisecond'
+      ) AS "deadline"
+    ), marker AS (
+      INSERT INTO "AmuxCommitDeadline" ("txid", "deadline", "operation")
+      SELECT txid_current(), "deadline", ${operation}
+      FROM commit_deadline
+      RETURNING "deadline"
+    ), commit_check AS MATERIALIZED (
+      SELECT (
+        EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_trigger t
+          JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+          WHERE c.oid = to_regclass('"AmuxCommitDeadline"')
+            AND t.tgname = ${AMUX_COMMIT_DEADLINE_TRIGGER}
+            AND t.tgdeferrable
+            AND t.tginitdeferred
+            AND t.tgenabled = 'O'
+            AND (t.tgtype::integer & 4) <> 0
+        )
+        AND current_setting('session_replication_role') <> 'replica'
+      ) AS "installed"
+    )
+    SELECT
+      clock_timestamp() < marker."deadline" AS "withinDeadline",
+      commit_check."installed" AS "commitCheckInstalled"
+    FROM marker CROSS JOIN commit_check
   `;
-  if (fence[0]?.withinDeadline !== true) {
+  requireAmuxCommitFence(fence, operation);
+}
+
+type AmuxCommitFenceRow = {
+  withinDeadline: boolean | null;
+  commitCheckInstalled: boolean | null;
+};
+
+/**
+ * The verdict of a commit fence. A missing trigger is checked first: without
+ * it nothing would look at the deadline at COMMIT, so the transaction is
+ * refused, never committed without the check, and the refusal is logged.
+ */
+const requireAmuxCommitFence = (
+  rows: AmuxCommitFenceRow[],
+  operation: string,
+): void => {
+  const row = rows[0];
+  if (row?.commitCheckInstalled !== true) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "commit_deadline_check_missing",
+        operation,
+      }),
+    );
+    throw new AmuxDbBoundaryError("AMUX_DB_COMMIT_CHECK_MISSING", operation);
+  }
+  if (row.withinDeadline !== true) {
     throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", operation);
   }
-}
+};
+
+/** Where a bounded transaction was when it failed. */
+export type AmuxDbBoundaryPhase = "running" | "committing";
+
+/**
+ * What a failed bounded transaction is reported as.
+ *
+ * SQLSTATE AX001 is read first, before the phase: it arrives while committing,
+ * but it is the commit deadline trigger's refusal and PostgreSQL has rolled the
+ * transaction back, so it is a known deadline refusal.
+ *
+ * Any other failure of a mutation transaction after its callback returned is
+ * an unknown outcome, a statement timeout (57014) included: a cancel that
+ * lands while the commit record is being flushed can reach the client after
+ * the commit is durable, so it is not proof of a rollback. Only a 57014 raised
+ * while the callback was running stays a known rollback, and it is passed on
+ * unchanged, as is every failure before COMMIT. A read transaction records
+ * nothing, so a failure of its COMMIT is passed on unchanged too.
+ */
+export const amuxDbBoundaryFailure = (
+  boundary: AmuxDbBoundary,
+  phase: AmuxDbBoundaryPhase,
+  error: unknown,
+): unknown => {
+  if (isAmuxLateCommitError(error)) {
+    return new AmuxDbBoundaryError(
+      "AMUX_DB_DEADLINE_EXCEEDED",
+      boundary.operation,
+      { cause: error },
+    );
+  }
+  if (phase === "committing" && boundary.isolation === "mutation") {
+    return new AmuxDbBoundaryError(
+      "AMUX_DB_OUTCOME_UNKNOWN",
+      boundary.operation,
+      { cause: error },
+    );
+  }
+  return error;
+};
 
 export const withAmuxRouteBudget = <T>(
   work: () => Promise<T>,
@@ -400,9 +528,16 @@ export const amuxBoundaryWithAttachment = (
  * database-clock deadline. The last explicit SQL query is the commit fence:
  * if the deadline was lost, the transaction rolls back. The Prisma-call count
  * does not prove an SQL statement count or a DB-enforced transaction maximum.
- * The fence is a DB-clock decision before COMMIT, not proof that COMMIT
- * completed before the deadline. A lost response or ambiguous COMMIT remains
- * pending/unknown until authoritative read-back.
+ *
+ * A mutation transaction's fence also records its commit deadline D — the
+ * earliest of its own deadline, the route deadline and every lease it
+ * required, less `AMUX_DB_COMMIT_RESERVE_MS` — and refuses at that same D.
+ * The deferred trigger then checks D again during COMMIT and fails a COMMIT
+ * that arrives at or after it with SQLSTATE AX001, which is reported as
+ * `AMUX_DB_DEADLINE_EXCEEDED`: rolled back. Any other failure after the
+ * callback returned is `AMUX_DB_OUTCOME_UNKNOWN` and stays unknown until
+ * authoritative read-back. A read transaction records nothing, so it gets
+ * no marker and keeps its plain fence.
  */
 export async function withAmuxDbBoundary<T>(
   boundary: AmuxDbBoundary,
@@ -436,7 +571,8 @@ export async function withAmuxDbBoundary<T>(
     );
   }
 
-  return prisma.$transaction(
+  let phase: AmuxDbBoundaryPhase = "running";
+  const transaction = prisma.$transaction(
     async (rawTx) => {
       const setup = await rawTx.$queryRaw<
         Array<{ dbNowEpochMs: bigint; deadlineAtEpochMs: bigint }>
@@ -536,24 +672,79 @@ export async function withAmuxDbBoundary<T>(
         routeDeadline?.databaseDeadlineAt ?? deadlineAt
       ).toISOString();
       const leaseDeadlineIso = (leaseDeadlineAt ?? deadlineAt).toISOString();
-      const fence = await tx.$queryRaw<Array<{ withinDeadline: boolean }>>`
-        SELECT
-          clock_timestamp() <
-          LEAST(
-            current_setting('tomverse.amux_deadline')::timestamptz,
-            ${routeDeadlineIso}::timestamptz,
-            ${leaseDeadlineIso}::timestamptz
-          )
-          AS "withinDeadline"
-      `;
+      if (boundary.isolation === "read") {
+        const fence = await tx.$queryRaw<Array<{ withinDeadline: boolean }>>`
+          SELECT
+            clock_timestamp() <
+            LEAST(
+              current_setting('tomverse.amux_deadline')::timestamptz,
+              ${routeDeadlineIso}::timestamptz,
+              ${leaseDeadlineIso}::timestamptz
+            )
+            AS "withinDeadline"
+        `;
 
-      if (fence[0]?.withinDeadline !== true) {
-        throw new AmuxDbBoundaryError(
-          "AMUX_DB_DEADLINE_EXCEEDED",
-          boundary.operation,
-        );
+        if (fence[0]?.withinDeadline !== true) {
+          throw new AmuxDbBoundaryError(
+            "AMUX_DB_DEADLINE_EXCEEDED",
+            boundary.operation,
+          );
+        }
+      } else {
+        // One statement, three effects, one deadline D:
+        // - `commit_deadline` is D, truncated to the millisecond so the stored
+        //   timestamptz(3) is D exactly and never later;
+        // - `marker` records D under this transaction's top-level id
+        //   (txid_current() is the same inside a Prisma savepoint), which
+        //   queues the deferred trigger for COMMIT. A second fence in one
+        //   transaction would fail on the primary key and roll back;
+        // - `commit_check` confirms that the trigger will fire: present on the
+        //   table the INSERT resolved to, deferrable, initially deferred, on
+        //   INSERT, enabled for an ordinary session. Without it nothing would
+        //   look at D at COMMIT, so the transaction is refused.
+        // The clock is compared with the stored D, the value the trigger reads.
+        const fence = await tx.$queryRaw<AmuxCommitFenceRow[]>`
+          WITH commit_deadline AS MATERIALIZED (
+            SELECT date_trunc(
+              'milliseconds',
+              LEAST(
+                current_setting('tomverse.amux_deadline')::timestamptz,
+                ${routeDeadlineIso}::timestamptz,
+                ${leaseDeadlineIso}::timestamptz
+              ) - ${AMUX_DB_COMMIT_RESERVE_MS} * INTERVAL '1 millisecond'
+            ) AS "deadline"
+          ), marker AS (
+            INSERT INTO "AmuxCommitDeadline" ("txid", "deadline", "operation")
+            SELECT txid_current(), "deadline", ${boundary.operation}
+            FROM commit_deadline
+            RETURNING "deadline"
+          ), commit_check AS MATERIALIZED (
+            SELECT (
+              EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_trigger t
+                JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+                WHERE c.oid = to_regclass('"AmuxCommitDeadline"')
+                  AND t.tgname = ${AMUX_COMMIT_DEADLINE_TRIGGER}
+                  AND t.tgdeferrable
+                  AND t.tginitdeferred
+                  AND t.tgenabled = 'O'
+                  AND (t.tgtype::integer & 4) <> 0
+              )
+              AND current_setting('session_replication_role') <> 'replica'
+            ) AS "installed"
+          )
+          SELECT
+            clock_timestamp() < marker."deadline" AS "withinDeadline",
+            commit_check."installed" AS "commitCheckInstalled"
+          FROM marker CROSS JOIN commit_check
+        `;
+        requireAmuxCommitFence(fence, boundary.operation);
       }
 
+      // Nothing may run after this line inside the callback: from here on a
+      // failure can only come from the COMMIT itself.
+      phase = "committing";
       return result;
     },
     {
@@ -565,4 +756,7 @@ export async function withAmuxDbBoundary<T>(
           : Prisma.TransactionIsolationLevel.ReadCommitted,
     },
   );
+  return transaction.catch((error: unknown): never => {
+    throw amuxDbBoundaryFailure(boundary, phase, error);
+  });
 }

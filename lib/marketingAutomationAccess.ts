@@ -351,9 +351,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  *
  * Both notes stand because both changes are in this tree, and the value below
  * is computed over the merged schema rather than taken from either side.
+ *
+ * 2026-09-29: `AmuxCommitDeadline`, the marker a deferred trigger reads to
+ * refuse an AMUX COMMIT that arrives after its deadline (orchestration policy
+ * version 18). Not a marketing model, not a webhook input, and no descriptor,
+ * webhook writer or admission decision changes. The digest moves because the
+ * whole Prisma schema is deliberately watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "02a0b870f730ce767cf0de5de3f1a1dfcbc3c3864821f5c0284b49b069ef9646";
+  "ba39a04cf4d74e8da5f7ac776a89f5355bdc6d0ad7c525223e1a2d0a19270ee3";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
