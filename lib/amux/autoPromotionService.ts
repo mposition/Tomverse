@@ -16,8 +16,13 @@ import {
   BoardImportError,
   boardImportAuditEntryHashMatches,
   boardImportAuditKeysPresent,
-  boardImportFailureIsAmbiguous,
 } from "@/lib/amux/boardImportCore";
+import {
+  AmuxDbBoundaryError,
+  amuxRouteHasBudgetForMs,
+  anchorAmuxRouteDeadline,
+  fenceAmuxRouteDeadline,
+} from "@/lib/amux/dbBoundary";
 import {
   boardPromotionCardWrite,
   boardPromotionExecutionBriefDigest,
@@ -57,7 +62,15 @@ import {
   parseAutoGrantRequest,
   parseAutoResumeRequest,
   AUTO_TICK_GRANT_ATTEMPTS,
+  AUTO_TICK_SEQUENTIAL_TRANSACTIONS,
+  AUTO_TICK_STATEMENT_TIMEOUT_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  AUTO_TRANSACTION_COMMIT_RESERVE_MS,
   autoTickCardSpecificRefusal,
+  autoTransactionFailure,
+  type AutoTransactionPhase,
 } from "@/lib/amux/autoPromotionCore";
 import { writeAutoPromoterAudit } from "@/lib/amux/autoPromotionSystemAudit";
 import {
@@ -139,34 +152,105 @@ const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
   return parsed;
 };
 
+/** The operation name a deadline refusal from this module carries. */
+const AUTO_PROMOTION_DB_OPERATION = "auto_promotion";
+
+type AutoTransactionLimits = { maxWaitMs: number; timeoutMs: number; statementTimeoutMs: number };
+
+/** The owner's routes, as since version 8. They run outside any route budget. */
+const OWNER_TRANSACTION_LIMITS: AutoTransactionLimits = {
+  maxWaitMs: 5_000,
+  timeoutMs: 20_000,
+  statementTimeoutMs: Number(BOARD_IMPORT_STATEMENT_TIMEOUT),
+};
+
+/** The system actor runs only from the internal tick, inside its route budget. */
+const TICK_TRANSACTION_LIMITS: AutoTransactionLimits = {
+  maxWaitMs: AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  timeoutMs: AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  statementTimeoutMs: AUTO_TICK_STATEMENT_TIMEOUT_MS,
+};
+
+const limitsFor = (actor: AutoActor): AutoTransactionLimits =>
+  actor.kind === "system" ? TICK_TRANSACTION_LIMITS : OWNER_TRANSACTION_LIMITS;
+
+/** The application per-transaction maximum. Not a database bound. */
+const transactionMaxMs = (limits: AutoTransactionLimits): number =>
+  limits.maxWaitMs + limits.timeoutMs + AUTO_TRANSACTION_COMMIT_RESERVE_MS;
+
+/**
+ * Whether the tick's route budget still covers `transactions` more tick
+ * transactions: the next one and those it has to leave room for. Always true
+ * outside a route budget.
+ */
+const tickHasRoomFor = (transactions: number): boolean =>
+  amuxRouteHasBudgetForMs(transactions * AUTO_TICK_TRANSACTION_MAX_MS);
+
+/**
+ * One auto-promotion transaction under the queue lock.
+ *
+ * Inside a route budget (the internal tick) a transaction whose
+ * per-transaction maximum no longer fits does not start, its first statement
+ * after the timeout anchors the route's database-clock deadline, and its last
+ * statement fences on it: one whose fence finds the deadline passed rolls back
+ * (docs/policy/development-agent-orchestration.md, Phase A). The fence also
+ * records the commit deadline, so a COMMIT that a stall pushes past it is
+ * refused by the database with SQLSTATE AX001, which is a known rollback here
+ * (`autoTransactionFailure` reads it before the phase). These transactions set
+ * no idle-in-transaction timeout, so the gap before COMMIT is bounded only by
+ * the transaction timeout, and what the check cannot cover is the commit
+ * record's own write and flush after it. The owner's transactions carry no
+ * route deadline and get no commit deadline.
+ *
+ * A failure is classified by where the transaction was
+ * (`autoTransactionFailure`), not by its message: only a failure after the
+ * callback returned, when the COMMIT may or may not have taken effect, is
+ * `outcome_unknown`. Anything earlier rolled back, so a statement timeout is a
+ * deadline refusal the caller may meet again next time, not a lost outcome that
+ * refuses its grant for good and counts toward the halt rule.
+ */
 const withAutoTransaction = async <T>(
   targetId: string | null,
+  limits: AutoTransactionLimits,
   run: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
 ): Promise<T> => {
   if (!boardImportAuditKeysPresent(adminAuditIntegrityKeys(process.env).length)) {
     throw new BoardImportError("audit_key_missing", 503, targetId);
   }
+  const maxMs = transactionMaxMs(limits);
+  if (!amuxRouteHasBudgetForMs(maxMs)) {
+    throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", AUTO_PROMOTION_DB_OPERATION);
+  }
+  let phase: AutoTransactionPhase = "starting";
   try {
     return await prisma.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT set_config('statement_timeout', ${BOARD_IMPORT_STATEMENT_TIMEOUT}, true)`;
+        phase = "running";
+        await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)`;
+        const routeDeadlineAt = await anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))`;
-        return run(tx, await databaseNow(tx));
+        const result = await run(tx, await databaseNow(tx));
+        await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);
+        // Nothing may run after this line inside the callback: from here on a
+        // failure can only come from the COMMIT itself.
+        phase = "committing";
+        return result;
       },
-      { maxWait: 5_000, timeout: 20_000 },
+      { maxWait: limits.maxWaitMs, timeout: limits.timeoutMs },
     );
   } catch (error) {
-    if (error instanceof BoardImportError) throw error;
-    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : null;
-    if (code === "P2002") throw new BoardImportError("conflict", 409, targetId);
-    const message = error instanceof Error ? error.message : "";
-    if (
-      boardImportFailureIsAmbiguous(typeof code === "string" ? code : null) ||
-      /timeout|ECONNRESET|ECONNREFUSED|Connection terminated|closed the connection|Server has closed/i.test(message)
-    ) {
-      throw new BoardImportError("outcome_unknown", 409, targetId);
+    // Refusals are thrown by the callback, so the transaction rolled back.
+    if (error instanceof BoardImportError || error instanceof AmuxDbBoundaryError) throw error;
+    switch (autoTransactionFailure(phase, error)) {
+      case "outcome_unknown":
+        throw new BoardImportError("outcome_unknown", 409, targetId);
+      case "conflict":
+        throw new BoardImportError("conflict", 409, targetId);
+      case "deadline_exceeded":
+        throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", AUTO_PROMOTION_DB_OPERATION);
+      default:
+        throw error;
     }
-    throw error;
   }
 };
 
@@ -595,7 +679,7 @@ export async function commitAutoGrant(
   requestDigest: string,
 ) {
   const itemBindingsDigest = boardPromotionItemBindingsDigest([grant.item]);
-  return withAutoTransaction(grant.grantId, async (tx, now) => {
+  return withAutoTransaction(grant.grantId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const existing = await tx.amuxRecommendationAutoGrant.findUnique({ where: { id: grant.grantId } });
     if (existing) {
       if (existing.workItemId !== grant.item.cardId || existing.requestDigest !== requestDigest) {
@@ -675,7 +759,7 @@ export async function commitAutoPromotion(
   const worker = autoWorkerAdmitted(body.workerId);
   if (!worker.ok) throw new BoardImportError(worker.code, 409, body.consumptionId);
   const actor = autoHumanActor(session, request);
-  const outcome = await withAutoTransaction(body.consumptionId, async (tx, now) => {
+  const outcome = await withAutoTransaction(body.consumptionId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const existing = await tx.amuxRecommendationAutoConsumption.findUnique({ where: { id: body.consumptionId } });
     if (existing) {
       if (
@@ -751,7 +835,7 @@ export async function commitSystemAutoPromotion(input: {
   | { promoted: true; consumptionId: string; grantId: string; snapshotId: string }
   | { promoted: false; reason: "no_grant" }
 > {
-  return withAutoTransaction(input.consumptionId, async (tx, now) => {
+  return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now) => {
     await requireAutoOpen(tx, input.consumptionId);
     const grant = await tx.amuxRecommendationAutoGrant.findFirst({
       where: {
@@ -792,21 +876,46 @@ export async function commitSystemAutoPromotion(input: {
   });
 }
 
-/** Expires up to `AUTO_EXPIRE_BATCH` due grants, oldest expiry first, one audit each. */
-export async function expireDueAutoGrants(actor: AutoActor): Promise<{ expired: number }> {
-  return withAutoTransaction(null, async (tx, now) => {
-    const due = await tx.amuxRecommendationAutoGrant.findMany({
-      where: { status: "active", expiresAt: { lte: now } },
-      orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
-      take: AUTO_EXPIRE_BATCH,
-      select: { id: true },
+/**
+ * Expires up to `AUTO_EXPIRE_BATCH` due grants, oldest expiry first, one grant
+ * and its audit per transaction.
+ *
+ * The audit chain's advisory lock is transaction scoped, so it is held from a
+ * transaction's first entry until its COMMIT. A whole batch in one transaction
+ * held it across every later expiry and entry, and every other audit writer
+ * queued behind it -- the AMUX lifecycle writers among them, whose 200 ms
+ * statement timeout turns that wait into a 503. One grant per transaction
+ * holds it for one append.
+ *
+ * `counter` advances as each transaction commits, so a caller stopped by a
+ * later failure still knows how many committed. `hasRoom` is asked before each
+ * transaction; when it says no, the rest wait for the next call.
+ */
+const expireDueGrantsOneByOne = async (
+  actor: AutoActor,
+  counter: { expired: number },
+  hasRoom: () => boolean = () => true,
+): Promise<void> => {
+  for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
+    if (!hasRoom()) return;
+    const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now) => {
+      const due = await tx.amuxRecommendationAutoGrant.findFirst({
+        where: { status: "active", expiresAt: { lte: now } },
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      if (!due) return false;
+      return expireGrantLocked(tx, now, actor, due.id);
     });
-    let expired = 0;
-    for (const row of due) {
-      if (await expireGrantLocked(tx, now, actor, row.id)) expired += 1;
-    }
-    return { expired };
-  });
+    if (!moved) return;
+    counter.expired += 1;
+  }
+};
+
+export async function expireDueAutoGrants(actor: AutoActor): Promise<{ expired: number }> {
+  const counter = { expired: 0 };
+  await expireDueGrantsOneByOne(actor, counter);
+  return { expired: counter.expired };
 }
 
 export type AutoTickResult = {
@@ -821,18 +930,28 @@ export type AutoTickResult = {
  * it first. Expiry is its own transaction and commits even when the consume
  * is refused. At most one card moves. A lost consume outcome is read back and
  * recorded, the halt rule is evaluated, and nothing is tried again.
+ *
+ * Inside the route budget no transaction starts unless the time left also
+ * covers what it must leave room for: an expiry leaves room for a consume and
+ * the record of its lost outcome, and a consume for that record. Grants still
+ * due when the budget runs short expire on the next tick; a consume that no
+ * longer fits ends the tick with `route_budget_exhausted` and moves nothing.
  */
 export async function runAutoPromotionTick(): Promise<AutoTickResult> {
-  let expired = 0;
+  const expiry = { expired: 0 };
   try {
-    expired = (await expireDueAutoGrants(AUTO_SYSTEM_ACTOR)).expired;
+    await expireDueGrantsOneByOne(AUTO_SYSTEM_ACTOR, expiry, () =>
+      tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS),
+    );
   } catch (error) {
     if (!(error instanceof BoardImportError)) throw error;
     // No consume was attempted, so this is not a lost consume outcome and is
-    // not counted toward the halt rule. The next tick expires again.
+    // not counted toward the halt rule. The next tick expires again. Expiries
+    // that committed before the failure are counted.
     const reason = error.code === "outcome_unknown" ? "expiry_outcome_unknown" : error.code;
-    return { promoted: false, reason, expired: 0 };
+    return { promoted: false, reason, expired: expiry.expired };
   }
+  const expired = expiry.expired;
   // A grant refused for a reason that belongs to its own card (the card
   // moved, a dependency is open, it fell out of the ranking cut) must not
   // hold every later grant until it expires. Those are skipped for this tick
@@ -842,6 +961,9 @@ export async function runAutoPromotionTick(): Promise<AutoTickResult> {
   const skipGrantIds: string[] = [];
   let lastReason: string | undefined;
   for (let attempt = 0; attempt < AUTO_TICK_GRANT_ATTEMPTS; attempt += 1) {
+    if (!tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS - 1)) {
+      return { promoted: false, reason: "route_budget_exhausted", expired };
+    }
     const consumptionId = randomUUID();
     const snapshotId = randomUUID();
     let pickedGrantId: string | null = null;
@@ -878,22 +1000,27 @@ export async function tickAutoPromotion(): Promise<AutoTickResult> {
 }
 
 /**
- * Records a consume whose outcome was lost. Runs under the queue lock, so the
- * original transaction has ended and the read-back is final: a consumption
- * row with this id either exists or never will. Either way one
- * `AmuxRecommendationAutoUnknown` row and one audit are written, and an
- * existing consumption row gets `outcomeUnknownAt`.
+ * What recording one lost consume outcome will write, read under the queue
+ * lock so the original transaction has ended and the read-back is final: a
+ * consumption row with this id either exists or never will. Writes nothing.
  */
-const markAutoOutcomeUnknownLocked = async (
+type AutoUnknownMark =
+  | { kind: "recorded"; consumptionFound: boolean }
+  | {
+    kind: "record";
+    consumption: { id: string; outcomeUnknownAt: Date | null } | null;
+    grantId: string | null;
+  };
+
+const readAutoOutcomeUnknownLocked = async (
   tx: Prisma.TransactionClient,
-  now: Date,
-  input: { actor: AutoActor; consumptionId: string; grantId: string | null },
-) => {
+  input: { consumptionId: string; grantId: string | null },
+): Promise<AutoUnknownMark> => {
   const recorded = await tx.amuxRecommendationAutoUnknown.findUnique({
     where: { id: input.consumptionId },
     select: { consumptionFound: true },
   });
-  if (recorded) return { recorded: false as const, consumptionFound: recorded.consumptionFound };
+  if (recorded) return { kind: "recorded", consumptionFound: recorded.consumptionFound };
   const consumption = await tx.amuxRecommendationAutoConsumption.findUnique({
     where: { id: input.consumptionId },
     select: { id: true, grantId: true, outcomeUnknownAt: true },
@@ -903,44 +1030,75 @@ const markAutoOutcomeUnknownLocked = async (
     const grant = await tx.amuxRecommendationAutoGrant.findUnique({ where: { id: input.grantId }, select: { id: true } });
     grantId = grant?.id ?? null;
   }
-  const auditId = await writeAutoAudit(
-    tx,
-    input.actor,
-    "amux.auto_promotion.outcome_unknown",
-    "AmuxRecommendationAutoUnknown",
-    input.consumptionId,
-    autoAuditMetadata({ consumptionId: input.consumptionId, grantId }),
-  );
-  if (consumption && !consumption.outcomeUnknownAt) {
+  return {
+    kind: "record",
+    consumption: consumption ? { id: consumption.id, outcomeUnknownAt: consumption.outcomeUnknownAt } : null,
+    grantId,
+  };
+};
+
+/**
+ * Writes one `AmuxRecommendationAutoUnknown` row and its audit, and marks an
+ * existing consumption row with `outcomeUnknownAt`. The row lock comes before
+ * the audit entry, and only the row that names the entry comes after it.
+ */
+const writeAutoOutcomeUnknownLocked = async (
+  tx: Prisma.TransactionClient,
+  now: Date,
+  actor: AutoActor,
+  consumptionId: string,
+  mark: AutoUnknownMark,
+) => {
+  if (mark.kind === "recorded") return { recorded: false as const, consumptionFound: mark.consumptionFound };
+  if (mark.consumption && !mark.consumption.outcomeUnknownAt) {
     await tx.amuxRecommendationAutoConsumption.updateMany({
-      where: { id: consumption.id, outcomeUnknownAt: null },
+      where: { id: mark.consumption.id, outcomeUnknownAt: null },
       data: { outcomeUnknownAt: now },
     });
   }
+  const auditId = await writeAutoAudit(
+    tx,
+    actor,
+    "amux.auto_promotion.outcome_unknown",
+    "AmuxRecommendationAutoUnknown",
+    consumptionId,
+    autoAuditMetadata({ consumptionId, grantId: mark.grantId }),
+  );
   await tx.amuxRecommendationAutoUnknown.create({
     data: {
-      id: input.consumptionId,
-      grantId,
-      consumptionFound: consumption !== null,
+      id: consumptionId,
+      grantId: mark.grantId,
+      consumptionFound: mark.consumption !== null,
       authorizationAuditLogId: auditId,
       recordedAt: now,
     },
   });
-  return { recorded: true as const, consumptionFound: consumption !== null };
+  return { recorded: true as const, consumptionFound: mark.consumption !== null };
 };
+
+type AutoHaltOpening = Extract<ReturnType<typeof autoHaltRequired>, { halt: true }>;
+
+type AutoHaltDecision =
+  | { kind: "already_open"; haltId: string }
+  | { kind: "clear" }
+  | { kind: "halt"; reason: AutoHaltOpening["reason"]; violationCode: AutoHaltOpening["violationCode"] };
 
 /**
  * The version 8 halt rule, read back. One stored critical violation, or two
  * lost outcomes within 15 minutes of the transaction clock, opens one halt.
+ * Writes nothing: every scan here happens before the transaction's first
+ * audit entry, so the audit chain's lock is never held across them.
+ *
+ * `pendingUnknown` is a lost outcome this transaction is about to record. It
+ * counts as it will once written, so reading first changes no decision.
  */
-const evaluateAutoHaltLocked = async (
+const readAutoHaltLocked = async (
   tx: Prisma.TransactionClient,
   now: Date,
-  actor: AutoActor,
-  haltId: string,
-) => {
+  pendingUnknown: { id: string; recordedAt: Date } | null,
+): Promise<AutoHaltDecision> => {
   const existing = await openHalt(tx);
-  if (existing) return { haltId: existing.id, halted: true as const, replayed: true as const };
+  if (existing) return { kind: "already_open", haltId: existing.id };
   const entries = await costEntries(tx);
   const inWindow = (windowMs: number) =>
     entries.filter((entry) => {
@@ -1010,10 +1168,28 @@ const evaluateAutoHaltLocked = async (
   });
   const decision = autoHaltRequired({
     criticalCodes: readback,
-    unknownAt: autoUnknownEvents({ consumptions, unknowns }),
+    unknownAt: autoUnknownEvents({
+      consumptions,
+      unknowns: pendingUnknown ? [...unknowns, pendingUnknown] : unknowns,
+    }),
     now,
   });
-  if (!decision.halt) return { haltId: null, halted: false as const, replayed: false as const };
+  if (!decision.halt) return { kind: "clear" };
+  return { kind: "halt", reason: decision.reason, violationCode: decision.violationCode };
+};
+
+/** Opens the halt a read-back decided on: its audit entry, then the row that names it. */
+const writeAutoHaltLocked = async (
+  tx: Prisma.TransactionClient,
+  now: Date,
+  actor: AutoActor,
+  haltId: string,
+  decision: AutoHaltDecision,
+) => {
+  if (decision.kind === "already_open") {
+    return { haltId: decision.haltId, halted: true as const, replayed: true as const };
+  }
+  if (decision.kind === "clear") return { haltId: null, halted: false as const, replayed: false as const };
   const auditId = await writeAutoAudit(
     tx,
     actor,
@@ -1036,10 +1212,17 @@ const evaluateAutoHaltLocked = async (
 };
 
 export async function commitAutoHaltFromReadback(input: { actor: AutoActor; haltId: string }) {
-  return withAutoTransaction(input.haltId, (tx, now) => evaluateAutoHaltLocked(tx, now, input.actor, input.haltId));
+  return withAutoTransaction(input.haltId, limitsFor(input.actor), async (tx, now) => {
+    const decision = await readAutoHaltLocked(tx, now, null);
+    return writeAutoHaltLocked(tx, now, input.actor, input.haltId, decision);
+  });
 }
 
-/** Records one lost consume outcome and evaluates the halt rule, in one transaction. */
+/**
+ * Records one lost consume outcome and evaluates the halt rule, in one
+ * transaction. Every read comes first; the writes, and with them the audit
+ * chain's lock, come last.
+ */
 export async function recordAutoOutcomeUnknown(input: {
   actor: AutoActor;
   consumptionId: string;
@@ -1047,10 +1230,16 @@ export async function recordAutoOutcomeUnknown(input: {
   haltId?: string;
 }) {
   const haltId = input.haltId ?? randomUUID();
-  return withAutoTransaction(input.consumptionId, async (tx, now) => {
-    const marked = await markAutoOutcomeUnknownLocked(tx, now, input);
-    const halt = await evaluateAutoHaltLocked(tx, now, input.actor, haltId);
-    return { ...marked, haltId: halt.haltId, halted: halt.halted };
+  return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now) => {
+    const mark = await readAutoOutcomeUnknownLocked(tx, input);
+    const halt = await readAutoHaltLocked(
+      tx,
+      now,
+      mark.kind === "record" ? { id: input.consumptionId, recordedAt: now } : null,
+    );
+    const marked = await writeAutoOutcomeUnknownLocked(tx, now, input.actor, input.consumptionId, mark);
+    const opened = await writeAutoHaltLocked(tx, now, input.actor, haltId, halt);
+    return { ...marked, haltId: opened.haltId, halted: opened.halted };
   });
 }
 
@@ -1085,7 +1274,7 @@ export async function resumeAutoPromotion(input: { session: Session; request: Re
 }
 
 export async function commitAutoResume(session: Session, request: Request, haltId: string) {
-  return withAutoTransaction(haltId, async (tx, now) => {
+  return withAutoTransaction(haltId, OWNER_TRANSACTION_LIMITS, async (tx, now) => {
     const halt = await tx.amuxRecommendationAutoHalt.findUnique({
       where: { id: haltId },
       select: { id: true, clearedAt: true, violationCode: true },

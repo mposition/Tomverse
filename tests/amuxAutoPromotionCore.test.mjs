@@ -24,6 +24,13 @@ import {
   AUTO_PROMOTION_POLICY_VERSION,
   AUTO_PROMOTION_V8_CONSUME_POLICY_VERSION,
   AUTO_SYSTEM_ACTOR_ROW_ID,
+  AUTO_TICK_ROUTE_BUDGET_MS,
+  AUTO_TICK_SEQUENTIAL_TRANSACTIONS,
+  AUTO_TICK_STATEMENT_TIMEOUT_MS,
+  AUTO_TICK_TRANSACTION_MAX_MS,
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
+  AUTO_TICK_TRANSACTION_TIMEOUT_MS,
+  AUTO_TRANSACTION_COMMIT_RESERVE_MS,
   autoBoundItem,
   autoConsumeBindingAccepted,
   autoConsumeRequestIsBound,
@@ -37,6 +44,8 @@ import {
   autoReadbackCritical,
   autoSystemConsumeDigest,
   autoTickHttpStatus,
+  autoTransactionFailure,
+  autoTransactionStatementCancelled,
   autoUnknownEvents,
   autoWorkerAdmitted,
   parseAutoConsumeRequest,
@@ -511,4 +520,238 @@ test("the halt read-back counts only lifecycle rows the consume itself could wri
   assert.equal((service.match(/"createdAt" <= c\."createdAt"/g) ?? []).length, 3);
   assert.match(service, /autoConsumptions: \{ some: \{\}, none: \{ status: "consumed" \} \}/);
   assert.doesNotMatch(service, /autoGrants: \{ some: \{\} \},\s*autoConsumptions/);
+});
+
+// Prisma error shapes as they arrive, reduced to the fields the classifier reads.
+const rawStatementTimeout = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2010",
+  message: "Raw query failed. Code: `57014`. Message: `canceling statement due to statement timeout`",
+  meta: { code: "57014", message: "canceling statement due to statement timeout" },
+};
+const modelStatementTimeout = {
+  name: "PrismaClientUnknownRequestError",
+  message:
+    'Error occurred during query execution:\nConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "57014", message: "canceling statement due to statement timeout", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })',
+};
+const transactionClosed = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2028",
+  message: "Transaction API error: Transaction already closed: A query cannot be executed on an expired transaction. The timeout for this transaction was 20000 ms.",
+};
+const startTimeout = {
+  name: "PrismaClientKnownRequestError",
+  code: "P2028",
+  message: "Transaction API error: Unable to start a transaction in the given time.",
+};
+const poolTimeout = { name: "PrismaClientKnownRequestError", code: "P2024", message: "Timed out fetching a new connection from the connection pool." };
+const serverClosed = { name: "PrismaClientKnownRequestError", code: "P1017", message: "Server has closed the connection." };
+const connectionTerminated = new Error("Connection terminated unexpectedly");
+const connectionReset = new Error("read ECONNRESET");
+const uniqueViolation = { name: "PrismaClientKnownRequestError", code: "P2002", message: "Unique constraint failed" };
+
+test("a statement timeout inside the transaction is a known rollback, not a lost outcome", () => {
+  assert.equal(autoTransactionStatementCancelled(rawStatementTimeout), true);
+  assert.equal(autoTransactionStatementCancelled(modelStatementTimeout), true);
+  assert.equal(autoTransactionStatementCancelled(serverClosed), false);
+  assert.equal(autoTransactionStatementCancelled(new Error("statement ok")), false);
+
+  // Before COMMIT was sent the transaction rolled back, whatever the cause.
+  assert.equal(autoTransactionFailure("running", rawStatementTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", modelStatementTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", transactionClosed), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("starting", startTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("starting", poolTimeout), "deadline_exceeded");
+  assert.equal(autoTransactionFailure("running", serverClosed), "rolled_back");
+  assert.equal(autoTransactionFailure("running", connectionTerminated), "rolled_back");
+  assert.equal(autoTransactionFailure("running", connectionReset), "rolled_back");
+  assert.equal(autoTransactionFailure("starting", serverClosed), "rolled_back");
+  assert.equal(autoTransactionFailure("running", uniqueViolation), "conflict");
+  assert.equal(autoTransactionFailure("running", new Error("anything else")), "rolled_back");
+  assert.equal(autoTransactionFailure("running", null), "rolled_back");
+});
+
+test("only a failure after the callback returned is an unknown outcome", () => {
+  const samples = [
+    rawStatementTimeout,
+    modelStatementTimeout,
+    transactionClosed,
+    startTimeout,
+    poolTimeout,
+    serverClosed,
+    connectionTerminated,
+    connectionReset,
+    uniqueViolation,
+    new Error("anything else"),
+  ];
+  for (const error of samples) {
+    // A connection lost during or after COMMIT: the commit may have happened.
+    assert.equal(autoTransactionFailure("committing", error), "outcome_unknown", error.message);
+    assert.notEqual(autoTransactionFailure("running", error), "outcome_unknown", error.message);
+    assert.notEqual(autoTransactionFailure("starting", error), "outcome_unknown", error.message);
+  }
+});
+
+test("the transaction wrapper classifies by phase, and a known rollback is not recorded as unknown", () => {
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  // No message matching: a timeout text inside the callback is not an unknown outcome.
+  assert.doesNotMatch(service, /timeout\|ECONNRESET/);
+  assert.equal(service.includes("boardImportFailureIsAmbiguous"), false);
+  const wrapper = service.slice(
+    service.indexOf("const withAutoTransaction = async"),
+    service.indexOf("const requireBoundAudit = async"),
+  );
+  assert.ok(wrapper.length > 0);
+  assert.match(wrapper, /let phase: AutoTransactionPhase = "starting";/);
+  assert.match(wrapper, /async \(tx\) => \{\s*phase = "running";/);
+  // "committing" is set after the callback's last statement and before its return.
+  assert.match(wrapper, /phase = "committing";\s*return result;\s*\}/);
+  assert.match(wrapper, /switch \(autoTransactionFailure\(phase, error\)\)/);
+  assert.match(wrapper, /case "outcome_unknown":\s*throw new BoardImportError\("outcome_unknown"/);
+  assert.match(wrapper, /case "deadline_exceeded":\s*throw new AmuxDbBoundaryError\("AMUX_DB_DEADLINE_EXCEEDED"/);
+  // Only an outcome_unknown refusal is recorded as a lost outcome, on both paths.
+  for (const entry of ["export async function consumeAutoPromotion", "export async function runAutoPromotionTick"]) {
+    const body = service.slice(service.indexOf(entry));
+    const record = body.indexOf("recordAutoOutcomeUnknownSafely(");
+    assert.ok(record > 0, entry);
+    assert.match(body.slice(0, record), /error\.code === "outcome_unknown"/, entry);
+  }
+  // The owner route answers a rolled-back deadline as retryable, not as a lost outcome.
+  const route = withoutComments(read("app/api/admin/amux/board-auto-promotion/route.ts"));
+  assert.match(
+    route,
+    /error instanceof AmuxDbBoundaryError && error\.code === "AMUX_DB_DEADLINE_EXCEEDED"[\s\S]*?"database_deadline_exceeded"[\s\S]*?status: 503/,
+  );
+});
+
+// The audit chain's advisory lock (lib/adminAudit.ts) is transaction scoped:
+// once a transaction appends an entry it holds the lock until COMMIT, and every
+// other audit writer waits. AMUX lifecycle writers wait under a 200 ms statement
+// timeout, so a tick that held it across long work turned their writes into
+// 503s. A timing test would need a database and would be flaky; these pin the
+// structure that keeps the hold short instead.
+test("the tick holds the audit chain lock only for the appends that end each short transaction", () => {
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  const between = (from, to) => {
+    const start = service.indexOf(from);
+    const end = service.indexOf(to, start + 1);
+    assert.ok(start >= 0 && end > start, `${from} .. ${to}`);
+    return service.slice(start, end);
+  };
+
+  // Expiry: the batch loop is outside the transaction, one grant inside it.
+  const expiry = between("const expireDueGrantsOneByOne = async", "export async function expireDueAutoGrants");
+  const loop = expiry.indexOf("for (let index = 0; index < AUTO_EXPIRE_BATCH");
+  assert.ok(loop >= 0 && expiry.indexOf("withAutoTransaction(") > loop);
+  assert.equal((expiry.match(/expireGrantLocked\(/g) ?? []).length, 1);
+  assert.doesNotMatch(expiry, /findMany\(/);
+  assert.doesNotMatch(service, /take: AUTO_EXPIRE_BATCH/);
+  const tick = between("export async function runAutoPromotionTick", "export async function tickAutoPromotion");
+  assert.match(tick, /expireDueGrantsOneByOne\(AUTO_SYSTEM_ACTOR/);
+
+  // After a transaction's first audit entry come only the rows that carry its
+  // id and, for a halt, one more entry: no read, scan or selection.
+  const reads =
+    /\.(?:findMany|findFirst|findUnique|count|aggregate|groupBy)\(|\$queryRaw|recommendationSelectionLocked\(|readAuto\w*\(|costEntries\(|humanDecisions\(|openHalt\(/;
+  for (const [from, to] of [
+    ["const expireGrantLocked = async", "type ConsumeLockedInput"],
+    ["const consumeGrantLocked = async", "export async function previewAutoPromotion"],
+    ["const writeAutoOutcomeUnknownLocked = async", "type AutoHaltOpening"],
+    ["const writeAutoHaltLocked = async", "export async function commitAutoHaltFromReadback"],
+  ]) {
+    const body = between(from, to);
+    const audit = body.indexOf("writeAutoAudit(");
+    assert.ok(audit > 0, from);
+    assert.doesNotMatch(body.slice(audit), reads, from);
+  }
+
+  // The read-back helpers write nothing, and both callers read before writing.
+  for (const [from, to] of [
+    ["const readAutoOutcomeUnknownLocked = async", "const writeAutoOutcomeUnknownLocked = async"],
+    ["const readAutoHaltLocked = async", "const writeAutoHaltLocked = async"],
+  ]) {
+    assert.doesNotMatch(
+      between(from, to),
+      /writeAutoAudit\(|\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw/,
+      from,
+    );
+  }
+  const record = between("export async function recordAutoOutcomeUnknown", "const recordAutoOutcomeUnknownSafely");
+  const lastRead = Math.max(record.indexOf("readAutoOutcomeUnknownLocked("), record.indexOf("readAutoHaltLocked("));
+  const firstWrite = Math.min(record.indexOf("writeAutoOutcomeUnknownLocked("), record.indexOf("writeAutoHaltLocked("));
+  assert.ok(lastRead > 0 && firstWrite > lastRead, "every read before the first write");
+  const readback = between("export async function commitAutoHaltFromReadback", "export async function recordAutoOutcomeUnknown");
+  assert.ok(readback.indexOf("readAutoHaltLocked(") < readback.indexOf("writeAutoHaltLocked("));
+  // The pending lost outcome counts in the halt decision as it will once written.
+  assert.match(record, /mark\.kind === "record" \? \{ id: input\.consumptionId, recordedAt: now \} : null/);
+});
+
+test("the tick's three transactions fit its route budget, and each statement fits its transaction", () => {
+  assert.equal(
+    AUTO_TICK_TRANSACTION_MAX_MS,
+    AUTO_TICK_TRANSACTION_MAX_WAIT_MS + AUTO_TICK_TRANSACTION_TIMEOUT_MS + AUTO_TRANSACTION_COMMIT_RESERVE_MS,
+  );
+  assert.equal(AUTO_TICK_SEQUENTIAL_TRANSACTIONS, 3);
+  assert.ok(AUTO_TICK_SEQUENTIAL_TRANSACTIONS * AUTO_TICK_TRANSACTION_MAX_MS <= AUTO_TICK_ROUTE_BUDGET_MS);
+  assert.ok(AUTO_TICK_STATEMENT_TIMEOUT_MS < AUTO_TICK_TRANSACTION_TIMEOUT_MS);
+  // The same commit reserve as the bounded AMUX transactions.
+  const boundary = read("lib/amux/dbBoundary.ts");
+  assert.match(
+    boundary,
+    new RegExp(`export const AMUX_DB_COMMIT_RESERVE_MS = ${AUTO_TRANSACTION_COMMIT_RESERVE_MS};`),
+  );
+});
+
+test("the tick route runs inside its route budget, and every tick transaction is admitted, anchored and fenced", () => {
+  const route = withoutComments(read("app/api/internal/amux/auto-promotion/tick/route.ts"));
+  assert.match(route, /return withAmuxRouteBudget\(async \(\) => \{/);
+  assert.match(route, /\}, AUTO_TICK_ROUTE_BUDGET_MS\);/);
+  assert.ok(route.indexOf("isAmuxSyncAuthorized(request)") < route.indexOf("withAmuxRouteBudget("));
+  // Failures answer in the shape of the other AMUX internal routes.
+  assert.match(route, /isAmuxInputError\(error\)/);
+  assert.equal((route.match(/amuxInternalErrorResponse\(OPERATION, error\)/g) ?? []).length, 2);
+  assert.equal(route.includes("auto_promotion_failed"), false);
+
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  const wrapper = service.slice(
+    service.indexOf("const withAutoTransaction = async"),
+    service.indexOf("const requireBoundAudit = async"),
+  );
+  const order = [
+    "if (!amuxRouteHasBudgetForMs(maxMs))",
+    "prisma.$transaction(",
+    "set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)",
+    "anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION)",
+    "pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))",
+    "const result = await run(tx, await databaseNow(tx));",
+    "await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);",
+    'phase = "committing";',
+  ].map((needle) => {
+    const index = wrapper.indexOf(needle);
+    assert.ok(index >= 0, needle);
+    return index;
+  });
+  assert.deepEqual([...order].sort((a, b) => a - b), order, "admission, anchor, lock, work, fence, commit");
+  assert.match(wrapper, /\{ maxWait: limits\.maxWaitMs, timeout: limits\.timeoutMs \}/);
+
+  // The system actor, which only the tick uses, gets the tick's limits.
+  assert.match(service, /actor\.kind === "system" \? TICK_TRANSACTION_LIMITS : OWNER_TRANSACTION_LIMITS/);
+  const system = service.slice(service.indexOf("export async function commitSystemAutoPromotion"));
+  assert.match(system, /withAutoTransaction\(input\.consumptionId, TICK_TRANSACTION_LIMITS,/);
+
+  // No tick transaction starts without room for what it must leave room for.
+  const tick = service.slice(
+    service.indexOf("export async function runAutoPromotionTick"),
+    service.indexOf("export async function tickAutoPromotion"),
+  );
+  assert.match(tick, /expireDueGrantsOneByOne\(AUTO_SYSTEM_ACTOR, expiry, \(\) =>\s*tickHasRoomFor\(AUTO_TICK_SEQUENTIAL_TRANSACTIONS\),?\s*\)/);
+  const room = tick.indexOf("if (!tickHasRoomFor(AUTO_TICK_SEQUENTIAL_TRANSACTIONS - 1))");
+  assert.ok(room > 0 && room < tick.indexOf("commitSystemAutoPromotion("));
+  assert.match(tick, /reason: "route_budget_exhausted"/);
+  const expiry = service.slice(
+    service.indexOf("const expireDueGrantsOneByOne = async"),
+    service.indexOf("export async function expireDueAutoGrants"),
+  );
+  assert.ok(expiry.indexOf("if (!hasRoom()) return;") < expiry.indexOf("withAutoTransaction("));
+  assert.equal(autoTickHttpStatus("route_budget_exhausted"), 200);
 });

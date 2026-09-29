@@ -45,7 +45,8 @@ test("the recover route logs the failure fields before its opaque 500", async ()
     "utf8",
   );
   const log = route.indexOf('console.error("AMUX recovery failed", amuxRecoverFailureFields(step, error))');
-  const opaque = route.indexOf('{ error: "AMUX recovery is unavailable." }');
+  // The opaque body comes from the shared internal-route helper.
+  const opaque = route.indexOf('return amuxInternalErrorResponse("execution_recover", error)');
   assert.ok(log > 0 && opaque > log, "the failure is logged before the opaque response");
   for (const step of ["quota_sweep", "reclaim_executions", "reclaim_claims"]) {
     assert.match(route, new RegExp(`step = "${step}";`));

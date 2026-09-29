@@ -1,0 +1,108 @@
+{
+  "eligible": {
+    "eligible": true,
+    "execution_ready": true,
+    "reason": null,
+    "task": {
+      "task_kind": "feature",
+      "complexity": 4,
+      "risk": 1,
+      "files_expected": 2
+    },
+    "candidates": [
+      {
+        "worker": {
+          "worker_name": "claude-b",
+          "provider": "claude",
+          "model": null,
+          "routing_roles": ["feature"],
+          "running": false,
+          "status": "stopped",
+          "dispatch_ready": false,
+          "archived": false,
+          "paused": false,
+          "isolated": false,
+          "blocked": false
+        },
+        "predicted_success": null,
+        "quota_remaining": null,
+        "expected_speed": null,
+        "low_rework": null,
+        "low_human_attention": null,
+        "cost_efficiency": null,
+        "provider_exhausted": false
+      },
+      {
+        "worker": {
+          "worker_name": "codex-a",
+          "provider": "codex",
+          "model": "gpt-5.3-codex",
+          "routing_roles": ["feature"],
+          "running": true,
+          "status": "idle",
+          "dispatch_ready": true,
+          "archived": false,
+          "paused": false,
+          "isolated": false,
+          "blocked": false
+        },
+        "predicted_success": 0.7,
+        "quota_remaining": 0.5,
+        "expected_speed": 0.6,
+        "low_rework": 0.7,
+        "low_human_attention": 0.5,
+        "cost_efficiency": 0.5,
+        "provider_exhausted": false
+      }
+    ],
+    "telemetry": {
+      "claude-b": {
+        "history": { "sample_size": 0 },
+        "quota": { "state": "unknown", "provider_exhausted": false }
+      },
+      "codex-a": {
+        "history": {
+          "sample_size": 8,
+          "predicted_success": {
+            "value": 0.7,
+            "raw_value": 0.8,
+            "confidence": 0.66,
+            "observed": true,
+            "source": "historical_attempts",
+            "sample_size": 8,
+            "observed_at": "2026-09-24T00:00:00.000Z"
+          },
+          "cost_efficiency": {
+            "value": 0.5,
+            "raw_value": null,
+            "confidence": 0.66,
+            "observed": true,
+            "source": "historical_cost",
+            "sample_size": 8,
+            "observed_at": "2026-09-24T00:00:00.000Z"
+          }
+        },
+        "quota": {
+          "value": 0.5,
+          "raw_value": 0.5,
+          "confidence": 1,
+          "observed": true,
+          "source": "provider_api",
+          "sample_size": null,
+          "observed_at": "2026-09-24T00:00:00.000Z",
+          "state": "fresh",
+          "provider_exhausted": false,
+          "reset_at": null
+        }
+      }
+    }
+  },
+  "refusal": {
+    "eligible": false,
+    "execution_ready": false,
+    "reason": "worker_catalog_unavailable",
+    "task": null,
+    "candidates": [],
+    "telemetry": {}
+  }
+}
