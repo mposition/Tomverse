@@ -79,8 +79,8 @@ export type AuRelationshipStanding =
  * Every end is final. An account restored from a deletion request, or a person
  * signing in again after 24 months, does not restart a relationship: the start
  * event is what the notice at signup covered, and nothing later re-shows it.
- * Dormancy is judged here from `lastLoginAt` until the next sign-in, and that
- * sign-in records it as an end (`endDormantEmailRelationshipAtSignIn()` in
+ * Dormancy is judged here from the later of `lastLoginAt` and the start until
+ * the next sign-in, and that sign-in records it as an end (`endDormantEmailRelationshipAtSignIn()` in
  * lib/emailPreferences.ts) before `lastLoginAt` moves, in one transaction.
  */
 export const auRelationshipStanding = (facts: AuRelationshipFacts): AuRelationshipStanding => {
