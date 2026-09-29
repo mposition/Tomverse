@@ -364,9 +364,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * v4/run v6). Only schema comments changed, not models, webhook inputs,
  * descriptor or admission decisions. All dated notes above stand in this
  * tree; the fingerprint is computed over the merged schema.
+ *
+ * 2026-09-30: main's local AMUX intake (#1770) back-merged into develop adds
+ * `AmuxLocalIntakeNormalized`, `AmuxLocalIntakeApproval` and their two
+ * `AmuxWorkItem` relations. Not a marketing model or a webhook input, and no
+ * descriptor, webhook writer or admission decision changes. The digest moves
+ * because the whole Prisma schema is deliberately watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f4b326b974a6a54b5166bb548e29d5ba2e1ba9a7320c774864273df5183a8dc0";
+  "1bb553c1f94eac67031780f724f868ca635413dff9ac2b32ff61e239079d4015";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
