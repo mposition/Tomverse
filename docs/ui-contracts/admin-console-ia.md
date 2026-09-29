@@ -55,8 +55,8 @@ owner-only (rule 14).
 | Operations | Infrastructure | `/admin/infrastructure` | — |
 | Operations | Automation | `/admin/automation` | `jobs`, `webhooks`, `reports` |
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
-| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
+| Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |

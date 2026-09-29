@@ -34,8 +34,8 @@ const NAV_LABELS = [
   "Infrastructure",
   "Automation",
   "Alerts",
-  "Email delivery",
   "Email campaigns",
+  "Email delivery",
   "Platform settings",
   // The AMUX group, listed in full to the owner these tests sign in as.
   "Backlog",
@@ -112,6 +112,9 @@ test.describe("admin console on a narrow viewport", () => {
         });
         expect(topmost, `${label} is covered by another element`).toContain(label);
       }
+      // Every link in the drawer is one of the entries above, so none can go
+      // unchecked: a twenty-fifth entry would fail here until it is listed.
+      await expect(navigation.getByRole("link")).toHaveCount(NAV_LABELS.length);
     });
   }
 
