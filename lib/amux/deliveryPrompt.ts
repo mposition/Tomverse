@@ -38,10 +38,10 @@ export const classifyApprovedExecutionBrief = (
 export const AMUX_DELIVERY_COMPLETION_RULES = [
   "How to finish:",
   "- While required checks are failing or still running, keep this card in doing and keep fixing. That is not a reason to discard it.",
-  "- When your pull request is open and its required checks pass, first make this card's evidence hold exactly one URL, this pull request's (https://github.com/mposition/Tomverse/pull/<number>), then set the card to done. Tomverse takes the first such URL in evidence; only if evidence has none does it look at last_result. A URL in the title, description or messages is never read.",
+  "- When your pull request is open and its required checks pass, first make this card's evidence hold exactly one URL, this pull request's (https://github.com/mposition/Tomverse/pull/<number>), then set the card to done. Tomverse takes the first valid pull request URL in evidence and falls back to last_result when evidence has no valid one. A URL in the title, description or messages is never read.",
   "- If the work needs no pull request, set this card to done when the work is finished.",
   "- Set this card to discarded, with the reason, only when the work cannot be finished.",
-  "- Finish only with done or discarded. Do not use verified, cancelled or quarantined: verified also ends the attempt as done, and cancelled or quarantined end it as discarded, so they only skip the steps above.",
+  "- Finish only with done (the attempt goes to review) or discarded (the attempt is blocked). Do not use verified, cancelled or quarantined: verified also sends the attempt to review, and cancelled or quarantined also block it, so they only skip the steps above.",
   "- backlog, todo, doing, review, failed and needsyou mean still running.",
   "- Do not merge the pull request. A person reviews and merges it.",
 ] as const;

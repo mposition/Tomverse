@@ -87,14 +87,15 @@ test("the prompt tells the worker how to close its local card, before any card t
   assert.match(rules, /Set this card to discarded/);
   assert.match(rules, /keep this card in doing and keep fixing/);
   assert.match(rules, /needs no pull request, set this card to done/);
-  assert.match(rules, /Do not use verified, cancelled or quarantined/);
+  assert.match(rules, /done \(the attempt goes to review\) or discarded \(the attempt is blocked\)/);
+  assert.match(rules, /Do not use verified, cancelled or quarantined: verified also sends the attempt to review, and cancelled or quarantined also block it/);
   assert.match(rules, /backlog, todo, doing, review, failed and needsyou mean still running/);
   assert.match(rules, /Do not merge the pull request/);
   // review_pr_number_from reads evidence first and takes its first matching
   // URL; last_result only when evidence has none; never the title,
   // description or messages. Only this repository's pull URLs count.
   assert.match(rules, /evidence hold exactly one URL/);
-  assert.match(rules, /takes the first such URL in evidence; only if evidence has none does it look at last_result/);
+  assert.match(rules, /takes the first valid pull request URL in evidence and falls back to last_result when evidence has no valid one/);
   assert.match(rules, /title, description or messages is never read/);
   assert.match(rules, /https:\/\/github\.com\/mposition\/Tomverse\/pull\//);
   // The precedence line comes after the untrusted description, so a
