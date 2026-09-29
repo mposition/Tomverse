@@ -124,6 +124,7 @@ test("no sign-up starts a relationship while every approved notice promises only
   });
   const result = await finalizeSignupConsentAttempt({
     userId: user.id,
+    createdBySignIn: true,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
