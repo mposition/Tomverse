@@ -171,6 +171,40 @@ pub(crate) fn parse_queue_body(
     Ok(SelectionRead::Ready(tasks))
 }
 
+/// Reads an owned-queue answer. 200 is the owned queue, held to its
+/// invariants; 409 is the board-capacity refusal, with the same body as the
+/// selection queue's, and nothing else. The owned queue's other 409
+/// (`{available: false, reason: "execution_api_disabled"}`), any other status
+/// and any other body stay errors, which halt the WSL bridge as before.
+pub(crate) fn parse_owned_queue_body(
+    status: StatusCode,
+    body: &[u8],
+) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
+    if status == StatusCode::CONFLICT {
+        let refusal: QueueCapacityRefusal =
+            serde_json::from_slice(body).context("invalid Tomverse AMUX owned-queue conflict")?;
+        if refusal.reason == BOARD_CAPACITY_EXCEEDED {
+            return Ok(SelectionRead::BoardCapacityExceeded);
+        }
+        bail!("unexpected Tomverse AMUX owned-queue conflict");
+    }
+    if status != StatusCode::OK {
+        bail!("unsupported Tomverse internal response status");
+    }
+    let tasks: Vec<OwnedTodoTask> =
+        serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
+    if tasks.len() > MAX_QUEUE_ITEMS
+        || tasks.iter().any(|task| {
+            !is_canonical_machine_id(&task.id)
+                || !is_canonical_machine_id(&task.owner)
+                || !(0..=PRISMA_INT_MAX).contains(&task.revision)
+        })
+    {
+        bail!("invalid Tomverse AMUX owned-queue response invariant");
+    }
+    Ok(SelectionRead::Ready(tasks))
+}
+
 /// Reads a routing snapshot answer, the same way as the queue.
 pub(crate) fn parse_routing_snapshot_body(
     status: StatusCode,
@@ -873,6 +907,41 @@ mod tests {
             parse_routing_snapshot_body(StatusCode::OK, &snapshot).unwrap(),
             SelectionRead::Ready(_)
         ));
+    }
+
+    #[test]
+    fn an_owned_queue_capacity_conflict_is_its_own_answer_and_nothing_else_is() {
+        // The exact body app/api/internal/amux/owned-queue/route.ts sends.
+        let refusal = br#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded"}"#;
+        assert!(matches!(
+            parse_owned_queue_body(StatusCode::CONFLICT, refusal).unwrap(),
+            SelectionRead::BoardCapacityExceeded
+        ));
+        for (status, body) in [
+            // The owned queue's other 409, from the execution API gate.
+            (
+                StatusCode::CONFLICT,
+                br#"{"available":false,"reason":"execution_api_disabled"}"#.as_slice(),
+            ),
+            (StatusCode::CONFLICT, br#"{"error":"x","reason":"other"}"#.as_slice()),
+            (
+                StatusCode::CONFLICT,
+                br#"{"error":"x","reason":"board_capacity_exceeded","extra":1}"#.as_slice(),
+            ),
+            (StatusCode::SERVICE_UNAVAILABLE, refusal.as_slice()),
+            (StatusCode::INTERNAL_SERVER_ERROR, b"[]".as_slice()),
+        ] {
+            assert!(parse_owned_queue_body(status, body).is_err(), "{status}");
+        }
+        let body = serde_json::to_vec(&vec![queue_wire_fixture("owned_server")]).unwrap();
+        match parse_owned_queue_body(StatusCode::OK, &body).unwrap() {
+            SelectionRead::Ready(tasks) => assert_eq!(tasks.len(), 1),
+            SelectionRead::BoardCapacityExceeded => panic!("a 200 is an owned queue"),
+        }
+        let mut bad = queue_wire_fixture("owned_server");
+        bad["owner"] = serde_json::json!("worker-");
+        let body = serde_json::to_vec(&vec![bad]).unwrap();
+        assert!(parse_owned_queue_body(StatusCode::OK, &body).is_err());
     }
 
     #[test]
@@ -1688,7 +1757,7 @@ impl TomverseApi {
         Ok(body)
     }
 
-    pub async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
+    pub async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
         let response = self
             .client
             .post(format!("{}/api/internal/amux/owned-queue", self.base_url))
@@ -1697,18 +1766,13 @@ impl TomverseApi {
             .json(&QueueRequest {})
             .send()
             .await?;
-        let (_, tasks): (_, Vec<OwnedTodoTask>) =
-            read_bounded_json(response, &[StatusCode::OK], MAX_OWNED_QUEUE_RESPONSE_BYTES).await?;
-        if tasks.len() > MAX_QUEUE_ITEMS
-            || tasks.iter().any(|task| {
-                !is_canonical_machine_id(&task.id)
-                    || !is_canonical_machine_id(&task.owner)
-                    || !(0..=PRISMA_INT_MAX).contains(&task.revision)
-            })
-        {
-            bail!("invalid Tomverse AMUX owned-queue response invariant");
-        }
-        Ok(tasks)
+        let (status, body) = read_bounded_body(
+            response,
+            &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_OWNED_QUEUE_RESPONSE_BYTES,
+        )
+        .await?;
+        parse_owned_queue_body(status, &body)
     }
 
     pub async fn execution_start(

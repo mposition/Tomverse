@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 
-use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask, TomverseApi};
+use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask, SelectionRead, TomverseApi};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeIdentity {
@@ -43,7 +43,9 @@ pub enum DriveOutcome {
 
 #[allow(async_fn_in_trait)]
 pub trait BoardControlPlane: Send + Sync {
-    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>>;
+    /// The owned queue, or the app's board-capacity refusal
+    /// (`board_capacity_exceeded`), which wrote nothing.
+    async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>>;
 
     async fn execution_start(
         &self,
@@ -68,7 +70,7 @@ pub trait WorkerAdapter: Send + Sync {
 }
 
 impl BoardControlPlane for TomverseApi {
-    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
+    async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
         TomverseApi::owned_queue(self).await
     }
 
@@ -110,7 +112,14 @@ where
      * not become concurrent execution attempts.
      */
     pub async fn tick(&self) -> Result<Vec<DriveOutcome>> {
-        let tasks = self.control.owned_queue().await?;
+        // The WSL bridge reads the owned queue itself and skips a tick on a
+        // capacity refusal; this driver (execute mode) keeps failing the tick.
+        let tasks = match self.control.owned_queue().await? {
+            SelectionRead::Ready(tasks) => tasks,
+            SelectionRead::BoardCapacityExceeded => {
+                anyhow::bail!("Tomverse AMUX owned queue exceeds one complete response")
+            }
+        };
 
         let mut workers = HashSet::new();
         let mut outcomes = Vec::new();
@@ -265,8 +274,8 @@ mod tests {
     }
 
     impl BoardControlPlane for FakeControl {
-        async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
-            Ok(self.tasks.clone())
+        async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
+            Ok(SelectionRead::Ready(self.tasks.clone()))
         }
 
         async fn execution_start(

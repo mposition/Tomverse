@@ -53,7 +53,7 @@ Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 
 - 저장된 카드 id나 owner가 정규 machine id 규칙에 맞지 않는 행은 두 queue 모두 그 행만 빼고 200으로 답한다. 구조화 WARN `queue_rows_rejected`에 개수만 남기고 id는 남기지 않는다. 그런 카드는 claim·routing snapshot·실행 시작 요청에서도 거절되므로 어차피 이 앱으로는 진행되지 않는다.
 - 이 트리에서 빌드한 Rust는 main 서버의 모양, 이 서버의 모양, `id`·`owner`·`revision`만 가진 최소 모양을 모두 받고, 그 밖의 필드는 거절한다. 호환 필드는 읽지 않는다.
 - 배포 순서: 서버 먼저가 안전하다. 옛 바이너리와 새 바이너리가 모두 이 서버의 모양을 읽는다. bridge를 먼저 다시 빌드해도 안전하다. 새 바이너리는 배포 전 main 서버의 모양도 읽는다.
-- 새 상한: 서버는 카드 512장이나 응답 512KB를 넘으면 queue·owned queue·routing snapshot을 409 `board_capacity_exceeded`로 답한다. 옛 orchestrator는 그 tick을 실패로 로그하고 계속 돌고, 새 orchestrator는 그 tick을 건너뛴다. bridge는 옛것과 새것 모두 owned queue에서 이 답을 받으면 halt한다. owned queue는 worker마다 열린 카드가 하나라 worker 수를 넘기 어렵다. 병합 전에 운영 queue의 크기를 읽기 전용으로 확인한다.
+- 새 상한: 서버는 카드 512장이나 응답 512KB를 넘으면 queue·owned queue·routing snapshot을 409 `board_capacity_exceeded`로 답한다. 옛 orchestrator는 그 tick을 실패로 로그하고 계속 돌고, 새 orchestrator는 그 tick을 건너뛴다. 새 bridge는 owned queue의 이 답(route가 보내는 정확한 body `{error, reason: "board_capacity_exceeded"}`)을 받으면 stderr에 `amux wsl bridge warn:` 한 줄을 남기고 그 tick의 새 배정만 건너뛴다. halt하지 않고, 진행 중인 attempt의 heartbeat와 정산은 계속한다. owned queue의 다른 409(`execution_api_disabled`)와 5xx는 전처럼 halt다. 옛 bridge는 이 답에서도 halt한다. owned queue는 worker마다 열린 카드가 하나라 worker 수를 넘기 어렵다. 병합 전에 운영 queue의 크기를 읽기 전용으로 확인한다.
 - 호환 필드를 빼는 것은 별도 변경이다. WSL bridge와 Railway orchestrator가 모두 이 트리 이후의 바이너리로 돈다는 것을 확인한 뒤, 스키마, 기준 본문, `tests/amuxWireContract.test.ts`, `lib/amux/store.ts`, 이 절을 함께 바꾼다.
 
 ## halt와 재시작
