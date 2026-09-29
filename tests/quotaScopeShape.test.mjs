@@ -249,7 +249,9 @@ test("two rules a CHECK cannot hold are held by triggers", () => {
     ]) {
         assert.match(
             sql,
-            new RegExp(`NEW\."${column}" IS DISTINCT FROM OLD\."${column}"`),
+            // `\\.` so the RegExp receives `\.`: a template literal drops a
+            // lone `\.` to `.`, which would match any character.
+            new RegExp(`NEW\\."${column}" IS DISTINCT FROM OLD\\."${column}"`),
             column
         );
     }

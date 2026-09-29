@@ -84,7 +84,10 @@ export const batchNearDuplicates = (
     .slice(0, input.nearDuplicateLimit ?? 10);
 };
 
-const escapeCell = (value: string) => value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+// Backslashes first, so a trailing one cannot turn an escaped pipe back into
+// a column separator.
+const escapeCell = (value: string) =>
+  value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 
 const quoted = (text: string) =>
   text
