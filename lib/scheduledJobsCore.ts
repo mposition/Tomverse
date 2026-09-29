@@ -275,10 +275,12 @@ export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
  *
  *   * `mobile_auth_keyring_health` -- the exact UTC run time (S2 of
  *     `.github/audits/2026-09-10-mobile-auth-keyring-standing-check-approval.md`
- *     defers it to scheduler registration) and the per-job last-run query
- *     that S6 makes a precondition. `getScheduledJobsDashboard()` reads the
- *     newest 150 rows across every job, so a daily job's row falls out of
- *     that window within hours and reads as delayed having run perfectly.
+ *     defers it to scheduler registration). The other precondition, S6's
+ *     per-job last-run query, is now in place: `getScheduledJobsDashboard()`
+ *     reads each job's latest run, success and failure for that job alone,
+ *     where it used to read the newest 150 rows across every job and lose a
+ *     daily job's run within hours. That removes an obstacle; it does not
+ *     register this key -- S2 still stands, and the move is its own decision.
  *
  * The rows written meanwhile are not wasted: they are the history the delay
  * judgement reads on the day it is switched on.
