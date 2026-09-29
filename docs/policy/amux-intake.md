@@ -11,6 +11,9 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 2
 | 1 | 2026-09-24 mposition | 수동 Codex draft를 owner Admin이 확인하는 intake. 앱은 LLM을 호출하지 않고, Codex는 앱에 직접 쓰지 않는다. |
 | 1 | 2026-09-24 mposition | 단계 8 production backlog write를 승인한다. 코드 래치를 켠다. 법적 보존 기간과 USD 상한은 정하지 않는다. |
 | 2 | 2026-09-28 mposition | 에이전트 등록 원천. 사람이 확인하는 원천의 규칙을 그 원천으로 한정하는 범위 문장을 더하고, 엔지니어링 Agent의 등록 원천 절을 추가한다. 새 원천의 코드 래치는 끈 채로 둔다. 승격과 사람 경로 규칙은 바꾸지 않는다. |
+| 3 | 2026-09-29 mposition | 로컬 분석 원천. 운영자 PC의 Frontier 분석 package를 Admin에서 카드마다 확인한다. 코드 래치는 끈 채로 둔다. 환경 값은 설정하지 않는다. |
+
+문서 맨 아래의 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. v1과 v2의 writer는 바뀌지 않는다.
 
 실행 제어는 `docs/policy/development-agent-orchestration.md`가 정한다. 두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
 
@@ -153,3 +156,70 @@ production backlog write는 2026-09-24에 mposition이 단계 8로 승인했다.
 **스위치.** 이 원천 전용 코드 래치(출고 값 false)와 환경 값 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY=enabled`, 그리고 그 Agent 정책의 운영 mode가 함께 있어야 writer가 열린다. v1의 래치와 `TOMVERSE_AMUX_INTAKE_APPLY`와는 독립이다 — 한쪽을 켜도 다른 쪽은 열리지 않는다. 그 Agent의 정지나 이 환경 값의 해제는 다음 등록부터 막는다.
 
 **이 절이 열지 않는 것.** 승격, 카드 수정, 비공개 원문의 외부 전송, `platformProductKey`, 사람 경로 규칙의 완화, 그리고 "하지 않는 것" 목록에서 위 두 항목을 뺀 나머지 전부(원격 Git push, provider 호출·외부 게시·배포, 사용자 credit, Publisher, 자율 졸업, `AmuxBoardImportApproval` 재사용 포함).
+
+## 로컬 분석 원천
+
+approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 3
+
+이 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 코드 래치의 출고 값은 false다. `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY`는 이 승인이 설정하지 않는다. v1의 `codex-conversation` writer와 v2의 에이전트 등록 writer는 이 절이 바꾸지 않는다.
+
+이 원천은 사람이 확인하는 세 번째 등록 원천이다. 운영자 PC의 로컬 도구가 Frontier 모델로 분석 package를 만들고, 운영자가 Admin에서 package를 가져와 카드마다 확인한 뒤 `backlog`로 등록한다. 앱, Railway service, API route, 브라우저는 LLM을 호출하지 않는다.
+
+**원천의 성격.** 기존 AMUX Intake의 새 source다. 로컬 화면이 등록을 대신하지 않는다. `codex-conversation`이나 v2의 세 `sourceSystem`에 이 분석을 넣지 않는다. 그 식별자는 다른 입력과 다른 행위자에 묶여 있다.
+
+**식별자.**
+
+- `agentId`는 `amux-intake`다. 로컬 도구는 그 agent의 초안 작성기고, 등록 행위자는 아니다.
+- `sourceSystem`은 `local-agent-intake`다.
+- `sourceKey`는 `analysisId`, 카드 `localId`, normalized digest를 묶은 HMAC의 대문자 hex다. 원문 입력, analysis id, 로컬 경로는 저장하지 않는다.
+- 등록의 행위자는 사람이다. system actor는 자동 만료와 reconciliation에만 기존 `tomverse-amux-orchestrator`를 쓴다. v2의 `engineering-agent-registrar`는 이 원천에 쓰지 않는다.
+- `platformProductKey`는 쓰지 않는다. 앱이 LLM을 호출하지 않으므로 새 값을 추가하지 않는다.
+
+**모델.** 호출은 운영자 PC에서만 일어난다. 모델 id와 reasoning effort는 로컬 adapter 설정이다. 코드에 모델 이름을 고정하지 않는다. v1 허용 목록의 제안은 `gpt-6-astra`와 effort `high` 또는 `xhigh`뿐이다. 설치된 CLI의 카탈로그에 그 모델이 없거나, 설정이 허용 목록 밖이면 `frontier_model_unavailable`로 멈추고 더 작은 모델로 바꾸지 않는다. receipt에는 실제로 쓰인 model id와 effort를 남긴다. 요청한 값과 다르면 package는 거절한다.
+
+**저장하는 것과 저장하지 않는 것.**
+
+저장하지 않는다.
+
+- 운영자 원문 입력
+- LLM의 자유 형식 전체 응답
+- `executionBrief`와 `executionBriefDigest`. 등록은 backlog이고 실행 승격이 아니다
+- `description`. catalog import와 사람 원천이 null로 두는 컬럼이며, due 해석 입력이 될 수 있다
+- `classification`, `projectKey`, `teamKey`. 등록 트랜잭션은 이 컬럼을 채우지 않는다
+- `AmuxWorkDependency` 행. 선행 카드 id는 normalized 본문의 참조로만 둔다. edge를 만드는 것은 별도 승인이다
+
+저장한다. 사람이 확인한 bounded normalized 객체 하나와 그 digest다. 제안 위치는 `AmuxWorkItem`의 기존 컬럼이 아니라, 그 카드와 같은 트랜잭션에 쓰는 전용 행이다. catalog 카드와 `codex-conversation` 카드는 그 행이 없다. v1이 소비된 draft의 `title`, `scope`, `completion`을 null로 두는 계약은 유지한다.
+
+normalized 객체의 필드와 상한은 다음이다. 바이트는 UTF-8이다.
+
+| 필드 | 상한 |
+|---|---|
+| `title` | 200바이트. 카드 `title`과 같은 값 |
+| `problem`, `rationale`, `priorityRationale` | 각 2,000바이트 |
+| `scopeIn`, `scopeOut`, `acceptanceCriteria`, `evidence`, `risks` | 각 최대 12개, 항목 500바이트 |
+| `repositoryPaths` | 최대 32개, 항목 200바이트. 저장소 루트 기준 상대 경로. `..`와 절대 경로는 거절 |
+| `dependencyIds` | 최대 16개. 등록 시점에 존재하는 카드 id만 |
+| `duplicateCandidateIds` | 최대 8개 |
+| `priority` | `p0` `p1` `p2` `p3` |
+| `kindProposal` | 기존 `AmuxWorkItem.kind` 허용값. 카드에 쓰는 `kind`는 계속 `unknown` |
+| `estimatedSize` | `small` `medium` `large` |
+
+package 전체는 65,536바이트를 넘기면 거절한다. 카드 수 상한은 8이다. 근거는 한 번의 사람 검토에서 카드별 확인을 유지하는 단위이고, v2의 회차당 3건은 사람 확인이 없는 자동 등록의 상한이라 여기 복사하지 않는다. 9장 이상은 `card_cap_exceeded`로 package 전체를 거절한다. 잘라서 등록하지 않는다. 운영자 입력의 상한은 8,192바이트다.
+
+canonical JSON은 기존 AMUX canonicalizer의 정렬 규칙을 쓴다. package digest와 카드 digest는 서로 다른 도메인 접두사를 가진 SHA-256이다. 카드 필드를 고치면 그 카드의 digest만 바뀌고, 그 카드의 확인은 무효다. 이미 등록된 다른 카드의 digest는 유지한다.
+
+**분석 결과.** package의 `recommendation`은 `new_cards`, `possible_duplicate`, `extend_existing`, `needs_information`, `rejected` 중 하나다. `possible_duplicate`와 `needs_information`과 `rejected`는 등록 0이다. `extend_existing`은 기존 카드를 자동으로 고치지 않고, 운영자에게 대상 id와 차이만 보여 준다. 새 카드 등록은 `new_cards`에서 운영자가 고른 카드만이다.
+
+**snapshot.** Admin이 최소화한 read-only snapshot을 파일로 내려 준다. production 페이지가 localhost를 호출하지 않는다. snapshot 필드는 카드 id, title, status, priority, kind, bounded summary, dependency id, source digest, 생성 시각, snapshot digest다. digest는 카드 목록만 덮고 생성 시각은 package의 `snapshotGeneratedAt`으로 따로 둔다. 그래야 서버가 현재 카드로 digest를 다시 계산할 수 있다. 사용자 데이터, audit 원문, credential, 비공개 문서 원문, 실행 산출물, 대화, execution brief는 넣지 않는다. 생성 시각이 24시간을 넘기거나 package의 snapshot digest가 그 내려받기와 다르면, 중복·확장 판단은 무효이고 재분석 전 등록은 거절한다. 서버는 등록 직전에 현재 보드로 identity, digest, 중복, dependency 존재와 cycle을 다시 계산한다. LLM의 유사도 판단은 그 검사를 대신하지 않는다.
+
+**한 카드, 한 결정, 한 트랜잭션.** package는 여러 카드를 보여줄 수 있다. 등록은 카드마다 별도의 확인 digest, step-up이 유효한 동안의 사람 승인, 트랜잭션이다. 한 번의 승인으로 여러 카드를 쓰지 않는다. 중간 카드가 `outcome_unknown`이면 같은 package의 다음 카드를 자동으로 진행하지 않는다. read-back은 v1과 같다. 넷이 아니라, 이 원천의 읽기 집합은 카드, normalized 행, consumed approval, human audit이다. 넷이 같은 digest면 성공, 없으면 `absent`, 일부면 `partial`이다. 그 읽기는 쓰지 않는다.
+
+**감사.** human audit metadata는 approval id, card digest, package digest, card count, policy version, schema version, scanner version, actor, source identity뿐이다. 원문, 제목, 본문, secret finding은 넣지 않는다. 기존 hash-chained audit writer만 쓴다.
+
+**스위치.** 이 원천 전용 코드 래치의 출고 값은 false다. 환경 값은 `TOMVERSE_AMUX_INTAKE_LOCAL_APPLY=enabled`뿐이다. v1의 `TOMVERSE_AMUX_INTAKE_APPLY`와 v2의 `TOMVERSE_AMUX_INTAKE_AGENT_APPLY`와는 독립이다. 사람이 최근 step-up으로 이 환경 값을 해제하기 전에는 writer가 열리지 않는다. 모델과 system actor는 해제하지 못한다. 로컬 도구에는 자동 실행이 없다. 운영자의 분석 요청 한 번에 프로세스 한 번이고, 자동 retry는 없다.
+
+**비용.** 로컬 호출 비용은 운영자의 Frontier 구독이다. 사용자 credit, 플랜, Chat provider budget을 읽거나 쓰지 않는다. 서버 경로의 provider 호출은 0이다. USD 상한 숫자는 이 승인이 정하지 않는다. 서버가 LLM을 호출하지 않으므로 그 숫자는 이 원천의 writer를 여는 조건이 아니다. 법적 보존 기간도 이 승인이 정하지 않는다. normalized 행을 production에 남기는 활성화는 보존 정책의 별도 승인 전이다.
+
+**지역.** 중국 본토의 접속, 처리 region, 그 지역의 provider는 쓰지 않는다. 운영자 입력과 snapshot을 로컬 도구 밖의 모델로 보내는 것은 국외 처리가 될 수 있다. 개인정보로 보이는 입력은 모델 호출 전에 거절한다. DPA와 처리 지역을 확인하기 전의 실제 모델 호출은 이 승인이 허용하지 않는다.
+
+**아직 열지 않는 것.** 법적 보존 기간, production 활성화, 환경 값 설정, `executionBrief` 작성, dependency edge, `todo` 승격, owner claim, worker 실행, 원격 push, PR, 배포.

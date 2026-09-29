@@ -918,6 +918,20 @@ const REGISTRY = {
     reason:
       "Internal request idempotency; in_progress may stay visible because a COMMIT can land late.",
   },
+  AmuxLocalIntakeNormalized_priority_check: {
+    owner: "list",
+    module: "lib/amux/localIntakeCore.ts",
+    list: "LOCAL_INTAKE_PRIORITIES",
+    reason:
+      "p0 through p3 on the normalized local-intake row. The work item priority check stays the board vocabulary. This row is written only with a policy version 3 local intake card.",
+  },
+  AmuxLocalIntakeApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/localIntakeCore.ts",
+    list: "LOCAL_INTAKE_APPROVAL_STATUSES",
+    reason:
+      "consumed or outcome_unknown for one local intake card. The shipped code latch is false, so the public route does not insert one until the environment value is exactly enabled.",
+  },
   AmuxWorkDelivery_status_check: {
     owner: "database",
     reason:
