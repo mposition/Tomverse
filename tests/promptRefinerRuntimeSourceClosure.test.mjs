@@ -1476,6 +1476,7 @@ test("operator-facing contracts name the enforced runtime source closure size", 
   const expectedCount = String(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);
   const expectedRuntimeSourceCount = String(runtimeImportClosure().length);
   for (const [path, pattern] of [
+    ["prisma/schema.prisma", /Content-free v5 manifest for the exact (\d+)-file runtime import closure/],
     ["docs/ops/prompt-refiner-durable-stage-writer-contract.md", /deployment의 (\d+)개 고정 source 파일/],
     ["docs/ops/prompt-refiner-durable-stage-writer-task.md", /(\d+)-file\/16 MiB bounded exact-byte/],
     ["docs/ops/tomverse-chat-progress.md", /confirmatory v4\/v6 현재 계약은 exact (\d+)-file/],
@@ -1497,8 +1498,13 @@ test("operator-facing contracts name the enforced runtime source closure size", 
     new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개는 8개 실행 root의 local TypeScript/JavaScript`),
     "runtime TypeScript/JavaScript source-count contract drifted"
   );
+  const schema = readFileSync(join(repositoryRoot, "prisma/schema.prisma"), "utf8");
+  assert.match(
+    schema,
+    /\(stage v4\/run v6\); legacy v4 \(stage v3\/run v5\) retains 189 files\./,
+    "schema comment must distinguish current and historical manifest generations"
+  );
   for (const [path, pattern] of [
-    ["prisma/schema.prisma", /Content-free v4 manifest for the exact (\d+)-file runtime import closure/],
     ["docs/ops/prompt-refiner-confirmatory-shadow-v5.md", /\*\*(\d+)개 고정 source 파일\*\*/],
   ]) {
     const source = readFileSync(join(repositoryRoot, path), "utf8");

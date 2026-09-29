@@ -5802,8 +5802,9 @@ model PromptRefinerReservationStage {
   corpusDigest                   String
   runtimeCommitSha               String
   runtimeSourceIdentityDigest    String
-  /// Content-free v4 manifest for the exact 189-file runtime import closure;
-  /// the database validates ordered paths plus 8 MiB/file and 16 MiB total.
+  /// Content-free v5 manifest for the exact 190-file runtime import closure
+  /// (stage v4/run v6); legacy v4 (stage v3/run v5) retains 189 files.
+  /// The database validates ordered paths plus 8 MiB/file and 16 MiB total.
   runtimeSourceManifest          Json
   runtimeSourceManifestDigest    String
   runtimeEnvironment             String
