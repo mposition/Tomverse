@@ -49,6 +49,7 @@ import {
 } from "@/lib/emailFeatureFlags";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
+import { UNSUBSCRIBE_NOTICE_LANGUAGES } from "@/lib/releaseNotesDisplayRequirements";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { deferralFor } from "@/lib/emailQuietHoursCore";
@@ -1638,6 +1639,12 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     identity: readBusinessIdentity(process.env),
     language: delivery.language,
     unsubscribeUrl: unsubscribeLink,
+    // The same table the display contract is composed from, keyed by the
+    // pinned profile (one per country), so the footer prints what the contract
+    // the row was pinned to says it prints.
+    unsubscribeNoticeLanguages: profile
+      ? UNSUBSCRIBE_NOTICE_LANGUAGES[profile.profileKey] ?? []
+      : [],
     rendered: templateRendered,
     suppressSubjectPrefix,
   });

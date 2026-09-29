@@ -292,8 +292,21 @@ export type SetPreferenceInput = {
     /** The mailbox the link was sent to, re-checked under the user row lock. */
     addressDigest: string;
   };
+  /**
+   * Called inside the transaction that wrote a consent record, with that
+   * record. How a caller queues the 14-day processing-result notice with the
+   * change it reports (docs/policy/email-product-news-redesign-draft.md 7.7),
+   * without this module reaching the outbox itself.
+   */
+  onConsentRecorded?: ConsentRecordedHook;
   now?: Date;
 };
+
+/** What a consent-record hook receives. */
+export type ConsentRecordedHook = (
+  tx: Prisma.TransactionClient,
+  record: { id: string; userId: string; emailAddress: string; action: string; occurredAt: Date }
+) => Promise<void>;
 
 export async function setPreference(input: SetPreferenceInput): Promise<PreferenceChangeResult> {
   const decision = preferenceChangeDecision({
@@ -656,6 +669,15 @@ export async function applyPreferenceChange(
       },
     });
     consentRecordId = consentRecord.id;
+    if (input.onConsentRecorded) {
+      await input.onConsentRecorded(tx, {
+        id: consentRecord.id,
+        userId: input.userId,
+        emailAddress: consentRecord.emailAddress,
+        action: consentRecord.action,
+        occurredAt: consentRecord.occurredAt,
+      });
+    }
   }
 
   // Every change of the enabled state, append-only. The id keys the suppression
@@ -748,9 +770,22 @@ export async function withdrawAllMarketing(input: {
   deliveryId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  /** Called once, for the first withdrawal this request records. */
+  onConsentRecorded?: ConsentRecordedHook;
   now?: Date;
 }) {
   const results: PreferenceChangeResult[] = [];
+  // One request, one processing result: the hook runs for the first purpose
+  // that actually records a withdrawal, not once per purpose.
+  let reported = false;
+  const hook = input.onConsentRecorded;
+  const once: ConsentRecordedHook | undefined = hook
+    ? async (tx, record) => {
+        if (reported) return;
+        await hook(tx, record);
+        reported = true;
+      }
+    : undefined;
   for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
     results.push(
       await setPreference({
@@ -758,6 +793,7 @@ export async function withdrawAllMarketing(input: {
         purpose,
         enabled: false,
         viaToken: input.source === "unsubscribe_link",
+        ...(once ? { onConsentRecorded: once } : {}),
       })
     );
   }

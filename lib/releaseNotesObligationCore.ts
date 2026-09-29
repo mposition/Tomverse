@@ -315,16 +315,24 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     warnDaysBefore: null,
     notes: `${DRAFT} section 7.7: name, address, email and telephone number (시행령 별표 6). Against emailBodyDisclosures and not emailBusinessIdentity: the latter reports a missing jurisdiction block as a warning, on purpose, because whether this deployment has Korean recipients is not a fact an environment holds -- so it stayed ready with no Korean telephone number and a review found this duty settled against it. The per-country check asks for that country's own blocks as errors, and reads the stored profile's footerBlocks as well as the environment, because the renderer prints the blocks the row names.`,
   },
-  // `bilingual_unsubscribe_notice` is deliberately absent. Section 7.7 marks it
-  // implemented, and this build does not do it: `renderJurisdictionFooter()`
-  // picks one language for the whole footer, so a Korean recipient is told about
-  // unsubscribing in Korean and an English one in English -- never both, which is
-  // what 별표 6 asks for. A review caught the first version claiming otherwise
-  // and resting it on the keyring check, which confirms neither language.
-  //
-  // So the duty has no row, it is unsettled, and its rule does not send. That is
-  // the mechanism reporting an unimplemented duty rather than a seed asserting
-  // one, and it is what has to be built before Korea can be sent to.
+  {
+    countryCode: "KR",
+    obligationKey: "bilingual_unsubscribe_notice",
+    state: "implemented",
+    readinessCheck: "emailBilingualUnsubscribeNotice",
+    dueByIso: null,
+    warnDaysBefore: null,
+    notes: `${DRAFT} section 7.7: the unsubscribe notice in Korean and English (시행령 별표 6), whatever the message's language. The footer renders it in every language UNSUBSCRIBE_NOTICE_LANGUAGES names for the pinned profile (S6b); the check renders a footer in each message language and confirms both notices are there, so a build that stops doing it unsettles the duty instead of keeping it.`,
+  },
+  {
+    countryCode: "KR",
+    obligationKey: "consent_result_notice_14_days",
+    state: "implemented",
+    readinessCheck: "emailProcessingResultNotice",
+    dueByIso: null,
+    warnDaysBefore: null,
+    notes: `${DRAFT} section 7.7: the result of a consent, an unsubscribe or a withdrawal, within 14 days (제50조제7항, 시행령 제62조의2). consent_result_notice and unsubscribe_result_notice carry the approved wording of docs/policy/email-consent-copy-draft.md sections 4.1 and 4.2 and are queued in the transaction that records the change (S6b); the check confirms both are registered and render.`,
+  },
   {
     countryCode: "KR",
     obligationKey: "no_login_for_unsubscribe",

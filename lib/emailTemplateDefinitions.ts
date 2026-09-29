@@ -198,6 +198,9 @@ export const LOGIN_METHOD_UNLINKED_TEMPLATE = "login_method_unlinked";
  * (`CHANGE_NOTICE_APPROVED_CONTENT_HASHES` in lib/emailPolicyPublication.ts).
  */
 export const POLICY_CHANGE_NOTICE_TEMPLATE = "policy_change_notice";
+/** The 14-day processing-result notices (docs/policy/email-consent-copy-draft.md §4.1, §4.2). */
+export const CONSENT_RESULT_NOTICE_TEMPLATE = "consent_result_notice";
+export const UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE = "unsubscribe_result_notice";
 
 const definitions: AnyDefinition[] = [
   {
@@ -271,6 +274,32 @@ const definitions: AnyDefinition[] = [
     render: (_payload: PolicyChangeNoticePayload, language) =>
       buildPolicyChangeNoticeEmail({ language, appUrl: appUrl() }),
     placeholderPayload: {},
+  },
+  {
+    key: CONSENT_RESULT_NOTICE_TEMPLATE,
+    // The result of a consent, within 14 days (Korea's 제50조제7항). Not
+    // advertising: it reports a processing result, carries no promotion and no
+    // unsubscribe link, and goes out whatever the marketing switches say.
+    senderRole: "general",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: ProcessingResultNoticePayload, language) =>
+      buildProcessingResultNotice("consent", payload, language),
+    placeholderPayload: { date: "{{consentDate}}" },
+  },
+  {
+    key: UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE,
+    // The result of an unsubscribe or a withdrawal. Sent to the address that
+    // just unsubscribed, because it is the result of that request and not
+    // advertising (docs/policy/email-consent-copy-draft.md §4.2).
+    senderRole: "general",
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: ProcessingResultNoticePayload, language) =>
+      buildProcessingResultNotice("unsubscribe", payload, language),
+    placeholderPayload: { date: "{{processedDate}}" },
   },
   {
     key: LOGIN_METHOD_LINKED_TEMPLATE,
@@ -700,5 +729,104 @@ export function buildPolicyChangeNoticeEmail(input: {
       `<p>${escapeNoticeHtml(copy.read)}<br><a href="${escapeNoticeHtml(privacy)}">${escapeNoticeHtml(privacy)}</a><br><a href="${escapeNoticeHtml(terms)}">${escapeNoticeHtml(terms)}</a></p>`,
       `<p>${escapeNoticeHtml(copy.why)}</p>`,
     ].join(""),
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * The processing-result notices (`consent_result_notice`,
+ * `unsubscribe_result_notice`).
+ *
+ * The approved wording of docs/policy/email-consent-copy-draft.md §4.1 and §4.2,
+ * byte for byte (tests/processingResultNotice.test.mjs reads the document).
+ * Korean and English only, as approved: a Korean-language recipient gets the
+ * Korean text, everyone else the English. Here, like the amendment notice,
+ * because this file is in the Prompt Refiner's sealed runtime closure and a new
+ * module imported from it would grow that closure.
+ * ------------------------------------------------------------------ */
+
+/** The date the processing happened, as YYYY-MM-DD on the Asia/Seoul calendar. */
+export type ProcessingResultNoticePayload = { date: string };
+
+type ProcessingResultCopy = { subject: string; lines: readonly string[]; closing: string };
+
+const PROCESSING_RESULT_COPY = {
+  consent: {
+    ko: {
+      subject: "광고성 정보 수신동의 처리 결과",
+      lines: [
+        "전송자: Tomverse Pty Ltd",
+        "처리 내용: 이메일 광고성 정보 수신동의",
+        "처리 결과: 동의 처리 완료",
+        "동의일: {date}",
+      ],
+      closing:
+        "이 동의는 철회하실 때까지 유효합니다. 언제든 이메일 설정이나 광고성 메일의 수신거부 링크에서 로그인 없이 철회하실 수 있습니다.",
+    },
+    en: {
+      subject: "Your marketing email preference has been turned on",
+      lines: [
+        "Sender: Tomverse Pty Ltd",
+        "Request: consent to receive marketing email",
+        "Outcome: turned on",
+        "Date: {date}",
+      ],
+      closing:
+        "This consent stays in effect until you withdraw it. You can withdraw it at any time in your email settings or with the unsubscribe link in any marketing message, without signing in.",
+    },
+  },
+  unsubscribe: {
+    ko: {
+      subject: "광고성 정보 수신거부 처리 결과",
+      lines: [
+        "전송자: Tomverse Pty Ltd",
+        "처리 내용: 이메일 광고성 정보 수신거부",
+        "처리 결과: 수신거부 처리 완료",
+        "처리일: {date}",
+      ],
+      closing:
+        "이 주소로 광고성 이메일을 더 보내지 않습니다. 로그인 코드, 결제 영수증, 서비스 공지는 계속 발송됩니다.",
+    },
+    en: {
+      subject: "Your marketing email has been turned off",
+      lines: [
+        "Sender: Tomverse Pty Ltd",
+        "Request: stop marketing email",
+        "Outcome: turned off",
+        "Date: {date}",
+      ],
+      closing:
+        "We will not send marketing email to this address again. Sign-in codes, billing receipts and service notices continue.",
+    },
+  },
+} as const;
+
+const processingResultCopy = (
+  kind: "consent" | "unsubscribe",
+  language: string | null | undefined
+): ProcessingResultCopy => {
+  const table = kind === "consent" ? PROCESSING_RESULT_COPY.consent : PROCESSING_RESULT_COPY.unsubscribe;
+  return language === "ko" ? table.ko : table.en;
+};
+
+const escapeResultHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+export function buildProcessingResultNotice(
+  kind: "consent" | "unsubscribe",
+  payload: ProcessingResultNoticePayload,
+  language: string | null | undefined
+) {
+  const copy = processingResultCopy(kind, language);
+  const lines = copy.lines.map((line) => line.replace("{date}", payload.date));
+  return {
+    subject: copy.subject,
+    text: `${lines.join("\n")}\n\n${copy.closing}`,
+    html:
+      `<p>${lines.map(escapeResultHtml).join("<br>")}</p>` +
+      `<p>${escapeResultHtml(copy.closing)}</p>`,
   };
 }

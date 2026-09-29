@@ -1374,6 +1374,16 @@ releaseNotesAuthorizationVerdict({
 - 수신거부·철회는 **짧은 transactional 확인 메일**을 보냅니다(수신거부한 주소에도
 나가는 service 메일입니다). `risk_accepted`로 받던 사람이 수신거부해도 같습니다.
 
+**구현(S6b)** — 두 통지(`consent_result_notice`, `unsubscribe_result_notice`)는 동의 문안
+§4.1·§4.2의 승인 문안 그대로이며(한국어·영어; 그 밖의 언어는 영어), 변경을 기록한
+transaction 안에서 enqueue됩니다(`lib/emailPreferences.ts`의 `onConsentRecorded`,
+`lib/processingResultNotice.ts`). 전체 수신거부는 요청 하나에 통지 하나입니다. 날짜는
+Asia/Seoul 달력이고, 모든 주소에 보냅니다 — 결과 보고라서 틀린 곳이 없고, 국가로
+고르면 아직 국가가 확인되지 않은 한국 수신자가 빠집니다. 한·영 수신거부 안내는
+footer가 프로필의 `UNSUBSCRIBE_NOTICE_LANGUAGES`대로 두 언어를 함께 싣고, 두 의무 모두
+실행 시점에 렌더해 보는 readiness check로 `implemented`를 뒷받침합니다. 불만 신고와
+개인정보 요청으로 생기는 철회는 사람의 요청이 아니므로 통지하지 않습니다.
+
 **2년 고지 — 연기합니다.** 가장 이른 동의가 들어오는 날부터 첫 기한은 2028년입니다.
 지금 만들지 않되, **잊지 않는 장치는 지금 둡니다** — readiness가 한국 수신자마다
 **`실제 동의일 ?? noticeAnchorAt` + 2년**을 계산하고, 그 최솟값 − 60일을 넘기면

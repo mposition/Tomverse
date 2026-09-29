@@ -75,6 +75,13 @@ export type FooterInput = {
   unsubscribeUrl?: string | null;
   /** Why this person is receiving it (C4). One short clause. */
   reasonLine?: string | null;
+  /**
+   * The languages the unsubscribe notice must also appear in, whatever the
+   * message's own language (draft section 7.7: Korea's 별표 6 asks for Korean
+   * and English). The message's language comes first; the rest follow in the
+   * order given. Absent or empty: the notice is in the message's language only.
+   */
+  unsubscribeNoticeLanguages?: readonly string[];
 };
 
 export type FooterResult =
@@ -258,17 +265,22 @@ const renderBlock = (
     case "unsubscribe_link": {
       const url = input.unsubscribeUrl?.trim();
       if (!url) return null;
-      return {
-        text: `${copy.unsubscribe}: ${url}`,
+      const noticeIn = (notice: FooterCopy) => ({
+        text: `${notice.unsubscribe}: ${url}`,
         html:
           `<a href="${escapeHtml(url)}" style="color:#2563eb;">` +
-          `${escapeHtml(copy.unsubscribe)}</a> &middot; ` +
+          `${escapeHtml(notice.unsubscribe)}</a> &middot; ` +
           escapeHtml(
-            copy.unsubscribeSla.replace(
+            notice.unsubscribeSla.replace(
               "{days}",
               String(input.profile.unsubscribeSlaBusinessDays)
             )
           ),
+      });
+      const notices = unsubscribeNoticeCopies(input, copy).map(noticeIn);
+      return {
+        text: notices.map((notice) => notice.text).join("\n"),
+        html: notices.map((notice) => notice.html).join("<br>"),
       };
     }
     case "unsubscribe_reason": {
@@ -278,6 +290,47 @@ const renderBlock = (
     default:
       return null;
   }
+};
+
+/**
+ * The unsubscribe notice's copies: the message's language, then each required
+ * language not already covered, in the order given. One copy when nothing more
+ * is required.
+ */
+const unsubscribeNoticeCopies = (input: FooterInput, copy: FooterCopy): FooterCopy[] => {
+  const own = normalizeLanguage(input.language);
+  const languages: FooterLanguage[] = [own];
+  for (const language of input.unsubscribeNoticeLanguages ?? []) {
+    const normalized = normalizeLanguage(language);
+    if (!languages.includes(normalized)) languages.push(normalized);
+  }
+  return languages.map((language) => (language === own ? copy : COPY_BY_LANGUAGE(language)));
+};
+
+/**
+ * Whether a footer rendered for a country that requires the unsubscribe notice
+ * in `languages` actually carries it in each of them, for a message in any of
+ * the footer's languages. The readiness check behind Korea's
+ * `bilingual_unsubscribe_notice` duty: a code property, asked at runtime so a
+ * build that stops doing it cannot keep the duty settled.
+ */
+export const unsubscribeNoticeCarriesLanguages = (languages: readonly string[]): boolean => {
+  const url = "https://example.invalid/unsubscribe";
+  return LANGUAGES.every((messageLanguage) => {
+    const rendered = renderJurisdictionFooter({
+      profile: { profileKey: "check", footerBlocks: ["unsubscribe_link"], unsubscribeSlaBusinessDays: 10 },
+      identity: {},
+      language: messageLanguage,
+      unsubscribeUrl: url,
+      unsubscribeNoticeLanguages: languages,
+    });
+    return (
+      rendered.ok &&
+      languages.every((language) =>
+        rendered.text.includes(`${COPY_BY_LANGUAGE(normalizeLanguage(language)).unsubscribe}: ${url}`)
+      )
+    );
+  });
 };
 
 /**
@@ -298,6 +351,25 @@ export const RENDERABLE_FOOTER_BLOCKS = [
   "unsubscribe_link",
   "unsubscribe_reason",
 ] as const;
+
+const COPY_BY_LANGUAGE = (language: FooterLanguage): FooterCopy => {
+  switch (language) {
+    case "ko":
+      return COPY.ko;
+    case "zh":
+      return COPY.zh;
+    case "fr":
+      return COPY.fr;
+    case "de":
+      return COPY.de;
+    case "es":
+      return COPY.es;
+    case "pt":
+      return COPY.pt;
+    default:
+      return COPY.en;
+  }
+};
 
 export const renderJurisdictionFooter = (input: FooterInput): FooterResult => {
   const copy = COPY[normalizeLanguage(input.language)];

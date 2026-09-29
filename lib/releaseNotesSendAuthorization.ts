@@ -16,6 +16,8 @@ import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore"
 import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
 import { REQUIRED_SUBJECT_PREFIX, subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
+import { unsubscribeNoticeCarriesLanguages } from "@/lib/emailFooterRenderer";
+import { processingResultNoticeReady } from "@/lib/processingResultNotice";
 import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
 import { earliestBiennialNoticeDueAt } from "@/lib/biennialConsentNoticeReadiness";
 import {
@@ -25,6 +27,7 @@ import {
 import {
   displayRequirementsFor,
   profilesForCountries,
+  UNSUBSCRIBE_NOTICE_LANGUAGES,
 } from "@/lib/releaseNotesDisplayRequirements";
 import {
   releaseNotesSendVerdict,
@@ -304,6 +307,10 @@ export async function releaseNotesSendAuthorization(
         emailFooterDisclosures: footer.disclosuresPresent,
         emailSubjectLabels: subject.labelsPresent,
         emailUnsubscribeKeyring: unsubscribeKeyringReadiness().ready,
+        emailBilingualUnsubscribeNotice: unsubscribeNoticeCarriesLanguages(
+          UNSUBSCRIBE_NOTICE_LANGUAGES.KR ?? []
+        ),
+        emailProcessingResultNotice: processingResultNoticeReady(),
       },
     };
   });

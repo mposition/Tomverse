@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
+import { prepareProcessingResultNotice } from "@/lib/processingResultNotice";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -226,6 +227,7 @@ export async function PATCH(req: Request) {
       }
     } else if (body.withdrawAllMarketing) {
       await withdrawAllMarketing({
+        onConsentRecorded: await prepareProcessingResultNotice(userId),
         userId,
         capturedVia: "preference_center",
         source: "preference_center",
@@ -243,6 +245,11 @@ export async function PATCH(req: Request) {
       }
 
       const result = await setPreference({
+        // A withdrawal answers with its result; switching on only requests a
+        // confirmation, which the confirmation path reports when it is used.
+        ...(body.enabled === false
+          ? { onConsentRecorded: await prepareProcessingResultNotice(userId) }
+          : {}),
         userId,
         purpose: body.purpose,
         enabled: body.enabled,
