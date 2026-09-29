@@ -53,6 +53,11 @@ struct RoutingSnapshotRequest<'a> {
     expected_revision: i64,
 }
 
+/// The routing snapshot the app sends (lib/amux/wireContract.ts,
+/// `amuxRoutingResponseSchema`). The field list is pinned against that schema
+/// by tests/amuxWireContract.test.ts and against the shared fixture
+/// tests/fixtures/amux-routing-snapshot-v1.json on both sides, so a field the
+/// server adds fails a test instead of the first non-empty queue.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RoutingSnapshotResponse {
@@ -61,6 +66,74 @@ pub struct RoutingSnapshotResponse {
     pub reason: Option<String>,
     pub task: Option<RoutingTaskProfile>,
     pub candidates: Vec<CandidateRoutingSignals>,
+    /// Per-worker routing evidence, keyed by worker name. The scorer reads
+    /// the candidate signals, which the server already derived from this, so
+    /// the evidence stays an opaque object here: only its outer shape (object
+    /// values under canonical worker names, empty on a refusal) is checked.
+    /// Its inner fields are the server schema's to police.
+    pub telemetry: serde_json::Map<String, Value>,
+}
+
+const MAX_ROUTING_CANDIDATES: usize = 128;
+
+/// The invariants the orchestrator relies on before scoring a snapshot.
+pub(crate) fn routing_snapshot_is_valid(snapshot: &RoutingSnapshotResponse) -> bool {
+    if snapshot.eligible {
+        snapshot.reason.is_none()
+            && snapshot.task.as_ref().is_some_and(|task| {
+                !task.task_kind.is_empty()
+                    && task.task_kind.len() <= 64
+                    && (0..=10).contains(&task.complexity)
+                    && (0..=10).contains(&task.risk)
+                    && task.files_expected.is_none_or(|value| value <= 100_000)
+            })
+            && snapshot.candidates.len() <= MAX_ROUTING_CANDIDATES
+            && snapshot.candidates.iter().all(|candidate| {
+                is_canonical_machine_id(&candidate.worker.worker_name)
+                    && !candidate.worker.provider.is_empty()
+                    && candidate.worker.provider.len() <= 80
+                    && candidate
+                        .worker
+                        .model
+                        .as_ref()
+                        .is_none_or(|value| value.len() <= 160)
+                    && candidate.worker.routing_roles.len() <= 64
+                    && candidate
+                        .worker
+                        .routing_roles
+                        .iter()
+                        .all(|value| !value.is_empty() && value.len() <= 64)
+                    && candidate.worker.status.len() <= 32
+                    && [
+                        candidate.predicted_success,
+                        candidate.quota_remaining,
+                        candidate.expected_speed,
+                        candidate.low_rework,
+                        candidate.low_human_attention,
+                        candidate.cost_efficiency,
+                    ]
+                    .iter()
+                    .all(|value| {
+                        value.is_none_or(|number| {
+                            number.is_finite() && (0.0..=1.0).contains(&number)
+                        })
+                    })
+            })
+            && snapshot.telemetry.len() <= MAX_ROUTING_CANDIDATES
+            && snapshot
+                .telemetry
+                .iter()
+                .all(|(worker, evidence)| is_canonical_machine_id(worker) && evidence.is_object())
+    } else {
+        snapshot
+            .reason
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+            && snapshot.task.is_none()
+            && snapshot.candidates.is_empty()
+            && !snapshot.execution_ready
+            && snapshot.telemetry.is_empty()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -103,11 +176,27 @@ pub const TOMVERSE_INTERNAL_CLAIM_TIMEOUT: Duration = Duration::from_secs(18);
 /// transport. Unknown outcomes stop; never blindly retry.
 pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// The auto-promotion tick waits up to five seconds for a connection and runs
-/// one transaction of up to twenty (lib/amux/autoPromotionService.ts). Thirty
-/// seconds covers both plus transport; a timeout is an unknown outcome the
-/// server records on its side, and the scheduler does not retry it.
+/// The auto-promotion tick runs several short transactions -- the expiry of
+/// due grants, at most one consume, and the record of a lost consume -- inside
+/// a 27-second route budget anchored on the database clock
+/// (`AUTO_TICK_ROUTE_BUDGET_MS`, lib/amux/autoPromotionCore.ts). The server
+/// starts no transaction that could not finish inside that budget, and each
+/// one checks the deadline as its last statement before COMMIT and rolls back
+/// if it has passed. That check is not the COMMIT: a stall between the two can
+/// still let a COMMIT land after the deadline, and no test yet proves
+/// otherwise (policy version 18). Thirty seconds adds the three seconds the
+/// lifecycle routes keep for connect, commit and transport.
+///
+/// A timeout here is an unknown outcome for this client only. The server does
+/// not learn of it and records nothing for it. The scheduler logs it and does
+/// not retry; the next tick reads the grants again, and a consume that did
+/// commit has its consumption row, so that grant is not consumed twice.
 pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The server's route budget for the tick, pinned against
+/// lib/amux/autoPromotionCore.ts by tests/amuxClaimContractParity.test.mjs.
+#[cfg(test)]
+const AUTO_PROMOTION_ROUTE_BUDGET: Duration = Duration::from_secs(27);
 
 const MAX_CLAIM_RESPONSE_BYTES: usize = 8 * 1024;
 
@@ -454,57 +543,7 @@ impl TomverseApi {
             .await?;
         let (_, snapshot): (_, RoutingSnapshotResponse) =
             read_bounded_json(response, &[StatusCode::OK], MAX_ROUTING_RESPONSE_BYTES).await?;
-        let valid_snapshot = if snapshot.eligible {
-            snapshot.reason.is_none()
-                && snapshot.task.as_ref().is_some_and(|task| {
-                    !task.task_kind.is_empty()
-                        && task.task_kind.len() <= 64
-                        && (0..=10).contains(&task.complexity)
-                        && (0..=10).contains(&task.risk)
-                        && task.files_expected.is_none_or(|value| value <= 100_000)
-                })
-                && snapshot.candidates.len() <= 128
-                && snapshot.candidates.iter().all(|candidate| {
-                    is_canonical_machine_id(&candidate.worker.worker_name)
-                        && !candidate.worker.provider.is_empty()
-                        && candidate.worker.provider.len() <= 80
-                        && candidate
-                            .worker
-                            .model
-                            .as_ref()
-                            .is_none_or(|value| value.len() <= 160)
-                        && candidate.worker.routing_roles.len() <= 64
-                        && candidate
-                            .worker
-                            .routing_roles
-                            .iter()
-                            .all(|value| !value.is_empty() && value.len() <= 64)
-                        && candidate.worker.status.len() <= 32
-                        && [
-                            candidate.predicted_success,
-                            candidate.quota_remaining,
-                            candidate.expected_speed,
-                            candidate.low_rework,
-                            candidate.low_human_attention,
-                            candidate.cost_efficiency,
-                        ]
-                        .iter()
-                        .all(|value| {
-                            value.is_none_or(|number| {
-                                number.is_finite() && (0.0..=1.0).contains(&number)
-                            })
-                        })
-                })
-        } else {
-            snapshot
-                .reason
-                .as_deref()
-                .is_some_and(|value| !value.is_empty())
-                && snapshot.task.is_none()
-                && snapshot.candidates.is_empty()
-                && !snapshot.execution_ready
-        };
-        if !valid_snapshot {
+        if !routing_snapshot_is_valid(&snapshot) {
             bail!("invalid Tomverse AMUX routing snapshot invariant");
         }
         Ok(snapshot)
@@ -563,8 +602,14 @@ mod tests {
         // outcome. Connect stays shorter than every total deadline.
         assert!(TOMVERSE_INTERNAL_CLAIM_TIMEOUT > Duration::from_secs(15));
         assert!(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT > Duration::from_secs(12));
-        // Auto-promotion: 5 s connection wait plus a 20 s transaction.
-        assert!(TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT > Duration::from_secs(25));
+        // Auto-promotion: the tick's route budget, a connect, and at least a
+        // second for commit and response transport.
+        assert!(
+            TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT
+                >= AUTO_PROMOTION_ROUTE_BUDGET
+                    + TOMVERSE_INTERNAL_CONNECT_TIMEOUT
+                    + Duration::from_secs(1)
+        );
         assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_REQUEST_TIMEOUT);
         assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT);
     }
@@ -637,6 +682,66 @@ mod tests {
         })
         .unwrap();
         assert_eq!(serialized, fixture);
+    }
+
+    fn routing_snapshot_fixture(name: &str) -> Value {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-routing-snapshot-v1.json"
+        ))
+        .unwrap();
+        fixtures[name].clone()
+    }
+
+    #[test]
+    fn the_server_routing_snapshot_with_telemetry_parses_and_validates() {
+        // tests/amuxWireContract.test.ts parses the same file with the server's
+        // response schema, so the two sides agree on one real body.
+        for name in ["eligible", "refusal"] {
+            let snapshot: RoutingSnapshotResponse =
+                serde_json::from_value(routing_snapshot_fixture(name)).unwrap();
+            assert!(routing_snapshot_is_valid(&snapshot), "{name}");
+        }
+        let eligible: RoutingSnapshotResponse =
+            serde_json::from_value(routing_snapshot_fixture("eligible")).unwrap();
+        assert_eq!(eligible.telemetry.len(), 2);
+        assert_eq!(eligible.candidates.len(), 2);
+    }
+
+    #[test]
+    fn routing_snapshot_still_refuses_an_unknown_top_level_field() {
+        for name in ["eligible", "refusal"] {
+            let mut body = routing_snapshot_fixture(name);
+            body["future_field"] = serde_json::json!(true);
+            assert!(serde_json::from_value::<RoutingSnapshotResponse>(body).is_err(), "{name}");
+        }
+        // Telemetry is part of the contract, not an optional extra.
+        let mut missing = routing_snapshot_fixture("eligible");
+        missing.as_object_mut().unwrap().remove("telemetry");
+        assert!(serde_json::from_value::<RoutingSnapshotResponse>(missing).is_err());
+    }
+
+    #[test]
+    fn routing_snapshot_telemetry_keeps_its_outer_shape() {
+        let mut refusal = routing_snapshot_fixture("refusal");
+        refusal["telemetry"] = serde_json::json!({
+            "codex-a": { "history": { "sample_size": 0 } }
+        });
+        let refusal: RoutingSnapshotResponse = serde_json::from_value(refusal).unwrap();
+        assert!(!routing_snapshot_is_valid(&refusal));
+
+        let mut not_object = routing_snapshot_fixture("eligible");
+        not_object["telemetry"]["codex-a"] = serde_json::json!("evidence");
+        let not_object: RoutingSnapshotResponse = serde_json::from_value(not_object).unwrap();
+        assert!(!routing_snapshot_is_valid(&not_object));
+
+        let mut bad_key = routing_snapshot_fixture("eligible");
+        bad_key["telemetry"]["-bad name"] = serde_json::json!({});
+        let bad_key: RoutingSnapshotResponse = serde_json::from_value(bad_key).unwrap();
+        assert!(!routing_snapshot_is_valid(&bad_key));
+
+        let mut array = routing_snapshot_fixture("eligible");
+        array["telemetry"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<RoutingSnapshotResponse>(array).is_err());
     }
 
     #[test]

@@ -4,7 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AMUX_CLAIM_CLOSED_REFUSAL_REASONS } from "../lib/amux/auditContract.ts";
-import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
+import {
+  AMUX_EXECUTION_API_CODE_LATCH,
+  amuxExecutionApiPermitted,
+  isAmuxExecutionApiEnabled,
+} from "../lib/amux/executionGate.ts";
 
 const rustSource = readFileSync(
   join(
@@ -324,14 +328,27 @@ test("selection reads reserve connect and response time beyond both route budget
   }
 });
 
-test("a production build cannot activate future execution with an environment flag", () => {
+test("the execution API opens on the code latch and the flag, in any NODE_ENV", () => {
+  // Policy version 18.
+  assert.equal(AMUX_EXECUTION_API_CODE_LATCH, true);
+  assert.equal(amuxExecutionApiPermitted(false, "1"), false);
+  assert.equal(amuxExecutionApiPermitted(true, "1"), true);
+  assert.equal(amuxExecutionApiPermitted(true, " 1 "), true);
+  for (const value of [undefined, "", "0", "true", "enabled", "11"]) {
+    assert.equal(amuxExecutionApiPermitted(true, value), false, String(value));
+  }
   const priorNodeEnv = process.env.NODE_ENV;
   const priorFlag = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
   try {
     process.env.NODE_ENV = "production";
     process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+    assert.equal(isAmuxExecutionApiEnabled(), true);
+    delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
     assert.equal(isAmuxExecutionApiEnabled(), false);
     process.env.NODE_ENV = "test";
+    assert.equal(isAmuxExecutionApiEnabled(), false);
+    // NODE_ENV=test is not a special case either way.
+    process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
     assert.equal(isAmuxExecutionApiEnabled(), true);
   } finally {
     if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -447,4 +464,43 @@ test("unknown future-lifecycle outcomes stop the whole runtime run", () => {
     /AMUX_BOARD_TICK_UNVERIFIED[\s\S]*?return Err\(anyhow!\(\s*"AMUX board tick outcome unknown; process run dormant"\s*\)\)/,
   );
   assert.match(boardSource, /AMUX_EXECUTION_START_OUTCOME_UNKNOWN/);
+});
+
+test("the auto-promotion client deadline outlives the tick's DB-clock route budget", async () => {
+  const { AUTO_TICK_ROUTE_BUDGET_MS } = await import("../lib/amux/autoPromotionCore.ts");
+  const seconds = (name) =>
+    Number(
+      rustSource.match(
+        new RegExp(`${name}: Duration = Duration::from_secs\\((\\d+)\\)`),
+      )?.[1],
+    ) * 1_000;
+  const connectMs = seconds("TOMVERSE_INTERNAL_CONNECT_TIMEOUT");
+  const clientMs = seconds("TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT");
+  assert.ok(Number.isFinite(clientMs) && Number.isFinite(connectMs));
+  // The Rust test pins its own copy of the budget; it must be this one.
+  assert.equal(seconds("AUTO_PROMOTION_ROUTE_BUDGET"), AUTO_TICK_ROUTE_BUDGET_MS);
+  assert.ok(
+    clientMs >= AUTO_TICK_ROUTE_BUDGET_MS + connectMs + 1_000,
+    "the tick client must reserve a second beyond route and connect",
+  );
+  const start = rustSource.indexOf("pub async fn auto_promotion_tick(");
+  assert.ok(start >= 0);
+  const next = rustSource.indexOf("\n    pub async fn ", start + 1);
+  assert.match(
+    rustSource.slice(start, next),
+    /\.timeout\(TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT\)/,
+  );
+  // A client timeout is unknown only on the client side; the server does not
+  // record it, and the comment must not say it does.
+  const doc = rustSource.slice(
+    rustSource.lastIndexOf("///", rustSource.indexOf("pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT")) - 2_000,
+    rustSource.indexOf("pub const TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT"),
+  );
+  assert.doesNotMatch(doc, /server records it on its side/);
+  assert.doesNotMatch(doc, /runs\s+one transaction/);
+  const route = readFileSync(
+    join(process.cwd(), "app", "api", "internal", "amux", "auto-promotion", "tick", "route.ts"),
+    "utf8",
+  );
+  assert.match(route, /\}, AUTO_TICK_ROUTE_BUDGET_MS\);/);
 });

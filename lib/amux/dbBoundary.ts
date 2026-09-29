@@ -14,9 +14,11 @@ export const AMUX_DB_MAX_WAIT_MS = 250;
 // but the derived transaction budget is an application estimate. This code
 // does not set transaction_timeout: PostgreSQL 17 could bound occupancy only
 // from an in-transaction SET (not BEGIN-to-SET or durable COMMIT); PostgreSQL
-// 16 lacks that setting. Future execution stays hard-disabled until the DB is
-// proven to prevent a late run from being recorded as success. Neither a SQL
-// statement-count cap nor a whole-transaction time bound is itself required.
+// 16 lacks that setting. Policy version 18 opens the execution API behind a
+// code latch and an environment variable; it does not claim the DB prevents a
+// late run from being recorded as success. No test proves that yet, and moving
+// this code to main waits on one. Neither a SQL statement-count cap nor a
+// whole-transaction time bound is itself required.
 export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // Single-operation future lifecycle routes have a shared DB-clock deadline.
 // The Rust client allows fifteen seconds for connect, route and response
@@ -169,14 +171,81 @@ export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
 
-export const amuxRouteHasBudgetFor = (boundary: AmuxDbBoundary): boolean => {
+/**
+ * Coarse admission for a transaction whose application per-transaction
+ * maximum is `transactionMaxMs`. Outside `withAmuxRouteBudget` there is no
+ * route deadline and nothing to refuse.
+ */
+export const amuxRouteHasBudgetForMs = (transactionMaxMs: number): boolean => {
   const deadline = amuxRouteDeadline.getStore();
   if (!deadline) return true;
-  const maxMs = amuxDbTransactionBudgetMs(boundary);
   // Coarse admission only. The authoritative cross-transaction limit is
   // checked against the PostgreSQL clock in each transaction setup/fence.
-  return deadline.localDeadlineMs - Date.now() >= maxMs;
+  return deadline.localDeadlineMs - Date.now() >= transactionMaxMs;
 };
+
+export const amuxRouteHasBudgetFor = (boundary: AmuxDbBoundary): boolean =>
+  amuxRouteHasBudgetForMs(amuxDbTransactionBudgetMs(boundary));
+
+/**
+ * The route deadline for a transaction that is not a `withAmuxDbBoundary`
+ * one: it keeps its own statement timeout and Prisma limits (the
+ * auto-promotion transactions are such), and declares its own application
+ * per-transaction maximum. Inside `withAmuxRouteBudget` it meets the same two
+ * database-clock checks as a bounded transaction.
+ *
+ * `anchorAmuxRouteDeadline` runs first in the transaction. It anchors the
+ * route's database deadline on the first transaction of the route, as
+ * `withAmuxDbBoundary` does, and refuses when less than `transactionMaxMs`
+ * is left. It returns the deadline, or null outside a route budget.
+ *
+ * `fenceAmuxRouteDeadline` runs last, just before COMMIT, and refuses once the
+ * database clock has reached the deadline, so the transaction rolls back
+ * instead of committing late. Like the bounded fence it is a decision before
+ * COMMIT, not proof of when COMMIT completed.
+ */
+export async function anchorAmuxRouteDeadline(
+  tx: Prisma.TransactionClient,
+  transactionMaxMs: number,
+  operation: string,
+): Promise<Date | null> {
+  const routeDeadline = amuxRouteDeadline.getStore();
+  if (!routeDeadline) return null;
+  const rows = await tx.$queryRaw<Array<{ dbNowEpochMs: bigint }>>`
+    SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowEpochMs"
+  `;
+  const raw: unknown = rows[0]?.dbNowEpochMs;
+  const dbNowEpochMs =
+    typeof raw === "bigint" || typeof raw === "number" ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(dbNowEpochMs)) {
+    throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", operation);
+  }
+  routeDeadline.databaseDeadlineAt ??= new Date(
+    dbNowEpochMs + routeDeadline.maxMs,
+  );
+  if (
+    routeDeadline.databaseDeadlineAt.getTime() - dbNowEpochMs <
+    transactionMaxMs
+  ) {
+    throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", operation);
+  }
+  return routeDeadline.databaseDeadlineAt;
+}
+
+export async function fenceAmuxRouteDeadline(
+  tx: Prisma.TransactionClient,
+  deadlineAt: Date | null,
+  operation: string,
+): Promise<void> {
+  if (deadlineAt === null) return;
+  const fence = await tx.$queryRaw<Array<{ withinDeadline: boolean }>>`
+    SELECT clock_timestamp() < ${deadlineAt.toISOString()}::timestamptz
+      AS "withinDeadline"
+  `;
+  if (fence[0]?.withinDeadline !== true) {
+    throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", operation);
+  }
+}
 
 export const withAmuxRouteBudget = <T>(
   work: () => Promise<T>,

@@ -550,3 +550,99 @@ export const autoTickHttpStatus = (reason: string | null | undefined): number =>
   if (reason === "audit_unbound" || reason === "auto_promotion_failed") return 500;
   return 200;
 };
+
+/**
+ * Where an auto-promotion transaction was when it failed. `starting`: the
+ * callback had not run yet (pool wait, BEGIN). `running`: inside the callback,
+ * before it returned. `committing`: the callback had returned, so the COMMIT
+ * was sent or about to be.
+ */
+export type AutoTransactionPhase = "starting" | "running" | "committing";
+
+/**
+ * What a failed auto-promotion transaction means for the rows it would have
+ * written.
+ *
+ * - `outcome_unknown`: the COMMIT may or may not have taken effect. Only a
+ *   failure after the callback returned is this; it is read back and never
+ *   retried, and it counts toward the halt rule.
+ * - `conflict`: a unique key refused a row. Nothing committed.
+ * - `deadline_exceeded`: a statement, transaction or pool deadline ran out
+ *   before COMMIT was sent. Nothing committed.
+ * - `rolled_back`: any other failure before COMMIT was sent, a lost connection
+ *   included. Nothing committed.
+ *
+ * A client never sends COMMIT for a transaction whose callback threw, and
+ * PostgreSQL does not commit a transaction it never received a COMMIT for, so
+ * every failure before `committing` is a known one. A statement timeout
+ * (SQLSTATE 57014) inside the callback is the case this exists for: it rolls
+ * the transaction back, and calling it unknown refused the grant for good and
+ * could open a halt.
+ */
+export type AutoTransactionFailure = "outcome_unknown" | "conflict" | "deadline_exceeded" | "rolled_back";
+
+const PRISMA_TIMEOUT_CODES = new Set([
+  // Timed out fetching a connection from the pool.
+  "P2024",
+  // Transaction API error: could not start in `maxWait`, or the interactive
+  // transaction's own timeout closed it.
+  "P2028",
+]);
+
+const errorField = (error: unknown, key: string): unknown =>
+  error && typeof error === "object" && key in error ? (error as Record<string, unknown>)[key] : undefined;
+
+/** SQLSTATE 57014, wherever Prisma put it: the raw-query `meta.code`, or the text of a model query's error. */
+export const autoTransactionStatementCancelled = (error: unknown): boolean => {
+  const meta = errorField(error, "meta");
+  if (errorField(meta, "code") === "57014" || errorField(error, "code") === "57014") return true;
+  const texts = [errorField(meta, "database_error"), errorField(meta, "message"), errorField(error, "message")];
+  return texts.some(
+    (text) =>
+      typeof text === "string" &&
+      (/\b57014\b/.test(text) || /canceling statement due to statement timeout/i.test(text)),
+  );
+};
+
+export const autoTransactionFailure = (phase: AutoTransactionPhase, error: unknown): AutoTransactionFailure => {
+  if (phase === "committing") return "outcome_unknown";
+  const code = errorField(error, "code");
+  if (code === "P2002") return "conflict";
+  if (autoTransactionStatementCancelled(error) || (typeof code === "string" && PRISMA_TIMEOUT_CODES.has(code))) {
+    return "deadline_exceeded";
+  }
+  return "rolled_back";
+};
+
+/**
+ * The internal tick's time layers (docs/policy/development-agent-orchestration.md,
+ * Phase A: timeout layering, and "a late run is not recorded as success").
+ *
+ * The Rust client waits `TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT` (30 s). The
+ * lifecycle routes keep three seconds of their client deadline for connect,
+ * COMMIT and response transport (15 s client, 12 s route); the tick keeps the
+ * same, so its route budget is 27 s. The route anchors that budget on the
+ * database clock in its first transaction and fences every later COMMIT on it.
+ *
+ * Each tick transaction declares an application per-transaction maximum:
+ * `maxWait` + the interactive transaction timeout + the same 200 ms commit
+ * reserve as `AMUX_DB_COMMIT_RESERVE_MS`. It is an application figure, not a
+ * database bound; PostgreSQL enforces only the statement timeout. A tick runs
+ * at most three such transactions back to back that it must be able to finish:
+ * an expiry, a consume, and the record of a lost consume, so three maxima fit
+ * inside the budget. A transaction is not started unless the time left covers
+ * it and everything it has to leave room for.
+ *
+ * These are code-contract values sized to the existing client deadline. They
+ * have not been measured against the production database; the owner's routes
+ * keep their own, longer limits.
+ */
+export const AUTO_TICK_ROUTE_BUDGET_MS = 27_000;
+export const AUTO_TICK_TRANSACTION_MAX_WAIT_MS = 1_000;
+export const AUTO_TICK_TRANSACTION_TIMEOUT_MS = 6_000;
+export const AUTO_TICK_STATEMENT_TIMEOUT_MS = 5_000;
+export const AUTO_TRANSACTION_COMMIT_RESERVE_MS = 200;
+export const AUTO_TICK_TRANSACTION_MAX_MS =
+  AUTO_TICK_TRANSACTION_MAX_WAIT_MS + AUTO_TICK_TRANSACTION_TIMEOUT_MS + AUTO_TRANSACTION_COMMIT_RESERVE_MS;
+/** Expiry, consume, and the record of a lost consume. */
+export const AUTO_TICK_SEQUENTIAL_TRANSACTIONS = 3;
