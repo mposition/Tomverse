@@ -10,6 +10,8 @@ import {
 } from "@/lib/emailSendLockCore";
 import { isLanguage } from "@/lib/language";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
+import { appUrl } from "@/lib/accountEmails";
 import {
   decryptSnapshot,
   encryptSnapshot,
@@ -17,9 +19,14 @@ import {
 } from "@/lib/emailSnapshotCrypto";
 import {
   emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
   type EmailClassification,
 } from "@/lib/emailTemplateDefinitions";
-import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+  templateContentHash,
+} from "@/lib/emailTemplateRegistry";
 import { templateMetadataMismatches } from "@/lib/emailTemplateMetadataCore";
 import {
   normalizeSuppressionAddress,
@@ -177,6 +184,9 @@ export async function createStandardDeliveryRows(
   }
 ): Promise<{ eventId: string; deliveryId: string; idempotencyKey: string }> {
   const definition = emailTemplateDefinition(input.templateKey);
+  // The amendment notice is queued only in approved wording, by every writer
+  // that goes through here (a campaign test send, a direct enqueue).
+  assertPolicyChangeNoticeApproved(definition.key, input.language);
 
   const event = await tx.emailEvent.create({
     data: {
@@ -798,6 +808,17 @@ class ReenqueueRaceError extends Error {
     this.name = "ReenqueueRaceError";
   }
 }
+
+/**
+ * Refuses a notice delivery whose wording, as this build renders it, is not
+ * the approved wording (lib/policyChangeNoticeEmail.ts).
+ */
+const assertPolicyChangeNoticeApproved = (templateKey: string, language: string) => {
+  if (templateKey !== POLICY_CHANGE_NOTICE_TEMPLATE) return;
+  if (!isPolicyChangeNoticeWordingApproved(language, appUrl())) {
+    throw new Error("The amendment notice's wording is not approved; it cannot be queued.");
+  }
+};
 
 const decideReleaseNotesSend = async (
   delivery: ClaimedDelivery,
@@ -1468,6 +1489,40 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     const decided = await decideReleaseNotesSend(delivery, definition, now);
     if (decided.finished) return decided.finished;
     suppressSubjectPrefix = decided.suppressSubjectPrefix;
+  }
+
+  // The amendment notice goes out only in approved wording, and only in the
+  // wording the row was queued with. The drain renders from the current source,
+  // not the stored version, so a deploy that changed the notice would otherwise
+  // send new words under the old version's approval -- and the publication gate
+  // counts deliveries by that version's hash.
+  if (definition.key === POLICY_CHANGE_NOTICE_TEMPLATE) {
+    const approved = isPolicyChangeNoticeWordingApproved(delivery.language, appUrl());
+    const pinned = await prisma.templateVersion.findUnique({
+      where: { id: delivery.templateVersion.id },
+      select: { contentHash: true },
+    });
+    const current = definition.render(definition.placeholderPayload, delivery.language);
+    if (!approved || pinned?.contentHash !== templateContentHash(current)) {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "failed",
+          attempts: delivery.attempts,
+          lastErrorKind: "notice_wording_unapproved",
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      await reportOperationalIncident({
+        code: "EMAIL_POLICY_NOTICE_WORDING_UNAPPROVED",
+        title: "An amendment notice was not sent: its wording is not the approved wording it was queued with",
+        severity: "error",
+        error: `Delivery ${delivery.id}: the notice as this build renders it is unapproved or differs from its queued version.`,
+        context: { component: "standard-email-lane", deliveryId: delivery.id },
+      });
+      return { outcome: "failed" as const, classification: definition.classification };
+    }
   }
 
   const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());

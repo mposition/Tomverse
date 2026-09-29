@@ -272,9 +272,9 @@ const definitions: AnyDefinition[] = [
     classification: "legal",
     purpose: null,
     requiresUnsubscribe: false,
-    render: (payload: PolicyChangeNoticePayload, language) =>
-      buildPolicyChangeNoticeEmail({ ...payload, language, appUrl: appUrl() }),
-    placeholderPayload: { effectiveDate: "{{effectiveDate}}" },
+    render: (_payload: PolicyChangeNoticePayload, language) =>
+      buildPolicyChangeNoticeEmail({ language, appUrl: appUrl() }),
+    placeholderPayload: {},
   },
   {
     key: LOGIN_METHOD_LINKED_TEMPLATE,

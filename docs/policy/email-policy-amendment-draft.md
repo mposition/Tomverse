@@ -18,14 +18,22 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 - **결정 F**(2026-09-16): 기존 계정에 `risk_accepted`로, 동의 없이 제품 소식을
   보냅니다(docs/policy/email-product-news-redesign-draft.md §5.6). 대상은 승인 때 봉인한 **계정과 주소의 목록**이며, 주소를
   바꾼 계정은 빠집니다. 법이 허용해서가 아니라 기록된 사업 결정입니다.
-- **호주 추론 동의**(docs/policy/email-product-news-redesign-draft.md §4.4, R4 결정 2026-09-29): 호주에서 최근 24개월 안에
-  로그인한 계정에는 사전 동의 없이 보낼 수 있습니다. 관계 lifecycle(S5b)이 들어간
-  뒤부터 판정에 쓰이며, 그 전에는 거절됩니다.
+- **호주 추론 동의**(docs/policy/email-product-news-redesign-draft.md §4.3·§4.4, 승인 C, R4 결정 2026-09-29): **이 개정이
+  시행된 뒤** 가입 화면의 고지를 보고 가입한 계정은, 최근 24개월 안에 로그인한 동안
+  호주 발신자 authority를 추론 동의로 통과합니다. 수신자 쪽은 국가 rule이 정하므로,
+  동의 없이 받을 수 있는 것은 수신자 rule이 `opt_out`(미국)이거나
+  `inferred_consent`(호주)인 계정입니다. 관계 lifecycle(S5b)이 들어가고 개정이
+  시행되기 전에는 거절됩니다.
 
 승인된 §6의 두 문장은 그 약속을 그대로 둡니다. 그래서 이 초안은 약속 문장
 자체를 고칩니다. 뉴스레터와 프로모션은 지금처럼 **신청한 경우에만**이고, 바뀌는
-것은 **제품 소식**뿐입니다. 제품 소식 발송에는 "이용 중인 기능" 같은 관련성
-필터가 없으므로, 문안도 그런 범위를 약속하지 않습니다.
+것은 **제품 소식**뿐입니다.
+
+**"보낼 수 있다"로 씁니다.** 두 경우 모두 그 안의 모든 계정이 받는 것은 아닙니다 —
+봉인 목록은 기존 계정의 일부이고 안내를 본 계정·주소를 바꾼 계정은 빠지며, 관계는
+로그인이 끊기거나 수신거부하면 끝납니다. 정책이 허락하는 범위를 적는 문장이지,
+누가 받는지를 단정하는 문장이 아닙니다. 관련 콘텐츠 범위(docs/policy/email-product-news-redesign-draft.md §4.4)는 Tomverse
+서비스 자체의 소식이며, 별개 제품군의 교차판매는 제품 소식에 들어가지 않습니다.
 
 ## 2. `/privacy` — 이메일 조항 첫 두 문장의 대체안
 
@@ -43,7 +51,7 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > 상태 안내를 보냅니다. 이 셋은 서비스 제공에 속해 끌 수 없습니다. 뉴스레터와
 > 프로모션은 신청하신 경우에만 보냅니다. 제품 소식(Tomverse 서비스 소식)도
 > 신청하신 분께 보내며, 두 경우에는 신청하지 않으셨어도 보낼 수 있습니다 — 이
-> 개정이 안내되기 전에 이미 가입해 같은 이메일 주소를 쓰고 계신 계정과, 호주에서
+> 개정이 안내되기 전에 가입한 계정과, 이 개정이 적용된 뒤 호주나 미국에서 가입해
 > 최근 24개월 안에 로그인한 계정입니다. 로그인 코드·영수증·서비스 안내가 아닌
 > 메일은 모두 이메일 설정에서 또는 해당 메일의 수신거부 링크를 눌러 로그인 없이
 > 언제든 끄실 수 있습니다.
@@ -54,10 +62,10 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > security notices, billing receipts and service status notices. These three
 > are part of providing the service and cannot be switched off. Newsletters and
 > promotions are sent only if you ask for them. Product updates (news about the
-> Tomverse service) are sent if you ask for them, and in two cases without your
-> asking: to accounts that were already registered before this change was
-> announced and still use the same email address, and to accounts in Australia
-> that have signed in within the last 24 months. Everything other than sign-in
+> Tomverse service) are sent if you ask for them, and may be sent without your
+> asking in two cases: to accounts that were registered before this change was
+> announced, and to accounts opened in Australia or the United States after this
+> change takes effect that have signed in within the last 24 months. Everything other than sign-in
 > codes, receipts and service notices can be turned off at any time in your
 > email settings or with the one-click unsubscribe link in any such message,
 > without signing in.
@@ -85,13 +93,13 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > We are updating the Tomverse Privacy Policy and Terms and Conditions. The
 > changes take effect on {{effectiveDate}}.
 >
-> Tomverse sends product update emails (news about the Tomverse service) only to
-> people who ask for them, with two exceptions: accounts that were already
-> registered before this change was announced and still use the same email
-> address, and accounts in Australia that have signed in within the last 24
-> months. You can turn these off at any time in your email settings or with the
-> unsubscribe link in any such message, without signing in. Sign-in codes,
-> receipts and service notices are not affected.
+> Tomverse may send product update emails (news about the Tomverse service)
+> without your asking in two cases: to accounts that were registered before this
+> change was announced, and to accounts opened in Australia or the United States
+> after this change takes effect that have signed in within the last 24 months.
+> Otherwise we send them only if you ask. You can turn them off at any time in
+> your email settings or with the unsubscribe link in any such message, without
+> signing in. Sign-in codes, receipts and service notices are not affected.
 >
 > A marketing email consent stays in effect until you withdraw it. If you
 > receive marketing email in Korea, we will remind you of that consent every two
@@ -102,8 +110,13 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > You are receiving this because it is a notice about the terms of your account.
 > It is sent whatever your email settings are.
 
-**승인할 hash는 production이 계산한 값입니다.** template version의 `contentHash`는
-링크까지 포함한 렌더 전체라, `appUrl()`이 다른 환경에서는 값이 다릅니다.
+**승인하는 것은 보내질 바이트 그대로입니다.** 고지에는 payload가 없고, 시행일은
+`POLICY_CHANGE_NOTICE_EFFECTIVE_DATE`로 코드에 있습니다. 그래서 template version의
+`contentHash`가 곧 수신자가 받는 메일이고, 캠페인 초안·승인, 모든 단건 enqueue와
+테스트 발송, 캠페인 fan-out, 그리고 drain이 발송 직전에 그 문안이 승인된 것인지
+다시 확인합니다. 배포로 문안이 바뀌면 큐는 새 문안을 옛 승인으로 보내지 않고
+멈춥니다(`notice_wording_unapproved`). hash는 링크까지 포함하므로 production이
+계산한 값을 승인합니다.
 
 **고지 발송은 사람이 합니다.** 전 계정에 가는 되돌릴 수 없는 외부 발송이므로
 자동화하지 않습니다. 시행일 **30달력일 전까지** 대상 계정 전원의 메일함에 도착해야
@@ -112,7 +125,8 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 ## 5. 시행일
 
 **미정 — 소유자 결정.** 게시일로부터 30일보다 늦어야 합니다. 두 문서가 같은 날을
-보여야 하며, 다르면 게이트가 `effective_dates_differ`로 거절합니다.
+보여야 하며, 다르면 게이트가 `effective_dates_differ`로 거절합니다. 고지의
+`POLICY_CHANGE_NOTICE_EFFECTIVE_DATE`도 같은 날이어야 하고, 테스트가 셋을 묶습니다.
 
 ## 6. 개정하지 않는 것 (소유자 결정 2026-09-29)
 
