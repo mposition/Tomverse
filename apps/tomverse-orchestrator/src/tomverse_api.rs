@@ -180,10 +180,12 @@ pub const TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(15
 /// due grants, at most one consume, and the record of a lost consume -- inside
 /// a 27-second route budget anchored on the database clock
 /// (`AUTO_TICK_ROUTE_BUDGET_MS`, lib/amux/autoPromotionCore.ts). The server
-/// starts no transaction that could not finish inside that budget and fences
-/// each COMMIT on it, so no transaction commits after the deadline; only a
-/// COMMIT already under way can finish late. Thirty seconds adds the three
-/// seconds the lifecycle routes keep for connect, commit and transport.
+/// starts no transaction that could not finish inside that budget, and each
+/// one checks the deadline as its last statement before COMMIT and rolls back
+/// if it has passed. That check is not the COMMIT: a stall between the two can
+/// still let a COMMIT land after the deadline, and no test yet proves
+/// otherwise (policy version 18). Thirty seconds adds the three seconds the
+/// lifecycle routes keep for connect, commit and transport.
 ///
 /// A timeout here is an unknown outcome for this client only. The server does
 /// not learn of it and records nothing for it. The scheduler logs it and does

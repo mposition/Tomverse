@@ -31,9 +31,11 @@ import {
  *
  * The whole tick runs inside one route budget anchored on the database clock
  * (`AUTO_TICK_ROUTE_BUDGET_MS`), like the other AMUX lifecycle routes: no
- * transaction starts that could not finish inside it, and each one fences its
- * COMMIT on it. A failure answers in the shape the other AMUX internal routes
- * use; the body carries a code, never an error message.
+ * transaction starts that could not finish inside it, and each one checks it
+ * as its last statement before COMMIT. That check precedes the COMMIT and
+ * does not bound it (policy version 18). A failure answers in the shape the
+ * other AMUX internal routes use; the body carries a code, never an error
+ * message.
  */
 
 const noStore = { "Cache-Control": "no-store" };
