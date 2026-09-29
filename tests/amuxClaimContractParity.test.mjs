@@ -4,7 +4,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { AMUX_CLAIM_CLOSED_REFUSAL_REASONS } from "../lib/amux/auditContract.ts";
-import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
+import {
+  AMUX_EXECUTION_API_CODE_LATCH,
+  amuxExecutionApiPermitted,
+  isAmuxExecutionApiEnabled,
+} from "../lib/amux/executionGate.ts";
 
 const rustSource = readFileSync(
   join(
@@ -324,15 +328,25 @@ test("selection reads reserve connect and response time beyond both route budget
   }
 });
 
-test("a production build cannot activate future execution with an environment flag", () => {
+test("the execution API opens on the code latch and the flag, in any NODE_ENV", () => {
+  // Policy version 18.
+  assert.equal(AMUX_EXECUTION_API_CODE_LATCH, true);
+  assert.equal(amuxExecutionApiPermitted(false, "1"), false);
+  assert.equal(amuxExecutionApiPermitted(true, "1"), true);
+  assert.equal(amuxExecutionApiPermitted(true, " 1 "), true);
+  for (const value of [undefined, "", "0", "true", "enabled", "11"]) {
+    assert.equal(amuxExecutionApiPermitted(true, value), false, String(value));
+  }
   const priorNodeEnv = process.env.NODE_ENV;
   const priorFlag = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
   try {
     process.env.NODE_ENV = "production";
     process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+    assert.equal(isAmuxExecutionApiEnabled(), true);
+    delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
     assert.equal(isAmuxExecutionApiEnabled(), false);
     process.env.NODE_ENV = "test";
-    assert.equal(isAmuxExecutionApiEnabled(), true);
+    assert.equal(isAmuxExecutionApiEnabled(), false);
   } finally {
     if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = priorNodeEnv;

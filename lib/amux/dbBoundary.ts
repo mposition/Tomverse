@@ -14,9 +14,11 @@ export const AMUX_DB_MAX_WAIT_MS = 250;
 // but the derived transaction budget is an application estimate. This code
 // does not set transaction_timeout: PostgreSQL 17 could bound occupancy only
 // from an in-transaction SET (not BEGIN-to-SET or durable COMMIT); PostgreSQL
-// 16 lacks that setting. Future execution stays hard-disabled until the DB is
-// proven to prevent a late run from being recorded as success. Neither a SQL
-// statement-count cap nor a whole-transaction time bound is itself required.
+// 16 lacks that setting. Policy version 18 opens the execution API behind a
+// code latch and an environment variable; it does not claim the DB prevents a
+// late run from being recorded as success. No test proves that yet, and moving
+// this code to main waits on one. Neither a SQL statement-count cap nor a
+// whole-transaction time bound is itself required.
 export const AMUX_ROUTE_BUDGET_MS = 15_000;
 // Single-operation future lifecycle routes have a shared DB-clock deadline.
 // The Rust client allows fifteen seconds for connect, route and response
