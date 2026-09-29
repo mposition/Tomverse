@@ -1,0 +1,292 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { DriverAdapterError } from "@prisma/driver-adapter-utils";
+
+import {
+  AMUX_COMMIT_DEADLINE_TABLE,
+  AMUX_COMMIT_DEADLINE_TRIGGER,
+  AMUX_LATE_COMMIT_MESSAGE,
+  AMUX_LATE_COMMIT_SQLSTATE,
+  isAmuxLateCommitError,
+} from "../lib/amux/commitDeadlineCore.ts";
+import { autoTransactionFailure } from "../lib/amux/autoPromotionCore.ts";
+import {
+  AMUX_COMMIT_DEADLINE_MIGRATION,
+  amuxCommitDeadlineInstallSql,
+  amuxCommitDeadlineInstallStatements,
+  readAmuxCommitDeadlineInstallSql,
+} from "../scripts/amux-commit-deadline-install.mjs";
+
+// Orchestration policy version 18, "활성화 증거": the database refuses an AMUX
+// COMMIT that arrives after its deadline. These pin the structure the routing
+// lane's database tests rely on (tests/integration/amux-orchestration.db.test.ts)
+// and the classification tests/server-contract/amux-commit-deadline-boundary.test.ts
+// drives through the real Prisma client.
+
+const root = process.cwd();
+const read = (path) => readFileSync(join(root, path), "utf8").replace(/\r\n/g, "\n");
+const withoutComments = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+const between = (source, from, to) => {
+  const start = source.indexOf(from);
+  const end = source.indexOf(to, start + from.length);
+  assert.ok(start >= 0 && end > start, `${from} .. ${to}`);
+  return source.slice(start, end);
+};
+const filesUnder = (directory) =>
+  readdirSync(join(root, directory), { recursive: true })
+    .map((name) => `${directory}/${String(name).replaceAll("\\", "/")}`)
+    .filter((path) => /\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/.test(path))
+    .sort();
+
+const migration = read(AMUX_COMMIT_DEADLINE_MIGRATION);
+const boundary = read("lib/amux/dbBoundary.ts");
+
+test("the migration is additive, later than every other, and holds one table, one function and one trigger", () => {
+  const directory = AMUX_COMMIT_DEADLINE_MIGRATION.split("/")[2];
+  const others = readdirSync(join(root, "prisma", "migrations"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== directory)
+    .map((entry) => entry.name);
+  assert.ok(others.length > 0);
+  for (const name of others) assert.ok(name < directory, `${name} sorts after ${directory}`);
+
+  const statements = migration
+    .split("\n")
+    .filter((line) => !line.startsWith("--"))
+    .join("\n");
+  assert.match(
+    statements,
+    /CREATE TABLE "AmuxCommitDeadline" \(\n {4}"txid" BIGINT NOT NULL,\n {4}"deadline" TIMESTAMPTZ\(3\) NOT NULL,\n {4}"operation" TEXT NOT NULL,\n\n {4}CONSTRAINT "AmuxCommitDeadline_pkey" PRIMARY KEY \("txid"\)\n\);/,
+  );
+  assert.doesNotMatch(statements, /\bDROP\b|\bALTER\b|\bTRUNCATE\b|\bUPDATE\b|\bVALIDATE\b/i);
+  // The only DELETE is the trigger removing its own row.
+  assert.equal((statements.match(/\bDELETE\b/g) ?? []).length, 1);
+  assert.match(statements, /'DELETE FROM %I\.%I WHERE "txid" = \$1',\s*TG_TABLE_SCHEMA,\s*TG_TABLE_NAME\s*\) USING NEW\."txid";/);
+  assert.equal((statements.match(/\bCREATE\b/g) ?? []).length, 3);
+  assert.match(statements, /^BEGIN;$/m);
+  assert.match(statements, /^COMMIT;$/m);
+});
+
+test("the trigger is deferred to COMMIT and raises AX001 at or after the stored deadline", () => {
+  assert.equal(AMUX_COMMIT_DEADLINE_TABLE, "AmuxCommitDeadline");
+  assert.equal(AMUX_COMMIT_DEADLINE_TRIGGER, "amux_commit_deadline_check");
+  assert.equal(AMUX_LATE_COMMIT_SQLSTATE, "AX001");
+  assert.equal(AMUX_LATE_COMMIT_MESSAGE, "AMUX_LATE_COMMIT");
+  assert.match(
+    migration,
+    /CREATE CONSTRAINT TRIGGER "amux_commit_deadline_check"\n {4}AFTER INSERT ON "AmuxCommitDeadline"\n {4}DEFERRABLE INITIALLY DEFERRED\n {4}FOR EACH ROW EXECUTE FUNCTION "amux_commit_deadline_check"\(\);/,
+  );
+  const body = between(migration, 'CREATE OR REPLACE FUNCTION "amux_commit_deadline_check"()', "$$;");
+  assert.match(body, /SET search_path = pg_catalog, pg_temp/);
+  assert.match(
+    body,
+    /IF pg_catalog\.clock_timestamp\(\) >= NEW\."deadline" THEN\n\s*RAISE EXCEPTION 'AMUX_LATE_COMMIT' USING ERRCODE = 'AX001';\n\s*END IF;/,
+  );
+  assert.match(body, /RETURN NULL;/);
+});
+
+test("the Prisma model matches the migrated table, so migrate diff stays clean", () => {
+  const schema = read("prisma/schema.prisma");
+  const model = between(schema, "model AmuxCommitDeadline {", "\n}");
+  const fields = model
+    .split("\n")
+    .slice(1)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("///"))
+    .map((line) => line.split(/\s+/).join(" "));
+  assert.deepEqual(fields, [
+    "txid BigInt @id",
+    "deadline DateTime @db.Timestamptz(3)",
+    "operation String",
+  ]);
+});
+
+test("both fences insert the marker, check the trigger, and compare the clock with the stored deadline", () => {
+  const code = withoutComments(boundary);
+  const mutation = between(code, '} else {\n', "requireAmuxCommitFence(fence, boundary.operation);");
+  const route = between(code, "export async function fenceAmuxRouteDeadline(", "requireAmuxCommitFence(fence, operation);");
+  for (const [name, fence] of [
+    ["withAmuxDbBoundary mutation fence", mutation],
+    ["fenceAmuxRouteDeadline", route],
+  ]) {
+    assert.match(fence, /date_trunc\(\s*'milliseconds',/, name);
+    assert.match(fence, /-\s+\$\{AMUX_DB_COMMIT_RESERVE_MS\} \* INTERVAL '1 millisecond'/, name);
+    assert.match(fence, /INSERT INTO "AmuxCommitDeadline" \("txid", "deadline", "operation"\)/, name);
+    assert.match(fence, /SELECT txid_current\(\), "deadline", \$\{/, name);
+    assert.match(fence, /RETURNING "deadline"/, name);
+    assert.match(fence, /JOIN pg_catalog\.pg_class c ON c\.oid = t\.tgrelid/, name);
+    assert.match(fence, /c\.oid = to_regclass\('"AmuxCommitDeadline"'\)/, name);
+    assert.match(fence, /t\.tgname = \$\{AMUX_COMMIT_DEADLINE_TRIGGER\}/, name);
+    assert.match(fence, /t\.tgdeferrable\s+AND t\.tginitdeferred/, name);
+    assert.match(fence, /clock_timestamp\(\) < marker\."deadline" AS "withinDeadline"/, name);
+    assert.match(fence, /commit_check\."installed" AS "commitCheckInstalled"/, name);
+  }
+  // The mutation fence's D is the earliest of all three deadlines it compared before.
+  assert.match(
+    mutation,
+    /LEAST\(\s*current_setting\('tomverse\.amux_deadline'\)::timestamptz,\s*\$\{routeDeadlineIso\}::timestamptz,\s*\$\{leaseDeadlineIso\}::timestamptz\s*\) - \$\{AMUX_DB_COMMIT_RESERVE_MS\}/,
+  );
+  // A read transaction keeps its plain fence and writes nothing.
+  const read = between(code, 'if (boundary.isolation === "read") {\n', "} else {\n");
+  assert.doesNotMatch(read, /AmuxCommitDeadline|INSERT|txid_current/);
+  assert.match(read, /AS "withinDeadline"/);
+
+  // A missing trigger is checked before the clock and refuses.
+  const verdict = between(code, "const requireAmuxCommitFence = (", "export type AmuxDbBoundaryPhase");
+  assert.ok(verdict.indexOf("commitCheckInstalled !== true") < verdict.indexOf("withinDeadline !== true"));
+  assert.match(verdict, /"AMUX_DB_COMMIT_CHECK_MISSING"/);
+  assert.match(verdict, /console\.warn\(/);
+});
+
+test("the committing phase starts only after the fence, and AX001 is read before it in both classifiers", () => {
+  const code = withoutComments(boundary);
+  const body = between(code, "export async function withAmuxDbBoundary<T>(", "\n}\n");
+  assert.match(body, /let phase: AmuxDbBoundaryPhase = "running";/);
+  assert.match(body, /requireAmuxCommitFence\(fence, boundary\.operation\);\s*\}\s*phase = "committing";\s*return result;\s*\}/);
+  assert.match(body, /return transaction\.catch\(\(error: unknown\): never => \{\s*throw amuxDbBoundaryFailure\(boundary, phase, error\);/);
+
+  const failure = between(code, "export const amuxDbBoundaryFailure = (", "\n};\n");
+  assert.ok(failure.indexOf("isAmuxLateCommitError(error)") > 0);
+  assert.ok(failure.indexOf("isAmuxLateCommitError(error)") < failure.indexOf('phase === "committing"'));
+  assert.match(failure, /isAmuxLateCommitError\(error\)\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_DEADLINE_EXCEEDED"/);
+  assert.match(failure, /phase === "committing" && boundary\.isolation === "mutation"\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_OUTCOME_UNKNOWN"/);
+
+  const core = withoutComments(read("lib/amux/autoPromotionCore.ts"));
+  const auto = between(core, "export const autoTransactionFailure = (", "\n};\n");
+  assert.ok(auto.indexOf("isAmuxLateCommitError(error)") > 0);
+  assert.ok(auto.indexOf("isAmuxLateCommitError(error)") < auto.indexOf('phase === "committing"'));
+
+  // The internal route answers the boundary's unknown outcome as it answers P2028.
+  const route = withoutComments(read("lib/amux/internalRoute.ts"));
+  assert.match(
+    route,
+    /databaseCode === "P2028" \|\|\s*\(error instanceof AmuxDbBoundaryError &&\s*error\.code === "AMUX_DB_OUTCOME_UNKNOWN"\)\s*\) \{\s*const incident = reportAmuxOperationalIncident/,
+  );
+});
+
+// Every shape AX001 can arrive in. The first is what the Prisma 7 transaction
+// manager rethrows at COMMIT, built with the adapter's own class.
+const adapterCause = {
+  originalCode: "AX001",
+  originalMessage: "AMUX_LATE_COMMIT",
+  kind: "postgres",
+  code: "AX001",
+  severity: "ERROR",
+  message: "AMUX_LATE_COMMIT",
+};
+const lateCommitShapes = [
+  new DriverAdapterError(adapterCause),
+  {
+    name: "PrismaClientKnownRequestError",
+    code: "P2010",
+    message: "Raw query failed. Code: `AX001`. Message: `AMUX_LATE_COMMIT`",
+    meta: { driverAdapterError: new DriverAdapterError(adapterCause) },
+  },
+  { name: "PrismaClientKnownRequestError", code: "P2010", meta: { code: "AX001", message: "AMUX_LATE_COMMIT" } },
+  Object.assign(new Error("AMUX_LATE_COMMIT"), { code: "AX001", severity: "ERROR" }),
+];
+
+test("AX001 is recognised wherever Prisma or the adapter put it, and only by its code", () => {
+  for (const error of lateCommitShapes) assert.equal(isAmuxLateCommitError(error), true);
+
+  const cyclic = { code: "P2010", meta: {} };
+  cyclic.meta.driverAdapterError = cyclic;
+  for (const error of [
+    null,
+    undefined,
+    "AX001",
+    new Error("AMUX_LATE_COMMIT"),
+    { message: "AMUX_LATE_COMMIT", meta: { message: "AMUX_LATE_COMMIT" } },
+    new DriverAdapterError({ ...adapterCause, code: "57014", originalCode: "57014" }),
+    { code: "P2028", message: "Transaction already closed" },
+    cyclic,
+  ]) {
+    assert.equal(isAmuxLateCommitError(error), false, String(error?.message ?? error));
+  }
+});
+
+test("the auto-promotion classifier reads AX001 before the committing shortcut", () => {
+  for (const error of lateCommitShapes) {
+    for (const phase of ["starting", "running", "committing"]) {
+      assert.equal(autoTransactionFailure(phase, error), "deadline_exceeded", phase);
+    }
+  }
+  const cancelled = new DriverAdapterError({ ...adapterCause, code: "57014", originalCode: "57014" });
+  assert.equal(autoTransactionFailure("committing", cancelled), "outcome_unknown");
+  assert.equal(autoTransactionFailure("committing", new Error("Connection terminated unexpectedly")), "outcome_unknown");
+});
+
+test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONSTRAINTS", () => {
+  const scanned = [
+    ...filesUnder("lib/amux"),
+    ...filesUnder("app/api/internal/amux"),
+    ...filesUnder("app/api/admin/amux"),
+    // Adapters run inside an AMUX writer's transaction (AmuxAttachment).
+    ...["lib", "app"].flatMap((directory) =>
+      filesUnder(directory).filter(
+        (path) =>
+          !path.startsWith("lib/amux/") &&
+          !path.startsWith("app/api/internal/amux/") &&
+          !path.startsWith("app/api/admin/amux/") &&
+          read(path).includes("@/lib/amux/dbBoundary"),
+      ),
+    ),
+  ];
+  assert.ok(scanned.includes("lib/amux/dbBoundary.ts"));
+  assert.ok(scanned.includes("lib/engineeringAgentAmuxAdapter.ts"));
+  assert.ok(scanned.includes("app/api/internal/amux/tasks/route.ts"));
+  const offenders = scanned.filter((path) => /SET\s+CONSTRAINTS/i.test(read(path)));
+  assert.deepEqual(offenders, []);
+});
+
+test("no AMUX internal route opens its own transaction except the catalog tasks route", () => {
+  const routes = filesUnder("app/api/internal/amux");
+  assert.ok(routes.length > 10);
+  const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
+  // The tasks route upserts catalog cards and records no execution success,
+  // so it has no deadline to keep and is outside the commit deadline check.
+  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts"]);
+});
+
+test("the push harnesses install the migration's own function and trigger, idempotently", () => {
+  const [functionSql, triggerSql] = amuxCommitDeadlineInstallStatements(migration);
+  const beginMarker = "-- amux-commit-deadline-check:install:begin\n";
+  const marked = between(migration, beginMarker, "-- amux-commit-deadline-check:install:end").slice(
+    beginMarker.length,
+  );
+  assert.equal(`${functionSql};\n\n${triggerSql};\n`, marked);
+  assert.ok(functionSql.startsWith('CREATE OR REPLACE FUNCTION "amux_commit_deadline_check"()'));
+  assert.ok(triggerSql.startsWith('CREATE CONSTRAINT TRIGGER "amux_commit_deadline_check"'));
+
+  const install = readAmuxCommitDeadlineInstallSql(root);
+  assert.equal(install, amuxCommitDeadlineInstallSql(migration));
+  assert.ok(install.includes(functionSql) && install.includes(triggerSql));
+  assert.match(install, /pg_advisory_xact_lock\(/);
+  assert.match(install, /IF NOT EXISTS \([\s\S]*?t\.tgname = 'amux_commit_deadline_check'[\s\S]*?\) THEN/);
+
+  assert.throws(() => amuxCommitDeadlineInstallStatements("CREATE TABLE x ();"), /exactly once/);
+  assert.throws(
+    () => amuxCommitDeadlineInstallStatements(migration.replace("CREATE CONSTRAINT TRIGGER", "CREATE TRIGGER")),
+    /exactly once/,
+  );
+
+  // Admin E2E: installed once per process before the first reset, then proven.
+  const database = withoutComments(read("tests/e2e-admin/support/database.ts"));
+  assert.match(database, /from "\.\.\/\.\.\/\.\.\/scripts\/amux-commit-deadline-install\.mjs";/);
+  const asserted = between(database, "const assertAdminSchemaPresent = async", "const ensureAmuxCommitDeadlineCheck");
+  assert.match(asserted, /await ensureAmuxCommitDeadlineCheck\(\);\s*schemaAsserted = true;/);
+  const ensure = between(database, "const ensureAmuxCommitDeadlineCheck = async", "\n};\n");
+  assert.match(ensure, /\$executeRawUnsafe\(\s*readAmuxCommitDeadlineInstallSql\(process\.cwd\(\)\)\s*\)/);
+  assert.match(ensure, /t\.tgdeferrable AS "deferrable", t\.tginitdeferred AS "initiallyDeferred"/);
+  assert.match(ensure, /throw new Error\(/);
+
+  // DB_INTEGRATION_SCHEMA_SOURCE=push, and only there: migrations create it.
+  const runner = read("scripts/run-db-integration-tests.mjs");
+  const push = between(runner, 'if (schemaSource === "push") {', "} else {");
+  assert.match(push, /"db", "execute", "--stdin"/);
+  assert.match(push, /input: readAmuxCommitDeadlineInstallSql\(/);
+  assert.equal(runner.split('"db", "execute", "--stdin"').length, 2);
+});

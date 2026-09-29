@@ -12,7 +12,7 @@ import { POST as executionSettlePost } from "@/app/api/internal/amux/execution/s
 import { POST as deliveryPullPost } from "@/app/api/internal/amux/delivery/pull/route";
 import { POST as deliveryAckPost } from "@/app/api/internal/amux/delivery/ack/route";
 import assert from "node:assert/strict";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
 import { Prisma } from "@prisma/client";
 import { Client as PgClient } from "pg";
 import { schemaValidAmuxRoutingCandidate } from "../amuxClaimFixture.ts";
@@ -25,12 +25,21 @@ import {
 } from "@/lib/amux/incidentCore";
 import {
   AMUX_DB_BOUNDARIES,
+  AMUX_DB_COMMIT_RESERVE_MS,
   AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
   AmuxDbBoundaryError,
   amuxDbTransactionBudgetMs,
+  fenceAmuxRouteDeadline,
   withAmuxDbBoundary,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
+import {
+  AMUX_COMMIT_DEADLINE_TRIGGER,
+  AMUX_LATE_COMMIT_MESSAGE,
+  AMUX_LATE_COMMIT_SQLSTATE,
+  isAmuxLateCommitError,
+} from "@/lib/amux/commitDeadlineCore";
+import { readAmuxCommitDeadlineInstallSql } from "../../scripts/amux-commit-deadline-install.mjs";
 import { buildAmuxRoutingSnapshot } from "@/lib/amux/routing";
 import { scoreAmuxWorkers } from "@/lib/amux/workerRouterCore";
 import {
@@ -2411,30 +2420,37 @@ test("execution start and settle are fenced by task revision and worker generati
  * after its DB-clock deadline must not be recorded as success. The final fence
  * (`withAmuxDbBoundary`) is a check *before* COMMIT; the tests above prove it
  * rolls back a transaction that is already late when the fence runs. This one
- * makes the fence pass just before the attempt's lease deadline and lets the
- * COMMIT itself arrive after it, which is what a GC pause, a stalled event
- * loop or a slow network between the fence and COMMIT does in production.
+ * makes the fence pass just before the commit deadline D and lets the COMMIT
+ * itself arrive after it, which is what a GC pause, a stalled event loop or a
+ * slow network between the fence and COMMIT does in production.
+ *
+ * D is the earliest deadline the settle is held to, less
+ * AMUX_DB_COMMIT_RESERVE_MS. Here that is the attempt's lease, set 1.5 s out;
+ * the runtime lease (90 s) and the transaction budget are later. The fence
+ * records D in `AmuxCommitDeadline` and compares the clock with it; the
+ * deferred trigger compares the clock with the same stored D during COMMIT.
  *
  * Instrumentation, at the pg driver the Prisma adapter uses, touches only this
- * settle's connection and only two statements:
+ * settle's connection:
  * - before the fence it walks the open transaction's clock forward with short
  *   pg_sleep statements (each under the 200 ms statement timeout, no idle gap)
- *   until the database clock is FENCE_MARGIN_MS before the lease deadline --
- *   the same as a settle whose own work ended there;
+ *   until the database clock is FENCE_MARGIN_MS before D -- the same as a
+ *   settle whose own work ended there -- and then lets the real fence run;
+ * - right after the fence it reads back the marker the fence wrote, which is
+ *   how the test knows D and the transaction id without computing either;
  * - it then holds the COMMIT, with no statement in between, until
- *   COMMIT_DELAY_MS after that point, so the COMMIT is sent after the deadline
- *   and while the idle-in-transaction timeout has not fired.
+ *   COMMIT_DELAY_MS after the walk ended, so the COMMIT is sent after D and
+ *   while the idle-in-transaction timeout has not fired.
  *
  * The setup assertions keep a pass from being vacuous: the fence let the
- * transaction through, the COMMIT was sent after the deadline, and the idle
- * gap stayed under the idle-in-transaction timeout (so a refusal would have to
- * come from something that looks at the deadline, not from that timeout).
- *
- * Expected on a build whose database does not check the deadline at COMMIT
- * (the fence is the last deadline check today): this test FAILS, because the
- * late COMMIT is accepted and the attempt is recorded as succeeded.
+ * transaction through with the trigger present, the recorded D is the lease
+ * less the reserve, the COMMIT was sent after D, and the idle gap stayed under
+ * the idle-in-transaction timeout (so the refusal has to come from something
+ * that looks at the deadline, not from that timeout). The refusal is then read
+ * on the raw errors, before any mapping: the pg driver's SQLSTATE and the
+ * adapter error Prisma rethrows at COMMIT both say AX001.
  */
-test("a settle whose COMMIT lands after its lease deadline is not recorded as success", async () => {
+test("a settle whose COMMIT lands after its commit deadline is refused by the database", async () => {
   const FENCE_MARGIN_MS = 40;
   const COMMIT_DELAY_MS = 70;
   assert.ok(COMMIT_DELAY_MS > FENCE_MARGIN_MS);
@@ -2451,13 +2467,17 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
   const probe = {
     armed: false,
     client: null as PgClient | null,
-    leaseDeadlineMs: 0,
+    commitDeadlineMs: 0,
     walkEndDbMs: null as number | null,
     walkEndLocalMs: null as number | null,
     fenceWithinDeadline: null as boolean | null,
-    fenceDoneLocalMs: null as number | null,
+    fenceCommitCheckInstalled: null as boolean | null,
+    markerDeadlineMs: null as number | null,
+    markerTxid: null as string | null,
+    lastStatementDoneLocalMs: null as number | null,
     commitSentLocalMs: null as number | null,
     commitAccepted: null as boolean | null,
+    commitError: null as unknown,
   };
   const textOf = (args: unknown[]) => {
     const first = args[0];
@@ -2473,6 +2493,13 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
       `SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"`,
     )) as { rows: Array<{ nowMs: string }> };
     return Number(result.rows[0]?.nowMs);
+  };
+  const column = (
+    result: { fields?: Array<{ name: string }>; rows?: unknown[][] },
+    name: string,
+  ) => {
+    const index = result.fields?.findIndex((field) => field.name === name) ?? -1;
+    return index < 0 ? undefined : result.rows?.[0]?.[index];
   };
 
   try {
@@ -2502,16 +2529,16 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
       throw new Error(`execution did not start: ${started.reason}`);
     }
 
-    // The attempt's lease ends 1.5 s from now on the database clock; the
-    // runtime lease (90 s) and the transaction budget are later, so this is the
-    // deadline the final fence uses.
+    // The attempt's lease ends 1.5 s from now on the database clock, so the
+    // commit deadline is that less the reserve.
     const dbNow = await prisma.$queryRaw<Array<{ nowMs: bigint }>>`
       SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"
     `;
-    probe.leaseDeadlineMs = Number(dbNow[0]?.nowMs) + 1_500;
+    const leaseDeadlineMs = Number(dbNow[0]?.nowMs) + 1_500;
+    probe.commitDeadlineMs = leaseDeadlineMs - AMUX_DB_COMMIT_RESERVE_MS;
     await prisma.amuxExecutionAttempt.update({
       where: { id: started.attemptId },
-      data: { leaseExpiresAt: new Date(probe.leaseDeadlineMs) },
+      data: { leaseExpiresAt: new Date(leaseDeadlineMs) },
     });
 
     prototype.query = function (this: PgClient, ...args: unknown[]) {
@@ -2521,7 +2548,7 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
         return (async () => {
           for (;;) {
             const now = await clockMs(this);
-            const remaining = probe.leaseDeadlineMs - FENCE_MARGIN_MS - now;
+            const remaining = probe.commitDeadlineMs - FENCE_MARGIN_MS - now;
             if (remaining <= 0) {
               probe.walkEndDbMs = now;
               probe.walkEndLocalMs = performance.now();
@@ -2529,9 +2556,21 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
             }
             await originalQuery.call(this, `SELECT pg_sleep(${(Math.min(remaining, 120) / 1_000).toFixed(3)})`);
           }
-          const result = (await originalQuery.apply(this, args)) as { rows?: unknown[][] };
-          probe.fenceWithinDeadline = result.rows?.[0]?.[0] === true;
-          probe.fenceDoneLocalMs = performance.now();
+          const result = (await originalQuery.apply(this, args)) as {
+            fields?: Array<{ name: string }>;
+            rows?: unknown[][];
+          };
+          probe.fenceWithinDeadline = column(result, "withinDeadline") === true;
+          probe.fenceCommitCheckInstalled = column(result, "commitCheckInstalled") === true;
+          const marker = (await originalQuery.call(
+            this,
+            `SELECT "txid"::text AS "txid",
+               floor(extract(epoch FROM "deadline") * 1000)::bigint::text AS "deadlineMs"
+             FROM "AmuxCommitDeadline" WHERE "txid" = txid_current()`,
+          )) as { rows: Array<{ txid: string; deadlineMs: string }> };
+          probe.markerTxid = marker.rows[0]?.txid ?? null;
+          probe.markerDeadlineMs = marker.rows[0] ? Number(marker.rows[0].deadlineMs) : null;
+          probe.lastStatementDoneLocalMs = performance.now();
           return result;
         })();
       }
@@ -2547,6 +2586,7 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
             return result;
           } catch (error) {
             probe.commitAccepted = false;
+            probe.commitError = error;
             throw error;
           }
         })();
@@ -2573,35 +2613,67 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
       prototype.query = originalQuery;
     }
 
-    // Setup: the pre-COMMIT fence let the transaction through, and the COMMIT
-    // was sent after the lease deadline without the idle timeout firing.
+    // Setup: the fence let the transaction through with the trigger present,
+    // D is the lease less the reserve, and the COMMIT was sent after D
+    // without the idle timeout firing.
     assert.equal(probe.fenceWithinDeadline, true, `setup: the fence must pass (${String(settleError)})`);
-    assert.ok(probe.walkEndDbMs !== null && probe.walkEndDbMs >= probe.leaseDeadlineMs - FENCE_MARGIN_MS);
-    assert.ok(probe.commitSentLocalMs !== null && probe.walkEndLocalMs !== null && probe.fenceDoneLocalMs !== null);
+    assert.equal(probe.fenceCommitCheckInstalled, true, "setup: the commit deadline trigger must be installed");
+    assert.equal(probe.markerDeadlineMs, probe.commitDeadlineMs, "setup: the fence recorded D = lease - reserve");
+    assert.ok(probe.markerTxid !== null, "setup: the fence recorded its transaction id");
     assert.ok(
-      probe.commitSentLocalMs - probe.walkEndLocalMs >= COMMIT_DELAY_MS,
-      "setup: the COMMIT must be sent after the lease deadline",
+      probe.walkEndDbMs !== null &&
+        probe.walkEndDbMs >= probe.commitDeadlineMs - FENCE_MARGIN_MS &&
+        probe.walkEndDbMs < probe.commitDeadlineMs,
+      "setup: the fence ran a few ms before D",
     );
     assert.ok(
-      probe.commitSentLocalMs - probe.fenceDoneLocalMs < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+      probe.commitSentLocalMs !== null &&
+        probe.walkEndLocalMs !== null &&
+        probe.lastStatementDoneLocalMs !== null,
+    );
+    assert.ok(
+      probe.commitSentLocalMs - probe.walkEndLocalMs >= COMMIT_DELAY_MS,
+      "setup: the COMMIT must be sent after D",
+    );
+    assert.ok(
+      probe.commitSentLocalMs - probe.lastStatementDoneLocalMs < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
       "setup: the idle gap before COMMIT exceeded the idle-in-transaction timeout; the run proves nothing",
     );
 
-    // The verdict. A late COMMIT must not leave a success behind.
+    // The raw errors, before any mapping: the database refused the COMMIT with
+    // AX001, and that is the code on the adapter error Prisma rethrew.
+    assert.equal(probe.commitAccepted, false, "the late COMMIT was accepted");
+    const pgError = probe.commitError as { code?: unknown; message?: unknown };
+    assert.equal(pgError.code, AMUX_LATE_COMMIT_SQLSTATE);
+    assert.equal(pgError.message, AMUX_LATE_COMMIT_MESSAGE);
+    assert.ok(settleError instanceof Error);
+    const adapterError = settleError.cause as {
+      name?: unknown;
+      cause?: { kind?: unknown; code?: unknown };
+      meta?: { code?: unknown };
+    };
+    assert.ok(
+      adapterError?.meta?.code === AMUX_LATE_COMMIT_SQLSTATE ||
+        (adapterError?.cause?.kind === "postgres" &&
+          adapterError.cause.code === AMUX_LATE_COMMIT_SQLSTATE),
+      `the error Prisma surfaced at COMMIT does not carry AX001: ${String(adapterError?.name)}`,
+    );
+    assert.equal(isAmuxLateCommitError(adapterError), true);
+
+    // The mapping, and the verdict: a late COMMIT leaves no success behind.
+    assert.ok(settleError instanceof AmuxDbBoundaryError);
+    assert.equal(settleError.code, "AMUX_DB_DEADLINE_EXCEEDED");
     const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
       where: { id: started.attemptId },
     });
     const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
-    assert.notEqual(
-      attempt.outcome,
-      "succeeded",
-      `a COMMIT sent ${Math.round(
-        probe.commitSentLocalMs - probe.walkEndLocalMs - FENCE_MARGIN_MS,
-      )} ms after the lease deadline was accepted (commitAccepted=${String(
-        probe.commitAccepted,
-      )}) and the attempt was recorded as succeeded`,
-    );
+    assert.notEqual(attempt.outcome, "succeeded");
     assert.notEqual(task.status, "review");
+    assert.equal(
+      await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(probe.markerTxid) } }),
+      0,
+      "the refused transaction's marker was rolled back with it",
+    );
   } finally {
     prototype.query = originalQuery;
     await prisma.amuxWorkDelivery.deleteMany({ where: { taskId } });
@@ -2610,6 +2682,205 @@ test("a settle whose COMMIT lands after its lease deadline is not recorded as su
     await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
   }
+});
+
+test("the commit deadline trigger is a deferred constraint trigger on insert, as the migration defines it", async () => {
+  const triggers = await prisma.$queryRaw<
+    Array<{
+      name: string;
+      deferrable: boolean;
+      initiallyDeferred: boolean;
+      enabled: string;
+      type: number;
+      functionName: string;
+      constraintType: string | null;
+    }>
+  >`
+    SELECT t.tgname AS "name",
+      t.tgdeferrable AS "deferrable",
+      t.tginitdeferred AS "initiallyDeferred",
+      t.tgenabled::text AS "enabled",
+      t.tgtype::integer AS "type",
+      p.proname::text AS "functionName",
+      k.contype::text AS "constraintType"
+    FROM pg_catalog.pg_trigger t
+    JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+    JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+    LEFT JOIN pg_catalog.pg_constraint k ON k.oid = t.tgconstraint
+    WHERE c.oid = to_regclass('"AmuxCommitDeadline"')
+      AND NOT t.tgisinternal
+  `;
+  assert.deepEqual(triggers, [
+    {
+      name: AMUX_COMMIT_DEADLINE_TRIGGER,
+      deferrable: true,
+      initiallyDeferred: true,
+      enabled: "O",
+      // TRIGGER_TYPE_ROW (1) | TRIGGER_TYPE_INSERT (4): AFTER, FOR EACH ROW, on INSERT only.
+      type: 5,
+      functionName: "amux_commit_deadline_check",
+      constraintType: "t",
+    },
+  ]);
+});
+
+test("a COMMIT whose recorded deadline has passed is refused at COMMIT, not at the insert", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-PAST");
+  const seen = { txid: null as string | null, insertedLate: false };
+  try {
+    let commitError: unknown = null;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+        const rows = await tx.$queryRaw<Array<{ txid: string; late: boolean }>>`
+          INSERT INTO "AmuxCommitDeadline" ("txid", "deadline", "operation")
+          VALUES (txid_current(), clock_timestamp() - INTERVAL '1 millisecond', 'commit_deadline_past_test')
+          RETURNING "txid"::text AS "txid", clock_timestamp() >= "deadline" AS "late"
+        `;
+        seen.txid = rows[0]?.txid ?? null;
+        seen.insertedLate = rows[0]?.late === true;
+      });
+    } catch (error) {
+      commitError = error;
+    }
+    // The insert itself was accepted with a deadline already behind it: the
+    // check is deferred to COMMIT.
+    assert.equal(seen.insertedLate, true);
+    assert.ok(seen.txid !== null);
+    assert.equal(isAmuxLateCommitError(commitError), true, String(commitError));
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(row.priority, "p0", "the refused COMMIT rolled the write back");
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.txid) } }), 0);
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("an on-time COMMIT succeeds and leaves no commit deadline row behind", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-ON-TIME");
+  try {
+    const txid = await withAmuxDbBoundary(
+      { operation: "commit_deadline_on_time_test", prismaCallCeiling: 4, isolation: "mutation" },
+      async (tx) => {
+        await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+        const rows = await tx.$queryRaw<Array<{ txid: string }>>`SELECT txid_current()::text AS "txid"`;
+        return rows[0]?.txid ?? null;
+      },
+    );
+    assert.ok(txid !== null);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(row.priority, "p0");
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(txid) } }), 0);
+    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("a transaction rolled back for another reason leaves no commit deadline row", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-ROLLBACK");
+  try {
+    // The mutation fence inserts its marker and refuses in the same statement.
+    const seen = {
+      refusedTxid: null as string | null,
+      thrownTxid: null as string | null,
+      markerSeen: false,
+    };
+    await assert.rejects(
+      withAmuxDbBoundary(
+        { operation: "commit_deadline_refused_test", prismaCallCeiling: 5, isolation: "mutation" },
+        async (tx) => {
+          await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+          const rows = await tx.$queryRaw<Array<{ txid: string }>>`SELECT txid_current()::text AS "txid"`;
+          seen.refusedTxid = rows[0]?.txid ?? null;
+          await tx.$queryRaw`
+            SELECT set_config(
+              'tomverse.amux_deadline',
+              (clock_timestamp() - INTERVAL '1 millisecond')::text,
+              true
+            )
+          `;
+        },
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_DEADLINE_EXCEEDED",
+    );
+    assert.ok(seen.refusedTxid !== null);
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.refusedTxid) } }), 0);
+
+    // The route fence passes and writes its marker; the transaction then
+    // fails on something else and takes the marker with it.
+    await assert.rejects(
+      prisma.$transaction(async (tx) => {
+        await fenceAmuxRouteDeadline(tx, new Date(Date.now() + 60_000), "commit_deadline_rollback_test");
+        const rows = await tx.$queryRaw<Array<{ txid: string; present: boolean }>>`
+          SELECT txid_current()::text AS "txid",
+            EXISTS (SELECT 1 FROM "AmuxCommitDeadline" WHERE "txid" = txid_current()) AS "present"
+        `;
+        seen.thrownTxid = rows[0]?.txid ?? null;
+        seen.markerSeen = rows[0]?.present === true;
+        throw new Error("rolled back for another reason");
+      }),
+      /rolled back for another reason/,
+    );
+    assert.equal(seen.markerSeen, true);
+    assert.ok(seen.thrownTxid !== null);
+    assert.equal(await prisma.amuxCommitDeadline.count({ where: { txid: BigInt(seen.thrownTxid) } }), 0);
+    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(row.priority, "p0");
+  } finally {
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});
+
+test("without the commit deadline trigger an AMUX write is refused, and the migration's text restores it", async () => {
+  const taskId = await createTodo("AMUX-COMMIT-DEADLINE-MISSING");
+  const install = readAmuxCommitDeadlineInstallSql(process.cwd());
+  const triggerPresent = async () =>
+    (
+      await prisma.$queryRaw<Array<{ present: boolean }>>`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_trigger t
+          WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
+            AND t.tgname = 'amux_commit_deadline_check'
+            AND t.tgdeferrable AND t.tginitdeferred
+        ) AS "present"
+      `
+    )[0]?.present === true;
+  assert.equal(await triggerPresent(), true, "setup: the migration installed the trigger");
+  const warnings = mock.method(console, "warn", () => {});
+  try {
+    await prisma.$executeRaw`DROP TRIGGER "amux_commit_deadline_check" ON "AmuxCommitDeadline"`;
+    assert.equal(await triggerPresent(), false);
+    await assert.rejects(
+      withAmuxDbBoundary(
+        { operation: "commit_deadline_missing_test", prismaCallCeiling: 3, isolation: "mutation" },
+        async (tx) => {
+          await tx.amuxWorkItem.update({ where: { id: taskId }, data: { priority: "p0" } });
+        },
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_COMMIT_CHECK_MISSING",
+    );
+    assert.equal(warnings.mock.callCount(), 1);
+    const row = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(row.priority, "p0", "the refused write was rolled back");
+    assert.equal(await prisma.amuxCommitDeadline.count(), 0);
+  } finally {
+    warnings.mock.restore();
+    // The same text the Admin E2E and push harnesses apply, run twice: the
+    // second run must be a no-op, not a duplicate-trigger error.
+    await prisma.$executeRawUnsafe(install);
+    await prisma.$executeRawUnsafe(install);
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+  assert.equal(await triggerPresent(), true);
+  const restored = await withAmuxDbBoundary(
+    { operation: "commit_deadline_restored_test", prismaCallCeiling: 2, isolation: "mutation" },
+    async () => "committed",
+  );
+  assert.equal(restored, "committed");
 });
 
 test("replacement worker generation cannot heartbeat or settle the old execution attempt", async () => {
