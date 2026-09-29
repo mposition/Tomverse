@@ -33,7 +33,10 @@ import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
 import { parseChatStreamTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
-import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
+import {
+  guestMessagesConversationPrefix,
+  guestMessagesStorageKey,
+} from "@/lib/guestConversationStorage";
 import {
   toChatRequestMessage,
   toGuestPersistableMessage,
@@ -102,6 +105,10 @@ import {
   type PublicChatResponseAttempt,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  gapFilledModelTranscript,
+  mergeGuestTranscripts,
+} from "@/lib/chatTranscriptGapFill";
 
 const processedPromptKeys = new Set<string>();
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
@@ -117,9 +124,74 @@ const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
 const isTranscriptMessage = (message: Message) =>
   message.id !== WELCOME_MESSAGE_ID;
 
+/**
+ * This model's guest transcript with the turns it never answered filled from
+ * the conversation's other guest transcripts. `null` when there is nothing to
+ * merge, so the caller keeps its ordinary single-transcript path.
+ *
+ * Only this model's own transcript and those of models no other panel shows
+ * are read: a model another panel still shows keeps its questions and
+ * answers there, including a follow-up asked of it alone.
+ */
+function guestTranscriptWithCarriedAnswers(
+  conversationId: string,
+  modelId: string,
+  ownSaved: string | null,
+  otherPanelModelIds: readonly string[]
+): Message[] | null {
+  const shownElsewhere = new Set(otherPanelModelIds);
+  const prefix = guestMessagesConversationPrefix(conversationId);
+  const parse = (raw: string | null, keyModelId: string): Message[] => {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return (parsed as Message[])
+        .filter((message) => message && message.id !== WELCOME_MESSAGE_ID)
+        // Older guest answers were stored without a model id; the key says
+        // whose they are.
+        .map((message) =>
+          message.role === "assistant" && !message.modelId
+            ? { ...message, modelId: keyModelId }
+            : message
+        );
+    } catch {
+      return [];
+    }
+  };
+  const others: Message[][] = [];
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key || !key.startsWith(prefix)) continue;
+      const keyModelId = key.slice(prefix.length);
+      if (!keyModelId || keyModelId === modelId || shownElsewhere.has(keyModelId)) {
+        continue;
+      }
+      const transcript = parse(localStorage.getItem(key), keyModelId);
+      if (transcript.length > 0) others.push(transcript);
+    }
+  } catch {
+    return null;
+  }
+  if (others.length === 0) return null;
+  const own = parse(ownSaved, modelId);
+  return gapFilledModelTranscript(
+    mergeGuestTranscripts([own, ...others]),
+    modelId,
+    otherPanelModelIds
+  );
+}
+
 type ChatAppProps = {
   modelId: string;
   transcriptScope?: "model" | "conversation";
+  /**
+   * The models the other panels of this conversation show. Their answers stay
+   * in their own panels; only an answer no panel shows is carried into this
+   * one (lib/chatTranscriptGapFill.ts).
+   */
+  otherPanelModelIds?: readonly string[];
   onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
   initialConversationId?: string | null;
   promptPayload?: {
@@ -333,6 +405,7 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
 function ChatAppComponent({
   modelId,
   transcriptScope = "model",
+  otherPanelModelIds,
   onRestorePrompt,
   initialConversationId = null,
   promptPayload,
@@ -451,6 +524,12 @@ function ChatAppComponent({
   const runtimeKeyRef = useRef(runtimeKey);
   useLayoutEffect(() => {
     runtimeKeyRef.current = runtimeKey;
+  });
+  // Read by the history load, which is keyed on the view and deliberately not
+  // re-run when another panel changes model.
+  const otherPanelModelIdsRef = useRef(otherPanelModelIds);
+  useLayoutEffect(() => {
+    otherPanelModelIdsRef.current = otherPanelModelIds;
   });
 
   useEffect(() => {
@@ -822,7 +901,17 @@ function ChatAppComponent({
         if (initialConversationId) {
           const storageKey = guestMessagesStorageKey(initialConversationId, modelId);
           const savedMessages = localStorage.getItem(storageKey);
-          if (savedMessages) {
+          const carried = transcriptScope === "model"
+            ? guestTranscriptWithCarriedAnswers(
+                initialConversationId,
+                modelId,
+                savedMessages,
+                otherPanelModelIdsRef.current ?? []
+              )
+            : null;
+          if (carried && carried.length > 0) {
+            writeChatRuntimeMessages(loadKey, carried);
+          } else if (savedMessages) {
             try {
               writeChatRuntimeMessages(loadKey, JSON.parse(savedMessages));
             } catch (e) {
@@ -855,9 +944,11 @@ function ChatAppComponent({
 
       const fetchPastMessages = async () => {
         try {
-          const modelQuery = transcriptScope === "conversation"
-            ? ""
-            : `modelId=${encodeURIComponent(modelId)}`;
+          // The whole conversation in both scopes. A model-scoped panel
+          // still shows only its own answers, but a turn its model never
+          // answered is filled from the model that did, and the server's
+          // per-model filter would have removed exactly those answers.
+          const modelQuery = "";
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
@@ -909,9 +1000,13 @@ function ChatAppComponent({
             if (isChatRuntimeStreaming(loadKey)) return;
 
           if (data.messages && data.messages.length > 0) {
-            const filteredMessages = transcriptMessagesForScope(
-              data.messages, modelId, transcriptScope
-            );
+            const filteredMessages = transcriptScope === "conversation"
+              ? transcriptMessagesForScope(data.messages, modelId, transcriptScope)
+              : gapFilledModelTranscript(
+                  data.messages,
+                  modelId,
+                  otherPanelModelIdsRef.current ?? []
+                );
             const parsedAttempts: PublicChatResponseAttempt[] = transcriptScope === "conversation" &&
               Array.isArray(data.responseAttempts)
               ? (data.responseAttempts as unknown[])
@@ -1253,9 +1348,15 @@ function ChatAppComponent({
         // taking the whole guest transcript with it. The bytes live in
         // ephemeral object storage, keyed by objectKey; the preview is worth
         // less than the history.
+        // A carried answer is another model's, and already stored under
+        // that model's key; writing it here would make it this model's.
         localStorage.setItem(
           storageKey,
-          JSON.stringify(transcript.map(toGuestPersistableMessage))
+          JSON.stringify(
+            transcript
+              .filter((message) => !message.carriedAnswer)
+              .map(toGuestPersistableMessage)
+          )
         );
       } catch (error) {
         console.error("Failed to persist guest messages:", error);

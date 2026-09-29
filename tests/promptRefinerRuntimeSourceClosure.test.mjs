@@ -262,12 +262,18 @@ const compilerOptions = parsedConfig.options;
 // closure. Neither change is a computed element access. The count remains 228
 // and the position-free inventory remains 9aa7ec49..., so only source
 // positions moved.
+//
+// 2026-09-29, image input-limit estimate: `lib/chatSecurity.ts` gains the
+// `reservationOnlyInputTokens` budget option and numeric `internal*` details
+// on the CHAT_INPUT_TOKEN_LIMIT refusal. No import is added and neither change
+// is a computed element access. The count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "0c29bca0c6b8b2eab72ad1d1b6a1597e",
-  "38a6818f684db88fe52654fade9419f3",
+  "806342cdc33feacfc2eecee7d5143185",
+  "f09d35a8d691e20a1084337bc3c05658",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

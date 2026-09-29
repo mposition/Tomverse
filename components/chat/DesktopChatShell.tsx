@@ -1232,6 +1232,7 @@ export function DesktopChatShell({
 
                 <ChatApp
                   transcriptScope={transcriptScope}
+                  otherPanelModelIds={selectedModels}
                   onRestorePrompt={onRestorePrompt}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
