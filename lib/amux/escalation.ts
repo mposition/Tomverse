@@ -48,6 +48,10 @@ const ESCALATION_REASON_CODES = new Set([
   "execution_lease_expired",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
+  // Policy version 15: why the WSL runner blocked an attempt.
+  "local_card_closed",
+  "local_card_unlinked",
+  "local_card_ambiguous",
 ]);
 
 export function storedAmuxEscalationReasonCode(

@@ -366,7 +366,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "AmuxRecommendationSnapshot",
     state: "excluded",
     exclusionReason:
-      "Operator evidence for one recommendation snapshot, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores digests and counts, not a customer prompt. A customer export receives nothing from this table.",
+      "Operator evidence for one recommendation snapshot, not customer data. The actor id is the administrator who prepared the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores digests and counts, not a customer prompt. A row the auto-promotion tick wrote carries the marker system:amux-auto-promoter instead of an administrator id. A customer export receives nothing from this table.",
   },
   {
     domain: "amuxRecommendationDecision",
@@ -390,7 +390,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "AmuxRecommendationAutoConsumption",
     state: "excluded",
     exclusionReason:
-      "Operator evidence for one auto-promotion consumption, not customer data. The actor id is the administrator who recorded the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+      "Operator evidence for one auto-promotion consumption, not customer data. The actor id is the administrator who recorded the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A row the auto-promotion tick wrote carries the marker system:amux-auto-promoter instead of an administrator id. A customer export receives nothing from this table.",
   },
   {
     domain: "amuxRecommendationAutoHalt",
@@ -398,7 +398,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "AmuxRecommendationAutoHalt",
     state: "excluded",
     exclusionReason:
-      "Operator evidence for one auto-promotion halt, not customer data. The actor id is the administrator who recorded the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a violation code, not free text. A customer export receives nothing from this table.",
+      "Operator evidence for one auto-promotion halt, not customer data. The actor id is the administrator who recorded the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a violation code, not free text. A row the auto-promotion tick wrote carries the marker system:amux-auto-promoter instead of an administrator id. A customer export receives nothing from this table.",
   },
   {
     domain: "amuxIntakeDraft",

@@ -316,6 +316,7 @@ struct ExecutionHeartbeatRequest<'a> {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecutionHeartbeatResponse {
     pub accepted: bool,
+    #[serde(default)]
     pub reason: Option<String>,
 }
 
@@ -349,14 +350,29 @@ struct ExecutionSettleRequest<'a> {
     reason: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_microusd: Option<u64>,
+    /// Policy version 15: only with succeeded -> review; the server verifies
+    /// the PR by reading GitHub itself.
+    /// Outer None omits the field (the stored PR is kept); Some(None) sends
+    /// null (a review that names no PR clears an earlier attempt's PR).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_pr_number: Option<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExecutionSettleResponse {
     pub settled: bool,
-    #[serde(rename = "taskRevision")]
+    #[serde(rename = "taskRevision", default)]
     pub task_revision: Option<i64>,
+    #[serde(default)]
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoPromotionTickResponse {
+    pub promoted: bool,
+    pub reason: Option<String>,
+    pub consumption_id: Option<String>,
+    pub expired: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -597,6 +613,33 @@ impl TomverseApi {
         to_status: &str,
         reason: Option<&str>,
     ) -> Result<ExecutionSettleResponse> {
+        self.execution_settle_with_review_pr(
+            attempt_id,
+            worker,
+            instance_id,
+            generation,
+            task_revision,
+            outcome,
+            to_status,
+            reason,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execution_settle_with_review_pr(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        instance_id: &str,
+        generation: i64,
+        task_revision: i64,
+        outcome: &str,
+        to_status: &str,
+        reason: Option<&str>,
+        review_pr_number: Option<Option<i64>>,
+    ) -> Result<ExecutionSettleResponse> {
         let response = self
             .client
             .post(format!(
@@ -614,6 +657,7 @@ impl TomverseApi {
                 to_status,
                 reason,
                 cost_microusd: None,
+                review_pr_number,
             })
             .send()
             .await?;
@@ -628,6 +672,33 @@ impl TomverseApi {
             .json()
             .await
             .context("invalid Tomverse AMUX execution-settle response")
+    }
+
+    /// Policy version 15: the system consumer of pre-approved automatic
+    /// promotion grants. The server decides everything (switch, graduation,
+    /// capacity, cost, halt); a 409 carries its refusal reason.
+    pub async fn auto_promotion_tick(&self) -> Result<AutoPromotionTickResponse> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/auto-promotion/tick",
+                self.base_url
+            ))
+            .bearer_auth(&self.secret)
+            .json(&QueueRequest {})
+            .send()
+            .await?;
+
+        let status = response.status();
+
+        if !status.is_success() && status != reqwest::StatusCode::CONFLICT {
+            response.error_for_status_ref()?;
+        }
+
+        response
+            .json()
+            .await
+            .context("invalid Tomverse AMUX auto-promotion tick response")
     }
 
     pub async fn execution_recover(&self) -> Result<ExecutionRecoveryResponse> {
@@ -676,5 +747,44 @@ mod tests {
         let body = &from_env[..from_env.find("pub async fn queue").unwrap()];
         assert!(body.contains(".timeout(TOMVERSE_INTERNAL_REQUEST_TIMEOUT)"));
         assert!(!body.contains("Client::new()"));
+    }
+
+    #[test]
+    fn settle_and_heartbeat_bodies_without_optional_fields_parse() {
+        let settled: ExecutionSettleResponse =
+            serde_json::from_str(r#"{"settled":true,"taskRevision":3}"#).unwrap();
+        assert!(settled.settled);
+        assert_eq!(settled.task_revision, Some(3));
+        let fenced: ExecutionSettleResponse =
+            serde_json::from_str(r#"{"settled":false,"reason":"fenced_out"}"#).unwrap();
+        assert!(!fenced.settled);
+        assert_eq!(fenced.reason.as_deref(), Some("fenced_out"));
+        let beat: ExecutionHeartbeatResponse = serde_json::from_str(r#"{"accepted":true}"#).unwrap();
+        assert!(beat.accepted);
+        let refused: ExecutionHeartbeatResponse =
+            serde_json::from_str(r#"{"accepted":false,"reason":"fenced_out"}"#).unwrap();
+        assert!(!refused.accepted);
+    }
+
+    #[test]
+    fn the_review_pr_field_is_omitted_null_or_a_number() {
+        let body = |review_pr_number| {
+            serde_json::to_value(ExecutionSettleRequest {
+                attempt_id: "a",
+                worker: "w",
+                instance_id: "i",
+                generation: 1,
+                task_revision: 2,
+                outcome: "succeeded",
+                to_status: "review",
+                reason: None,
+                cost_microusd: None,
+                review_pr_number,
+            })
+            .unwrap()
+        };
+        assert!(body(None).get("review_pr_number").is_none());
+        assert_eq!(body(Some(None))["review_pr_number"], serde_json::Value::Null);
+        assert_eq!(body(Some(Some(1740)))["review_pr_number"], serde_json::json!(1740));
     }
 }

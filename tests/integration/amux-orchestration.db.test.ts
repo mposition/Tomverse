@@ -1116,6 +1116,7 @@ test("claim API refuses ownership when no worker is execution-ready", async () =
       process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1344,6 +1345,7 @@ test("execution start and settle are fenced by task revision and worker generati
     await prisma.amuxWorkerRuntime.deleteMany({
       where: { workerName: worker },
     });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1459,6 +1461,7 @@ test("replacement worker generation cannot heartbeat or settle the old execution
     await prisma.amuxWorkerRuntime.deleteMany({
       where: { workerName: worker },
     });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1674,6 +1677,7 @@ test("execution API is fail-closed by default and preserves the execution fences
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -1797,6 +1801,7 @@ test("expired execution recovery returns only the still-current attempt to Todo 
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -2129,6 +2134,7 @@ test("execution start atomically creates durable delivery and pull ack remain id
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -2276,6 +2282,7 @@ test("replacement runtime cannot consume an old delivery and expiry cancels it w
       where: { workerName: worker },
     });
 
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
@@ -3003,4 +3010,159 @@ test("the admin card list reads attempt counts and the latest attempt in set que
     await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
     await prisma.amuxWorkItem.delete({ where: { id: taskId } });
   }
+});
+
+const runPromotedCardToSettle = async (
+  label: string,
+  settle: (input: {
+    attemptId: string;
+    worker: string;
+    instanceId: string;
+    generation: number;
+    taskRevision: number;
+    now: Date;
+  }) => Promise<unknown>,
+) => {
+  const { boardPromotionExecutionBriefDigest } = await import("@/lib/amux/boardPromotionCore");
+  const worker = `amux-review-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const taskId = await createTodo(label);
+  const base = new Date();
+  const brief = "Approved brief for the human review regression.";
+  await prisma.amuxWorkItem.update({
+    where: { id: taskId },
+    data: {
+      owner: worker,
+      claimedAt: base,
+      revision: 1,
+      executionBrief: brief,
+      executionBriefDigest: boardPromotionExecutionBriefDigest(brief),
+    },
+  });
+  const cleanup = async () => {
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkDelivery.deleteMany({ where: { taskId } });
+    await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: worker } });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  };
+  try {
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    if (!started.started) throw new Error(`execution did not start: ${started.reason}`);
+    const result = await settle({
+      attemptId: started.attemptId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      taskRevision: started.taskRevision,
+      now: new Date(base.getTime() + 2_000),
+    });
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    const escalations = await prisma.amuxHumanEscalation.findMany({ where: { taskId } });
+    return { result, task, escalations, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+};
+
+test("a promoted card that asks for done goes to human review with an escalation", async () => {
+  const { result, task, escalations, cleanup } = await runPromotedCardToSettle(
+    "amux-review-forced",
+    (input) => settleAmuxExecution({ ...input, outcome: "succeeded", toStatus: "done" }),
+  );
+  try {
+    assert.deepEqual(result, { settled: true, taskRevision: 3 });
+    assert.equal(task.status, "review");
+    assert.equal(task.owner, null);
+    assert.equal(task.reviewPrNumber, null);
+    assert.equal(escalations.length, 1);
+    assert.equal(escalations[0].reason, "human_review_required");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a review settlement records the named PR on the card in the same transaction", async () => {
+  const { result, task, escalations, cleanup } = await runPromotedCardToSettle(
+    "amux-review-pr",
+    (input) =>
+      settleAmuxExecution({ ...input, outcome: "succeeded", toStatus: "review", reviewPrNumber: 1733 }),
+  );
+  try {
+    assert.deepEqual(result, { settled: true, taskRevision: 3 });
+    assert.equal(task.status, "review");
+    assert.equal(task.reviewPrNumber, 1733);
+    // AmuxWorkItem_review_pr_check requires the flag with a stored PR.
+    assert.equal(task.requiresHumanReview, true);
+    // AmuxWorkItem_human_review_shape_check pairs the flag with a specialty.
+    assert.equal(task.reviewSpecialty, "code-review");
+    assert.equal(escalations.length, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a review settlement that names no PR clears a PR left by an earlier attempt", async () => {
+  const { result, task, cleanup } = await runPromotedCardToSettle("amux-review-pr-cleared", async (input) => {
+    await prisma.amuxWorkItem.update({
+      where: { id: (await prisma.amuxExecutionAttempt.findUniqueOrThrow({ where: { id: input.attemptId } })).taskId },
+      data: { requiresHumanReview: true, reviewSpecialty: "code-review", reviewPrNumber: 1600 },
+    });
+    return settleAmuxExecution({ ...input, outcome: "succeeded", toStatus: "review", reviewPrNumber: null });
+  });
+  try {
+    assert.deepEqual(result, { settled: true, taskRevision: 3 });
+    assert.equal(task.status, "review");
+    assert.equal(task.reviewPrNumber, null);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a runner reason code is kept on the attempt and on the blocked escalation", async () => {
+  const { task, escalations, cleanup } = await runPromotedCardToSettle("amux-review-unlinked", (input) =>
+    settleAmuxExecution({ ...input, outcome: "blocked", toStatus: "blocked", reason: "local_card_unlinked" }),
+  );
+  try {
+    assert.equal(task.status, "blocked");
+    assert.equal(escalations.length, 1);
+    assert.equal(escalations[0].reason, "local_card_unlinked");
+    const attempt = await prisma.amuxExecutionAttempt.findFirstOrThrow({ where: { taskId: task.id } });
+    assert.equal(attempt.reason, "local_card_unlinked");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("a PR number on any settlement other than succeeded to review is refused before the transaction", async () => {
+  await assert.rejects(
+    settleAmuxExecution({
+      attemptId: randomUUID(),
+      worker: "amux-review-refused",
+      instanceId: randomUUID(),
+      generation: 1,
+      taskRevision: 1,
+      outcome: "failed",
+      toStatus: "todo",
+      reviewPrNumber: 7,
+    }),
+    /Invalid AMUX review PR number/,
+  );
 });

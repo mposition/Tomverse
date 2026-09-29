@@ -10,6 +10,49 @@ use crate::tomverse_api::{QueueTask, TomverseApi};
 
 const SCORING_VERSION: &str = "amux-global-priority-v2";
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
+/// Policy version 15: the system consumer of pre-approved promotion grants.
+const AUTO_PROMOTION_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Policy version 15. Claim-only mode claims ownerless Todo for a runtime the
+/// server reports execution-ready and starts no runtime or executor here; the
+/// WSL runner executes. Opened only by this latch and `TOMVERSE_AMUX_CLAIM`
+/// exactly `1`.
+pub const CLAIM_ONLY_CODE_LATCH: bool = true;
+pub const CLAIM_ONLY_ENV_NAME: &str = "TOMVERSE_AMUX_CLAIM";
+
+pub fn claim_only_permitted(latch: bool, env_value: Option<&str>) -> bool {
+    latch && env_value == Some("1")
+}
+
+pub fn claim_only_enabled() -> bool {
+    claim_only_permitted(
+        CLAIM_ONLY_CODE_LATCH,
+        std::env::var(CLAIM_ONLY_ENV_NAME).ok().as_deref(),
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimMode {
+    SelectionOnly,
+    ClaimOnly,
+    Execute,
+    Conflict,
+}
+
+/// Both switches together is a configuration error: execute mode starts a
+/// Railway runtime that would compete with the WSL runner for the same work.
+pub fn claim_mode(execute: bool, claim_only: bool) -> ClaimMode {
+    match (execute, claim_only) {
+        (true, true) => ClaimMode::Conflict,
+        (true, false) => ClaimMode::Execute,
+        (false, true) => ClaimMode::ClaimOnly,
+        (false, false) => ClaimMode::SelectionOnly,
+    }
+}
+
+pub fn current_claim_mode() -> ClaimMode {
+    claim_mode(execution_enabled(), claim_only_enabled())
+}
 const MAX_ROUTING_PROBES_PER_TICK: usize = 16;
 
 pub fn execution_enabled() -> bool {
@@ -61,7 +104,22 @@ impl Scheduler {
 
     pub async fn run(mut self) -> Result<()> {
         let mut next_recovery = Instant::now();
+        let mut next_auto_promotion = Instant::now();
         loop {
+            if Instant::now() >= next_auto_promotion {
+                match self.api.auto_promotion_tick().await {
+                    Ok(outcome) => info!(
+                        promoted = outcome.promoted,
+                        reason = ?outcome.reason,
+                        consumption_id = ?outcome.consumption_id,
+                        expired_grants = outcome.expired.unwrap_or(0),
+                        "AMUX automatic promotion tick"
+                    ),
+                    Err(error) => warn!(%error, "AMUX automatic promotion tick failed"),
+                }
+                next_auto_promotion = Instant::now() + AUTO_PROMOTION_INTERVAL;
+            }
+
             if Instant::now() >= next_recovery {
                 match self.api.execution_recover().await {
                     Ok(outcome) if outcome.recovered => info!(
@@ -95,8 +153,17 @@ impl Scheduler {
         let queue = self.api.queue().await?;
         let ranked = rank_global_priority_at(queue, Utc::now());
         // Selection-only observes the highest priority task without taking
-        // ownership or reading worker-specific routing state.
-        let selection_only = !execution_enabled();
+        // ownership or reading worker-specific routing state. Both switches
+        // together also falls back to selection: never claim on a conflict.
+        let mode = current_claim_mode();
+        if mode == ClaimMode::Conflict {
+            warn!(
+                measured = true,
+                verdict = "claim_mode_conflict",
+                "TOMVERSE_AMUX_EXECUTE and TOMVERSE_AMUX_CLAIM are both set; not claiming"
+            );
+        }
+        let selection_only = !matches!(mode, ClaimMode::ClaimOnly | ClaimMode::Execute);
         if selection_only {
             self.scan_offset = 0;
         }
@@ -562,5 +629,30 @@ mod tests {
 
         let selected = select_global_priority_at(tasks, now()).unwrap();
         assert_eq!(selected.0.id, "A");
+    }
+
+    #[test]
+    fn claim_only_opens_only_on_the_latch_and_exactly_one() {
+        assert!(claim_only_permitted(true, Some("1")));
+        for value in [None, Some(""), Some("0"), Some(" 1"), Some("1 "), Some("true"), Some("enabled")] {
+            assert!(!claim_only_permitted(true, value), "{value:?}");
+        }
+        assert!(!claim_only_permitted(false, Some("1")));
+    }
+
+    #[test]
+    fn claim_mode_refuses_both_switches_together() {
+        assert_eq!(claim_mode(false, false), ClaimMode::SelectionOnly);
+        assert_eq!(claim_mode(false, true), ClaimMode::ClaimOnly);
+        assert_eq!(claim_mode(true, false), ClaimMode::Execute);
+        assert_eq!(claim_mode(true, true), ClaimMode::Conflict);
+    }
+
+    #[test]
+    fn a_conflict_never_claims() {
+        let source = include_str!("scheduler.rs");
+        assert!(source.contains(
+            "let selection_only = !matches!(mode, ClaimMode::ClaimOnly | ClaimMode::Execute);"
+        ));
     }
 }
