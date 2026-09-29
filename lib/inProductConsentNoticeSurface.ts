@@ -121,8 +121,11 @@ export async function recordConsentNoticeAction(input: {
   // is also accepted right after the render recorded itself -- the screen is
   // still open, and `already_shown` is the render's own trace.
   const offer = await noticeStateForUser({ userId: input.userId });
-  const answerAfterRender =
-    input.action !== "shown" && !offer.offered && offer.refusal === "already_shown";
+  const alreadyShown = !offer.offered && offer.refusal === "already_shown";
+  // The render is one fact per account: another tab, or a response that was
+  // lost, may have recorded it already, and that is the render recorded.
+  if (input.action === "shown" && alreadyShown) return { recorded: true };
+  const answerAfterRender = input.action !== "shown" && alreadyShown;
   if (!offer.offered && !answerAfterRender) return { recorded: false, reason: "not_offered" };
 
   const user = await prisma.user.findUnique({
@@ -247,7 +250,9 @@ export async function recordConsentNoticeAction(input: {
       }
     });
   } catch (error) {
-    if (error === CONFIRMATION_UNAVAILABLE) {
+    // Its own refusals too (already confirmed by a concurrent click, address
+    // moved): the transaction rolled back, nothing was queued.
+    if (error === CONFIRMATION_UNAVAILABLE || typeof error === "symbol") {
       return { recorded: false, reason: "confirmation_unavailable" };
     }
     throw error;

@@ -53,16 +53,15 @@ export async function POST(req: Request) {
     await consumeApiRateLimit(req, session.user.id, "consent-notice", { minute: 10, day: 50 });
     const body = await readLimitedJson(req, 1_024, bodySchema);
     if (body.action === "accept") {
-      // "Yes" can queue a confirmation for each of three purposes. They count
-      // against the same per-account budget the settings screen uses for
-      // confirmation mail, one unit per possible message, so this path is not
-      // a way around it.
-      for (let unit = 0; unit < 3; unit += 1) {
-        await consumeApiRateLimit(req, `consent-confirmation:${session.user.id}`, "consent-confirmation", {
-          minute: 3,
-          day: 10,
-        });
-      }
+      // One unit of the settings screen's confirmation budget per "Yes": the
+      // limiter charges atomically one unit at a time, and three separate
+      // charges could spend the budget and then refuse with no mail sent. The
+      // path cannot loop -- after one "Yes" every purpose is confirmed or
+      // waiting on a live link, and a second queues nothing for 72 hours.
+      await consumeApiRateLimit(req, `consent-confirmation:${session.user.id}`, "consent-confirmation", {
+        minute: 3,
+        day: 10,
+      });
     }
     const result = await recordConsentNoticeAction({
       userId: session.user.id,

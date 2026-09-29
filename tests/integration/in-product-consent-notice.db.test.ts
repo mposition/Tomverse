@@ -110,8 +110,9 @@ test("a render is recorded with the server's resolution, and the notice is not o
   );
 
   assert.deepEqual(await consentNoticeForViewer(user.id), { offered: false });
-  // A second render of a closed notice records nothing.
-  assert.deepEqual(await action(user.id, "shown"), { recorded: false, reason: "not_offered" });
+  // A second render -- another tab, a lost response -- is the same fact, and
+  // is answered as recorded without writing again.
+  assert.deepEqual(await action(user.id, "shown"), { recorded: true });
   assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 1);
 });
 

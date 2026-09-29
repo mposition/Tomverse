@@ -56,6 +56,9 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
   // that record exists; otherwise the notice would come back.
   const [shownRecorded, setShownRecorded] = useState(false);
   const asked = useRef(false);
+  // Set synchronously: `busy` disables the buttons only after the next paint,
+  // and a double click would otherwise post twice.
+  const answering = useRef(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const acceptRef = useRef<HTMLButtonElement | null>(null);
@@ -139,9 +142,12 @@ export function InProductConsentNotice({ enabled }: { enabled: boolean }) {
 
   const answer = useCallback(
     async (action: "object" | "accept") => {
+      if (answering.current) return;
+      answering.current = true;
       setBusy(true);
       setFailed(false);
       const recorded = await post(action);
+      answering.current = false;
       setBusy(false);
       if (!recorded) {
         setFailed(true);
