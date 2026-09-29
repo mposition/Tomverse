@@ -87,12 +87,26 @@ export const EMAIL_CONSENT_CONFIRMATION_FLAG_KEY =
  */
 export const EMAIL_RELEASE_NOTES_FLAG_KEY = "feature.emailReleaseNotesEnabled";
 
+/**
+ * The consent devices on the sign-up screen (S4).
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md sections 5.1, 5.2
+ * and the S4 row of section 12 ("별도 `collectionEnabled` 게이트").
+ *
+ * Off means the screen shows no devices, and the two routes that store and
+ * consume a choice refuse. Its own switch because turning it on starts writing
+ * permanent evidence (`notice_shown`, `objected`) about new accounts, which is
+ * a different decision from any sending switch.
+ */
+export const EMAIL_SIGNUP_CONSENT_FLAG_KEY = "feature.emailSignupConsentEnabled";
+
 export const EMAIL_FEATURE_FLAG_KEYS = [
   EMAIL_MARKETING_FLAG_KEY,
   EMAIL_RELEASE_NOTES_FLAG_KEY,
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY,
 ] as const;
 
 export type EmailFeatureFlagKey = (typeof EMAIL_FEATURE_FLAG_KEYS)[number];

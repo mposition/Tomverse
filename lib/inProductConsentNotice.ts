@@ -439,6 +439,12 @@ type RecordInput = {
   };
   occurredAt?: Date;
   client?: Prisma.TransactionClient;
+  /**
+   * The screen the devices were on. The in-product notice by default; the
+   * sign-up screen (S4, draft section 5.2) records the same facts through the
+   * same function, so the rules about what a row may say are one set.
+   */
+  capturedVia?: "in_product_notice" | "signup_form";
 };
 
 const recordNoticeEvent = async (
@@ -784,7 +790,7 @@ const recordNoticeEvent = async (
         kind: record.kind,
         scopeKey: record.scopeKey,
         occurredAt: input.occurredAt ?? new Date(),
-        capturedVia: "in_product_notice",
+        capturedVia: input.capturedVia ?? "in_product_notice",
         sourceEventKey,
         jurisdiction: jurisdiction.country,
         jurisdictionSource: jurisdiction.source,

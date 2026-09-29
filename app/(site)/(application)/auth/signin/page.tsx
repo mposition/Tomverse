@@ -1,5 +1,6 @@
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { isLanguage } from "@/lib/language";
+import { isEmailSignupConsentEnabled } from "@/lib/appSettings";
 import { SignInPageContent } from "./SignInPageContent";
 
 /**
@@ -33,14 +34,24 @@ export default async function SignInPage({
   // build artifact was produced without it.
   const runtimeEnvironment = process.env;
   const turnstileSiteKey = runtimeEnvironment.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  // The sign-up consent devices (S4), decided on the server: off renders none.
+  const signupConsentEnabled = await isEmailSignupConsentEnabled().catch(() => false);
 
   if (!isLanguage(locale)) {
-    return <SignInPageContent turnstileSiteKey={turnstileSiteKey} />;
+    return (
+      <SignInPageContent
+        turnstileSiteKey={turnstileSiteKey}
+        signupConsentEnabled={signupConsentEnabled}
+      />
+    );
   }
 
   return (
     <LanguageProvider initialLang={locale} forceInitialLang>
-      <SignInPageContent turnstileSiteKey={turnstileSiteKey} />
+      <SignInPageContent
+        turnstileSiteKey={turnstileSiteKey}
+        signupConsentEnabled={signupConsentEnabled}
+      />
     </LanguageProvider>
   );
 }

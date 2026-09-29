@@ -21,6 +21,8 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
+import { storeSignupConsentChoice } from "@/components/auth/signupConsentClient";
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -67,7 +69,13 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
+function SignInButtons({
+    turnstileSiteKey,
+    signupConsentEnabled = false,
+}: {
+    turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+}) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
@@ -106,6 +114,20 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
             router.replace(callbackUrl);
         }
     }, [callbackUrl, hasAuthenticatedUser, router]);
+
+    // The sign-up consent devices (S4). Both start unset: an opt-in is never
+    // pre-ticked, and not ticking it is not a refusal.
+    const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    const storeConsent = (channel: "oauth" | "email_code", extra: { provider?: string; email?: string }) =>
+        signupConsentEnabled
+            ? storeSignupConsentChoice({
+                  channel,
+                  ...extra,
+                  expressOptInRequested: consentChoice.optIn,
+                  objected: consentChoice.objected,
+                  language: lang,
+              })
+            : Promise.resolve();
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -189,6 +211,7 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
+            await storeConsent("email_code", { email: email.trim() });
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
@@ -324,13 +347,23 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                     {t("auth.privacyPolicyLink")}
                 </Link>
             </p>
+            {signupConsentEnabled ? (
+                <SignupConsentDevices
+                    language={lang}
+                    optIn={consentChoice.optIn}
+                    objected={consentChoice.objected}
+                    onChange={setConsentChoice}
+                />
+            ) : null}
 
             {/* Google */}
             <button
                 type="button"
                 onClick={() => {
                     markSignupStarted("google");
-                    void signIn("google", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "google" }).then(() =>
+                        signIn("google", { callbackUrl }, oauthAuthorizationParams)
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -344,7 +377,9 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 type="button"
                 onClick={() => {
                     markSignupStarted("azure-ad");
-                    void signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "azure-ad" }).then(() =>
+                        signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams)
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -505,8 +540,10 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
 
 export function SignInPageContent({
     turnstileSiteKey,
+    signupConsentEnabled = false,
 }: {
     turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
 }) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
@@ -546,7 +583,10 @@ export function SignInPageContent({
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons turnstileSiteKey={turnstileSiteKey} />
+                        <SignInButtons
+                            turnstileSiteKey={turnstileSiteKey}
+                            signupConsentEnabled={signupConsentEnabled}
+                        />
                     </Suspense>
                 </div>
             </div>

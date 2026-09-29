@@ -46,6 +46,8 @@ test("the ADR's three flag names are the keys the code reads", () => {
     "feature.emailCampaignsEnabled",
     "feature.emailConsentReconfirmEnabled",
     "feature.emailConsentConfirmationEnabled",
+    // The sign-up consent devices (S4, 2026-09-29).
+    "feature.emailSignupConsentEnabled",
   ]);
 });
 
