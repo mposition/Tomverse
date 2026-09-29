@@ -2217,7 +2217,11 @@ test("an authenticated not-eligible claim appends one bounded refusal audit", as
 
 test("an authenticated authoritative-worker mismatch appends one bounded refusal audit", async () => {
   const taskId = await createTodo("amux-api-worker-mismatch");
-  const authoritativeWorker = "codex-authoritative";
+  // Under main's selection rule (#1595) only a running, idle, dispatch-ready
+  // worker can be the authoritative choice, so the test registers one; without
+  // it the server finds no authoritative worker at all and refuses for that
+  // reason instead of the mismatch this test is about.
+  const authoritativeWorker = `codex-authoritative-${randomUUID()}`;
   const requestedWorker = "claude-mismatch";
   const secret = makeAmuxSyncSecret();
 
@@ -2248,6 +2252,18 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   ]);
 
   try {
+    const instanceId = randomUUID();
+    const runtime = await registerAmuxWorkerRuntime(authoritativeWorker, instanceId, new Date());
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: authoritativeWorker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(),
+    });
+    assert.equal(ready.accepted, true);
+
     const response = await claimPost(
       new Request("http://localhost/api/internal/amux/claim", {
         method: "POST",
@@ -2320,6 +2336,7 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
       process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: authoritativeWorker } });
     await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
   }
 });
