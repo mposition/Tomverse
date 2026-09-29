@@ -378,6 +378,40 @@ test("a due grant is expired on a consume attempt and by the tick, and the tick 
   assert.deepEqual(await ledger(), before);
 });
 
+test("each due grant expires in its own transaction, so the audit chain lock is released between them", async () => {
+  // The audit chain's advisory lock lasts until COMMIT. A batch in one
+  // transaction held it across every expiry; one grant per transaction holds
+  // it for one append. xmin names the transaction that last wrote a row.
+  const dueIds: string[] = [];
+  for (const label of ["P", "Q", "R"]) {
+    const card = await seedCard(label);
+    dueIds.push(
+      await seedGrantRow(card.id, {
+        grantedAt: new Date(Date.now() - 8 * DAY_MS),
+        expiresAt: new Date(Date.now() - DAY_MS),
+      }),
+    );
+  }
+  const before = await ledger();
+  const result = await runAutoPromotionTick();
+  assert.equal(result.promoted, false);
+  assert.ok(result.expired >= dueIds.length);
+  const writers = new Set<string>();
+  for (const id of dueIds) {
+    const rows = await prisma.$queryRaw<Array<{ status: string; writer: string }>>`
+      SELECT "status", xmin::text AS "writer" FROM "AmuxRecommendationAutoGrant" WHERE "id" = ${id}
+    `;
+    assert.equal(rows[0]?.status, "expired");
+    writers.add(rows[0]?.writer ?? "");
+    assert.equal(
+      await prisma.adminAuditLog.count({ where: { action: "amux.auto_grant.expired", targetId: id } }),
+      1,
+    );
+  }
+  assert.equal(writers.size, dueIds.length, "one transaction per expired grant");
+  assert.deepEqual(await ledger(), before);
+});
+
 test("the owner consume uses the bound item and amount and writes exactly one cost entry", async () => {
   const lifecycleBefore = await counts();
   const cardH = await seedCard("H");

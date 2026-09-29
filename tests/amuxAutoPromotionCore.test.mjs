@@ -592,3 +592,65 @@ test("the transaction wrapper classifies by phase, and a known rollback is not r
     /error instanceof AmuxDbBoundaryError && error\.code === "AMUX_DB_DEADLINE_EXCEEDED"[\s\S]*?"database_deadline_exceeded"[\s\S]*?status: 503/,
   );
 });
+
+// The audit chain's advisory lock (lib/adminAudit.ts) is transaction scoped:
+// once a transaction appends an entry it holds the lock until COMMIT, and every
+// other audit writer waits. AMUX lifecycle writers wait under a 200 ms statement
+// timeout, so a tick that held it across long work turned their writes into
+// 503s. A timing test would need a database and would be flaky; these pin the
+// structure that keeps the hold short instead.
+test("the tick holds the audit chain lock only for the appends that end each short transaction", () => {
+  const service = withoutComments(read("lib/amux/autoPromotionService.ts"));
+  const between = (from, to) => {
+    const start = service.indexOf(from);
+    const end = service.indexOf(to, start + 1);
+    assert.ok(start >= 0 && end > start, `${from} .. ${to}`);
+    return service.slice(start, end);
+  };
+
+  // Expiry: the batch loop is outside the transaction, one grant inside it.
+  const expiry = between("const expireDueGrantsOneByOne = async", "export async function expireDueAutoGrants");
+  const loop = expiry.indexOf("for (let index = 0; index < AUTO_EXPIRE_BATCH");
+  assert.ok(loop >= 0 && expiry.indexOf("withAutoTransaction(") > loop);
+  assert.equal((expiry.match(/expireGrantLocked\(/g) ?? []).length, 1);
+  assert.doesNotMatch(expiry, /findMany\(/);
+  assert.doesNotMatch(service, /take: AUTO_EXPIRE_BATCH/);
+  const tick = between("export async function runAutoPromotionTick", "export async function tickAutoPromotion");
+  assert.match(tick, /expireDueGrantsOneByOne\(AUTO_SYSTEM_ACTOR/);
+
+  // After a transaction's first audit entry come only the rows that carry its
+  // id and, for a halt, one more entry: no read, scan or selection.
+  const reads =
+    /\.(?:findMany|findFirst|findUnique|count|aggregate|groupBy)\(|\$queryRaw|recommendationSelectionLocked\(|readAuto\w*\(|costEntries\(|humanDecisions\(|openHalt\(/;
+  for (const [from, to] of [
+    ["const expireGrantLocked = async", "type ConsumeLockedInput"],
+    ["const consumeGrantLocked = async", "export async function previewAutoPromotion"],
+    ["const writeAutoOutcomeUnknownLocked = async", "type AutoHaltOpening"],
+    ["const writeAutoHaltLocked = async", "export async function commitAutoHaltFromReadback"],
+  ]) {
+    const body = between(from, to);
+    const audit = body.indexOf("writeAutoAudit(");
+    assert.ok(audit > 0, from);
+    assert.doesNotMatch(body.slice(audit), reads, from);
+  }
+
+  // The read-back helpers write nothing, and both callers read before writing.
+  for (const [from, to] of [
+    ["const readAutoOutcomeUnknownLocked = async", "const writeAutoOutcomeUnknownLocked = async"],
+    ["const readAutoHaltLocked = async", "const writeAutoHaltLocked = async"],
+  ]) {
+    assert.doesNotMatch(
+      between(from, to),
+      /writeAutoAudit\(|\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(|\$executeRaw/,
+      from,
+    );
+  }
+  const record = between("export async function recordAutoOutcomeUnknown", "const recordAutoOutcomeUnknownSafely");
+  const lastRead = Math.max(record.indexOf("readAutoOutcomeUnknownLocked("), record.indexOf("readAutoHaltLocked("));
+  const firstWrite = Math.min(record.indexOf("writeAutoOutcomeUnknownLocked("), record.indexOf("writeAutoHaltLocked("));
+  assert.ok(lastRead > 0 && firstWrite > lastRead, "every read before the first write");
+  const readback = between("export async function commitAutoHaltFromReadback", "export async function recordAutoOutcomeUnknown");
+  assert.ok(readback.indexOf("readAutoHaltLocked(") < readback.indexOf("writeAutoHaltLocked("));
+  // The pending lost outcome counts in the halt decision as it will once written.
+  assert.match(record, /mark\.kind === "record" \? \{ id: input\.consumptionId, recordedAt: now \} : null/);
+});
