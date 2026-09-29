@@ -944,11 +944,13 @@ function ChatAppComponent({
 
       const fetchPastMessages = async () => {
         try {
-          // The whole conversation in both scopes. A model-scoped panel
-          // still shows only its own answers, but a turn its model never
-          // answered is filled from the model that did, and the server's
-          // per-model filter would have removed exactly those answers.
-          const modelQuery = "";
+          // Every model's answers, not this model's slice. The panel still
+          // shows only its own, but a turn its model never answered is filled
+          // from the model that did, and the per-model filter would have
+          // removed exactly those answers.
+          const modelQuery = transcriptScope === "conversation"
+            ? ""
+            : `modelId=${encodeURIComponent(modelId)}&answers=all`;
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
