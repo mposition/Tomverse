@@ -550,6 +550,28 @@ mod tests {
     };
 
     #[test]
+    fn internal_deadlines_outlast_their_route_budgets() {
+        // Claim runs inside the app's bounded admission budget and lifecycle
+        // routes (recovery included) inside a twelve-second one; a shorter
+        // client deadline would turn a normal slow answer into an unknown
+        // outcome. Connect stays shorter than every total deadline.
+        assert!(TOMVERSE_INTERNAL_CLAIM_TIMEOUT > Duration::from_secs(15));
+        assert!(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT > Duration::from_secs(12));
+        assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_REQUEST_TIMEOUT);
+        assert!(TOMVERSE_INTERNAL_CONNECT_TIMEOUT < TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT);
+    }
+
+    #[test]
+    fn from_env_builds_a_client_with_a_deadline() {
+        let source = include_str!("tomverse_api.rs");
+        let from_env = &source[source.find("pub fn from_env").unwrap()..];
+        let body = &from_env[..from_env.find("pub async fn queue").unwrap()];
+        assert!(body.contains("Self::with_timeouts("));
+        assert!(body.contains("TOMVERSE_INTERNAL_REQUEST_TIMEOUT"));
+        assert!(!body.contains("Client::new()"));
+    }
+
+    #[test]
     fn canonical_claim_fixture_is_rust_serialized_and_stable() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/amux-claim-request-rust-v1.json"

@@ -37,6 +37,8 @@ import {
 } from "@/lib/r2";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
+import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
+import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
 import {
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
@@ -68,8 +70,6 @@ import {
     recordDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
-import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
-import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
 import type {
     RoutingAttemptErrorClass,

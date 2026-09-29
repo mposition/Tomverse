@@ -33,6 +33,8 @@ Production mutation 전에는 다음을 확인한다.
 - checklist: `staging-checklist.md`
 - preflight/local evidence: `staging-readiness.md`
 - executor wrapper contract: `executor-protocol.md`
+- WSL development runner contract: `wsl-execution-bridge.md`
+- backlog 카드를 Todo로 올리는 절차와 brief 제약: `board-promotion.md`
 - immutable run records: `staging-verification-records/`
 - verification index: `verification/README.md`
 - recovery와 rollback: `recovery.md`

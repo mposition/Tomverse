@@ -12,6 +12,7 @@ import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -291,7 +292,7 @@ export function AdminAmuxRoutingPanel() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch("/api/admin/amux/routing", {
+      const response = await adminFetch("/api/admin/amux/routing", {
         cache: "no-store",
       });
       if (!response.ok) {
@@ -348,7 +349,7 @@ export function AdminAmuxRoutingPanel() {
     setDecisionStatusUnknown(false);
     setDecisionStatusChecking(false);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review?escalation_id=${encodeURIComponent(escalationId)}`,
         {
           cache: "no-store",
@@ -393,7 +394,7 @@ export function AdminAmuxRoutingPanel() {
     setProposal(null);
     setDecisionStatusUnknown(false);
     try {
-      const response = await fetch("/api/admin/amux/escalations/proposals", {
+      const response = await adminFetch("/api/admin/amux/escalations/proposals", {
         method: "POST",
         cache: "no-store",
         signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
@@ -465,7 +466,7 @@ export function AdminAmuxRoutingPanel() {
       return;
     }
     try {
-      const response = await fetch("/api/admin/amux/escalations", {
+      const response = await adminFetch("/api/admin/amux/escalations", {
         method: "PATCH",
         cache: "no-store",
         signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
@@ -536,7 +537,7 @@ export function AdminAmuxRoutingPanel() {
         decision_id: identity.decision_id,
         subject_digest: identity.subject_digest,
       });
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/amux/escalations/review/decision-status?${query}`,
         {
           cache: "no-store",

@@ -1,0 +1,50 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxCardsMessages = defineAdminMessages({
+  en: {
+    title: "AMUX cards",
+    description:
+      "Read-only list of the AMUX cards stored in Tomverse, which is where their status lives. The local AMUX board does not show these cards. This screen changes nothing and starts no worker.",
+    shown: (shown: number, total: number, limit: number) =>
+      `Showing ${shown} of ${total} cards, the ${limit} most recently updated, ordered by status.`,
+    columnCard: "Card",
+    columnStatus: "Status",
+    columnOwner: "Owner",
+    columnPriority: "Priority",
+    columnKind: "Kind",
+    columnBrief: "Brief",
+    columnReview: "Review",
+    columnAttempts: "Attempts",
+    columnUpdated: "Updated",
+    none: "-",
+    briefPresent: "approved",
+    briefAbsent: "none",
+    reviewRequired: "required",
+    pr: (value: number) => `PR ${value}`,
+    lastAttempt: (outcome: string, status: string) => `${outcome} to ${status}`,
+    empty: "No cards.",
+  },
+  ko: {
+    title: "AMUX 카드",
+    description:
+      "Tomverse에 저장된 AMUX 카드의 읽기 전용 목록입니다. 카드 상태의 정본은 여기입니다. 로컬 AMUX Board에는 이 카드가 보이지 않습니다. 이 화면은 아무것도 바꾸지 않고 워커를 시작하지 않습니다.",
+    shown: (shown: number, total: number, limit: number) =>
+      `카드 ${total}장 가운데 최근 갱신된 ${limit}장 한도에서 ${shown}장을 상태 순으로 보여 줍니다.`,
+    columnCard: "카드",
+    columnStatus: "상태",
+    columnOwner: "owner",
+    columnPriority: "우선순위",
+    columnKind: "종류",
+    columnBrief: "brief",
+    columnReview: "Review",
+    columnAttempts: "실행",
+    columnUpdated: "갱신",
+    none: "-",
+    briefPresent: "승인됨",
+    briefAbsent: "없음",
+    reviewRequired: "필요",
+    pr: (value: number) => `PR ${value}`,
+    lastAttempt: (outcome: string, status: string) => `${outcome} → ${status}`,
+    empty: "카드가 없습니다.",
+  },
+});

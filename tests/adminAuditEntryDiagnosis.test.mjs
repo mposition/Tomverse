@@ -134,10 +134,14 @@ test("the console can reach the diagnosis without a shell", () => {
         resolve(import.meta.dirname, "..", "components", "admin", "AdminAuditIntegrityPanel.tsx"),
         "utf8"
     );
+    // `adminFetch`, not `fetch`: every admin panel goes through the wrapper
+    // that gives the request a deadline, and `tests/adminFetchDeadline.test.mjs`
+    // forbids the bare call. Pinning `fetch(` here would have quietly accepted
+    // a panel that opted back out of the deadline.
     assert.match(
         panel,
-        /fetch\(\s*\n?\s*`\/api\/admin\/audit\/\$\{encodeURIComponent\(auditId\)\}\/diagnose`/,
-        "the panel must call the endpoint"
+        /adminFetch\(\s*\n?\s*`\/api\/admin\/audit\/\$\{encodeURIComponent\(auditId\)\}\/diagnose`/,
+        "the panel must call the endpoint, through adminFetch"
     );
     assert.ok(
         panel.includes('data-testid="admin-audit-integrity-diagnose"'),

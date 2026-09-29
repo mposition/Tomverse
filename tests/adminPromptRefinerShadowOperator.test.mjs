@@ -42,8 +42,11 @@ test("the mounted effect reads only and every mutation is a named click action",
 test("the execution boundary locks before POST and unlocks only on paused", () => {
   assert.match(
     panel,
-    /setExecutionPostLocked\(true\);[\s\S]*?fetch\(PROMPT_REFINER_SHADOW_EXECUTION_PATH/
+    /setExecutionPostLocked\(true\);[\s\S]*?adminFetch\(PROMPT_REFINER_SHADOW_EXECUTION_PATH,[\s\S]*?timeoutMs: EXECUTION_POST_TIMEOUT_MS/
   );
+  // The execute route runs up to its 300 s maxDuration; the client must outlast
+  // it or every normal run would read as an unknown outcome.
+  assert.match(panel, /const EXECUTION_POST_TIMEOUT_MS = 330_000;/);
   assert.match(
     panel,
     /if \(refreshed && parsed\?\.status === "paused"\) \{\s*setExecutionPostLocked\(false\)/

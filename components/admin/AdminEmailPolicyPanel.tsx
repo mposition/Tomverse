@@ -4,8 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mail, RefreshCw } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { useAdminMessages,
+  useAdminLocale,
+} from "@/components/admin/AdminLocaleProvider";
 import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The jurisdiction policy console.
@@ -90,6 +98,12 @@ export function AdminEmailPolicyPanel() {
   useEffect(() => {
     loadFailedMessage.current = m.toast.loadFailed;
   }, [m.toast.loadFailed]);
+  const { locale: apiLocale } = useAdminLocale();
+  // Classified rather than thrown as a bare string. `describeAdminApiFailure`
+  // tells a stale step-up window (428) apart from a fault, and the notice
+  // below gives that refusal a way back -- rule 7 of
+  // docs/ui-contracts/admin-console-ia.md.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [data, setData] = useState<PolicyResponse | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -100,7 +114,7 @@ export function AdminEmailPolicyPanel() {
     setLoading(true);
     try {
       const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
-      const response = await fetch(`/api/admin/email-policy${query}`, {
+      const response = await adminFetch(`/api/admin/email-policy${query}`, {
         cache: "no-store",
       });
       const payload = (await response.json().catch(() => null)) as
@@ -108,11 +122,14 @@ export function AdminEmailPolicyPanel() {
         | { error?: string }
         | null;
       if (!response.ok || !payload || !("versions" in payload)) {
-        throw new Error(
-          payload && "error" in payload && payload.error
-            ? payload.error
-            : loadFailedMessage.current
-        );
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: payload && "error" in payload ? payload.error : null,
+          fallback: loadFailedMessage.current,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        throw new Error(outcome.message);
       }
       setData(payload);
       setSelectedId(payload.selected?.id ?? null);
@@ -124,7 +141,7 @@ export function AdminEmailPolicyPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [apiLocale]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -133,7 +150,7 @@ export function AdminEmailPolicyPanel() {
   }, [load]);
 
   const post = async (body: Record<string, unknown>) => {
-    const response = await fetch("/api/admin/email-policy", {
+    const response = await adminFetch("/api/admin/email-policy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -201,6 +218,7 @@ export function AdminEmailPolicyPanel() {
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">

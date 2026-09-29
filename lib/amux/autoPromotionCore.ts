@@ -16,16 +16,18 @@ import {
 /**
  * Closed gate for one pre-approved card.
  *
- * docs/policy/development-agent-orchestration.md (orchestration policy version 8).
+ * docs/policy/development-agent-orchestration.md (orchestration policy version 9).
+ * The request schema stays at policy version 8.
  *
- * The shipped code latch is false. Parsing and the numeric checks are pure.
+ * Version 9 ships the code latch true. Apply still needs the env value
+ * exactly `enabled`. Parsing and the numeric checks are pure.
  * Nothing here reads an execution switch, starts a worker, or spends credits.
  */
 
 export const AUTO_PROMOTION_POLICY_VERSION = 8;
 export const AUTO_PROMOTION_CANONICALIZATION_VERSION = AMUX_MANIFEST_CANONICALIZATION_VERSION;
 export const AUTO_PROMOTION_APPLY_ENV = "TOMVERSE_AMUX_BOARD_AUTO_PROMOTE";
-export const AUTO_PROMOTION_CODE_LATCH = false;
+export const AUTO_PROMOTION_CODE_LATCH = true;
 export const AUTO_GRADUATION_DECISIONS = 20;
 export const AUTO_GRADUATION_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
 export const AUTO_COST_EVENT_CENTS = 500;
