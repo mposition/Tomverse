@@ -11,6 +11,7 @@ import type {
   EngineeringAgentConsolePayload,
   EngineeringAgentOwnerItemView,
 } from "@/lib/engineeringAgentConsoleRead";
+import { adminFetch } from "@/lib/adminFetch";
 
 const PAGE_PATH = "/admin/engineering-agent";
 const FIRST_T1_WINDOW_DAYS = 14;
@@ -40,7 +41,7 @@ export function AdminEngineeringAgentPanel({ initial }: { initial: EngineeringAg
     setBusy(key);
     setNotice(null);
     try {
-      const response = await fetch(url, {
+      const response = await adminFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
