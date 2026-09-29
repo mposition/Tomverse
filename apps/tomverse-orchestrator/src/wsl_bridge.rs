@@ -97,6 +97,11 @@ pub struct SessionPresence {
 pub struct LocalDispatchBody {
     pub text: String,
     pub no_board: bool,
+    /// Local AMUX mints the receipt card from its command history, and it
+    /// records an owner send there only when `record_history` is set. Without
+    /// it the send is delivered, answers `no_board_refused`, and no card ever
+    /// appears (first claim-only run, 2026-09-29).
+    pub record_history: bool,
     pub msg_id: String,
 }
 
@@ -516,6 +521,7 @@ pub fn plan_local_dispatch(
         body: LocalDispatchBody {
             text: prompt.to_owned(),
             no_board: true,
+            record_history: true,
             msg_id: attempt_id.to_owned(),
         },
     }
@@ -944,6 +950,7 @@ impl LocalAmux for HttpLocal {
             .json(&serde_json::json!({
                 "text": body.text,
                 "no_board": true,
+                "record_history": body.record_history,
                 "msg_id": body.msg_id,
             }))
             .send()
@@ -1764,6 +1771,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(local.sends.len(), 1);
         assert!(local.sends[0].no_board);
+        assert!(local.sends[0].record_history);
         assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
         assert_eq!(local.paths, vec!["/api/sessions/claude-impl/send".to_owned()]);
         assert_eq!(
