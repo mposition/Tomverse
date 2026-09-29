@@ -171,6 +171,8 @@ test("the opening sentence is about the reader, where the language marks that", 
     fr: /vous a pas envoyé/,
     zh: /向您发送/,
     ko: /보내드린/,
+    // Since 2026-09-29 (section 9.2): the 2026-09-23 wording had no recipient.
+    pt: /lhe enviou/,
   };
   for (const [language, pattern] of Object.entries(marksTheReader)) {
     assert.match(

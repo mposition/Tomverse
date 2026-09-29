@@ -146,6 +146,89 @@ const V2026_09_23: ConsentCopyTable = Object.freeze({
 });
 
 /**
+ * Section 9.2's correction, approved by the owner on 2026-09-29: the Portuguese
+ * in-product notice names its reader in the first clause, as the other pronoun
+ * languages do. Every other string is the 2026-09-23 wording, unchanged.
+ *
+ * Written out rather than spread from 2026-09-23: the immutability check reads
+ * each version's strings as literals (scripts/check-consent-copy-immutability-core.mjs).
+ */
+const V2026_09_29: ConsentCopyTable = Object.freeze({
+  signupOptIn: Object.freeze({
+    ko: "이메일 광고성 정보 수신동의 (선택)",
+    en: "Send me product news and offers by email (optional)",
+    de: "Produktneuigkeiten und Angebote per E-Mail erhalten (optional)",
+    es: "Quiero recibir novedades y ofertas por correo electrónico (opcional)",
+    fr: "Recevoir les actualités produit et les offres par e-mail (facultatif)",
+    pt: "Quero receber novidades e ofertas por e-mail (opcional)",
+    zh: "接收产品资讯和优惠邮件（可选）",
+  }),
+  signupNotice: Object.freeze({
+    ko: "켜시면 계정에 등록된 주소로 제품 소식, 뉴스레터, 프로모션을 보내 드립니다. 로그인 코드, 결제 영수증, 서비스 공지는 이 설정과 무관하게 발송됩니다. 언제든 로그인 없이 끄실 수 있습니다.",
+    en: "If you turn this on, Tomverse sends product updates, newsletters and promotions to the address on your account. Sign-in codes, billing receipts and service notices are sent whether or not you turn this on. You can turn it off at any time, without signing in.",
+    de: "Wenn Sie dies aktivieren, sendet Tomverse Produkt-Updates, Newsletter und Angebote an die Adresse Ihres Kontos. Anmeldecodes, Rechnungsbelege und Servicehinweise werden unabhängig davon gesendet. Sie können es jederzeit ohne Anmeldung deaktivieren.",
+    es: "Si lo activas, Tomverse enviará novedades del producto, boletines y promociones a la dirección de tu cuenta. Los códigos de acceso, los recibos de facturación y los avisos de servicio se envían igualmente. Puedes desactivarlo en cualquier momento, sin iniciar sesión.",
+    fr: "Si vous l'activez, Tomverse envoie les actualités produit, les infolettres et les promotions à l'adresse de votre compte. Les codes de connexion, les reçus de facturation et les avis de service sont envoyés dans tous les cas. Vous pouvez le désactiver à tout moment, sans vous connecter.",
+    pt: "Se você ativar, a Tomverse envia novidades do produto, boletins e promoções para o endereço da sua conta. Códigos de acesso, recibos de cobrança e avisos de serviço são enviados de qualquer forma. Você pode desativar a qualquer momento, sem fazer login.",
+    zh: "开启后，Tomverse 会向您账户中的地址发送产品动态、资讯邮件和优惠信息。登录验证码、账单收据和服务通知无论是否开启都会发送。您可以随时关闭，无需登录。",
+  }),
+  signupRefuse: Object.freeze({
+    ko: "광고성 이메일을 받지 않겠습니다",
+    en: "I do not want marketing email",
+    de: "Ich möchte keine Werbe-E-Mails erhalten",
+    es: "No quiero recibir correos de marketing",
+    fr: "Je ne souhaite pas recevoir d'e-mails marketing",
+    pt: "Não quero receber e-mails de marketing",
+    zh: "我不想接收营销邮件",
+  }),
+  noticeTitle: Object.freeze({
+    ko: "제품 소식을 이메일로 받아보시겠습니까?",
+    en: "Would you like product news by email?",
+    de: "Möchten Sie Produktneuigkeiten per E-Mail erhalten?",
+    es: "¿Quieres recibir novedades del producto por correo?",
+    fr: "Souhaitez-vous recevoir les actualités produit par e-mail ?",
+    pt: "Quer receber novidades do produto por e-mail?",
+    zh: "是否希望通过邮件接收产品动态？",
+  }),
+  noticeBody: Object.freeze({
+    ko: "Tomverse는 지금까지 제품 소식을 보내드린 적이 없고, 요청하지 않으시면 앞으로도 보내지 않습니다. 켜시면 계정에 등록된 주소로 제품 소식, 뉴스레터, 프로모션을 보내 드립니다. 로그인 코드, 영수증, 서비스 공지는 영향을 받지 않습니다. 언제든 로그인 없이 끄실 수 있습니다.",
+    en: "Tomverse has not sent you product news, and will not unless you ask. Turning this on sends product updates, newsletters and promotions to the address on your account. Sign-in codes, receipts and service notices are unaffected. You can turn it off at any time, without signing in.",
+    de: "Tomverse hat Ihnen bisher keine Produktneuigkeiten gesendet und wird dies ohne Ihre Zustimmung auch nicht tun. Wenn Sie dies aktivieren, senden wir Produkt-Updates, Newsletter und Angebote an die Adresse Ihres Kontos. Anmeldecodes, Belege und Servicehinweise bleiben unberührt. Sie können es jederzeit ohne Anmeldung deaktivieren.",
+    es: "Tomverse no te ha enviado novedades del producto y no lo hará a menos que lo pidas. Si lo activas, enviaremos novedades, boletines y promociones a la dirección de tu cuenta. Los códigos de acceso, los recibos y los avisos de servicio no cambian. Puedes desactivarlo en cualquier momento, sin iniciar sesión.",
+    fr: "Tomverse ne vous a pas envoyé d'actualités produit et ne le fera pas sans votre demande. Si vous l'activez, nous enverrons les actualités produit, les infolettres et les promotions à l'adresse de votre compte. Les codes de connexion, les reçus et les avis de service ne changent pas. Vous pouvez le désactiver à tout moment, sans vous connecter.",
+    pt: "A Tomverse não lhe enviou novidades do produto e não enviará a menos que você peça. Se ativar, enviaremos novidades, boletins e promoções para o endereço da sua conta. Códigos de acesso, recibos e avisos de serviço não mudam. Você pode desativar a qualquer momento, sem fazer login.",
+    zh: "Tomverse 尚未向您发送过产品动态，未经您同意也不会发送。开启后，我们会向您账户中的地址发送产品动态、资讯邮件和优惠信息。登录验证码、收据和服务通知不受影响。您可以随时关闭，无需登录。",
+  }),
+  noticeAccept: Object.freeze({
+    ko: "네, 받겠습니다",
+    en: "Yes, send them",
+    de: "Ja, senden",
+    es: "Sí, quiero recibirlas",
+    fr: "Oui, envoyez-les",
+    pt: "Sim, pode enviar",
+    zh: "好，请发送",
+  }),
+  noticeRefuse: Object.freeze({
+    ko: "받지 않겠습니다",
+    en: "No, thank you",
+    de: "Nein, danke",
+    es: "No, gracias",
+    fr: "Non, merci",
+    pt: "Não, obrigado",
+    zh: "不用了",
+  }),
+  noticeDismiss: Object.freeze({
+    ko: "나중에",
+    en: "Not now",
+    de: "Später",
+    es: "Ahora no",
+    fr: "Plus tard",
+    pt: "Agora não",
+    zh: "以后再说",
+  }),
+});
+
+/**
  * Every version that has ever been rendered, newest last.
  *
  * Old entries are never removed. A `copyHash` stored against a consent in 2026
@@ -274,6 +357,37 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
     ] as const,
     copy: V2026_09_23,
   }),
+  Object.freeze({
+    version: "2026-09-29",
+    approvedBy: "mposition",
+    approvedAt: "2026-09-29",
+    recordSection: "12.",
+    recordDigest: "a1ab24637575e81df497891eb45ee8ad",
+    approvedBodyDigest: "479b3052f69e2bb097b4c0eb0ac44730",
+    deviceCells: {
+      signupOptIn: { section: "11.A", label: null, role: null },
+      signupNotice: { section: "11.B", label: null, role: null },
+      signupRefuse: { section: "11.C", label: null, role: null },
+      noticeTitle: { section: "11.D", label: "제목", role: null },
+      noticeBody: { section: "11.D", label: "본문", role: null },
+      noticeAccept: { section: "11.D", label: "세 버튼", role: "동의" },
+      noticeRefuse: { section: "11.D", label: "세 버튼", role: "거부" },
+      noticeDismiss: { section: "11.D", label: "세 버튼", role: "닫기" },
+    },
+    deviceSummary: {
+      section: "11.0",
+      label: null,
+      rows: [
+        ["#", "장치", "어디에", "무엇을 기록하는가"],
+        ["A", "opt-in 체크박스 (미체크 상태)", "가입 흐름", "동의 → DOI"],
+        ["B", "고지 문장", "가입 흐름, A 옆", "notice_shown"],
+        ["C", "독립 거부 수단", "가입 흐름, A와 별개", "objected"],
+        ["D", "제품 내 일회성 안내", "기존 계정의 다음 접속", "A·B·C와 같은 세 상태"],
+      ],
+    },
+    approvedSections: [["§11", "동의 장치 4개의 문안 — §9.2 포르투갈어 첫 절 수정"]] as const,
+    copy: V2026_09_29,
+  }),
 ]);
 
 /**
@@ -322,7 +436,8 @@ export const CONSENT_COPY_VERSIONS: ReadonlyArray<{
  * decide that by accident.
  */
 export const PROMISE_NO_UNREQUESTED_SEND_VERSIONS: ReadonlySet<string> =
-  new Set(["2026-09-23"]);
+  // 2026-09-29 corrects one Portuguese clause and keeps the promise.
+  new Set(["2026-09-23", "2026-09-29"]);
 
 /** Versions that deliberately make no such promise. Empty, and stated. */
 export const MAKES_NO_SEND_PROMISE_VERSIONS: ReadonlySet<string> = new Set([]);

@@ -28,8 +28,11 @@
  *
  * Section 5.1.1 gives Australia `inferred_consent`, with approval C's
  * condition: it takes effect once the draft's section 4.4 relationship model
- * is built and the policy amendment (E) is in force. Neither exists, and the
- * model's dormancy threshold waits on the owner's R4. Until then the rule row
+ * is built and the policy amendment (E) is in force -- and, since decision B
+ * (2026-09-29), only for an account whose sign-up notice disclosed unasked
+ * sending (docs/policy/email-notifications.md, the AU paragraph under 5.1.1;
+ * draft section 4.4). R4 was decided the same day. None of this exists yet, and
+ * the seed's `activationGates` are a record, not what decides. Until then the rule row
  * says what was approved and this verdict refuses to rely on it
  * (`inferred_consent_not_in_effect`); S5b adds the relationship input that
  * would let it. Express consent satisfies either authority regardless.
