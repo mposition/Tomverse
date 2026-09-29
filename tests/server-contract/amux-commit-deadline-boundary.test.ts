@@ -340,10 +340,35 @@ test("the internal route answers AX001 as a deadline and a missing trigger as an
       "commit_contract",
       new AmuxDbBoundaryError("AMUX_DB_COMMIT_CHECK_MISSING", "commit_contract"),
     );
-    assert.equal(missing.status, 500);
+    assert.equal(missing.status, 503);
+    assert.equal(missing.headers.get("Cache-Control"), "no-store");
     const body = (await missing.json()) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(body).sort(), ["error", "incident_id"]);
+    assert.deepEqual(Object.keys(body).sort(), ["error", "incident_id", "reason"]);
+    assert.equal(body.error, "AMUX database commit check is missing.");
+    assert.equal(body.reason, "amux_commit_check_missing");
+    assert.equal(typeof body.incident_id, "string");
+    assert.equal(missing.headers.get("X-AMUX-Incident-ID"), body.incident_id);
+    // The incident names the code, so an operator can tell it from any other 503.
+    const logged = JSON.parse(String(errors.mock.calls.at(-1)?.arguments[0])) as Record<string, unknown>;
+    assert.equal(logged.event, "internal_route_failure");
+    assert.equal(logged.error_class, "AmuxDbBoundaryError");
+    assert.equal(logged.error_code, "AMUX_DB_COMMIT_CHECK_MISSING");
+    assert.equal(logged.incident_id, body.incident_id);
   } finally {
     errors.mock.restore();
+  }
+
+  // A missing trigger found by the boundary itself reaches the same answer.
+  const warnings = mock.method(console, "warn", () => {});
+  const routeErrors = mock.method(console, "error", () => {});
+  try {
+    reset({ commitCheckInstalled: false });
+    const refusal = await caught(run(MUTATION));
+    const response = amuxInternalErrorResponse("commit_contract", refusal);
+    assert.equal(response.status, 503);
+    assert.equal(((await response.json()) as Record<string, unknown>).reason, "amux_commit_check_missing");
+  } finally {
+    warnings.mock.restore();
+    routeErrors.mock.restore();
   }
 });

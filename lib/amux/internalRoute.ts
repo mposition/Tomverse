@@ -119,6 +119,31 @@ export const amuxInternalErrorResponse = (
     );
   }
 
+  // The fence found no commit deadline trigger that will fire and rolled the
+  // transaction back rather than commit without the check. Nothing was
+  // written, but the database is missing its migration, which an operator has
+  // to see: an incident, with a reason of its own.
+  if (
+    error instanceof AmuxDbBoundaryError &&
+    error.code === "AMUX_DB_COMMIT_CHECK_MISSING"
+  ) {
+    const incident = reportAmuxOperationalIncident(operation, error);
+    return new Response(
+      JSON.stringify({
+        error: "AMUX database commit check is missing.",
+        reason: "amux_commit_check_missing",
+        incident_id: incident.incidentId,
+      }),
+      {
+        status: 503,
+        headers: {
+          ...NO_STORE_HEADERS,
+          "X-AMUX-Incident-ID": incident.incidentId,
+        },
+      },
+    );
+  }
+
   const incident = reportAmuxOperationalIncident(operation, error);
   return new Response(
     JSON.stringify({
