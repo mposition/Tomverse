@@ -24,14 +24,20 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 
 **"보낼 수 있다"로 씁니다.** 봉인 목록은 기존 계정의 일부이고 안내를 본 계정·주소를
 바꾼 계정은 빠지므로, 안내 전 가입 계정 모두가 받는 것은 아닙니다. 정책이 허락하는
-범위를 적는 문장이지, 누가 받는지를 단정하는 문장이 아닙니다.
+범위를 적는 문장이지, 누가 받는지를 단정하는 문장이 아닙니다. 그리고 **닫는 문장을
+씁니다**("그 밖에는 신청하신 경우에만") — 없으면 이 문장은 다른 경로를 배제하지
+않습니다.
+
+**"안내 전"의 경계는 봉인 시각입니다.** 발송 함수는 안내 시각을 모르고, 봉인은
+`approvedAt`보다 늦게 만들어진 계정을 넣지 않습니다(`lib/emailSendApprovalCohort.ts`).
+그러므로 봉인은 **고지를 보내기 전에**, 결정 F의 `approvedAt`으로 합니다. 고지 뒤에
+더 늦은 `approvedAt`으로 봉인하면 그 사이 가입한 계정이 이 문장 밖에서 받게 됩니다.
 
 **호주 추론 동의는 이 개정의 문장에 들어가지 않습니다.** 관계(docs/policy/email-product-news-redesign-draft.md §4.4, R4 결정
 2026-09-29)는 가입 화면의 고지가 시작 사건인데, 승인된 가입 고지(동의 문안 3.B·11.B)는
 "켜시면 보내 드립니다"이고 결정 B(2026-09-29)가 그 약속을 유지했습니다. 그 화면을 본
 사람에게 관계로 보내면 화면과 모순되므로, S5b는 **관계 발송을 고지한 가입 문안
-버전**을 본 계정에만 관계를 기록합니다(`RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS`,
-오늘 0개). 그리고 관계는 가입지가 아니라 발송 시점의 수신자 rule과 겹쳐 판정되므로
+버전**을 본 계정에만 관계를 기록합니다(그 버전 목록은 S5b가 두며, 오늘 0개). 그리고 관계는 가입지가 아니라 발송 시점의 수신자 rule과 겹쳐 판정되므로
 "호주나 미국에서 가입한 계정"으로 적을 수도 없습니다. 추론 동의를 쓰려면 소유자가
 (1) 관계 발송을 알리는 가입 고지 문안과 (2) 그 범위를 적은 `/privacy` 문장을 함께
 승인해야 하며, 그것은 이 개정 뒤의 별도 개정입니다. 관련 콘텐츠 범위(docs/policy/email-product-news-redesign-draft.md §4.4)는 Tomverse
@@ -54,7 +60,8 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > 상태 안내를 보냅니다. 이 셋은 서비스 제공에 속해 끌 수 없습니다. 뉴스레터와
 > 프로모션은 신청하신 경우에만 보냅니다. 제품 소식(Tomverse 서비스 소식)도
 > 신청하신 분께 보내며, 이 개정이 안내되기 전에 가입한 계정에는 신청하지
-> 않으셨어도 보낼 수 있습니다. 로그인 코드·영수증·서비스 안내가 아닌
+> 않으셨어도 보낼 수 있습니다. 그 밖에는 신청하신 경우에만 보냅니다. 로그인
+> 코드·영수증·서비스 안내가 아닌
 > 메일은 모두 이메일 설정에서 또는 해당 메일의 수신거부 링크를 눌러 로그인 없이
 > 언제든 끄실 수 있습니다.
 
@@ -66,7 +73,7 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 > promotions are sent only if you ask for them. Product updates (news about the
 > Tomverse service) are sent if you ask for them, and may be sent without your
 > asking to accounts that were registered before this change was announced.
-> Everything other than sign-in
+> Otherwise they are sent only if you ask for them. Everything other than sign-in
 > codes, receipts and service notices can be turned off at any time in your
 > email settings or with the one-click unsubscribe link in any such message,
 > without signing in.

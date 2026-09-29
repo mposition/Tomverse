@@ -513,10 +513,11 @@ IP를 그대로 쓰고, production 밖에서는 `x-real-ip`도 씁니다. 동의
 **수신거부 가능성은 이 선택지들을 구분하지 않습니다.** 어느 경로로 보내든 수신거부는
 로그인 없이 됩니다. 그것은 동의를 유효하게 만드는 조건이 아닙니다.
 
-**"이미 하는 일"은 아닙니다 — 설계됐고 일부 만들어졌습니다.** 78계정에게
-`risk_accepted`로 보내는 **발송 경로는 이 트리에 없습니다.** standard lane에
-`risk_accepted` 분기가 없어 동의 없는 계정은 `no_consent`로 건너뛰고, marketing
-flag는 기본값이 off입니다. **production의 flag 값과 승인 봉인 여부는 이 문서가
+**"이미 하는 일"은 아닙니다 — 설계됐고, 경로는 이제 있습니다.** 78계정에게
+`risk_accepted`로 보내는 발송 경로는 S9에서 들어왔습니다: `product_updates`는 일반
+동의 게이트 대신 release notes 판정(`releaseNotesSendAuthorization()`)을 거치고, 그
+판정이 봉인된 승인의 멤버에게 override를 적용합니다. 그 경로는 전용 flag와 게시
+게이트 뒤에 있고, marketing flag는 기본값이 off입니다. **production의 flag 값과 승인 봉인 여부는 이 문서가
 말할 수 있는 사실이 아닙니다** — 저장소가 아니라 운영 DB가 가진 값이고, 보내기
 전에 확인해야 하는 것입니다. 원장과
 봉인 장치(S3)는 develop에 있고, cohort 판정(S8a)은 아직 병합되지 않았으며, 발송은

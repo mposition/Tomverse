@@ -60,7 +60,7 @@ test("every writer of a notice delivery, and the drain, asks whether the wording
 
 test("every language says may, not will", () => {
   // A permission the policy grants, not a statement about who will receive
-  // what: the sealed list and the relationship rule both leave people out.
+  // what: the sealed list leaves people out.
   for (const language of LANGUAGES) {
     const text = buildPolicyChangeNoticeEmail({ language, appUrl: APP }).text;
     assert.ok(!/with two exceptions|à deux exceptions|mit zwei Ausnahmen|con dos excepciones|com duas exceções/.test(text), language);
@@ -81,4 +81,13 @@ test("the notice names only the case the send rules can reach", () => {
     assert.doesNotMatch(html, countries, language);
     assert.doesNotMatch(text, /24/, language);
   }
+});
+
+test("the /privacy draft closes the unasked case the way the notice does", () => {
+  // Without the closing sentence the draft does not rule other paths out.
+  const draft = readFileSync("docs/policy/email-policy-amendment-draft.md", "utf8");
+  const section = draft.slice(draft.indexOf("## 2."), draft.indexOf("## 3."));
+  assert.match(section, /그 밖에는 신청하신 경우에만 보냅니다/);
+  assert.match(section, /Otherwise they are sent only if you ask for them/);
+  assert.doesNotMatch(section, /호주나 미국|Australia or the United States|24개월|24 months/);
 });
