@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tracing::{info, warn};
 
-use crate::tomverse_api::{ClaimResponse, QueueTask, TomverseApi};
+use crate::tomverse_api::{
+    ClaimResponse, QueueTask, SelectionRead, TomverseApi, BOARD_CAPACITY_EXCEEDED,
+};
 
 const SCORING_VERSION: &str = "amux-global-priority-v2";
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(30);
@@ -203,7 +205,13 @@ impl Scheduler {
     }
 
     async fn tick(&mut self) -> Result<()> {
-        let queue = self.api.queue().await?;
+        let queue = match self.api.queue().await? {
+            SelectionRead::Ready(queue) => queue,
+            SelectionRead::BoardCapacityExceeded => {
+                skip_tick_for_board_capacity("queue");
+                return Ok(());
+            }
+        };
         let ranked = rank_global_priority_at(queue, Utc::now());
         // Selection-only observes the highest priority task without taking
         // ownership or reading worker-specific routing state. Both switches
@@ -255,7 +263,16 @@ impl Scheduler {
                 return Ok(());
             }
 
-            let snapshot = self.api.routing_snapshot(&task.id, task.revision).await?;
+            let snapshot = match self.api.routing_snapshot(&task.id, task.revision).await? {
+                SelectionRead::Ready(snapshot) => snapshot,
+                // The snapshot's size comes from the worker catalog, not this
+                // task, so every other task in the window would get the same
+                // answer. Skip the tick; the next one reads the queue again.
+                SelectionRead::BoardCapacityExceeded => {
+                    skip_tick_for_board_capacity("routing_snapshot");
+                    return Ok(());
+                }
+            };
 
             if !snapshot.eligible {
                 warn!(
@@ -417,6 +434,19 @@ impl Scheduler {
         }
         Ok(())
     }
+}
+
+/// A board too large for one complete selection response is a known answer
+/// that wrote nothing, not an unknown outcome: log it and try again next tick.
+/// Recovery and automatic promotion keep their own cadence meanwhile.
+fn skip_tick_for_board_capacity(endpoint: &'static str) {
+    warn!(
+        endpoint,
+        reason = BOARD_CAPACITY_EXCEEDED,
+        measured = true,
+        verdict = "selection_skipped",
+        "Tomverse AMUX board exceeds one complete selection response; skipping this tick"
+    );
 }
 
 fn next_routing_offset(queue_len: usize, index: usize) -> usize {
@@ -740,5 +770,159 @@ mod tests {
         assert!(source.contains(
             "let selection_only = !matches!(mode, ClaimMode::ClaimOnly | ClaimMode::Execute);"
         ));
+    }
+
+    /// Answers each request by its path from a fixed table, one connection per
+    /// request, and records the paths it was asked for.
+    async fn serve_selection(
+        answers: Vec<(&'static str, &'static str, String)>,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                // Headers, then the declared body.
+                let head_end = loop {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    if read == 0 {
+                        break None;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        break Some(at + 4);
+                    }
+                };
+                let Some(head_end) = head_end else { continue };
+                let head = String::from_utf8_lossy(&request[..head_end]).to_string();
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                while request.len() < head_end + length {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let path = head.split_whitespace().nth(1).unwrap_or("").to_owned();
+                log.lock().unwrap().push(path.clone());
+                let (status, body) = answers
+                    .iter()
+                    .find(|(suffix, _, _)| path.ends_with(suffix))
+                    .map(|(_, status, body)| (*status, body.clone()))
+                    .unwrap_or(("500 Internal Server Error", "{}".to_owned()));
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                stream.write_all(reply.as_bytes()).await.unwrap();
+                let _ = stream.shutdown().await;
+            }
+        });
+        (format!("http://{address}"), seen)
+    }
+
+    fn scheduler_for(base_url: String) -> Scheduler {
+        let mut scheduler = Scheduler::new(TomverseApi::for_test_with_timeouts(
+            base_url,
+            Duration::from_millis(500),
+            Duration::from_secs(2),
+        ));
+        // Claim path, so the tick reaches the routing snapshot. The latch and
+        // TOMVERSE_AMUX_CLAIM are not set in tests, so this is Execute mode.
+        scheduler.execution_enabled = true;
+        scheduler
+    }
+
+    fn queue_row() -> String {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-queue-wire-compat-v1.json"
+        ))
+        .unwrap();
+        format!("[{}]", fixtures["queue_server"])
+    }
+
+    const QUEUE_CAPACITY_BODY: &str =
+        r#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded"}"#;
+    const ROUTING_CAPACITY_BODY: &str = r#"{"eligible":false,"reason":"board_capacity_exceeded"}"#;
+
+    #[tokio::test]
+    async fn a_board_capacity_refusal_from_the_queue_skips_the_tick() {
+        let (base_url, seen) = serve_selection(vec![(
+            "/api/internal/amux/queue",
+            "409 Conflict",
+            QUEUE_CAPACITY_BODY.to_owned(),
+        )])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        scheduler.tick().await.expect("a capacity refusal is a skipped tick, not an exit");
+        assert_eq!(*seen.lock().unwrap(), vec!["/api/internal/amux/queue".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn a_board_capacity_refusal_from_the_routing_snapshot_skips_the_tick() {
+        let (base_url, seen) = serve_selection(vec![
+            ("/api/internal/amux/queue", "200 OK", queue_row()),
+            (
+                "/api/internal/amux/routing-snapshot",
+                "409 Conflict",
+                ROUTING_CAPACITY_BODY.to_owned(),
+            ),
+        ])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        scheduler.tick().await.expect("a capacity refusal is a skipped tick, not an exit");
+        // No claim follows a refused snapshot.
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                "/api/internal/amux/queue".to_owned(),
+                "/api/internal/amux/routing-snapshot".to_owned(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn any_other_selection_failure_is_still_an_unknown_outcome() {
+        for (status, body) in [
+            ("409 Conflict", r#"{"error":"Queue capacity exceeded.","reason":"other"}"#),
+            ("409 Conflict", r#"{"error":"x","reason":"board_capacity_exceeded","extra":1}"#),
+            ("503 Service Unavailable", r#"{"reason":"amux_outcome_unknown"}"#),
+            ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
+        ] {
+            let (base_url, _) = serve_selection(vec![(
+                "/api/internal/amux/queue",
+                status,
+                body.to_owned(),
+            )])
+            .await;
+            let mut scheduler = scheduler_for(base_url);
+            assert!(scheduler.tick().await.is_err(), "{status} {body}");
+        }
+
+        let (base_url, _) = serve_selection(vec![
+            ("/api/internal/amux/queue", "200 OK", queue_row()),
+            (
+                "/api/internal/amux/routing-snapshot",
+                "409 Conflict",
+                r#"{"eligible":true,"reason":"board_capacity_exceeded"}"#.to_owned(),
+            ),
+        ])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+        assert!(scheduler.tick().await.is_err());
     }
 }

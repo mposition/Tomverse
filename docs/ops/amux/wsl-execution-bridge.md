@@ -42,7 +42,7 @@ Tomverse 내부 호출에는 호출별 deadline이 있고 연결은 1초다. wor
 
 worker heartbeat가 `runtime_lease_lost`로 거절되면 다시 등록하지 않고 halt한다. 등록은 generation을 올리는데, 서버의 등록은 열린 attempt를 확인하지 않는다. ack는 됐지만 이 프로세스의 pending에 없는 attempt가 서버에 열려 있을 수 있으므로, 사람이 attempt 상태를 확인한 뒤 다시 시작한다.
 
-Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 알려진 결과로 본다. 닫힌 사유 목록의 거절과 CAS 패배는 소유권을 바꾸지 않았으므로 같은 창의 다음 후보로 넘어간다. 전송 오류, 예상 밖 상태 코드·본문 같은 결과 불명 claim과 queue·routing snapshot·recover 호출의 실패는 프로세스를 0이 아닌 종료 코드로 끝낸다. 다시 시작한 프로세스는 queue를 새로 읽는다.
+Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 알려진 결과로 본다. 닫힌 사유 목록의 거절과 CAS 패배는 소유권을 바꾸지 않았으므로 같은 창의 다음 후보로 넘어간다. queue나 routing snapshot이 409 `board_capacity_exceeded`로 답하면(카드 512장 또는 응답 512KB 초과, main에는 없던 상한) 아무것도 쓰이지 않았으므로 WARN(`verdict = "selection_skipped"`)을 남기고 그 tick만 건너뛴다. 복구와 자동 승격 주기는 그대로 돈다. 전송 오류, 예상 밖 상태 코드·본문 같은 결과 불명 claim과 queue·routing snapshot·recover 호출의 그 밖의 실패는 프로세스를 0이 아닌 종료 코드로 끝낸다. 다시 시작한 프로세스는 queue를 새로 읽는다.
 
 ## Wire compatibility
 
@@ -53,6 +53,7 @@ Railway orchestrator의 claim 전용 루프는 서버가 답한 claim 결과를 
 - 저장된 카드 id나 owner가 정규 machine id 규칙에 맞지 않는 행은 두 queue 모두 그 행만 빼고 200으로 답한다. 구조화 WARN `queue_rows_rejected`에 개수만 남기고 id는 남기지 않는다. 그런 카드는 claim·routing snapshot·실행 시작 요청에서도 거절되므로 어차피 이 앱으로는 진행되지 않는다.
 - 이 트리에서 빌드한 Rust는 main 서버의 모양, 이 서버의 모양, `id`·`owner`·`revision`만 가진 최소 모양을 모두 받고, 그 밖의 필드는 거절한다. 호환 필드는 읽지 않는다.
 - 배포 순서: 서버 먼저가 안전하다. 옛 바이너리와 새 바이너리가 모두 이 서버의 모양을 읽는다. bridge를 먼저 다시 빌드해도 안전하다. 새 바이너리는 배포 전 main 서버의 모양도 읽는다.
+- 새 상한: 서버는 카드 512장이나 응답 512KB를 넘으면 queue·owned queue·routing snapshot을 409 `board_capacity_exceeded`로 답한다. 옛 orchestrator는 그 tick을 실패로 로그하고 계속 돌고, 새 orchestrator는 그 tick을 건너뛴다. bridge는 옛것과 새것 모두 owned queue에서 이 답을 받으면 halt한다. owned queue는 worker마다 열린 카드가 하나라 worker 수를 넘기 어렵다. 병합 전에 운영 queue의 크기를 읽기 전용으로 확인한다.
 - 호환 필드를 빼는 것은 별도 변경이다. WSL bridge와 Railway orchestrator가 모두 이 트리 이후의 바이너리로 돈다는 것을 확인한 뒤, 스키마, 기준 본문, `tests/amuxWireContract.test.ts`, `lib/amux/store.ts`, 이 절을 함께 바꾼다.
 
 ## halt와 재시작

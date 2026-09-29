@@ -91,6 +91,110 @@ pub struct RoutingSnapshotResponse {
 
 const MAX_ROUTING_CANDIDATES: usize = 128;
 
+/// The one conflict the two selection reads answer with a known meaning: the
+/// board is larger than the app serializes in one complete response (more than
+/// 512 rows, or a body over 512 KB; lib/amux/store.ts and
+/// lib/amux/internalRoute.ts). main's server never sent it. Nothing was
+/// written and nothing was claimed, so the scheduler logs it and skips the
+/// tick instead of treating it as an unknown outcome.
+pub const BOARD_CAPACITY_EXCEEDED: &str = "board_capacity_exceeded";
+
+/// A selection read: the body, or the app's board-capacity refusal.
+#[derive(Debug)]
+pub enum SelectionRead<T> {
+    Ready(T),
+    BoardCapacityExceeded,
+}
+
+/// `POST /api/internal/amux/queue` at 409: `{error, reason}`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueueCapacityRefusal {
+    #[allow(dead_code)]
+    error: String,
+    reason: String,
+}
+
+/// `POST /api/internal/amux/routing-snapshot` at 409: `{eligible, reason}`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoutingCapacityRefusal {
+    eligible: bool,
+    reason: String,
+}
+
+fn queue_invariants_hold(tasks: &[QueueTask]) -> bool {
+    tasks.len() <= MAX_QUEUE_ITEMS
+        && tasks.iter().all(|task| {
+            is_canonical_machine_id(&task.id)
+                && !task.kind.is_empty()
+                && task.kind.len() <= 64
+                && !task.priority.is_empty()
+                && task.priority.len() <= 32
+                && (0..=8).contains(&task.drag)
+                && (0..=PRISMA_INT_MAX).contains(&task.revision)
+                && task.dependent_count >= 0
+                && (0..=6_010_428).contains(&task.scheduler_score)
+                && matches!(
+                    task.scoring_version.as_str(),
+                    "" | "amux-global-priority-v1" | "amux-global-priority-v2"
+                )
+                && (task.scoring_version != "amux-global-priority-v2"
+                    || task.scheduler_score == task.scheduler_signals.total())
+                && chrono::DateTime::parse_from_rfc3339(&task.created_at).is_ok()
+        })
+}
+
+/// Reads a queue answer. 200 is the queue, held to its invariants; 409 is the
+/// board-capacity refusal and nothing else. Any other status or body is an
+/// error, as before.
+pub(crate) fn parse_queue_body(
+    status: StatusCode,
+    body: &[u8],
+) -> Result<SelectionRead<Vec<QueueTask>>> {
+    if status == StatusCode::CONFLICT {
+        let refusal: QueueCapacityRefusal =
+            serde_json::from_slice(body).context("invalid Tomverse AMUX queue conflict")?;
+        if refusal.reason == BOARD_CAPACITY_EXCEEDED {
+            return Ok(SelectionRead::BoardCapacityExceeded);
+        }
+        bail!("unexpected Tomverse AMUX queue conflict");
+    }
+    if status != StatusCode::OK {
+        bail!("unsupported Tomverse internal response status");
+    }
+    let tasks: Vec<QueueTask> =
+        serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
+    if !queue_invariants_hold(&tasks) {
+        bail!("invalid Tomverse AMUX queue response invariant");
+    }
+    Ok(SelectionRead::Ready(tasks))
+}
+
+/// Reads a routing snapshot answer, the same way as the queue.
+pub(crate) fn parse_routing_snapshot_body(
+    status: StatusCode,
+    body: &[u8],
+) -> Result<SelectionRead<RoutingSnapshotResponse>> {
+    if status == StatusCode::CONFLICT {
+        let refusal: RoutingCapacityRefusal = serde_json::from_slice(body)
+            .context("invalid Tomverse AMUX routing snapshot conflict")?;
+        if !refusal.eligible && refusal.reason == BOARD_CAPACITY_EXCEEDED {
+            return Ok(SelectionRead::BoardCapacityExceeded);
+        }
+        bail!("unexpected Tomverse AMUX routing snapshot conflict");
+    }
+    if status != StatusCode::OK {
+        bail!("unsupported Tomverse internal response status");
+    }
+    let snapshot: RoutingSnapshotResponse =
+        serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
+    if !routing_snapshot_is_valid(&snapshot) {
+        bail!("invalid Tomverse AMUX routing snapshot invariant");
+    }
+    Ok(SelectionRead::Ready(snapshot))
+}
+
 /// The invariants the orchestrator relies on before scoring a snapshot.
 pub(crate) fn routing_snapshot_is_valid(snapshot: &RoutingSnapshotResponse) -> bool {
     if snapshot.eligible {
@@ -501,7 +605,7 @@ impl TomverseApi {
         Ok(api)
     }
 
-    pub async fn queue(&self) -> Result<Vec<QueueTask>> {
+    pub async fn queue(&self) -> Result<SelectionRead<Vec<QueueTask>>> {
         let response = self
             .client
             .post(format!("{}/api/internal/amux/queue", self.base_url))
@@ -510,38 +614,20 @@ impl TomverseApi {
             .timeout(self.selection_read_timeout)
             .send()
             .await?;
-        let (_, tasks): (_, Vec<QueueTask>) =
-            read_bounded_json(response, &[StatusCode::OK], MAX_QUEUE_RESPONSE_BYTES).await?;
-        if tasks.len() > MAX_QUEUE_ITEMS
-            || tasks.iter().any(|task| {
-                !is_canonical_machine_id(&task.id)
-                    || task.kind.is_empty()
-                    || task.kind.len() > 64
-                    || task.priority.is_empty()
-                    || task.priority.len() > 32
-                    || !(0..=8).contains(&task.drag)
-                    || !(0..=PRISMA_INT_MAX).contains(&task.revision)
-                    || task.dependent_count < 0
-                    || !(0..=6_010_428).contains(&task.scheduler_score)
-                    || !matches!(
-                        task.scoring_version.as_str(),
-                        "" | "amux-global-priority-v1" | "amux-global-priority-v2"
-                    )
-                    || (task.scoring_version == "amux-global-priority-v2"
-                        && task.scheduler_score != task.scheduler_signals.total())
-                    || chrono::DateTime::parse_from_rfc3339(&task.created_at).is_err()
-            })
-        {
-            bail!("invalid Tomverse AMUX queue response invariant");
-        }
-        Ok(tasks)
+        let (status, body) = read_bounded_body(
+            response,
+            &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_QUEUE_RESPONSE_BYTES,
+        )
+        .await?;
+        parse_queue_body(status, &body)
     }
 
     pub async fn routing_snapshot(
         &self,
         task_id: &str,
         expected_revision: i64,
-    ) -> Result<RoutingSnapshotResponse> {
+    ) -> Result<SelectionRead<RoutingSnapshotResponse>> {
         let response = self
             .client
             .post(format!(
@@ -556,12 +642,13 @@ impl TomverseApi {
             .timeout(self.selection_read_timeout)
             .send()
             .await?;
-        let (_, snapshot): (_, RoutingSnapshotResponse) =
-            read_bounded_json(response, &[StatusCode::OK], MAX_ROUTING_RESPONSE_BYTES).await?;
-        if !routing_snapshot_is_valid(&snapshot) {
-            bail!("invalid Tomverse AMUX routing snapshot invariant");
-        }
-        Ok(snapshot)
+        let (status, body) = read_bounded_body(
+            response,
+            &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_ROUTING_RESPONSE_BYTES,
+        )
+        .await?;
+        parse_routing_snapshot_body(status, &body)
     }
 
     pub async fn claim(
@@ -734,6 +821,58 @@ mod tests {
         ))
         .unwrap();
         fixtures[name].clone()
+    }
+
+    #[test]
+    fn a_board_capacity_conflict_is_its_own_selection_answer() {
+        let queue_refusal =
+            br#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded"}"#;
+        assert!(matches!(
+            parse_queue_body(StatusCode::CONFLICT, queue_refusal).unwrap(),
+            SelectionRead::BoardCapacityExceeded
+        ));
+        let routing_refusal = br#"{"eligible":false,"reason":"board_capacity_exceeded"}"#;
+        assert!(matches!(
+            parse_routing_snapshot_body(StatusCode::CONFLICT, routing_refusal).unwrap(),
+            SelectionRead::BoardCapacityExceeded
+        ));
+
+        // Any other conflict, extra field, or status is still an error.
+        for (status, body) in [
+            (StatusCode::CONFLICT, br#"{"error":"x","reason":"other"}"#.as_slice()),
+            (
+                StatusCode::CONFLICT,
+                br#"{"error":"x","reason":"board_capacity_exceeded","extra":1}"#.as_slice(),
+            ),
+            (StatusCode::CONFLICT, b"{}".as_slice()),
+            (StatusCode::SERVICE_UNAVAILABLE, queue_refusal.as_slice()),
+            (StatusCode::INTERNAL_SERVER_ERROR, b"[]".as_slice()),
+        ] {
+            assert!(parse_queue_body(status, body).is_err(), "{status}");
+        }
+        for body in [
+            br#"{"eligible":true,"reason":"board_capacity_exceeded"}"#.as_slice(),
+            br#"{"eligible":false,"reason":"not_eligible"}"#.as_slice(),
+        ] {
+            assert!(parse_routing_snapshot_body(StatusCode::CONFLICT, body).is_err());
+        }
+
+        // 200 still goes through the invariants.
+        let row = queue_wire_fixture("queue_server");
+        let body = serde_json::to_vec(&vec![row.clone()]).unwrap();
+        match parse_queue_body(StatusCode::OK, &body).unwrap() {
+            SelectionRead::Ready(tasks) => assert_eq!(tasks.len(), 1),
+            SelectionRead::BoardCapacityExceeded => panic!("a 200 is a queue"),
+        }
+        let mut bad = row;
+        bad["id"] = serde_json::json!("TASK-trailing-");
+        let body = serde_json::to_vec(&vec![bad]).unwrap();
+        assert!(parse_queue_body(StatusCode::OK, &body).is_err());
+        let snapshot = serde_json::to_vec(&routing_snapshot_fixture("eligible")).unwrap();
+        assert!(matches!(
+            parse_routing_snapshot_body(StatusCode::OK, &snapshot).unwrap(),
+            SelectionRead::Ready(_)
+        ));
     }
 
     #[test]
