@@ -14,6 +14,7 @@ import { POST as deliveryAckPost } from "@/app/api/internal/amux/delivery/ack/ro
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { Prisma } from "@prisma/client";
+import { Client as PgClient } from "pg";
 import { schemaValidAmuxRoutingCandidate } from "../amuxClaimFixture.ts";
 
 import { prisma } from "@/lib/prisma";
@@ -24,6 +25,7 @@ import {
 } from "@/lib/amux/incidentCore";
 import {
   AMUX_DB_BOUNDARIES,
+  AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
   AmuxDbBoundaryError,
   amuxDbTransactionBudgetMs,
   withAmuxDbBoundary,
@@ -2401,6 +2403,212 @@ test("execution start and settle are fenced by task revision and worker generati
     await prisma.amuxWorkItem.deleteMany({
       where: { id: taskId },
     });
+  }
+});
+
+/*
+ * Policy version 18, "활성화 증거": a settle whose COMMIT reaches the database
+ * after its DB-clock deadline must not be recorded as success. The final fence
+ * (`withAmuxDbBoundary`) is a check *before* COMMIT; the tests above prove it
+ * rolls back a transaction that is already late when the fence runs. This one
+ * makes the fence pass just before the attempt's lease deadline and lets the
+ * COMMIT itself arrive after it, which is what a GC pause, a stalled event
+ * loop or a slow network between the fence and COMMIT does in production.
+ *
+ * Instrumentation, at the pg driver the Prisma adapter uses, touches only this
+ * settle's connection and only two statements:
+ * - before the fence it walks the open transaction's clock forward with short
+ *   pg_sleep statements (each under the 200 ms statement timeout, no idle gap)
+ *   until the database clock is FENCE_MARGIN_MS before the lease deadline --
+ *   the same as a settle whose own work ended there;
+ * - it then holds the COMMIT, with no statement in between, until
+ *   COMMIT_DELAY_MS after that point, so the COMMIT is sent after the deadline
+ *   and while the idle-in-transaction timeout has not fired.
+ *
+ * The setup assertions keep a pass from being vacuous: the fence let the
+ * transaction through, the COMMIT was sent after the deadline, and the idle
+ * gap stayed under the idle-in-transaction timeout (so a refusal would have to
+ * come from something that looks at the deadline, not from that timeout).
+ *
+ * Expected on a build whose database does not check the deadline at COMMIT
+ * (the fence is the last deadline check today): this test FAILS, because the
+ * late COMMIT is accepted and the attempt is recorded as succeeded.
+ */
+test("a settle whose COMMIT lands after its lease deadline is not recorded as success", async () => {
+  const FENCE_MARGIN_MS = 40;
+  const COMMIT_DELAY_MS = 70;
+  assert.ok(COMMIT_DELAY_MS > FENCE_MARGIN_MS);
+  assert.ok(COMMIT_DELAY_MS < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS);
+
+  const worker = `amux-late-commit-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const taskId = await createTodo("amux-late-commit");
+  const base = new Date();
+
+  type Query = (this: PgClient, ...args: unknown[]) => unknown;
+  const prototype = PgClient.prototype as unknown as { query: Query };
+  const originalQuery = prototype.query;
+  const probe = {
+    armed: false,
+    client: null as PgClient | null,
+    leaseDeadlineMs: 0,
+    walkEndDbMs: null as number | null,
+    walkEndLocalMs: null as number | null,
+    fenceWithinDeadline: null as boolean | null,
+    fenceDoneLocalMs: null as number | null,
+    commitSentLocalMs: null as number | null,
+    commitAccepted: null as boolean | null,
+  };
+  const textOf = (args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === "string") return first;
+    if (first && typeof first === "object" && typeof (first as { text?: unknown }).text === "string") {
+      return (first as { text: string }).text;
+    }
+    return "";
+  };
+  const clockMs = async (client: PgClient) => {
+    const result = (await originalQuery.call(
+      client,
+      `SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"`,
+    )) as { rows: Array<{ nowMs: string }> };
+    return Number(result.rows[0]?.nowMs);
+  };
+
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { owner: worker, claimedAt: base, revision: 1 },
+    });
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    if (!started.started) {
+      throw new Error(`execution did not start: ${started.reason}`);
+    }
+
+    // The attempt's lease ends 1.5 s from now on the database clock; the
+    // runtime lease (90 s) and the transaction budget are later, so this is the
+    // deadline the final fence uses.
+    const dbNow = await prisma.$queryRaw<Array<{ nowMs: bigint }>>`
+      SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "nowMs"
+    `;
+    probe.leaseDeadlineMs = Number(dbNow[0]?.nowMs) + 1_500;
+    await prisma.amuxExecutionAttempt.update({
+      where: { id: started.attemptId },
+      data: { leaseExpiresAt: new Date(probe.leaseDeadlineMs) },
+    });
+
+    prototype.query = function (this: PgClient, ...args: unknown[]) {
+      const text = textOf(args);
+      if (probe.armed && probe.client === null && text.includes(`AS "withinDeadline"`)) {
+        probe.client = this;
+        return (async () => {
+          for (;;) {
+            const now = await clockMs(this);
+            const remaining = probe.leaseDeadlineMs - FENCE_MARGIN_MS - now;
+            if (remaining <= 0) {
+              probe.walkEndDbMs = now;
+              probe.walkEndLocalMs = performance.now();
+              break;
+            }
+            await originalQuery.call(this, `SELECT pg_sleep(${(Math.min(remaining, 120) / 1_000).toFixed(3)})`);
+          }
+          const result = (await originalQuery.apply(this, args)) as { rows?: unknown[][] };
+          probe.fenceWithinDeadline = result.rows?.[0]?.[0] === true;
+          probe.fenceDoneLocalMs = performance.now();
+          return result;
+        })();
+      }
+      if (probe.armed && this === probe.client && text.trim().toUpperCase() === "COMMIT") {
+        probe.armed = false;
+        return (async () => {
+          const wait = (probe.walkEndLocalMs ?? 0) + COMMIT_DELAY_MS - performance.now();
+          if (wait > 0) await delay(wait);
+          probe.commitSentLocalMs = performance.now();
+          try {
+            const result = await originalQuery.apply(this, args);
+            probe.commitAccepted = true;
+            return result;
+          } catch (error) {
+            probe.commitAccepted = false;
+            throw error;
+          }
+        })();
+      }
+      return originalQuery.apply(this, args);
+    };
+    probe.armed = true;
+
+    let settleError: unknown = null;
+    try {
+      await settleAmuxExecution({
+        attemptId: started.attemptId,
+        worker,
+        instanceId,
+        generation: runtime.generation,
+        taskRevision: started.taskRevision,
+        outcome: "succeeded",
+        toStatus: "review",
+      });
+    } catch (error) {
+      settleError = error;
+    } finally {
+      probe.armed = false;
+      prototype.query = originalQuery;
+    }
+
+    // Setup: the pre-COMMIT fence let the transaction through, and the COMMIT
+    // was sent after the lease deadline without the idle timeout firing.
+    assert.equal(probe.fenceWithinDeadline, true, `setup: the fence must pass (${String(settleError)})`);
+    assert.ok(probe.walkEndDbMs !== null && probe.walkEndDbMs >= probe.leaseDeadlineMs - FENCE_MARGIN_MS);
+    assert.ok(probe.commitSentLocalMs !== null && probe.walkEndLocalMs !== null && probe.fenceDoneLocalMs !== null);
+    assert.ok(
+      probe.commitSentLocalMs - probe.walkEndLocalMs >= COMMIT_DELAY_MS,
+      "setup: the COMMIT must be sent after the lease deadline",
+    );
+    assert.ok(
+      probe.commitSentLocalMs - probe.fenceDoneLocalMs < AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS,
+      "setup: the idle gap before COMMIT exceeded the idle-in-transaction timeout; the run proves nothing",
+    );
+
+    // The verdict. A late COMMIT must not leave a success behind.
+    const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
+      where: { id: started.attemptId },
+    });
+    const task = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } });
+    assert.notEqual(
+      attempt.outcome,
+      "succeeded",
+      `a COMMIT sent ${Math.round(
+        probe.commitSentLocalMs - probe.walkEndLocalMs - FENCE_MARGIN_MS,
+      )} ms after the lease deadline was accepted (commitAccepted=${String(
+        probe.commitAccepted,
+      )}) and the attempt was recorded as succeeded`,
+    );
+    assert.notEqual(task.status, "review");
+  } finally {
+    prototype.query = originalQuery;
+    await prisma.amuxWorkDelivery.deleteMany({ where: { taskId } });
+    await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: worker } });
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
   }
 });
 
