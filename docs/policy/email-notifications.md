@@ -1953,7 +1953,10 @@ EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건�
 
 ### 6.1 신호 우선순위
 
-IP는 **가장 약한 신호**이며 단독으로 관할권을 확정하지 않습니다.
+IP는 **가장 약한 신호**입니다. 2026-09-29 소유자 승인(초안 §12 S0,
+[제품 소식 재설계](email-product-news-redesign-draft.md) §5.3)부터 **IP로 추정한
+국가는 기록하고 판정에 씁니다** — 단, 1~4순위가 있으면 그것이 이기고, 사용자는
+설정에서 언제든 정정합니다.
 
 | 순위 | 신호 | 출처 | 신뢰도 | 비고 |
 |---|---|---|---|---|
@@ -1962,7 +1965,7 @@ IP는 **가장 약한 신호**이며 단독으로 관할권을 확정하지 않�
 | 3 | **사용자가 직접 신고한 국가** | 이메일 알림 설정 | 높음 | `UserSettings.country`, source=`self_declared` |
 | 4 | **동의 기록 시점의 관할권** | `ConsentRecord.jurisdiction` | 높음(과거 시점) | 동의의 유효성 판단에 사용 |
 | 5 | 계정 언어 + 시간대 조합 | `UserSettings.language`, `timeZone` | 중간 | `Asia/Seoul` + `ko`는 강한 정황 |
-| 6 | IP 국가 | `cf-ipcountry` | **낮음** | 단독 확정 금지 |
+| 6 | IP 추정 국가 | 가입·로그인 시 `cf-ipcountry`, `UserSettings.countrySource = ip_estimated` | **추정** | 1~4순위가 없을 때만 채택. 5순위와 다르면 충돌 |
 
 ### 6.2 판정 알고리즘
 
@@ -1976,10 +1979,14 @@ resolveEmailJurisdiction(user)
    confidence = "conflict", 두 값을 conflicts[]에 모두 기록한다. 다만 사용자가
    청구 국가 기록 이후 현재 거주 국가를 다시 확인했다면 그 최신 자기신고를 충돌의
    답으로 채택한다.
-4. 1~3순위가 하나도 없으면 5순위(언어+시간대)로 후보를 만들되
-   confidence = "low"로 표시한다.
-5. 그래도 없으면 countryCode = "ZZ", confidence = "unknown".
-6. IP(6순위)는 **판정에 쓰지 않고 conflict 관찰용으로만 기록**한다.
+4. 1~4순위가 하나도 없고 IP 추정 국가(6순위)가 기록돼 있으면 그것을 채택하고
+   confidence = "estimated"로 표시한다. 5순위(언어+시간대)가 **다른** 나라를
+   가리키면 두 후보가 모두 통과해야 하며, 판정이 후보 하나씩만 받는 동안에는
+   그 경우를 confidence = "conflict"로 보고 보류한다(fail-closed).
+5. 그것도 없으면 5순위(언어+시간대)로 후보를 만들되 confidence = "low"로 표시한다.
+6. 그래도 없으면 countryCode = "ZZ", confidence = "unknown".
+   요청 시점의 IP(`cf-ipcountry`)는 추정을 **기록할 때**만 읽고, 판정은 기록된
+   추정을 읽는다. 기록은 더 강한 source를 덮어쓰지 않는다.
 7. countryCode -> profileKey 매핑(10.2)으로 profile을 고른다.
 ```
 
@@ -2012,11 +2019,10 @@ marketing을 **보내지 않고 보류**합니다.
 때문입니다 — 미국의 `opt_out`, 호주의 추론 동의, 승인 F의 `risk_accepted`로
 받는 사람은 동의 화면을 지나지 않았고, 따라서 그 화면이 묻는 국가도 없습니다.
 
-**그 경로들은 지금 고신뢰 국가 신호가 없으면 fail-closed입니다.** 6.1의 신호
-우선순위에서 확정되지 않으면 marketing은 보류이고(`ZZ`는 발송 안 함), IP 추정
-국가를 근거로 쓰는 계약은 **아직 이 문서에 없습니다** — 초안 §12 S0의 남은 항목
-이며 6.1·6.2와 `AGENTS.md`를 함께 고칠 때 들어옵니다. 그 전까지 동의 없는
-경로의 수신자는 **국가가 확정될 때까지 받지 못합니다.**
+**그 경로들은 IP 추정 국가로 판정합니다**(2026-09-29 개정). 가입과 로그인 때
+기록한 추정 국가가 6.2의 4단계로 채택되고, 추정도 없거나 5순위와 어긋나면
+fail-closed로 보류합니다(`ZZ`는 발송 안 함). 추정이 틀렸다면 사용자가 설정에서
+국가를 고치고, 그 자기 신고가 추정을 이깁니다.
 
 보류는 그래서 예외 상황이 아니라 **그 경로들의 기본 상태**입니다.
 
@@ -2025,6 +2031,7 @@ marketing을 **보내지 않고 보류**합니다.
 | high (1~3순위, 충돌 없음, profile 있음) | 해당 profile 적용 | 발송 | 발송 | 발송 |
 | high이지만 profile 없음(ZZ) | **보류** `skipped:jurisdiction_unconfirmed` | 발송 | 발송 | 발송 |
 | **conflict** (2순위 vs 3순위 불일치) | **보류** `skipped:jurisdiction_conflict` + 사용자 확인 요청 | 발송 | 발송 | 발송 |
+| estimated (6순위, 5순위와 일치하거나 5순위 없음, profile 있음) | 해당 profile 적용 | 발송 | 발송 | 발송 |
 | low (5순위) | **보류** `skipped:jurisdiction_unconfirmed` + 확인 요청 | 발송 | 발송 | 발송 |
 | unknown (ZZ) | **보류** + 확인 요청 | 발송 | 발송 | 발송 |
 

@@ -532,6 +532,13 @@ const recordNoticeEvent = async (
       `A ${resolved.source} resolution cannot be high confidence.`
     );
   }
+  // And `estimated` is the IP estimate's own confidence, which nothing else
+  // carries -- both directions, like a conflict.
+  if ((resolved.confidence === "estimated") !== (resolved.source === "ip_estimated")) {
+    throw new Error(
+      "An estimated resolution must come from the recorded IP estimate, and that estimate is only ever estimated."
+    );
+  }
 
   const jurisdiction = noticeJurisdictionColumns(resolved);
 
@@ -584,14 +591,11 @@ const recordNoticeEvent = async (
 
   // Every rendered rule belongs to a country the resolution involved.
   //
-  // The observed IP country is deliberately **not** in that set. Draft section
-  // 5.3 wants it as a second candidate, and says in the same passage that S0
-  // must amend the approved contract first; the approved contract still says
-  // an IP is observational and does not decide a jurisdiction (sections 6.2
-  // and 6.3). Admitting it here would write records that contract does not
-  // allow, permanently -- an unresolved account could be recorded with a
-  // hotel's country as the only rule it was shown, and every later send would
-  // attach that country's display duties. S8b adds it back with S0.
+  // The request's observed IP country is still **not** in that set. What the
+  // 2026-09-29 amendment admitted is the *recorded* estimate, which reaches
+  // here as the resolution itself (`ip_estimated`); a hotel's IP seen on one
+  // request is not a country this account was resolved to, and recording its
+  // rule would attach that country's display duties to every later send.
   for (const country of candidateCountries) {
     if (!namedCountries.has(country)) {
       throw new Error(

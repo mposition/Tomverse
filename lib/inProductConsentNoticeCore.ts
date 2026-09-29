@@ -257,7 +257,8 @@ export const noticeJurisdictionColumns = (resolved: {
   confidence: string;
   source: string;
 }): NoticeJurisdiction =>
-  resolved.confidence === "high" && resolved.countryCode !== "ZZ"
+  (resolved.confidence === "high" || resolved.confidence === "estimated") &&
+  resolved.countryCode !== "ZZ"
     ? { country: resolved.countryCode, source: resolved.source }
     : {
         country: "ZZ",
@@ -316,6 +317,9 @@ export const NOTICE_CANDIDATE_SIGNALS: ReadonlySet<string> = new Set([
   "billing",
   "self_declared",
   "consent",
+  // The recorded IP estimate, a basis since the 2026-09-29 amendment
+  // (docs/policy/email-notifications.md §6.2 step 4).
+  "ip_estimated",
   "inferred",
   "conflict",
   "unresolved",
