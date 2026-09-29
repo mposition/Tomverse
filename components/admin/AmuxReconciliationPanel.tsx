@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxReconciliationMessages } from "@/lib/adminMessages/amuxReconciliation";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
@@ -31,7 +32,7 @@ export function AmuxReconciliationPanel() {
   const send = async (action: string) => {
     setPending(true);
     try {
-      const response = await fetch(`/api/admin/amux/reconciliation?action=${action}`, {
+      const response = await adminFetch(`/api/admin/amux/reconciliation?action=${action}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: requestText,

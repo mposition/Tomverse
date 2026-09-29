@@ -4,7 +4,9 @@ import { test } from "node:test";
 
 import {
   RECOMMENDATION_AUDIT_KEYS,
+  RECOMMENDATION_CAPACITY_AUDIT_KEYS,
   RECOMMENDATION_CODE_LATCH,
+  parseRecommendationCapacityRequest,
   parseRecommendationDecisionRequest,
   recommendationApplyPermitted,
   recommendationApproveStillIncluded,
@@ -41,8 +43,8 @@ const card = (id, overrides = {}) => ({
 
 const id = (suffix) => `c${suffix.padEnd(24, "0").slice(0, 24)}`;
 
-test("version 7 ships the recommendation latch closed", () => {
-  assert.equal(RECOMMENDATION_CODE_LATCH, false);
+test("version 10 ships the recommendation latch open", () => {
+  assert.equal(RECOMMENDATION_CODE_LATCH, true);
   assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: false }), false);
   assert.equal(recommendationApplyPermitted({ envValue: "enabled", codeLatch: true }), true);
   assert.equal(recommendationApplyPermitted({ envValue: "true", codeLatch: true }), false);
@@ -277,6 +279,45 @@ test("audit metadata keeps only the allowlist", () => {
   for (const key of Object.keys(metadata)) assert.ok(RECOMMENDATION_AUDIT_KEYS.includes(key));
 });
 
+test("version 11 records capacity only from the request and does not choose a limit", () => {
+  const accepted = parseRecommendationCapacityRequest(JSON.stringify({
+    active: true,
+    canonicalizationVersion: "amux-json-v1",
+    policyVersion: 11,
+    wipLimit: 4,
+  }));
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.request.wipLimit, 4);
+  for (const raw of [
+    { active: true, canonicalizationVersion: "amux-json-v1", policyVersion: 7, wipLimit: 4 },
+    { active: "true", canonicalizationVersion: "amux-json-v1", policyVersion: 11, wipLimit: 4 },
+    { active: true, canonicalizationVersion: "amux-json-v1", policyVersion: 11, wipLimit: 0 },
+    { active: true, canonicalizationVersion: "amux-json-v1", policyVersion: 11, wipLimit: 10001 },
+    { active: true, canonicalizationVersion: "amux-json-v1", policyVersion: 11, wipLimit: 4, cardId: "CHAT-01" },
+  ]) {
+    assert.equal(parseRecommendationCapacityRequest(JSON.stringify(raw)).ok, false);
+  }
+  const route = readFileSync("app/api/admin/amux/board-recommendation/route.ts", "utf8");
+  const service = readFileSync("lib/amux/recommendationPoolService.ts", "utf8");
+  const core = readFileSync("lib/amux/recommendationPoolCore.ts", "utf8");
+  assert.ok(route.indexOf('action === "capacity"') < route.indexOf("if (!RECOMMENDATION_CODE_LATCH)"));
+  const capacity = service.slice(
+    service.indexOf("export async function configureRecommendationCapacity"),
+    service.indexOf("const loadCards"),
+  );
+  assert.equal((capacity.match(/amuxRecommendationCapacity\.upsert/g) ?? []).length, 1);
+  assert.equal(capacity.includes("amuxRecommendationCapacity.create"), false);
+  assert.equal(capacity.includes("amuxRecommendationCapacity.update"), false);
+  assert.equal(capacity.includes("AUTO_GLOBAL_ACTIVE_CAP"), false);
+  assert.equal(capacity.includes("wipLimit: 3"), false);
+  assert.equal(capacity.includes("amuxWorkItem"), false);
+  assert.equal(capacity.includes("process.env"), false);
+  assert.equal(capacity.includes("TOMVERSE_AMUX_EXECUTE"), false);
+  assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
+  assert.deepEqual([...RECOMMENDATION_CAPACITY_AUDIT_KEYS], ["active", "wipLimit"]);
+  assert.equal(core.includes("AUTO_GLOBAL_ACTIVE_CAP"), false);
+});
+
 test("the route passes the shipped latch and does not mention execution", () => {
   const route = readFileSync("app/api/admin/amux/board-recommendation/route.ts", "utf8");
   const service = readFileSync("lib/amux/recommendationPoolService.ts", "utf8");
@@ -287,5 +328,5 @@ test("the route passes the shipped latch and does not mention execution", () => 
   assert.equal(service.includes("TOMVERSE_AMUX_EXECUTE"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.create"), false);
   assert.equal(service.includes("amuxRecommendationCapacity.update"), false);
-  assert.match(core, /RECOMMENDATION_CODE_LATCH = false/);
+  assert.match(core, /RECOMMENDATION_CODE_LATCH = true/);
 });

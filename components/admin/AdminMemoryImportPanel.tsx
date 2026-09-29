@@ -6,6 +6,7 @@ import { Brain, Loader2, RefreshCw } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminMemoryImportMessages } from "@/lib/adminMessages/memoryImport";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The reader for the import and memory observability APIs (§22).
@@ -164,8 +165,8 @@ export function AdminMemoryImportPanel() {
     const load = useCallback(async () => {
         try {
             const [memoryResponse, importResponse] = await Promise.all([
-                fetch("/api/admin/memory", { cache: "no-store" }),
-                fetch("/api/admin/external-imports", { cache: "no-store" }),
+                adminFetch("/api/admin/memory", { cache: "no-store" }),
+                adminFetch("/api/admin/external-imports", { cache: "no-store" }),
             ]);
             setError(null);
             // The import report is secondary: its absence must not blank the

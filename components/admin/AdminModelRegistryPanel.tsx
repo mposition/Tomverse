@@ -20,6 +20,11 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -47,6 +52,7 @@ import {
 } from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { adminFetch } from "@/lib/adminFetch";
 
 type EnvironmentStatus = {
   compatible: boolean;
@@ -308,7 +314,12 @@ export function AdminModelRegistryPanel() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedProvider = searchParams.get("provider");
-  const [apiFailure, setApiFailure] = useState<string | null>(null);
+  const { locale: apiLocale } = useAdminLocale();
+  // Disabling a model is a two-person action, so this endpoint answers 409
+  // with an approval id and 428 when the sign-in is stale. Both were read as
+  // `data.error` and thrown, which told the operator to retry a request that
+  // had already been accepted, and named a remedy with no way to reach it.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [apiFailureCode, setApiFailureCode] = useState<string | null>(null);
   const [saveAttempt, setSaveAttempt] = useState(0);
   const [saveRefusal, setSaveRefusal] = useState<"replace" | "plain" | null>(null);
@@ -426,20 +437,27 @@ export function AdminModelRegistryPanel() {
   const [guestLead, setGuestLead] = useState<{ stored: string | null; effective: string | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<EnvironmentStatus | null>(null);
+  // When the server said it read this list. Sent back on a save so the server
+  // can refuse a write based on a row that has moved since -- usually moved by
+  // catalogue reconciliation rather than by a second operator, which is why
+  // this matters in a one-person organisation at all.
+  const [readAt, setReadAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/models", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/models", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as {
         models?: AdminModel[];
         securityFindings?: RegistrySecurityFinding[];
+        readAt?: string;
         guestLead?: { stored: string | null; effective: string | null };
         error?: string;
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
       setModels(data.models);
       setSecurityFindings(data.securityFindings || []);
+      setReadAt(data.readAt ?? null);
       setGuestLead(data.guestLead ?? null);
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : m.toast.loadFailed, "error");
@@ -475,7 +493,7 @@ export function AdminModelRegistryPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(
+        const response = await adminFetch(
           `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({ workItemId: adoptParam })}`,
           { cache: "no-store" }
         );
@@ -675,7 +693,7 @@ export function AdminModelRegistryPanel() {
       };
       void (async () => {
         try {
-          const response = await fetch(
+          const response = await adminFetch(
             `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({
               workItemId: adoptWorkItemId,
               modelId: adoptedModelId,
@@ -839,7 +857,7 @@ export function AdminModelRegistryPanel() {
     value === "required"
       ? m.adopt.blankRequired
       : typeof value === "number"
-        ? m.adopt.blankSavesAs(value.toLocaleString("en-US"))
+        ? m.adopt.blankSavesAs(value.toLocaleString(adminIntlLocale(locale)))
         : undefined;
 
   const creditFloor = useMemo(
@@ -967,6 +985,7 @@ export function AdminModelRegistryPanel() {
     setForm((current) => ({ ...current, [key]: value }));
     setValidation(null);
     setApiFailure(null);
+    setApiFailureCode(null);
   };
 
   // A different model, at the moment the operator picks it. Everything the
@@ -1005,7 +1024,7 @@ export function AdminModelRegistryPanel() {
   const validate = async () => {
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/models", {
+      const response = await adminFetch("/api/admin/models", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -1052,8 +1071,12 @@ export function AdminModelRegistryPanel() {
                 : {}),
             })}`
           : "/api/admin/models";
-      const response = await fetch(
-        isNew ? createUrl : `/api/admin/models/${encodeURIComponent(form.id)}`,
+      // Creating cannot be stale -- there is no row yet to have moved.
+      const updateUrl = readAt
+        ? `/api/admin/models/${encodeURIComponent(form.id)}?readAt=${encodeURIComponent(readAt)}`
+        : `/api/admin/models/${encodeURIComponent(form.id)}`;
+      const response = await adminFetch(
+        isNew ? createUrl : updateUrl,
         {
           method: isNew ? "POST" : "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1064,23 +1087,38 @@ export function AdminModelRegistryPanel() {
         | {
             model?: AdminModel;
             retired?: AdminModel;
+            readAt?: string;
             error?: string;
             code?: string;
+            approvalId?: string;
           }
         | null;
       if (!response.ok || !data?.model) {
         const protectedId = replacesId || form.id;
         if (data?.code === APPLICATION_FALLBACK_PROTECTED || data?.code === GUEST_LEAD_PROTECTED) {
           setApiFailureCode(data.code);
-          setApiFailure(
-            data.code === APPLICATION_FALLBACK_PROTECTED
-              ? m.adopt.fallbackProtected(protectedId)
-              : m.adopt.guestLeadProtected(protectedId)
-          );
+          setApiFailure({
+            message:
+              data.code === APPLICATION_FALLBACK_PROTECTED
+                ? m.adopt.fallbackProtected(protectedId)
+                : m.adopt.guestLeadProtected(protectedId),
+            tone: "error",
+            requiresReauthentication: false,
+            approvalId: null,
+          });
           return;
         }
         setApiFailureCode(null);
-        throw new Error(data?.error || m.toast.saveFailed);
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: m.toast.saveFailed,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        throw new Error(outcome.message);
       }
       setModels((current) => {
         const replacedId = data.retired?.id;
@@ -1091,6 +1129,9 @@ export function AdminModelRegistryPanel() {
           (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)
         );
       });
+      // The operator's own write moved the row, so the next save must not be
+      // refused as a conflict with themselves.
+      if (data.readAt) setReadAt(data.readAt);
       setEditingId(null);
       setCopySourceId(null);
       setValidation(null);
@@ -1115,7 +1156,15 @@ export function AdminModelRegistryPanel() {
     } catch (error) {
       // The dialog stays open, so the sentence lives in the dialog. A second
       // copy in the toast makes the same text match twice.
-      setApiFailure(error instanceof Error ? error.message : m.toast.saveFailed);
+      const message = error instanceof Error ? error.message : m.toast.saveFailed;
+      setApiFailure((current) =>
+        current ?? {
+          message,
+          tone: "error",
+          requiresReauthentication: false,
+          approvalId: null,
+        }
+      );
     } finally {
       setSaving(false);
     }
@@ -1125,9 +1174,22 @@ export function AdminModelRegistryPanel() {
     if (!window.confirm(m.toast.archiveConfirm(model.name))) return;
     setSaving(true);
     try {
-      const response = await fetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
-      const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.archiveFailed);
+      const response = await adminFetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
+      const data = (await response.json().catch(() => null)) as
+        | { model?: AdminModel; error?: string; code?: string; approvalId?: string }
+        | null;
+      if (!response.ok || !data?.model) {
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: m.toast.archiveFailed,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        throw new Error(outcome.message);
+      }
       await load();
       setEditingId(null);
       setCopySourceId(null);
@@ -1172,11 +1234,7 @@ export function AdminModelRegistryPanel() {
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
-      {apiFailure && !editingId ? (
-        <div role="alert" data-testid="admin-api-error" className="border-b border-red-500/30 bg-red-500/10 px-5 py-3 text-sm text-red-100">
-          {apiFailure}
-        </div>
-      ) : null}
+      {apiFailure && !editingId ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>
@@ -1635,15 +1693,11 @@ export function AdminModelRegistryPanel() {
             </div>
 
             <div className="sticky bottom-0 flex flex-col gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
-              {apiFailure ? (
-                <div role="alert" data-testid="admin-api-error" className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm leading-5 text-red-100">
-                  <p>{apiFailure}</p>
-                  {apiFailureCode === APPLICATION_FALLBACK_PROTECTED || apiFailureCode === GUEST_LEAD_PROTECTED ? (
-                    <Link href="/admin/platform#default-models" className="mt-1 inline-block font-bold text-white underline">
-                      {m.adopt.openDefaultModels}
-                    </Link>
-                  ) : null}
-                </div>
+              {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
+              {apiFailure && (apiFailureCode === APPLICATION_FALLBACK_PROTECTED || apiFailureCode === GUEST_LEAD_PROTECTED) ? (
+                <Link href="/admin/platform#default-models" className="text-sm font-bold text-white underline">
+                  {m.adopt.openDefaultModels}
+                </Link>
               ) : null}
               {adoptWorkItemId &&
               (floorException === "needs_acknowledgement" || floorException === "accepted") ? (

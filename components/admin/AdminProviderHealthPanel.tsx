@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   ChevronDown,
@@ -34,6 +34,11 @@ import {
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminProviderHealthMessages } from "@/lib/adminMessages/providerHealth";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
+import {
+  shouldIssueAdminPoll,
+  type AdminPollTrigger,
+} from "@/lib/adminPollTick";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
@@ -1286,10 +1291,17 @@ export function AdminProviderHealthPanel({
     useState<AiProvider | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Not state: a re-render must not clear it, and nothing renders from it.
+  // Guards the pair together, because the two reads ride the same cadence on
+  // purpose -- letting one overlap while the other did not would put the
+  // verification history out of step with the failure counter it is read
+  // against, which is the thing that cadence exists to prevent.
+  const inFlight = useRef(false);
+
   const refreshDashboard = useCallback(async () => {
     setRefreshing(true);
     try {
-      const response = await fetch("/api/admin/provider-health", {
+      const response = await adminFetch("/api/admin/provider-health", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
@@ -1318,7 +1330,7 @@ export function AdminProviderHealthPanel({
   const refreshVerification = useCallback(async () => {
     if (!canRunVerification) return;
     try {
-      const response = await fetch("/api/admin/provider-health/verify", {
+      const response = await adminFetch("/api/admin/provider-health/verify", {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
@@ -1343,7 +1355,7 @@ export function AdminProviderHealthPanel({
       setVerifyingProvider(provider);
       setNotice(null);
       try {
-        const response = await fetch("/api/admin/provider-health/verify", {
+        const response = await adminFetch("/api/admin/provider-health/verify", {
           method: "POST",
           headers: {
             Accept: "application/json",
@@ -1388,7 +1400,7 @@ export function AdminProviderHealthPanel({
       setRecoveringProvider(provider);
       setNotice(null);
       try {
-        const response = await fetch("/api/admin/provider-health/recover", {
+        const response = await adminFetch("/api/admin/provider-health/recover", {
           method: "POST",
           headers: {
             Accept: "application/json",
@@ -1432,7 +1444,7 @@ export function AdminProviderHealthPanel({
     async (provider, creditUsd, note) => {
       setSavingProvider(provider);
       try {
-        const response = await fetch("/api/admin/provider-credits", {
+        const response = await adminFetch("/api/admin/provider-credits", {
           method: "PATCH",
           headers: {
             Accept: "application/json",
@@ -1477,7 +1489,7 @@ export function AdminProviderHealthPanel({
     async (provider, profile) => {
       setSavingBillingProvider(provider);
       try {
-        const response = await fetch("/api/admin/provider-billing", {
+        const response = await adminFetch("/api/admin/provider-billing", {
           method: "PATCH",
           headers: {
             Accept: "application/json",
@@ -1523,28 +1535,45 @@ export function AdminProviderHealthPanel({
   );
 
   useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      void refreshDashboard();
+    const refresh = (trigger: AdminPollTrigger) => {
+      if (
+        !shouldIssueAdminPoll({
+          inFlight: inFlight.current,
+          documentVisible: document.visibilityState === "visible",
+          trigger,
+        })
+      ) {
+        return;
+      }
+      inFlight.current = true;
       // Verification history rides the same cadence as the dashboard, so the
       // "already used for a recovery" flag on a check can never be stale
       // relative to the failure counter it would be used against.
-      void refreshVerification();
+      void Promise.allSettled([refreshDashboard(), refreshVerification()]).then(
+        () => {
+          inFlight.current = false;
+        }
+      );
     };
-    const initialRefresh = window.setTimeout(refreshWhenVisible, 0);
-    const interval = window.setInterval(refreshWhenVisible, REFRESH_INTERVAL_MS);
-    window.addEventListener("tomverse:provider-health-refresh", refreshWhenVisible);
-    window.addEventListener("admin:refresh", refreshWhenVisible);
-    window.addEventListener("focus", refreshWhenVisible);
+    // `focus` and the console-wide refresh stay reachable while the tab is
+    // hidden: focus is what brings the panel up to date the moment somebody
+    // looks at it again, and the browser has not necessarily updated
+    // `visibilityState` by the time it fires.
+    const refreshOnEvent = () => refresh("event");
+    const initialRefresh = window.setTimeout(() => refresh("manual"), 0);
+    const interval = window.setInterval(() => refresh("interval"), REFRESH_INTERVAL_MS);
+    window.addEventListener("tomverse:provider-health-refresh", refreshOnEvent);
+    window.addEventListener("admin:refresh", refreshOnEvent);
+    window.addEventListener("focus", refreshOnEvent);
     return () => {
       window.clearInterval(interval);
       window.clearTimeout(initialRefresh);
       window.removeEventListener(
         "tomverse:provider-health-refresh",
-        refreshWhenVisible
+        refreshOnEvent
       );
-      window.removeEventListener("admin:refresh", refreshWhenVisible);
-      window.removeEventListener("focus", refreshWhenVisible);
+      window.removeEventListener("admin:refresh", refreshOnEvent);
+      window.removeEventListener("focus", refreshOnEvent);
     };
   }, [refreshDashboard, refreshVerification]);
 

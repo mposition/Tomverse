@@ -50,7 +50,26 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   overview: {
     label: "개요",
     description: "운영 스냅샷, 확인 필요 항목, 최근 활동",
-    aliases: ["홈", "대시보드", "상태", "현황"],
+    aliases: [
+      "홈",
+      "대시보드",
+      "상태",
+      "현황",
+      "상태 점수",
+      "점수",
+      "환경변수",
+      "환경 설정",
+    ],
+    tabs: {
+      summary: {
+        label: "요약",
+        description: "운영 스냅샷, 확인 필요 항목, 최근 활동",
+      },
+      health: {
+        label: "상태 점수",
+        description: "점수가 어떻게 나왔고 각 항목에 무엇을 해야 하는지",
+      },
+    },
   },
   "work-queue": {
     label: "작업 대기열",
@@ -256,6 +275,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "amux-board-recommendation": {
     label: "AMUX 추천 풀",
     description: "owner 전용 backlog 추천 snapshot, 꺼진 운영 적용",
+  },
+  "amux-cards": {
+    label: "AMUX 카드",
+    description: "owner 전용 AMUX 카드와 실행 상태 읽기 전용 목록",
   },
   "amux-intake": {
     label: "AMUX 등록",

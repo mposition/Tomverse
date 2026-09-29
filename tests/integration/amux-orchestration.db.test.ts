@@ -4089,3 +4089,51 @@ test("expired delivery receipt rotates and stale acknowledgements are fenced", a
     });
   }
 });
+
+test("the admin card list reads attempt counts and the latest attempt in set queries", async () => {
+  // Source checks cannot see a raw-SQL parameter the driver refuses; this runs
+  // the query against PostgreSQL through the same Prisma adapter as production.
+  const { listAmuxCardsForAdmin } = await import("@/lib/amux/adminCardList");
+  const taskId = await createTodo("amux-admin-card-list");
+  const base = new Date();
+  try {
+    await prisma.amuxExecutionAttempt.createMany({
+      data: [
+        { outcome: "failed", toStatus: "todo", offset: 2_000 },
+        { outcome: "blocked", toStatus: "blocked", offset: 1_000 },
+      ].map((attempt, index) => ({
+        id: randomUUID(),
+        taskId,
+        worker: "claude-impl",
+        workerInstanceId: randomUUID(),
+        workerGeneration: 1,
+        taskRevision: index + 1,
+        attemptNumber: index + 1,
+        heartbeatAt: base,
+        leaseExpiresAt: null,
+        startedAt: new Date(base.getTime() - attempt.offset),
+        endedAt: base,
+        outcome: attempt.outcome,
+        toStatus: attempt.toStatus,
+        endedBy: "claude-impl",
+        reason: "execution_failed",
+      })),
+    });
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { drag: 0 },
+    });
+
+    const list = await listAmuxCardsForAdmin();
+    const row = list.rows.find((candidate) => candidate.id === taskId);
+    assert.ok(row, "the freshly updated card is within the newest rows");
+    assert.equal(row.attemptCount, 2);
+    assert.equal(row.lastAttemptOutcome, "blocked");
+    assert.equal(row.lastAttemptToStatus, "blocked");
+    assert.equal(row.briefPresent, false);
+    assert.ok(list.total >= list.rows.length);
+  } finally {
+    await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkItem.delete({ where: { id: taskId } });
+  }
+});

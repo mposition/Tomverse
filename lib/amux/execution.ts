@@ -22,6 +22,10 @@ import {
   lockAmuxResourcePolicies,
 } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
+import {
+  buildAmuxDeliveryPrompt,
+  classifyApprovedExecutionBrief,
+} from "@/lib/amux/deliveryPrompt";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -70,6 +74,8 @@ type TaskLockRow = {
   estimatedCostMicrousd: bigint | null;
   requiresHumanReview: boolean;
   reviewSpecialty: string | null;
+  executionBrief: string | null;
+  executionBriefDigest: string | null;
 };
 
 const executionLeaseExpiry = (now: Date) =>
@@ -136,6 +142,8 @@ const lockTask = async (
       ,"estimatedCostMicrousd"
       ,"requiresHumanReview"
       ,"reviewSpecialty"
+      ,"executionBrief"
+      ,"executionBriefDigest"
     FROM "AmuxWorkItem"
     WHERE "id" = ${taskId}
     FOR UPDATE
@@ -166,71 +174,6 @@ const validSettlement = (
   (outcome === "succeeded" && (toStatus === "review" || toStatus === "done")) ||
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
-
-const buildAmuxDeliveryPrompt = (input: {
-  taskId: string;
-  title: string;
-  description: string | null;
-  kind: string;
-  priority: string;
-  worker: string;
-  attemptId: string;
-  attemptNumber: number;
-  taskRevision: number;
-  previousAttempt: {
-    outcome: string | null;
-    toStatus: string | null;
-  } | null;
-}) => {
-  if (
-    Buffer.byteLength(input.title, "utf8") > 4 * 1_024 ||
-    Buffer.byteLength(input.description ?? "", "utf8") > 64 * 1_024
-  ) {
-    throw new Error("AMUX delivery source exceeds byte ceiling");
-  }
-  const description = input.description?.trim() || "(no description)";
-  const reportedOutcome = input.previousAttempt?.outcome;
-  const previousOutcome =
-    reportedOutcome === "succeeded" ||
-    reportedOutcome === "failed" ||
-    reportedOutcome === "blocked" ||
-    reportedOutcome === "expired"
-      ? reportedOutcome
-      : "unknown";
-  const reportedStatus = input.previousAttempt?.toStatus;
-  const previousStatus =
-    reportedStatus === "todo" ||
-    reportedStatus === "review" ||
-    reportedStatus === "done" ||
-    reportedStatus === "blocked" ||
-    reportedStatus === "cancelled"
-      ? reportedStatus
-      : "unknown";
-
-  const prompt = [
-    "[Tomverse AMUX work]",
-    `Task: ${input.taskId}`,
-    `Title: ${input.title}`,
-    `Kind: ${input.kind}`,
-    `Priority: ${input.priority}`,
-    `Worker: ${input.worker}`,
-    `Execution attempt: ${input.attemptId}`,
-    `Attempt number: ${input.attemptNumber}`,
-    `Task revision: ${input.taskRevision}`,
-    ...(input.previousAttempt
-      ? [
-          `Previous outcome: ${previousOutcome}`,
-          `Previous status: ${previousStatus}`,
-        ]
-      : []),
-    "",
-    description,
-  ].join("\n");
-  if (Buffer.byteLength(prompt, "utf8") > 96 * 1_024) {
-    throw new Error("AMUX delivery envelope exceeds byte ceiling");
-  }
-  return prompt;
-};
 
 /**
  * Starts execution only for the currently-owned Todo and the currently-live
@@ -263,7 +206,8 @@ export async function startAmuxExecution(input: {
         | "incident_frozen"
         | "cost_estimate_missing"
         | "cost_budget_exhausted"
-        | "cost_budget_window_inactive";
+        | "cost_budget_window_inactive"
+        | "execution_brief_unverified";
     }
 > {
   if (input.expectedRevision > AMUX_MAX_EXPECTED_REVISION) {
@@ -443,6 +387,17 @@ export async function startAmuxExecution(input: {
         };
       }
 
+      const approvedBrief = classifyApprovedExecutionBrief(
+        lockedTask.executionBrief,
+        lockedTask.executionBriefDigest,
+      );
+      if (approvedBrief.state === "unverified") {
+        return {
+          started: false as const,
+          reason: "execution_brief_unverified" as const,
+        };
+      }
+
       const taskRevision = input.expectedRevision + 1;
 
       const task = await tx.amuxWorkItem.updateMany({
@@ -560,6 +515,8 @@ export async function startAmuxExecution(input: {
         attemptId,
         attemptNumber: budget.next_attempt_number,
         taskRevision,
+        executionBrief: lockedTask.executionBrief,
+        executionBriefDigest: lockedTask.executionBriefDigest,
         previousAttempt,
       });
 

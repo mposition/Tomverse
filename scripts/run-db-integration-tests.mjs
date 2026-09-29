@@ -228,6 +228,11 @@ run(
     // terminal receipts and stop-without-retry unknown recovery.
     "tests/integration/prompt-refiner-shadow-run.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
+    // The hash chain is walked in batches now, and a cursor that skips or
+    // repeats a row is silent: a skipped row is reported as verified, and a
+    // repeated one compares an entry against its own hash and invents a
+    // linkage break in a sound chain.
+    "tests/integration/admin-audit-integrity-walk.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",

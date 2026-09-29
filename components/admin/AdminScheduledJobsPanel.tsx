@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminScheduledJobsMessages } from "@/lib/adminMessages/scheduledJobs";
+import { adminFetch } from "@/lib/adminFetch";
 
 type ScheduledJobRow = {
   key: string;
@@ -44,7 +45,7 @@ export function AdminScheduledJobsPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/scheduled-jobs", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/scheduled-jobs", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as
         | { jobs?: ScheduledJobRow[]; error?: string }
         | null;

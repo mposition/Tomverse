@@ -7,6 +7,7 @@ import { Loader2, Search } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminGlobalSearchMessages } from "@/lib/adminMessages/globalSearch";
+import { adminFetch } from "@/lib/adminFetch";
 
 type SearchResult = {
   type: string;
@@ -42,7 +43,7 @@ export function AdminGlobalSearchPanel() {
     }
     setIsSearching(true);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/search?q=${encodeURIComponent(normalized)}`,
         { cache: "no-store" }
       );

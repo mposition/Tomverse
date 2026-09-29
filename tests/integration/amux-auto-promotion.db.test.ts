@@ -134,7 +134,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("the closed auto latch writes nothing and a grant leaves the card in backlog", async () => {
+test("an unset auto env writes nothing and a grant leaves the card in backlog", async () => {
   const storedIncident = await prisma.appSetting.findUnique({ where: { key: INCIDENT_KEY }, select: { value: true } });
   previousIncident = storedIncident?.value ?? null;
   await prisma.appSetting.upsert({

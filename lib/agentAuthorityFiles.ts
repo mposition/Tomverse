@@ -125,6 +125,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/orchestrator*",
 ];
 
 /**
