@@ -353,6 +353,10 @@ export const WEB_SEARCH_CAPABILITIES: Readonly<Record<string, WebSearchCapabilit
   // flow and never reaches the "always" web-search-mode code path.
 };
 
+/** The register's own answer, or undefined for a model it does not list. */
+const registeredWebSearchCapability = (modelId: string): WebSearchCapability | undefined =>
+  WEB_SEARCH_CAPABILITIES[modelId];
+
 /**
  * What a caller can tell this module about a model.
  *
@@ -412,7 +416,7 @@ export const getWebSearchCapability = (
   model: WebSearchModelRef
 ): WebSearchCapability => {
   const id = typeof model === "string" ? model : model.id;
-  const registered = WEB_SEARCH_CAPABILITIES[id];
+  const registered = registeredWebSearchCapability(id);
   if (registered) return registered;
   const compiled = getModel(id);
   const provider =

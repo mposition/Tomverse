@@ -20,11 +20,6 @@ export const RETIRED_USER_TOKEN_LIMIT_ENV = [
     "CHAT_USER_TOKENS_PER_MONTH",
 ] as const;
 
-// 2,000 tokens per guest credit, the ratio the original 40,000 / 200,000 held
-// against 20 / 100 credits, carried over to the 50 / 300 credits of
-// 2026-09-29. A searching three-model turn reserves about 38,000 tokens
-// (WEB_SEARCH_INPUT_TOKEN_OVERHEAD per model), so 40,000 would have refused
-// the second searching turn of a day the credit allowance still permits.
 export const GUEST_TOKENS_PER_DAY_DEFAULT = 100_000;
 export const GUEST_TOKENS_PER_MONTH_DEFAULT = 600_000;
 /** The IP aggregate admits three guests' worth before refusing. */
@@ -48,6 +43,16 @@ export const findRetiredUserTokenLimitEnvNames = (env: Environment) =>
         (name) => typeof env[name] === "string" && env[name] !== ""
     );
 
+/**
+ * A guest's daily and monthly token allowance.
+ *
+ * The defaults are 2,000 tokens per guest credit, the ratio the original
+ * 40,000 / 200,000 held against 20 / 100 credits, carried over to the
+ * 50 / 300 credits of 2026-09-29. A searching three-model turn reserves about
+ * 38,000 tokens (WEB_SEARCH_INPUT_TOKEN_OVERHEAD per model), so 40,000 would
+ * have refused the second searching turn of a day the credit allowance still
+ * permits.
+ */
 export const guestTokenLimits = (env: Environment) => ({
     day: positiveIntegerFrom(
         env.CHAT_GUEST_TOKENS_PER_DAY,
