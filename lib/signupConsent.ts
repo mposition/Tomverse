@@ -206,9 +206,15 @@ export type FinalizeSignupConsentResult =
     };
 
 /**
- * The refusals after which the choice can never be consumed, so the tab may
- * forget it. Everything else -- above all `confirmation_unavailable`, which
- * rolled back and left the attempt pending -- is worth another try.
+ * The refusals that are final answers, which the route returns as 200.
+ * Everything else -- above all `confirmation_unavailable`, which rolled back
+ * and left the attempt pending -- is worth another try, and answers 503.
+ *
+ * Final for this request is not the same as spent: `binding_mismatch`,
+ * `account_predates_attempt` and `not_created_by_this_sign_in` say *this
+ * account* cannot use the attempt, which stays pending for the one that can,
+ * so the tab keeps it. Only `not_found` and `not_pending` mean the attempt
+ * itself is gone (components/auth/signupConsentClient.ts).
  */
 export const TERMINAL_FINALIZE_REFUSALS: ReadonlySet<string> = new Set([
   "not_found",
@@ -246,6 +252,13 @@ export async function finalizeSignupConsentAttempt(input: {
   const attempt = await prisma.signupConsentAttempt.findUnique({ where: { id: input.attemptId } });
   if (!attempt || attempt.nonceHash !== nonceHash(input.nonce)) {
     return { ok: false, reason: "not_found" };
+  }
+  // Already consumed by this account: a retry whose first answer was lost.
+  // The same answer again, so the tab counts it as consumed -- reading it as a
+  // refusal would let the landing's own estimate overwrite the one the sign-up
+  // just recorded.
+  if (attempt.consumedAt && attempt.userId === input.userId) {
+    return { ok: true, confirmationRequested: false };
   }
 
   const user = await prisma.user.findUnique({

@@ -1,5 +1,7 @@
 "use client";
 
+import { CURRENT_CONSENT_COPY_VERSION } from "@/lib/emailConsentCopy";
+
 /**
  * The tab's side of the sign-up consent choice (S4).
  *
@@ -46,7 +48,12 @@ type StoredAttempt = {
   provider?: string;
   /** The language the screen showed, which names the notice wording recorded. */
   language?: string;
+  /** The consent copy version the screen rendered. */
+  copyVersion?: string;
 };
+
+/** The address as the server binds it (`normalizeEmailLoginAddress`). */
+const boundAddress = (email: string | undefined) => email?.trim().toLowerCase();
 
 type Slots = Partial<Record<Channel, StoredAttempt>>;
 
@@ -151,8 +158,9 @@ export async function storeSignupConsentChoice(input: {
     previous.optIn === input.expressOptInRequested &&
     previous.objected === input.objected &&
     previous.language === input.language &&
+    previous.copyVersion === CURRENT_CONSENT_COPY_VERSION &&
     (input.channel === "email_code"
-      ? previous.email === input.email
+      ? previous.email === boundAddress(input.email)
       : previous.provider === input.provider)
   ) {
     return previous.attemptId;
@@ -187,9 +195,10 @@ export async function storeSignupConsentChoice(input: {
           expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 15 * 60_000,
           optIn: input.expressOptInRequested,
           objected: input.objected,
-          ...(input.email ? { email: input.email } : {}),
+          ...(input.email ? { email: boundAddress(input.email) } : {}),
           ...(input.provider ? { provider: input.provider } : {}),
           language: input.language,
+          copyVersion: CURRENT_CONSENT_COPY_VERSION,
         },
       });
       return data.attemptId;

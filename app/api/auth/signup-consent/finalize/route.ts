@@ -15,11 +15,12 @@ import { finalizeSignupConsentAttempt, TERMINAL_FINALIZE_REFUSALS } from "@/lib/
  * Contract: docs/policy/email-product-news-redesign-draft.md section 5.2 (S4).
  * The session says who is asking; `finalizeSignupConsentAttempt()` decides
  * whether this account was created by the flow the choice belongs to, and an
- * existing account's sign-in never consumes one. A refusal after which the
- * choice can never be consumed answers 200 with its reason, and the tab then
- * forgets it; one that rolled back and left the attempt pending
- * (`confirmation_unavailable`) answers 503, and the landing tries again a few
- * times before dropping it. The account exists either way.
+ * existing account's sign-in never consumes one. A final answer is 200 with
+ * its reason (`TERMINAL_FINALIZE_REFUSALS`); the tab drops the attempt only
+ * when it is spent -- consumed, `not_found` or `not_pending` -- and keeps it
+ * after a refusal about this account. One that rolled back and left the
+ * attempt pending (`confirmation_unavailable`) answers 503, and the landing
+ * tries again a few times. The account exists either way.
  */
 
 const bodySchema = z

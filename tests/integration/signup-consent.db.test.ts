@@ -490,3 +490,32 @@ test("the attempt is stamped with the clock the account rows are stamped with", 
     { ok: true, confirmationRequested: false }
   );
 });
+
+test("a retry after a consumed answer was lost is answered as consumed", async () => {
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "google",
+    expressOptInRequested: false,
+    objected: false,
+    language: "en",
+    ipCountry: "AU",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  const user = await oauthAccount(later(issuedAt));
+  const finalize = () =>
+    finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: true,
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    });
+  assert.equal((await finalize()).ok, true);
+  // The same account again: consumed, not refused -- and nothing written twice.
+  assert.equal((await finalize()).ok, true);
+  assert.equal(
+    await prisma.emailPermissionEvent.count({ where: { userId: user.id, kind: "notice_shown" } }),
+    1
+  );
+});
