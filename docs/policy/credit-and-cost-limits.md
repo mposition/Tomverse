@@ -976,6 +976,36 @@ registry에만 있는 모델은 컴파일된 목록에서 provider를 찾을 수
 않습니다. **검색하는 모델이 늘었으므로 `SEARCH_PROVIDER_BRAVE_COST_MICROUSD_PER_{DAY|MONTH}`
 소진 여부를 배포 뒤 확인합니다.**
 
+#### 모델별 웹 검색 경로는 Admin Console에서 덮어쓸 수 있습니다 (2026-09-30)
+
+`ModelRegistryEntry.webSearchOverride`는 관리자가 모델 registry 편집 화면에서
+정하는 값입니다(`lib/webSearchOverride.ts`). **`NULL`은 "코드를 따른다"**이고
+기본값도 backfill도 없으므로, 배포 직후 모든 모델은 지금과 똑같이 동작합니다.
+
+| 값 | 의미 |
+|---|---|
+| `NULL` (자동) | 위 register → provider 규칙. 편집 화면이 코드가 고를 경로를 함께 보여 줍니다. |
+| `off` | 검색하지 않음. function calling이 불안정한 모델, 검색 예산에서 뺄 모델. |
+| `app-managed` | provider와 무관하게 이 애플리케이션의 backend(Brave)로 검색. |
+
+- **provider 자체 검색을 켜는 값은 없습니다.** 질의당 단가·요청이 강제하는
+  상한은 `reserveNativeSearchCost`가 돈을 예약하는 근거이고 모델마다 검증해
+  코드 register에 적습니다. 틀린 값이 invoice가 아니라 review에서 걸리게
+  하려는 것입니다. 그래서 override가 옮길 수 있는 곳은 최악 비용이 이미
+  묶여 있는 두 경로뿐이고, DB CHECK도 이 둘만 허용합니다.
+- **Perplexity는 override를 받지 않습니다.** 모든 답변 안에서 검색하므로
+  `off`는 지킬 수 없고(배지가 검색하지 않았다고 거짓말하게 됩니다),
+  `app-managed`는 두 번째 검색을 따로 청구합니다. admin schema가 거절하고,
+  저장된 값이 있어도 resolver가 무시합니다.
+- **override는 backend readiness를 대신하지 않습니다.** `app-managed`로 둔
+  모델도 Brave credential과 예산이 없는 배포에서는 검색을 제안하지 않습니다.
+- **변경은 감사 기록에 이전 값과 함께 남습니다**(`model.registry.updated`의
+  `webSearchOverride: { from, to }`). 어느 예산이 쓰이는지와 검색 여부가
+  바뀌는 결정이기 때문입니다.
+- 값은 `registryRowToModel()` 한 곳에서 읽어 채팅 경로·공개 카탈로그·Admin
+  Console이 같은 값을 봅니다. 공개 카탈로그에 싣는 이유는 composer가 이 값으로
+  스위치를 판정하기 때문이며, 가격이나 키가 아니라 경로 이름만 나갑니다.
+
 ### 새 대화는 웹 검색 ON으로 시작하고, 게스트 한도를 올렸습니다 (2026-09-29)
 
 답변 품질을 위해 새 대화의 기본 웹 검색 모드를 게스트부터 `always`로

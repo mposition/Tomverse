@@ -26,7 +26,7 @@ import {
   type WebSearchBackend,
   type WebSearchBackendReadiness,
 } from "@/lib/webSearchBackends";
-import { getModel } from "@/lib/models";
+import { getModel, type AiModel } from "@/lib/models";
 
 export type WebSearchSupport =
   /** The model's own provider ships the search tool and runs it. */
@@ -368,7 +368,16 @@ const registeredWebSearchCapability = (modelId: string): WebSearchCapability | u
  */
 export type WebSearchModelRef =
   | string
-  | { id: string; provider?: string | null; apiModel?: string | null };
+  | {
+      id: string;
+      provider?: string | null;
+      apiModel?: string | null;
+      /**
+       * An administrator's override from the runtime registry. Only a row can
+       * carry one, which is one more reason a caller holding the row passes it.
+       */
+      webSearchOverride?: string | null;
+    };
 
 /**
  * Providers whose models never search through the application-managed tool.
@@ -412,7 +421,12 @@ const inferredWebSearchCapability = (
   return APP_MANAGED_BRAVE;
 };
 
-export const getWebSearchCapability = (
+/**
+ * What the code alone says about a model: the register, then the provider
+ * rule. Exported so the Admin Console can show what "follow the code" means
+ * for a row beside the override it is about to set.
+ */
+export const webSearchCapabilityFromCode = (
   model: WebSearchModelRef
 ): WebSearchCapability => {
   const id = typeof model === "string" ? model : model.id;
@@ -427,6 +441,72 @@ export const getWebSearchCapability = (
     compiled?.apiModel ??
     id;
   return inferredWebSearchCapability(provider, apiModel);
+};
+
+/**
+ * An administrator's per-model web search override: the closed list, and who
+ * may not take one. Documented, and re-exported for everything outside the
+ * Prompt Refiner runtime closure, in lib/webSearchOverride.ts.
+ *
+ * Defined here rather than imported from there: this module is inside that
+ * closure, and the test pinning it counts every file the closure reaches. A new
+ * import would have grown the closure by one file for three constants.
+ */
+export const WEB_SEARCH_OVERRIDES = ["off", "app-managed"] as const satisfies readonly NonNullable<
+  AiModel["webSearchOverride"]
+>[];
+
+export type WebSearchOverride = (typeof WEB_SEARCH_OVERRIDES)[number];
+
+/**
+ * Compile-time: the list and `AiModel["webSearchOverride"]` name the same
+ * values. `satisfies` above proves the list is inside the field's union; this
+ * proves the union has nothing the list lacks.
+ */
+export const WEB_SEARCH_OVERRIDE_LIST_IS_EXHAUSTIVE: Exclude<
+  NonNullable<AiModel["webSearchOverride"]>,
+  WebSearchOverride
+> extends never
+  ? true
+  : never = true;
+
+export const isWebSearchOverride = (value: unknown): value is WebSearchOverride =>
+  typeof value === "string" &&
+  (WEB_SEARCH_OVERRIDES as readonly string[]).includes(value);
+
+/**
+ * Providers whose models take no override at all: Perplexity searches inside
+ * every completion, so `off` cannot be honoured and `app-managed` would add a
+ * second, separately billed search.
+ */
+export const WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS: ReadonlySet<string> = new Set([
+  "perplexity",
+]);
+
+/**
+ * A model's web search capability: the code's answer, then an administrator's
+ * override on top of it (lib/webSearchOverride.ts).
+ *
+ * An override can only move a model onto a route whose worst case this
+ * application already bounds -- `off`, or the application-managed backend --
+ * so the result is always one of the records above and never a native tool the
+ * register has not verified. A provider whose models search inside every
+ * completion takes no override (the admin schema refuses one); a stored value
+ * for it is ignored here rather than trusted, so a badge never claims a search
+ * did not happen when it did.
+ */
+export const getWebSearchCapability = (
+  model: WebSearchModelRef
+): WebSearchCapability => {
+  const fromCode = webSearchCapabilityFromCode(model);
+  if (typeof model === "string") return fromCode;
+  const override = model.webSearchOverride;
+  if (!isWebSearchOverride(override)) return fromCode;
+  const provider = model.provider ?? getModel(model.id)?.provider;
+  if (provider && WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS.has(provider)) {
+    return fromCode;
+  }
+  return override === "off" ? UNSUPPORTED : APP_MANAGED_BRAVE;
 };
 
 /**

@@ -99,6 +99,7 @@ test("one invalid guest-lead row does not reject the rest", () => {
   assert.ok(seed);
   const valid = {
     ...seed,
+    webSearchOverride: null,
     updatedById: null,
     updatedByEmail: null,
     createdAt: new Date(0),
