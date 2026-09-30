@@ -616,6 +616,34 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  AmuxOrchestratorWrite_call_kind_check: {
+    owner: "list",
+    module: "lib/amux/orchestratorHaltCore.ts",
+    list: "AMUX_ORCHESTRATOR_CALL_KINDS",
+    reason:
+      "The three orchestrator write calls that are admitted before they are processed (orchestration policy version 20, section 4): claim, recover and the automatic promotion tick. Selection reads, acknowledgements and halt records are not write calls and are never admitted.",
+  },
+  AmuxOrchestratorWrite_resolution_check: {
+    owner: "list",
+    module: "lib/amux/orchestratorHaltCore.ts",
+    list: "AMUX_ORCHESTRATOR_RESOLUTIONS",
+    reason:
+      "no_commit is the resolver's rollback confirmed by the evidence, human_confirmed is a person clearing the halt that names the request. An acknowledgement is ackedAt, not a resolution. Null is an admission not yet resolved.",
+  },
+  AmuxOrchestratorWriteReceipt_target_kind_check: {
+    owner: "list",
+    module: "lib/amux/orchestratorHaltCore.ts",
+    list: "AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS",
+    reason:
+      "The closed list of what a receipt names (policy version 20, section 4): card, claim decision, attempt, automatic promotion grant and consumption, and the quota observation batch. A kind outside it would be a state change the Admin halts screen cannot link or explain.",
+  },
+  AmuxOrchestratorHalt_reason_code_check: {
+    owner: "list",
+    module: "lib/amux/orchestratorHaltCore.ts",
+    list: "AMUX_ORCHESTRATOR_HALT_REASON_CODES",
+    reason:
+      "The six halt reasons of policy version 20, section 2. The first four carry the write's request id as the halt key; contract_violation and selection_read_failures carry none. The orchestrator's Rust list is pinned to the same six by tests/amuxOrchestratorHaltCore.test.mjs.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",
