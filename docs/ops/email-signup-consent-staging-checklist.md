@@ -6,10 +6,11 @@
 - 같은 문서 §5.2a: 로그인과 가입의 분리(v25)
 - 같은 문서 §5.4: 제품 내 안내(S8)
 - 같은 문서 §7.7: 처리 결과 알림(S6b)
+- 주소가 증명된 세션의 즉시 동의(B안): docs/policy/email-double-opt-in.md §14
 
 이 체크리스트를 실행하고 서명하는 것이 production에서 `feature.emailSignupConsentEnabled`를 켜기 위한 전제 조건입니다.
 
-- **template revision**: `2026-09-30a`
+- **template revision**: `2026-09-30b`
 
 ## 이 문서는 template입니다
 
@@ -93,7 +94,7 @@ A·B·C·D가 그 경로들입니다.
 
 - [ ] staging이 서빙 중인 **전체 40자리 SHA**를 `GET /api/build-info`에서 읽음.
       merge SHA를 옮겨 적지 않습니다.
-- [ ] 그 SHA가 `e43f106a`(PR #1784 merge) 이후임
+- [ ] 그 SHA가 `72c4f05e`(PR #1793 merge) 이후임
 - [ ] staging DB의 `feature.emailSignupConsentEnabled`와
       `feature.emailConsentConfirmationEnabled`가 둘 다 `true`임
 - [ ] 실행자의 접속 국가가 marketing 허용 국가(`MARKETING_ALLOWED_COUNTRY_CODES`)임.
@@ -106,7 +107,7 @@ A·B·C·D가 그 경로들입니다.
 
 | 계정 | 채널 | 쓰는 곳 |
 |---|---|---|
-| G | 새 Google 계정 | C-2 → A-2 → B-1·B-2 (이 순서) |
+| G | 새 Google 계정(주소 확인된 Gmail 등) | C-2 → A-2 → B-1·B-2 (이 순서) |
 | M | 새 Microsoft 계정 | A-3 |
 | E1 | 새 이메일 주소 | A-1 |
 | E2 | 새 이메일 주소 | C-1 |
@@ -123,7 +124,7 @@ A·B·C·D가 그 경로들입니다.
 합니다.
 
 **세 가입 모두 `relationship_started`가 없어야 합니다.** 관계는 동의 없이도 제품
-소식이 갈 수 있음을 밝힌 가입 고지에서만 시작하는데(§4.4 결정 B), 그런 고지
+소식이 갈 수 있음을 밝힌 가입 고지에서만 시작하는데(docs/policy/email-product-news-redesign-draft.md §4.4 결정 B), 그런 고지
 버전을 담는 `RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS`가 비어 있습니다. 하나라도
 있으면 그것이 발견입니다.
 
@@ -131,14 +132,17 @@ A·B·C·D가 그 경로들입니다.
       기대: attempt `consumed`, `notice_shown` 1건과 `objected` 1건
       (`capturedVia=signup_form`), 확인 메일 없음, `UserSettings.country`에 IP
       추정 국가.
-- [ ] **A-2 (동의, G)** 동의 체크만 하고 Google로 가입 → 받은 확인 메일의 링크를
-      눌러 확인 완료.
-      기대: 가입 직후 `notice_shown`, `product_updates` 확인 메일 1통
-      (`marketing_consent_confirmation`), `ConsentRecord` `confirmation_requested`.
-      링크 확인 뒤 `ConsentRecord` `granted`와 `consent_result_notice` 1통.
-- [ ] **A-3 (무선택, M)** 아무것도 체크하지 않고 Microsoft로 가입.
-      기대: `notice_shown`만, **`objected` 없음**, 확인 메일 없음, `ConsentRecord`
-      없음.
+- [ ] **A-2 (동의, 증명된 세션, G)** 동의 체크만 하고 Google로 가입.
+      기대: 가입 직후 `notice_shown`과 `product_updates` **`granted`**
+      (`evidence.confirmedVia=verified_session`, `proof=google_verified`,
+      `capturedVia=signup_form`), `EmailPreference.confirmedAt` 있음. **확인 메일
+      (`marketing_consent_confirmation`)은 없고**, `consent_result_notice` 1통만.
+- [ ] **A-3 (동의, 증명 없는 세션, M)** 동의 체크만 하고 Microsoft로 가입 → 받은
+      확인 메일의 링크를 눌러 확인 완료.
+      기대: Microsoft는 주소 증명이 아니므로(docs/policy/email-double-opt-in.md §14.1) 가입 직후에는 `notice_shown`과
+      `ConsentRecord` `confirmation_requested`, 확인 메일 1통뿐이고 `granted`는
+      **없음**. 링크 확인 뒤 `granted`(`confirmedVia=link`)와 `consent_result_notice` 1통.
+      "무선택"은 C-3이 확인합니다.
 
 ## B. 기존 계정은 아무것도 소비하지 않는다 — 차단, 무료
 
@@ -185,10 +189,12 @@ E4로 가입하면 다시 `true`로 씁니다. 두 쓰기는 기록의 관측 �
 
 - [ ] **E-1 (E5)** D-1과 같은 방식으로 만든 계정에서 "나중에" → `notice_shown`만
       있고, 새로고침 뒤 다시 뜨지 않음.
-- [ ] **E-2 (E6)** 같은 방식으로 만든 계정에서 "네, 받겠습니다" → 이메일 설정 화면으로
-      이동, 확인 메일 **3통**(제품 소식·뉴스레터·프로모션). 링크를 누르기 전에는
-      `granted` 없음.
-- [ ] **E-3** A-2의 `consent_result_notice`가 도착하고 발신자·처리 내용·결과·날짜를
+- [ ] **E-2 (E6)** 같은 방식으로 만든 계정(이메일 코드 로그인 = 증명된 세션)에서
+      "네, 받겠습니다" → 이메일 설정 화면으로 이동, 세 항목이 **즉시 켜짐**.
+      기대: `granted` 3건(`evidence.via=in_product_notice`,
+      `confirmedVia=verified_session`), 확인 메일 없음. 처리 결과 알림은 동의 기록마다
+      나가므로 **3통**입니다 — 한 번의 "네"에 3통이 가는 것은 관측으로 적습니다.
+- [ ] **E-3** A-2(또는 A-3)의 `consent_result_notice`가 도착하고 발신자·처리 내용·결과·날짜를
       적음.
 - [ ] **E-4 (G)** 이메일 설정에서 marketing을 모두 끔 → `withdrawn`과
       `unsubscribe_result_notice` 1통.
