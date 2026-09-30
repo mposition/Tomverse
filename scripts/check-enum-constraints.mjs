@@ -57,6 +57,13 @@ const REGISTRY = {
     reason:
       "How a documentation read ended: parsed, not_found (the page or the table row is not there), fetch_failed, parse_failed (the document's structure moved). The adoption draft reads only 'parsed', so a status the list does not know would be evidence silently ignored rather than a write refused.",
   },
+  ModelRegistryEntry_webSearchOverride_check: {
+    owner: "list",
+    module: "lib/webSearchOverride.ts",
+    list: "WEB_SEARCH_OVERRIDES",
+    reason:
+      "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",

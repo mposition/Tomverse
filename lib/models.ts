@@ -161,7 +161,7 @@ export type AiModel = {
     inputUsdPerMillionTokens?: number;
     outputUsdPerMillionTokens?: number;
     cachedInputPriceMultiplier?: number;
-};
+} & ModelWebSearchOverrideField;
 
 const FULL_BINARY_INPUT = {
     image: true,
@@ -677,3 +677,15 @@ for (const model of AVAILABLE_MODELS as readonly AiModel[]) {
         );
     }
 }
+
+/**
+ * An administrator's per-model web search override, from the runtime registry.
+ *
+ * Declared here, below the catalogue, and joined onto `AiModel` rather than
+ * written inside it, so adding it moved no line of this file: the Prompt
+ * Refiner runtime-closure test pins every dynamic element access in it by
+ * position. Absent means "follow the code" -- see lib/webSearchOverride.ts.
+ */
+export type ModelWebSearchOverrideField = {
+    webSearchOverride?: import("@/lib/webSearchOverride").WebSearchOverride;
+};

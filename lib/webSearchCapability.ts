@@ -368,7 +368,16 @@ const registeredWebSearchCapability = (modelId: string): WebSearchCapability | u
  */
 export type WebSearchModelRef =
   | string
-  | { id: string; provider?: string | null; apiModel?: string | null };
+  | {
+      id: string;
+      provider?: string | null;
+      apiModel?: string | null;
+      /**
+       * An administrator's override from the runtime registry. Only a row can
+       * carry one, which is one more reason a caller holding the row passes it.
+       */
+      webSearchOverride?: string | null;
+    };
 
 /**
  * Providers whose models never search through the application-managed tool.
@@ -412,7 +421,12 @@ const inferredWebSearchCapability = (
   return APP_MANAGED_BRAVE;
 };
 
-export const getWebSearchCapability = (
+/**
+ * What the code alone says about a model: the register, then the provider
+ * rule. Exported so the Admin Console can show what "follow the code" means
+ * for a row beside the override it is about to set.
+ */
+export const webSearchCapabilityFromCode = (
   model: WebSearchModelRef
 ): WebSearchCapability => {
   const id = typeof model === "string" ? model : model.id;
@@ -427,6 +441,40 @@ export const getWebSearchCapability = (
     compiled?.apiModel ??
     id;
   return inferredWebSearchCapability(provider, apiModel);
+};
+
+// Imported here rather than at the top for the reason `registeredWebSearchCapability`
+// sits where it does: an import above it would move the line the Prompt Refiner
+// runtime-closure test pins.
+import {
+  isWebSearchOverride,
+  WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
+} from "@/lib/webSearchOverride";
+
+/**
+ * A model's web search capability: the code's answer, then an administrator's
+ * override on top of it (lib/webSearchOverride.ts).
+ *
+ * An override can only move a model onto a route whose worst case this
+ * application already bounds -- `off`, or the application-managed backend --
+ * so the result is always one of the records above and never a native tool the
+ * register has not verified. A provider whose models search inside every
+ * completion takes no override (the admin schema refuses one); a stored value
+ * for it is ignored here rather than trusted, so a badge never claims a search
+ * did not happen when it did.
+ */
+export const getWebSearchCapability = (
+  model: WebSearchModelRef
+): WebSearchCapability => {
+  const fromCode = webSearchCapabilityFromCode(model);
+  if (typeof model === "string") return fromCode;
+  const override = model.webSearchOverride;
+  if (!isWebSearchOverride(override)) return fromCode;
+  const provider = model.provider ?? getModel(model.id)?.provider;
+  if (provider && WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS.has(provider)) {
+    return fromCode;
+  }
+  return override === "off" ? UNSUPPORTED : APP_MANAGED_BRAVE;
 };
 
 /**

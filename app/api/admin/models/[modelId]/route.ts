@@ -135,6 +135,19 @@ export async function PATCH(
         metadata: { provider: body.provider, status: body.status },
       });
     }
+    // Read before the write so the audit row can say what the override was.
+    // A web search route change moves which budget a model's searches spend
+    // and whether it searches at all, so "set to X" without "from Y" is not a
+    // record anyone can act on.
+    const previousWebSearchOverride =
+      body.webSearchOverride === undefined
+        ? undefined
+        : (
+            await prisma.modelRegistryEntry.findUnique({
+              where: { id: modelId },
+              select: { webSearchOverride: true },
+            })
+          )?.webSearchOverride ?? null;
     const updateModel = () =>
       prisma.modelRegistryEntry.update({
         where: { id: modelId },
@@ -162,7 +175,21 @@ export async function PATCH(
       targetType: "Model",
       targetId: modelId,
       summary: `Updated model registry entry ${modelId}.`,
-      metadata: { provider: body.provider, apiModel: body.apiModel, status: body.status, creditWeight: body.creditWeight },
+      metadata: {
+        provider: body.provider,
+        apiModel: body.apiModel,
+        status: body.status,
+        creditWeight: body.creditWeight,
+        ...(body.webSearchOverride !== undefined &&
+        previousWebSearchOverride !== body.webSearchOverride
+          ? {
+              webSearchOverride: {
+                from: previousWebSearchOverride ?? null,
+                to: body.webSearchOverride,
+              },
+            }
+          : {}),
+      },
     });
     // SEC-012. `/api/models/catalog` answers from a shared snapshot, so a
     // registry write has to drop it or the change is invisible until the TTL

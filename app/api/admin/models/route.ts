@@ -605,6 +605,7 @@ export async function POST(req: Request) {
         apiModel: body.apiModel,
         minimumPlan: body.minimumPlan,
         creditWeight: body.creditWeight,
+        webSearchOverride: body.webSearchOverride ?? null,
         ...(workItemId
           ? {
               workItemId,

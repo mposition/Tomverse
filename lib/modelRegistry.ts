@@ -43,7 +43,7 @@ const inputCapabilitiesFromRow = (
   };
 };
 
-export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
+const registryRowToBaseModel = (row: ModelRegistryEntry): AiModel => {
   if (!isAiProvider(row.provider)) {
     throw new Error(`Model registry entry ${row.id} has an unsupported provider.`);
   }
@@ -469,3 +469,28 @@ export async function getModelRegistrySecurityFindings(): Promise<
     return findings;
   });
 }
+
+// Imported here rather than with the others for the same reason the function
+// below lives here: an import at the top would move every line under it.
+import { isWebSearchOverride } from "@/lib/webSearchOverride";
+
+/**
+ * The runtime model for a registry row, with its web search override applied.
+ *
+ * The override is read here, in the one function every registry read goes
+ * through, so the chat route, the public catalogue and the Admin Console all
+ * see the same value. It is joined on at the end of the file rather than
+ * written into `registryRowToBaseModel` above so that no line of this file
+ * moved: the Prompt Refiner runtime-closure test pins every dynamic element
+ * access in it by position.
+ *
+ * A stored value the closed list does not know is dropped -- the model follows
+ * the code -- rather than trusted. The database CHECK makes that unreachable;
+ * the guard is for a row read through a path that skipped it.
+ */
+export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
+  const model = registryRowToBaseModel(row);
+  return isWebSearchOverride(row.webSearchOverride)
+    ? { ...model, webSearchOverride: row.webSearchOverride }
+    : model;
+};
