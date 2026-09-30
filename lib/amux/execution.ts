@@ -11,6 +11,7 @@ import {
   AMUX_DB_BOUNDARIES,
   AmuxDbBoundaryError,
   amuxBoundaryWithAttachment,
+  amuxRouteOrchestratorReceiptsMayHaveCommitted,
   withAmuxDbBoundary,
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
@@ -1352,9 +1353,16 @@ export async function reclaimExpiredAmuxExecutions(
         },
       );
     } catch (error) {
+      // Out of time: stop and report more work. Not when a receipt of this
+      // admitted request may already have committed (an earlier sweep or
+      // reclaim): then the deadline must reach the route, which answers an
+      // unknown outcome instead of a known 200 (orchestration policy version
+      // 20, section 1). A request without the identity headers has no
+      // receipts and keeps the old answer.
       if (
         error instanceof AmuxDbBoundaryError &&
-        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED" &&
+        !amuxRouteOrchestratorReceiptsMayHaveCommitted()
       ) {
         options.onMoreWork?.();
         break;
@@ -1506,9 +1514,16 @@ export async function reclaimExpiredAmuxClaims(
         },
       );
     } catch (error) {
+      // Out of time: stop and report more work. Not when a receipt of this
+      // admitted request may already have committed (an earlier sweep or
+      // reclaim): then the deadline must reach the route, which answers an
+      // unknown outcome instead of a known 200 (orchestration policy version
+      // 20, section 1). A request without the identity headers has no
+      // receipts and keeps the old answer.
       if (
         error instanceof AmuxDbBoundaryError &&
-        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED" &&
+        !amuxRouteOrchestratorReceiptsMayHaveCommitted()
       ) {
         options.onMoreWork?.();
         break;
