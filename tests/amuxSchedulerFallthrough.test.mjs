@@ -4,9 +4,10 @@ import test from "node:test";
 
 // A refusal or a lost CAS is a known outcome and the scan moves on (main,
 // #1595): one refused task cannot hide later runnable work, and the claim-only
-// orchestrator keeps running through a routine refusal. Only an unknown claim
-// outcome stops the process.
-test("unroutable and refused tasks fall through but an unknown claim outcome stops the process", async () => {
+// orchestrator keeps running through a routine refusal. An unknown claim
+// outcome halts the orchestrator (policy version 20) -- it no longer ends the
+// process.
+test("unroutable and refused tasks fall through but an unknown claim outcome halts the orchestrator", async () => {
   const [scheduler, api] = await Promise.all([
     readFile(
       new URL(
@@ -45,13 +46,12 @@ test("unroutable and refused tasks fall through but an unknown claim outcome sto
   assert.match(scheduler, /ClaimFollowUp::NextCandidate => continue,/);
   assert.match(
     scheduler,
-    /ClaimFollowUp::EndTick => \{\s*self\.scan_offset = 0;\s*return Ok\(\(\)\);/,
+    /ClaimFollowUp::EndTick => \{\s*self\.scan_offset = 0;\s*return Flow::Continue;/,
   );
   assert.doesNotMatch(scheduler, /Dormant/);
-  assert.match(
-    scheduler,
-    /return Err\(anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)\)/,
-  );
+  assert.match(scheduler, /CallKind::Claim,\s*ids\.request_id,/);
+  assert.match(scheduler, /Settled::Halted => return Flow::Halted,/);
+  assert.doesNotMatch(scheduler, /anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)/);
   assert.match(api, /fn claim_response_status_is_bounded/);
   assert.match(api, /pub enum ClaimResponse/);
 });

@@ -163,6 +163,23 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
     0,
   );
 
+  // Orchestration policy version 20: an admitted claim adds its admission
+  // transaction before these three, and one admission-lock call to the claim
+  // transaction itself. That route has to fit as well.
+  const admissionBudgetMs = dbNumber("AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS");
+  const admissionLockCalls = dbNumber("AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
+  assert.equal(admissionLockCalls, 1);
+  assert.ok(admissionBudgetMs > 0);
+  const admittedPlannedMs =
+    plannedDbCallBudgetMs +
+    admissionBudgetMs +
+    sizingWaitMs +
+    admissionLockCalls * perCallPlanningFactor;
+  assert.ok(
+    admittedPlannedMs <= routeMs,
+    `an admitted claim plans ${admittedPlannedMs} ms against a ${routeMs} ms route`,
+  );
+
   assert.ok(Number.isFinite(plannedDbCallBudgetMs));
   assert.ok(
     plannedDbCallBudgetMs <= routeMs,
@@ -245,15 +262,32 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       ],
       "execution_recover",
     ],
+    // Orchestration policy version 20: the acknowledgement, and the halt
+    // record and state read with the resolver that runs first.
+    ["orchestrator/ack", ["orchestratorAck"], "orchestrator_ack"],
+    [
+      "orchestrator/halt",
+      [
+        "orchestratorResolveCandidates",
+        "orchestratorResolve",
+        "orchestratorHaltStateRead",
+        "orchestratorHaltOpen",
+      ],
+      "orchestrator_halt_state",
+    ],
   ];
   for (const [route, boundaries, method] of endpoints) {
     for (const boundary of boundaries) {
-      const ceiling = Number(
+      const declared = Number(
         dbBoundarySource.match(
           new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
         )?.[1],
       );
-      assert.ok(Number.isInteger(ceiling), boundary);
+      assert.ok(Number.isInteger(declared), boundary);
+      // An admitted write's mutation adds its admission lock
+      // (AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS); every boundary is held to
+      // that wider figure, which bounds both.
+      const ceiling = declared + value("AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
       const plannedBudget =
         ceiling *
           (value("AMUX_DB_STATEMENT_TIMEOUT_MS") +
@@ -485,29 +519,26 @@ test("TypeScript and Rust share the database-busy reason and its exact body", as
     );
     assert.ok(source.includes(`r#"${body}"#`), file);
   }
-  // The selection reads skip a tick on it. So do the claim and the recovery
-  // sweep since 2026-09-30: for a write the server sends it only when the
-  // transaction never started and the route had written nothing
-  // (AMUX_DB_NOT_STARTED). Anything else from them still stops the run.
-  //
-  // Since 2026-09-30 (selection-read 5xx/transport skip), both selection
-  // reads share one handler, `handle_selection_read`, so the busy skip's
-  // `"queue"`/`"routing_snapshot"` label is passed in as `endpoint` at each
-  // call site rather than inlined next to `skip_tick_for_database_busy`.
+  // The selection reads skip a tick on it, uncounted. Since orchestration
+  // policy version 20 the claim, the recovery sweep and the automatic
+  // promotion tick treat it -- and the other two "nothing committed" 503
+  // reasons -- as a known answer, acknowledged `no_commit`; every other answer
+  // halts instead of ending the process.
   assert.match(
     schedulerSource,
-    /Ok\(SelectionRead::DatabaseBusy\) => \{\s*skip_tick_for_database_busy\(endpoint\);/,
+    /Ok\(SelectionRead::DatabaseBusy\) => SelectionClass::Uncounted\(DATABASE_BUSY\),/,
   );
   assert.match(schedulerSource, /self\.handle_selection_read\("queue", queue_result\)/);
   assert.match(
     schedulerSource,
     /self\.handle_selection_read\("routing_snapshot", snapshot_result\)/,
   );
-  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Ok\(\(\)\);/);
-  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => warn!\([\s\S]*?verdict = "recovery_skipped"/);
-  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)\)/);
-  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_RECOVERY_OUTCOME_UNKNOWN"\)\)/);
-  assert.match(schedulerSource, /fn any_other_claim_failure_still_stops_the_run\(/);
+  assert.match(schedulerSource, /Settled::NothingCommitted\(reason\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Flow::Continue;/);
+  assert.match(schedulerSource, /Settled::NothingCommitted\(reason\) => \{[\s\S]*?verdict = "recovery_skipped"/);
+  assert.match(schedulerSource, /self\.open_halt\(kind\.unknown_outcome\(\), request_id, Some\(request_id\), class\);/);
+  assert.doesNotMatch(schedulerSource, /anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)/);
+  assert.doesNotMatch(schedulerSource, /anyhow::anyhow!\("AMUX_RECOVERY_OUTCOME_UNKNOWN"\)/);
+  assert.match(schedulerSource, /fn an_answer_outside_section_1_halts_before_the_next_write_and_is_never_acknowledged\(/);
   // Only the exact body at 503 is the busy answer, a typed error a caller
   // must ask for: a caller that does not still stops.
   assert.match(rustSource, /pub fn is_database_busy\(error: &anyhow::Error\) -> bool/);

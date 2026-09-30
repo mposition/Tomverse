@@ -33,10 +33,12 @@ test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cade
     scheduler,
     /const RECOVERY_INTERVAL: Duration = Duration::from_secs\(30\);/,
   );
-  assert.match(scheduler, /self\.api\.execution_recover\(\)\.await/);
+  // Orchestration policy version 20: a write call with its own request id.
+  assert.match(scheduler, /self\.api\.execution_recover\(ids\)\.await/);
+  assert.match(scheduler, /recovery: RECOVERY_INTERVAL,/);
   assert.match(
     scheduler,
-    /next_recovery = Instant::now\(\) \+ RECOVERY_INTERVAL/,
+    /next_recovery = Instant::now\(\) \+ self\.timing\.recovery/,
   );
   assert.match(api, /pub async fn execution_recover/);
   assert.match(api, /\/api\/internal\/amux\/execution\/recover/);
