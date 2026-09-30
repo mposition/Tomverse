@@ -198,12 +198,17 @@ export async function recordSendDecision(
  * a record that proves the wrong thing.
  */
 export const evidenceOf = (verdict: SendVerdict): DecisionEvidence[] =>
-  verdict.authorities.flatMap((entry) =>
-    entry.evidenceIds.map((consentRecordId) => ({
+  verdict.authorities.flatMap((entry) => [
+    ...entry.evidenceIds.map((consentRecordId) => ({
       authority: entry.authority,
       consentRecordId,
-    }))
-  );
+    })),
+    // An inferred consent cites the relationship event it rests on.
+    ...(entry.eventEvidenceIds ?? []).map((eventId) => ({
+      authority: entry.authority,
+      eventId,
+    })),
+  ]);
 
 /**
  * Records that the provider accepted a message this send-phase verdict allowed.

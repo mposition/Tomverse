@@ -3,7 +3,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { isDeterminativeConfidence } from "@/lib/emailJurisdictionCore";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
-import { isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
+import { isEmailPolicyPublished, isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
+import { auRelationshipForSend } from "@/lib/auRelationship";
 import {
   FOOTER_DISCLOSURE_COUNTRIES,
   footerBlocksRequired,
@@ -408,6 +409,26 @@ export async function releaseNotesSendAuthorization(
     };
   });
 
+  // The Australian relationship, which is what an inferred consent rests on
+  // (section 4.4, lib/auRelationshipCore.ts). Only for an account: a
+  // relationship is recorded at signup and belongs to the account that made it.
+  // Read whatever the country, because the Australian sender authority applies
+  // to every message.
+  const relationship =
+    input.userId === null
+      ? null
+      : await read("the relationship", async () =>
+          auRelationshipForSend({
+            userId: input.userId as string,
+            deliveryAddress: input.normalizedAddress,
+            consentWithdrawn: consent.withdrawn,
+            amendmentInForce: await isEmailPolicyPublished(input.now),
+            now: input.now,
+          })
+        );
+  const inferred =
+    relationship !== null && relationship.active ? { eventIds: [relationship.eventId] } : null;
+
   const objected =
     latestObjection !== null &&
     (consent.grantedAt === null || latestObjection.occurredAt > consent.grantedAt);
@@ -625,7 +646,7 @@ export async function releaseNotesSendAuthorization(
     recipient: {
       suppressed: input.suppressed,
       objected,
-      consent: { express: consent.express, evidenceIds: consent.evidenceIds },
+      consent: { express: consent.express, evidenceIds: consent.evidenceIds, inferred },
     },
     flags,
     display: {

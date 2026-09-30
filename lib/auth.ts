@@ -10,6 +10,7 @@ import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
 import { appUrl } from "@/lib/accountEmails";
+import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -250,10 +251,25 @@ export const authOptions: NextAuthOptions = {
             });
         },
         async signIn({ user, account, isNewUser }) {
-            await prisma.user
-                .update({
-                    where: { id: user.id },
-                    data: { lastLoginAt: new Date() },
+            // One transaction: an Australian relationship that went dormant is
+            // ended before `lastLoginAt` moves, or neither happens and it stays
+            // dormant (docs/policy/email-product-news-redesign-draft.md 4.4).
+            await prisma
+                .$transaction(async (tx) => {
+                    const now = new Date();
+                    const previous = await tx.user.findUnique({
+                        where: { id: user.id },
+                        select: { lastLoginAt: true },
+                    });
+                    await endDormantEmailRelationshipAtSignIn(tx, {
+                        userId: user.id,
+                        previousLastLoginAt: previous?.lastLoginAt ?? null,
+                        now,
+                    });
+                    await tx.user.update({
+                        where: { id: user.id },
+                        data: { lastLoginAt: now },
+                    });
                 })
                 .catch((error) => {
                     console.error("Failed to record last login time:", error);

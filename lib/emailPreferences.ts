@@ -18,6 +18,9 @@ import {
   type ConsentConfirmationState,
   type EmailPurpose,
   type PreferenceChangeRefusal,
+  relationshipDormantAt,
+  relationshipEndedSourceEventKey,
+  relationshipStartedSourceEventKey,
 } from "@/lib/emailPreferenceCore";
 import { normalizeCountry } from "@/lib/emailJurisdictionCore";
 import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
@@ -759,4 +762,73 @@ export async function withdrawAllMarketing(input: {
     );
   }
   return results;
+}
+
+/**
+ * Ends an Australian relationship that went dormant, at the sign-in that would
+ * otherwise revive it (docs/policy/email-product-news-redesign-draft.md section
+ * 4.4, R4: 24 months since the last sign-in).
+ *
+ * The standing is read from `lastLoginAt`, and a sign-in overwrites that
+ * column; without a recorded end, the first sign-in after dormancy would bring
+ * the relationship back and the send verdict would cite its start event again.
+ * So the sign-in event calls this **inside the transaction that moves
+ * `lastLoginAt`**, with the value it is about to replace. If this fails, the
+ * column does not move either, and the relationship stays dormant.
+ *
+ * Idempotent and race-safe: one end per start, inserted with
+ * `ON CONFLICT DO NOTHING`, so a concurrent end (a deletion request) cannot
+ * abort the caller's transaction.
+ */
+export async function endDormantEmailRelationshipAtSignIn(
+  tx: Prisma.TransactionClient,
+  input: { userId: string; previousLastLoginAt: Date | null; now: Date }
+): Promise<{ ended: boolean }> {
+  const started = await tx.emailPermissionEvent.findUnique({
+    where: {
+      kind_sourceEventKey: {
+        kind: "relationship_started",
+        sourceEventKey: relationshipStartedSourceEventKey(input.userId),
+      },
+    },
+    select: {
+      id: true,
+      userId: true,
+      emailAddress: true,
+      addressNormalizationVersion: true,
+      policyVersionId: true,
+      jurisdiction: true,
+      jurisdictionSource: true,
+      occurredAt: true,
+    },
+  });
+  if (!started || started.userId !== input.userId) return { ended: false };
+  // Never before the start: an account with no recorded sign-in is measured
+  // from the relationship's own beginning.
+  const lastSeen =
+    input.previousLastLoginAt && input.previousLastLoginAt > started.occurredAt
+      ? input.previousLastLoginAt
+      : started.occurredAt;
+  const dormantAt = relationshipDormantAt(lastSeen, input.now);
+  if (!dormantAt) return { ended: false };
+  const written = await tx.emailPermissionEvent.createMany({
+    data: [
+      {
+        userId: input.userId,
+        emailAddress: started.emailAddress,
+        addressNormalizationVersion: started.addressNormalizationVersion,
+        kind: "relationship_ended",
+        scopeKey: "marketing",
+        occurredAt: dormantAt,
+        capturedVia: "system",
+        sourceEventKey: relationshipEndedSourceEventKey(started.id),
+        jurisdiction: started.jurisdiction,
+        jurisdictionSource: started.jurisdictionSource,
+        policyVersionId: started.policyVersionId,
+        evidence: { reason: "dormant", startedEventId: started.id, lastSeenAt: lastSeen.toISOString() },
+      },
+    ],
+    skipDuplicates: true,
+  });
+  return { ended: written.count === 1 };
 }

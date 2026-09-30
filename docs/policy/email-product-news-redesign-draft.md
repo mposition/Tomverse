@@ -450,6 +450,18 @@ writer·drain이 공유합니다.**
 | 관련 콘텐츠 범위 | 그 사람이 쓰는 제품의 기능. 별개 제품군 교차판매는 제외. 수신자별 기능 필터는 코드에 없으므로, 이 범위와 무료 계정의 더 좁은 관련성은 **사람이 캠페인을 승인할 때** 내용으로 지킵니다 — 관계 계정이 포함된 캠페인의 승인은 이 두 줄을 확인한 것입니다 |
 | 종료 시 즉시 전환 | 종료 사건이 기록되면 그 순간부터 발송 불가. suppression과 동일 층 |
 
+**구현(S5b)** — `lib/auRelationshipCore.ts`가 판정하고 `lib/auRelationship.ts`가
+기록·조회합니다. 시작은 가입 finalize의 transaction 안에서 `relationship_started`
+(scope `marketing`)로 한 번 쓰며, 개정이 시행 중이고, 거부 장치를 쓰지 않았고, 본
+가입 고지 버전이 `RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS`에 있을 때만입니다 —
+**오늘 이 목록은 비어 있으므로 시작되는 관계는 없습니다.** 종료는 삭제 요청
+(`relationship_ended`, 같은 transaction), 마지막 로그인 24개월 경과(다음 로그인이
+`lastLoginAt`을 옮기기 전에 같은 transaction에서 `relationship_ended`로 기록 — 기록하지
+못하면 `lastLoginAt`도 움직이지 않습니다), 가입 때와 다른
+주소, 동의 철회로 판정하고, 수신거부는 suppression이 먼저 막습니다. **종료는 최종입니다**
+— 계정 복구나 재로그인이 관계를 다시 시작하지 않습니다. 발송 판정은 시작 사건을
+추론 동의의 증거로 인용합니다.
+
 ---
 
 ## 5. D3 — 수집: 두 장치를 분리합니다 (L2)

@@ -322,12 +322,20 @@ const compilerOptions = parsedConfig.options;
 // Prompt Refiner successor note above stand together. No computed element
 // access is added; the count and the position-free inventory are unchanged,
 // and the digest below is a repin over the merged tree.
+//
+// 2026-09-30, Australian relationship (S5b), repinned on the merged S4: the sign-in event in
+// `lib/auth.ts` now ends a dormant relationship in the transaction that moves
+// `lastLoginAt`, through `endDormantEmailRelationshipAtSignIn()` in
+// `lib/emailPreferences.ts` and pure helpers appended to
+// `lib/emailPreferenceCore.ts` -- both already listed, so the file set is
+// unchanged. None of it is an element access; the count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "805d1894d94194389b4a6031c7ca8459",
-  "062e06eb35924a11516f4b2af47b1d86",
+  "41d2f3422e7ab7884739d488a41ca53c",
+  "a8bcee9534f75b4e2176ff9cfcbb584e",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
