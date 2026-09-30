@@ -232,6 +232,100 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
   따라서 owned-queue가 정확한 busy body가 아닌 5xx나 전송 오류를 받으면 지금도 halt한다 --
   이 커밋이 고치는 범위가 아니다. WSL bridge에 같은 규칙이 필요한지는 별도로 검토한다.
 
+### 버전 20: orchestrator 정지(halt)와 재시작
+
+근거는 `docs/policy/development-agent-orchestration.md`의 버전 20이다. 이 절은 그 정책을
+운영하는 방법이고, 정책과 다르면 정책이 이긴다. 위의 2026-09-29·09-30 메모와 아래
+"재시작 정책"의 종료 코드 설명은 버전 20 이전의 동작을 적은 기록이다.
+
+**무엇이 바뀌었나.**
+
+- orchestrator는 알려진 답(정책 1: claim·recover·자동 승격 tick의 계약 본문 2xx와 닫힌
+  409, 그리고 503 `amux_database_busy`·`amux_database_deadline_exceeded`·
+  `amux_database_call_ceiling_exceeded`)만 지금처럼 처리한다. 그 밖의 답과 무응답에서는
+  프로세스를 끝내지 않고 **정지(halt)** 한다. 정지 중에는 쓰기 호출과 selection read를 하지
+  않고, 30초마다 정지 상태 읽기만 하며, 5분마다 ERROR 한 줄(사유 코드 또는 대기 상태,
+  정지 id)을 남긴다.
+- 정지 사유는 닫힌 목록이다: `claim_outcome_unknown`, `recovery_outcome_unknown`,
+  `promotion_outcome_unknown`, `unacked_write_receipt`, `contract_violation`,
+  `selection_read_failures`. 앞의 넷은 그 쓰기 호출의 요청 id가 정지 키다.
+- 저장되지 않는 대기 상태가 셋 있다. `ack_pending`(ack가 아직 성공하지 않음, ack만 30초마다
+  다시 보낸다), `halt_unreadable`(정지 상태를 읽지 못함, 웹이 이 버전을 배포하기 전의 404
+  포함), `awaiting_deadline`(해결되지 않은 접수의 기한 + 5초를 기다림). 로그로만 드러나고
+  badge에는 나오지 않는다.
+- 쓰기 호출마다 새 요청 id를 헤더(`x-amux-request-id`, 인스턴스 id는
+  `x-amux-instance-id`)로 보낸다. 서버는 처리 전에 `AmuxOrchestratorWrite`에 접수를
+  커밋하고, 상태를 바꾸는 모든 트랜잭션이 접수 행을 잠그고 같은 트랜잭션에
+  `AmuxOrchestratorWriteReceipt`를 남긴다. 헤더가 없는 요청(버전 20 이전 orchestrator)은
+  지금처럼 접수 없이 처리된다.
+- 서버는 한 요청에서 영수증이 커밋된 뒤에는 위 503 세 사유를 보내지 않고 503
+  `amux_outcome_unknown`으로 답한다. orchestrator는 알려진 답을 ack(`definite` 또는
+  `no_commit`)하고, ack가 성공하기 전에는 다음 쓰기를 하지 않는다. `no_commit` ack는
+  영수증이 있으면 거절되고 그 자리에서 `unacked_write_receipt` 정지가 된다.
+- 정지 상태 읽기(`GET /api/internal/amux/orchestrator/halt`)는 먼저 판정을 적용한다. ack도
+  해결도 안 된 접수가 기한 + 5초를 지났고 영수증이 0이면 `no_commit`으로 닫고 시스템 감사
+  `amux.orchestrator.write_resolved`를 남긴다. 영수증이 있으면 **사람 확인 필요**로 남긴다.
+- 스케줄은 이 문장이 참일 때만 시작하거나 다시 시작한다: 메모리의 정지가 없고, 성공한 정지
+  상태 읽기에서 열린 정지 0, 미정 접수 0, 사람 확인 필요 0이며, 이 프로세스가 기록한 모든
+  정지에 사람 감사 `amux.orchestrator.halt_cleared`가 있다. 다른 프로세스가 연 정지도 막는다.
+- 종료는 정책 3의 목록뿐이다: 시작 설정 오류(필수 환경 변수, `TOMVERSE_AMUX_EXECUTE`와
+  `TOMVERSE_AMUX_CLAIM`의 충돌, 시작 시 정지 상태 읽기의 401·403), panic, 실행 모드의
+  `AMUX_WORKER_POLL_UNVERIFIED`·`AMUX_BOARD_TICK_UNVERIFIED`. `TOMVERSE_AMUX_ENABLED`가
+  꺼져 끝나는 경우는 지금처럼 0이다.
+
+**알려진 한계.** `contract_violation`과 `selection_read_failures`는 접수가 없는 정지다.
+기록(`POST /api/internal/amux/orchestrator/halt`) 전에 프로세스가 죽으면 사라진다. 새
+프로세스는 같은 조건을 다시 만나면 다시 정지한다(selection read 횟수는 0부터 다시 센다).
+접수가 있는 네 사유는 접수가 남아 있어 새 프로세스의 시작 판정이 다시 찾는다.
+
+**정지를 알아채는 곳.** Admin Console › AMUX › Execution의 badge(escalation 수 + 열린 정지
+수)와 Halts 탭(`/admin/amux-execution?tab=halts`), 그리고 orchestrator 로그의 ERROR 줄이다.
+외부 알림은 없다(정책 8). 개수를 읽지 못하면 badge는 그려지지 않는다 -- 0이 아니다.
+
+#### 운영자의 해제 절차
+
+해제는 사람만 한다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 결과 불명의 확정은
+사람이 영수증의 대상을 읽고 한다.
+
+1. Admin Console에 owner로 로그인하고 `/admin/amux-execution?tab=halts`를 연다.
+2. **열린 정지**에서 사유 코드와 요청 id를 읽는다. 요청이 있으면 그 접수의 호출 종류, 접수
+   시각·기한, ack·해결 여부와 **영수증**(대상 종류, 대상 id, 행 수)이 함께 보인다.
+   - 영수증이 없고 접수가 `no_commit`으로 해결됐으면: DB가 롤백을 확정한 것이다. 원래 작업은
+     일어나지 않았다.
+   - 영수증이 있으면: 그 쓰기는 커밋됐다. 대상 링크(카드·배정·자동 승격 화면)에서 카드의 owner·
+     status, attempt, grant·소비 행이 기대와 맞는지 확인한다. 필요한 조치(예: 카드를 되돌리는
+     일)는 그 화면의 기존 도구로 따로 한다. 해제가 대신하지 않는다.
+   - `contract_violation`·`selection_read_failures`는 요청이 없다. orchestrator 로그의 같은
+     시각 WARN/ERROR(`class`)로 원인(인증, 배포 중 404, 서버 결함)을 확인하고 먼저 고친다.
+3. **확인할 쓰기**(사람 확인 필요) 목록에 남은 요청도 같은 방법으로 확인한다. orchestrator는
+   이런 요청마다 `unacked_write_receipt` 정지를 기록하므로, 곧 열린 정지 목록에도 나타난다.
+4. 해제: 정지 행의 입력 칸에 **정지 키의 앞 8자**를 직접 입력하고 "정지 해제"를 누른다.
+   - 로그인이 오래됐으면 428과 함께 재인증 링크가 나온다. 링크로 다시 로그인한 뒤 같은 화면에서
+     다시 한다.
+   - 앞 8자가 틀리면 거절되고 아무것도 바뀌지 않는다.
+   - 해제는 사람 감사 `amux.orchestrator.halt_cleared`를 같은 트랜잭션에 남기고, 요청이 있으면
+     그 접수를 `human_confirmed`로 닫는다(그 요청의 영수증도 함께 닫힌다).
+5. orchestrator는 다음 정지 상태 읽기(최대 30초 뒤)에서 해제를 읽고, 위의 재개 조건이 모두
+   참이면 스케줄을 다시 시작한다. 로그의 `verdict = "scheduling"` INFO 줄이 재개다.
+
+#### 배포 뒤 운영자 단계: Railway 재시작 정책
+
+정책 9에 따라, **이 버전의 구현이 웹과 orchestrator 양쪽에 배포된 뒤** 재시작 정책을
+`On Failure`로 명시한다. 구현 전에는 바꾸지 않는다. 배포 순서는 웹(migration과 route)이
+먼저, orchestrator가 나중이다. orchestrator가 먼저 떠도 정지 상태 읽기가 404라
+`halt_unreadable`로 기다리고 쓰기를 하지 않는다.
+
+1. 웹 배포에서 migration `20260930120000_amux_orchestrator_halt`가 적용됐는지 확인한다.
+2. orchestrator 배포 뒤 로그에서 인스턴스 id 줄과 `verdict = "scheduling"`(또는 정지·대기
+   ERROR 줄)을 확인한다.
+3. Railway 대시보드 → 프로젝트 `Tomverse` → 환경 `production` → 서비스 `AMUX Orchestrator` →
+   Settings → Restart Policy를 `On Failure`로 명시한다. 최대 횟수는 운영자가 정한다. `staging`도
+   같은 자리에서 같게 한다.
+4. 같은 화면에서 값을 다시 읽고, 날짜와 값을 incident 기록에 적는다.
+
+이 저장소는 이 서비스의 재시작 정책을 선언하지 않는다(아래 "재시작 정책" 첫 항목). 대시보드가
+유일한 자리다.
+
 ### 재시작 정책
 
 - 이 저장소에는 AMUX Orchestrator 서비스의 선언이 없다. `.railway/railway.ts`는 named
@@ -242,7 +336,7 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 - Railway 문서(docs.railway.com/deployments/restart-policy) 기준 기본값은 `On Failure`,
   최대 10회이고, `On Failure`는 0이 아닌 종료 코드면 다시 시작한다. 21:55에 1초 안에 다시
   시작된 것은 이 기본값과 맞는다. 21:57 뒤 다시 시작되지 않은 이유는 확인하지 못했다.
-- orchestrator가 오류로 멈출 때는 종료 코드 1로 끝난다(`main`이 `Err`를 돌려준다). `TOMVERSE_AMUX_ENABLED`가 꺼져서 끝나는 경우는 `Ok`라 0이다. 결과
+- (버전 20 이전의 동작. 지금은 위 "버전 20" 절의 정지로 바뀌었다.) orchestrator가 오류로 멈출 때는 종료 코드 1로 끝난다(`main`이 `Err`를 돌려준다). `TOMVERSE_AMUX_ENABLED`가 꺼져서 끝나는 경우는 `Ok`라 0이다. 결과
   불명 claim(`AMUX_CLAIM_OUTCOME_UNKNOWN`), 결과 불명 recover
   (`AMUX_RECOVERY_OUTCOME_UNKNOWN`), 그 밖의 내부 API 실패
   (`AMUX_INTERNAL_API_UNVERIFIED`)가 모두 같다. Railway는 종료 코드별로 가르지 못하므로
@@ -263,7 +357,7 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 1. Railway 대시보드 → 프로젝트 `Tomverse` → 환경 `production` → 서비스
    `AMUX Orchestrator` → Settings의 Restart Policy에서 현재 정책과 최대 횟수를 읽는다.
    `staging`도 같은 자리에서 읽는다.
-2. 값을 정한다. 이 문서는 정하지 않는다.
+2. 값을 정한다. 버전 20 정책 9가 구현 배포 뒤 `On Failure`로 정했다(위 "배포 뒤 운영자 단계"). 아래 선택지는 그 결정 전의 검토 기록이다.
    - `Never`: 모든 종료가 사람의 재시작을 기다린다. 결과 불명 규칙과 맞는다. 결과 불명이
      아닌 종료(시작 설정 오류 등)도 사람이 다시 시작해야 한다.
    - `On Failure`(최대 N회): 지금 기본값과 같은 동작이며 쓰기의 결과 불명 뒤에도 자동으로

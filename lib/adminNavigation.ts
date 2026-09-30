@@ -43,7 +43,9 @@ export type AdminNavBadgeKey =
   | "alerts"
   | "modelLifecycle"
   | "emailCampaigns"
-  | "amuxEscalations";
+  | "amuxEscalations"
+  | "amuxOrchestratorHalts"
+  | "amuxExecution";
 
 export type AdminNavTab = {
   id: string;
@@ -597,9 +599,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "AMUX cards, their execution state, and why AMUX assigned the work",
     group: "AMUX",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
-    // route checks it); the card list writes nothing.
+    // route checks it); the card list writes nothing. Clearing an orchestrator
+    // halt takes the owner role and a recent step-up in its own route.
     writeRoles: ["owner", "ops"],
-    badge: "amuxEscalations",
+    // Escalations plus open orchestrator halts (orchestration policy
+    // version 20, section 7).
+    badge: "amuxExecution",
     aliases: [
       "amux",
       "cards",
@@ -611,6 +616,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "human review",
       "review",
       "incident",
+      "orchestrator",
+      "halt",
+      "outcome unknown",
     ],
     tabs: [
       {
@@ -624,6 +632,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Assignment",
         description: "Why AMUX assigned the work, and escalations waiting on a person",
         badge: "amuxEscalations",
+      },
+      {
+        id: "halts",
+        label: "Halts",
+        description: "Orchestrator halts, the writes a person has to confirm, and clearing a halt",
+        badge: "amuxOrchestratorHalts",
       },
     ],
   },

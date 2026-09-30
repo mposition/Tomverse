@@ -5,8 +5,58 @@ use reqwest::{Client, StatusCode, header};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+use uuid::Uuid;
+
+use crate::orchestrator_halt::{AckRequest, HaltRecordRequest};
 use crate::scheduler::ScoreBreakdown;
 use crate::worker::{CandidateRoutingSignals, RoutingTaskProfile};
+
+/// Orchestration policy version 20, section 4: the request identity of a
+/// write call, sent as headers so the claim, recover and tick bodies stay
+/// exactly what they were (tests/fixtures and main_wire_compat.rs pin them).
+pub const REQUEST_ID_HEADER: &str = "x-amux-request-id";
+pub const INSTANCE_ID_HEADER: &str = "x-amux-instance-id";
+
+/// A new request id for every write call, the process's instance id on each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteIds {
+    pub request_id: Uuid,
+    pub instance_id: Uuid,
+}
+
+/// A status and the body that came with it, read whole and bounded, whatever
+/// the status. The caller decides what it means (lib orchestrator_halt.rs);
+/// a transport failure, a body over its limit or a compressed body is an
+/// error instead, which for a write call is no answer at all.
+#[derive(Debug)]
+pub struct RawAnswer {
+    pub status: StatusCode,
+    pub body: Vec<u8>,
+}
+
+pub(crate) async fn read_raw_answer(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<RawAnswer> {
+    let status = response.status();
+    ensure_identity_encoding(&response)?;
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("failed to read Tomverse internal response")?
+    {
+        let next_len = body
+            .len()
+            .checked_add(chunk.len())
+            .context("Tomverse internal response byte count overflow")?;
+        if next_len > max_bytes {
+            bail!("Tomverse internal response exceeds byte limit");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(RawAnswer { status, body })
+}
 
 #[derive(Clone)]
 pub struct TomverseApi {
@@ -282,14 +332,72 @@ async fn database_busy_or(mut response: reqwest::Response, otherwise: &'static s
 }
 
 /// `otherwise`, tagged with `SelectionReadTransientStatus` when `status` is a
-/// 5xx or 429. The tag is inert unless a caller looks for it (only the
-/// scheduler's selection reads do), so `.to_string()` on the result is still
-/// exactly `otherwise`.
+/// 5xx or 429, and with `UnacceptedStatus` otherwise. Both tags are inert
+/// unless a caller looks for them (only the scheduler's selection reads do),
+/// so `.to_string()` on the result is still exactly `otherwise`.
 fn transient_status_or(status: StatusCode, otherwise: &'static str) -> anyhow::Error {
     if is_selection_transient_status_code(status) {
         anyhow::Error::new(SelectionReadTransientStatus { status }).context(otherwise)
     } else {
-        anyhow::anyhow!(otherwise)
+        anyhow::Error::new(UnacceptedStatus { status }).context(otherwise)
+    }
+}
+
+/// A status a call does not accept, other than a 5xx or 429 (those carry
+/// `SelectionReadTransientStatus`). Orchestration policy version 20, section
+/// 1: for the two selection reads a 404 is a counted failure, and every other
+/// such status is a contract violation. Nothing else looks for it.
+#[derive(Debug, Clone, Copy)]
+pub struct UnacceptedStatus {
+    pub status: StatusCode,
+}
+
+impl std::fmt::Display for UnacceptedStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Tomverse AMUX answered {}", self.status)
+    }
+}
+
+impl std::error::Error for UnacceptedStatus {}
+
+/// A selection read answered with one of the two other "nothing committed"
+/// 503 reasons (`amux_database_deadline_exceeded`,
+/// `amux_database_call_ceiling_exceeded`). Orchestration policy version 20,
+/// section 1: like the busy answer, it ends the tick without a claim and is
+/// not counted. Still an error for every caller that does not look for it.
+#[derive(Debug, Clone, Copy)]
+pub struct NothingCommittedAnswer {
+    pub reason: &'static str,
+}
+
+impl std::fmt::Display for NothingCommittedAnswer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Tomverse AMUX answered 503 {}", self.reason)
+    }
+}
+
+impl std::error::Error for NothingCommittedAnswer {}
+
+/// The busy 503 is `SelectionRead::DatabaseBusy`; these are the other two.
+fn other_nothing_committed_reason(body: &[u8]) -> Option<&'static str> {
+    let answer: DatabaseBusyAnswer = serde_json::from_slice(body).ok()?;
+    [
+        "amux_database_deadline_exceeded",
+        "amux_database_call_ceiling_exceeded",
+    ]
+    .into_iter()
+    .find(|reason| *reason == answer.reason)
+}
+
+/// The error for a selection read's 503 whose body is not the busy answer.
+fn selection_503_error(body: &[u8]) -> anyhow::Error {
+    match other_nothing_committed_reason(body) {
+        Some(reason) => anyhow::Error::new(NothingCommittedAnswer { reason })
+            .context("unsupported Tomverse internal response status"),
+        None => transient_status_or(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "unsupported Tomverse internal response status",
+        ),
     }
 }
 
@@ -353,6 +461,9 @@ pub(crate) fn parse_queue_body(
     }
     if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy_body(body) {
         return Ok(SelectionRead::DatabaseBusy);
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return Err(selection_503_error(body));
     }
     if status != StatusCode::OK {
         return Err(transient_status_or(
@@ -425,6 +536,9 @@ pub(crate) fn parse_routing_snapshot_body(
     }
     if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy_body(body) {
         return Ok(SelectionRead::DatabaseBusy);
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return Err(selection_503_error(body));
     }
     if status != StatusCode::OK {
         return Err(transient_status_or(
@@ -695,10 +809,18 @@ pub enum ClaimResponse {
     Refused { reason: ClaimRefusalReason },
 }
 
+// Kept for the claim response tests: since policy version 20 the claim
+// answer is read raw and classified by orchestrator_halt::classify_claim,
+// which still parses the body with parse_claim_response_body.
+#[cfg_attr(not(test), allow(dead_code))]
 fn claim_response_status_is_bounded(status: reqwest::StatusCode) -> bool {
     status == reqwest::StatusCode::OK || status == reqwest::StatusCode::CONFLICT
 }
 
+// Kept for the claim response tests: since policy version 20 the claim
+// answer is read raw and classified by orchestrator_halt::classify_claim,
+// which still parses the body with parse_claim_response_body.
+#[cfg_attr(not(test), allow(dead_code))]
 fn append_claim_response_chunk(body: &mut Vec<u8>, chunk: &[u8]) -> Result<()> {
     let Some(next_len) = body.len().checked_add(chunk.len()) else {
         bail!("Tomverse AMUX claim response exceeds byte limit");
@@ -763,6 +885,10 @@ pub(crate) fn parse_claim_response_body(
     bail!("unsupported Tomverse AMUX claim response status")
 }
 
+// Kept for the claim response tests: since policy version 20 the claim
+// answer is read raw and classified by orchestrator_halt::classify_claim,
+// which still parses the body with parse_claim_response_body.
+#[cfg_attr(not(test), allow(dead_code))]
 async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimResponse> {
     let status = response.status();
     ensure_identity_encoding(&response)?;
@@ -896,20 +1022,28 @@ impl TomverseApi {
         parse_routing_snapshot_body(status, &body)
     }
 
+    /// A write call (orchestration policy version 20, section 4): it carries
+    /// its request identity, and its answer comes back raw -- whatever the
+    /// status -- for `orchestrator_halt::classify_claim` to decide which of
+    /// the known answers it is, if any. An `Err` is no answer at all.
+    #[allow(clippy::too_many_arguments)]
     pub async fn claim(
         &self,
+        ids: WriteIds,
         task_id: &str,
         worker: &str,
         expected_revision: i64,
         scheduler_score: i64,
         scoring_version: &str,
         signals: Value,
-    ) -> Result<ClaimResponse> {
+    ) -> Result<RawAnswer> {
         let response = self
             .client
             .post(format!("{}/api/internal/amux/claim", self.base_url))
             .timeout(self.claim_timeout)
             .bearer_auth(&self.secret)
+            .header(REQUEST_ID_HEADER, ids.request_id.to_string())
+            .header(INSTANCE_ID_HEADER, ids.instance_id.to_string())
             .json(&ClaimRequest {
                 task_id,
                 worker,
@@ -922,22 +1056,7 @@ impl TomverseApi {
             })
             .send()
             .await?;
-
-        if !claim_response_status_is_bounded(response.status()) {
-            // A claim that never started answers the exact busy body at 503;
-            // the scheduler skips the tick on it. Any other status stays the
-            // error it was.
-            if response.status() == StatusCode::SERVICE_UNAVAILABLE {
-                return Err(
-                    database_busy_or(response, "unsupported Tomverse AMUX claim response status")
-                        .await,
-                );
-            }
-            response.error_for_status_ref()?;
-            bail!("unsupported Tomverse AMUX claim response status");
-        }
-
-        read_claim_response(response).await
+        read_raw_answer(response, MAX_CLAIM_RESPONSE_BYTES).await
     }
 }
 
@@ -2242,8 +2361,10 @@ impl TomverseApi {
 
     /// Policy version 15: the system consumer of pre-approved automatic
     /// promotion grants. The server decides everything (switch, graduation,
-    /// capacity, cost, halt); a 409 carries its refusal reason.
-    pub async fn auto_promotion_tick(&self) -> Result<AutoPromotionTickResponse> {
+    /// capacity, cost, halt). A write call since policy version 20: it
+    /// carries its request identity and its answer comes back raw for
+    /// `orchestrator_halt::classify_tick`. An `Err` is no answer at all.
+    pub async fn auto_promotion_tick(&self, ids: WriteIds) -> Result<RawAnswer> {
         let response = self
             .client
             .post(format!(
@@ -2251,21 +2372,18 @@ impl TomverseApi {
                 self.base_url
             ))
             .bearer_auth(&self.secret)
+            .header(REQUEST_ID_HEADER, ids.request_id.to_string())
+            .header(INSTANCE_ID_HEADER, ids.instance_id.to_string())
             .json(&QueueRequest {})
             .timeout(TOMVERSE_INTERNAL_AUTO_PROMOTION_TIMEOUT)
             .send()
             .await?;
-        let (_, body): (_, AutoPromotionTickResponse) = read_bounded_json(
-            response,
-            &[StatusCode::OK, StatusCode::CONFLICT],
-            MAX_LIFECYCLE_RESPONSE_BYTES,
-        )
-        .await
-        .context("invalid Tomverse AMUX auto-promotion tick response")?;
-        Ok(body)
+        read_raw_answer(response, MAX_LIFECYCLE_RESPONSE_BYTES).await
     }
 
-    pub async fn execution_recover(&self) -> Result<ExecutionRecoveryResponse> {
+    /// A write call since policy version 20, answered raw for
+    /// `orchestrator_halt::classify_recover`. An `Err` is no answer at all.
+    pub async fn execution_recover(&self, ids: WriteIds) -> Result<RawAnswer> {
         let response = self
             .client
             .post(format!(
@@ -2274,40 +2392,123 @@ impl TomverseApi {
             ))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
+            .header(REQUEST_ID_HEADER, ids.request_id.to_string())
+            .header(INSTANCE_ID_HEADER, ids.instance_id.to_string())
             .json(&QueueRequest {})
             .send()
             .await?;
+        read_raw_answer(response, MAX_LIFECYCLE_RESPONSE_BYTES).await
+    }
 
-        let (status, body): (_, ExecutionRecoveryResponse) = read_bounded_json(
-            response,
-            &[StatusCode::OK, StatusCode::CONFLICT],
-            MAX_LIFECYCLE_RESPONSE_BYTES,
-        )
-        .await?;
-        let nonnegative = |value: Option<i64>| value.is_none_or(|value| value >= 0);
-        let valid = match status {
-            StatusCode::OK => {
-                body.recovered
-                    && nonnegative(body.reclaimed)
-                    && nonnegative(body.reclaimed_claims)
-                    && nonnegative(body.quota_observations_deleted)
-                    && body.reason.is_none()
-            }
-            StatusCode::CONFLICT => {
-                !body.recovered
-                    && body.reclaimed.is_none()
-                    && body.reclaimed_claims.is_none()
-                    && nonnegative(body.quota_observations_deleted)
-                    && body
-                        .reason
+    /// Policy version 20, section 4: acknowledges a known answer to one write
+    /// call. Not itself a write call: it carries no request identity header.
+    pub async fn orchestrator_ack(&self, request_id: Uuid, kind: &'static str) -> Result<RawAnswer> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/orchestrator/ack",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&AckRequest {
+                request_id: request_id.to_string(),
+                kind,
+            })
+            .send()
+            .await?;
+        read_raw_answer(response, MAX_LIFECYCLE_RESPONSE_BYTES).await
+    }
+
+    /// Policy version 20, section 5: records one halt, or reads back the one
+    /// already recorded under the same key. There is no call that clears one.
+    pub async fn orchestrator_halt_record(&self, record: &HaltRecordRequest) -> Result<RawAnswer> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/api/internal/amux/orchestrator/halt",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(record)
+            .send()
+            .await?;
+        read_raw_answer(response, MAX_LIFECYCLE_RESPONSE_BYTES).await
+    }
+
+    /// Policy version 20, section 5: the halt state, after the server has
+    /// applied its resolver, with the state of each halt key asked about.
+    pub async fn orchestrator_halt_state(&self, halt_keys: &[Uuid]) -> Result<RawAnswer> {
+        let query: Vec<(&str, String)> = halt_keys
+            .iter()
+            .map(|key| ("halt_key", key.to_string()))
+            .collect();
+        let response = self
+            .client
+            .get(format!(
+                "{}/api/internal/amux/orchestrator/halt",
+                self.base_url
+            ))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&query)
+            .send()
+            .await?;
+        read_raw_answer(response, MAX_LIFECYCLE_RESPONSE_BYTES).await
+    }
+}
+
+/// The recovery answer's own invariants: a 2xx the route sends when it
+/// recovered, and its one 409 (orchestration policy version 20, section 1:
+/// `execution_api_disabled`, the form the parser has always accepted).
+pub(crate) fn recovery_answer_is_valid(
+    status: StatusCode,
+    body: &ExecutionRecoveryResponse,
+) -> bool {
+    let nonnegative = |value: Option<i64>| value.is_none_or(|value| value >= 0);
+    match status {
+        StatusCode::OK => {
+            body.recovered
+                && nonnegative(body.reclaimed)
+                && nonnegative(body.reclaimed_claims)
+                && nonnegative(body.quota_observations_deleted)
+                && body.reason.is_none()
+        }
+        StatusCode::CONFLICT => {
+            !body.recovered
+                && body.reclaimed.is_none()
+                && body.reclaimed_claims.is_none()
+                && nonnegative(body.quota_observations_deleted)
+                && body.reason.as_deref() == Some("execution_api_disabled")
+        }
+        _ => false,
+    }
+}
+
+/// The tick answer's own invariants (policy version 20, section 1): any 200
+/// the route sends, whatever its reason, and the 409 `apply_disabled`.
+pub(crate) fn tick_answer_is_valid(status: StatusCode, body: &AutoPromotionTickResponse) -> bool {
+    let expired = body.expired.is_none_or(|value| value >= 0);
+    match status {
+        StatusCode::OK => {
+            expired
+                && if body.promoted {
+                    body.consumption_id
                         .as_deref()
                         .is_some_and(|value| !value.is_empty())
-            }
-            _ => false,
-        };
-        if !valid {
-            bail!("invalid Tomverse AMUX execution-recover response invariant");
+                        && body.reason.is_none()
+                } else {
+                    body.consumption_id.is_none()
+                        && body.reason.as_deref().is_none_or(|value| !value.is_empty())
+                }
         }
-        Ok(body)
+        StatusCode::CONFLICT => {
+            expired
+                && !body.promoted
+                && body.consumption_id.is_none()
+                && body.reason.as_deref() == Some("apply_disabled")
+        }
+        _ => false,
     }
 }

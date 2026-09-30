@@ -1221,6 +1221,39 @@ domains:
       wrote carries the marker `system:amux-auto-promoter` instead of an
       operator id.
 
+  - domain: amuxOrchestratorHalt
+    prismaModel: AmuxOrchestratorHalt
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one orchestrator halt. The row names the
+        administrator who cleared it and is retained for security
+        investigation and audit. The retention period is not a legal
+        determination; it stays TBD until security and legal approval, and a
+        legal hold outranks any later purge.
+      retentionStartsFrom: "openedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      clearedByUserId is the operator id of the administrator who cleared the
+      halt and intentionally has no User foreign key; it is null while the
+      halt is open. The row stores a closed reason code and identifiers, not a
+      free-text reason and not a customer's prompt or file. The orchestrator
+      opens the row; only a person clears it. AmuxOrchestratorWrite and
+      AmuxOrchestratorWriteReceipt have no user column and are not
+      registered, as with AmuxRecommendationAutoUnknown and
+      AmuxRecommendationAutoCostEntry.
+
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft
     userLinkageRole: actor

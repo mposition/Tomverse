@@ -11,6 +11,7 @@ import {
   AMUX_DB_BOUNDARIES,
   AmuxDbBoundaryError,
   amuxBoundaryWithAttachment,
+  amuxRouteOrchestratorReceiptsMayHaveCommitted,
   withAmuxDbBoundary,
   type AmuxAttachment,
 } from "@/lib/amux/dbBoundary";
@@ -1283,6 +1284,12 @@ export async function reclaimExpiredAmuxExecutions(
             throw new Error("AMUX expired execution changed while reclaiming");
           }
 
+          // Orchestration policy version 20, section 4: the card's status and
+          // revision and the attempt, as receipts of an admitted recover. The
+          // escalation, delivery and runtime rows below commit with them.
+          context.recordReceipt("work_item", attempt.taskId, 1);
+          context.recordReceipt("execution_attempt", attempt.id, 1);
+
           if (effectiveToStatus === "blocked") {
             await openAmuxHumanEscalation(tx, {
               taskId: attempt.taskId,
@@ -1346,9 +1353,16 @@ export async function reclaimExpiredAmuxExecutions(
         },
       );
     } catch (error) {
+      // Out of time: stop and report more work. Not when a receipt of this
+      // admitted request may already have committed (an earlier sweep or
+      // reclaim): then the deadline must reach the route, which answers an
+      // unknown outcome instead of a known 200 (orchestration policy version
+      // 20, section 1). A request without the identity headers has no
+      // receipts and keeps the old answer.
       if (
         error instanceof AmuxDbBoundaryError &&
-        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED" &&
+        !amuxRouteOrchestratorReceiptsMayHaveCommitted()
       ) {
         options.onMoreWork?.();
         break;
@@ -1476,6 +1490,10 @@ export async function reclaimExpiredAmuxClaims(
             return false;
           }
 
+          // Orchestration policy version 20, section 4: the released owner and
+          // revision, as a receipt of an admitted recover.
+          context.recordReceipt("work_item", task.id, 1);
+
           await writeSystemAuditLog({
             systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
             action: "amux.claim.expired",
@@ -1496,9 +1514,16 @@ export async function reclaimExpiredAmuxClaims(
         },
       );
     } catch (error) {
+      // Out of time: stop and report more work. Not when a receipt of this
+      // admitted request may already have committed (an earlier sweep or
+      // reclaim): then the deadline must reach the route, which answers an
+      // unknown outcome instead of a known 200 (orchestration policy version
+      // 20, section 1). A request without the identity headers has no
+      // receipts and keeps the old answer.
       if (
         error instanceof AmuxDbBoundaryError &&
-        error.code === "AMUX_DB_DEADLINE_EXCEEDED"
+        error.code === "AMUX_DB_DEADLINE_EXCEEDED" &&
+        !amuxRouteOrchestratorReceiptsMayHaveCommitted()
       ) {
         options.onMoreWork?.();
         break;

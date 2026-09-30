@@ -621,6 +621,12 @@ export async function claimUnownedTodo(
 
     const revision = input.expectedRevision + 1;
 
+    // Orchestration policy version 20, section 4: the owner and revision
+    // change and the claim decision, as receipts of an admitted claim. The
+    // refusal and CAS-loss paths above change nothing and record none.
+    context.recordReceipt("work_item", input.taskId, 1);
+    context.recordReceipt("claim_decision", decision.id, 1);
+
     await writeSystemAuditLog({
       systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
       action: "amux.claim.assigned",

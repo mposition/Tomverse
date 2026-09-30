@@ -612,7 +612,9 @@ test.describe("admin console shell", () => {
   }) => {
     await page.goto("/admin/amux-execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    await expect(strip.getByRole("link")).toHaveCount(2);
+    // Cards, Assignment and Halts (orchestration policy version 20).
+    await expect(strip.getByRole("link")).toHaveCount(3);
+    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=cards$/
@@ -655,7 +657,10 @@ test.describe("the AMUX group by role", () => {
     await page.goto("/admin/amux-execution");
     await expect(consoleHeading(page)).toHaveText("Execution");
     const strip = page.getByRole("navigation", { name: "Execution sections" });
-    await expect(strip.getByRole("link")).toHaveCount(1);
+    // Assignment and Halts: every admin role may read the halts, only an owner
+    // may clear one.
+    await expect(strip.getByRole("link")).toHaveCount(2);
+    await expect(strip.locator('a[href$="tab=halts"]')).toHaveCount(1);
     await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute(
       "href",
       /tab=assignment$/

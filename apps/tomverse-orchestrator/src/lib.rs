@@ -1,6 +1,7 @@
 pub mod board_driver;
 pub mod executor;
 pub mod local_card;
+pub mod orchestrator_halt;
 pub mod runtime_service;
 pub mod scheduler;
 pub mod tomverse_api;
@@ -29,6 +30,13 @@ fn scheduler_enabled() -> bool {
         .is_some_and(|value| value.trim() == "1")
 }
 
+/// The process's exits (orchestration policy version 20, section 3): `Ok`
+/// when `TOMVERSE_AMUX_ENABLED` is off, as before; an error only for a start
+/// configuration error (a missing or malformed required variable, both
+/// `TOMVERSE_AMUX_EXECUTE` and `TOMVERSE_AMUX_CLAIM`, a 401 or 403 on the
+/// startup halt state read) and, in execute mode, the runtime's own
+/// `AMUX_WORKER_POLL_UNVERIFIED` and `AMUX_BOARD_TICK_UNVERIFIED`. Everything
+/// else the scheduler meets is a halt, not an exit.
 pub async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -66,14 +74,29 @@ pub async fn run() -> Result<()> {
 
     let api = tomverse_api::TomverseApi::from_env()?;
 
+    // Policy version 20, section 4: one instance id per process.
     let scheduler = scheduler::Scheduler::new(api.clone());
+    info!(
+        service = "tomverse-orchestrator",
+        instance_id = %scheduler.instance_id(),
+        "Tomverse AMUX orchestrator instance"
+    );
+
+    // The scheduler never ends by itself. Its first call is the halt state
+    // read, and its only error is a 401 or 403 on that read at startup.
+    let scheduler = async move {
+        match scheduler.run().await {
+            Ok(never) => match never {},
+            Err(error) => Err(error),
+        }
+    };
 
     /*
      * Selection-only and claim-only modes deliberately do not require executor
      * configuration and create no worker runtime registrations.
      */
     if !execution_enabled {
-        return scheduler.run().await;
+        return scheduler.await;
     }
 
     /*
@@ -87,5 +110,5 @@ pub async fn run() -> Result<()> {
 
     let runtime = runtime_service::RuntimeService::new(api, executor);
 
-    supervise_amux(scheduler.run(), runtime.run()).await
+    supervise_amux(scheduler, runtime.run()).await
 }

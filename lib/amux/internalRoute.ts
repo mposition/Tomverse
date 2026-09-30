@@ -2,7 +2,16 @@ import "server-only";
 
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import type { z } from "zod";
-import { AmuxDbBoundaryError } from "@/lib/amux/dbBoundary";
+import {
+  AmuxDbBoundaryError,
+  admitAmuxOrchestratorWrite,
+  amuxRouteOrchestratorReceiptsMayHaveCommitted,
+} from "@/lib/amux/dbBoundary";
+import {
+  AMUX_ORCHESTRATOR_DUPLICATE_REQUEST_REASON,
+  type AmuxOrchestratorCallKind,
+  type AmuxOrchestratorWriteIdentity,
+} from "@/lib/amux/orchestratorHaltCore";
 import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
@@ -36,6 +45,41 @@ export const amuxJsonNoStore = (body: unknown, status = 200): Response =>
     headers: NO_STORE_HEADERS,
   });
 
+/**
+ * Orchestration policy version 20, section 4: the admission of one
+ * orchestrator write call, as the first thing its route does inside its
+ * budget. A request without the two identity headers comes from an
+ * orchestrator built before version 20 and is served exactly as before,
+ * with no admission (`null`). A second admission of the same request id is
+ * refused with 409 `duplicate_request`, which is not a known answer. An
+ * admission that cannot be committed throws the not-started error, which
+ * `amuxInternalErrorResponse` answers 503 `amux_database_busy`.
+ */
+export async function admitAmuxOrchestratorRequest(
+  identity: AmuxOrchestratorWriteIdentity,
+  callKind: AmuxOrchestratorCallKind,
+): Promise<Response | null> {
+  if (identity.kind !== "admitted") return null;
+  const admission = await admitAmuxOrchestratorWrite({
+    requestId: identity.requestId,
+    instanceId: identity.instanceId,
+    callKind,
+  });
+  return admission.admitted
+    ? null
+    : amuxJsonNoStore(
+        {
+          error: "Duplicate request.",
+          reason: AMUX_ORCHESTRATOR_DUPLICATE_REQUEST_REASON,
+        },
+        409,
+      );
+}
+
+/** The answer to a write whose identity headers are present but malformed. */
+export const amuxInvalidOrchestratorIdentityResponse = (): Response =>
+  amuxJsonNoStore({ error: "Invalid request." }, 400);
+
 export const amuxBoundedJsonNoStore = (
   body: unknown,
   status = 200,
@@ -54,10 +98,100 @@ export const amuxBoundedJsonNoStore = (
   });
 };
 
+const amuxOutcomeUnknownResponse = (
+  operation: string,
+  error: unknown,
+): Response => {
+  const incident = reportAmuxOperationalIncident(operation, error);
+  return new Response(
+    JSON.stringify({
+      error: "AMUX database outcome is unknown.",
+      reason: "amux_outcome_unknown",
+      incident_id: incident.incidentId,
+    }),
+    {
+      status: 503,
+      headers: {
+        ...NO_STORE_HEADERS,
+        "X-AMUX-Incident-ID": incident.incidentId,
+      },
+    },
+  );
+};
+
+/**
+ * Whether `amuxInternalErrorResponse` would answer this error with one of the
+ * three 503 reasons that say "this request committed nothing" (orchestration
+ * policy version 20, section 1): busy, deadline exceeded, call ceiling
+ * exceeded. Mirrors the branch order below.
+ */
+const answersNothingCommitted = (error: unknown): boolean => {
+  if (error instanceof AmuxDbBoundaryError && isAmuxDbBusyCode(error.code)) {
+    return true;
+  }
+  const candidate = error as {
+    code?: unknown;
+    meta?: { code?: unknown; database_error?: unknown };
+  };
+  const databaseCode =
+    typeof candidate?.meta?.code === "string"
+      ? candidate.meta.code
+      : typeof candidate?.code === "string"
+        ? candidate.code
+        : null;
+  const databaseError =
+    typeof candidate?.meta?.database_error === "string"
+      ? candidate.meta.database_error
+      : "";
+  if (
+    (error instanceof AmuxDbBoundaryError &&
+      error.code === "AMUX_DB_DEADLINE_EXCEEDED") ||
+    databaseCode === "57014" ||
+    databaseError.includes("57014")
+  ) {
+    return true;
+  }
+  return (
+    databaseCode !== "P2028" &&
+    error instanceof AmuxDbBoundaryError &&
+    error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
+  );
+};
+
 export const amuxInternalErrorResponse = (
   operation: string,
   error: unknown,
 ): Response => {
+  // Orchestration policy version 20, section 1: once a receipt of this
+  // admitted request may have committed, the three answers that say "nothing
+  // was committed" are no longer true, so none of them is sent. The answer is
+  // an unknown outcome, which the orchestrator halts on and never
+  // acknowledges.
+  if (
+    answersNothingCommitted(error) &&
+    amuxRouteOrchestratorReceiptsMayHaveCommitted()
+  ) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "orchestrator_receipt_committed_before_refusal",
+        operation,
+      }),
+    );
+    return amuxOutcomeUnknownResponse(operation, error);
+  }
+
+  // A state-changing transaction of an admitted write found its admission
+  // missing, acknowledged or resolved under the row lock, and rolled back
+  // before changing anything. Someone else has closed the request, so it is
+  // not answered as a known outcome.
+  if (
+    error instanceof AmuxDbBoundaryError &&
+    error.code === "AMUX_DB_ADMISSION_CLOSED"
+  ) {
+    return amuxOutcomeUnknownResponse(operation, error);
+  }
+
   // A read that the database could not take just then, or a transaction that
   // never started, in a route that had written nothing (decided once, in
   // amuxDbBoundaryFailure). Nothing was written, so this is never an unknown
