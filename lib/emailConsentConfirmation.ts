@@ -568,7 +568,9 @@ export async function grantConsentWithVerifiedSession(input: {
     source: "preference_center",
     jurisdiction: grant.jurisdiction.countryCode,
     jurisdictionSource: grant.jurisdiction.source,
-    confirmedCountry: input.confirmedCountry ?? null,
+    // Only a country the person confirmed in this action; setPreference reads
+    // any value it is given, null included, as one to validate.
+    ...(input.confirmedCountry ? { confirmedCountry: input.confirmedCountry } : {}),
     ip: input.ip ?? null,
     userAgent: input.userAgent ?? null,
     confirmation: grant.confirmation,

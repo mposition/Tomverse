@@ -198,6 +198,8 @@ test("an address changed after the proof grants nothing", async () => {
     enabled: true,
     capturedVia: "preference_center",
     source: "preference_center",
+    // The country the seal was made under: the write must name it.
+    jurisdiction: prepared.grant.jurisdiction.countryCode,
     confirmation: prepared.grant.confirmation,
   });
   assert.deepEqual(result, { changed: false, reason: "address_changed" });
