@@ -349,17 +349,19 @@ const scoreOne = (
     !candidate.worker.isolated &&
     !candidate.worker.blocked;
 
-  // A stopped worker remains selectable because the execution layer owns
-  // worker startup. A running idle worker without a recognized dispatch
-  // boundary is unsafe for new ownership and remains preference-only.
-  const idleWithoutBoundary =
-    candidate.worker.running &&
-    candidate.worker.status.toLowerCase() === "idle" &&
-    !candidate.worker.dispatch_ready;
+  // A new ownership claim selects only a worker that can take the card now:
+  // running, idle and at a recognized dispatch boundary. A stopped or busy
+  // worker stays visible as preferred demand but is not selected, so a claim
+  // is never stranded behind it while another worker is ready. main held this
+  // rule (#1595); a develop merge had reverted it to "a stopped worker remains
+  // selectable". The live WSL loop claims in claim-only mode, where nothing
+  // starts a stopped worker. worker.rs keeps the same rule.
   const selectedEligible =
     operationallyAllowed &&
     !candidate.provider_exhausted &&
-    !idleWithoutBoundary;
+    candidate.worker.running &&
+    candidate.worker.status.toLowerCase() === "idle" &&
+    candidate.worker.dispatch_ready;
 
   return {
     worker_name: candidate.worker.worker_name,

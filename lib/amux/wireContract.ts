@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  AMUX_MACHINE_ID_PATTERN,
   AMUX_PRISMA_INT_MAX,
   amuxMachineIdSchema,
 } from "@/lib/amux/claimContract";
@@ -13,17 +14,67 @@ const prismaInt = z.number().int().min(0).max(AMUX_PRISMA_INT_MAX);
 const timestamp = z.string().datetime({ offset: true });
 const unitSignal = z.number().min(0).max(1).nullable();
 
+// Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
+// compatibility"). An orchestrator or WSL bridge built from main before the
+// develop AMUX port requires these fields and fails to parse a body without
+// them. They are required here, not optional, so that dropping one is a
+// deliberate change to this schema, its test and that document, not a quiet
+// edit in lib/amux/store.ts. Their values are only checked for type: they are
+// card text and ids the app already stores, and a stricter check here would
+// turn one unusual stored title into a failed queue for every worker.
+const legacyCardText = z.string().max(100_000);
+const legacyCardId = z.string().min(1).max(120);
+
+/**
+ * Drops the queue rows whose stored machine ids the wire schema would refuse,
+ * so one such row cannot turn the whole queue into a 500.
+ *
+ * main accepted any trimmed card id and worker name up to 120 characters; the
+ * canonical rule (`AMUX_MACHINE_ID_PATTERN`) refuses, for example, one that
+ * ends in `-`. The claim, routing-snapshot and execution-start routes refuse
+ * such an id in their request, so the card cannot be claimed or started
+ * through this app either way; answering the other rows keeps every other
+ * card and worker moving. What was dropped is reported as a count, never as
+ * the ids, and every remaining row still goes through the full schema.
+ */
+export const keepCanonicalAmuxQueueRows = <T>(
+  queue: "selection" | "owned",
+  rows: readonly T[],
+  machineIds: (row: T) => readonly string[],
+): T[] => {
+  const kept = rows.filter((row) =>
+    machineIds(row).every((id) => AMUX_MACHINE_ID_PATTERN.test(id)),
+  );
+  const rejected = rows.length - kept.length;
+  if (rejected > 0) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "queue_rows_rejected",
+        queue,
+        reason: "non_canonical_machine_id",
+        rejected_rows: rejected,
+        kept_rows: kept.length,
+      }),
+    );
+  }
+  return kept;
+};
+
 export const amuxQueueResponseSchema = z
   .array(
     z
       .object({
         id: amuxMachineIdSchema,
+        title: legacyCardText,
+        status: z.literal("todo"),
         kind: z.string().min(1).max(64),
         priority: z.string().min(1).max(32),
         pinned: z.boolean(),
         drag: z.number().int().min(0).max(8),
         revision: prismaInt,
         created_at: timestamp,
+        dependencies: z.array(legacyCardId).max(10_000),
         dependent_count: prismaInt,
         scheduler_score: z.number().int().min(0).max(6_010_428),
         scoring_version: z.literal("amux-global-priority-v2"),
@@ -52,8 +103,12 @@ export const amuxOwnedQueueResponseSchema = z
     z
       .object({
         id: amuxMachineIdSchema,
+        title: legacyCardText,
+        kind: z.string().min(1).max(64),
+        priority: z.string().min(1).max(32),
         owner: amuxMachineIdSchema,
         revision: prismaInt,
+        created_at: timestamp,
       })
       .strict(),
   )

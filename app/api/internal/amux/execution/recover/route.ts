@@ -9,10 +9,13 @@ import {
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
 import {
+  admitAmuxOrchestratorRequest,
   amuxInternalErrorResponse,
+  amuxInvalidOrchestratorIdentityResponse,
   amuxJsonNoStore,
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
+import { readAmuxOrchestratorWriteIdentity } from "@/lib/amux/orchestratorHaltCore";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   reclaimExpiredAmuxClaims,
@@ -34,10 +37,19 @@ export async function POST(request: Request) {
       },
     );
   }
+  // Orchestration policy version 20, section 4. Without the identity headers
+  // (an orchestrator built before version 20) the sweep is served exactly as
+  // before, with no admission.
+  const identity = readAmuxOrchestratorWriteIdentity(request.headers);
+  if (identity.kind === "invalid") {
+    return amuxInvalidOrchestratorIdentityResponse();
+  }
 
   return withAmuxRouteBudget(async () => {
     let step: AmuxRecoverStep = "request";
     try {
+      const refused = await admitAmuxOrchestratorRequest(identity, "recover");
+      if (refused) return refused;
       await readLimitedJson(request, 1 * 1_024, requestSchema);
 
       // Selection-only can still accept quota telemetry. Keep its 90-day

@@ -150,14 +150,34 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
     dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
     dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS");
   const reserve = dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
+  const budget = (profile) =>
+    profileCallCeiling(profile) * perCallPlanningFactor + reserve;
   const threeTransactions = ["claimRouteClock", "routingSnapshot", "claim"];
+  // The route was sized with a 250 ms connection wait per transaction (the
+  // maxWait until 2026-09-30). The wait is now capped by the route's slack
+  // (amuxDbConnectionWaitMs), so a longer one comes out of that slack and can
+  // never make the route answer later; the sizing still has to hold.
+  const sizingWaitMs = 250;
   const plannedDbCallBudgetMs = threeTransactions.reduce(
-    (sum, profile) =>
-      sum +
-      profileCallCeiling(profile) * perCallPlanningFactor +
-      reserve +
-      maxWait,
+    (sum, profile) => sum + budget(profile) + sizingWaitMs,
     0,
+  );
+
+  // Orchestration policy version 20: an admitted claim adds its admission
+  // transaction before these three, and one admission-lock call to the claim
+  // transaction itself. That route has to fit as well.
+  const admissionBudgetMs = dbNumber("AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS");
+  const admissionLockCalls = dbNumber("AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
+  assert.equal(admissionLockCalls, 1);
+  assert.ok(admissionBudgetMs > 0);
+  const admittedPlannedMs =
+    plannedDbCallBudgetMs +
+    admissionBudgetMs +
+    sizingWaitMs +
+    admissionLockCalls * perCallPlanningFactor;
+  assert.ok(
+    admittedPlannedMs <= routeMs,
+    `an admitted claim plans ${admittedPlannedMs} ms against a ${routeMs} ms route`,
   );
 
   assert.ok(Number.isFinite(plannedDbCallBudgetMs));
@@ -165,6 +185,13 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
     plannedDbCallBudgetMs <= routeMs,
     "the anchored route must fit its three planned Prisma-call budgets",
   );
+  // 8,700 ms of budgets: the first transaction may wait the whole maximum.
+  assert.equal(maxWait, 2_000);
+  assert.ok(
+    Math.min(maxWait, routeMs - budget("claimRouteClock")) === maxWait,
+    "the claim route's first transaction gets the full connection wait",
+  );
+  assert.match(dbBoundarySource, /maxWait: connectionWaitMs,/);
   assert.ok(
     claimSeconds * 1_000 >= routeMs + connectSeconds * 1_000 + 1_000,
     "claim HTTP must reserve a second for response transport beyond route and connect",
@@ -201,6 +228,19 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       )?.[1],
     ) * 1_000;
   assert.ok(clientMs >= routeMs + connectMs + 1_000);
+  // A transaction never starts later than its route's deadline less its
+  // budget (the capped connection wait), and Prisma closes it at most the
+  // slack after that budget: the server answers within the route budget plus
+  // the slack, which the one-second transport reserve above covers.
+  assert.equal(value("AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS"), 300);
+  assert.ok(value("AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS") < 1_000);
+  assert.match(
+    dbBoundarySource,
+    /timeout: transactionBudgetMs \+ AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS,/,
+  );
+  // Every lifecycle boundary fits its budget and the full 2,000 ms wait in
+  // the 12 s route (the largest, execution start, is 9,200 + 2,000).
+  assert.equal(value("AMUX_DB_MAX_WAIT_MS"), 2_000);
 
   const endpoints = [
     ["workers/register", ["workerRegister"], "worker_register"],
@@ -222,15 +262,32 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       ],
       "execution_recover",
     ],
+    // Orchestration policy version 20: the acknowledgement, and the halt
+    // record and state read with the resolver that runs first.
+    ["orchestrator/ack", ["orchestratorAck"], "orchestrator_ack"],
+    [
+      "orchestrator/halt",
+      [
+        "orchestratorResolveCandidates",
+        "orchestratorResolve",
+        "orchestratorHaltStateRead",
+        "orchestratorHaltOpen",
+      ],
+      "orchestrator_halt_state",
+    ],
   ];
   for (const [route, boundaries, method] of endpoints) {
     for (const boundary of boundaries) {
-      const ceiling = Number(
+      const declared = Number(
         dbBoundarySource.match(
           new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
         )?.[1],
       );
-      assert.ok(Number.isInteger(ceiling), boundary);
+      assert.ok(Number.isInteger(declared), boundary);
+      // An admitted write's mutation adds its admission lock
+      // (AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS); every boundary is held to
+      // that wider figure, which bounds both.
+      const ceiling = declared + value("AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS");
       const plannedBudget =
         ceiling *
           (value("AMUX_DB_STATEMENT_TIMEOUT_MS") +
@@ -304,17 +361,24 @@ test("selection reads reserve connect and response time beyond both route budget
         new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
       )?.[1],
     );
-    const plannedBudget =
+    const transactionBudget =
       ceiling *
         (dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
           dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
-      dbNumber("AMUX_DB_COMMIT_RESERVE_MS") +
-      dbNumber("AMUX_DB_MAX_WAIT_MS");
+      dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
     assert.ok(Number.isInteger(ceiling), boundary);
     assert.ok(Number.isInteger(routeMs), route);
+    // The 2,000 ms maximum does not fit a 2.8 s selection route: the wait is
+    // capped by the route's slack (amuxDbConnectionWaitMs), 800 ms for the
+    // queue and 500 ms for the routing snapshot, still at least twice the
+    // 250 ms that failed in production.
+    const connectionWaitMs = Math.min(
+      dbNumber("AMUX_DB_MAX_WAIT_MS"),
+      routeMs - transactionBudget,
+    );
     assert.ok(
-      plannedBudget <= routeMs,
-      `${route} planned DB-call budget exceeds route budget`,
+      connectionWaitMs >= 500,
+      `${route} leaves ${connectionWaitMs} ms to wait for a connection`,
     );
     assert.ok(
       clientMs >= routeMs + connectMs + 1_000,
@@ -432,6 +496,53 @@ test("routing response byte ceilings match and overflow refuses complete output"
   assert.equal(rustKiB, serverKiB);
   assert.match(routeSource, /error instanceof AmuxResponseCapacityError/);
   assert.match(routeSource, /reason: "board_capacity_exceeded"/);
+});
+
+test("TypeScript and Rust share the database-busy reason and its exact body", async () => {
+  const { AMUX_DATABASE_BUSY_REASON } = await import("../lib/amux/readFailureCore.ts");
+  assert.match(
+    rustSource,
+    new RegExp(`pub const DATABASE_BUSY: &str = "${AMUX_DATABASE_BUSY_REASON}";`),
+  );
+  const route = readFileSync(join(process.cwd(), "lib", "amux", "internalRoute.ts"), "utf8");
+  assert.match(
+    route,
+    /error: "AMUX database is busy\.",\s*reason: AMUX_DATABASE_BUSY_REASON,\s*\}\),\s*\{\s*status: 503,/,
+  );
+  // The body the server sends (tests/server-contract/amux-commit-deadline-boundary.test.ts
+  // holds the server to it) is the literal every Rust test parses.
+  const body = JSON.stringify({ error: "AMUX database is busy.", reason: AMUX_DATABASE_BUSY_REASON });
+  for (const file of ["tomverse_api.rs", "scheduler.rs", "wsl_bridge.rs"]) {
+    const source = readFileSync(
+      join(process.cwd(), "apps", "tomverse-orchestrator", "src", file),
+      "utf8",
+    );
+    assert.ok(source.includes(`r#"${body}"#`), file);
+  }
+  // The selection reads skip a tick on it, uncounted. Since orchestration
+  // policy version 20 the claim, the recovery sweep and the automatic
+  // promotion tick treat it -- and the other two "nothing committed" 503
+  // reasons -- as a known answer, acknowledged `no_commit`; every other answer
+  // halts instead of ending the process.
+  assert.match(
+    schedulerSource,
+    /Ok\(SelectionRead::DatabaseBusy\) => SelectionClass::Uncounted\(DATABASE_BUSY\),/,
+  );
+  assert.match(schedulerSource, /self\.handle_selection_read\("queue", queue_result\)/);
+  assert.match(
+    schedulerSource,
+    /self\.handle_selection_read\("routing_snapshot", snapshot_result\)/,
+  );
+  assert.match(schedulerSource, /Settled::NothingCommitted\(reason\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Flow::Continue;/);
+  assert.match(schedulerSource, /Settled::NothingCommitted\(reason\) => \{[\s\S]*?verdict = "recovery_skipped"/);
+  assert.match(schedulerSource, /self\.open_halt\(kind\.unknown_outcome\(\), request_id, Some\(request_id\), class\);/);
+  assert.doesNotMatch(schedulerSource, /anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)/);
+  assert.doesNotMatch(schedulerSource, /anyhow::anyhow!\("AMUX_RECOVERY_OUTCOME_UNKNOWN"\)/);
+  assert.match(schedulerSource, /fn an_answer_outside_section_1_halts_before_the_next_write_and_is_never_acknowledged\(/);
+  // Only the exact body at 503 is the busy answer, a typed error a caller
+  // must ask for: a caller that does not still stops.
+  assert.match(rustSource, /pub fn is_database_busy\(error: &anyhow::Error\) -> bool/);
+  assert.match(rustSource, /if is_database_busy_body\(&body\) \{\s*anyhow::Error::new\(DatabaseBusy\)/);
 });
 
 test("unknown future-lifecycle outcomes stop the whole runtime run", () => {

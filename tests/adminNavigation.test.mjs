@@ -293,6 +293,9 @@ test("the discovery backlog keeps a way in", () => {
 const readPage = (segment) =>
   readFileSync(join(ADMIN_ROUTE_ROOT, segment, "page.tsx"), "utf8");
 
+const loaderSource = () =>
+  readFileSync(join(process.cwd(), "lib", "adminNavigationCounts.ts"), "utf8");
+
 const OWNER_GATE =
   /if \(!session\?\.user\?\.id \|\| getAdminRole\(session\) !== "owner"\) notFound\(\);/;
 
@@ -319,7 +322,7 @@ test("the AMUX group holds Backlog, Promotion and Execution, with their sections
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "assignment"]
+    ["cards", "assignment", "halts"]
   );
   // Between Operations and Governance.
   assert.deepEqual(
@@ -375,7 +378,7 @@ test("each of the eight AMUX screens redirects to its own section", () => {
   );
 });
 
-test("the owner sees the whole AMUX group; every other role sees Execution's Assignment only", () => {
+test("the owner sees the whole AMUX group; every other role sees Execution's Assignment and Halts only", () => {
   const owner = adminNavigationFor("owner");
   for (const item of ADMIN_NAVIGATION) {
     const shown = owner.find((entry) => entry.id === item.id);
@@ -391,9 +394,11 @@ test("the owner sees the whole AMUX group; every other role sees Execution's Ass
     const visible = adminNavigationFor(role);
     const amux = visible.filter((item) => item.group === "AMUX");
     assert.deepEqual(amux.map((item) => item.id), ["amux-execution"], `${role}: AMUX entries`);
+    // Halts (orchestration policy version 20, section 7) is read by every
+    // role the Execution badge counts it for; only the owner may clear one.
     assert.deepEqual(
       amux[0].tabs.map((tab) => tab.id),
-      ["assignment"],
+      ["assignment", "halts"],
       `${role}: Execution sections`
     );
     // Nothing outside AMUX moves for this role.
@@ -413,7 +418,7 @@ test("a role that cannot be determined sees only what every role sees", () => {
       adminNavigationFor(role)
         .filter((item) => item.group === "AMUX")
         .map((item) => [item.id, item.tabs.map((tab) => tab.id)]),
-      [["amux-execution", ["assignment"]]]
+      [["amux-execution", ["assignment", "halts"]]]
     );
   }
 });
@@ -468,7 +473,8 @@ test("Execution opens on Cards for the owner and on Assignment for everyone else
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(tabs, role, undefined);
     assert.equal(opened.tab.id, "assignment", String(role));
-    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment"]);
+    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment", "halts"]);
+    assert.equal(resolveAdminTabFor(tabs, role, "halts").tab.id, "halts", String(role));
     // A stale value that names no section still falls back...
     assert.equal(resolveAdminTabFor(tabs, role, "not-a-tab").tab.id, "assignment");
     // ...but naming the owner's section is a 404, not a silent substitute.
@@ -490,8 +496,10 @@ test("view roles never promise more than the pages grant, nor hide what they gra
   assert.equal(execution.viewRoles, undefined);
   const cards = execution.tabs.find((tab) => tab.id === "cards");
   const assignment = execution.tabs.find((tab) => tab.id === "assignment");
+  const halts = execution.tabs.find((tab) => tab.id === "halts");
   assert.deepEqual(cards.viewRoles, ["owner"]);
   assert.equal(assignment.viewRoles, undefined);
+  assert.equal(halts.viewRoles, undefined);
   const page = readPage("amux-execution");
   const branchAt = page.indexOf('if (tab.id === "cards")');
   assert.ok(branchAt > 0, "the Execution page has a Cards branch");
@@ -503,6 +511,14 @@ test("view roles never promise more than the pages grant, nor hide what they gra
     "the Cards branch reads the list before refusing a non-owner"
   );
   assert.match(page, /if \(!resolved\) notFound\(\);/);
+  // The Halts branch opens to every role and offers the clear to the owner
+  // only; it never refuses a role the tab strip shows it to.
+  const haltsAt = page.indexOf('if (tab.id === "halts")');
+  assert.ok(haltsAt > 0, "the Execution page has a Halts branch");
+  const haltsBranch = page.slice(haltsAt, page.indexOf("<AdminAmuxRoutingPanel />"));
+  assert.doesNotMatch(haltsBranch, /notFound\(/);
+  assert.match(haltsBranch, /canClear=\{isOwner\}/);
+  assert.match(page, /const isOwner = Boolean\(session\?\.user\?\.id\) && role === "owner";/);
   // Every other entry is still open to every role.
   for (const item of ADMIN_NAVIGATION) {
     if (item.group === "AMUX") continue;
@@ -532,10 +548,51 @@ test("Routing keeps Chat shadow routing and points at where AMUX assignment went
   assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel \/>/);
 });
 
-test("the Execution badge counts the escalations the Assignment section lists", () => {
+test("the Execution badge counts the escalations the Assignment section lists and the open halts", () => {
   const execution = ADMIN_NAVIGATION.find((item) => item.id === "amux-execution");
-  assert.equal(execution.badge, "amuxEscalations");
+  // Orchestration policy version 20, section 7: the entry's badge is the
+  // escalation count plus the open orchestrator halt count, and the Halts tab
+  // carries the halt count alone.
+  assert.equal(execution.badge, "amuxExecution");
   assert.equal(execution.tabs.find((tab) => tab.id === "assignment").badge, "amuxEscalations");
+  assert.equal(execution.tabs.find((tab) => tab.id === "halts").badge, "amuxOrchestratorHalts");
+  assert.equal(adminNavigationBadge("amuxOrchestratorHalts", EMPTY_ADMIN_NAVIGATION_COUNTS), null);
+  assert.equal(
+    adminNavigationBadge("amuxOrchestratorHalts", {
+      ...EMPTY_ADMIN_NAVIGATION_COUNTS,
+      openAmuxOrchestratorHalts: 2,
+    }),
+    2
+  );
+  assert.equal(
+    adminNavigationBadge("amuxExecution", {
+      ...EMPTY_ADMIN_NAVIGATION_COUNTS,
+      openAmuxEscalations: 3,
+      openAmuxOrchestratorHalts: 2,
+    }),
+    5
+  );
+  // A halt count that could not be read is no badge on the entry, not the
+  // escalations alone: that figure would read as "no halt".
+  assert.equal(
+    adminNavigationBadge("amuxExecution", {
+      ...EMPTY_ADMIN_NAVIGATION_COUNTS,
+      openAmuxEscalations: 3,
+    }),
+    null
+  );
+  assert.equal(
+    adminNavigationBadge("amuxExecution", {
+      ...EMPTY_ADMIN_NAVIGATION_COUNTS,
+      openAmuxOrchestratorHalts: 2,
+    }),
+    null
+  );
+  assert.match(
+    readPage("amux-execution"),
+    /countOpenAmuxOrchestratorHalts\(\)\.catch\(\(\) => null\)/
+  );
+  assert.match(loaderSource(), /countOpenAmuxOrchestratorHalts\(\),/);
   // An unknown count is no badge; zero is zero.
   assert.equal(adminNavigationBadge("amuxEscalations", EMPTY_ADMIN_NAVIGATION_COUNTS), null);
   assert.equal(
@@ -553,7 +610,7 @@ test("the Execution badge counts the escalations the Assignment section lists", 
     4
   );
   // One status list for the count and for the list it points at.
-  const loader = readFileSync(join(process.cwd(), "lib", "adminNavigationCounts.ts"), "utf8");
+  const loader = loaderSource();
   const report = readFileSync(join(process.cwd(), "lib", "amux", "explainability.ts"), "utf8");
   const sameWhere =
     /where: \{ status: \{ in: \[\.\.\.AMUX_ESCALATION_AWAITING_STATUSES\] \} \}/;

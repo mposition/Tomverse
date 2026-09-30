@@ -722,16 +722,23 @@ test("the tick route runs inside its route budget, and every tick transaction is
     "prisma.$transaction(",
     "set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)",
     "anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION)",
+    // Orchestration policy version 20, section 4: inside an admitted tick
+    // the admission row is locked before anything is changed.
+    "lockAmuxRouteOrchestratorAdmission(tx, AUTO_PROMOTION_DB_OPERATION)",
     "pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))",
-    "const result = await run(tx, await databaseNow(tx));",
-    "await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);",
+    "const result = await run(tx, await databaseNow(tx), recordReceipt);",
+    "await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION, receipts);",
     'phase = "committing";',
   ].map((needle) => {
     const index = wrapper.indexOf(needle);
     assert.ok(index >= 0, needle);
     return index;
   });
-  assert.deepEqual([...order].sort((a, b) => a - b), order, "admission, anchor, lock, work, fence, commit");
+  assert.deepEqual(
+    [...order].sort((a, b) => a - b),
+    order,
+    "admission, anchor, admission lock, lock, work, fence with receipts, commit",
+  );
   assert.match(wrapper, /\{ maxWait: limits\.maxWaitMs, timeout: limits\.timeoutMs \}/);
 
   // The system actor, which only the tick uses, gets the tick's limits.

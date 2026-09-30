@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { POST as claimPost } from "@/app/api/internal/amux/claim/route";
 import { POST as queuePost } from "@/app/api/internal/amux/queue/route";
@@ -21,6 +23,7 @@ import { prisma } from "@/lib/prisma";
 import { anchorAmuxClaimDeadline } from "@/lib/amux/claimDeadline";
 import {
   AMUX_INCIDENT_SETTING_KEY,
+  parseAmuxIncidentSetting,
   serializeAmuxIncidentState,
 } from "@/lib/amux/incidentCore";
 import {
@@ -68,6 +71,18 @@ import {
 } from "@/lib/amux/store";
 
 const SCORING_VERSION = "amux-global-priority-v1";
+
+// The queue bodies the app sends during the compatibility window, the same
+// file the Rust client parses (tests/fixtures/amux-queue-wire-compat-v1.json).
+const queueWireCompat = JSON.parse(
+  readFileSync(
+    join(process.cwd(), "tests/fixtures/amux-queue-wire-compat-v1.json"),
+    "utf8",
+  ),
+) as {
+  queue_server: Record<string, unknown>;
+  owned_server: Record<string, unknown>;
+};
 
 const makeAmuxSyncSecret = () => `amux-test-${randomUUID()}`;
 
@@ -972,6 +987,9 @@ test("project WIP admission serializes claims for different tasks", async () => 
       measured: true,
       verdict: "refused",
       systemActor: "tomverse-amux-orchestrator",
+      // main's refusal evidence (#1595): the full resource and its count.
+      blocked_resource: { scope: "project", key: projectKey },
+      wip: [{ scope: "project", key: projectKey, limit: 1, current: 1 }],
     });
     assert.equal(
       await prisma.amuxWorkItem.count({
@@ -990,6 +1008,293 @@ test("project WIP admission serializes claims for different tasks", async () => 
     });
     await prisma.amuxResourcePolicy.delete({
       where: { scope_key: { scope: "project", key: projectKey } },
+    });
+  }
+});
+
+// Restored from main (#1595). A develop merge dropped these three; they pin the
+// execution-start refusal audit under incident mode, the attempt budget and the
+// cost guard.
+test("incident admission refusals keep claim and execution-start audits atomic", async () => {
+  const claimTaskId = await createTodo("amux-incident-claim");
+  const startTaskId = await createTodo("amux-incident-start");
+  const worker = `amux-incident-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+  const previousSetting = await prisma.appSetting.findUnique({
+    where: { key: AMUX_INCIDENT_SETTING_KEY },
+    select: { value: true },
+  });
+
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: startTaskId },
+      data: {
+        owner: worker,
+        claimedAt: base,
+        revision: 1,
+      },
+    });
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+
+    await prisma.appSetting.upsert({
+      where: { key: AMUX_INCIDENT_SETTING_KEY },
+      create: {
+        key: AMUX_INCIDENT_SETTING_KEY,
+        value: serializeAmuxIncidentState({
+          version: 1,
+          state: "frozen",
+          transition_id: null,
+          changed_at: base.toISOString(),
+          reason: "DB regression incident freeze",
+          ticket: "AMUX-DB-INCIDENT",
+        }),
+      },
+      update: {
+        value: serializeAmuxIncidentState({
+          version: 1,
+          state: "frozen",
+          transition_id: null,
+          changed_at: base.toISOString(),
+          reason: "DB regression incident freeze",
+          ticket: "AMUX-DB-INCIDENT",
+        }),
+      },
+    });
+
+    const claim = await claimUnownedTodo({
+      taskId: claimTaskId,
+      worker: `${worker}-claim`,
+      expectedRevision: 0,
+      schedulerScore: 32,
+      scoringVersion: SCORING_VERSION,
+      signals: signals(),
+    });
+    assert.deepEqual(claim, {
+      claimed: false,
+      reason: "incident_admission_blocked",
+    });
+
+    const start = await startAmuxExecution({
+      taskId: startTaskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    assert.deepEqual(start, { started: false, reason: "incident_frozen" });
+
+    const [claimAudit, startAudit, claimTask, startTask] = await Promise.all([
+      prisma.adminAuditLog.findFirstOrThrow({
+        where: { action: "amux.claim.refused", targetId: claimTaskId },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.adminAuditLog.findFirstOrThrow({
+        where: {
+          action: "amux.execution.start_refused",
+          targetId: startTaskId,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: claimTaskId } }),
+      prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: startTaskId } }),
+    ]);
+    assert.equal(
+      (claimAudit.metadata as Record<string, unknown>).reason,
+      "incident_admission_blocked",
+    );
+    assert.equal(
+      (startAudit.metadata as Record<string, unknown>).reason,
+      "incident_frozen",
+    );
+    assert.equal(claimTask.owner, null);
+    assert.equal(claimTask.revision, 0);
+    assert.equal(startTask.status, "todo");
+    assert.equal(startTask.revision, 1);
+  } finally {
+    if (previousSetting) {
+      await prisma.appSetting.update({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+        data: { value: previousSetting.value },
+      });
+    } else {
+      await prisma.appSetting.deleteMany({
+        where: { key: AMUX_INCIDENT_SETTING_KEY },
+      });
+    }
+    await prisma.amuxWorkerRuntime.deleteMany({
+      where: { workerName: worker },
+    });
+    await prisma.amuxWorkItem.deleteMany({
+      where: { id: { in: [claimTaskId, startTaskId] } },
+    });
+  }
+});
+
+test("execution start blocks a task after five historical attempts without resetting the budget", async () => {
+  const taskId = await createTodo("amux-attempt-budget");
+  const worker = `amux-attempt-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { owner: worker, claimedAt: base, revision: 1 },
+    });
+    await prisma.amuxExecutionAttempt.createMany({
+      data: Array.from({ length: 5 }, (_, index) => ({
+        id: randomUUID(),
+        taskId,
+        worker,
+        workerInstanceId: instanceId,
+        workerGeneration: 1,
+        taskRevision: index + 2,
+        attemptNumber: index + 1,
+        heartbeatAt: base,
+        leaseExpiresAt: null,
+        startedAt: new Date(base.getTime() - (5 - index) * 1_000),
+        endedAt: base,
+        outcome: "failed",
+        toStatus: "todo",
+        endedBy: worker,
+        reason: "execution_failed",
+      })),
+    });
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    assert.deepEqual(started, {
+      started: false,
+      reason: "attempt_budget_exhausted",
+    });
+
+    const [task, attemptCount, escalation] = await Promise.all([
+      prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } }),
+      prisma.amuxExecutionAttempt.count({ where: { taskId } }),
+      prisma.amuxHumanEscalation.findFirstOrThrow({
+        where: { taskId, reason: "attempt_budget_exhausted" },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+    assert.equal(task.status, "blocked");
+    assert.equal(task.revision, 2);
+    assert.equal(attemptCount, 5);
+    assert.equal(escalation.status, "open");
+  } finally {
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
+    await prisma.amuxExecutionAttempt.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkerRuntime.deleteMany({
+      where: { workerName: worker },
+    });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+  }
+});
+
+test("execution start blocks before spending when the project cost budget is exhausted", async () => {
+  const taskId = await createTodo("amux-start-cost-guard");
+  const projectKey = `amux-start-cost-${randomUUID()}`;
+  const worker = `amux-start-cost-worker-${randomUUID()}`;
+  const instanceId = randomUUID();
+  const base = new Date();
+
+  try {
+    await prisma.amuxResourcePolicy.create({
+      data: {
+        scope: "project",
+        key: projectKey,
+        displayName: projectKey,
+        costBudgetMicrousd: BigInt(100),
+        budgetWindowStartsAt: new Date(base.getTime() - 60_000),
+        budgetWindowEndsAt: new Date(base.getTime() + 60_000),
+      },
+    });
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: {
+        projectKey,
+        estimatedCostMicrousd: BigInt(101),
+        owner: worker,
+        claimedAt: base,
+        revision: 1,
+      },
+    });
+    const runtime = await registerAmuxWorkerRuntime(worker, instanceId, base);
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: worker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(base.getTime() + 500),
+    });
+    assert.equal(ready.accepted, true);
+
+    const started = await startAmuxExecution({
+      taskId,
+      worker,
+      instanceId,
+      generation: runtime.generation,
+      expectedRevision: 1,
+      now: new Date(base.getTime() + 1_000),
+    });
+    assert.deepEqual(started, {
+      started: false,
+      reason: "cost_budget_exhausted",
+    });
+
+    const [task, attemptCount, audit] = await Promise.all([
+      prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: taskId } }),
+      prisma.amuxExecutionAttempt.count({ where: { taskId } }),
+      prisma.adminAuditLog.findFirstOrThrow({
+        where: {
+          action: "amux.execution.cost_guard_blocked",
+          targetId: taskId,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+    assert.equal(task.status, "blocked");
+    assert.equal(task.revision, 2);
+    assert.equal(attemptCount, 0);
+    assert.equal(
+      (audit.metadata as Record<string, unknown>).reason,
+      "cost_budget_exhausted",
+    );
+  } finally {
+    await prisma.amuxHumanEscalation.deleteMany({ where: { taskId } });
+    await prisma.amuxWorkerRuntime.deleteMany({
+      where: { workerName: worker },
+    });
+    await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
+    await prisma.amuxResourcePolicy.deleteMany({
+      where: { scope: "project", key: projectKey },
     });
   }
 });
@@ -1054,6 +1359,10 @@ test("incident admission refusal is distinct from CAS loss and audited atomicall
         targetId: taskId,
       },
     });
+    const stored = await prisma.appSetting.findUniqueOrThrow({
+      where: { key: AMUX_INCIDENT_SETTING_KEY },
+      select: { value: true },
+    });
     assert.deepEqual(refusalAudit.metadata, {
       reason: "incident_admission_blocked",
       worker,
@@ -1061,6 +1370,10 @@ test("incident admission refusal is distinct from CAS loss and audited atomicall
       measured: true,
       verdict: "refused",
       systemActor: "tomverse-amux-orchestrator",
+      // main's refusal evidence (#1595): which incident blocked admission.
+      incident_state: "frozen",
+      incident_transition_id: null,
+      incident_valid: parseAmuxIncidentSetting(stored.value).valid,
     });
   } finally {
     if (previous) {
@@ -1402,6 +1715,15 @@ test("live dependents contribute to dependent_count exactly once", async () => {
 
   assert.ok(parent);
   assert.equal(parent.dependent_count, 1);
+
+  // The queue keys an orchestrator built from main before the develop AMUX
+  // port requires, kept for the compatibility window.
+  assert.deepEqual(
+    Object.keys(parent).sort(),
+    Object.keys(queueWireCompat.queue_server).sort(),
+  );
+  assert.equal(parent.status, "todo");
+  assert.deepEqual(parent.dependencies, []);
 
   // The child waits on the unfinished parent.
   assert.equal(
@@ -1894,7 +2216,11 @@ test("an authenticated not-eligible claim appends one bounded refusal audit", as
 
 test("an authenticated authoritative-worker mismatch appends one bounded refusal audit", async () => {
   const taskId = await createTodo("amux-api-worker-mismatch");
-  const authoritativeWorker = "codex-authoritative";
+  // Under main's selection rule (#1595) only a running, idle, dispatch-ready
+  // worker can be the authoritative choice, so the test registers one; without
+  // it the server finds no authoritative worker at all and refuses for that
+  // reason instead of the mismatch this test is about.
+  const authoritativeWorker = `codex-authoritative-${randomUUID()}`;
   const requestedWorker = "claude-mismatch";
   const secret = makeAmuxSyncSecret();
 
@@ -1925,6 +2251,18 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
   ]);
 
   try {
+    const instanceId = randomUUID();
+    const runtime = await registerAmuxWorkerRuntime(authoritativeWorker, instanceId, new Date());
+    const ready = await heartbeatAmuxWorkerRuntime({
+      workerName: authoritativeWorker,
+      instanceId,
+      generation: runtime.generation,
+      status: "idle",
+      dispatchReady: true,
+      now: new Date(),
+    });
+    assert.equal(ready.accepted, true);
+
     const response = await claimPost(
       new Request("http://localhost/api/internal/amux/claim", {
         method: "POST",
@@ -1997,11 +2335,15 @@ test("an authenticated authoritative-worker mismatch appends one bounded refusal
       process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previousExecutionApi;
     }
 
+    await prisma.amuxWorkerRuntime.deleteMany({ where: { workerName: authoritativeWorker } });
     await prisma.amuxWorkItem.deleteMany({ where: { id: taskId } });
   }
 });
 
-test("claim API refuses ownership before execution lifecycle is ready", async () => {
+// main's selection rule (#1595): a worker that is not running, idle and at a
+// dispatch boundary is preferred demand, never a selected owner, so a claim for
+// it is refused before any ownership evidence exists.
+test("claim API refuses ownership when no worker is execution-ready", async () => {
   const taskId = await createTodo("amux-api-lifecycle-gate");
   const worker = "codex-evidence";
   const secret = makeAmuxSyncSecret();
@@ -2034,9 +2376,8 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
   try {
     /*
-     * This test targets the execution lifecycle gate, not routing evidence.
-     * Build the exact server-owned routing evidence first so authoritative
-     * routing validation succeeds and the request reaches execution_ready.
+     * An unavailable runtime remains a demand preference, not a selected
+     * owner; the claim must refuse before creating any ownership evidence.
      */
     const snapshot = await buildAmuxRoutingSnapshot(taskId, 0);
 
@@ -2048,7 +2389,9 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     const routing = scoreAmuxWorkers(snapshot.task, snapshot.candidates);
 
-    assert.equal(routing.selected_worker, worker);
+    assert.equal(routing.preferred_worker, worker);
+    assert.equal(routing.selected_worker, null);
+    assert.equal(snapshot.execution_ready, false);
 
     const evidence = {
       scheduler: signals(),
@@ -2088,7 +2431,7 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     assert.deepEqual(body, {
       claimed: false,
-      reason: "execution_lifecycle_unavailable",
+      reason: "no_authoritative_worker",
     });
 
     const task = await prisma.amuxWorkItem.findUniqueOrThrow({
@@ -2116,7 +2459,7 @@ test("claim API refuses ownership before execution lifecycle is ready", async ()
 
     assert.equal(refusalAudits.length, 1);
     assert.deepEqual(refusalAudits[0]?.metadata, {
-      reason: "execution_lifecycle_unavailable",
+      reason: "no_authoritative_worker",
       worker,
       expected_revision: 0,
       measured: true,
@@ -3485,7 +3828,12 @@ test("execution-off worker and owned routes cannot touch control state", async (
   }
 });
 
-test("owned queue exposes only minimal runnable owner-assigned Todo metadata", async () => {
+// The owned queue keeps the seven keys a WSL bridge built from main before the
+// develop AMUX port requires, during the compatibility window; that bridge
+// halts on a body without them (docs/ops/amux/wsl-execution-bridge.md, "Wire
+// compatibility"). description and claimed_at are Options there and are not
+// sent. The key list is the shared fixture the Rust client parses.
+test("owned queue exposes only runnable owner-assigned Todo work in the compatibility shape", async () => {
   const ownedId = await createTodo("amux-owned-queue");
   const unownedId = await createTodo("amux-unowned-queue");
   const worker = `amux-owned-${randomUUID()}`;
@@ -3528,8 +3876,12 @@ test("owned queue exposes only minimal runnable owner-assigned Todo metadata", a
 
     const rows = (await response.json()) as Array<{
       id: string;
+      title: string;
+      kind: string;
+      priority: string;
       owner: string;
       revision: number;
+      created_at: string;
     }>;
 
     const owned = rows.find((row) => row.id === ownedId);
@@ -3537,7 +3889,17 @@ test("owned queue exposes only minimal runnable owner-assigned Todo metadata", a
     assert.ok(owned);
     assert.equal(owned.owner, worker);
     assert.equal(owned.revision, 4);
-    assert.deepEqual(Object.keys(owned).sort(), ["id", "owner", "revision"]);
+    assert.equal(owned.kind, "code");
+    assert.equal(owned.priority, "p1");
+    // The stored description never reaches the wire.
+    assert.doesNotMatch(
+      JSON.stringify(rows),
+      /Delivery body for the selected worker/,
+    );
+    assert.deepEqual(
+      Object.keys(owned).sort(),
+      Object.keys(queueWireCompat.owned_server).sort(),
+    );
 
     assert.equal(
       rows.some((row) => row.id === unownedId),

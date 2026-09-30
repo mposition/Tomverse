@@ -37,3 +37,17 @@ export const prisma =
     });
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+/** Connection counts of this process's pg pool. No connection string, no host. */
+export type PrismaPoolUsage = { total: number; idle: number; waiting: number };
+
+/**
+ * For diagnostics when a transaction could not get a connection (AMUX logs it
+ * with a busy answer). In development a hot reload can leave `prisma` on an
+ * earlier module's pool, so these counts are only meaningful in production.
+ */
+export const prismaPoolUsage = (): PrismaPoolUsage => ({
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+});

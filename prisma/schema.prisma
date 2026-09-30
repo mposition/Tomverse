@@ -8044,6 +8044,78 @@ model AmuxCommitDeadline {
   operation String
 }
 
+/// One admitted orchestrator write call: a claim, a recover or an automatic
+/// promotion tick (orchestration policy version 20, section 4). Committed in
+/// its own short transaction before the call is processed, so a write whose
+/// outcome the orchestrator lost is still found after its process is gone.
+///
+/// `admittedAt` is the database clock of the admission transaction and
+/// `deadlineAt` that clock plus the route's budget; the trigger
+/// `amux_orchestrator_write_guard` re-anchors both on clock_timestamp()
+/// whatever the writer sent. `ackedAt` is written once, by the orchestrator's
+/// acknowledgement of a known answer. `resolvedAt` and `resolution` are written
+/// once, together: `no_commit` by the resolver once the deadline plus five
+/// seconds has passed with no receipt, `human_confirmed` when a person clears
+/// the halt that names this request. A row that is neither acknowledged nor
+/// resolved is never deleted. The functions and triggers exist only in
+/// migration 20260930120000_amux_orchestrator_halt; `prisma db push` creates
+/// none of them. Every write goes through lib/amux/orchestratorHaltStore.ts.
+model AmuxOrchestratorWrite {
+  requestId  String    @id
+  instanceId String
+  callKind   String
+  admittedAt DateTime  @db.Timestamptz(3)
+  deadlineAt DateTime  @db.Timestamptz(3)
+  ackedAt    DateTime? @db.Timestamptz(3)
+  resolvedAt DateTime? @db.Timestamptz(3)
+  resolution String?
+
+  receipts AmuxOrchestratorWriteReceipt[]
+
+  @@index([ackedAt, resolvedAt, deadlineAt])
+}
+
+/// A committed state change of one admitted write, written in the same
+/// transaction as the change: the kind of row it touched, that row's id (null
+/// for the quota observation sweep, which deletes a batch) and how many rows.
+/// A rolled-back write leaves none. No title, brief or body. The trigger
+/// refuses a receipt for an admission that is already acknowledged or
+/// resolved, and refuses every update.
+model AmuxOrchestratorWriteReceipt {
+  id          String   @id
+  requestId   String
+  targetKind  String
+  targetId    String?
+  rowCount    Int
+  committedAt DateTime @db.Timestamptz(3)
+
+  write AmuxOrchestratorWrite @relation(fields: [requestId], references: [requestId], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([requestId])
+}
+
+/// One orchestrator halt (orchestration policy version 20, section 5). The
+/// orchestrator opens it through `POST /api/internal/amux/orchestrator/halt`;
+/// only a person clears it, from the Admin console, with the owner role and a
+/// recent step-up. `haltKey` is the request id for a reason that has one and
+/// an orchestrator-made UUID otherwise. The trigger writes the three clear
+/// columns once, together, and refuses every other update and every delete.
+/// `clearedByUserId` is the administrator's id and intentionally has no User
+/// foreign key, like the other AMUX operator evidence.
+model AmuxOrchestratorHalt {
+  id              String    @id
+  haltKey         String    @unique
+  reasonCode      String
+  requestId       String?
+  openedAt        DateTime  @db.Timestamptz(3)
+  clearedAt       DateTime? @db.Timestamptz(3)
+  clearedByUserId String?
+  clearAuditLogId String?   @unique
+
+  @@index([clearedAt, openedAt])
+  @@index([requestId])
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the

@@ -80,6 +80,7 @@ export function AmuxLocalIntakePanel() {
 
   const refusedForStepUp =
     result?.code === "ADMIN_REAUTHENTICATION_REQUIRED" || result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  const registerReady = (result?.cards ?? []).some((card) => card.applyPermitted === true);
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4" data-testid="amux-local-intake-panel">
@@ -118,7 +119,9 @@ export function AmuxLocalIntakePanel() {
           {messages.preview}
         </button>
       </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.registerDisabled}</p>
+      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+        {registerReady ? messages.registerPermitted : messages.registerDisabled}
+      </p>
       {refusedForStepUp ? (
         <a className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100" href={STEP_UP_HREF}>
           {messages.renewSignIn}

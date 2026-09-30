@@ -10,9 +10,9 @@ import { previewLocalIntakeCard } from "@/lib/amux/localIntakeRegistrationCore";
 import { prisma } from "@/lib/prisma";
 
 // Real PostgreSQL evidence for one local intake card.
-// applyLocalIntakeRegistration checks the shipped latch and does not reach
-// this body while the latch is false. A missing TEST_DATABASE_URL means this
-// file was not executed, not that it passed.
+// This test calls commit directly. applyLocalIntakeRegistration also requires
+// TOMVERSE_AMUX_INTAKE_LOCAL_APPLY=enabled, which this process does not set.
+// A missing TEST_DATABASE_URL means this file was not executed, not that it passed.
 
 const secret = `local-intake-hmac-${randomUUID()}-extra`;
 const actorUserId = `amux-local-intake-${randomUUID()}`;

@@ -2,16 +2,41 @@ import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaPoolUsage, type PrismaPoolUsage } from "@/lib/prisma";
 import {
   AMUX_COMMIT_DEADLINE_TRIGGER,
   isAmuxLateCommitError,
 } from "@/lib/amux/commitDeadlineCore";
+import {
+  amuxTransactionNotStartedCode,
+  amuxTransientDatabaseCode,
+  isAmuxDbBusyCode,
+} from "@/lib/amux/readFailureCore";
+import type {
+  AmuxOrchestratorCallKind,
+  AmuxOrchestratorReceiptTargetKind,
+} from "@/lib/amux/orchestratorHaltCore";
+import {
+  amuxOrchestratorReceiptInsertSql,
+  insertAmuxOrchestratorAdmission,
+  lockAmuxOrchestratorAdmission,
+  type AmuxOrchestratorReceipt,
+} from "@/lib/amux/orchestratorHaltStore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;
-export const AMUX_DB_MAX_WAIT_MS = 250;
+/**
+ * The longest a transaction waits for a pool connection and its BEGIN
+ * (Prisma's `maxWait`). Inside a route it is further capped by
+ * `amuxDbConnectionWaitMs`: a transaction waits only out of the time its route
+ * has left beyond the transaction's own budget, so a longer wait never makes a
+ * route answer later than its budget. 250 ms (until 2026-09-30) failed most
+ * orchestrator runs against a 10-connection pool shared with web traffic.
+ */
+export const AMUX_DB_MAX_WAIT_MS = 2_000;
+/** Prisma's interactive-transaction timeout is the budget plus this. */
+export const AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS = 300;
 // This is an application-level Prisma API-call ceiling, not a PostgreSQL
 // statement counter. A single Prisma call can emit more than one SQL statement.
 // PostgreSQL enforces the statement and idle-in-transaction timeouts below,
@@ -38,7 +63,29 @@ export type AmuxDbBoundary = {
   operation: string;
   prismaCallCeiling: number;
   isolation: "read" | "mutation";
+  /**
+   * `none` for a mutation that only records a refusal audit and changes no
+   * state (orchestration policy version 20, section 4): inside an admitted
+   * orchestrator write it neither locks the admission nor writes a receipt.
+   * Every other mutation of an admitted write locks the admission row before
+   * its work, which costs it `AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS` more.
+   */
+  admissionLock?: "none";
 };
+
+/**
+ * The one extra Prisma call a mutation of an admitted orchestrator write makes:
+ * its admission row lock (lib/amux/orchestratorHaltStore.ts). Its receipts ride
+ * in the commit fence and cost nothing more. Only such a mutation is widened,
+ * so a route called without a request id is budgeted exactly as before.
+ */
+export const AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS = 1;
+
+/**
+ * The admission transaction's own budget: a statement timeout setting and one
+ * insert, each at most a statement and an idle timeout, and the commit reserve.
+ */
+export const AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS = 800;
 
 export const AMUX_DB_BOUNDARIES = {
   claimRouteClock: {
@@ -79,10 +126,13 @@ export const AMUX_DB_BOUNDARIES = {
   },
   // 18: the one-open-card-per-worker count added a read to the success path.
   claim: { operation: "claim", prismaCallCeiling: 18, isolation: "mutation" },
+  // A refusal audit changes no ownership or status, so an admitted claim's
+  // refusal takes no admission lock and leaves no receipt (policy version 20).
   claimRefusal: {
     operation: "claim_refusal",
     prismaCallCeiling: 6,
     isolation: "mutation",
+    admissionLock: "none",
   },
   ownedQueueRead: {
     operation: "owned_queue_read",
@@ -154,6 +204,37 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // Policy version 20. setup + admission lock + receipt count + ackedAt + fence
+  orchestratorAck: {
+    operation: "orchestrator_ack",
+    prismaCallCeiling: 5,
+    isolation: "mutation",
+  },
+  // setup + candidate list + fence
+  orchestratorResolveCandidates: {
+    operation: "orchestrator_resolve_candidates",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // setup + admission lock + receipt count + system audit (4) + update + fence
+  orchestratorResolve: {
+    operation: "orchestrator_resolve",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
+  // setup + open halts + counts + people's list + requested keys + fence
+  orchestratorHaltStateRead: {
+    operation: "orchestrator_halt_state_read",
+    prismaCallCeiling: 6,
+    isolation: "read",
+  },
+  // setup + key lock + existing + admission call kind + system audit (4) +
+  // insert + fence
+  orchestratorHaltOpen: {
+    operation: "orchestrator_halt_open",
+    prismaCallCeiling: 10,
+    isolation: "mutation",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**
@@ -166,15 +247,45 @@ export const AMUX_DB_BOUNDARIES = {
  * - `AMUX_DB_OUTCOME_UNKNOWN`: a mutation transaction failed after its callback
  *   returned, for any reason but AX001. The COMMIT may or may not have taken
  *   effect; the caller reads back and never retries blindly.
+ * - `AMUX_DB_READ_BUSY`: a read transaction failed because the database could
+ *   not take it just then (lib/amux/readFailureCore.ts), inside a route that
+ *   had not started a mutation. Nothing was written; the caller may ask again.
+ * - `AMUX_DB_NOT_STARTED`: a transaction, read or mutation, could not get its
+ *   connection or start within its connection wait (P2024/P2028 before its
+ *   callback ran), inside a route that had not started a mutation. None of its
+ *   SQL ran, so nothing was written; the caller may ask again. An orchestrator
+ *   write whose admission could not be committed is reported the same way
+ *   (policy version 20, section 4): the write did not start.
+ * - `AMUX_DB_ADMISSION_CLOSED`: a state-changing transaction of an admitted
+ *   orchestrator write found its admission row missing, acknowledged or
+ *   resolved under the row lock, and rolled back before changing anything
+ *   (section 4). The request is answered as an unknown outcome, never as one
+ *   of the three answers that say nothing was committed.
  */
 export type AmuxDbBoundaryErrorCode =
   | "AMUX_DB_DEADLINE_EXCEEDED"
   | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
   | "AMUX_DB_COMMIT_CHECK_MISSING"
-  | "AMUX_DB_OUTCOME_UNKNOWN";
+  | "AMUX_DB_OUTCOME_UNKNOWN"
+  | "AMUX_DB_READ_BUSY"
+  | "AMUX_DB_NOT_STARTED"
+  | "AMUX_DB_ADMISSION_CLOSED";
+
+/** The two codes answered 503 `amux_database_busy`: nothing was written. */
+export const isAmuxDbBusyError = (
+  error: unknown,
+): error is AmuxDbBoundaryError =>
+  error instanceof AmuxDbBoundaryError && isAmuxDbBusyCode(error.code);
 
 export class AmuxDbBoundaryError extends Error {
   readonly code: AmuxDbBoundaryErrorCode;
+  /**
+   * Diagnostics on a busy failure only, for the operator's log line: the
+   * connection wait this transaction was given and the pool's connection
+   * counts when it failed. Never a connection string.
+   */
+  connectionWaitMs?: number;
+  poolUsage?: PrismaPoolUsage | null;
 
   constructor(
     code: AmuxDbBoundaryErrorCode,
@@ -191,13 +302,218 @@ type AmuxRouteDeadline = {
   localDeadlineMs: number;
   maxMs: number;
   databaseDeadlineAt?: Date;
+  /**
+   * Set when the first transaction of this route that can write has started:
+   * a mutation boundary's callback began, or a transaction anchored the route
+   * deadline itself (`anchorAmuxRouteDeadline`). Once set, a later failure of
+   * the route can no longer say that nothing was written. A mutation that
+   * never got its connection does not set it: none of its SQL ran.
+   */
+  mutationStarted: boolean;
+  /**
+   * Set by `admitAmuxOrchestratorWrite` once the route's admission has
+   * committed (orchestration policy version 20, section 4). Every
+   * state-changing transaction of the route then locks that row and writes
+   * its receipts in its fence. `receiptCommits` counts the transactions whose
+   * receipts reached COMMIT and were not refused by the database (SQLSTATE
+   * AX001): after the first, the route never answers one of the three 503
+   * reasons that say nothing was committed.
+   */
+  orchestratorWrite?: { requestId: string; receiptCommits: number };
 };
 const amuxRouteDeadline = new AsyncLocalStorage<AmuxRouteDeadline>();
+
+/**
+ * Section 1: whether a receipt of this route's admitted request may have
+ * committed. The internal route reads it before answering 503
+ * `amux_database_busy`, `amux_database_deadline_exceeded` or
+ * `amux_database_call_ceiling_exceeded`, and answers `amux_outcome_unknown`
+ * instead when it is true.
+ */
+export const amuxRouteOrchestratorReceiptsMayHaveCommitted = (): boolean =>
+  (amuxRouteDeadline.getStore()?.orchestratorWrite?.receiptCommits ?? 0) > 0;
+
+/**
+ * Records that a transaction carrying receipts of the route's admitted request
+ * is about to COMMIT. Returns the undo for the one failure that proves the
+ * COMMIT did not happen, the commit deadline trigger's AX001; every other
+ * COMMIT failure leaves the mark, because the receipts may have committed.
+ * Outside an admitted route it records nothing.
+ */
+export const markAmuxRouteOrchestratorReceiptsCommitting = (): (() => void) => {
+  const orchestratorWrite = amuxRouteDeadline.getStore()?.orchestratorWrite;
+  if (!orchestratorWrite) return () => {};
+  orchestratorWrite.receiptCommits += 1;
+  let undone = false;
+  return () => {
+    if (undone) return;
+    undone = true;
+    orchestratorWrite.receiptCommits -= 1;
+  };
+};
+
+/** The admitted request id of this route, or null. */
+export const amuxRouteOrchestratorRequestId = (): string | null =>
+  amuxRouteDeadline.getStore()?.orchestratorWrite?.requestId ?? null;
+
+/**
+ * Section 4: locks the admission row of this route's admitted request, for a
+ * transaction that is about to change state, and refuses before any change
+ * when the row is missing, acknowledged or resolved. Returns false outside an
+ * admitted route, where nothing is locked.
+ */
+export async function lockAmuxRouteOrchestratorAdmission(
+  tx: Prisma.TransactionClient,
+  operation: string,
+): Promise<boolean> {
+  const requestId = amuxRouteOrchestratorRequestId();
+  if (requestId === null) return false;
+  const admission = await lockAmuxOrchestratorAdmission(tx, requestId);
+  if (!admission || admission.acked || admission.resolved) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "orchestrator_admission_closed",
+        operation,
+        admission: admission === null ? "missing" : admission.resolved ? "resolved" : "acked",
+      }),
+    );
+    throw new AmuxDbBoundaryError("AMUX_DB_ADMISSION_CLOSED", operation);
+  }
+  return true;
+}
+
+/**
+ * Section 4: the admission of one orchestrator write, as the first transaction
+ * of its route, committed on its own before the route does anything else. The
+ * route's database deadline is anchored on the admission's `deadlineAt` -- the
+ * admission clock plus this route's budget -- so every later commit fence of
+ * the route is held to a deadline no later than the one the resolver waits
+ * out. A second admission of the same request id is refused (`admitted:
+ * false`). An admission that cannot be committed, for any reason, is reported
+ * as a transaction that did not start: the route answers 503
+ * `amux_database_busy` and starts no write.
+ */
+export async function admitAmuxOrchestratorWrite(input: {
+  requestId: string;
+  instanceId: string;
+  callKind: AmuxOrchestratorCallKind;
+}): Promise<{ admitted: boolean }> {
+  const routeDeadline = amuxRouteDeadline.getStore();
+  if (
+    !routeDeadline ||
+    routeDeadline.databaseDeadlineAt !== undefined ||
+    routeDeadline.mutationStarted ||
+    routeDeadline.orchestratorWrite !== undefined
+  ) {
+    throw new Error("An orchestrator admission must be its route's first transaction");
+  }
+  const routeRemainingMs = routeDeadline.localDeadlineMs - Date.now();
+  let admitted: Awaited<ReturnType<typeof insertAmuxOrchestratorAdmission>>;
+  try {
+    if (routeRemainingMs < AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS) {
+      throw new Error("route budget exhausted before admission");
+    }
+    admitted = await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(AMUX_DB_STATEMENT_TIMEOUT_MS)}, true)`;
+        return insertAmuxOrchestratorAdmission(tx, {
+          requestId: input.requestId,
+          instanceId: input.instanceId,
+          callKind: input.callKind,
+          budgetMs: routeDeadline.maxMs,
+        });
+      },
+      {
+        maxWait: amuxDbConnectionWaitMs(
+          routeRemainingMs,
+          AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS,
+        ),
+        timeout: AMUX_ORCHESTRATOR_ADMISSION_BUDGET_MS,
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      },
+    );
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "orchestrator_admission_failed",
+        call_kind: input.callKind,
+        error_code:
+          amuxTransactionNotStartedCode(error) ?? amuxTransientDatabaseCode(error) ?? "other",
+      }),
+    );
+    throw new AmuxDbBoundaryError("AMUX_DB_NOT_STARTED", "orchestrator_admission", {
+      cause: error,
+    });
+  }
+  if (!admitted.admitted) return { admitted: false };
+  routeDeadline.databaseDeadlineAt = admitted.deadlineAt;
+  routeDeadline.orchestratorWrite = { requestId: input.requestId, receiptCommits: 0 };
+  return { admitted: true };
+}
+
+export type { AmuxOrchestratorReceipt };
+
+/** Records one receipt of the transaction it is given to. */
+export type AmuxOrchestratorReceiptRecorder = (
+  targetKind: AmuxOrchestratorReceiptTargetKind,
+  targetId: string | null,
+  rowCount: number,
+) => void;
+
+/**
+ * What the route had done when one of its transactions failed.
+ *
+ * - `outside_route`: no `withAmuxRouteBudget` scope, so nothing is known about
+ *   earlier writes of the caller (an in-app adapter, a script).
+ * - `no_mutation_started`: inside a route that has not started a transaction
+ *   that can write.
+ * - `mutation_started`: inside a route that has.
+ */
+export type AmuxRouteWriteState =
+  | "outside_route"
+  | "no_mutation_started"
+  | "mutation_started";
+
+const amuxRouteWriteState = (
+  routeDeadline: AmuxRouteDeadline | undefined,
+): AmuxRouteWriteState =>
+  routeDeadline === undefined
+    ? "outside_route"
+    : routeDeadline.mutationStarted
+      ? "mutation_started"
+      : "no_mutation_started";
 
 export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
   boundary.prismaCallCeiling * AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
+
+/**
+ * Prisma's `maxWait` for one transaction.
+ *
+ * Outside a route it is `AMUX_DB_MAX_WAIT_MS`. Inside one it is also capped by
+ * what the route has left beyond this transaction's budget, so the
+ * transaction, if it starts at all, starts no later than its route's deadline
+ * less its budget: the wait comes out of the route's slack and never extends
+ * the route. The route budgets and the Rust client deadlines sized on them
+ * therefore hold whatever this maximum is. At least 1 ms (Prisma refuses 0);
+ * the coarse admission has already refused a transaction without its budget.
+ */
+export const amuxDbConnectionWaitMs = (
+  routeRemainingMs: number | null,
+  transactionBudgetMs: number,
+): number =>
+  routeRemainingMs === null
+    ? AMUX_DB_MAX_WAIT_MS
+    : Math.max(
+        1,
+        Math.min(
+          AMUX_DB_MAX_WAIT_MS,
+          Math.floor(routeRemainingMs - transactionBudgetMs),
+        ),
+      );
 
 /**
  * Coarse admission for a transaction whose application per-transaction
@@ -241,6 +557,9 @@ export async function anchorAmuxRouteDeadline(
 ): Promise<Date | null> {
   const routeDeadline = amuxRouteDeadline.getStore();
   if (!routeDeadline) return null;
+  // This transaction records a commit deadline, so it can write: a read of
+  // the same route that fails after this point cannot say nothing was written.
+  routeDeadline.mutationStarted = true;
   const rows = await tx.$queryRaw<Array<{ dbNowEpochMs: bigint }>>`
     SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowEpochMs"
   `;
@@ -266,8 +585,21 @@ export async function fenceAmuxRouteDeadline(
   tx: Prisma.TransactionClient,
   deadlineAt: Date | null,
   operation: string,
+  receipts: readonly AmuxOrchestratorReceipt[] = [],
 ): Promise<void> {
-  if (deadlineAt === null) return;
+  const requestId = amuxRouteOrchestratorRequestId();
+  if (deadlineAt === null) {
+    // Outside a route there is no admitted request, so there is nothing to
+    // record a receipt against.
+    if (requestId !== null && receipts.length > 0) {
+      throw new Error("An admitted orchestrator write has no route deadline");
+    }
+    return;
+  }
+  if (requestId !== null && receipts.length > 0) {
+    await fenceAmuxRouteDeadlineWithReceipts(tx, deadlineAt, operation, requestId, receipts);
+    return;
+  }
   // One statement: record the commit deadline for the COMMIT-time trigger,
   // confirm that trigger will fire, and compare the clock with the same
   // deadline. See `withAmuxDbBoundary` for why each clause is written so.
@@ -307,6 +639,57 @@ export async function fenceAmuxRouteDeadline(
   requireAmuxCommitFence(fence, operation);
 }
 
+/**
+ * The same fence with the receipts of an admitted orchestrator write (policy
+ * version 20, section 4) as one more data-modifying CTE of the same statement,
+ * so they commit exactly when the rest of the transaction does. A separate
+ * text rather than an empty fragment in the one above, so a transaction
+ * without receipts sends exactly the statement it sent before.
+ */
+async function fenceAmuxRouteDeadlineWithReceipts(
+  tx: Prisma.TransactionClient,
+  deadlineAt: Date,
+  operation: string,
+  requestId: string,
+  receipts: readonly AmuxOrchestratorReceipt[],
+): Promise<void> {
+  const receiptSql = amuxOrchestratorReceiptInsertSql(requestId, receipts);
+  const fence = await tx.$queryRaw<AmuxCommitFenceRow[]>`
+    WITH commit_deadline AS MATERIALIZED (
+      SELECT date_trunc(
+        'milliseconds',
+        ${deadlineAt.toISOString()}::timestamptz -
+          ${AMUX_DB_COMMIT_RESERVE_MS} * INTERVAL '1 millisecond'
+      ) AS "deadline"
+    ), marker AS (
+      INSERT INTO "AmuxCommitDeadline" ("txid", "deadline", "operation")
+      SELECT txid_current(), "deadline", ${operation}
+      FROM commit_deadline
+      RETURNING "deadline"
+    ), commit_check AS MATERIALIZED (
+      SELECT (
+        EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_trigger t
+          JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+          WHERE c.oid = to_regclass('"AmuxCommitDeadline"')
+            AND t.tgname = ${AMUX_COMMIT_DEADLINE_TRIGGER}
+            AND t.tgdeferrable
+            AND t.tginitdeferred
+            AND t.tgenabled = 'O'
+            AND (t.tgtype::integer & 4) <> 0
+        )
+        AND current_setting('session_replication_role') <> 'replica'
+      ) AS "installed"
+    )${receiptSql}
+    SELECT
+      clock_timestamp() < marker."deadline" AS "withinDeadline",
+      commit_check."installed" AS "commitCheckInstalled"
+    FROM marker CROSS JOIN commit_check
+  `;
+  requireAmuxCommitFence(fence, operation);
+}
+
 type AmuxCommitFenceRow = {
   withinDeadline: boolean | null;
   commitCheckInstalled: boolean | null;
@@ -337,11 +720,31 @@ const requireAmuxCommitFence = (
   }
 };
 
-/** Where a bounded transaction was when it failed. */
-export type AmuxDbBoundaryPhase = "running" | "committing";
+/**
+ * Where a bounded transaction was when it failed.
+ *
+ * - `starting`: its callback has not begun. Prisma was still getting a pool
+ *   connection and sending BEGIN within `maxWait`; a transaction that starts
+ *   late is rolled back by Prisma without running the callback. None of the
+ *   boundary's SQL has run.
+ * - `running`: the callback began and has not returned.
+ * - `committing`: the callback returned; only the COMMIT is left.
+ */
+export type AmuxDbBoundaryPhase = "starting" | "running" | "committing";
 
 /**
  * What a failed bounded transaction is reported as.
+ *
+ * | phase      | isolation | error                         | route wrote before | reported as              |
+ * |------------|-----------|-------------------------------|--------------------|--------------------------|
+ * | any        | any       | AX001                         | any                | AMUX_DB_DEADLINE_EXCEEDED |
+ * | committing | mutation  | anything else                 | any                | AMUX_DB_OUTCOME_UNKNOWN  |
+ * | starting   | any       | P2024, P2028                  | no                 | AMUX_DB_NOT_STARTED      |
+ * | any        | read      | transient (readFailureCore)   | no                 | AMUX_DB_READ_BUSY        |
+ * | otherwise  |           |                               |                    | the error, unchanged     |
+ *
+ * "Route wrote before" is `mutation_started`; outside a route it counts as yes,
+ * because nothing is known about what the caller did before.
  *
  * SQLSTATE AX001 is read first, before the phase: it arrives while committing,
  * but it is the commit deadline trigger's refusal and PostgreSQL has rolled the
@@ -352,13 +755,31 @@ export type AmuxDbBoundaryPhase = "running" | "committing";
  * lands while the commit record is being flushed can reach the client after
  * the commit is durable, so it is not proof of a rollback. Only a 57014 raised
  * while the callback was running stays a known rollback, and it is passed on
- * unchanged, as is every failure before COMMIT. A read transaction records
- * nothing, so a failure of its COMMIT is passed on unchanged too.
+ * unchanged, as is every failure before COMMIT.
+ *
+ * A read transaction records nothing, so it never has an unknown outcome. The
+ * one thing decided for a read is whether the database was merely busy -- a
+ * pool, transaction-start, statement-timeout or connection failure
+ * (lib/amux/readFailureCore.ts) -- and that is reported as
+ * `AMUX_DB_READ_BUSY` only when the route it ran in had not started a
+ * transaction that can write: then nothing at all was written and the caller
+ * may ask again. After such a transaction, or outside a route, and for every
+ * other read failure, the error is passed on unchanged, and so answered as it
+ * was before. This is the only place the read/mutation decision is made; it
+ * reads the boundary's `isolation`, never the route's name.
+ *
+ * A transaction that never started wrote nothing either, mutation or not: a
+ * P2024 or P2028 while `starting` is the pool or `maxWait` refusing it before
+ * its callback ran. The same P2028 once the callback has begun is the
+ * interactive transaction's own timeout, and keeps its old answer: passed on
+ * while running (a known rollback, still answered as an unknown outcome by the
+ * internal route) and an unknown outcome while committing.
  */
 export const amuxDbBoundaryFailure = (
   boundary: AmuxDbBoundary,
   phase: AmuxDbBoundaryPhase,
   error: unknown,
+  routeWrites: AmuxRouteWriteState,
 ): unknown => {
   if (isAmuxLateCommitError(error)) {
     return new AmuxDbBoundaryError(
@@ -374,14 +795,44 @@ export const amuxDbBoundaryFailure = (
       { cause: error },
     );
   }
+  if (
+    routeWrites !== "no_mutation_started" ||
+    error instanceof AmuxDbBoundaryError
+  ) {
+    return error;
+  }
+  if (phase === "starting" && amuxTransactionNotStartedCode(error) !== null) {
+    return new AmuxDbBoundaryError("AMUX_DB_NOT_STARTED", boundary.operation, {
+      cause: error,
+    });
+  }
+  if (
+    boundary.isolation === "read" &&
+    amuxTransientDatabaseCode(error) !== null
+  ) {
+    return new AmuxDbBoundaryError("AMUX_DB_READ_BUSY", boundary.operation, {
+      cause: error,
+    });
+  }
   return error;
+};
+
+const safePoolUsage = (): PrismaPoolUsage | null => {
+  try {
+    return prismaPoolUsage();
+  } catch {
+    return null;
+  }
 };
 
 export const withAmuxRouteBudget = <T>(
   work: () => Promise<T>,
   maxMs = AMUX_ROUTE_BUDGET_MS,
 ): Promise<T> =>
-  amuxRouteDeadline.run({ localDeadlineMs: Date.now() + maxMs, maxMs }, work);
+  amuxRouteDeadline.run(
+    { localDeadlineMs: Date.now() + maxMs, maxMs, mutationStarted: false },
+    work,
+  );
 
 const PRISMA_MODEL_CALL_METHODS = new Set([
   "aggregate",
@@ -538,6 +989,13 @@ export const amuxBoundaryWithAttachment = (
  * callback returned is `AMUX_DB_OUTCOME_UNKNOWN` and stays unknown until
  * authoritative read-back. A read transaction records nothing, so it gets
  * no marker and keeps its plain fence.
+ *
+ * Inside an admitted orchestrator write (policy version 20, section 4) a
+ * mutation locks the admission row right after setup and before its work,
+ * and refuses with nothing changed when the admission is closed. The receipts
+ * its work records with `recordReceipt` are inserted by its commit fence, so
+ * they commit exactly when its changes do. A refusal-only boundary
+ * (`admissionLock: "none"`) does neither and may record no receipt.
  */
 export async function withAmuxDbBoundary<T>(
   boundary: AmuxDbBoundary,
@@ -549,6 +1007,11 @@ export async function withAmuxDbBoundary<T>(
       requireLeaseAt: (leaseExpiresAt: Date) => void;
       /** The same bounded client as `tx`, typed for an `AmuxAttachment`. */
       attachedTransaction: AmuxAttachedTransaction;
+      /**
+       * Records a state change this transaction makes, for the receipts of an
+       * admitted orchestrator write. Outside one it records nothing.
+       */
+      recordReceipt: AmuxOrchestratorReceiptRecorder;
     },
   ) => Promise<T>,
 ): Promise<T> {
@@ -560,20 +1023,48 @@ export async function withAmuxDbBoundary<T>(
   }
 
   const routeDeadline = amuxRouteDeadline.getStore();
-  const transactionBudgetMs = amuxDbTransactionBudgetMs(boundary);
-  if (
-    routeDeadline !== undefined &&
-    routeDeadline.localDeadlineMs - Date.now() < transactionBudgetMs
-  ) {
+  const orchestratorWrite = routeDeadline?.orchestratorWrite;
+  const locksAdmission =
+    orchestratorWrite !== undefined &&
+    boundary.isolation === "mutation" &&
+    boundary.admissionLock !== "none";
+  // The admission lock is one more call, so it widens this transaction's
+  // budget; a route with no admission keeps the declared one.
+  const effectiveBoundary: AmuxDbBoundary = locksAdmission
+    ? {
+        ...boundary,
+        prismaCallCeiling:
+          boundary.prismaCallCeiling + AMUX_ORCHESTRATOR_ADMISSION_LOCK_CALLS,
+      }
+    : boundary;
+  const transactionBudgetMs = amuxDbTransactionBudgetMs(effectiveBoundary);
+  const routeRemainingMs =
+    routeDeadline === undefined
+      ? null
+      : routeDeadline.localDeadlineMs - Date.now();
+  if (routeRemainingMs !== null && routeRemainingMs < transactionBudgetMs) {
     throw new AmuxDbBoundaryError(
       "AMUX_DB_DEADLINE_EXCEEDED",
       boundary.operation,
     );
   }
+  const connectionWaitMs = amuxDbConnectionWaitMs(
+    routeRemainingMs,
+    transactionBudgetMs,
+  );
 
-  let phase: AmuxDbBoundaryPhase = "running";
+  let forgetReceiptCommit: () => void = () => {};
+  let phase: AmuxDbBoundaryPhase = "starting";
   const transaction = prisma.$transaction(
     async (rawTx) => {
+      // Prisma runs this callback only once the connection is held and BEGIN
+      // has been sent. Until this line nothing of this boundary has run.
+      phase = "running";
+      // From here on this route may have written, whatever becomes of this
+      // transaction.
+      if (boundary.isolation === "mutation" && routeDeadline !== undefined) {
+        routeDeadline.mutationStarted = true;
+      }
       const setup = await rawTx.$queryRaw<
         Array<{ dbNowEpochMs: bigint; deadlineAtEpochMs: bigint }>
       >`
@@ -650,7 +1141,11 @@ export async function withAmuxDbBoundary<T>(
         }
       }
 
-      const tx = boundedTransactionClient(rawTx, boundary, 1);
+      const tx = boundedTransactionClient(rawTx, effectiveBoundary, 1);
+      if (locksAdmission) {
+        await lockAmuxRouteOrchestratorAdmission(tx, boundary.operation);
+      }
+      const receipts: AmuxOrchestratorReceipt[] = [];
       let leaseDeadlineAt: Date | null = null;
       const result = await work(tx, {
         dbNow,
@@ -663,6 +1158,18 @@ export async function withAmuxDbBoundary<T>(
           ) {
             leaseDeadlineAt = leaseExpiresAt;
           }
+        },
+        recordReceipt(targetKind, targetId, rowCount) {
+          if (boundary.isolation === "read") {
+            throw new Error("A read boundary cannot record a state change");
+          }
+          if (orchestratorWrite === undefined) return;
+          if (!locksAdmission) {
+            throw new Error(
+              "A refusal-only boundary cannot record a state change of an admitted write",
+            );
+          }
+          receipts.push({ targetKind, targetId, rowCount });
         },
       });
       // Prisma DateTime values may be sent to PostgreSQL as naive timestamps.
@@ -703,6 +1210,17 @@ export async function withAmuxDbBoundary<T>(
         //   INSERT, enabled for an ordinary session. Without it nothing would
         //   look at D at COMMIT, so the transaction is refused.
         // The clock is compared with the stored D, the value the trigger reads.
+        // An admitted orchestrator write's receipts are a fourth effect of the
+        // same statement (lib/amux/orchestratorHaltStore.ts).
+        const receiptSql =
+          orchestratorWrite !== undefined && receipts.length > 0
+            ? amuxOrchestratorReceiptInsertSql(orchestratorWrite.requestId, receipts)
+            : Prisma.empty;
+        // From the fence on, the receipts may reach COMMIT. The catch below
+        // takes the mark back for every failure that proves they did not.
+        if (orchestratorWrite !== undefined && receipts.length > 0) {
+          forgetReceiptCommit = markAmuxRouteOrchestratorReceiptsCommitting();
+        }
         const fence = await tx.$queryRaw<AmuxCommitFenceRow[]>`
           WITH commit_deadline AS MATERIALIZED (
             SELECT date_trunc(
@@ -733,7 +1251,7 @@ export async function withAmuxDbBoundary<T>(
               )
               AND current_setting('session_replication_role') <> 'replica'
             ) AS "installed"
-          )
+          )${receiptSql}
           SELECT
             clock_timestamp() < marker."deadline" AS "withinDeadline",
             commit_check."installed" AS "commitCheckInstalled"
@@ -748,8 +1266,8 @@ export async function withAmuxDbBoundary<T>(
       return result;
     },
     {
-      maxWait: AMUX_DB_MAX_WAIT_MS,
-      timeout: transactionBudgetMs + 300,
+      maxWait: connectionWaitMs,
+      timeout: transactionBudgetMs + AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS,
       isolationLevel:
         boundary.isolation === "read"
           ? Prisma.TransactionIsolationLevel.RepeatableRead
@@ -757,6 +1275,26 @@ export async function withAmuxDbBoundary<T>(
     },
   );
   return transaction.catch((error: unknown): never => {
-    throw amuxDbBoundaryFailure(boundary, phase, error);
+    // The route's write state when this transaction failed, not when it began:
+    // a mutation of the same route that started meanwhile counts, this one
+    // included once its callback began.
+    const failure = amuxDbBoundaryFailure(
+      boundary,
+      phase,
+      error,
+      amuxRouteWriteState(routeDeadline),
+    );
+    // Receipts of a transaction that failed before COMMIT, or whose COMMIT the
+    // commit deadline trigger refused (AX001), were rolled back with
+    // everything else. Any other COMMIT failure may have committed them, so
+    // the mark stays and the route answers an unknown outcome.
+    if (phase !== "committing" || isAmuxLateCommitError(error)) {
+      forgetReceiptCommit();
+    }
+    if (isAmuxDbBusyError(failure)) {
+      failure.connectionWaitMs = connectionWaitMs;
+      failure.poolUsage = safePoolUsage();
+    }
+    throw failure;
   });
 }

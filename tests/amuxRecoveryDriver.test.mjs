@@ -16,29 +16,45 @@ const recoverRoutePath = new URL(
 );
 const telemetryPath = new URL("../lib/amux/telemetry.ts", import.meta.url);
 const boundaryPath = new URL("../lib/amux/dbBoundary.ts", import.meta.url);
+const executionPath = new URL("../lib/amux/execution.ts", import.meta.url);
 
 test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cadence", async () => {
-  const [scheduler, api, recoverRoute, telemetry, boundary] = await Promise.all(
-    [
+  const [scheduler, api, recoverRoute, telemetry, boundary, execution] =
+    await Promise.all([
       readFile(schedulerPath, "utf8"),
       readFile(apiPath, "utf8"),
       readFile(recoverRoutePath, "utf8"),
       readFile(telemetryPath, "utf8"),
       readFile(boundaryPath, "utf8"),
-    ],
-  );
+      readFile(executionPath, "utf8"),
+    ]);
 
   assert.match(
     scheduler,
     /const RECOVERY_INTERVAL: Duration = Duration::from_secs\(30\);/,
   );
-  assert.match(scheduler, /self\.api\.execution_recover\(\)\.await/);
+  // Orchestration policy version 20: a write call with its own request id.
+  assert.match(scheduler, /self\.api\.execution_recover\(ids\)\.await/);
+  assert.match(scheduler, /recovery: RECOVERY_INTERVAL,/);
   assert.match(
     scheduler,
-    /next_recovery = Instant::now\(\) \+ RECOVERY_INTERVAL/,
+    /next_recovery = Instant::now\(\) \+ self\.timing\.recovery/,
   );
   assert.match(api, /pub async fn execution_recover/);
   assert.match(api, /\/api\/internal\/amux\/execution\/recover/);
+  // The recovery client deadline outlasts the twelve-second route budget.
+  assert.match(
+    api,
+    /pub async fn execution_recover[\s\S]*?\.timeout\(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT\)/,
+  );
+  assert.match(
+    api,
+    /TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs\(15\)/,
+  );
+  assert.match(boundary, /AMUX_LIFECYCLE_ROUTE_BUDGET_MS = 12_000/);
+  assert.match(api, /pub more: Option<bool>/);
+  assert.match(scheduler, /more = outcome\.more\.unwrap_or\(false\)/);
+  assert.match(recoverRoute, /withAmuxRouteBudget/);
   assert.match(recoverRoute, /await sweepExpiredAmuxQuotaObservations\(\)/);
   assert.match(recoverRoute, /if \(!isAmuxExecutionApiEnabled\(\)\)/);
   assert.ok(
@@ -52,5 +68,12 @@ test("orchestrator drives the canonical AMUX recovery endpoint on a bounded cade
     /withAmuxDbBoundary\(\s*AMUX_DB_BOUNDARIES\.quotaObservationSweep/,
   );
   assert.match(telemetry, /LIMIT \$\{AMUX_QUOTA_SWEEP_BATCH_SIZE\}/);
+  assert.match(telemetry, /FOR UPDATE SKIP LOCKED/);
   assert.match(boundary, /quotaObservationSweep:[\s\S]*?prismaCallCeiling: 3/);
+  assert.match(execution, /AMUX_DB_BOUNDARIES\.executionStart/);
+  assert.match(execution, /AMUX_DB_BOUNDARIES\.executionHeartbeat/);
+  assert.match(execution, /AMUX_DB_BOUNDARIES\.executionSettle/);
+  // An expiry that also exhausts the attempt budget says so on the attempt
+  // and its escalation, as main recorded it (#1595).
+  assert.match(execution, /reason: recoveryReason/);
 });
