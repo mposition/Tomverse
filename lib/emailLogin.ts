@@ -527,7 +527,11 @@ async function completeVerifiedEmail(
 
   // A hold completes a sign-up and nothing else. If an account has appeared
   // at the address since, it is signed into by a fresh code, not by this row.
-  if (existing && viaHold) return { ok: false, reason: "invalid_or_expired" };
+  // The code did match, so the refusal is not counted toward the lockout.
+  if (existing && viaHold) {
+    await matched.settle();
+    return { ok: false, reason: "invalid_or_expired" };
+  }
 
   if (!(await spendAttempt(matched.attempt, now))) {
     return { ok: false, reason: "invalid_or_expired" };

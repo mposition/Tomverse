@@ -400,8 +400,11 @@ function SignInButtons({
         if (isSignup) {
             attemptId = await storeConsent("oauth", { provider });
             await declareSignupIntent(provider);
-        } else {
-            await withdrawSignupIntent();
+        } else if (!(await withdrawSignupIntent())) {
+            // An intent that may still be set would turn this sign-in into a
+            // new account; stop here rather than go to the provider.
+            setFormError(t("auth.errorGeneric"));
+            return;
         }
         await signIn(
             provider,

@@ -373,6 +373,8 @@ export function readRememberedAuthCallbackUrl(): string | null {
  * the person that round trip.
  */
 export async function declareSignupIntent(provider: "google" | "azure-ad"): Promise<void> {
+  // A failed declaration costs a round trip: the provider sign-in comes back
+  // to the sign-up screen, which asks again.
   await sendSignupIntent({
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -383,20 +385,23 @@ export async function declareSignupIntent(provider: "google" | "azure-ad"): Prom
 /**
  * Withdraws any intent the sign-up screen set, before a sign-in screen
  * provider click: within its ten minutes it would otherwise turn that sign-in
- * into a new account.
+ * into a new account. Returns whether the server confirmed it; the caller does
+ * not go to the provider otherwise, since a surviving intent would do exactly
+ * that.
  */
-export async function withdrawSignupIntent(): Promise<void> {
-  await sendSignupIntent({ method: "DELETE" });
+export async function withdrawSignupIntent(): Promise<boolean> {
+  return sendSignupIntent({ method: "DELETE" });
 }
 
-async function sendSignupIntent(init: RequestInit): Promise<void> {
+async function sendSignupIntent(init: RequestInit): Promise<boolean> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 5_000);
   try {
     const response = await fetch("/api/auth/signup-intent", { ...init, signal: controller.signal });
     await response.body?.cancel().catch(() => undefined);
+    return response.ok;
   } catch {
-    // The provider round trip still happens; the sign-up screen asks again.
+    return false;
   } finally {
     window.clearTimeout(timer);
   }

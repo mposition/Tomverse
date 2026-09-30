@@ -145,6 +145,8 @@ test("a hold does not sign into an account that appeared at the address since", 
     ok: false,
     reason: "invalid_or_expired",
   });
+  // The code matched: the refusal is not a failed guess.
+  assert.equal(await prisma.chatUsageBucket.count({ where: { period: "email-otp-lock" } }), 0);
 });
 
 test("an existing account signs in and is never held", async () => {
