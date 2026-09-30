@@ -330,12 +330,21 @@ const compilerOptions = parsedConfig.options;
 // `lib/emailPreferenceCore.ts` -- both already listed, so the file set is
 // unchanged. None of it is an element access; the count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so this repins positions only.
+//
+// 2026-09-30, per-model web search override: `ModelRegistryEntry` gains the
+// nullable `webSearchOverride` column, and the watched-schema note in
+// `lib/marketingAutomationAccess.ts` records it beside the recomputed
+// fingerprint. The note is comment only. The override itself lives in
+// `lib/webSearchCapability.ts`, `lib/models.ts` and `lib/modelRegistry.ts`,
+// all already listed, placed so none of their accesses moved and none was
+// added. No import is added; the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "41d2f3422e7ab7884739d488a41ca53c",
-  "a8bcee9534f75b4e2176ff9cfcbb584e",
+  "a585976bfe0753032c821d7f63df3149",
+  "7061b8ad56a1dd826441fa6629dc952b",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
