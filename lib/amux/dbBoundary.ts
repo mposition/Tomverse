@@ -7,6 +7,7 @@ import {
   AMUX_COMMIT_DEADLINE_TRIGGER,
   isAmuxLateCommitError,
 } from "@/lib/amux/commitDeadlineCore";
+import { amuxTransientDatabaseCode } from "@/lib/amux/readFailureCore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
@@ -166,12 +167,16 @@ export const AMUX_DB_BOUNDARIES = {
  * - `AMUX_DB_OUTCOME_UNKNOWN`: a mutation transaction failed after its callback
  *   returned, for any reason but AX001. The COMMIT may or may not have taken
  *   effect; the caller reads back and never retries blindly.
+ * - `AMUX_DB_READ_BUSY`: a read transaction failed because the database could
+ *   not take it just then (lib/amux/readFailureCore.ts), inside a route that
+ *   had not started a mutation. Nothing was written; the caller may ask again.
  */
 export type AmuxDbBoundaryErrorCode =
   | "AMUX_DB_DEADLINE_EXCEEDED"
   | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
   | "AMUX_DB_COMMIT_CHECK_MISSING"
-  | "AMUX_DB_OUTCOME_UNKNOWN";
+  | "AMUX_DB_OUTCOME_UNKNOWN"
+  | "AMUX_DB_READ_BUSY";
 
 export class AmuxDbBoundaryError extends Error {
   readonly code: AmuxDbBoundaryErrorCode;
@@ -191,8 +196,38 @@ type AmuxRouteDeadline = {
   localDeadlineMs: number;
   maxMs: number;
   databaseDeadlineAt?: Date;
+  /**
+   * Set before the first transaction of this route that can write: a mutation
+   * boundary, or a transaction that anchors the route deadline itself
+   * (`anchorAmuxRouteDeadline`). Once set, a later read failure of the route
+   * can no longer say that nothing was written.
+   */
+  mutationStarted: boolean;
 };
 const amuxRouteDeadline = new AsyncLocalStorage<AmuxRouteDeadline>();
+
+/**
+ * What the route had done when one of its transactions failed.
+ *
+ * - `outside_route`: no `withAmuxRouteBudget` scope, so nothing is known about
+ *   earlier writes of the caller (an in-app adapter, a script).
+ * - `no_mutation_started`: inside a route that has not started a transaction
+ *   that can write.
+ * - `mutation_started`: inside a route that has.
+ */
+export type AmuxRouteWriteState =
+  | "outside_route"
+  | "no_mutation_started"
+  | "mutation_started";
+
+const amuxRouteWriteState = (
+  routeDeadline: AmuxRouteDeadline | undefined,
+): AmuxRouteWriteState =>
+  routeDeadline === undefined
+    ? "outside_route"
+    : routeDeadline.mutationStarted
+      ? "mutation_started"
+      : "no_mutation_started";
 
 export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
@@ -241,6 +276,9 @@ export async function anchorAmuxRouteDeadline(
 ): Promise<Date | null> {
   const routeDeadline = amuxRouteDeadline.getStore();
   if (!routeDeadline) return null;
+  // This transaction records a commit deadline, so it can write: a read of
+  // the same route that fails after this point cannot say nothing was written.
+  routeDeadline.mutationStarted = true;
   const rows = await tx.$queryRaw<Array<{ dbNowEpochMs: bigint }>>`
     SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowEpochMs"
   `;
@@ -352,13 +390,24 @@ export type AmuxDbBoundaryPhase = "running" | "committing";
  * lands while the commit record is being flushed can reach the client after
  * the commit is durable, so it is not proof of a rollback. Only a 57014 raised
  * while the callback was running stays a known rollback, and it is passed on
- * unchanged, as is every failure before COMMIT. A read transaction records
- * nothing, so a failure of its COMMIT is passed on unchanged too.
+ * unchanged, as is every failure before COMMIT.
+ *
+ * A read transaction records nothing, so it never has an unknown outcome. The
+ * one thing decided for a read is whether the database was merely busy -- a
+ * pool, transaction-start, statement-timeout or connection failure
+ * (lib/amux/readFailureCore.ts) -- and that is reported as
+ * `AMUX_DB_READ_BUSY` only when the route it ran in had not started a
+ * transaction that can write: then nothing at all was written and the caller
+ * may ask again. After such a transaction, or outside a route, and for every
+ * other read failure, the error is passed on unchanged, and so answered as it
+ * was before. This is the only place the read/mutation decision is made; it
+ * reads the boundary's `isolation`, never the route's name.
  */
 export const amuxDbBoundaryFailure = (
   boundary: AmuxDbBoundary,
   phase: AmuxDbBoundaryPhase,
   error: unknown,
+  routeWrites: AmuxRouteWriteState,
 ): unknown => {
   if (isAmuxLateCommitError(error)) {
     return new AmuxDbBoundaryError(
@@ -374,6 +423,16 @@ export const amuxDbBoundaryFailure = (
       { cause: error },
     );
   }
+  if (
+    boundary.isolation === "read" &&
+    routeWrites === "no_mutation_started" &&
+    !(error instanceof AmuxDbBoundaryError) &&
+    amuxTransientDatabaseCode(error) !== null
+  ) {
+    return new AmuxDbBoundaryError("AMUX_DB_READ_BUSY", boundary.operation, {
+      cause: error,
+    });
+  }
   return error;
 };
 
@@ -381,7 +440,10 @@ export const withAmuxRouteBudget = <T>(
   work: () => Promise<T>,
   maxMs = AMUX_ROUTE_BUDGET_MS,
 ): Promise<T> =>
-  amuxRouteDeadline.run({ localDeadlineMs: Date.now() + maxMs, maxMs }, work);
+  amuxRouteDeadline.run(
+    { localDeadlineMs: Date.now() + maxMs, maxMs, mutationStarted: false },
+    work,
+  );
 
 const PRISMA_MODEL_CALL_METHODS = new Set([
   "aggregate",
@@ -571,6 +633,12 @@ export async function withAmuxDbBoundary<T>(
     );
   }
 
+  // Marked before BEGIN: from here on this route may have written, whatever
+  // becomes of this transaction.
+  if (boundary.isolation === "mutation" && routeDeadline !== undefined) {
+    routeDeadline.mutationStarted = true;
+  }
+
   let phase: AmuxDbBoundaryPhase = "running";
   const transaction = prisma.$transaction(
     async (rawTx) => {
@@ -757,6 +825,13 @@ export async function withAmuxDbBoundary<T>(
     },
   );
   return transaction.catch((error: unknown): never => {
-    throw amuxDbBoundaryFailure(boundary, phase, error);
+    // The route's write state when this transaction failed, not when it began:
+    // a mutation of the same route that started meanwhile counts.
+    throw amuxDbBoundaryFailure(
+      boundary,
+      phase,
+      error,
+      amuxRouteWriteState(routeDeadline),
+    );
   });
 }

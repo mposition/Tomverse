@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::tomverse_api::{
-    ClaimResponse, QueueTask, SelectionRead, TomverseApi, BOARD_CAPACITY_EXCEEDED,
+    ClaimResponse, QueueTask, SelectionRead, TomverseApi, BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
 const SCORING_VERSION: &str = "amux-global-priority-v2";
@@ -211,6 +211,10 @@ impl Scheduler {
                 skip_tick_for_board_capacity("queue");
                 return Ok(());
             }
+            SelectionRead::DatabaseBusy => {
+                skip_tick_for_database_busy("queue");
+                return Ok(());
+            }
         };
         let ranked = rank_global_priority_at(queue, Utc::now());
         // Selection-only observes the highest priority task without taking
@@ -270,6 +274,12 @@ impl Scheduler {
                 // answer. Skip the tick; the next one reads the queue again.
                 SelectionRead::BoardCapacityExceeded => {
                     skip_tick_for_board_capacity("routing_snapshot");
+                    return Ok(());
+                }
+                // A busy database would answer the next task's read the same
+                // way, and nothing was written or claimed. Skip the tick.
+                SelectionRead::DatabaseBusy => {
+                    skip_tick_for_database_busy("routing_snapshot");
                     return Ok(());
                 }
             };
@@ -446,6 +456,19 @@ fn skip_tick_for_board_capacity(endpoint: &'static str) {
         measured = true,
         verdict = "selection_skipped",
         "Tomverse AMUX board exceeds one complete selection response; skipping this tick"
+    );
+}
+
+/// A selection read the app's database could not take just then. A read
+/// wrote nothing, so this is not an unknown outcome: log it and try again on
+/// the next tick. A claim, recovery and every other status still stop the run.
+fn skip_tick_for_database_busy(endpoint: &'static str) {
+    warn!(
+        endpoint,
+        reason = DATABASE_BUSY,
+        measured = true,
+        verdict = "selection_skipped",
+        "Tomverse AMUX database was busy for a selection read; nothing was written; skipping this tick"
     );
 }
 
@@ -895,12 +918,99 @@ mod tests {
         );
     }
 
+    // The exact body lib/amux/internalRoute.ts sends for a busy read.
+    const DATABASE_BUSY_BODY: &str =
+        r#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#;
+
+    #[tokio::test]
+    async fn a_database_busy_answer_from_the_queue_skips_the_tick() {
+        let (base_url, seen) = serve_selection(vec![(
+            "/api/internal/amux/queue",
+            "503 Service Unavailable",
+            DATABASE_BUSY_BODY.to_owned(),
+        )])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        scheduler.tick().await.expect("a busy read is a skipped tick, not an exit");
+        assert_eq!(*seen.lock().unwrap(), vec!["/api/internal/amux/queue".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn a_database_busy_answer_from_the_routing_snapshot_skips_the_tick() {
+        let (base_url, seen) = serve_selection(vec![
+            ("/api/internal/amux/queue", "200 OK", queue_row()),
+            (
+                "/api/internal/amux/routing-snapshot",
+                "503 Service Unavailable",
+                DATABASE_BUSY_BODY.to_owned(),
+            ),
+        ])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        scheduler.tick().await.expect("a busy read is a skipped tick, not an exit");
+        // No claim follows a busy snapshot.
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![
+                "/api/internal/amux/queue".to_owned(),
+                "/api/internal/amux/routing-snapshot".to_owned(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_database_busy_answer_to_a_claim_still_stops_the_run() {
+        // The claim is a write: whatever it answers besides its own closed
+        // refusals is an unknown outcome, the busy body included.
+        let routing: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/amux-routing-snapshot-v1.json"
+        ))
+        .unwrap();
+        let (base_url, seen) = serve_selection(vec![
+            ("/api/internal/amux/queue", "200 OK", queue_row()),
+            (
+                "/api/internal/amux/routing-snapshot",
+                "200 OK",
+                routing["eligible"].to_string(),
+            ),
+            (
+                "/api/internal/amux/claim",
+                "503 Service Unavailable",
+                DATABASE_BUSY_BODY.to_owned(),
+            ),
+        ])
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        let error = scheduler.tick().await.expect_err("a claim answer outside its contract stops");
+        assert_eq!(error.to_string(), "AMUX_CLAIM_OUTCOME_UNKNOWN");
+        assert_eq!(
+            seen.lock().unwrap().last().map(String::as_str),
+            Some("/api/internal/amux/claim")
+        );
+    }
+
     #[tokio::test]
     async fn any_other_selection_failure_is_still_an_unknown_outcome() {
         for (status, body) in [
             ("409 Conflict", r#"{"error":"Queue capacity exceeded.","reason":"other"}"#),
             ("409 Conflict", r#"{"error":"x","reason":"board_capacity_exceeded","extra":1}"#),
             ("503 Service Unavailable", r#"{"reason":"amux_outcome_unknown"}"#),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database is busy.","reason":"amux_database_busy","extra":1}"#,
+            ),
+            ("500 Internal Server Error", DATABASE_BUSY_BODY),
             ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
         ] {
             let (base_url, _) = serve_selection(vec![(

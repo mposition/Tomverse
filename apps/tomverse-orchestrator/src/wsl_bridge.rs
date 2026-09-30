@@ -28,6 +28,7 @@ use crate::local_card::{
 };
 use crate::tomverse_api::{
     ExecutionStartResponse, OwnedTodoTask, PulledDelivery, SelectionRead, BOARD_CAPACITY_EXCEEDED,
+    DATABASE_BUSY,
 };
 
 pub const WSL_BRIDGE_CODE_LATCH: bool = true;
@@ -690,15 +691,21 @@ where
         }]);
     }
 
-    // A board too large for one complete owned-queue response is a known
-    // answer that wrote nothing, not an unknown outcome: no new assignment
-    // this tick, no halt. Attempts already in flight keep their heartbeat and
-    // settlement. Any other failure still returns an error, which halts.
+    // A board too large for one complete owned-queue response, and a database
+    // too busy to take the read just then, are known answers that wrote
+    // nothing, not unknown outcomes: no new assignment this tick, no halt.
+    // Attempts already in flight keep their heartbeat and settlement. Any
+    // other failure still returns an error, which halts.
     let tasks = match control.owned_queue().await? {
         SelectionRead::Ready(tasks) => tasks,
         SelectionRead::BoardCapacityExceeded => {
             return Ok(vec![BridgeTickResult::Idle {
                 reason: BOARD_CAPACITY_EXCEEDED,
+            }]);
+        }
+        SelectionRead::DatabaseBusy => {
+            return Ok(vec![BridgeTickResult::Idle {
+                reason: DATABASE_BUSY,
             }]);
         }
     };
@@ -1328,6 +1335,9 @@ fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
     match result {
         BridgeTickResult::Idle { reason } if *reason == BOARD_CAPACITY_EXCEEDED => Some(format!(
             "amux wsl bridge warn: owned queue answered 409 {reason}; no new assignment this tick, not halted"
+        )),
+        BridgeTickResult::Idle { reason } if *reason == DATABASE_BUSY => Some(format!(
+            "amux wsl bridge warn: owned queue answered 503 {reason}; no new assignment this tick, not halted"
         )),
         _ => None,
     }
@@ -2176,6 +2186,43 @@ mod tests {
         );
     }
 
+    // The exact body lib/amux/internalRoute.ts sends when the owned-queue read
+    // found the database too busy to take it.
+    const OWNED_QUEUE_DATABASE_BUSY_BODY: &str =
+        r#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#;
+
+    #[tokio::test]
+    async fn an_owned_queue_database_busy_answer_skips_the_tick_without_a_halt() {
+        let prompts = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let results = bridge_tick(
+            &input(true, &prompts, None),
+            tomverse_api(tomverse_answering(
+                "503 Service Unavailable",
+                OWNED_QUEUE_DATABASE_BUSY_BODY,
+            )),
+            running_session(),
+            &mut local,
+        )
+        .await
+        .expect("a busy read is a skipped tick, not an error that halts");
+
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Idle {
+                reason: "amux_database_busy",
+            }]
+        );
+        assert!(!results
+            .iter()
+            .any(|result| matches!(result, BridgeTickResult::Halted { .. })));
+        assert!(local.sends.is_empty());
+        assert_eq!(
+            bridge_tick_warning(&results[0]).as_deref(),
+            Some("amux wsl bridge warn: owned queue answered 503 amux_database_busy; no new assignment this tick, not halted"),
+        );
+    }
+
     #[tokio::test]
     async fn any_other_owned_queue_failure_still_halts() {
         for (status, body) in [
@@ -2186,6 +2233,20 @@ mod tests {
                 r#"{"error":"Queue capacity exceeded.","reason":"board_capacity_exceeded","extra":1}"#,
             ),
             ("503 Service Unavailable", r#"{"reason":"amux_outcome_unknown"}"#),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database is busy.","reason":"amux_database_busy","extra":1}"#,
+            ),
+            ("409 Conflict", OWNED_QUEUE_DATABASE_BUSY_BODY),
+            ("500 Internal Server Error", OWNED_QUEUE_DATABASE_BUSY_BODY),
             ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
         ] {
             let prompts = BTreeMap::new();
@@ -2204,11 +2265,10 @@ mod tests {
     }
 
     #[test]
-    fn only_the_capacity_skip_writes_the_warning() {
-        assert!(bridge_tick_warning(&BridgeTickResult::Idle {
-            reason: "board_capacity_exceeded",
-        })
-        .is_some());
+    fn only_the_capacity_and_busy_skips_write_the_warning() {
+        for reason in ["board_capacity_exceeded", "amux_database_busy"] {
+            assert!(bridge_tick_warning(&BridgeTickResult::Idle { reason }).is_some());
+        }
         for result in [
             BridgeTickResult::Idle {
                 reason: "worker_not_running",

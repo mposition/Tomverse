@@ -4,6 +4,11 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import type { z } from "zod";
 import { AmuxDbBoundaryError } from "@/lib/amux/dbBoundary";
 import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
+import {
+  AMUX_DATABASE_BUSY_REASON,
+  AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxTransientDatabaseCode,
+} from "@/lib/amux/readFailureCore";
 
 export const AMUX_INTERNAL_RESPONSE_MAX_BYTES = 512 * 1_024;
 export class AmuxResponseCapacityError extends Error {
@@ -51,6 +56,37 @@ export const amuxInternalErrorResponse = (
   operation: string,
   error: unknown,
 ): Response => {
+  // A read that the database could not take just then, in a route that had
+  // written nothing (decided once, in amuxDbBoundaryFailure). Nothing was
+  // written, so this is never an unknown outcome and opens no incident; the
+  // caller asks again on its next tick. A warning keeps the rate visible.
+  if (
+    error instanceof AmuxDbBoundaryError &&
+    error.code === "AMUX_DB_READ_BUSY"
+  ) {
+    console.warn(
+      JSON.stringify({
+        subsystem: "amux",
+        event: "internal_route_database_busy",
+        operation,
+        error_code: amuxTransientDatabaseCode(error.cause) ?? "unknown",
+      }),
+    );
+    return new Response(
+      JSON.stringify({
+        error: "AMUX database is busy.",
+        reason: AMUX_DATABASE_BUSY_REASON,
+      }),
+      {
+        status: 503,
+        headers: {
+          ...NO_STORE_HEADERS,
+          "Retry-After": String(AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS),
+        },
+      },
+    );
+  }
+
   const candidate = error as {
     code?: unknown;
     meta?: { code?: unknown; database_error?: unknown };
@@ -84,6 +120,9 @@ export const amuxInternalErrorResponse = (
   // A mutation that failed after its callback returned (anything but the
   // commit deadline trigger's AX001, which is a deadline refusal above) may or
   // may not have committed: the same answer as a Prisma transaction timeout.
+  // A P2028 still reaches here from a mutation boundary, and from a read that
+  // failed after its route had started a mutation; a busy read of a route
+  // that wrote nothing was answered above.
   if (
     databaseCode === "P2028" ||
     (error instanceof AmuxDbBoundaryError &&

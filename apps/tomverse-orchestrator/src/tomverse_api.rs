@@ -99,11 +99,52 @@ const MAX_ROUTING_CANDIDATES: usize = 128;
 /// tick instead of treating it as an unknown outcome.
 pub const BOARD_CAPACITY_EXCEEDED: &str = "board_capacity_exceeded";
 
-/// A selection read: the body, or the app's board-capacity refusal.
+/// The 503 the three selection reads (queue, routing snapshot, owned queue)
+/// answer with when the database could not take the read just then: no pool
+/// connection, no transaction start within `maxWait`, a statement timeout or a
+/// dropped connection, in a route that had written nothing
+/// (lib/amux/readFailureCore.ts; decided in `amuxDbBoundaryFailure`,
+/// lib/amux/dbBoundary.ts). A read writes nothing, so this is not an unknown
+/// outcome: the scheduler and the WSL bridge log it and skip the tick. A write
+/// whose outcome is unknown still answers `amux_outcome_unknown`, and every
+/// other 503 stays an error.
+pub const DATABASE_BUSY: &str = "amux_database_busy";
+
+/// A selection read: the body, the app's board-capacity refusal, or the app's
+/// database-busy answer. The last two wrote nothing.
 #[derive(Debug)]
 pub enum SelectionRead<T> {
     Ready(T),
     BoardCapacityExceeded,
+    DatabaseBusy,
+}
+
+/// The selection reads at 503: `{error, reason}` from
+/// `amuxInternalErrorResponse` (lib/amux/internalRoute.ts), the same body for
+/// all three routes.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DatabaseBusyAnswer {
+    #[allow(dead_code)]
+    error: String,
+    reason: String,
+}
+
+/// The statuses the three selection reads parse: 200, the capacity 409 and
+/// the database-busy 503. Each parser still refuses any other body at 409 or
+/// 503. Writes do not use this list.
+const SELECTION_READ_STATUSES: &[StatusCode] = &[
+    StatusCode::OK,
+    StatusCode::CONFLICT,
+    StatusCode::SERVICE_UNAVAILABLE,
+];
+
+/// Whether a 503 body is exactly the database-busy answer. Any other 503 body
+/// -- `amux_outcome_unknown` with its incident id, a deadline, an extra field
+/// -- is not.
+fn is_database_busy(body: &[u8]) -> bool {
+    serde_json::from_slice::<DatabaseBusyAnswer>(body)
+        .is_ok_and(|answer| answer.reason == DATABASE_BUSY)
 }
 
 /// `POST /api/internal/amux/queue` at 409: `{error, reason}`.
@@ -146,8 +187,8 @@ fn queue_invariants_hold(tasks: &[QueueTask]) -> bool {
 }
 
 /// Reads a queue answer. 200 is the queue, held to its invariants; 409 is the
-/// board-capacity refusal and nothing else. Any other status or body is an
-/// error, as before.
+/// board-capacity refusal and nothing else; 503 is the database-busy answer
+/// and nothing else. Any other status or body is an error, as before.
 pub(crate) fn parse_queue_body(
     status: StatusCode,
     body: &[u8],
@@ -159,6 +200,9 @@ pub(crate) fn parse_queue_body(
             return Ok(SelectionRead::BoardCapacityExceeded);
         }
         bail!("unexpected Tomverse AMUX queue conflict");
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+        return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
         bail!("unsupported Tomverse internal response status");
@@ -173,7 +217,8 @@ pub(crate) fn parse_queue_body(
 
 /// Reads an owned-queue answer. 200 is the owned queue, held to its
 /// invariants; 409 is the board-capacity refusal, with the same body as the
-/// selection queue's, and nothing else. The owned queue's other 409
+/// selection queue's, and nothing else; 503 is the database-busy answer and
+/// nothing else. The owned queue's other 409
 /// (`{available: false, reason: "execution_api_disabled"}`), any other status
 /// and any other body stay errors, which halt the WSL bridge as before.
 pub(crate) fn parse_owned_queue_body(
@@ -187,6 +232,9 @@ pub(crate) fn parse_owned_queue_body(
             return Ok(SelectionRead::BoardCapacityExceeded);
         }
         bail!("unexpected Tomverse AMUX owned-queue conflict");
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+        return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
         bail!("unsupported Tomverse internal response status");
@@ -205,7 +253,8 @@ pub(crate) fn parse_owned_queue_body(
     Ok(SelectionRead::Ready(tasks))
 }
 
-/// Reads a routing snapshot answer, the same way as the queue.
+/// Reads a routing snapshot answer, the same way as the queue. Its 409 body is
+/// `{eligible, reason}`; its 503 body is the queue's `{error, reason}`.
 pub(crate) fn parse_routing_snapshot_body(
     status: StatusCode,
     body: &[u8],
@@ -217,6 +266,9 @@ pub(crate) fn parse_routing_snapshot_body(
             return Ok(SelectionRead::BoardCapacityExceeded);
         }
         bail!("unexpected Tomverse AMUX routing snapshot conflict");
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+        return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
         bail!("unsupported Tomverse internal response status");
@@ -650,7 +702,7 @@ impl TomverseApi {
             .await?;
         let (status, body) = read_bounded_body(
             response,
-            &[StatusCode::OK, StatusCode::CONFLICT],
+            SELECTION_READ_STATUSES,
             MAX_QUEUE_RESPONSE_BYTES,
         )
         .await?;
@@ -678,7 +730,7 @@ impl TomverseApi {
             .await?;
         let (status, body) = read_bounded_body(
             response,
-            &[StatusCode::OK, StatusCode::CONFLICT],
+            SELECTION_READ_STATUSES,
             MAX_ROUTING_RESPONSE_BYTES,
         )
         .await?;
@@ -896,7 +948,9 @@ mod tests {
         let body = serde_json::to_vec(&vec![row.clone()]).unwrap();
         match parse_queue_body(StatusCode::OK, &body).unwrap() {
             SelectionRead::Ready(tasks) => assert_eq!(tasks.len(), 1),
-            SelectionRead::BoardCapacityExceeded => panic!("a 200 is a queue"),
+            SelectionRead::BoardCapacityExceeded | SelectionRead::DatabaseBusy => {
+                panic!("a 200 is a queue")
+            }
         }
         let mut bad = row;
         bad["id"] = serde_json::json!("TASK-trailing-");
@@ -936,12 +990,104 @@ mod tests {
         let body = serde_json::to_vec(&vec![queue_wire_fixture("owned_server")]).unwrap();
         match parse_owned_queue_body(StatusCode::OK, &body).unwrap() {
             SelectionRead::Ready(tasks) => assert_eq!(tasks.len(), 1),
-            SelectionRead::BoardCapacityExceeded => panic!("a 200 is an owned queue"),
+            SelectionRead::BoardCapacityExceeded | SelectionRead::DatabaseBusy => {
+                panic!("a 200 is an owned queue")
+            }
         }
         let mut bad = queue_wire_fixture("owned_server");
         bad["owner"] = serde_json::json!("worker-");
         let body = serde_json::to_vec(&vec![bad]).unwrap();
         assert!(parse_owned_queue_body(StatusCode::OK, &body).is_err());
+    }
+
+    // The exact body lib/amux/internalRoute.ts sends for a busy read, the same
+    // for all three routes. tests/server-contract/amux-commit-deadline-boundary.test.ts
+    // holds the server to this literal.
+    const DATABASE_BUSY_BODY: &[u8] =
+        br#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#;
+
+    #[test]
+    fn a_database_busy_answer_is_its_own_selection_answer_on_all_three_reads() {
+        assert!(matches!(
+            parse_queue_body(StatusCode::SERVICE_UNAVAILABLE, DATABASE_BUSY_BODY).unwrap(),
+            SelectionRead::DatabaseBusy
+        ));
+        assert!(matches!(
+            parse_routing_snapshot_body(StatusCode::SERVICE_UNAVAILABLE, DATABASE_BUSY_BODY)
+                .unwrap(),
+            SelectionRead::DatabaseBusy
+        ));
+        assert!(matches!(
+            parse_owned_queue_body(StatusCode::SERVICE_UNAVAILABLE, DATABASE_BUSY_BODY).unwrap(),
+            SelectionRead::DatabaseBusy
+        ));
+    }
+
+    #[test]
+    fn any_other_503_or_the_busy_body_at_another_status_is_still_an_error() {
+        let cases: [(StatusCode, &[u8]); 9] = [
+            // The server's unknown outcome, as it sends it and as a bare reason.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                br#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#,
+            ),
+            (StatusCode::SERVICE_UNAVAILABLE, br#"{"reason":"amux_outcome_unknown"}"#),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                br#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#,
+            ),
+            // The busy reason with anything more or less is not the busy answer.
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                br#"{"error":"AMUX database is busy.","reason":"amux_database_busy","incident_id":"x"}"#,
+            ),
+            (StatusCode::SERVICE_UNAVAILABLE, br#"{"reason":"amux_database_busy"}"#),
+            (StatusCode::SERVICE_UNAVAILABLE, b"not json"),
+            // The busy body at any other status.
+            (StatusCode::CONFLICT, DATABASE_BUSY_BODY),
+            (StatusCode::INTERNAL_SERVER_ERROR, DATABASE_BUSY_BODY),
+            (StatusCode::BAD_GATEWAY, DATABASE_BUSY_BODY),
+        ];
+        for (status, body) in cases {
+            let text = String::from_utf8_lossy(body);
+            assert!(parse_queue_body(status, body).is_err(), "queue {status} {text}");
+            assert!(
+                parse_routing_snapshot_body(status, body).is_err(),
+                "routing {status} {text}"
+            );
+            assert!(
+                parse_owned_queue_body(status, body).is_err(),
+                "owned {status} {text}"
+            );
+        }
+        // Another 503 keeps the error it had before this answer existed.
+        let error = parse_queue_body(
+            StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"reason":"amux_outcome_unknown"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "unsupported Tomverse internal response status");
+    }
+
+    #[test]
+    fn only_the_three_selection_reads_accept_a_503() {
+        let source = include_str!("tomverse_api.rs");
+        // Built with concat! so this test's own text is neither counted nor
+        // found in place of the function it names.
+        let needle = concat!("SELECTION_READ", "_STATUSES,");
+        assert_eq!(source.matches(needle).count(), 3);
+        for name in [
+            concat!("pub async fn ", "queue("),
+            concat!("pub async fn ", "routing_snapshot("),
+            concat!("pub async fn ", "owned_queue("),
+        ] {
+            assert_eq!(source.matches(name).count(), 1, "{name}");
+            let start = source.find(name).unwrap();
+            let end = source[start + 1..]
+                .find("\n    pub async fn ")
+                .map_or(source.len(), |offset| start + 1 + offset);
+            assert!(source[start..end].contains(needle), "{name}");
+        }
     }
 
     #[test]
@@ -1768,7 +1914,7 @@ impl TomverseApi {
             .await?;
         let (status, body) = read_bounded_body(
             response,
-            &[StatusCode::OK, StatusCode::CONFLICT],
+            SELECTION_READ_STATUSES,
             MAX_OWNED_QUEUE_RESPONSE_BYTES,
         )
         .await?;

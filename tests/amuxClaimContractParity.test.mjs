@@ -434,6 +434,36 @@ test("routing response byte ceilings match and overflow refuses complete output"
   assert.match(routeSource, /reason: "board_capacity_exceeded"/);
 });
 
+test("TypeScript and Rust share the database-busy reason and its exact body", async () => {
+  const { AMUX_DATABASE_BUSY_REASON } = await import("../lib/amux/readFailureCore.ts");
+  assert.match(
+    rustSource,
+    new RegExp(`pub const DATABASE_BUSY: &str = "${AMUX_DATABASE_BUSY_REASON}";`),
+  );
+  const route = readFileSync(join(process.cwd(), "lib", "amux", "internalRoute.ts"), "utf8");
+  assert.match(
+    route,
+    /error: "AMUX database is busy\.",\s*reason: AMUX_DATABASE_BUSY_REASON,\s*\}\),\s*\{\s*status: 503,/,
+  );
+  // The body the server sends (tests/server-contract/amux-commit-deadline-boundary.test.ts
+  // holds the server to it) is the literal every Rust test parses.
+  const body = JSON.stringify({ error: "AMUX database is busy.", reason: AMUX_DATABASE_BUSY_REASON });
+  for (const file of ["tomverse_api.rs", "scheduler.rs", "wsl_bridge.rs"]) {
+    const source = readFileSync(
+      join(process.cwd(), "apps", "tomverse-orchestrator", "src", file),
+      "utf8",
+    );
+    assert.ok(source.includes(`r#"${body}"#`), file);
+  }
+  // Only the selection reads skip a tick on it; the claim is a write.
+  assert.match(schedulerSource, /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("queue"\);/);
+  assert.match(
+    schedulerSource,
+    /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("routing_snapshot"\);/,
+  );
+  assert.match(schedulerSource, /fn a_database_busy_answer_to_a_claim_still_stops_the_run\(/);
+});
+
 test("unknown future-lifecycle outcomes stop the whole runtime run", () => {
   const runtimeSource = readFileSync(
     join(
