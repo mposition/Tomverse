@@ -212,8 +212,10 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
   파싱·불변식이 깨진 응답은 전처럼 "결과 불명"으로 프로세스를 끝낸다. 이 규칙은 바뀌지 않았다.
 - 연속으로 건너뛴 횟수가 tick 간격(`TICK_INTERVAL`, 5초) 기준 5분 분량인
   `MAX_CONSECUTIVE_SELECTION_READ_SKIPS`(60)를 넘으면, 지속되는 서버 결함이 영원히 조용하게
-  건너뛰어지지 않도록 그동안과 같은 `AMUX_INTERNAL_API_UNVERIFIED`로 끝낸다. 성공한 selection
-  read 한 번이 이 카운터를 0으로 되돌린다.
+  건너뛰어지지 않도록 그동안과 같은 `AMUX_INTERNAL_API_UNVERIFIED`로 끝낸다. 카운터는 tick이
+  끝난 뒤, 그 tick의 selection read가 모두 성공했을 때만 0으로 되돌린다. 읽기 하나의 성공으로
+  되돌리지 않는다. queue는 성공하고 routing snapshot만 실패하는 tick(05:58Z의 모양)도 한 번으로
+  세기 위해서다. busy나 board-capacity로 끝난 tick은 카운터를 그대로 둔다.
 - board-capacity 초과와 정확한 busy body 건너뛰기(위 두 메모의 동작)는 이 새 상한에 넣지 않고
   그대로 둔다. 이 문서가 이미 지속적인 busy를 WARN만으로 영원히 받아들이기로 했으므로(바로 위
   섹션), 그 조건을 이번 상한에 넣으면 지금까지 절대 끝내지 않던 상황에서 새로 프로세스를 끝내게

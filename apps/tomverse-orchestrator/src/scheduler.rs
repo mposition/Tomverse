@@ -149,9 +149,25 @@ pub struct Scheduler {
     scan_offset: usize,
     execution_enabled: bool,
     /// Consecutive selection-read failures skipped in a row (see
-    /// `MAX_CONSECUTIVE_SELECTION_READ_SKIPS`). Reset to zero on any
-    /// successful `queue` or `routing_snapshot` read.
+    /// `MAX_CONSECUTIVE_SELECTION_READ_SKIPS`). Reset to zero only after a
+    /// whole tick whose selection reads were all ready (see `tick`), never on
+    /// one successful read: a tick whose queue succeeds and whose routing
+    /// snapshot fails must still count.
     consecutive_selection_skips: u32,
+    /// What this tick's selection reads did so far. Set by
+    /// `handle_selection_read`, read once by `tick` when the tick ends.
+    tick_selection: TickSelection,
+}
+
+/// The selection-read outcome of one tick. A counted failure or an uncounted
+/// skip (busy, board capacity) overrides a ready read; only a tick that stays
+/// `Ready` resets the consecutive-failure counter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TickSelection {
+    Untouched,
+    Ready,
+    UncountedSkip,
+    CountedFailure,
 }
 
 impl Scheduler {
@@ -161,6 +177,7 @@ impl Scheduler {
             scan_offset: 0,
             execution_enabled: execution_enabled(),
             consecutive_selection_skips: 0,
+            tick_selection: TickSelection::Untouched,
         }
     }
 
@@ -273,18 +290,24 @@ impl Scheduler {
     ) -> Result<Option<T>> {
         match result {
             Ok(SelectionRead::Ready(value)) => {
-                self.consecutive_selection_skips = 0;
+                if self.tick_selection == TickSelection::Untouched {
+                    self.tick_selection = TickSelection::Ready;
+                }
                 Ok(Some(value))
             }
             Ok(SelectionRead::BoardCapacityExceeded) => {
                 skip_tick_for_board_capacity(endpoint);
+                self.tick_selection = TickSelection::UncountedSkip;
                 Ok(None)
             }
             Ok(SelectionRead::DatabaseBusy) => {
                 skip_tick_for_database_busy(endpoint);
+                self.tick_selection = TickSelection::UncountedSkip;
                 Ok(None)
             }
             Err(error) if is_selection_read_recoverable(&error) => {
+                // At most once per tick: every recoverable failure ends the tick.
+                self.tick_selection = TickSelection::CountedFailure;
                 self.consecutive_selection_skips += 1;
                 if self.consecutive_selection_skips > MAX_CONSECUTIVE_SELECTION_READ_SKIPS {
                     warn!(
@@ -313,7 +336,20 @@ impl Scheduler {
         }
     }
 
+    /// One tick. The consecutive-failure counter is reset here, after the
+    /// tick, and only when every selection read in it was ready: a tick that
+    /// ended on a busy or board-capacity skip leaves the counter as it was,
+    /// and a tick with a counted failure has already incremented it.
     async fn tick(&mut self) -> Result<()> {
+        self.tick_selection = TickSelection::Untouched;
+        let result = self.tick_once().await;
+        if self.tick_selection == TickSelection::Ready {
+            self.consecutive_selection_skips = 0;
+        }
+        result
+    }
+
+    async fn tick_once(&mut self) -> Result<()> {
         let queue_result = self.api.queue().await;
         let Some(queue) = self.handle_selection_read("queue", queue_result)? else {
             return Ok(());
@@ -1458,5 +1494,117 @@ mod tests {
             .await
             .expect_err("exceeding the bound stops the scheduler");
         assert_eq!(error.to_string(), "AMUX_INTERNAL_API_UNVERIFIED");
+    }
+
+    /// Serves a queue row, then answers the routing snapshot by `mode`:
+    /// 0 = 500, 1 = the exact busy body, 2 = the queue is empty instead (a
+    /// whole successful tick that reads no snapshot).
+    async fn serve_snapshot_modes() -> (String, std::sync::Arc<std::sync::atomic::AtomicU8>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mode = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let flag = mode.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    let read = stream.read(&mut buffer).await.unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    let Some(at) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&request[..at]).to_string();
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= at + 4 + length {
+                        break;
+                    }
+                }
+                let head = String::from_utf8_lossy(&request).to_string();
+                let current = flag.load(std::sync::atomic::Ordering::SeqCst);
+                let (status, body) = if head.contains("/api/internal/amux/queue") {
+                    if current == 2 {
+                        ("200 OK", "[]".to_owned())
+                    } else {
+                        ("200 OK", queue_row())
+                    }
+                } else if current == 1 {
+                    ("503 Service Unavailable", DATABASE_BUSY_BODY.to_owned())
+                } else {
+                    (
+                        "500 Internal Server Error",
+                        r#"{"error":"Internal server error."}"#.to_owned(),
+                    )
+                };
+                let reply = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = stream.write_all(reply.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            }
+        });
+        (format!("http://{address}"), mode)
+    }
+
+    /// The 2026-09-30 05:58Z shape: the queue answers, the routing snapshot
+    /// does not. A ready queue in the same tick must not reset the count, a
+    /// busy tick in between must not reset it either, and only a whole
+    /// successful tick does.
+    #[tokio::test]
+    async fn a_ready_queue_does_not_reset_the_count_when_the_snapshot_fails_in_the_same_tick() {
+        use std::sync::atomic::Ordering;
+        let bound = MAX_CONSECUTIVE_SELECTION_READ_SKIPS;
+        let (base_url, mode) = serve_snapshot_modes().await;
+        let mut scheduler = scheduler_for(base_url);
+
+        for attempt in 1..=bound - 1 {
+            scheduler
+                .tick()
+                .await
+                .unwrap_or_else(|error| panic!("attempt {attempt} of {bound}: {error}"));
+        }
+        assert_eq!(scheduler.consecutive_selection_skips, bound - 1);
+
+        // A busy snapshot after a ready queue keeps the count where it was.
+        mode.store(1, Ordering::SeqCst);
+        scheduler.tick().await.expect("a busy snapshot is a skipped tick");
+        assert_eq!(scheduler.consecutive_selection_skips, bound - 1);
+
+        // Back to failing: the bound is reached, then exceeded.
+        mode.store(0, Ordering::SeqCst);
+        scheduler.tick().await.expect("the bound itself is still a skip");
+        assert_eq!(scheduler.consecutive_selection_skips, bound);
+        let error = scheduler
+            .tick()
+            .await
+            .expect_err("one past the bound stops even though every queue read succeeded");
+        assert_eq!(error.to_string(), "AMUX_INTERNAL_API_UNVERIFIED");
+
+        // A whole successful tick resets it.
+        let (base_url, mode) = serve_snapshot_modes().await;
+        let mut scheduler = scheduler_for(base_url);
+        for _ in 0..3 {
+            scheduler.tick().await.expect("under the bound");
+        }
+        assert_eq!(scheduler.consecutive_selection_skips, 3);
+        mode.store(2, Ordering::SeqCst);
+        scheduler.tick().await.expect("an empty queue is a successful tick");
+        assert_eq!(scheduler.consecutive_selection_skips, 0);
     }
 }
