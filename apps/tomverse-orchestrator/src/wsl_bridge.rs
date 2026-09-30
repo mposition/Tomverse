@@ -36,6 +36,18 @@ use crate::tomverse_api::{
 /// owned Todo is started again next tick with the same revision and runtime.
 pub const START_DATABASE_BUSY: &str = "execution_start_database_busy";
 
+/// The idle reason for an owned Todo whose worker this process already has a
+/// locally unsettled execution for: a `PendingExecution` still being
+/// heartbeaten, or a start already acked and waiting on
+/// `awaiting_delivery`. The server's owned queue can legitimately offer such
+/// a task again — its own recovery may have reclaimed and reassigned it
+/// while this process still runs the earlier attempt — so this check does
+/// not depend on the server ever agreeing the worker is busy. It is a
+/// defensive, worker-keyed refusal: this process never starts a second local
+/// execution for a worker it already has one for, independent of heartbeat
+/// timing.
+pub const START_WORKER_EXECUTION_PENDING_LOCALLY: &str = "worker_execution_pending_locally";
+
 /// An attempt Tomverse started whose delivery pull or ack answered the exact
 /// database-busy body. That call wrote nothing; the attempt is open on the
 /// server with its delivery still queued or leased. The next tick pulls it
@@ -187,6 +199,22 @@ pub enum BridgeTickResult {
     },
 }
 
+/// `bridge_tick_sourced` failed with an unknown outcome after it may already
+/// have acked and locally sent some work this tick. `partial` is exactly what
+/// a success would have returned up to the failure — including any
+/// `input.awaiting_delivery` entries this tick never got to attempt, carried
+/// forward as `AwaitingDelivery` so the caller still knows to pull them next
+/// tick. Discarding `partial` on error is the bug this type exists to make
+/// impossible: an attempt that already reached the local session (a
+/// `Pending` result) must keep getting execution heartbeats even after this
+/// halts, or the server's lease expires under a session that is still
+/// running the work.
+#[derive(Debug)]
+pub struct BridgeTickError {
+    pub error: anyhow::Error,
+    pub partial: Vec<BridgeTickResult>,
+}
+
 pub struct BridgeTickInput<'a> {
     pub latch: bool,
     pub env_value: Option<&'a str>,
@@ -202,6 +230,13 @@ pub struct BridgeTickInput<'a> {
     /// Started attempts whose delivery an earlier tick could not pull or ack
     /// because Tomverse answered busy. Pulled again before new work.
     pub awaiting_delivery: &'a [AwaitingDelivery],
+    /// Workers this process already has an unsettled local execution for (a
+    /// `PendingExecution` from an earlier tick, still being heartbeaten).
+    /// `awaiting_delivery`'s own workers count as busy too and do not need to
+    /// be repeated here. An owned Todo for a worker in either set is refused
+    /// with `START_WORKER_EXECUTION_PENDING_LOCALLY` rather than started
+    /// again, regardless of what this tick's execution heartbeats answered.
+    pub locally_pending_workers: &'a [String],
 }
 
 pub struct LocalExchange {
@@ -738,7 +773,9 @@ where
     C: BoardControlPlane,
 {
     let mut prompts = input.prompts.clone();
-    bridge_tick_sourced(input, control, sessions, &mut prompts, local).await
+    bridge_tick_sourced(input, control, sessions, &mut prompts, local)
+        .await
+        .map_err(|error| error.error)
 }
 
 pub async fn bridge_tick_sourced<C, P, L>(
@@ -747,7 +784,7 @@ pub async fn bridge_tick_sourced<C, P, L>(
     sessions: ExistingSessionAdapter,
     prompts: &mut P,
     local: &mut L,
-) -> Result<Vec<BridgeTickResult>>
+) -> Result<Vec<BridgeTickResult>, BridgeTickError>
 where
     C: BoardControlPlane,
     P: AttemptPrompts,
@@ -784,12 +821,16 @@ where
     let mut halted = false;
 
     // Deliveries an earlier tick could not pull: those attempts are already
-    // open on the server, so they come before any new start.
-    for awaiting in input.awaiting_delivery {
+    // open on the server, so they come before any new start. An unknown
+    // failure here must not discard a `Pending`/`AwaitingDelivery` this loop
+    // already produced, nor silently drop the entries after it that this
+    // tick never got to attempt: both come back in `BridgeTickError::partial`
+    // for the caller to record before it halts.
+    for (index, awaiting) in input.awaiting_delivery.iter().enumerate() {
         if halted {
             break;
         }
-        let result = deliver_started(
+        let result = match deliver_started(
             input,
             &snapshot,
             prompts,
@@ -797,7 +838,20 @@ where
             &awaiting.worker,
             &awaiting.attempt_id,
         )
-        .await?;
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let mut partial = results;
+                partial.extend(input.awaiting_delivery[index + 1..].iter().map(|remaining| {
+                    BridgeTickResult::AwaitingDelivery {
+                        worker: remaining.worker.clone(),
+                        attempt_id: remaining.attempt_id.clone(),
+                    }
+                }));
+                return Err(BridgeTickError { error, partial });
+            }
+        };
         if matches!(result, BridgeTickResult::Halted { .. }) {
             halted = true;
         }
@@ -811,23 +865,39 @@ where
     // too busy to take the read just then, are known answers that wrote
     // nothing, not unknown outcomes: no new assignment this tick, no halt.
     // Attempts already in flight keep their heartbeat and settlement. Any
-    // other failure still returns an error, which halts.
-    let tasks = match control.owned_queue().await? {
-        SelectionRead::Ready(tasks) => tasks,
-        SelectionRead::BoardCapacityExceeded => {
+    // other failure still returns an error, carrying what this tick already
+    // committed (the awaiting_delivery loop above just finished cleanly, so
+    // `results` here holds only its outcomes).
+    let tasks = match control.owned_queue().await {
+        Ok(SelectionRead::Ready(tasks)) => tasks,
+        Ok(SelectionRead::BoardCapacityExceeded) => {
             results.push(BridgeTickResult::Idle {
                 reason: BOARD_CAPACITY_EXCEEDED,
             });
             return Ok(results);
         }
-        SelectionRead::DatabaseBusy => {
+        Ok(SelectionRead::DatabaseBusy) => {
             results.push(BridgeTickResult::Idle {
                 reason: DATABASE_BUSY,
             });
             return Ok(results);
         }
+        Err(error) => return Err(BridgeTickError { error, partial: results }),
     };
     let mut seen = HashSet::new();
+    // A worker whose earlier attempt is still pending locally, or whose start
+    // this process already acked and is waiting to deliver, is never started
+    // a second time by this process. The server's owned queue can
+    // legitimately offer such a task again — its own recovery may have
+    // reclaimed and reassigned it while this process still runs the earlier
+    // attempt — so this defensive check does not depend on what this tick's
+    // execution heartbeats answered.
+    let mut busy_workers: HashSet<&str> = input
+        .locally_pending_workers
+        .iter()
+        .map(String::as_str)
+        .collect();
+    busy_workers.extend(input.awaiting_delivery.iter().map(|entry| entry.worker.as_str()));
 
     for task in tasks {
         if !seen.insert(task.owner.clone()) {
@@ -836,8 +906,14 @@ where
         if halted {
             break;
         }
+        if busy_workers.contains(task.owner.as_str()) {
+            results.push(BridgeTickResult::Idle {
+                reason: START_WORKER_EXECUTION_PENDING_LOCALLY,
+            });
+            continue;
+        }
 
-        let outcomes = BoardDriver::new(
+        let outcomes = match BoardDriver::new(
             SingleOwnedTask {
                 inner: &control,
                 task: task.clone(),
@@ -845,7 +921,11 @@ where
             sessions.clone(),
         )
         .tick()
-        .await?;
+        .await
+        {
+            Ok(outcomes) => outcomes,
+            Err(error) => return Err(BridgeTickError { error, partial: results }),
+        };
 
         for outcome in outcomes {
             let result = match outcome {
@@ -853,7 +933,10 @@ where
                     worker,
                     attempt_id,
                     ..
-                } => deliver_started(input, &snapshot, prompts, local, &worker, &attempt_id).await?,
+                } => match deliver_started(input, &snapshot, prompts, local, &worker, &attempt_id).await {
+                    Ok(result) => result,
+                    Err(error) => return Err(BridgeTickError { error, partial: results }),
+                },
                 DriveOutcome::ExecutionStartDeferred { .. } => BridgeTickResult::Idle {
                     reason: START_DATABASE_BUSY,
                 },
@@ -1353,8 +1436,56 @@ pub async fn run_from_env() -> i32 {
             }
         }
 
-        if !halted {
+        // Execution heartbeats run before any new start this tick (not after,
+        // as an earlier version had it). `bridge_tick_sourced` below can
+        // start a brand new attempt for a worker whose EARLIER attempt is
+        // still `pending`; renewing that earlier attempt's lease first, in
+        // the same tick, closes the window where the server's own recovery
+        // could have reclaimed and reassigned it while this process still
+        // runs it. A busy answer here means the renewal did not go through —
+        // not that the attempt ended — so it only withholds this tick's new
+        // starts (`any_pending_busy_this_tick`); it is not a sticky halt.
+        let mut any_pending_busy_this_tick = false;
+        let mut still_pending = Vec::new();
+        for entry in pending.drain(..) {
+            let Some(session) = sessions.presence(&entry.delivery.worker) else {
+                halted = true;
+                continue;
+            };
+            let answer = api
+                .execution_heartbeat(&entry.delivery, &session.instance_id, session.generation)
+                .await
+                .map(|response| response.accepted);
+            match plan_heartbeat_answer(&answer) {
+                PendingHeartbeat::Keep => still_pending.push(entry),
+                PendingHeartbeat::RetryNextTick => {
+                    eprintln!(
+                        "amux wsl bridge warn: execution heartbeat for attempt {} answered 503 {DATABASE_BUSY}; kept, not halted",
+                        entry.delivery.attempt_id
+                    );
+                    any_pending_busy_this_tick = true;
+                    still_pending.push(entry);
+                }
+                PendingHeartbeat::KeepAndHalt => {
+                    still_pending.push(entry);
+                    halted = true;
+                }
+                PendingHeartbeat::DropAndHalt => halted = true,
+            }
+        }
+        pending = still_pending;
+
+        if !halted && !any_pending_busy_this_tick {
             let carried = std::mem::take(&mut awaiting_delivery);
+            // Independent of this tick's heartbeat timing: a worker whose
+            // earlier attempt is still in `pending` right now must never be
+            // started again by this process. `awaiting_delivery`'s own
+            // workers count as busy too and `bridge_tick_sourced` folds them
+            // in itself.
+            let locally_pending_workers: Vec<String> = pending
+                .iter()
+                .map(|entry| entry.delivery.worker.clone())
+                .collect();
             let mut prompts = DeliveryPrompts {
                 api: &api,
                 sessions: &sessions,
@@ -1373,6 +1504,7 @@ pub async fn run_from_env() -> i32 {
                 now: 0,
                 worker_outcome: None,
                 awaiting_delivery: &carried,
+                locally_pending_workers: &locally_pending_workers,
             };
             let mut accepted = Vec::new();
             match bridge_tick_sourced(
@@ -1385,31 +1517,33 @@ pub async fn run_from_env() -> i32 {
             .await
             {
                 Ok(results) => {
-                    for result in &results {
-                        if matches!(result, BridgeTickResult::Halted { .. }) {
-                            halted = true;
-                        }
-                        if let Some(warning) = bridge_tick_warning(result) {
-                            eprintln!("{warning}");
-                        }
-                        if let BridgeTickResult::AwaitingDelivery { worker, attempt_id } = result {
-                            awaiting_delivery.push(AwaitingDelivery {
-                                worker: worker.clone(),
-                                attempt_id: attempt_id.clone(),
-                            });
-                        }
-                        if let BridgeTickResult::Pending { attempt_id } = result {
-                            if let Some(delivery) = prompts
-                                .deliveries
-                                .iter()
-                                .find(|delivery| delivery.attempt_id == *attempt_id)
-                            {
-                                accepted.push((attempt_id.clone(), delivery.clone()));
-                            }
-                        }
-                    }
+                    record_bridge_tick_results(
+                        &results,
+                        &prompts.deliveries,
+                        &mut awaiting_delivery,
+                        &mut accepted,
+                        &mut halted,
+                    );
                 }
-                Err(_) => {
+                Err(err) => {
+                    // The tick failed with an unknown outcome, but it may
+                    // already have acked and locally sent work before that:
+                    // `err.partial` is exactly what a success would have
+                    // returned up to the failure. Recording it first is what
+                    // keeps an already-dispatched attempt in `pending` (so it
+                    // keeps getting heartbeats after this halt) instead of
+                    // being forgotten.
+                    eprintln!(
+                        "amux wsl bridge warn: tick failed after {} result(s) already committed this tick; recording them before halting",
+                        err.partial.len()
+                    );
+                    record_bridge_tick_results(
+                        &err.partial,
+                        &prompts.deliveries,
+                        &mut awaiting_delivery,
+                        &mut accepted,
+                        &mut halted,
+                    );
                     halted = true;
                 }
             }
@@ -1423,35 +1557,11 @@ pub async fn run_from_env() -> i32 {
                     card: None,
                 });
             }
+        } else if any_pending_busy_this_tick {
+            eprintln!(
+                "amux wsl bridge warn: an execution heartbeat answered 503 {DATABASE_BUSY} this tick; no new assignment, not halted"
+            );
         }
-
-        let mut still_pending = Vec::new();
-        for entry in pending.drain(..) {
-            let Some(session) = sessions.presence(&entry.delivery.worker) else {
-                halted = true;
-                continue;
-            };
-            let answer = api
-                .execution_heartbeat(&entry.delivery, &session.instance_id, session.generation)
-                .await
-                .map(|response| response.accepted);
-            match plan_heartbeat_answer(&answer) {
-                PendingHeartbeat::Keep => still_pending.push(entry),
-                PendingHeartbeat::RetryNextTick => {
-                    eprintln!(
-                        "amux wsl bridge warn: execution heartbeat for attempt {} answered 503 {DATABASE_BUSY}; kept, not halted",
-                        entry.delivery.attempt_id
-                    );
-                    still_pending.push(entry);
-                }
-                PendingHeartbeat::KeepAndHalt => {
-                    still_pending.push(entry);
-                    halted = true;
-                }
-                PendingHeartbeat::DropAndHalt => halted = true,
-            }
-        }
-        pending = still_pending;
 
         // Policy version 15: settle from the linked local receipt. A local
         // read failure is retried next tick; it is a read, not an outcome.
@@ -1530,6 +1640,45 @@ pub async fn run_from_env() -> i32 {
     }
 }
 
+/// Applies one tick's results — either `bridge_tick_sourced`'s `Ok` value, or
+/// the `partial` results carried by its `BridgeTickError` — to the run loop's
+/// bookkeeping. A `Halted` result sets `halted`; a skip-without-halt result
+/// gets its stderr warning; a still-open `AwaitingDelivery` is queued so the
+/// next tick pulls it before any new work; a `Pending` result's matching
+/// delivery is queued to start execution heartbeats. Using the same function
+/// for both the success and the failure path is what keeps a genuine error
+/// from discarding whatever the tick already committed.
+fn record_bridge_tick_results(
+    results: &[BridgeTickResult],
+    deliveries: &[PulledDelivery],
+    awaiting_delivery: &mut Vec<AwaitingDelivery>,
+    accepted: &mut Vec<(String, PulledDelivery)>,
+    halted: &mut bool,
+) {
+    for result in results {
+        if matches!(result, BridgeTickResult::Halted { .. }) {
+            *halted = true;
+        }
+        if let Some(warning) = bridge_tick_warning(result) {
+            eprintln!("{warning}");
+        }
+        if let BridgeTickResult::AwaitingDelivery { worker, attempt_id } = result {
+            awaiting_delivery.push(AwaitingDelivery {
+                worker: worker.clone(),
+                attempt_id: attempt_id.clone(),
+            });
+        }
+        if let BridgeTickResult::Pending { attempt_id } = result {
+            if let Some(delivery) = deliveries
+                .iter()
+                .find(|delivery| delivery.attempt_id == *attempt_id)
+            {
+                accepted.push((attempt_id.clone(), delivery.clone()));
+            }
+        }
+    }
+}
+
 /// The stderr line (journald keeps it) for a tick result that skipped new
 /// assignments without halting.
 fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
@@ -1542,6 +1691,9 @@ fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
         )),
         BridgeTickResult::Idle { reason } if *reason == START_DATABASE_BUSY => Some(format!(
             "amux wsl bridge warn: execution start answered 503 {DATABASE_BUSY}; not started, retrying next tick, not halted"
+        )),
+        BridgeTickResult::Idle { reason } if *reason == START_WORKER_EXECUTION_PENDING_LOCALLY => Some(format!(
+            "amux wsl bridge warn: owned queue offered a task whose worker still has an unsettled local execution ({reason}); not started, not halted"
         )),
         BridgeTickResult::AwaitingDelivery { attempt_id, .. } => Some(format!(
             "amux wsl bridge warn: delivery for attempt {attempt_id} answered 503 {DATABASE_BUSY}; pulling again next tick, not halted"
@@ -1742,6 +1894,8 @@ mod tests {
     use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask};
 
     const ATTEMPT_ID: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
+    const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
+    const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
 
     fn task() -> OwnedTodoTask {
         OwnedTodoTask {
@@ -1806,6 +1960,7 @@ mod tests {
             now: 100,
             worker_outcome: outcome,
             awaiting_delivery: &[],
+            locally_pending_workers: &[],
         }
     }
 
@@ -2773,6 +2928,138 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(local.sends.is_empty());
+    }
+
+    /// Regression for the review finding on execution-heartbeat/start
+    /// ordering: even if the run loop somehow tried to start a task before
+    /// renewing an in-flight attempt's lease, a worker this process already
+    /// has a locally unsettled execution for is never started a second time.
+    /// The server's owned queue can legitimately offer the same task again —
+    /// its own recovery may have reclaimed and reassigned it while this
+    /// process still runs the earlier attempt — so the check is keyed on the
+    /// worker this process knows about, not on anything the server's answer
+    /// says this tick. Before this defensive check existed, this task would
+    /// have gone through `execution_start` a second time while the first
+    /// local run was still in flight.
+    #[tokio::test]
+    async fn a_worker_with_a_locally_pending_attempt_is_never_started_again() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut prompts = BTreeMap::new();
+        prompts.insert(ATTEMPT_ID.into(), brief_prompt());
+        let mut local = LocalExchange::accepting();
+        let mut tick_input = input(true, &prompts, None);
+        let locally_pending = vec!["claude-impl".to_string()];
+        tick_input.locally_pending_workers = &locally_pending;
+
+        let results = bridge_tick(
+            &tick_input,
+            FlagControl {
+                calls: calls.clone(),
+                tasks: vec![task()],
+                start: started(),
+            },
+            running_session(),
+            &mut local,
+        )
+        .await
+        .unwrap();
+
+        // Only the owned-queue read happens: `execution_start` is never
+        // called for a worker this process already has a pending local
+        // execution for.
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(local.sends.is_empty());
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Idle {
+                reason: START_WORKER_EXECUTION_PENDING_LOCALLY,
+            }]
+        );
+    }
+
+    /// Prompts that succeed exactly once, then fail with a genuine (not
+    /// database-busy) error on every later call.
+    struct SucceedThenFailPrompts {
+        calls: usize,
+    }
+
+    impl AttemptPrompts for SucceedThenFailPrompts {
+        async fn prompt_for(&mut self, _worker: &str, _attempt_id: &str) -> Result<Option<String>> {
+            let call = self.calls;
+            self.calls += 1;
+            if call == 0 {
+                Ok(Some(brief_prompt()))
+            } else {
+                Err(anyhow::anyhow!("unsupported Tomverse internal response status"))
+                    .context("delivery pull failed")
+            }
+        }
+    }
+
+    /// Regression for the review finding on `bridge_tick_sourced` discarding
+    /// partial progress: the first `awaiting_delivery` entry acks and sends
+    /// locally (a `Pending` result), the second's pull then fails with an
+    /// unknown outcome, and a third entry is never attempted this tick at
+    /// all. Before `BridgeTickError` existed, the `?` on the second entry's
+    /// failure returned `Err` straight out of the function and the caller's
+    /// `Err(_) => { halted = true; }` never saw the first entry's `Pending`
+    /// or the third entry's still-open `AwaitingDelivery` — the already
+    /// locally-running first attempt would have stopped getting execution
+    /// heartbeats even though the local session kept running it.
+    #[tokio::test]
+    async fn an_error_after_partial_success_still_returns_it_instead_of_discarding_it() {
+        let empty = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let carried = vec![
+            AwaitingDelivery {
+                worker: "claude-impl".into(),
+                attempt_id: ATTEMPT_ID.into(),
+            },
+            AwaitingDelivery {
+                worker: "claude-review".into(),
+                attempt_id: ATTEMPT_ID_2.into(),
+            },
+            AwaitingDelivery {
+                worker: "claude-ops".into(),
+                attempt_id: ATTEMPT_ID_3.into(),
+            },
+        ];
+        let mut tick_input = input(true, &empty, None);
+        tick_input.awaiting_delivery = &carried;
+
+        let result = bridge_tick_sourced(
+            &tick_input,
+            FlagControl {
+                calls: Arc::new(AtomicUsize::new(0)),
+                tasks: Vec::new(),
+                start: started(),
+            },
+            running_session(),
+            &mut SucceedThenFailPrompts { calls: 0 },
+            &mut local,
+        )
+        .await;
+
+        let Err(err) = result else {
+            panic!("expected the second entry's pull failure to return Err");
+        };
+        assert_eq!(
+            err.partial,
+            vec![
+                BridgeTickResult::Pending {
+                    attempt_id: ATTEMPT_ID.into(),
+                },
+                BridgeTickResult::AwaitingDelivery {
+                    worker: "claude-ops".into(),
+                    attempt_id: ATTEMPT_ID_3.into(),
+                },
+            ],
+            "the first entry's Pending and the never-attempted third entry must both survive the second entry's failure"
+        );
+        // The first entry's local send actually happened; the second and
+        // third never reached dispatch.
+        assert_eq!(local.sends.len(), 1);
+        assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
     }
 
     #[test]
