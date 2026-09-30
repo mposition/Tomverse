@@ -12,7 +12,10 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { getTrustedClientIp } from "@/lib/clientIp";
-import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
+import {
+  grantConsentWithVerifiedSession,
+  requestConsentConfirmation,
+} from "@/lib/emailConsentConfirmation";
 import { readPreferences, setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
 import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
 import { jurisdictionForUser, setSelfDeclaredCountry } from "@/lib/emailJurisdiction";
@@ -186,8 +189,9 @@ export async function PATCH(req: Request) {
         );
       }
 
-      // Switching a marketing purpose on is a request for a confirmation mail,
-      // never the consent itself (docs/policy/email-double-opt-in.md §5). The
+      // Switching a marketing purpose on is the consent itself when this
+      // session's sign-in proved the address (docs/policy/email-double-opt-in.md
+      // §14); otherwise it is a request for a confirmation mail (§5) and the
       // preference stays off until the link in that mail is used.
       //
       // Bounded per account: each request sends a message to the account's own
@@ -199,21 +203,40 @@ export async function PATCH(req: Request) {
         "consent-confirmation",
         { minute: 3, day: 10 }
       );
-      const requested = await requestConsentConfirmation({
+      const ip = (() => {
+        const trusted = getTrustedClientIp(req);
+        return trusted === "unknown" ? null : trusted;
+      })();
+      const granted = await grantConsentWithVerifiedSession({
         userId,
         purpose: body.purpose!,
+        proof: session.user.addressProof ?? null,
         capturedVia: "preference_center",
+        jurisdiction,
         confirmedCountry: countryDecision.countryCode,
-        jurisdiction: jurisdiction.countryCode,
-        jurisdictionSource: "self_declared",
-        ip: (() => {
-          const trusted = getTrustedClientIp(req);
-          return trusted === "unknown" ? null : trusted;
-        })(),
+        ip,
         userAgent: req.headers.get("user-agent"),
         now,
       });
-      if (!requested.requested && requested.reason !== "already_confirmed") {
+      // Only a session without proof falls back to the mail. Every other
+      // refusal -- the flag off, the address moved, a suppression -- would
+      // refuse the mail's confirmation too.
+      let available = granted.granted;
+      if (!granted.granted && granted.reason === "no_proof") {
+        const requested = await requestConsentConfirmation({
+          userId,
+          purpose: body.purpose!,
+          capturedVia: "preference_center",
+          confirmedCountry: countryDecision.countryCode,
+          jurisdiction: jurisdiction.countryCode,
+          jurisdictionSource: "self_declared",
+          ip,
+          userAgent: req.headers.get("user-agent"),
+          now,
+        });
+        available = requested.requested || requested.reason === "already_confirmed";
+      }
+      if (!available) {
         // Off, or keys not deployed: the step that would make consent valid is
         // not available, so no consent is collected. Saying so is better than
         // storing a switch that silently never sends.

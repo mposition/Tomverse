@@ -350,12 +350,18 @@ const compilerOptions = parsedConfig.options;
 // 2026-09-30, sign-in / sign-up split takes develop: the split note and the
 // web search override note above both stand; the digest below is a repin over
 // the merged tree.
+//
+// 2026-09-30, consent from a proven session (DOI section 14): the address proof
+// helpers are appended to `lib/emailPreferenceCore.ts`, the sealed session
+// confirmation to `lib/emailPreferences.ts`, and `lib/auth.ts` writes the
+// proof into the token -- all already listed, so the file set stays 190. No
+// element access is added; this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "2d5068e55fdae55c27ae6accdd1ac13d",
-  "acd0238cfe6f97fb67674ed13e8692c8",
+  "f53dabacb0732a88f681597b097812b7",
+  "5253c18da6cbc591d022ae0809155a4a",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

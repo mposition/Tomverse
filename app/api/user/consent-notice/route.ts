@@ -73,6 +73,7 @@ export async function POST(req: Request) {
         return trusted === "unknown" ? null : trusted;
       })(),
       userAgent: req.headers.get("user-agent"),
+      addressProof: session.user.addressProof ?? null,
     });
     return NextResponse.json(result, {
       status: result.recorded

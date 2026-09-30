@@ -45,6 +45,7 @@ export async function POST(req: Request) {
       userId: session.user.id,
       createdBySignIn: session.user.accountCreatedBySignIn === true,
       emailLoginAttemptId: session.user.signupEmailLoginAttemptId ?? null,
+      addressProof: session.user.addressProof ?? null,
       attemptId: body.attemptId,
       nonce: body.nonce,
     });

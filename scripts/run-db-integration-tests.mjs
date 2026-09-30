@@ -365,6 +365,9 @@ run(
     // Sign-in and sign-up split (v25): a proven address with no account is
     // held for one sign-up, and only the database shows the hold is single use.
     "tests/integration/email-login-signup-hold.db.test.ts",
+    // DOI section 14: a proven session consents at once; the database shows
+    // the seal, the lock-time address check and the retired link.
+    "tests/integration/email-verified-session-consent.db.test.ts",
     "tests/integration/au-relationship.db.test.ts",
     "tests/integration/in-product-consent-notice.db.test.ts",
     "tests/integration/processing-result-notice.db.test.ts",

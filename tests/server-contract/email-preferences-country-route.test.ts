@@ -42,7 +42,15 @@ const world: {
   /** When set, jurisdictionForUser returns exactly this, ignoring the request. */
   forcedResolution: Record<string, unknown> | null;
   jurisdictionReads: number;
-} = { calls: [], billingCountry: null, forcedResolution: null, jurisdictionReads: 0 };
+  /** What the proven-session grant answers (docs/policy/email-double-opt-in.md §14). */
+  sessionGrant: Record<string, unknown>;
+} = {
+  calls: [],
+  billingCountry: null,
+  forcedResolution: null,
+  jurisdictionReads: 0,
+  sessionGrant: { granted: false, reason: "no_proof" },
+};
 
 let route: { PATCH: (request: Request) => Promise<Response> } | null = null;
 
@@ -65,6 +73,10 @@ const loadRoute = async () => {
   });
   mock.module(mod("lib/emailConsentConfirmation.ts"), {
     namedExports: {
+      grantConsentWithVerifiedSession: async (input: Record<string, unknown>) => {
+        world.calls.push({ fn: "grantConsentWithVerifiedSession", input });
+        return world.sessionGrant;
+      },
       requestConsentConfirmation: async (input: Record<string, unknown>) => {
         world.calls.push({ fn: "requestConsentConfirmation", input });
         return { requested: true, purpose: input.purpose, requestedAt: new Date() };
@@ -187,17 +199,44 @@ test("a conflicting resolution is refused as a conflict", async () => {
   assert.deepEqual(world.calls, []);
 });
 
-test("an allowlisted country asks for a confirmation and never writes consent directly", async () => {
+test("an allowlisted country without a proven session asks for a confirmation", async () => {
   reset();
   const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
   assert.equal(response.status, 200);
-  // docs/policy/email-double-opt-in.md §5: switching marketing on is a request
-  // for a confirmation mail, not the consent.
+  // docs/policy/email-double-opt-in.md §5: without a proof the switch is a
+  // request for a confirmation mail, not the consent.
   assert.deepEqual(
     world.calls.map((call) => call.fn),
-    ["requestConsentConfirmation"]
+    ["grantConsentWithVerifiedSession", "requestConsentConfirmation"]
+  );
+  assert.equal(world.calls[1].input.confirmedCountry, "DE");
+});
+
+test("a proven session consents at once and sends no confirmation mail", async () => {
+  reset();
+  world.sessionGrant = { granted: true, alreadyConfirmed: false };
+  const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
+  assert.equal(response.status, 200);
+  // docs/policy/email-double-opt-in.md §14.2.
+  assert.deepEqual(
+    world.calls.map((call) => call.fn),
+    ["grantConsentWithVerifiedSession"]
   );
   assert.equal(world.calls[0].input.confirmedCountry, "DE");
+  world.sessionGrant = { granted: false, reason: "no_proof" };
+});
+
+test("a proven session refused for another reason is not turned into a mail", async () => {
+  reset();
+  world.sessionGrant = { granted: false, reason: "suppressed" };
+  const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "CONFIRMATION_UNAVAILABLE");
+  assert.deepEqual(
+    world.calls.map((call) => call.fn),
+    ["grantConsentWithVerifiedSession"]
+  );
+  world.sessionGrant = { granted: false, reason: "no_proof" };
 });
 
 test("somebody in NL can still save a country, switch off, and withdraw everything", async () => {

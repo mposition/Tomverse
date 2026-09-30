@@ -15,6 +15,8 @@ import {
   emailPurposeClassification,
   preferenceChangeDecision,
   recordsConsent,
+  type AddressProof,
+  type AddressProofMethod,
   type ConsentConfirmationState,
   type EmailPurpose,
   type PreferenceChangeRefusal,
@@ -22,7 +24,12 @@ import {
   relationshipEndedSourceEventKey,
   relationshipStartedSourceEventKey,
 } from "@/lib/emailPreferenceCore";
-import { normalizeCountry } from "@/lib/emailJurisdictionCore";
+import {
+  marketingJurisdictionVerdict,
+  normalizeCountry,
+  type ResolvedJurisdiction,
+} from "@/lib/emailJurisdictionCore";
+import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   normalizeSuppressionAddress,
@@ -245,6 +252,77 @@ export type PreferenceSource =
   | "privacy_request"
   | "provider_complaint";
 
+/** A consent confirmed by its mailed link (docs/policy/email-double-opt-in.md §5). */
+export type LinkConfirmation = {
+  kind?: "link";
+  tokenVersion: string;
+  requestedAt: Date;
+  requestId: string;
+  policyVersionId: string;
+  /** The mailbox the link was sent to, re-checked under the user row lock. */
+  addressDigest: string;
+};
+
+/**
+ * A consent confirmed by the session that proved the address
+ * (docs/policy/email-double-opt-in.md §14). It carries no request id: it
+ * cannot satisfy the link branch, and the link branch cannot satisfy it.
+ * Only `sealVerifiedSessionConfirmation()` makes one, from a proof the server
+ * wrote into the session token; a plain object of this shape is refused.
+ */
+export type VerifiedSessionConfirmation = {
+  readonly kind: "verified_session";
+  readonly proof: AddressProofMethod;
+  readonly provenAt: Date;
+  /** The proven address's digest, re-checked under the user row lock. */
+  readonly addressDigest: string;
+  /** The purposes it was checked for; it switches on nothing else. */
+  readonly purposes: readonly EmailPurpose[];
+  /** The country it was checked under; the write must name the same one. */
+  readonly countryCode: string;
+};
+
+const sealedSessionConfirmations = new WeakSet<object>();
+
+/**
+ * Makes the one kind of session confirmation `applyPreferenceChange()` will
+ * honour, or `null`. It checks what it certifies itself -- the collection
+ * flag, each purpose's change decision and the marketing jurisdiction -- so a
+ * caller cannot obtain one without them, and binds the purposes and the
+ * country so the write cannot use it for anything else
+ * (docs/policy/email-double-opt-in.md §14.6). The proof against the account's
+ * current address is the caller's to check first; the digest is checked again
+ * under the user row lock.
+ */
+export async function sealVerifiedSessionConfirmation(input: {
+  proof: AddressProof;
+  purposes: readonly string[];
+  jurisdiction: ResolvedJurisdiction;
+}): Promise<VerifiedSessionConfirmation | null> {
+  if (!(await isEmailConsentConfirmationEnabled())) return null;
+  const purposes: EmailPurpose[] = [];
+  for (const purpose of input.purposes) {
+    if (!preferenceChangeDecision({ purpose, enabled: true, confirmed: true }).allowed) return null;
+    purposes.push(purpose as EmailPurpose);
+  }
+  if (purposes.length === 0) return null;
+  if (!marketingJurisdictionVerdict(input.jurisdiction).allowed) return null;
+  const sealed: VerifiedSessionConfirmation = Object.freeze({
+    kind: "verified_session" as const,
+    proof: input.proof.method,
+    provenAt: new Date(input.proof.provenAt),
+    addressDigest: consentAddressDigest(input.proof.address),
+    purposes: Object.freeze([...purposes]),
+    countryCode: input.jurisdiction.countryCode,
+  });
+  sealedSessionConfirmations.add(sealed);
+  return sealed;
+}
+
+const isSessionConfirmation = (
+  confirmation: SetPreferenceInput["confirmation"]
+): confirmation is VerifiedSessionConfirmation => confirmation?.kind === "verified_session";
+
 export type SetPreferenceInput = {
   userId: string;
   purpose: string;
@@ -260,6 +338,12 @@ export type SetPreferenceInput = {
   consentWording?: string | null;
   /** The country the person confirmed in the same opt-in action. */
   confirmedCountry?: string | null;
+  /**
+   * The screen the consent was given on, when `capturedVia` does not say it:
+   * the in-product notice records `preference_center` as its capture and names
+   * itself here (docs/policy/email-double-opt-in.md §14.5).
+   */
+  evidenceVia?: "in_product_notice" | "signup_form";
   /**
    * Only invalidate a pending confirmation link; do not record a refusal.
    *
@@ -284,14 +368,7 @@ export type SetPreferenceInput = {
    * names: the person agreed under the policy they were shown, not whichever
    * one is active when they click.
    */
-  confirmation?: {
-    tokenVersion: string;
-    requestedAt: Date;
-    requestId: string;
-    policyVersionId: string;
-    /** The mailbox the link was sent to, re-checked under the user row lock. */
-    addressDigest: string;
-  };
+  confirmation?: LinkConfirmation | VerifiedSessionConfirmation;
   /**
    * Called inside the transaction that wrote a consent record, with that
    * record. How a caller queues the 14-day processing-result notice with the
@@ -341,8 +418,12 @@ export async function setPreference(input: SetPreferenceInput): Promise<Preferen
   });
   if (!user?.email) return { changed: false, reason: "unknown_purpose" };
 
+  // A link names the policy its request was made under; a session consent is
+  // given under the one active now.
   const policyVersionId =
-    input.confirmation?.policyVersionId ?? (await ensureBootstrapPolicyVersion());
+    (input.confirmation && !isSessionConfirmation(input.confirmation)
+      ? input.confirmation.policyVersionId
+      : null) ?? (await ensureBootstrapPolicyVersion());
   await ensureDefaultPreferences(input.userId);
 
   // Every transition of this row -- request, confirm, cancel, withdraw --
@@ -404,6 +485,20 @@ export async function applyPreferenceChange(
   // address that actually withdrew.
   const email = await lockUserEmail(tx, input.userId);
   if (!email) return "no_address" as const;
+  if (isSessionConfirmation(input.confirmation)) {
+    // Only a confirmation the server sealed from a session proof, and only to
+    // switch a purpose on (docs/policy/email-double-opt-in.md §14.6).
+    if (
+      !sealedSessionConfirmations.has(input.confirmation) ||
+      !input.enabled ||
+      !input.confirmation.purposes.includes(input.purpose) ||
+      input.jurisdiction !== input.confirmation.countryCode
+    ) {
+      throw new Error(
+        "A verified-session confirmation must be sealed by the server, enable a purpose it was sealed for, under its country."
+      );
+    }
+  }
   if (
     input.confirmation &&
     consentAddressDigest(email) !== input.confirmation.addressDigest
@@ -454,7 +549,10 @@ export async function applyPreferenceChange(
     return "cancelled" as const;
   }
 
-  if (input.confirmation) {
+  if (isSessionConfirmation(input.confirmation)) {
+    // Already confirmed, by a link or an earlier session: nothing to record.
+    if (existing.enabled && existing.confirmedAt) return "already_set" as const;
+  } else if (input.confirmation) {
     if (existing.confirmationRequestId !== input.confirmation.requestId) {
       return "superseded" as const;
     }
@@ -633,7 +731,14 @@ export async function applyPreferenceChange(
       grantedAt: input.enabled ? now : null,
       ...(input.enabled
         ? consentBased
-          ? { confirmedAt: now }
+          ? {
+              confirmedAt: now,
+              // A session consent leaves no request behind: a link already in
+              // the inbox must not change anything later (docs/policy/email-double-opt-in.md §14.6 item 4).
+              ...(isSessionConfirmation(input.confirmation)
+                ? { confirmationRequestedAt: null, confirmationRequestId: null }
+                : {}),
+            }
           : {}
         : {
             nextConfirmationNoticeAt: null,
@@ -678,15 +783,21 @@ export async function applyPreferenceChange(
             ? { wordingHash: evidenceHash("wording", input.consentWording) }
             : {}),
           ...(input.deliveryId ? { deliveryId: input.deliveryId } : {}),
-          ...(input.confirmation
+          ...(isSessionConfirmation(input.confirmation)
             ? {
-                confirmedVia: "link",
-                tokenVersion: input.confirmation.tokenVersion,
-                requestedAt: input.confirmation.requestedAt.toISOString(),
-                requestId: input.confirmation.requestId,
+                confirmedVia: "verified_session",
+                proof: input.confirmation.proof,
+                provenAt: input.confirmation.provenAt.toISOString(),
               }
-            : {}),
-          via: input.source,
+            : input.confirmation
+              ? {
+                  confirmedVia: "link",
+                  tokenVersion: input.confirmation.tokenVersion,
+                  requestedAt: input.confirmation.requestedAt.toISOString(),
+                  requestId: input.confirmation.requestId,
+                }
+              : {}),
+          via: input.evidenceVia ?? input.source,
         },
         ipHash: evidenceHash("ip", input.ip),
         userAgentHash: evidenceHash("ua", input.userAgent),

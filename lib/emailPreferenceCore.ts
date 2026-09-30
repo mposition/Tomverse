@@ -489,3 +489,78 @@ export const relationshipDormantAt = (lastSeen: Date, now: Date): Date | null =>
   const dormantAt = addUtcMonths(lastSeen, EMAIL_RELATIONSHIP_DORMANCY_MONTHS);
   return now.getTime() >= dormantAt.getTime() ? dormantAt : null;
 };
+
+/* ------------------------------------------ address proof (DOI section 14) */
+
+/**
+ * What a sign-in proved about the account's address
+ * (docs/policy/email-double-opt-in.md §14.1).
+ *
+ * A consent ticked in a session that proved the address is recorded as
+ * confirmed at once; anything else takes the confirmation mail. Two sources
+ * only: this app's own code or link, and a Google sign-in whose raw profile
+ * says `email_verified`. Microsoft is not a source -- an Entra tenant sets the
+ * email value itself, which proves no mailbox.
+ */
+export const ADDRESS_PROOF_METHODS = ["email_code", "google_verified"] as const;
+export type AddressProofMethod = (typeof ADDRESS_PROOF_METHODS)[number];
+
+export type AddressProof = {
+  method: AddressProofMethod;
+  /** Trimmed and lower-cased, as `consentAddressDigest()` normalises it. */
+  address: string;
+  /** When the sign-in proved it (ISO), written by the server at sign-in. */
+  provenAt: string;
+};
+
+const proofAddress = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim().toLowerCase() : null;
+
+/**
+ * The proof a sign-in carries, read on the sign-in branch of the JWT callback
+ * only (docs/policy/email-double-opt-in.md §14.1). The address stored is the one the source proved, and only when
+ * it is the signed-in user's own: with a session present NextAuth links a new
+ * provider to the existing user, and that provider's profile must not prove
+ * this account's address.
+ */
+export const addressProofForSignIn = (input: {
+  provider: string | null | undefined;
+  /** The provider's raw profile (`OAuthProfile`), not the mapped user. */
+  profile: unknown;
+  /** The address of the user the token is for. */
+  userEmail: string | null | undefined;
+  now: Date;
+}): AddressProof | null => {
+  const userAddress = proofAddress(input.userEmail);
+  if (!userAddress) return null;
+  if (input.provider === "email-code") {
+    // authorize() returns a user only after a code or link for this address matched.
+    return { method: "email_code", address: userAddress, provenAt: input.now.toISOString() };
+  }
+  if (input.provider === "google") {
+    const profile = input.profile as { email?: unknown; email_verified?: unknown } | null;
+    if (!profile || profile.email_verified !== true) return null;
+    if (proofAddress(profile.email) !== userAddress) return null;
+    return { method: "google_verified", address: userAddress, provenAt: input.now.toISOString() };
+  }
+  return null;
+};
+
+export const isAddressProof = (value: unknown): value is AddressProof => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.method === "string" &&
+    (ADDRESS_PROOF_METHODS as readonly string[]).includes(candidate.method) &&
+    typeof candidate.address === "string" &&
+    candidate.address.length > 0 &&
+    typeof candidate.provenAt === "string" &&
+    !Number.isNaN(Date.parse(candidate.provenAt))
+  );
+};
+
+/** The proof names this address, after the same normalisation. */
+export const addressProofCovers = (
+  proof: unknown,
+  email: string | null | undefined
+): proof is AddressProof => isAddressProof(proof) && proof.address === proofAddress(email);

@@ -15,8 +15,11 @@ import { consentCopyHash } from "@/lib/emailConsentCopyHash";
 import { readConsentKeyring } from "@/lib/emailConsentToken";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
-import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
-import { ensureDefaultPreferences } from "@/lib/emailPreferences";
+import {
+  prepareVerifiedSessionGrant,
+  requestConsentConfirmation,
+} from "@/lib/emailConsentConfirmation";
+import { applyPreferenceChange, ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { CONSENT_CONFIRMATION_TTL_MS } from "@/lib/emailConsentToken";
 import {
   noticeStateForUser,
@@ -86,7 +89,7 @@ const copyLanguage = (value: string | null | undefined): ConsentCopyLanguage =>
     : "en";
 
 export type ConsentNoticeActionResult =
-  | { recorded: true; requested?: string[] }
+  | { recorded: true; requested?: string[]; granted?: string[] }
   | {
       recorded: false;
       reason:
@@ -114,6 +117,12 @@ export async function recordConsentNoticeAction(input: {
   copyVersion: string;
   ip?: string | null;
   userAgent?: string | null;
+  /**
+   * What this session's sign-in proved about the address (`addressProof`).
+   * With it "Yes" is the consent for all three purposes; without it, three
+   * confirmation mails (docs/policy/email-double-opt-in.md §14.2).
+   */
+  addressProof?: unknown;
 }): Promise<ConsentNoticeActionResult> {
   if (!(await consentNoticeCollectionReady())) return { recorded: false, reason: "disabled" };
   if (!consentCopyVersion(input.copyVersion)) return { recorded: false, reason: "unknown_version" };
@@ -219,6 +228,54 @@ export async function recordConsentNoticeAction(input: {
       confirmationRequestedAt: true,
     },
   });
+
+  // A session that proved the address consents here, for every purpose not
+  // already confirmed -- a pending one included, whose link the grant retires.
+  // All or none, like the requests below (§14.6).
+  const sessionGrant = await prepareVerifiedSessionGrant({
+    userId: input.userId,
+    proof: input.addressProof,
+    purposes: noticePurposes(),
+    jurisdiction: resolved,
+  });
+  if (sessionGrant.ok) {
+    const { grant } = sessionGrant;
+    const toGrant = noticePurposes().filter((purpose) => {
+      const row = rows.find((entry) => entry.purpose === purpose);
+      return !(row?.enabled && row.confirmedAt);
+    });
+    try {
+      await prisma.$transaction(async (tx) => {
+        for (const purpose of toGrant) {
+          const outcome = await applyPreferenceChange(tx, {
+            userId: input.userId,
+            purpose,
+            enabled: true,
+            capturedVia: "preference_center",
+            source: "preference_center",
+            evidenceVia: "in_product_notice",
+            jurisdiction: grant.jurisdiction.countryCode,
+            jurisdictionSource: grant.jurisdiction.source,
+            ip: input.ip ?? null,
+            userAgent: input.userAgent ?? null,
+            confirmation: grant.confirmation,
+            onConsentRecorded: grant.onConsentRecorded,
+            now: new Date(),
+            policyVersionId: grant.policyVersionId,
+            confirmedCountry: null,
+          });
+          if (outcome !== "changed" && outcome !== "already_set") throw CONFIRMATION_UNAVAILABLE;
+        }
+      });
+    } catch (error) {
+      if (error === CONFIRMATION_UNAVAILABLE) {
+        return { recorded: false, reason: "confirmation_unavailable" };
+      }
+      throw error;
+    }
+    return { recorded: true, granted: toGrant };
+  }
+
   const toRequest = noticePurposes().filter((purpose) => {
     const row = rows.find((entry) => entry.purpose === purpose);
     if (!row) return true;

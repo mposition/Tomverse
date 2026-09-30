@@ -1,4 +1,5 @@
 import type { DefaultSession } from "next-auth";
+import type { AddressProof } from "@/lib/emailPreferenceCore";
 
 declare module "next-auth" {
     // 💡 기존 Session 인터페이스를 병합(Merge)하여 확장합니다.
@@ -12,6 +13,8 @@ declare module "next-auth" {
             accountCreatedBySignIn?: boolean;
             /** The login row an email sign-up spent; the consent choice binds to it. */
             signupEmailLoginAttemptId?: string;
+            /** What this session's sign-in proved about the address (DOI §14.1). */
+            addressProof?: AddressProof;
         } & DefaultSession["user"];
     }
 }
@@ -40,5 +43,13 @@ declare module "next-auth/jwt" {
          * (docs/policy/email-product-news-redesign-draft.md section 5.2a).
          */
         signupEmailLoginAttemptId?: string;
+        /**
+         * What the sign-in that issued this token proved about the account's
+         * address: this app's code or link, or Google's email_verified
+         * (docs/policy/email-double-opt-in.md §14.1). Absent otherwise, and on
+         * tokens issued before it existed; a consent from such a session takes
+         * the confirmation mail.
+         */
+        addressProof?: AddressProof;
     }
 }
