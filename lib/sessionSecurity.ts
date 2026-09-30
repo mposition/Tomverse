@@ -1,10 +1,19 @@
 import "server-only";
 
+import { cookies } from "next/headers";
+import { decode } from "next-auth/jwt";
+
 import { prisma } from "@/lib/prisma";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { revokeAllMobileSessions } from "@/lib/mobileAuthService";
 import type {
     SessionSecuritySnapshotResult,
+} from "@/lib/sessionRevocationCore";
+import {
+    SESSION_COOKIE_NAMES,
+    SIGNUP_INTENT_COOKIE,
+    oauthSignupGate,
+    type OAuthSignupGate,
 } from "@/lib/sessionRevocationCore";
 
 /**
@@ -105,3 +114,98 @@ export const readSessionSecuritySnapshot = async (
     });
     return snapshot;
 };
+
+type CookieJar = Awaited<ReturnType<typeof cookies>>;
+
+/**
+ * Whether the request carries a session NextAuth would link a provider to.
+ *
+ * Mirrors the OAuth callback handler (next-auth/core/lib/callback-handler.js):
+ * it decodes the session JWT and loads the user named by `sub`; a token that
+ * does not decode -- expired, or signed with a rotated secret -- or names no
+ * user is treated as no session, and the callback goes on to create an
+ * account. So a cookie that is merely present is not a session here either.
+ */
+async function sessionCookieNamesUser(jar: CookieJar): Promise<boolean> {
+    const secret = process.env.NEXTAUTH_SECRET;
+    if (!secret) return false;
+    const all = jar.getAll();
+    for (const name of SESSION_COOKIE_NAMES) {
+        const whole = all.find((cookie) => cookie.name === name);
+        const chunks = all
+            .filter((cookie) => cookie.name.startsWith(`${name}.`))
+            .map((cookie) => ({ index: Number(cookie.name.slice(name.length + 1)), value: cookie.value }))
+            .filter((chunk) => Number.isInteger(chunk.index))
+            .sort((a, b) => a.index - b.index);
+        const token = whole?.value ?? (chunks.length ? chunks.map((chunk) => chunk.value).join("") : null);
+        if (!token) continue;
+        try {
+            const decoded = await decode({ token, secret });
+            const sub = decoded?.sub;
+            if (typeof sub !== "string" || !sub) continue;
+            const user = await prisma.user.findUnique({ where: { id: sub }, select: { id: true } });
+            if (user) return true;
+        } catch {
+            // Undecodable: NextAuth treats it as no session, and so does this.
+        }
+    }
+    return false;
+}
+
+/**
+ * The facts `oauthSignupGate()` needs, read inside NextAuth's `signIn`
+ * callback (docs/policy/email-product-news-redesign-draft.md section 5.2a).
+ *
+ * The callback is not given the request, so the two cookies are read through
+ * `next/headers` -- the NextAuth route is an App Router handler. The address
+ * lookup is the adapter's own (`getUserByEmail` is an exact `findUnique`), so
+ * "a user owns this address" means what NextAuth will conclude a moment later.
+ */
+export async function readOAuthSignupGate(input: {
+    provider: string;
+    providerAccountId: string;
+    email: string | null | undefined;
+}): Promise<OAuthSignupGate & { linkedUserId: string | null }> {
+    const linked = await prisma.account.findUnique({
+        where: {
+            provider_providerAccountId: {
+                provider: input.provider,
+                providerAccountId: input.providerAccountId,
+            },
+        },
+        select: { userId: true },
+    });
+    if (linked) return { allow: true, reason: "existing_account", linkedUserId: linked.userId };
+
+    const addressHasUser = input.email
+        ? (await prisma.user.findUnique({ where: { email: input.email }, select: { id: true } })) !== null
+        : false;
+
+    const jar = await cookies();
+    const hasSession = await sessionCookieNamesUser(jar);
+    const intentProvider = jar.get(SIGNUP_INTENT_COOKIE)?.value ?? null;
+
+    const gate = oauthSignupGate({
+        provider: input.provider,
+        accountExists: false,
+        addressHasUser,
+        hasSession,
+        intentProvider,
+    });
+    // One intent, one sign-up: spend it here so it cannot create a second
+    // account from a later click within its ten minutes.
+    if (gate.allow && gate.reason === "signup_intent") {
+        try {
+            jar.set(SIGNUP_INTENT_COOKIE, "", {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "lax",
+                path: "/api/auth",
+                maxAge: 0,
+            });
+        } catch {
+            // Read-only here; it still expires within ten minutes.
+        }
+    }
+    return { ...gate, linkedUserId: null };
+}

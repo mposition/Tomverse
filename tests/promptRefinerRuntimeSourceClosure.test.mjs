@@ -331,6 +331,13 @@ const compilerOptions = parsedConfig.options;
 // unchanged. None of it is an element access; the count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so this repins positions only.
 //
+// 2026-09-30, sign-in / sign-up split (v25, policy section 5.2a): the OAuth
+// sign-up gate is appended to `lib/sessionRevocationCore.ts` and
+// `lib/sessionSecurity.ts`, the email sign-up hold to `lib/emailLogin.ts`,
+// and `lib/auth.ts` calls them -- all already listed, so the file set stays
+// 190. A dated note in `lib/marketingAutomationAccess.ts` moves positions.
+// No element access is added; the count remains 228 and the position-free
+//
 // 2026-09-30, per-model web search override: `ModelRegistryEntry` gains the
 // nullable `webSearchOverride` column, and the watched-schema note in
 // `lib/marketingAutomationAccess.ts` records it beside the recomputed
@@ -339,12 +346,16 @@ const compilerOptions = parsedConfig.options;
 // all already listed, placed so none of their accesses moved and none was
 // added. No import is added; the count remains 228 and the position-free
 // inventory remains 9aa7ec49..., so this repins positions only.
+//
+// 2026-09-30, sign-in / sign-up split takes develop: the split note and the
+// web search override note above both stand; the digest below is a repin over
+// the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a585976bfe0753032c821d7f63df3149",
-  "7061b8ad56a1dd826441fa6629dc952b",
+  "2d5068e55fdae55c27ae6accdd1ac13d",
+  "acd0238cfe6f97fb67674ed13e8692c8",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

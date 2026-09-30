@@ -8,7 +8,8 @@ import {
 } from "../lib/signupConsentCore.ts";
 
 // The sign-up consent choice and when it may be consumed.
-// Contract: docs/policy/email-product-news-redesign-draft.md section 5.2 (S4).
+// Contract: docs/policy/email-product-news-redesign-draft.md section 5.2 (S4)
+// and section 5.2a (v25: the email binding is the one row the sign-up spent).
 
 const NOW = new Date("2026-09-29T10:00:00.000Z");
 const minutes = (value) => new Date(NOW.getTime() + value * 60_000);
@@ -37,7 +38,7 @@ const refusal = (input = {}) =>
   signupConsentRefusal({
     attempt: attempt(input.attempt),
     account: account(input.account),
-    emailLoginSince: input.emailLoginSince === undefined ? null : input.emailLoginSince,
+    emailLoginSpent: input.emailLoginSpent === undefined ? null : input.emailLoginSpent,
     now: NOW,
   });
 
@@ -74,24 +75,43 @@ test("the binding has to be the channel's own", () => {
   assert.equal(refusal({ account: { providers: [] } }), "binding_mismatch");
 });
 
-test("an email-code account needs its address and a code consumed since the choice", () => {
+test("an email-code account needs its address and the row its sign-up spent", () => {
   const emailAttempt = { channel: "email_code", bindingProvider: null, bindingEmail: "new@example.test" };
   const emailAccount = { providers: [] };
+  const spent = (overrides = {}) => ({ email: "new@example.test", spentAt: minutes(-1), ...overrides });
   assert.equal(
-    refusal({ attempt: emailAttempt, account: emailAccount, emailLoginSince: { id: "ela_1" } }),
+    refusal({ attempt: emailAttempt, account: emailAccount, emailLoginSpent: spent() }),
     null
   );
-  // No email login since the choice was made.
+  // The session named no row: not a sign-up this flow made.
   assert.equal(
-    refusal({ attempt: emailAttempt, account: emailAccount, emailLoginSince: null }),
+    refusal({ attempt: emailAttempt, account: emailAccount, emailLoginSpent: null }),
     "binding_mismatch"
   );
-  // Another address.
+  // A row spent before the choice was made.
+  assert.equal(
+    refusal({
+      attempt: emailAttempt,
+      account: emailAccount,
+      emailLoginSpent: spent({ spentAt: minutes(-6) }),
+    }),
+    "binding_mismatch"
+  );
+  // A row for another address.
+  assert.equal(
+    refusal({
+      attempt: emailAttempt,
+      account: emailAccount,
+      emailLoginSpent: spent({ email: "other@example.test" }),
+    }),
+    "binding_mismatch"
+  );
+  // Another account address.
   assert.equal(
     refusal({
       attempt: emailAttempt,
       account: { ...emailAccount, email: "other@example.test" },
-      emailLoginSince: { id: "ela_1" },
+      emailLoginSpent: spent(),
     }),
     "binding_mismatch"
   );
@@ -100,9 +120,23 @@ test("an email-code account needs its address and a code consumed since the choi
     refusal({
       attempt: emailAttempt,
       account: { providers: ["google"] },
-      emailLoginSince: { id: "ela_1" },
+      emailLoginSpent: spent(),
     }),
     "binding_mismatch"
+  );
+});
+
+test("a code requested before the choice binds once its sign-up spends it after (v25)", () => {
+  // Sign-in screen: code requested at -8, proved at -7 with no account, the
+  // row held. Sign-up step: choice stored at -5, hold spent at -1.
+  const emailAttempt = { channel: "email_code", bindingProvider: null, bindingEmail: "new@example.test" };
+  assert.equal(
+    refusal({
+      attempt: emailAttempt,
+      account: { providers: [] },
+      emailLoginSpent: { email: "new@example.test", spentAt: minutes(-1) },
+    }),
+    null
   );
 });
 

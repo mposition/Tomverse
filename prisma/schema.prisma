@@ -243,14 +243,21 @@ model VerificationToken {
 // explicit-invalidation semantics). No relation to User: at request time the
 // email may not correspond to any existing account yet.
 model EmailLoginAttempt {
-  id            String    @id @default(cuid())
-  email         String
-  codeHash      String
-  linkTokenHash String    @unique
-  expiresAt     DateTime
-  consumedAt    DateTime?
-  invalidatedAt DateTime?
-  createdAt     DateTime  @default(now())
+  id               String    @id @default(cuid())
+  email            String
+  codeHash         String
+  linkTokenHash    String    @unique
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  invalidatedAt    DateTime?
+  createdAt        DateTime  @default(now())
+  /// Set when a sign-in proved this address and found no account: the same
+  /// code or link may then complete one sign-up until this time
+  /// (docs/policy/email-product-news-redesign-draft.md section 5.2a). Only on a
+  /// consumed row; a hold never makes the code usable for a sign-in again.
+  signupHoldUntil  DateTime?
+  /// When that one sign-up used the hold. Set once, never cleared.
+  signupHoldUsedAt DateTime?
 
   @@index([email, consumedAt, invalidatedAt, expiresAt])
   @@index([expiresAt])

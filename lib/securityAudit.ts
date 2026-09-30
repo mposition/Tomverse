@@ -9,6 +9,9 @@ type AuthAuditEvent =
     | "auth.sign_in"
     | "auth.sign_in_denied_suspended"
     | "auth.sign_in_denied_pending_deletion"
+    // A provider account with no account here signed in from the sign-in
+    // screen, and was sent to sign-up instead of becoming a new account.
+    | "auth.sign_in_redirected_to_signup"
     | "auth.sign_out"
     | "auth.link_account"
     // A presented token was rejected during session resolution because the

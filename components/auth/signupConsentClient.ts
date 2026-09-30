@@ -213,28 +213,50 @@ export async function storeSignupConsentChoice(input: {
 }
 
 /**
- * After this tab's own sign-in lands: hands the stored choice to the server,
- * and forgets it once the answer is final. Returns whether the choice was
- * **consumed** -- the server answered `ok: true` -- which is when the sign-up
- * recorded its own estimate; a refusal or a rollback recorded nothing. Only a landing whose URL carries the
- * stored attempt's marker counts. The server decides whether this account may
- * consume it; an existing account's sign-in never does.
+ * The refusals that mean the person signed into an account that already
+ * existed from the sign-up screen (docs/policy/email-product-news-redesign-draft.md
+ * section 5.2a): the choice they ticked is not applied, and the landing says so
+ * rather than dropping it without a word.
  */
-export async function finalizeStoredSignupConsent(): Promise<boolean> {
+const EXISTING_ACCOUNT_REFUSALS = new Set([
+  "not_created_by_this_sign_in",
+  "account_predates_attempt",
+  "account_already_consumed",
+]);
+
+export type SignupConsentFinalizeOutcome = {
+  /** The server answered `ok: true`: the sign-up recorded its own estimate. */
+  consumed: boolean;
+  /** Signed into an existing account from the sign-up screen: nothing applied. */
+  existingAccount: boolean;
+};
+
+const NOTHING_FINALIZED: SignupConsentFinalizeOutcome = { consumed: false, existingAccount: false };
+
+/**
+ * After this tab's own sign-in lands: hands the stored choice to the server,
+ * and forgets it once the answer is final. `consumed` is whether the server
+ * answered `ok: true` -- which is when the sign-up recorded its own estimate;
+ * a refusal or a rollback recorded nothing. Only a landing whose URL carries
+ * the stored attempt's marker counts. The server decides whether this account
+ * may consume it; an existing account's sign-in never does, and
+ * `existingAccount` says that is what happened.
+ */
+export async function finalizeStoredSignupConsent(): Promise<SignupConsentFinalizeOutcome> {
   const slots = readSlots();
-  if (!slots.oauth && !slots.email_code) return false;
+  if (!slots.oauth && !slots.email_code) return NOTHING_FINALIZED;
   let url: URL;
   try {
     url = new URL(window.location.href);
   } catch {
-    return false;
+    return NOTHING_FINALIZED;
   }
   const marker = url.searchParams.get(SIGNUP_CONSENT_MARKER_PARAM);
   const channel = (["oauth", "email_code"] as const).find(
     (key) => slots[key]?.attemptId === marker
   );
   const entry = channel ? slots[channel] : undefined;
-  if (!channel || !entry) return false;
+  if (!channel || !entry) return NOTHING_FINALIZED;
   const stored = { attemptId: entry.attemptId, nonce: entry.nonce };
   // 200 is a final answer: consumed, or refused for good. Anything else -- the
   // confirmation lane briefly gone (503), a rate limit, a server error, the
@@ -248,6 +270,7 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   // leaves the attempt pending for the account it does belong to, so the tab
   // keeps it; only a consumed or dead attempt is dropped.
   let spent = false;
+  let existingAccount = false;
   for (const delayMs of FINALIZE_RETRY_DELAYS_MS) {
     if (delayMs > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs));
     try {
@@ -263,6 +286,8 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
         consumed = data?.ok === true;
         spent =
           consumed || data?.reason === "not_found" || data?.reason === "not_pending";
+        existingAccount =
+          typeof data?.reason === "string" && EXISTING_ACCOUNT_REFUSALS.has(data.reason);
         break;
       }
     } catch {
@@ -292,7 +317,7 @@ export async function finalizeStoredSignupConsent(): Promise<boolean> {
   } catch {
     // The URL keeps the marker; with nothing stored, it does nothing.
   }
-  return consumed;
+  return { consumed, existingAccount };
 }
 
 const FINALIZE_RETRY_DELAYS_MS = [0, 2_000, 8_000];
@@ -310,5 +335,74 @@ export async function recordJurisdictionEstimateOnce(): Promise<void> {
     await response.body?.cancel().catch(() => undefined);
   } catch {
     // Best effort; the next session tries again.
+  }
+}
+
+const AUTH_CALLBACK_KEY = "tomverse.auth.callbackUrl.v1";
+
+/**
+ * Remembers where this tab's sign-in was headed, for the sign-up screen a
+ * provider sign-in with no account is sent to (section 5.2a). That redirect is
+ * a fixed URL built on the server, so it carries no destination of its own.
+ */
+export function rememberAuthCallbackUrl(callbackUrl: string): void {
+  try {
+    window.sessionStorage.setItem(AUTH_CALLBACK_KEY, callbackUrl);
+  } catch {
+    // Storage blocked: the sign-up lands on the default page instead.
+  }
+}
+
+/** The destination `rememberAuthCallbackUrl()` kept, if it is same-origin. */
+export function readRememberedAuthCallbackUrl(): string | null {
+  try {
+    const value = window.sessionStorage.getItem(AUTH_CALLBACK_KEY);
+    if (!value) return null;
+    const url = new URL(value, window.location.origin);
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tells the server this click means to create an account with `provider`
+ * (section 5.2a). Without it, a provider account with no account here is sent
+ * back to the sign-up screen instead of created. Bounded like the choice store:
+ * a slow request must not hold up the redirect, and a failed one only costs
+ * the person that round trip.
+ */
+export async function declareSignupIntent(provider: "google" | "azure-ad"): Promise<void> {
+  // A failed declaration costs a round trip: the provider sign-in comes back
+  // to the sign-up screen, which asks again.
+  await sendSignupIntent({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+}
+
+/**
+ * Withdraws any intent the sign-up screen set, before a sign-in screen
+ * provider click: within its ten minutes it would otherwise turn that sign-in
+ * into a new account. Returns whether the server confirmed it; the caller does
+ * not go to the provider otherwise, since a surviving intent would do exactly
+ * that.
+ */
+export async function withdrawSignupIntent(): Promise<boolean> {
+  return sendSignupIntent({ method: "DELETE" });
+}
+
+async function sendSignupIntent(init: RequestInit): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await fetch("/api/auth/signup-intent", { ...init, signal: controller.signal });
+    await response.body?.cancel().catch(() => undefined);
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
   }
 }
