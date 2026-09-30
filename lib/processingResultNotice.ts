@@ -8,6 +8,7 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import type { ResolvedJurisdiction } from "@/lib/emailJurisdictionCore";
 import { createStandardDeliveryRows } from "@/lib/standardEmailLane";
 import type { ConsentRecordedHook } from "@/lib/emailPreferences";
 
@@ -66,6 +67,13 @@ export async function prepareProcessingResultNotice(
      * (docs/policy/email-product-news-redesign-draft.md 7.7).
      */
     stopsAllMarketing?: boolean;
+    /**
+     * The jurisdiction the recorded change was decided under, when the user
+     * row does not hold it yet: a sign-up consents in the transaction that
+     * records its estimated country, after this hook is prepared
+     * (docs/policy/email-double-opt-in.md §14.6).
+     */
+    jurisdiction?: ResolvedJurisdiction;
   } = {}
 ): Promise<ConsentRecordedHook> {
   const settings = await prisma.userSettings.findUnique({
@@ -77,7 +85,7 @@ export async function prepareProcessingResultNotice(
     ensureTemplateVersion({ templateKey: CONSENT_RESULT_NOTICE_TEMPLATE, language }),
     ensureTemplateVersion({ templateKey: UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE, language }),
     ensureBootstrapPolicyVersion(),
-    jurisdictionForUser({ userId }),
+    options.jurisdiction ?? jurisdictionForUser({ userId }),
   ]);
 
   return async (tx, record) => {

@@ -250,6 +250,23 @@ const CONFIRMATION_UNAVAILABLE = Symbol("confirmation_unavailable");
  * its confirmation mail missing, and nothing shows the screen again to redo it.
  * A refusal leaves everything as it was; the account exists either way.
  */
+/**
+ * The answer for an attempt this account already consumed -- a retry whose
+ * first answer was lost, or the loser of a concurrent pair. It says whether
+ * that consumption consented at once, read from the ledger it wrote, so the
+ * retry does not look like a sign-up that ticked nothing
+ * (docs/policy/email-double-opt-in.md §14).
+ */
+async function consumedAnswer(userId: string): Promise<FinalizeSignupConsentResult> {
+  const granted = await prisma.consentRecord.findFirst({
+    where: { userId, capturedVia: "signup_form", action: "granted" },
+    select: { id: true },
+  });
+  return granted
+    ? { ok: true, confirmationRequested: false, consentGranted: true }
+    : { ok: true, confirmationRequested: false };
+}
+
 export async function finalizeSignupConsentAttempt(input: {
   userId: string;
   /** The asking session's sign-in created the account (`accountCreatedBySignIn`). */
@@ -278,7 +295,7 @@ export async function finalizeSignupConsentAttempt(input: {
   // refusal would let the landing's own estimate overwrite the one the sign-up
   // just recorded.
   if (attempt.consumedAt && attempt.userId === input.userId) {
-    return { ok: true, confirmationRequested: false };
+    return consumedAnswer(input.userId);
   }
 
   const user = await prisma.user.findUnique({
@@ -435,6 +452,7 @@ export async function finalizeSignupConsentAttempt(input: {
           enabled: true,
           capturedVia: "signup_form",
           source: "signup",
+          evidenceVia: "signup_form",
           jurisdiction: grant.jurisdiction.countryCode,
           jurisdictionSource: grant.jurisdiction.source,
           confirmation: grant.confirmation,
@@ -475,7 +493,7 @@ export async function finalizeSignupConsentAttempt(input: {
         select: { consumedAt: true, userId: true },
       });
       if (winner?.consumedAt && winner.userId === input.userId) {
-        return { ok: true, confirmationRequested: false };
+        return consumedAnswer(input.userId);
       }
       return { ok: false, reason: "not_pending" };
     }

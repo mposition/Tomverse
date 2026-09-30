@@ -510,13 +510,21 @@ export async function prepareVerifiedSessionGrant(input: {
 
   // Before any transaction: both may insert rows (docs/policy/email-double-opt-in.md §13.1 item 16).
   await ensureDefaultPreferences(input.userId);
-  const onConsentRecorded = await prepareProcessingResultNotice(input.userId);
+  const confirmation = await sealVerifiedSessionConfirmation({
+    proof: input.proof,
+    purposes: input.purposes,
+    jurisdiction: resolved,
+  });
+  if (!confirmation) return { ok: false, reason: "disabled" };
+  const onConsentRecorded = await prepareProcessingResultNotice(input.userId, {
+    jurisdiction: resolved,
+  });
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
   return {
     ok: true,
     grant: {
-      confirmation: sealVerifiedSessionConfirmation(input.proof),
+      confirmation,
       onConsentRecorded,
       jurisdiction: { countryCode: resolved.countryCode, source: resolved.source },
       policyVersionId,

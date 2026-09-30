@@ -24,7 +24,12 @@ import {
   relationshipEndedSourceEventKey,
   relationshipStartedSourceEventKey,
 } from "@/lib/emailPreferenceCore";
-import { normalizeCountry } from "@/lib/emailJurisdictionCore";
+import {
+  marketingJurisdictionVerdict,
+  normalizeCountry,
+  type ResolvedJurisdiction,
+} from "@/lib/emailJurisdictionCore";
+import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   normalizeSuppressionAddress,
@@ -271,22 +276,44 @@ export type VerifiedSessionConfirmation = {
   readonly provenAt: Date;
   /** The proven address's digest, re-checked under the user row lock. */
   readonly addressDigest: string;
+  /** The purposes it was checked for; it switches on nothing else. */
+  readonly purposes: readonly EmailPurpose[];
+  /** The country it was checked under; the write must name the same one. */
+  readonly countryCode: string;
 };
 
 const sealedSessionConfirmations = new WeakSet<object>();
 
 /**
  * Makes the one kind of session confirmation `applyPreferenceChange()` will
- * honour. Called by `prepareVerifiedSessionGrant()` after it checked the
- * collection flag, the purpose and the jurisdiction; nothing that reads a
- * request body or runs a privacy or complaint withdrawal calls it.
+ * honour, or `null`. It checks what it certifies itself -- the collection
+ * flag, each purpose's change decision and the marketing jurisdiction -- so a
+ * caller cannot obtain one without them, and binds the purposes and the
+ * country so the write cannot use it for anything else
+ * (docs/policy/email-double-opt-in.md §14.6). The proof against the account's
+ * current address is the caller's to check first; the digest is checked again
+ * under the user row lock.
  */
-export function sealVerifiedSessionConfirmation(proof: AddressProof): VerifiedSessionConfirmation {
+export async function sealVerifiedSessionConfirmation(input: {
+  proof: AddressProof;
+  purposes: readonly string[];
+  jurisdiction: ResolvedJurisdiction;
+}): Promise<VerifiedSessionConfirmation | null> {
+  if (!(await isEmailConsentConfirmationEnabled())) return null;
+  const purposes: EmailPurpose[] = [];
+  for (const purpose of input.purposes) {
+    if (!preferenceChangeDecision({ purpose, enabled: true, confirmed: true }).allowed) return null;
+    purposes.push(purpose as EmailPurpose);
+  }
+  if (purposes.length === 0) return null;
+  if (!marketingJurisdictionVerdict(input.jurisdiction).allowed) return null;
   const sealed: VerifiedSessionConfirmation = Object.freeze({
     kind: "verified_session" as const,
-    proof: proof.method,
-    provenAt: new Date(proof.provenAt),
-    addressDigest: consentAddressDigest(proof.address),
+    proof: input.proof.method,
+    provenAt: new Date(input.proof.provenAt),
+    addressDigest: consentAddressDigest(input.proof.address),
+    purposes: Object.freeze([...purposes]),
+    countryCode: input.jurisdiction.countryCode,
   });
   sealedSessionConfirmations.add(sealed);
   return sealed;
@@ -461,8 +488,15 @@ export async function applyPreferenceChange(
   if (isSessionConfirmation(input.confirmation)) {
     // Only a confirmation the server sealed from a session proof, and only to
     // switch a purpose on (docs/policy/email-double-opt-in.md §14.6).
-    if (!sealedSessionConfirmations.has(input.confirmation) || !input.enabled) {
-      throw new Error("A verified-session confirmation must be sealed by the server and enable a purpose.");
+    if (
+      !sealedSessionConfirmations.has(input.confirmation) ||
+      !input.enabled ||
+      !input.confirmation.purposes.includes(input.purpose) ||
+      input.jurisdiction !== input.confirmation.countryCode
+    ) {
+      throw new Error(
+        "A verified-session confirmation must be sealed by the server, enable a purpose it was sealed for, under its country."
+      );
     }
   }
   if (

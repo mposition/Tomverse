@@ -17,6 +17,7 @@ import {
 import { ensureDefaultPreferences, setPreference } from "@/lib/emailPreferences";
 import { recordConsentNoticeAction } from "@/lib/inProductConsentNoticeSurface";
 import { finalizeSignupConsentAttempt, issueSignupConsentAttempt } from "@/lib/signupConsent";
+import { recordSuppression } from "@/lib/emailSuppression";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // A consent ticked in a session that proved the address is confirmed at once;
@@ -28,7 +29,7 @@ const reset = () =>
     TRUNCATE TABLE
       "SignupConsentAttempt", "EmailPermissionEvent", "ConsentRecord", "EmailPreference",
       "EmailPreferenceTransition", "EmailDelivery", "EmailEvent", "TemplateVersion",
-      "EmailTemplate", "SuppressionCause", "SuppressionEntry", "Account",
+      "EmailTemplate", "SuppressionCause", "SuppressionEntry", "Account", "EmailLoginAttempt",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion",
       "AppSetting", "UserSettings", "User"
     RESTART IDENTITY CASCADE
@@ -173,6 +174,8 @@ test("a session confirmation not sealed by the server is refused", async () => {
         proof: "google_verified",
         provenAt: new Date(),
         addressDigest: "forged",
+        purposes: ["product_updates"],
+        countryCode: "AU",
       },
     })
   );
@@ -303,4 +306,77 @@ test("the notice's Yes from a proven session consents to all three purposes at o
     await prisma.consentRecord.count({ where: { userId: user.id, action: "confirmation_requested" } }),
     0
   );
+});
+
+test("a sign-up's result notice is addressed under the country the sign-up recorded", async () => {
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "email_code",
+    email: `kr-${randomUUID()}@example.test`,
+    expressOptInRequested: true,
+    objected: false,
+    language: "en",
+    ipCountry: "AU",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  if (!issued.ok) return;
+  const attempt = await prisma.signupConsentAttempt.findUniqueOrThrow({ where: { id: issued.attemptId } });
+  const email = attempt.bindingEmail as string;
+  const login = await prisma.emailLoginAttempt.create({
+    data: {
+      email,
+      codeHash: "hash",
+      linkTokenHash: randomUUID(),
+      expiresAt: new Date(issuedAt.getTime() + 600_000),
+      consumedAt: new Date(issuedAt.getTime() + 1_000),
+    },
+  });
+  const user = await prisma.user.create({
+    data: { email, createdAt: new Date(issuedAt.getTime() + 2_000) },
+    select: { id: true },
+  });
+  const finalize = () =>
+    finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: true,
+      emailLoginAttemptId: login.id,
+      addressProof: proofFor(email, "email_code"),
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    });
+  assert.deepEqual(await finalize(), { ok: true, confirmationRequested: false, consentGranted: true });
+
+  const notice = await prisma.emailDelivery.findFirstOrThrow({
+    where: { userId: user.id },
+    select: { jurisdictionCountry: true, templateVersion: { select: { template: { select: { key: true } } } } },
+  });
+  assert.equal(notice.templateVersion.template.key, "consent_result_notice");
+  assert.equal(notice.jurisdictionCountry, "AU");
+
+  // A retry whose first answer was lost says the same thing.
+  assert.deepEqual(await finalize(), { ok: true, confirmationRequested: false, consentGranted: true });
+});
+
+test("a proven session cannot consent to a suppressed address through the notice", async () => {
+  const user = await australian();
+  // A hard bounce on the address: the notice is not offered to it, and a Yes
+  // sent anyway grants nothing. (A refusal of one purpose mid-transaction rolls
+  // the others back; the transaction throws on any outcome but changed or
+  // already_set.)
+  await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
+    emailAddress: user.email,
+    reason: "hard_bounce",
+    source: "admin",
+  });
+  const result = await recordConsentNoticeAction({
+    userId: user.id,
+    action: "accept",
+    language: "en",
+    copyVersion: CURRENT_CONSENT_COPY_VERSION,
+    addressProof: proofFor(user.email, "email_code"),
+  });
+  assert.equal(result.recorded, false);
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id, action: "granted" } }), 0);
 });
