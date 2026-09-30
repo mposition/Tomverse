@@ -303,17 +303,59 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory remains 9aa7ec49..., so the digest below is a repin
 // over the merged tree.
 //
+// 2026-09-29, sign-up consent (S0, S4): `lib/emailJurisdictionCore.ts` gains
+// the IP-estimate signal and `isDeterminativeConfidence()`, `lib/appSettings.ts`
+// the sign-up collection reader and `lib/emailFeatureFlags.ts` its key. None
+// adds an element access -- the resolver reads named fields and the conflict
+// pair is an array literal -- so the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., and this repins positions only. The watched-
+// schema note in `lib/marketingAutomationAccess.ts` for the same model is
+// comment only and moves the positions below it.
+//
 // 2026-09-29, Prompt Refiner v4/v6 successor: schema comment provenance in
 // `lib/marketingAutomationAccess.ts` moved source positions without changing
 // computed accesses. On this merged tree, the canonical builder still reports
 // 228 accesses, the same position-free inventory and the ordered 190-file
 // closure. The digest below binds their merged source positions.
+//
+// 2026-09-30, sign-up consent branch (S4) takes develop: the S4 note and the
+// Prompt Refiner successor note above stand together. No computed element
+// access is added; the count and the position-free inventory are unchanged,
+// and the digest below is a repin over the merged tree.
+//
+// 2026-09-30, Australian relationship (S5b), repinned on the merged S4: the sign-in event in
+// `lib/auth.ts` now ends a dormant relationship in the transaction that moves
+// `lastLoginAt`, through `endDormantEmailRelationshipAtSignIn()` in
+// `lib/emailPreferences.ts` and pure helpers appended to
+// `lib/emailPreferenceCore.ts` -- both already listed, so the file set is
+// unchanged. None of it is an element access; the count remains 228 and the
+// position-free inventory remains 9aa7ec49..., so this repins positions only.
+//
+// 2026-09-30, sign-in / sign-up split (v25, policy section 5.2a): the OAuth
+// sign-up gate is appended to `lib/sessionRevocationCore.ts` and
+// `lib/sessionSecurity.ts`, the email sign-up hold to `lib/emailLogin.ts`,
+// and `lib/auth.ts` calls them -- all already listed, so the file set stays
+// 190. A dated note in `lib/marketingAutomationAccess.ts` moves positions.
+// No element access is added; the count remains 228 and the position-free
+//
+// 2026-09-30, per-model web search override: `ModelRegistryEntry` gains the
+// nullable `webSearchOverride` column, and the watched-schema note in
+// `lib/marketingAutomationAccess.ts` records it beside the recomputed
+// fingerprint. The note is comment only. The override itself lives in
+// `lib/webSearchCapability.ts`, `lib/models.ts` and `lib/modelRegistry.ts`,
+// all already listed, placed so none of their accesses moved and none was
+// added. No import is added; the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so this repins positions only.
+//
+// 2026-09-30, sign-in / sign-up split takes develop: the split note and the
+// web search override note above both stand; the digest below is a repin over
+// the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5f4037c7f404a877bc88cc83f907e6d4",
-  "9b694ac34fcf50333543d3b630e3c4a0",
+  "2d5068e55fdae55c27ae6accdd1ac13d",
+  "acd0238cfe6f97fb67674ed13e8692c8",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

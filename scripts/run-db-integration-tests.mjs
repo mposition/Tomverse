@@ -233,6 +233,11 @@ run(
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
     "tests/integration/amux-intake-registration.db.test.ts",
+    // Local intake writes one backlog card, one normalized row, one consumed
+    // approval and one audit, and no dependency rows. apply returns before
+    // the transaction while the code latch is false, so this test calls the
+    // commit function directly.
+    "tests/integration/amux-local-intake-registration.db.test.ts",
     // Source reconciliation appends one consumed run and per-card revisions.
     // Accept moves only the revision pointer. Reject leaves the pointer. The
     // public apply function returns before the transaction while the code
@@ -349,6 +354,20 @@ run(
     // will not lose, the seal closes the set in the same transaction, and one
     // phase of one delivery is recorded once however many times it is evaluated.
     "tests/integration/release-notes-send-decision.db.test.ts",
+    // The amendment notice's reach (S10): which owed accounts have no attempt at
+    // all, counted as a set in one statement. The first version counted only
+    // `sent` and compared sizes, and both mistakes are about rows.
+    "tests/integration/email-policy-publication.db.test.ts",
+    // The sign-up screen's consent choice (S4): only the database shows that an
+    // existing account never consumes one, that consumption and its evidence
+    // commit together, and that an estimate never replaces a declaration.
+    "tests/integration/signup-consent.db.test.ts",
+    // Sign-in and sign-up split (v25): a proven address with no account is
+    // held for one sign-up, and only the database shows the hold is single use.
+    "tests/integration/email-login-signup-hold.db.test.ts",
+    "tests/integration/au-relationship.db.test.ts",
+    "tests/integration/in-product-consent-notice.db.test.ts",
+    "tests/integration/processing-result-notice.db.test.ts",
     // The two statutory display checks, whose question is which (policy version,
     // profile) a message could still be composed under. Both earlier readings of
     // that were wrong in ways only rows show: the active version alone, and a

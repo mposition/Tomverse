@@ -28,9 +28,20 @@ import {
   AmuxIntakeOutcomeUnknownError,
   applyAmuxIntakeRegistration,
 } from "@/lib/amux/intakeRegistration";
+import {
+  LOCAL_INTAKE_APPLY_ENV,
+  LOCAL_INTAKE_PACKAGE_MAX_BYTES,
+  LOCAL_INTAKE_SOURCE_KEY_SECRET_ENV,
+} from "@/lib/amux/localIntakeCore";
+import { previewLocalIntakeCard, previewLocalIntakePackage } from "@/lib/amux/localIntakeRegistrationCore";
+import {
+  LocalIntakeOutcomeUnknownError,
+  applyLocalIntakeRegistration,
+  readLocalIntakeBoardSnapshot,
+} from "@/lib/amux/localIntakeRegistration";
 
 const noStoreHeaders = { "Cache-Control": "private, no-store, max-age=0" };
-const ACTIONS = new Set(["preview", "register"]);
+const ACTIONS = new Set(["preview", "register", "local-preview", "local-register"]);
 const previewHits = new Map<string, number[]>();
 
 const withNoStore = (response: Response) => {
@@ -62,6 +73,69 @@ const requireOwner = async () => {
   return { session } as const;
 };
 
+const admitPreview = (userId: string) => {
+  const now = Date.now();
+  const pruned = pruneBoardImportPreviewHits([...previewHits], now);
+  previewHits.clear();
+  for (const [accountId, retained] of pruned) previewHits.set(accountId, retained);
+  const decision = admitBoardImportPreview(previewHits.get(userId) ?? [], now);
+  if (decision.retained.length === 0) previewHits.delete(userId);
+  else previewHits.set(userId, decision.retained);
+  return decision.allowed && decision.retained.length <= BOARD_IMPORT_PREVIEW_LIMIT;
+};
+
+const failIntake = (error: unknown) => {
+  const approvalResponse = adminApprovalErrorResponse(error);
+  if (approvalResponse) return withNoStore(approvalResponse);
+  if (error instanceof BoardImportError) {
+    const unknown =
+      error instanceof AmuxIntakeOutcomeUnknownError || error instanceof LocalIntakeOutcomeUnknownError
+        ? error
+        : null;
+    const body = unknown
+      ? { error: unknown.code, retry: false as const, readBack: unknown.readBack }
+      : { error: error.code, writes: 0 as const };
+    return NextResponse.json(body, { status: error.httpStatus, headers: noStoreHeaders });
+  }
+  const security = apiSecurityResponse(error);
+  if (security) return withNoStore(security);
+  console.error("AMUX intake preview failed");
+  return NextResponse.json({ error: "intake_failed" }, { status: 500, headers: noStoreHeaders });
+};
+
+export async function GET(request: Request) {
+  try {
+    const auth = await requireOwner();
+    if ("response" in auth) return auth.response;
+    const action = new URL(request.url).searchParams.get("action");
+    if (action !== "local-snapshot") {
+      return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStoreHeaders });
+    }
+    const userId = auth.session.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStoreHeaders });
+    }
+    if (!admitPreview(userId)) {
+      return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
+    }
+    const generatedAt = new Date().toISOString();
+    const snapshot = await readLocalIntakeBoardSnapshot(generatedAt);
+    if (!snapshot.ok) {
+      return NextResponse.json({ error: snapshot.code, writes: 0 }, { status: 409, headers: noStoreHeaders });
+    }
+    return NextResponse.json(
+      { generatedAt: snapshot.generatedAt, digest: snapshot.digest, cards: snapshot.cards },
+      {
+      headers: {
+        ...noStoreHeaders,
+        "Content-Disposition": 'attachment; filename="amux-local-intake-snapshot.json"',
+      },
+    });
+  } catch (error) {
+    return failIntake(error);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const auth = await requireOwner();
@@ -77,20 +151,51 @@ export async function POST(request: Request) {
     if (!userId) {
       return NextResponse.json({ error: "Not found." }, { status: 404, headers: noStoreHeaders });
     }
-    if (action !== "preview") {
+    const local = action === "local-preview" || action === "local-register";
+    if (action !== "preview" && action !== "local-preview") {
       await consumeApiRateLimit(request, userId, `admin-amux-intake-${action}`, { minute: 10, day: 100 });
     }
-    const raw = await readLimitedText(request, AMUX_INTAKE_RAW_BODY_MAX_BYTES);
+    const raw = await readLimitedText(request, local ? LOCAL_INTAKE_PACKAGE_MAX_BYTES : AMUX_INTAKE_RAW_BODY_MAX_BYTES);
+    if (local) {
+      if (action === "local-preview" && !admitPreview(userId)) {
+        return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
+      }
+      const generatedAt = new Date().toISOString();
+      const snapshot = await readLocalIntakeBoardSnapshot(generatedAt);
+      if (!snapshot.ok) {
+        return NextResponse.json({ error: snapshot.code, writes: 0 }, { status: 409, headers: noStoreHeaders });
+      }
+      const context = {
+        now: new Date(),
+        liveSnapshotDigest: snapshot.digest,
+        secret: process.env[LOCAL_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null,
+        existingIds: snapshot.cards.map((card) => card.id),
+        envValue: process.env[LOCAL_INTAKE_APPLY_ENV],
+      };
+      if (action === "local-preview") {
+        const preview = previewLocalIntakePackage(raw, context);
+        return NextResponse.json(
+          { ...preview, writes: 0, liveSnapshotDigest: snapshot.digest, snapshotGeneratedAt: snapshot.generatedAt },
+          { headers: noStoreHeaders },
+        );
+      }
+      const localId = new URL(request.url).searchParams.get("localId") ?? "";
+      const confirmationDigest = new URL(request.url).searchParams.get("confirmationDigest") ?? undefined;
+      const planned = previewLocalIntakeCard(raw, { ...context, localId, confirmationDigest });
+      if (!planned.plan) {
+        return NextResponse.json(
+          { error: planned.code ?? "approval_required", writes: 0, digest: planned.digest },
+          { status: 409, headers: noStoreHeaders },
+        );
+      }
+      return NextResponse.json(
+        await applyLocalIntakeRegistration({ session: auth.session, request, plan: planned.plan }),
+        { headers: noStoreHeaders },
+      );
+    }
     const secret = process.env[AMUX_INTAKE_SOURCE_KEY_SECRET_ENV] ?? null;
     if (action === "preview") {
-      const now = Date.now();
-      const pruned = pruneBoardImportPreviewHits([...previewHits], now);
-      previewHits.clear();
-      for (const [accountId, retained] of pruned) previewHits.set(accountId, retained);
-      const decision = admitBoardImportPreview(previewHits.get(userId) ?? [], now);
-      if (decision.retained.length === 0) previewHits.delete(userId);
-      else previewHits.set(userId, decision.retained);
-      if (!decision.allowed || decision.retained.length > BOARD_IMPORT_PREVIEW_LIMIT) {
+      if (!admitPreview(userId)) {
         return NextResponse.json({ error: "preview_rate_limited" }, { status: 429, headers: noStoreHeaders });
       }
       return NextResponse.json(previewAmuxIntake(raw, secret, process.env[AMUX_INTAKE_APPLY_ENV]), {
@@ -106,18 +211,6 @@ export async function POST(request: Request) {
       { headers: noStoreHeaders },
     );
   } catch (error) {
-    const approvalResponse = adminApprovalErrorResponse(error);
-    if (approvalResponse) return withNoStore(approvalResponse);
-    if (error instanceof BoardImportError) {
-      const body =
-        error instanceof AmuxIntakeOutcomeUnknownError
-          ? { error: error.code, retry: false as const, readBack: error.readBack }
-          : { error: error.code, writes: 0 as const };
-      return NextResponse.json(body, { status: error.httpStatus, headers: noStoreHeaders });
-    }
-    const security = apiSecurityResponse(error);
-    if (security) return withNoStore(security);
-    console.error("AMUX intake preview failed");
-    return NextResponse.json({ error: "intake_failed" }, { status: 500, headers: noStoreHeaders });
+    return failIntake(error);
   }
 }

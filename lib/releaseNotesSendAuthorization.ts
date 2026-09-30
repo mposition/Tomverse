@@ -1,7 +1,10 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import { isEmailMarketingEnabled, isEmailReleaseNotesEnabled } from "@/lib/appSettings";
+import { isDeterminativeConfidence } from "@/lib/emailJurisdictionCore";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailPolicyPublished, isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
+import { auRelationshipForSend } from "@/lib/auRelationship";
 import {
   FOOTER_DISCLOSURE_COUNTRIES,
   footerBlocksRequired,
@@ -13,6 +16,8 @@ import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore"
 import { approvalScopeRefusal, cohortRefusal } from "@/lib/emailPermissionLedgerCore";
 import { REQUIRED_SUBJECT_PREFIX, subjectLabelReadiness } from "@/lib/emailSubjectLabelReadiness";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
+import { unsubscribeNoticeCarriesLanguages } from "@/lib/emailFooterRenderer";
+import { processingResultNoticeReady } from "@/lib/processingResultNotice";
 import { verdictRead } from "@/lib/releaseNotesVerdictRetryCore";
 import { earliestBiennialNoticeDueAt } from "@/lib/biennialConsentNoticeReadiness";
 import {
@@ -22,6 +27,7 @@ import {
 import {
   displayRequirementsFor,
   profilesForCountries,
+  UNSUBSCRIBE_NOTICE_LANGUAGES,
 } from "@/lib/releaseNotesDisplayRequirements";
 import {
   releaseNotesSendVerdict,
@@ -165,7 +171,9 @@ export const candidateCountries = (jurisdiction: {
   confidence: string;
   conflicts: string[];
 }): string[] => {
-  if (jurisdiction.confidence !== "high") return [];
+  // A settled country, or the recorded IP estimate with nothing contradicting
+  // it (docs/policy/email-notifications.md §6.2 step 4, 2026-09-29).
+  if (!isDeterminativeConfidence(jurisdiction.confidence)) return [];
   if (jurisdiction.countryCode === "ZZ") return [];
   // A country with no profile of its own resolves to `profileKey: "ZZ"` while
   // keeping its country code -- Japan today. The marketing gate refuses that as
@@ -299,6 +307,10 @@ export async function releaseNotesSendAuthorization(
         emailFooterDisclosures: footer.disclosuresPresent,
         emailSubjectLabels: subject.labelsPresent,
         emailUnsubscribeKeyring: unsubscribeKeyringReadiness().ready,
+        emailBilingualUnsubscribeNotice: unsubscribeNoticeCarriesLanguages(
+          UNSUBSCRIBE_NOTICE_LANGUAGES.KR ?? []
+        ),
+        emailProcessingResultNotice: processingResultNoticeReady(),
       },
     };
   });
@@ -404,6 +416,26 @@ export async function releaseNotesSendAuthorization(
     };
   });
 
+  // The Australian relationship, which is what an inferred consent rests on
+  // (section 4.4, lib/auRelationshipCore.ts). Only for an account: a
+  // relationship is recorded at signup and belongs to the account that made it.
+  // Read whatever the country, because the Australian sender authority applies
+  // to every message.
+  const relationship =
+    input.userId === null
+      ? null
+      : await read("the relationship", async () =>
+          auRelationshipForSend({
+            userId: input.userId as string,
+            deliveryAddress: input.normalizedAddress,
+            consentWithdrawn: consent.withdrawn,
+            amendmentInForce: await isEmailPolicyPublished(input.now),
+            now: input.now,
+          })
+        );
+  const inferred =
+    relationship !== null && relationship.active ? { eventIds: [relationship.eventId] } : null;
+
   const objected =
     latestObjection !== null &&
     (consent.grantedAt === null || latestObjection.occurredAt > consent.grantedAt);
@@ -484,7 +516,9 @@ export async function releaseNotesSendAuthorization(
 
   const flags = await read("the feature flags", async () => ({
     marketingEnabled: await isEmailMarketingEnabled(),
-    releaseNotesEnabled: await isEmailReleaseNotesEnabled(),
+    // Live, not merely switched on: the flag may not run ahead of the
+    // published amendment (S10, lib/emailPolicyPublication.ts).
+    releaseNotesEnabled: await isEmailReleaseNotesLive(),
   }));
 
   // The override, and only where one could apply: a sealed `risk_accepted`
@@ -619,7 +653,7 @@ export async function releaseNotesSendAuthorization(
     recipient: {
       suppressed: input.suppressed,
       objected,
-      consent: { express: consent.express, evidenceIds: consent.evidenceIds },
+      consent: { express: consent.express, evidenceIds: consent.evidenceIds, inferred },
     },
     flags,
     display: {

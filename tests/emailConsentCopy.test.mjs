@@ -113,42 +113,116 @@ const REQUIRED_PHRASES = {
     pt: [/sem fazer login/],
     zh: [/无需登录/],
   },
+  // GDPR Art 7(3): the person is told, before consenting, that they can
+  // withdraw at any time. Every version says it, with or without the sign-in
+  // qualifier that 2026-09-30 dropped.
+  canWithdraw: {
+    ko: [/언제든 (로그인 없이 )?끄실 수 있습니다\./],
+    en: [/You can turn it off at any time[.,]/],
+    de: [/Sie können es jederzeit (ohne Anmeldung )?deaktivieren\./],
+    es: [/Puedes desactivarlo en cualquier momento[.,]/],
+    fr: [/Vous pouvez le désactiver à tout moment[.,]/],
+    pt: [/Você pode desativar a qualquer momento[.,]/],
+    zh: [/您可以随时关闭[。，]/],
+  },
 };
 
-test("every language names the three kinds of mail that keep coming", () => {
-  for (const [language, patterns] of Object.entries(
-    REQUIRED_PHRASES.keepsComing
-  )) {
-    for (const pattern of patterns) {
-      assert.match(
-        consentCopy("signupNotice", language),
-        pattern,
-        `signupNotice.${language}`
-      );
-      assert.match(
-        consentCopy("noticeBody", language),
-        pattern,
-        `noticeBody.${language}`
-      );
+// Which versions carry which of those sentences on devices B and D.
+//
+// These two checks read only the current version once, and 2026-09-30 changed
+// what the current version says (the owner's decision, approved document
+// section 13): the sentence naming the mail that keeps coming left B and D, and
+// the withdrawal sentence lost its "without signing in". Section 10.1 item 11
+// says the old expectation is then bound to the versions that carry it and the
+// new one is written down separately, so each version is checked against what
+// it actually said rather than against whichever one is newest.
+//
+// Two-way on purpose: a version in a set must carry the sentence in all seven
+// languages, and a version outside it must carry it in none. A version with the
+// sentence in some languages fails either way, which is the partial-translation
+// gap the list above was written for. A later version that puts a sentence back
+// has to be added here, which is the recorded act section 10.1 asks for.
+const NAMES_THE_MAIL_THAT_KEEPS_COMING = new Set(["2026-09-23", "2026-09-29"]);
+const SAYS_WITHDRAWAL_NEEDS_NO_SIGN_IN = new Set(["2026-09-23", "2026-09-29"]);
+const NOTICE_KEYS = ["signupNotice", "noticeBody"];
+
+test("the disclosure sets name only versions that exist", () => {
+  const known = new Set(CONSENT_COPY_VERSIONS.map((entry) => entry.version));
+  for (const version of [
+    ...NAMES_THE_MAIL_THAT_KEEPS_COMING,
+    ...SAYS_WITHDRAWAL_NEEDS_NO_SIGN_IN,
+  ]) {
+    assert.ok(known.has(version), `${version} is not a consent copy version`);
+  }
+});
+
+test("every language names the three kinds of mail that keep coming, in the versions that carry that sentence", () => {
+  for (const { version } of CONSENT_COPY_VERSIONS) {
+    const carries = NAMES_THE_MAIL_THAT_KEEPS_COMING.has(version);
+    for (const [language, patterns] of Object.entries(
+      REQUIRED_PHRASES.keepsComing
+    )) {
+      for (const pattern of patterns) {
+        for (const key of NOTICE_KEYS) {
+          const text = consentCopy(key, language, version);
+          const where = `${version} ${key}.${language}`;
+          if (carries) assert.match(text, pattern, where);
+          else assert.doesNotMatch(text, pattern, `${where} still names the mail that keeps coming`);
+        }
+      }
     }
   }
 });
 
-test("every language says unsubscribing needs no sign-in", () => {
-  for (const [language, patterns] of Object.entries(REQUIRED_PHRASES.noSignIn)) {
-    for (const pattern of patterns) {
-      assert.match(
-        consentCopy("signupNotice", language),
-        pattern,
-        `signupNotice.${language}`
-      );
-      assert.match(
-        consentCopy("noticeBody", language),
-        pattern,
-        `noticeBody.${language}`
-      );
+test("every language says unsubscribing needs no sign-in, in the versions that carry that qualifier", () => {
+  for (const { version } of CONSENT_COPY_VERSIONS) {
+    const carries = SAYS_WITHDRAWAL_NEEDS_NO_SIGN_IN.has(version);
+    for (const [language, patterns] of Object.entries(REQUIRED_PHRASES.noSignIn)) {
+      for (const pattern of patterns) {
+        for (const key of NOTICE_KEYS) {
+          const text = consentCopy(key, language, version);
+          const where = `${version} ${key}.${language}`;
+          if (carries) assert.match(text, pattern, where);
+          else assert.doesNotMatch(text, pattern, `${where} still says "without signing in"`);
+        }
+      }
     }
   }
+});
+
+test("every version tells the reader, in every language, that they can withdraw", () => {
+  // The one withdrawal statement the law requires before consent, so it is not
+  // bound to a version set: no version may drop it. The unsubscribe flow still
+  // needs no sign-in (docs/policy/email-notifications.md section 11.3); what
+  // 2026-09-30 removed is the statement of that, not the behaviour.
+  for (const { version } of CONSENT_COPY_VERSIONS) {
+    for (const [language, patterns] of Object.entries(REQUIRED_PHRASES.canWithdraw)) {
+      for (const pattern of patterns) {
+        for (const key of NOTICE_KEYS) {
+          assert.match(
+            consentCopy(key, language, version),
+            pattern,
+            `${version} ${key}.${language} does not say the reader can withdraw`
+          );
+        }
+      }
+    }
+  }
+});
+
+test("2026-09-30 keeps the withdrawal sentence and drops the other two", () => {
+  // The new expectation, stated for the version it belongs to rather than left
+  // to fall out of the set membership above.
+  assert.equal(NAMES_THE_MAIL_THAT_KEEPS_COMING.has("2026-09-30"), false);
+  assert.equal(SAYS_WITHDRAWAL_NEEDS_NO_SIGN_IN.has("2026-09-30"), false);
+  assert.equal(
+    consentCopy("signupNotice", "en", "2026-09-30"),
+    "If you turn this on, Tomverse sends product updates, newsletters and promotions to the address on your account. You can turn it off at any time."
+  );
+  assert.equal(
+    consentCopy("signupNotice", "ko", "2026-09-30"),
+    "켜시면 계정에 등록된 주소로 제품 소식, 뉴스레터, 프로모션을 보내 드립니다. 언제든 끄실 수 있습니다."
+  );
 });
 
 test("the in-product notice opens by saying we have not been sending", () => {
@@ -171,6 +245,8 @@ test("the opening sentence is about the reader, where the language marks that", 
     fr: /vous a pas envoyé/,
     zh: /向您发送/,
     ko: /보내드린/,
+    // Since 2026-09-29 (section 9.2): the 2026-09-23 wording had no recipient.
+    pt: /lhe enviou/,
   };
   for (const [language, pattern] of Object.entries(marksTheReader)) {
     assert.match(

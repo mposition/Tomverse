@@ -315,16 +315,22 @@ export const releaseNotesObligationSeed = (): readonly ObligationSeed[] => [
     warnDaysBefore: null,
     notes: `${DRAFT} section 7.7: name, address, email and telephone number (시행령 별표 6). Against emailBodyDisclosures and not emailBusinessIdentity: the latter reports a missing jurisdiction block as a warning, on purpose, because whether this deployment has Korean recipients is not a fact an environment holds -- so it stayed ready with no Korean telephone number and a review found this duty settled against it. The per-country check asks for that country's own blocks as errors, and reads the stored profile's footerBlocks as well as the environment, because the renderer prints the blocks the row names.`,
   },
-  // `bilingual_unsubscribe_notice` is deliberately absent. Section 7.7 marks it
-  // implemented, and this build does not do it: `renderJurisdictionFooter()`
-  // picks one language for the whole footer, so a Korean recipient is told about
-  // unsubscribing in Korean and an English one in English -- never both, which is
-  // what 별표 6 asks for. A review caught the first version claiming otherwise
-  // and resting it on the keyring check, which confirms neither language.
-  //
-  // So the duty has no row, it is unsettled, and its rule does not send. That is
-  // the mechanism reporting an unimplemented duty rather than a seed asserting
-  // one, and it is what has to be built before Korea can be sent to.
+  {
+    countryCode: "KR",
+    obligationKey: "bilingual_unsubscribe_notice",
+    state: "implemented",
+    readinessCheck: "emailBilingualUnsubscribeNotice",
+    dueByIso: null,
+    warnDaysBefore: null,
+    notes: `${DRAFT} section 7.7: the unsubscribe notice in Korean and English (시행령 별표 6), whatever the message's language. The footer renders it in every language UNSUBSCRIBE_NOTICE_LANGUAGES names for the pinned profile (S6b); the check renders a footer in each message language and confirms both notices are there, so a build that stops doing it unsettles the duty instead of keeping it.`,
+  },
+  // `consent_result_notice_14_days` has no row yet. The consent notice and
+  // the all-marketing unsubscribe notice are built and queued (S6b), but a
+  // single purpose's withdrawal sends nothing: the approved wording says all
+  // marketing to the address stops, which is false for it, and a
+  // purpose-scoped wording is an owner approval that does not exist. A duty
+  // done for some of the changes it covers is not done, so Korea stays
+  // unsettled on it.
   {
     countryCode: "KR",
     obligationKey: "no_login_for_unsubscribe",

@@ -7,6 +7,7 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
+import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole } from "@/lib/adminAuth";
@@ -66,7 +67,10 @@ export default async function AdminAmuxBacklogPage({
       ) : tab.id === "metadata" ? (
         <AmuxBacklogMetadataPanel />
       ) : (
-        <AmuxIntakePanel />
+        <>
+          <AmuxIntakePanel />
+          <AmuxLocalIntakePanel />
+        </>
       )}
     </div>
   );

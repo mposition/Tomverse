@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
   campaignAttestationStates,
@@ -56,6 +57,8 @@ beforeEach(async () => {
   // product_updates is the release-notes product now, behind its own switch
   // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
   await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
 });
 
 after(async () => {

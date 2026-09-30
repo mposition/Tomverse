@@ -318,3 +318,51 @@ test("the preference centre asks whenever marketing could not send", () => {
     false
   );
 });
+
+// The 2026-09-29 amendment (docs/policy/email-notifications.md §6.2 step 4).
+
+test("a recorded IP estimate decides when nothing stronger exists", () => {
+  const resolved = resolveEmailJurisdiction({ estimatedCountry: "KR" });
+  assert.equal(resolved.countryCode, "KR");
+  assert.equal(resolved.confidence, "estimated");
+  assert.equal(resolved.source, "ip_estimated");
+  assert.equal(marketingJurisdictionVerdict(resolved).allowed, true);
+});
+
+test("an estimate loses to a declaration, a billing country and a consent", () => {
+  for (const stronger of [
+    { selfDeclaredCountry: "US" },
+    { billingCountry: "US" },
+    { consentCountry: "US" },
+  ]) {
+    const resolved = resolveEmailJurisdiction({ estimatedCountry: "KR", ...stronger });
+    assert.equal(resolved.countryCode, "US");
+    assert.notEqual(resolved.source, "ip_estimated");
+  }
+});
+
+test("an estimate that language and time zone contradict holds marketing back", () => {
+  // Two candidates must both pass; while the verdict takes one country, the
+  // disagreement is a conflict.
+  const resolved = resolveEmailJurisdiction({
+    estimatedCountry: "US",
+    language: "ko",
+    timeZone: "Asia/Seoul",
+  });
+  assert.equal(resolved.confidence, "conflict");
+  assert.deepEqual(resolved.conflicts, ["US", "KR"]);
+  assert.equal(marketingJurisdictionVerdict(resolved).allowed, false);
+  // Agreeing signals leave the estimate standing.
+  const agreeing = resolveEmailJurisdiction({
+    estimatedCountry: "KR",
+    language: "ko",
+    timeZone: "Asia/Seoul",
+  });
+  assert.equal(agreeing.confidence, "estimated");
+});
+
+test("the request's own IP country still decides nothing", () => {
+  const resolved = resolveEmailJurisdiction({ ipCountry: "KR" });
+  assert.equal(resolved.countryCode, "ZZ");
+  assert.equal(resolved.observedIpCountry, "KR");
+});

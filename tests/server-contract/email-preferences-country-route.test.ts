@@ -84,6 +84,14 @@ const loadRoute = async () => {
       },
     },
   });
+  // The 14-day result notice's hook (S6b) prepares template rows; this route
+  // contract is about the route, so the hook is a no-op here and its own DB
+  // test covers what it queues.
+  mock.module(mod("lib/processingResultNotice.ts"), {
+    namedExports: {
+      prepareProcessingResultNotice: async () => async () => {},
+    },
+  });
   mock.module(mod("lib/emailJurisdiction.ts"), {
     namedExports: {
       jurisdictionForUser: async (input: {

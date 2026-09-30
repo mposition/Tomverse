@@ -360,13 +360,33 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * develop. Not a marketing webhook input and no descriptor or admission
  * decision changes; the value below is computed over the merged schema.
  *
+ * 2026-09-29: sign-up consent (S4) adds the `SignupConsentAttempt` model and
+ * its relation on `User`. Neither is a marketing model or a webhook input; the
+ * digest moves because the whole Prisma schema is deliberately watched.
+ *
  * 2026-09-29: the current Prompt Refiner v5 manifest binds 190 files (stage
  * v4/run v6). Only schema comments changed, not models, webhook inputs,
  * descriptor or admission decisions. All dated notes above stand in this
  * tree; the fingerprint is computed over the merged schema.
+ *
+ * 2026-09-30: the sign-up consent branch (S4) merges develop; both notes above
+ * stand, and the value below is computed over the merged schema.
+ *
+ * 2026-09-30: the sign-in / sign-up split (v25, section 5.2a) adds two
+ * nullable sign-up hold columns to `EmailLoginAttempt`. Not a marketing model or
+ * a webhook input; the digest moves because the whole schema is watched.
+ *
+ * 2026-09-30: `ModelRegistryEntry` gains the nullable `webSearchOverride`
+ * column (an administrator's per-model web search route). Not a marketing
+ * model or a webhook input; the digest moves because the whole Prisma schema
+ * is deliberately watched. Descriptor and admission decisions are unchanged.
+ *
+ * 2026-09-30: the sign-in / sign-up split takes develop with the web search
+ * override; both notes above stand, and the value below is computed over the
+ * merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f4b326b974a6a54b5166bb548e29d5ba2e1ba9a7320c774864273df5183a8dc0";
+  "e370d1c92bcae6b9af90c513405567bc5549f2c90f8a3af9e19c4bfbfeb6adf7";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

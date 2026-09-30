@@ -173,7 +173,7 @@ export async function POST(request: Request) {
         // request the dispatch refuses.
         const searchBackendReadiness = resolveWebSearchBackendReadiness();
         const budgets = models.map((model) => {
-            const capability = getWebSearchCapability(model.id);
+            const capability = getWebSearchCapability(model);
             // Images count against the limit at their provider's ceiling and
             // reserve the rest of the flat allowance -- the split the chat
             // route makes from real pixels, made here without them.

@@ -3,6 +3,11 @@ import "server-only";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { findUnpricedModels } from "@/lib/modelPricing";
+import {
+  WEB_SEARCH_OVERRIDES,
+  webSearchOverrideRefusal,
+  type WebSearchOverride,
+} from "@/lib/webSearchOverride";
 import type { AiModel } from "@/lib/models";
 import {
   AI_PROVIDERS,
@@ -55,6 +60,9 @@ const modelFields = {
   contextWindowTokens: nullablePositiveInt(20_000_000),
   supportsImage: z.boolean(),
   supportsNativePdf: z.boolean(),
+  // Absent keeps what is stored (older panels predate the field); null returns
+  // the model to "follow the code".
+  webSearchOverride: z.enum(WEB_SEARCH_OVERRIDES).nullable().optional(),
   maxImages: nullablePositiveInt(100),
   maxBase64ImagePayloadBytes: nullablePositiveInt(100 * 1024 * 1024),
   maxOutputTokens: nullablePositiveInt(2_000_000),
@@ -143,6 +151,17 @@ const refineModelInput = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
         message: "Reserved output tokens cannot exceed maximum output tokens.",
       });
     }
+    const overrideRefusal = webSearchOverrideRefusal(
+      String(candidate.provider ?? ""),
+      candidate.webSearchOverride as WebSearchOverride | null | undefined
+    );
+    if (overrideRefusal) {
+      context.addIssue({
+        code: "custom",
+        path: ["webSearchOverride"],
+        message: overrideRefusal,
+      });
+    }
     if (
       candidate.id &&
       candidate.replacementModelId &&
@@ -198,6 +217,9 @@ export function registryInputToData(
     contextWindowTokens: nullable(input.contextWindowTokens),
     supportsImage: input.supportsImage,
     supportsNativePdf: input.supportsNativePdf,
+    ...(input.webSearchOverride !== undefined
+      ? { webSearchOverride: input.webSearchOverride }
+      : {}),
     maxImages: input.supportsImage ? nullable(input.maxImages) : null,
     maxBase64ImagePayloadBytes: input.supportsImage
       ? nullable(input.maxBase64ImagePayloadBytes)

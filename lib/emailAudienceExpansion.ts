@@ -2,11 +2,14 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
+import { appUrl } from "@/lib/accountEmails";
 import {
-  isEmailMarketingEnabled,
-  isEmailReleaseNotesEnabled,
-} from "@/lib/appSettings";
+  emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
+import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailReleaseNotesLiveForEnqueue } from "@/lib/emailPolicyPublication";
 import {
   marketingFlagApplies,
   releaseNotesFlagApplies,
@@ -386,7 +389,7 @@ export async function expandEmailEvent(input: {
   // mid-expansion and a partial audience already queued.
   if (
     releaseNotesFlagApplies(definitionForFlag.purpose) &&
-    !(await isEmailReleaseNotesEnabled())
+    !(await isEmailReleaseNotesLiveForEnqueue())
   ) {
     return { refused: "release_notes_disabled" };
   }
@@ -517,6 +520,15 @@ export async function expandEmailEvent(input: {
         const language = isLanguage(deliveryContent.language)
           ? deliveryContent.language
           : "en";
+        // The amendment notice fans out only in approved wording
+        // (lib/policyChangeNoticeEmail.ts). Thrown, so the wave stops rather than
+        // queueing some recipients under wording nobody approved.
+        if (
+          event.template.key === POLICY_CHANGE_NOTICE_TEMPLATE &&
+          !isPolicyChangeNoticeWordingApproved(language, appUrl())
+        ) {
+          throw new Error("The amendment notice's wording is not approved; the wave cannot expand.");
+        }
         const template = await ensureTemplateVersion({
           templateKey: event.template.key,
           language,

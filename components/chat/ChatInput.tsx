@@ -910,6 +910,7 @@ export function ChatInput({
   const {
     models: AVAILABLE_MODELS,
     publicModels: PUBLIC_MODELS,
+    getModel: getCatalogModel,
   } = useModelCatalog();
   const PUBLIC_MODEL_IDS = useMemo(
     () => new Set(PUBLIC_MODELS.map((model) => model.id)),
@@ -1178,6 +1179,9 @@ export function ChatInput({
     webSearchMode,
     selectedModelIds: activeSelectedModels,
     backendReadiness: searchBackendReadiness,
+    // The chip and the estimate have to resolve the same rows: a model that
+    // exists only in the runtime registry is unknown to the compiled catalogue.
+    resolveModel: getCatalogModel,
   });
   const webSearchChipLabel = webSearchState.allUnsupported
     ? t("chat.webSearchChipUnavailable")

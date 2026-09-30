@@ -57,6 +57,13 @@ const REGISTRY = {
     reason:
       "How a documentation read ended: parsed, not_found (the page or the table row is not there), fetch_failed, parse_failed (the document's structure moved). The adoption draft reads only 'parsed', so a status the list does not know would be evidence silently ignored rather than a write refused.",
   },
+  ModelRegistryEntry_webSearchOverride_check: {
+    owner: "list",
+    module: "lib/webSearchOverride.ts",
+    list: "WEB_SEARCH_OVERRIDES",
+    reason:
+      "An administrator's per-model web search route: off or the application-managed backend. NULL follows the code. There is no value for a provider's native tool on purpose -- its cost ceiling is verified per model in lib/webSearchCapability.ts, not chosen in a form.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",
@@ -917,6 +924,20 @@ const REGISTRY = {
     list: "REQUEST_STATES",
     reason:
       "Internal request idempotency; in_progress may stay visible because a COMMIT can land late.",
+  },
+  AmuxLocalIntakeNormalized_priority_check: {
+    owner: "list",
+    module: "lib/amux/localIntakeCore.ts",
+    list: "LOCAL_INTAKE_PRIORITIES",
+    reason:
+      "p0 through p3 on the normalized local-intake row. The work item priority check stays the board vocabulary. This row is written only with a policy version 3 local intake card.",
+  },
+  AmuxLocalIntakeApproval_status_check: {
+    owner: "list",
+    module: "lib/amux/localIntakeCore.ts",
+    list: "LOCAL_INTAKE_APPROVAL_STATUSES",
+    reason:
+      "consumed or outcome_unknown for one local intake card. The shipped code latch is false, so the public route does not insert one until the environment value is exactly enabled.",
   },
   AmuxWorkDelivery_status_check: {
     owner: "database",

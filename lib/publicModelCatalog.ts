@@ -56,6 +56,13 @@ export type PublicCatalogModel = {
     reasoning?: AiModel["reasoning"];
     contextWindowTokens?: number;
     inputCapabilities?: AiModel["inputCapabilities"];
+    /**
+     * The administrator's web search override. Public because the composer
+     * decides from it whether the switch can search, and a client that could
+     * not see it would promise a search the dispatch refuses (or refuse one it
+     * would run). It names a route, never a price or a key.
+     */
+    webSearchOverride?: AiModel["webSearchOverride"];
 };
 
 /**
@@ -114,5 +121,8 @@ export const toPublicCatalogModel = (model: AiModel): PublicCatalogModel => ({
         : {}),
     ...(model.inputCapabilities
         ? { inputCapabilities: model.inputCapabilities }
+        : {}),
+    ...(model.webSearchOverride
+        ? { webSearchOverride: model.webSearchOverride }
         : {}),
 });

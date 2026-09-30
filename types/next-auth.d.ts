@@ -8,6 +8,10 @@ declare module "next-auth" {
             plan?: "Free" | "Pro" | "Max";
             createdAt?: string;
             authenticatedAt?: string;
+            /** This session's sign-in created the account (sign-up consent, S4). */
+            accountCreatedBySignIn?: boolean;
+            /** The login row an email sign-up spent; the consent choice binds to it. */
+            signupEmailLoginAttemptId?: string;
         } & DefaultSession["user"];
     }
 }
@@ -23,5 +27,18 @@ declare module "next-auth/jwt" {
          * `User.sessionsRevokedAt` so revocation works without a session table.
          */
         sessionIssuedAt?: number;
+        /**
+         * True only on the token of the sign-in that created the account. The
+         * sign-up screen's choice is consumed by that session and no other: an
+         * account another tab created is signed into here with this false.
+         */
+        accountCreatedBySignIn?: boolean;
+        /**
+         * The `EmailLoginAttempt` an email sign-up spent, on the token of the
+         * sign-in that created the account only. Finalize binds the sign-up
+         * choice to this row and no other
+         * (docs/policy/email-product-news-redesign-draft.md section 5.2a).
+         */
+        signupEmailLoginAttemptId?: string;
     }
 }

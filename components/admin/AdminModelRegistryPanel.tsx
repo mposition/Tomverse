@@ -51,6 +51,12 @@ import {
   type ModelLifecycleFilter,
 } from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
+import { webSearchCapabilityFromCode } from "@/lib/webSearchCapability";
+import {
+  WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
+  isWebSearchOverride,
+  type WebSearchOverride,
+} from "@/lib/webSearchOverride";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { adminFetch } from "@/lib/adminFetch";
 
@@ -91,6 +97,8 @@ type FormState = {
   contextWindowTokens: number | null;
   supportsImage: boolean;
   supportsNativePdf: boolean;
+  /** Null follows the code; see lib/webSearchOverride.ts. */
+  webSearchOverride: WebSearchOverride | null;
   maxImages: number | null;
   maxBase64ImagePayloadBytes: number | null;
   maxOutputTokens: number | null;
@@ -120,6 +128,7 @@ const emptyForm = (): FormState => ({
   contextWindowTokens: null,
   supportsImage: false,
   supportsNativePdf: false,
+  webSearchOverride: null,
   maxImages: null,
   maxBase64ImagePayloadBytes: null,
   maxOutputTokens: 2048,
@@ -149,6 +158,7 @@ const formFromModel = (model: AdminModel): FormState => ({
   contextWindowTokens: model.contextWindowTokens || null,
   supportsImage: model.inputCapabilities?.image === true,
   supportsNativePdf: model.inputCapabilities?.nativePdf === true,
+  webSearchOverride: model.webSearchOverride ?? null,
   maxImages: model.inputCapabilities?.maxImages || null,
   maxBase64ImagePayloadBytes: model.inputCapabilities?.maxBase64ImagePayloadBytes || null,
   maxOutputTokens: model.maxOutputTokens || null,
@@ -158,6 +168,70 @@ const formFromModel = (model: AdminModel): FormState => ({
   cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
   sortOrder: model.sortOrder || 0,
 });
+
+const webSearchRouteLabel = (
+  form: Pick<FormState, "id" | "provider" | "apiModel">,
+  routes: { native: string; appManaged: string; searchModel: string; unsupported: string }
+) => {
+  const capability = webSearchCapabilityFromCode({
+    id: form.id,
+    provider: form.provider,
+    apiModel: form.apiModel,
+  });
+  switch (capability.support) {
+    case "native":
+      return routes.native;
+    case "app-managed":
+      return routes.appManaged;
+    case "search-model":
+      return routes.searchModel;
+    default:
+      return routes.unsupported;
+  }
+};
+
+/**
+ * The web search route for one model: follow the code, off, or the
+ * application's own backend. "Automatic" names what the code would choose for
+ * this provider and id, so the operator sees what they are overriding. There
+ * is no option for a provider's own tool (lib/webSearchOverride.ts).
+ */
+function WebSearchOverrideField({
+  form,
+  messages,
+  onChange,
+}: {
+  form: FormState;
+  messages: {
+    webSearch: string;
+    webSearchModes: { auto: (codeRoute: string) => string; off: string; appManaged: string };
+    webSearchRoutes: { native: string; appManaged: string; searchModel: string; unsupported: string };
+    webSearchHelp: string;
+    webSearchRefused: string;
+  };
+  onChange: (value: WebSearchOverride | null) => void;
+}) {
+  const refused = WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS.has(form.provider);
+  return (
+    <label className={`${labelClass} md:col-span-2`}>
+      {messages.webSearch}
+      <select
+        data-testid="model-web-search-override"
+        value={refused ? "" : form.webSearchOverride ?? ""}
+        disabled={refused}
+        onChange={(e) => onChange(isWebSearchOverride(e.target.value) ? e.target.value : null)}
+        className={inputClass}
+      >
+        <option value="">{messages.webSearchModes.auto(webSearchRouteLabel(form, messages.webSearchRoutes))}</option>
+        <option value="off">{messages.webSearchModes.off}</option>
+        <option value="app-managed">{messages.webSearchModes.appManaged}</option>
+      </select>
+      <span className="text-[11px] font-normal normal-case tracking-normal text-zinc-500">
+        {refused ? messages.webSearchRefused : messages.webSearchHelp}
+      </span>
+    </label>
+  );
+}
 
 const inputClass =
   "w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
@@ -1600,6 +1674,11 @@ export function AdminModelRegistryPanel() {
                 <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} />{adoptWorkItemId ? <DraftHints lines={adoptionGuidance.byField.contextWindowTokens} /> : null}</label>
                 <label className={labelClass}>{m.capabilities.maxImages}<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>{m.capabilities.maxBase64ImageBytes}<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
+                <WebSearchOverrideField
+                  form={form}
+                  messages={m.capabilities}
+                  onChange={(value) => setField("webSearchOverride", value)}
+                />
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">

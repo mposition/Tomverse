@@ -27,6 +27,7 @@ import {
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   drainStandardEmailDeliveries,
   enqueueStandardEmail,
@@ -130,6 +131,8 @@ beforeEach(async () => {
   // product_updates is the release-notes product now, behind its own switch
   // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
   await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
   await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
 });
 
@@ -150,8 +153,7 @@ after(async () => {
 // only time a draft's duty rows may be written. `advertising_subject_label` is
 // `implemented` rather than waived, which is why the label is still printed.
 const KOREAN_DUTIES_THE_SEED_LEAVES_OPEN = [
-  ["bilingual_unsubscribe_notice", "emailUnsubscribeKeyring"],
-  ["consent_result_notice_14_days", "emailUnsubscribeKeyring"],
+  ["consent_result_notice_14_days", "emailProcessingResultNotice"],
   ["advertising_subject_label", "emailSubjectLabels"],
 ] as const;
 

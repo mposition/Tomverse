@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getModel } from "../lib/models.ts";
+import { ALL_WEB_SEARCH_BACKENDS_READY } from "../lib/webSearchBackends.ts";
 
 import {
   anySelectedModelCanSearch,
@@ -313,6 +315,7 @@ test("availability reads the dispatchable capability, not the provider's brochur
   // refuse it too, or it promises a search the dispatch will reject.
   assert.equal(
     anySelectedModelCanSearch({
+      resolveModel: getModel,
       selectedModelIds: ["gemini-3-1-pro"],
       disabledModelIds: [],
     }),
@@ -320,6 +323,7 @@ test("availability reads the dispatchable capability, not the provider's brochur
   );
   assert.equal(
     anySelectedModelCanSearch({
+      resolveModel: getModel,
       selectedModelIds: ["gpt-5-6-luna"],
       disabledModelIds: [],
     }),
@@ -330,9 +334,23 @@ test("availability reads the dispatchable capability, not the provider's brochur
 test("a paused searching model does not make the selection searchable", () => {
   assert.equal(
     anySelectedModelCanSearch({
+      resolveModel: getModel,
       selectedModelIds: ["gpt-5-6-luna", "gpt-5-4-mini"],
       disabledModelIds: ["gpt-5-6-luna"],
     }),
     false
+  );
+});
+
+test("a registry-only model can be offered a searching re-run", () => {
+  const row = { id: "gpt-6-luna", provider: "openai" };
+  assert.equal(
+    anySelectedModelCanSearch({
+      resolveModel: (modelId) => (modelId === row.id ? row : getModel(modelId)),
+      selectedModelIds: [row.id],
+      disabledModelIds: [],
+      searchBackendReadiness: ALL_WEB_SEARCH_BACKENDS_READY,
+    }),
+    true
   );
 });

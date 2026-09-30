@@ -23,6 +23,7 @@ import {
 import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
 import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { prisma } from "@/lib/prisma";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
 // The three ADR flags, against the database that actually holds them (EM-05).
@@ -124,6 +125,8 @@ test("turning the flag on lets the same message through", async () => {
   // The launch template carries product_updates, which is also behind the
   // release-notes switch; this test is about the marketing one.
   await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
 
   const result = await enqueueStandardEmail({
     templateKey: MODEL_LAUNCH_TEMPLATE,
@@ -142,6 +145,8 @@ test("turning the flag on lets the same message through", async () => {
 test("the campaign fan-out is gated too, or the flag would be a lie", async () => {
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
   await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
   const queued = await enqueueStandardEmail({
     templateKey: MODEL_LAUNCH_TEMPLATE,
     emailAddress: "person@example.test",

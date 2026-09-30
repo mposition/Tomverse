@@ -21,6 +21,34 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
+import {
+    declareSignupIntent,
+    readRememberedAuthCallbackUrl,
+    readStoredSignupConsentChoice,
+    rememberAuthCallbackUrl,
+    storeSignupConsentChoice,
+    withdrawSignupIntent,
+    withSignupConsentMarker,
+} from "@/components/auth/signupConsentClient";
+
+/**
+ * Sign-in and sign-up are separate screens
+ * (docs/policy/email-product-news-redesign-draft.md section 5.2a, v25).
+ *
+ * - `signin` shows no consent devices and stores no choice: a returning member
+ *   is not asked, and nothing records a notice they were not shown. A proven
+ *   address or provider account with no account here is sent to sign-up --
+ *   never before the proof, so "no account" is only told to its owner.
+ * - `signup` shows the devices above the buttons, stores the choice, and is
+ *   the only screen whose clicks may create an account.
+ */
+export type AuthScreenMode = "signin" | "signup";
+
+const OAUTH_PROVIDER_LABELS: Record<string, string> = {
+    google: "Google",
+    "azure-ad": "Microsoft",
+};
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -67,12 +95,38 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
+function SignInButtons({
+    turnstileSiteKey,
+    signupConsentEnabled = false,
+    mode,
+}: {
+    turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+    mode: AuthScreenMode;
+}) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
     const { t, lang } = useLanguage();
-    const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
+    const isSignup = mode === "signup";
+    // A provider sign-in with no account is redirected here by the server to a
+    // fixed URL with no destination; the sign-in screen remembered it.
+    const [rememberedCallbackUrl, setRememberedCallbackUrl] = useState<string | null>(null);
+    useEffect(() => {
+        if (searchParams.get("callbackUrl")) return;
+        const remembered = readRememberedAuthCallbackUrl();
+        if (remembered) queueMicrotask(() => setRememberedCallbackUrl(remembered));
+    }, [searchParams]);
+    const callbackUrl = withChatLanguage(
+        searchParams.get("callbackUrl") ?? rememberedCallbackUrl,
+        lang
+    );
+    // Sent here from the sign-in screen after the provider proved an account
+    // that has none here (section 5.2a).
+    const noAccountProvider =
+        isSignup && searchParams.get("notice") === "no_account"
+            ? OAUTH_PROVIDER_LABELS[searchParams.get("provider") ?? ""] ?? null
+            : null;
     // Both administrator windows land here: an expired console session and an
     // expired high-risk step-up window. The notice is the same either way --
     // the previous session was ended on purpose and signing in again is what
@@ -106,6 +160,38 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
             router.replace(callbackUrl);
         }
     }, [callbackUrl, hasAuthenticatedUser, router]);
+
+    // The sign-up consent devices (S4). Both start unset: an opt-in is never
+    // pre-ticked, and not ticking it is not a refusal.
+    const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    // After a reload the screen shows the choice this tab actually stored, not
+    // the unticked defaults: sending again then keeps that attempt instead of
+    // replacing it with an empty one.
+    useEffect(() => {
+        // Read after hydration (storage is the browser's), applied as the
+        // effect's callback rather than synchronously in its body.
+        const stored = readStoredSignupConsentChoice();
+        if (stored) queueMicrotask(() => setConsentChoice(stored));
+    }, []);
+    // The attempt the code request stored, so the verify step's landing carries
+    // its marker.
+    const [consentAttemptId, setConsentAttemptId] = useState<string | null>(null);
+    // The sign-in screen proved this address and found no account: the code is
+    // now a one-time sign-up hold, and this tab turns into the sign-up step.
+    const [heldSignup, setHeldSignup] = useState(false);
+    // Only a screen that shows the devices stores a choice -- the server writes
+    // `noticeShown: true` on every attempt it is given.
+    const devicesShown = signupConsentEnabled && (isSignup || heldSignup);
+    const storeConsent = (channel: "oauth" | "email_code", extra: { provider?: string; email?: string }) =>
+        devicesShown
+            ? storeSignupConsentChoice({
+                  channel,
+                  ...extra,
+                  expressOptInRequested: consentChoice.optIn,
+                  objected: consentChoice.objected,
+                  language: lang,
+              })
+            : Promise.resolve(null);
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -189,6 +275,14 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
+            // Stored at the first request only. A resend on the code step keeps
+            // the pending attempt: the choice is locked there, and superseding
+            // it before a request that then fails would leave the still-valid
+            // earlier code bound to nothing.
+            // The store keeps the pending attempt when the choice and address
+            // are unchanged (always so on the code step, where the devices are
+            // locked), and replaces it only when the person changed the choice.
+            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
@@ -243,23 +337,85 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 redirect: false,
                 email: email.trim(),
                 code: code.trim(),
-                callbackUrl,
+                intent: mode,
+                callbackUrl: withSignupConsentMarker(callbackUrl, consentAttemptId),
             });
-            // next-auth v4 collapses every authorize() rejection into the
-            // generic "CredentialsSignin" code, so a specific "locked" vs
-            // "invalid" distinction can't reach the client here -- show one
-            // generic message and let the user request a fresh code.
+            // authorize()'s error message reaches here as `result.error`. The
+            // one that matters is "no account": the code matched, so the person
+            // told is the one who proved the address, and the code is now a
+            // one-time sign-up hold (section 5.2a). Every other rejection gets
+            // one generic message -- "locked" vs "invalid" would help nobody
+            // but a guesser.
+            if (result?.error === "EMAIL_ACCOUNT_NOT_FOUND") {
+                setHeldSignup(true);
+                return;
+            }
             if (result?.error) {
                 setFormError(t("auth.emailLoginInvalidCode"));
                 return;
             }
-            window.location.href = result?.url || callbackUrl;
+            window.location.href =
+                result?.url || withSignupConsentMarker(callbackUrl, consentAttemptId);
         } catch {
             setFormError(t("auth.emailLoginInvalidCode"));
         } finally {
             setIsVerifyingCode(false);
         }
     };
+
+    // The sign-up step of a sign-in that found no account: store the choice
+    // the devices now show, then spend the held code once with a sign-up
+    // intent. The code is not requested again.
+    const handleHeldSignup = async () => {
+        if (isVerifyingCode) return;
+        setIsVerifyingCode(true);
+        setFormError(null);
+        try {
+            const attemptId = await storeConsent("email_code", { email: email.trim() });
+            const landing = withSignupConsentMarker(callbackUrl, attemptId);
+            const result = await signIn("email-code", {
+                redirect: false,
+                email: email.trim(),
+                code: code.trim(),
+                intent: "signup",
+                callbackUrl: landing,
+            });
+            if (result?.error) {
+                // The hold lives as long as the code did; past that, a new code.
+                setFormError(t("auth.emailLoginInvalidCode"));
+                return;
+            }
+            window.location.href = result?.url || landing;
+        } catch {
+            setFormError(t("auth.emailLoginInvalidCode"));
+        } finally {
+            setIsVerifyingCode(false);
+        }
+    };
+
+    const startOAuth = async (provider: "google" | "azure-ad") => {
+        markSignupStarted(provider);
+        rememberAuthCallbackUrl(callbackUrl);
+        let attemptId: string | null = null;
+        if (isSignup) {
+            attemptId = await storeConsent("oauth", { provider });
+            await declareSignupIntent(provider);
+        } else if (!(await withdrawSignupIntent())) {
+            // An intent that may still be set would turn this sign-in into a
+            // new account; stop here rather than go to the provider.
+            setFormError(t("auth.errorGeneric"));
+            return;
+        }
+        await signIn(
+            provider,
+            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+            oauthAuthorizationParams
+        );
+    };
+
+    const otherScreenHref = `${isSignup ? "/auth/signin" : "/auth/signup"}?${new URLSearchParams({
+        callbackUrl,
+    }).toString()}`;
 
     // While a minute-scoped rate limit is counting down, show the live
     // remaining seconds instead of the frozen number from when the error
@@ -304,34 +460,70 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                     {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
                 </div>
             ) : null}
-            <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
-                {t("auth.privacy")}{" "}
-                <Link
-                    href="/terms"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            {noAccountProvider ? (
+                <div
+                    role="status"
+                    data-testid="signup-no-account-notice"
+                    className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100"
                 >
-                    {t("auth.termsLink")}
-                </Link>
-                {" / "}
-                <Link
-                    href="/privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                >
-                    {t("auth.privacyPolicyLink")}
-                </Link>
-            </p>
+                    {t("auth.noAccountOAuth").replaceAll("{provider}", noAccountProvider)}
+                </div>
+            ) : null}
+            {heldSignup ? (
+                <div className="space-y-4" data-testid="signin-no-account-step">
+                    <p
+                        role="status"
+                        className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100"
+                    >
+                        {t("auth.noAccountEmail").replace("{email}", email.trim())}
+                    </p>
+                    {signupConsentEnabled ? (
+                        <SignupConsentDevices
+                            disabled={isVerifyingCode}
+                            language={lang}
+                            optIn={consentChoice.optIn}
+                            objected={consentChoice.objected}
+                            onChange={setConsentChoice}
+                        />
+                    ) : null}
+                    <button
+                        type="button"
+                        disabled={isVerifyingCode}
+                        onClick={handleHeldSignup}
+                        className={providerButtonClass}
+                    >
+                        {isVerifyingCode ? t("auth.loading") : t("auth.signupWithThisEmail")}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setHeldSignup(false);
+                            setStep("email");
+                            setCode("");
+                            setFormError(null);
+                            requestAnimationFrame(() => emailInputRef.current?.focus());
+                        }}
+                        className="w-full text-center text-xs font-semibold text-zinc-500 hover:underline dark:text-zinc-400"
+                    >
+                        {t("auth.emailLoginBackButton")}
+                    </button>
+                </div>
+            ) : (
+            <>
+            {devicesShown ? (
+                <SignupConsentDevices
+                    disabled={step === "code"}
+                    language={lang}
+                    optIn={consentChoice.optIn}
+                    objected={consentChoice.objected}
+                    onChange={setConsentChoice}
+                />
+            ) : null}
 
             {/* Google */}
             <button
                 type="button"
-                onClick={() => {
-                    markSignupStarted("google");
-                    void signIn("google", { callbackUrl }, oauthAuthorizationParams);
-                }}
+                onClick={() => void startOAuth("google")}
                 className={providerButtonClass}
             >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -342,10 +534,7 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
             {/* Microsoft */}
             <button
                 type="button"
-                onClick={() => {
-                    markSignupStarted("azure-ad");
-                    void signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams);
-                }}
+                onClick={() => void startOAuth("azure-ad")}
                 className={providerButtonClass}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" className="h-5 w-5">
@@ -485,6 +674,8 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                     </button>
                 </div>
             )}
+            </>
+            )}
             {displayedFormError ? (
                 <>
                     <p
@@ -499,14 +690,54 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                     ) : null}
                 </>
             ) : null}
+            {heldSignup ? null : (
+                <p className="text-center text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    {t(isSignup ? "auth.haveAccountPrompt" : "auth.noAccountPrompt")}{" "}
+                    <Link
+                        href={otherScreenHref}
+                        data-testid={isSignup ? "signup-to-signin-link" : "signin-to-signup-link"}
+                        className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                    >
+                        {t(isSignup ? "auth.signinLink" : "auth.signupLink")}
+                    </Link>
+                </p>
+            )}
+            {/* Below the sign-in buttons, as one line rather than a card, so
+                the page fits a screen with the consent devices shown. Those
+                devices stay above the buttons: a provider click stores the
+                choice and records that the notice was shown. */}
+            <p data-testid="signin-terms-notice" className="px-1 text-center text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                {t("auth.privacy")}{" "}
+                <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.termsLink")}
+                </Link>
+                {" / "}
+                <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.privacyPolicyLink")}
+                </Link>
+            </p>
         </div>
     );
 }
 
 export function SignInPageContent({
     turnstileSiteKey,
+    signupConsentEnabled = false,
+    mode = "signin",
 }: {
     turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+    mode?: AuthScreenMode;
 }) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
@@ -539,14 +770,18 @@ export function SignInPageContent({
                             Tomverse
                         </h1>
                         <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                            {t("auth.description")}
+                            {t(mode === "signup" ? "auth.signupDescription" : "auth.description")}
                         </p>
                     </div>
                 </div>
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons turnstileSiteKey={turnstileSiteKey} />
+                        <SignInButtons
+                            turnstileSiteKey={turnstileSiteKey}
+                            signupConsentEnabled={signupConsentEnabled}
+                            mode={mode}
+                        />
                     </Suspense>
                 </div>
             </div>

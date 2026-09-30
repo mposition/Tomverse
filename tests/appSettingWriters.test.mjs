@@ -121,6 +121,13 @@ const READ_ONLY_KEYS = {
       "operator step in the marketing activation order, recorded by writing " +
       "the row, not a toggle a screen should offer ahead of that order.",
   },
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY: {
+    reason:
+      "docs/policy/email-product-news-redesign-draft.md section 5.2: turning " +
+      "this on starts writing permanent consent evidence about every new " +
+      "account, after the consent copy and the confirmation flag are live. " +
+      "An operator step recorded by writing the row, not a screen toggle.",
+  },
   MARKETING_EXPERIMENTS_KEY: {
     reason:
       "S2 adds the audited experiment activation route after cache and CSP " +

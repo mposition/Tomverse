@@ -211,6 +211,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "signupConsentAttempt",
+    publicName: "signup_consent_attempt",
+    prismaModel: "SignupConsentAttempt",
+    state: "unverified",
+  },
+  {
     domain: "emailPolicyVersion",
     publicName: "email_policy_version",
     prismaModel: "EmailPolicyVersion",
@@ -626,6 +632,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "Operator approval evidence for one explicit intake registration, not customer data. The actor id is the administrator who consumed the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxLocalIntakeNormalized",
+    publicName: "amux_local_intake_normalized",
+    prismaModel: "AmuxLocalIntakeNormalized",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one local-agent intake card the administrator confirmed, not customer data. The actor id is the administrator and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores the bounded normalized analysis and digests. Raw operator input and the model transcript are absent. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxLocalIntakeApproval",
+    publicName: "amux_local_intake_approvals",
+    prismaModel: "AmuxLocalIntakeApproval",
+    state: "excluded",
+    exclusionReason:
+      "Operator approval evidence for one local intake registration, not customer data. The actor id is the administrator who consumed the row and is intentionally not a User foreign key, so account deletion cannot rewrite it. A customer export receives nothing from this table.",
   },
   {
     domain: "adminNote",

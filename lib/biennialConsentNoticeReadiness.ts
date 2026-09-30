@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { isDeterminativeConfidence } from "@/lib/emailJurisdictionCore";
 import { sendablePolicyVersionIds } from "@/lib/emailSendableProfiles";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingSendingConfigured } from "@/lib/emailUnsubscribeReadiness";
@@ -178,7 +179,9 @@ async function koreanAnchors(): Promise<BiennialAnchor[]> {
     const jurisdiction = await jurisdictionForUser({ userId });
     // High confidence only: an inferred or conflicting country is not a finding
     // that somebody is Korean, and the send would not treat it as one either.
-    if (jurisdiction.countryCode !== "KR" || jurisdiction.confidence !== "high") continue;
+    if (jurisdiction.countryCode !== "KR" || !isDeterminativeConfidence(jurisdiction.confidence)) {
+      continue;
+    }
     if (found.consentAnchor !== null) {
       anchors.push({ userId, anchoredAt: found.consentAnchor, source: "consent" });
       continue;

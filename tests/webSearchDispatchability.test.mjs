@@ -127,6 +127,7 @@ test("the composer's supported count and surcharge agree with dispatchability", 
     "codestral",
   ];
   const state = deriveWebSearchComposerState({
+    resolveModel: getModel,
     webSearchMode: "always",
     selectedModelIds: selection,
   });
@@ -156,6 +157,7 @@ test("the mixed and all-unsupported composer contracts survive the narrowing", (
   // Mixed: a warning with the exception named, not a block -- the dispatchable
   // models still search and the rest answer without one.
   const mixed = deriveWebSearchComposerState({
+    resolveModel: getModel,
     webSearchMode: "always",
     selectedModelIds: ["gpt-5-6-luna", "gemini-3-6-flash"],
   });
@@ -167,6 +169,7 @@ test("the mixed and all-unsupported composer contracts survive the narrowing", (
   // Every selected model undispatchable: blocked, so the composer states the
   // problem before the send rather than after it.
   const blocked = deriveWebSearchComposerState({
+    resolveModel: getModel,
     webSearchMode: "always",
     selectedModelIds: ["gemini-3-6-flash", "gemini-3-1-pro"],
   });
@@ -178,6 +181,7 @@ test("the mixed and all-unsupported composer contracts survive the narrowing", (
   // Auto only offers a search, so an undispatchable model is not an exception
   // the user has to resolve before sending.
   const auto = deriveWebSearchComposerState({
+    resolveModel: getModel,
     webSearchMode: "auto",
     selectedModelIds: ["gemini-3-6-flash"],
   });

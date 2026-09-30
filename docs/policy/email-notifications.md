@@ -96,7 +96,7 @@
 
 | 남은 S0 항목 | 언제까지 |
 |---|---|
-| **IP 추정 국가** — 6.1·6.2와 `AGENTS.md` | **IP 추정을 구현하기 전에.** 지금 6절은 fail-closed이고 추정 국가를 쓰지 않습니다 |
+| ~~**IP 추정 국가** — 6.1·6.2와 `AGENTS.md`~~ | **개정됨(소유자 승인 2026-09-29).** 기록된 IP 추정은 더 강한 신호가 없고 모순이 없을 때 `estimated`로 판정에 쓰입니다(6.2 4단계). profile 없는 국가의 추정은 여전히 marketing을 열지 않습니다 |
 | **기록 세 층과 승인 원장** — 10.2의 데이터 모델 | **S3 구현 전에** |
 | **7.7·7.8** 한국 의무와 의무 상태 기록 | 해당 단계(S6) 전에 |
 | **webhook·suppression 절 동기화** — 9.6, 12.3, 12.4, 13.5, 13.7, 14.4 | 해당 단계 전에. 13.2·13.3·10.1·10.2는 v26~v28이 이미 옮겼습니다 |
@@ -1758,8 +1758,12 @@ snapshot 사이에 **§4.3·§4.4·§5.1·§5.5·§5.6·§11은 바이트 단위
 | **CH·CA** | `express_consent` | CH는 FDPIC, CA는 CASL. 해제 없음 |
 | **ZZ**(국가 미상) | **발송 안 함** | — |
 
-**신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 초안 5.1의 고지를
-본 계정에만 성립합니다. 그 전에 가입한 계정은 초안 5.5·5.6이 다룹니다.
+**신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 초안 5.1의 고지를 본
+계정 가운데 **그 고지가 동의 없이도 제품 소식이 갈 수 있음을 밝힌** 계정에만 성립합니다
+(2026-09-29 결정 B로 좁힘). 승인된 가입 고지(동의 문안 3.B·11.B)는 "켜시면 보내
+드립니다"이고 그 약속을 유지하므로, 오늘 이 조건을 충족하는 가입은 없습니다. 그런
+고지 문안과 그 범위를 적은 `/privacy` 문장은 별도 승인과 별도 개정입니다
+(docs/policy/email-policy-amendment-draft.md §1). 그 전에 가입한 계정은 초안 5.5·5.6이 다룹니다.
 
 **`risk_accepted`는 이 표의 값이 아닙니다.** 국가 rule은 그대로 두고, 그 위에서
 내린 결정으로 초안 5.6에 따라 기록됩니다 — 승인 F(기존 78계정 전원 발송)가
@@ -1949,7 +1953,10 @@ EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건�
 
 ### 6.1 신호 우선순위
 
-IP는 **가장 약한 신호**이며 단독으로 관할권을 확정하지 않습니다.
+IP는 **가장 약한 신호**입니다. 2026-09-29 소유자 승인(초안 §12 S0,
+[제품 소식 재설계](email-product-news-redesign-draft.md) §5.3)부터 **IP로 추정한
+국가는 기록하고 판정에 씁니다** — 단, 1~4순위가 있으면 그것이 이기고, 사용자는
+설정에서 언제든 정정합니다.
 
 | 순위 | 신호 | 출처 | 신뢰도 | 비고 |
 |---|---|---|---|---|
@@ -1958,7 +1965,7 @@ IP는 **가장 약한 신호**이며 단독으로 관할권을 확정하지 않�
 | 3 | **사용자가 직접 신고한 국가** | 이메일 알림 설정 | 높음 | `UserSettings.country`, source=`self_declared` |
 | 4 | **동의 기록 시점의 관할권** | `ConsentRecord.jurisdiction` | 높음(과거 시점) | 동의의 유효성 판단에 사용 |
 | 5 | 계정 언어 + 시간대 조합 | `UserSettings.language`, `timeZone` | 중간 | `Asia/Seoul` + `ko`는 강한 정황 |
-| 6 | IP 국가 | `cf-ipcountry` | **낮음** | 단독 확정 금지 |
+| 6 | IP 추정 국가 | 가입·로그인 시 `cf-ipcountry`, `UserSettings.countrySource = ip_estimated` | **추정** | 1~4순위가 없을 때만 채택. 5순위와 다르면 충돌 |
 
 ### 6.2 판정 알고리즘
 
@@ -1972,10 +1979,14 @@ resolveEmailJurisdiction(user)
    confidence = "conflict", 두 값을 conflicts[]에 모두 기록한다. 다만 사용자가
    청구 국가 기록 이후 현재 거주 국가를 다시 확인했다면 그 최신 자기신고를 충돌의
    답으로 채택한다.
-4. 1~3순위가 하나도 없으면 5순위(언어+시간대)로 후보를 만들되
-   confidence = "low"로 표시한다.
-5. 그래도 없으면 countryCode = "ZZ", confidence = "unknown".
-6. IP(6순위)는 **판정에 쓰지 않고 conflict 관찰용으로만 기록**한다.
+4. 1~4순위가 하나도 없고 IP 추정 국가(6순위)가 기록돼 있으면 그것을 채택하고
+   confidence = "estimated"로 표시한다. 5순위(언어+시간대)가 **다른** 나라를
+   가리키면 두 후보가 모두 통과해야 하며, 판정이 후보 하나씩만 받는 동안에는
+   그 경우를 confidence = "conflict"로 보고 보류한다(fail-closed).
+5. 그것도 없으면 5순위(언어+시간대)로 후보를 만들되 confidence = "low"로 표시한다.
+6. 그래도 없으면 countryCode = "ZZ", confidence = "unknown".
+   요청 시점의 IP(`cf-ipcountry`)는 추정을 **기록할 때**만 읽고, 판정은 기록된
+   추정을 읽는다. 기록은 더 강한 source를 덮어쓰지 않는다.
 7. countryCode -> profileKey 매핑(10.2)으로 profile을 고른다.
 ```
 
@@ -2008,11 +2019,10 @@ marketing을 **보내지 않고 보류**합니다.
 때문입니다 — 미국의 `opt_out`, 호주의 추론 동의, 승인 F의 `risk_accepted`로
 받는 사람은 동의 화면을 지나지 않았고, 따라서 그 화면이 묻는 국가도 없습니다.
 
-**그 경로들은 지금 고신뢰 국가 신호가 없으면 fail-closed입니다.** 6.1의 신호
-우선순위에서 확정되지 않으면 marketing은 보류이고(`ZZ`는 발송 안 함), IP 추정
-국가를 근거로 쓰는 계약은 **아직 이 문서에 없습니다** — 초안 §12 S0의 남은 항목
-이며 6.1·6.2와 `AGENTS.md`를 함께 고칠 때 들어옵니다. 그 전까지 동의 없는
-경로의 수신자는 **국가가 확정될 때까지 받지 못합니다.**
+**그 경로들은 IP 추정 국가로 판정합니다**(2026-09-29 개정). 가입과 로그인 때
+기록한 추정 국가가 6.2의 4단계로 채택되고, 추정도 없거나 5순위와 어긋나면
+fail-closed로 보류합니다(`ZZ`는 발송 안 함). 추정이 틀렸다면 사용자가 설정에서
+국가를 고치고, 그 자기 신고가 추정을 이깁니다.
 
 보류는 그래서 예외 상황이 아니라 **그 경로들의 기본 상태**입니다.
 
@@ -2021,6 +2031,7 @@ marketing을 **보내지 않고 보류**합니다.
 | high (1~3순위, 충돌 없음, profile 있음) | 해당 profile 적용 | 발송 | 발송 | 발송 |
 | high이지만 profile 없음(ZZ) | **보류** `skipped:jurisdiction_unconfirmed` | 발송 | 발송 | 발송 |
 | **conflict** (2순위 vs 3순위 불일치) | **보류** `skipped:jurisdiction_conflict` + 사용자 확인 요청 | 발송 | 발송 | 발송 |
+| estimated (6순위, 5순위와 일치하거나 5순위 없음, profile 있음) | 해당 profile 적용 | 발송 | 발송 | 발송 |
 | low (5순위) | **보류** `skipped:jurisdiction_unconfirmed` + 확인 요청 | 발송 | 발송 | 발송 |
 | unknown (ZZ) | **보류** + 확인 요청 | 발송 | 발송 | 발송 |
 
@@ -3944,6 +3955,7 @@ AT·CH 밖 국가의 국가별 의무 확인). 뒤의 것은 근거와 무관하
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | **한국 `(광고)`는 면제로 결정됐습니다**(초안 7.7 — 승인 D의 의무별 결정). 싱가포르 `<ADV>`는 **싱가포르 수신거부 주소(초안 §13 R3)와 함께** 확인합니다. ~~Q4~~는 야간 발송 창에 대한 질문이었고 2026-09-16에 해소됐습니다 — 접두어와 무관합니다 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
+| **가입 화면의 동의 장치** | `feature.emailSignupConsentEnabled` | 소유자 승인 2026-09-29(S4). [제품 소식 재설계](email-product-news-redesign-draft.md) §5.1·§5.2 — 켜면 새 계정마다 `notice_shown`·`objected`가 영구 기록되므로, 동의 문안과 확인 단계가 켜진 **뒤**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
 | **릴리스 노트 제품 발송** | `feature.emailReleaseNotesEnabled` | marketing 활성화와 **별개 결정**입니다 — 앞은 이 배포가 marketing을 보낼 수 있는가이고, 이것은 릴리스 노트 제품이 보낼 수 있는가입니다. 활성화 순서의 마지막 단계이며, 문서 확정 · policy version 활성화 · readiness 확인이 모두 끝난 뒤에 켭니다([설계](email-product-news-redesign-draft.md) §12). enqueue와 send **양쪽**에서 읽습니다 — 켜져 있을 때 쌓인 행이 끈 뒤에 나가면 안 되기 때문입니다 |
 | quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | ~~Q4~~ **해소 (2026-09-16)** — 시행령 제61조제2항이 전자우편을 야간 제한 대상에서 제외하므로 KR profile의 `quietHours`는 비어 있습니다. 기계는 그대로 두고, 어떤 profile이 창을 갖게 되면 seed 한 줄과 새 policy version입니다 |
@@ -4511,7 +4523,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
 | D4 | ~~**전역 opt-in(C1)**, **soft opt-in 미사용(C8)**~~ → **국가 rule + 호주 발신자 authority의 이중 판정** | 5.1, 5.1.1, 5.6 — **2026-09-15 승인(`mposition`) 뒤 2026-09-16에 개정됐습니다**(승인 A·C, 제품 소식 재설계 초안 §11). 21절 Q2는 개정 이전 상태에 대한 해소입니다 |
-| D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
+| D5 | 관할권은 **요청마다 관측한 IP로 판정하지 않음**. marketing은 판정된 관할권(`high`, 또는 2026-09-29 개정 뒤의 기록된 IP 추정 `estimated`)을 요구하고, 미확정이면 보류 | 6.2, 6.3 — 2026-09-29에 개정됐습니다(S0). `lib/emailJurisdictionSeed.ts`의 ZZ profile 설명 문장("high가 아니면 거절")은 seed 내용이라 그대로 두었고, ZZ에서는 profile이 없어 여전히 marketing이 나가지 않습니다 |
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
 | D8 | `renderedHash`는 **키 있는 HMAC + 키 버전**, 검증 키 보관 하한은 legal 7년 | 10.3-6, 10.3-7 |

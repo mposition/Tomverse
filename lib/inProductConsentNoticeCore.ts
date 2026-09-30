@@ -257,7 +257,13 @@ export const noticeJurisdictionColumns = (resolved: {
   confidence: string;
   source: string;
 }): NoticeJurisdiction =>
-  resolved.confidence === "high" && resolved.countryCode !== "ZZ"
+  // An estimate settles the column only where this policy has a profile for
+  // its country (docs/policy/email-notifications.md §6.3): the marketing and
+  // send verdicts already hold the rest back, and the permanent notice row
+  // must not record as settled what they treat as unknown.
+  (resolved.confidence === "high" ||
+    (resolved.confidence === "estimated" && resolved.profileKey !== "ZZ")) &&
+  resolved.countryCode !== "ZZ"
     ? { country: resolved.countryCode, source: resolved.source }
     : {
         country: "ZZ",
@@ -266,6 +272,46 @@ export const noticeJurisdictionColumns = (resolved: {
         // to settle is `unresolved`, which is a different fact.
         source: resolved.confidence === "conflict" ? "conflict" : "unresolved",
       };
+
+/**
+ * The candidates a notice rendered under a resolution names, in the shape the
+ * ledger requires (`recordNoticeShown()`): exactly the countries the resolution
+ * involved, each with the signal that named it.
+ *
+ * - A conflict names its two countries, each as `conflict` -- the resolver says
+ *   which values disagreed, not which source gave which.
+ * - `ZZ` names none.
+ * - Anything else names its one country with its own source as the signal,
+ *   including a `low` inference: the row has to say what the screen was
+ *   rendered under even when that was a guess.
+ *
+ * `ruleVersionOf` answers the active rule version for a country, or 0 where the
+ * country has none -- the value the sign-up screen records (S4).
+ */
+export const noticeCandidatesFor = (input: {
+  resolved: {
+    countryCode: string;
+    confidence: string;
+    source: string;
+    conflicts?: readonly string[];
+  };
+  ruleVersionOf: (country: string) => number;
+  copyHash: string;
+}): Array<{ country: string; signal: string; ruleVersion: number; copyHash: string }> => {
+  const candidate = (country: string, signal: string) => ({
+    country,
+    signal,
+    ruleVersion: input.ruleVersionOf(country),
+    copyHash: input.copyHash,
+  });
+  if (input.resolved.confidence === "conflict") {
+    return [...new Set(input.resolved.conflicts ?? [])].map((country) =>
+      candidate(country, "conflict")
+    );
+  }
+  if (input.resolved.countryCode === "ZZ") return [];
+  return [candidate(input.resolved.countryCode, input.resolved.source)];
+};
 
 /**
  * The bytes two recorded facts are compared by.
@@ -316,6 +362,9 @@ export const NOTICE_CANDIDATE_SIGNALS: ReadonlySet<string> = new Set([
   "billing",
   "self_declared",
   "consent",
+  // The recorded IP estimate, a basis since the 2026-09-29 amendment
+  // (docs/policy/email-notifications.md §6.2 step 4).
+  "ip_estimated",
   "inferred",
   "conflict",
   "unresolved",

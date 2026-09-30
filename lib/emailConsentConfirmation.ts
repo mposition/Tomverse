@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHmac, randomUUID } from "node:crypto";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import {
@@ -9,8 +11,10 @@ import {
   readConsentKeyring,
   readConsentToken,
   type ConsentTokenResult,
+  CONSENT_CONFIRMATION_TTL_MS,
 } from "@/lib/emailConsentToken";
-import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import { jurisdictionForUser, recordEstimatedCountry } from "@/lib/emailJurisdiction";
+import { prepareProcessingResultNotice } from "@/lib/processingResultNotice";
 import {
   marketingJurisdictionVerdict,
   normalizeCountry,
@@ -86,6 +90,7 @@ export type ConsentConfirmationRequestResult =
         | "not_consent_purpose"
         | "no_address"
         | "already_confirmed"
+        | "pending"
         | "disabled"
         | "keys_missing";
     };
@@ -112,6 +117,44 @@ export async function requestConsentConfirmation(input: {
   ip?: string | null;
   userAgent?: string | null;
   now?: Date;
+  /**
+   * Where the country came from. `self_declared` (the default) is the settings
+   * screen, where the person picks it. `ip_estimated` is the sign-up screen
+   * (S4), where the country is the IP estimate the screen rendered under: it is
+   * recorded as an estimate, never as something the person said, and never over
+   * a stronger source. `resolved` is the in-product notice (S8), which asks
+   * under the country the account already resolves to and writes none.
+   */
+  countrySource?: "self_declared" | "ip_estimated" | "resolved";
+  /**
+   * The screen, for the consent record's evidence. Defaults to the settings
+   * screen. `in_product_notice` is the one-time notice (S8): its record's
+   * `capturedVia` stays `preference_center`, the closed list the ledger
+   * accepts, and the evidence names the screen.
+   */
+  evidenceVia?: "preference_center" | "signup_form" | "in_product_notice";
+  /**
+   * The caller's transaction, when this request has to commit with the caller's
+   * own writes -- the sign-up consumption records the choice, the notice and
+   * this request as one fact (draft section 5.2). A refusal found inside it
+   * (already confirmed, address moved) is then thrown rather than returned, so
+   * the caller's transaction does not commit half of it.
+   */
+  client?: Prisma.TransactionClient;
+  /**
+   * The caller seeded the account's preference rows before opening
+   * `client`'s transaction. Required when one transaction requests several
+   * purposes: seeding on the global client (an INSERT ... ON CONFLICT on the
+   * same rows) would wait on the row the first request locked and updated,
+   * and the transaction waits on it -- until the interactive timeout.
+   */
+  preferencesSeeded?: boolean;
+  /**
+   * Leave a purpose alone that is already waiting on a live link, decided under
+   * the row lock: a new request would replace its id and kill the link in the
+   * inbox. Answered as `{ requested: false, reason: "pending" }`, not thrown.
+   */
+  skipIfPending?: boolean;
 }): Promise<ConsentConfirmationRequestResult> {
   if (!isEmailPurpose(input.purpose) || !CONSENT_REQUIRED_PURPOSES.has(input.purpose)) {
     return { requested: false, reason: "not_consent_purpose" };
@@ -138,7 +181,7 @@ export async function requestConsentConfirmation(input: {
   });
   if (!user?.email) return { requested: false, reason: "no_address" };
 
-  await ensureDefaultPreferences(input.userId);
+  if (!input.preferencesSeeded) await ensureDefaultPreferences(input.userId);
   const now = input.now ?? new Date();
   const policyVersionId = await ensureBootstrapPolicyVersion();
   const requestId = randomUUID();
@@ -166,8 +209,9 @@ export async function requestConsentConfirmation(input: {
     language,
   });
 
-  try {
-    await prisma.$transaction(async (tx) => {
+  const countrySource = input.countrySource ?? "self_declared";
+  let skippedPending = false;
+  const write = async (tx: Prisma.TransactionClient) => {
       // Same lock order as setPreference(): user, then preference. The address
       // the mail goes to is the one read under the lock.
       const lockedEmail = await lockUserEmail(tx, input.userId);
@@ -177,24 +221,47 @@ export async function requestConsentConfirmation(input: {
       await lockEmailPreferenceRow(tx, input.userId, purpose);
       const existing = await tx.emailPreference.findUnique({
         where: { userId_purpose: { userId: input.userId, purpose } },
-        select: { enabled: true, confirmedAt: true },
+        select: {
+          enabled: true,
+          confirmedAt: true,
+          confirmationRequestId: true,
+          confirmationRequestedAt: true,
+        },
       });
       if (existing?.enabled && existing.confirmedAt) throw ALREADY_CONFIRMED;
+      if (
+        input.skipIfPending &&
+        existing &&
+        !existing.enabled &&
+        existing.confirmationRequestId !== null &&
+        existing.confirmationRequestedAt !== null &&
+        now.getTime() - existing.confirmationRequestedAt.getTime() < CONSENT_CONFIRMATION_TTL_MS
+      ) {
+        skippedPending = true;
+        return;
+      }
 
-      await tx.userSettings.upsert({
-        where: { userId: input.userId },
-        create: {
-          userId: input.userId,
-          country,
-          countrySource: "self_declared",
-          countryUpdatedAt: now,
-        },
-        update: {
-          country,
-          countrySource: "self_declared",
-          countryUpdatedAt: now,
-        },
-      });
+      if (countrySource === "self_declared") {
+        await tx.userSettings.upsert({
+          where: { userId: input.userId },
+          create: {
+            userId: input.userId,
+            country,
+            countrySource: "self_declared",
+            countryUpdatedAt: now,
+          },
+          update: {
+            country,
+            countrySource: "self_declared",
+            countryUpdatedAt: now,
+          },
+        });
+      } else if (countrySource === "ip_estimated") {
+        await recordEstimatedCountry({ userId: input.userId, ipCountry: country, now, client: tx });
+      }
+      // `resolved`: the country is the resolution's own -- billing, an earlier
+      // consent -- and is already recorded where it came from. Writing it again
+      // as something else would turn a billing country into a declaration.
 
       // enabled is left exactly as it is: false for an ordinary request, and
       // true only for a row switched on before this step existed, which the send
@@ -219,7 +286,7 @@ export async function requestConsentConfirmation(input: {
           jurisdictionSource: input.jurisdictionSource,
           policyVersionId,
           capturedVia: input.capturedVia,
-          evidence: { via: "preference_center", requestId },
+          evidence: { via: input.evidenceVia ?? "preference_center", requestId },
           ipHash: evidenceHash("ip", input.ip),
           userAgentHash: evidenceHash("ua", input.userAgent),
         },
@@ -240,7 +307,16 @@ export async function requestConsentConfirmation(input: {
         jurisdictionCountry: country,
         jurisdictionProfileKey: profileForCountry(country),
       });
-    });
+  };
+
+  if (input.client) {
+    await write(input.client);
+    if (skippedPending) return { requested: false, reason: "pending" };
+    return { requested: true, purpose, requestedAt: now };
+  }
+
+  try {
+    await prisma.$transaction(write);
   } catch (error) {
     if (error === ALREADY_CONFIRMED) return { requested: false, reason: "already_confirmed" };
     // The address changed between the read and the lock; nothing was written.
@@ -248,6 +324,7 @@ export async function requestConsentConfirmation(input: {
     throw error;
   }
 
+  if (skippedPending) return { requested: false, reason: "pending" };
   return { requested: true, purpose, requestedAt: now };
 }
 
@@ -329,10 +406,15 @@ export async function confirmConsent(input: {
     return { confirmed: false, reason: "country_not_allowed" };
   }
 
+  // Korea's 14-day result notice, queued in the transaction that records the
+  // consent (docs/policy/email-product-news-redesign-draft.md 7.7). Prepared
+  // here because preparing may insert template rows.
+  const onConsentRecorded = await prepareProcessingResultNotice(payload.userId);
   const result = await setPreference({
     userId: payload.userId,
     purpose: payload.purpose,
     enabled: true,
+    onConsentRecorded,
     capturedVia: "preference_center",
     source: "preference_center",
     jurisdiction: jurisdiction.countryCode,
