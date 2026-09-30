@@ -62,6 +62,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmail,
     openModelLifecycle,
     overdueCampaignWaves,
+    pendingMarketingApprovals,
     openAmuxEscalations,
   ] = await Promise.allSettled([
     prisma.feedback.count({
@@ -95,6 +96,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmailCount(),
     countOpenWorkItems(),
     overdueCampaignWaveCount({ now }),
+    prisma.marketingPost.count({ where: { status: "pending_approval" } }),
     countAwaitingAmuxEscalations(),
   ]);
 
@@ -115,6 +117,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmail: settled(abandonedLegalEmail),
     openModelLifecycle: settled(openModelLifecycle),
     overdueCampaignWaves: settled(overdueCampaignWaves),
+    pendingMarketingApprovals: settled(pendingMarketingApprovals),
     openAmuxEscalations: settled(openAmuxEscalations),
   };
 

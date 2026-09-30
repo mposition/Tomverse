@@ -1,0 +1,1158 @@
+# Independent review — task prompt-refiner-shadow-live-adapter-v1, round 2
+
+Review the change against the original requirement below. Read the requirement and the diff before anything else.
+Do not take the author's summary as a description of what the change does; the diff is.
+
+## Requirement (original)
+
+Prompt Refiner의 최초 bounded staging shadow를 준비하되 현재 제품·관리자·script·cron에서 호출할 수 없는 격리 OpenAI adapter와 별도 one-run 계약만 구현한다. adapter는 gpt-5-6-luna, reasoning medium, 4096 output tokens, 15000ms timeout, retry 0, tools none, prompt cache attachment none과 보수적 rendered-input upper bound를 강제하고 strict JSON parser 결과 및 content-free usage/cost upper-bound만 반환한다. provider import와 credential resolution은 live adapter 함수가 실제로 호출될 때만 dynamic import로 도달해야 한다. 이번 범위에는 stage 생성, reservation reserve/consume, durable run/receipt writer, admin/product route, script/cron entry point, provider/API 호출, 실제 비용, flag·Router·UI 연결이 없다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.
+
+## Completion criteria
+
+- one-run 계약은 기존 provider-independent execution/reservation/corpus identity를 결속하고 16개 case, 요청당 24916 microUSD, run ceiling 398656 microUSD, 별도 사람 비용 승인, retry 0과 unknown no-redispatch를 고정한다.
+- rendered system/user message의 실제 UTF-8 byte 수와 고정 framing allowance를 합한 보수적 token upper bound가 100000 이하일 때만 dispatch callback에 도달한다. source char/byte 계약과 JSON escaping 최악 경계를 테스트한다.
+- adapter는 exact model/catalog/pricing 계약을 다시 검사하고 system/user 메시지를 기존 prompt builder에서만 만들며 maxOutputTokens 4096, maxRetries 0, timeout 15000, request/response body retention false, tools와 prompt-cache marker 없음, reasoning medium을 강제한다.
+- dispatch callback은 provider generate 직전에 정확히 한 번 호출되고 callback 거절은 generate를 호출하지 않는다. callback 뒤 timeout·known provider failure·unknown outcome은 각각 닫힌 terminal reason으로 분류하며 자동 재시도하지 않는다.
+- 모델 출력은 기존 strict parser만 통과하고 repair·fence 제거·schema coercion·부분 salvage가 없다. 결과 object는 transient refinedPrompt 외에 provider 오류 prose·request/response body·credential을 포함하거나 기록하지 않는다.
+- usage의 known zero와 unknown을 구분하고 input/output/reasoning/cache-read counts가 안전 정수일 때만 보수적 cost upper-bound를 계산한다. actual billed cost나 품질 승인을 주장하지 않는다.
+- live provider 함수는 ai/getActiveAiModel을 dynamic import하지만 저장소의 제품 route, admin route, script, cron과 기존 shadow harness는 이 module을 import하지 않는다. source-import test가 이 unreachable 경계를 고정한다.
+- 관련 unit, typecheck, 대상 lint, model-pricing, prompt-injection, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.
+- Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다.
+
+## Change under review — digest sha256:d4911de0427db084f06ef00fb3cf774ddf4f81a342f2a8b8cacd0c1e1302694d, commit 433bac9144c1ba65e8e9a6071b3266e4f5723ba1
+
+```diff
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.authorization.md
+new file mode 100644
+index 00000000..2f57a604
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.authorization.md
+@@ -0,0 +1,30 @@
++# Prompt Refiner shadow live adapter v1 Claude 독립 검토 제한 승인
++
++Codex가 현재 대화의 사용자 승인을 기록한다. 사용자 메시지의 시각은 기록하거나
++추정하지 않는다. 이 문서는 전자서명, 검토 통과, 유료 실행 승인, stage 생성,
++provider 호출, push·병합·배포 승인이 아니다.
++
++## 승인 문구와 적용 범위
++
++현재 대화에서 사용자는 다음과 같이 지시했다.
++
++> 배포 완료 되었습니다. 권장 순서로 자동으로 진행해주세요. 단, 독립 검토 필요시에는 꼭 Claude에 요청해주세요. --skip-preflight 예외 또한 승인합니다.
++
++이 승인은 같은 디렉터리의 task가 정의한 새 exchange에서 Claude Code Max 읽기 전용
++독립 검토를 수행할 때 `--skip-preflight`를 쓰는 것에만 적용한다. 최초 검토와
++actionable finding 대응 후 최대 두 번의 수정 검토까지다.
++
++## 유지되는 경계
++
++- 같은 child process에서 모든 대소문자 표기의 `ANTHROPIC_API_KEY`와
++  `ANTHROPIC_AUTH_TOKEN`을 제거하고, pinned Claude Code 2.1.261의
++  `claude auth status --json`이 `authMethod=claude.ai`, `subscriptionType=max`,
++  `loggedIn=true`일 때만 실행한다. 실패하면 API key 방식으로 전환하지 않는다.
++- Claude는 `--print --safe-mode --output-format json --tools Read,Grep,Glob
++  --allowedTools Read,Grep,Glob --strict-mcp-config`만 사용한다.
++- `--skip-preflight`는 쓰기 거부 probe를 실행하지 않은 사실을 기록하는 예외다.
++  테스트·CI 실패 우회나 미해결 finding 무시가 아니다.
++- provider/API/model 호출, credential 조회, stage·reservation·receipt mutation,
++  유료 benchmark, 제품 flag·Router·UI 연결과 실제 지출은 승인하지 않는다.
++- 패키지 digest와 source SHA가 일치하지 않으면 검토하지 않는다. revision 상한에서
++  actionable finding이 남으면 `on_hold`로 끝내며 새 exchange로 우회하지 않는다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.task.json
+new file mode 100644
+index 00000000..d4bb2f57
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-live-adapter-v1.task.json
+@@ -0,0 +1,28 @@
++{
++  "taskId": "prompt-refiner-shadow-live-adapter-v1",
++  "requirement": "Prompt Refiner의 최초 bounded staging shadow를 준비하되 현재 제품·관리자·script·cron에서 호출할 수 없는 격리 OpenAI adapter와 별도 one-run 계약만 구현한다. adapter는 gpt-5-6-luna, reasoning medium, 4096 output tokens, 15000ms timeout, retry 0, tools none, prompt cache attachment none과 보수적 rendered-input upper bound를 강제하고 strict JSON parser 결과 및 content-free usage/cost upper-bound만 반환한다. provider import와 credential resolution은 live adapter 함수가 실제로 호출될 때만 dynamic import로 도달해야 한다. 이번 범위에는 stage 생성, reservation reserve/consume, durable run/receipt writer, admin/product route, script/cron entry point, provider/API 호출, 실제 비용, flag·Router·UI 연결이 없다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.",
++  "completionCriteria": [
++    "one-run 계약은 기존 provider-independent execution/reservation/corpus identity를 결속하고 16개 case, 요청당 24916 microUSD, run ceiling 398656 microUSD, 별도 사람 비용 승인, retry 0과 unknown no-redispatch를 고정한다.",
++    "rendered system/user message의 실제 UTF-8 byte 수와 고정 framing allowance를 합한 보수적 token upper bound가 100000 이하일 때만 dispatch callback에 도달한다. source char/byte 계약과 JSON escaping 최악 경계를 테스트한다.",
++    "adapter는 exact model/catalog/pricing 계약을 다시 검사하고 system/user 메시지를 기존 prompt builder에서만 만들며 maxOutputTokens 4096, maxRetries 0, timeout 15000, request/response body retention false, tools와 prompt-cache marker 없음, reasoning medium을 강제한다.",
++    "dispatch callback은 provider generate 직전에 정확히 한 번 호출되고 callback 거절은 generate를 호출하지 않는다. callback 뒤 timeout·known provider failure·unknown outcome은 각각 닫힌 terminal reason으로 분류하며 자동 재시도하지 않는다.",
++    "모델 출력은 기존 strict parser만 통과하고 repair·fence 제거·schema coercion·부분 salvage가 없다. 결과 object는 transient refinedPrompt 외에 provider 오류 prose·request/response body·credential을 포함하거나 기록하지 않는다.",
++    "usage의 known zero와 unknown을 구분하고 input/output/reasoning/cache-read counts가 안전 정수일 때만 보수적 cost upper-bound를 계산한다. actual billed cost나 품질 승인을 주장하지 않는다.",
++    "live provider 함수는 ai/getActiveAiModel을 dynamic import하지만 저장소의 제품 route, admin route, script, cron과 기존 shadow harness는 이 module을 import하지 않는다. source-import test가 이 unreachable 경계를 고정한다.",
++    "관련 unit, typecheck, 대상 lint, model-pricing, prompt-injection, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.",
++    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다."
++  ],
++  "baseCommit": "820cf5ae1c0042ea6aee62668cd881a2d1606ed6",
++  "writableScope": [
++    "AGENTS.md",
++    "docs/ops/cross-review/packages/",
++    "docs/ops/prompt-refiner-shadow-harness.md",
++    "docs/policy/prompt-refiner-observability.md",
++    "lib/promptRefinerShadowLiveAdapter.ts",
++    "lib/promptRefinerShadowRunContract.ts",
++    "package.json",
++    "tests/promptRefinerShadowLiveAdapter.test.mjs",
++    "tests/promptRefinerShadowRunContract.test.mjs"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/prompt-refiner-shadow-harness.md b/docs/ops/prompt-refiner-shadow-harness.md
+index 593da672..a4df59af 100644
+--- a/docs/ops/prompt-refiner-shadow-harness.md
++++ b/docs/ops/prompt-refiner-shadow-harness.md
+@@ -173,3 +173,24 @@ manifest bytes와 대상 environment를 다시 검증한 결과를 요구하고,
+ 결속하고 durable admin writer가 그것을 원자적으로 생성하도록 별도 설계·검토해야 한다.
+ 그 전에는 stage seed, Prisma mutation, admin route/script, receipt writer, product caller,
+ provider SDK, 자격증명 조회, flag 활성화 또는 `admitted: true` 경로를 추가하지 않는다.
++
++## 9. live adapter 준비 상태
++
++후속 `prompt-refiner-shadow-run-v1` 계약은 첫 실제 shadow를 이 문서의 동결 corpus
++16건으로 제한하고 최대 16 dispatch, 요청당 24,916 microUSD, run 전체 398,656
++microUSD를 고정한다. 이 계약과 서버 전용 OpenAI SDK adapter는 구현돼 있지만
++`durableRunWriterReady=false`, `entryPointReady=false`, `executionAdmitted=false`,
++`productAdapterReady=false`다.
++
++adapter는 기존 message builder와 strict parser를 재사용하고 15초 timeout, retry 0,
++4096 output-token cap을 고정한다. dispatch 직전 future runner가 제공할 callback을 먼저
++완료해야 하며, callback이 실패하면 provider를 부르지 않는다. dispatch 이후 timeout,
++알려진 provider 실패와 unknown outcome을 분리하고, 알 수 없는 usage는 null로 유지한다.
++system/data message의 UTF-8 byte 수에 고정 framing allowance를 더한 값은 exact tokenizer
++측정이 아닌 보수적 token upper bound다.
++
++중요하게도 이 adapter를 import하는 제품 route, 관리자 route, script, cron 또는 다른
++runtime library는 없다. 기존 `npm run shadow:prompt-refiner` 역시 provider-free 상태를
++그대로 유지하며 adapter를 호출하지 않는다. 다음 단계는 adapter 호출 추가가 아니라,
++먼저 exact 비용 승인과 reservation consume, dispatch intent와 terminal receipt를 durable하게
++기록하는 별도 runner/writer 계약을 구현·독립 검토하는 것이다.
+diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
+index 4193c4e7..467c0db5 100644
+--- a/docs/policy/prompt-refiner-observability.md
++++ b/docs/policy/prompt-refiner-observability.md
+@@ -338,3 +338,34 @@ stage 행은 provider/network/credential/receipt/reservation/product/flag를 실
+ 위협 모델은
+ [`prompt-refiner-durable-stage-writer-threat-model.md`](prompt-refiner-durable-stage-writer-threat-model.md)에
+ 있다.
++
++## 12. 격리된 live adapter와 단일 실행 계약
++
++`prompt-refiner-shadow-run-v1`은 위 stage의 100개 reservation pool을 실제 실행
++승인으로 해석하지 않고, 향후 한 번의 합성 shadow를 동결 corpus 16건으로 다시
++좁힌다. 요청당 상한은 24,916 microUSD이고 run 전체 상한은 398,656 microUSD다.
++retry는 0, timeout은 15초이며 결과가 불명확하면 `unknown_after_dispatch`로 중단하고
++같은 요청을 다시 보내지 않는다. 이 값은 실행 가능한 budget이 아니라 별도 비용 승인이
++결속될 때 적용할 ceiling이다.
++
++`prompt-refiner-openai-sdk-adapter-v1`은 고정된 OpenAI 모델·가격·reasoning 설정과 기존
++strict JSON parser를 연결한 서버 전용 모듈이다. provider SDK와 credential boundary는
++유일한 live export가 실제 호출될 때만 동적으로 해석한다. 현재 제품·관리자 route,
++script, cron과 다른 runtime library는 이 모듈을 import하지 않는다. 따라서 이 변경만으로
++provider 호출, stage/reservation 소비, DB mutation 또는 사용자 UI 효과가 생기지 않는다.
++
++입력 사전 검사는 provider tokenizer를 소유한다고 주장하지 않는다. system/data message의
++UTF-8 byte 수는 byte-level BPE token 수의 보수적 상한이고, 여기에 고정 framing allowance를
++더해 100,000-token 계약을 넘으면 dispatch 전에 거부한다. 실제 provider usage는 nullable로
++기록하며 알 수 없는 값을 0으로 만들지 않는다. warning, multi-step, usage cap 초과 또는
++provider 결과의 의미가 불명확한 경우는 성공으로 승격하지 않는다. 계산된 비용은 고정
++단가의 보수적 upper bound이지 provider invoice가 아니다. 이 prefilter는 기존 동결 계약이
++요구한 actual-tokenizer 식별·계수를 충족하지 않으므로 실행 승인 근거가 아니다. durable
++runner가 열리기 전에 그 요구를 구현하거나 별도 계약 변경으로 다시 승인해야 한다.
++
++이 단계의 readiness 값은 `durableRunWriterReady=false`, `entryPointReady=false`,
++`executionAdmitted=false`, `productAdapterReady=false`다. 다음 변경은 별도 검토에서 exact
++승인·reservation consume·dispatch intent·terminal receipt를 한 transaction 경계에
++결속하고, dispatch 뒤 unknown outcome을 운영자가 확인하기 전 재시도하지 못하게 해야 한다.
++그 writer와 owner-only entry point가 배포되기 전에는 비용 승인을 받아도 live adapter를
++호출할 수 없다.
+diff --git a/lib/promptRefinerShadowLiveAdapter.ts b/lib/promptRefinerShadowLiveAdapter.ts
+new file mode 100644
+index 00000000..4415362d
+--- /dev/null
++++ b/lib/promptRefinerShadowLiveAdapter.ts
+@@ -0,0 +1,355 @@
++/**
++ * Isolated provider adapter for the future Prompt Refiner staging shadow.
++ *
++ * No product route, admin route, script or cron imports this module. The live
++ * export dynamically imports the provider SDK boundary only after a future
++ * durable runner has called it. Tests use createPromptRefinerShadowSdkAdapter
++ * with an in-memory language model and never resolve credentials or network.
++ */
++import "server-only";
++
++import {
++    PROMPT_REFINER_EXECUTION_MODEL_PIN,
++    PROMPT_REFINER_MAX_INPUT_TOKENS,
++    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++    PROMPT_REFINER_RETRY_COUNT,
++    PROMPT_REFINER_TIMEOUT_MS,
++    promptRefinerExecutionContractProblems,
++    promptRefinerWorstCaseCostMicroUsd,
++    type PromptRefinerTerminalReason,
++} from "@/lib/promptRefinerExecutionContract";
++import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
++import { getEnabledModel, type AiModel } from "@/lib/models";
++import { promptRefinerModelMessages } from "@/lib/promptRefinerModelPrompt";
++import {
++    PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++    PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
++    promptRefinerShadowRunContractProblems,
++} from "@/lib/promptRefinerShadowRunContract";
++import { parsePromptRefinerShadowOutput } from "@/lib/promptRefinerShadowHarness";
++import {
++    promptRefinerRequestSchema,
++    type PromptRefinerRequest,
++} from "@/lib/promptRefinerSuggestion";
++
++type NullableCount = number | null;
++
++export type PromptRefinerShadowUsage = {
++    inputTokens: NullableCount;
++    cachedInputTokens: NullableCount;
++    outputTokens: NullableCount;
++    reasoningTokens: NullableCount;
++    /** Conservative pinned-rate amount, not a provider invoice. */
++    costUpperBoundMicroUsd: NullableCount;
++};
++
++type CommonOutcome = {
++    adapterVersion: typeof PROMPT_REFINER_SHADOW_ADAPTER_VERSION;
++    provider: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.provider;
++    modelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId;
++    terminalReason: PromptRefinerTerminalReason;
++    durationMs: number;
++    usage: PromptRefinerShadowUsage;
++};
++
++export type PromptRefinerShadowAdapterOutcome =
++    | (CommonOutcome & {
++          status: "suggested";
++          terminalReason: "suggested";
++          /** Transient result. No writer exists in this adapter. */
++          refinedPrompt: string;
++      })
++    | (CommonOutcome & {
++          status: "failed";
++          terminalReason: Exclude<
++              PromptRefinerTerminalReason,
++              | "suggested"
++              | "eligibility_refused"
++              | "execution_not_approved"
++              | "execution_contract_mismatch"
++              | "adapter_unavailable"
++              | "reservation_authority_unavailable"
++              | "cancelled_before_dispatch"
++          >;
++          refinedPrompt: null;
++      });
++
++export type PromptRefinerShadowDispatchFact = {
++    requestId: string;
++    adapterVersion: typeof PROMPT_REFINER_SHADOW_ADAPTER_VERSION;
++    provider: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.provider;
++    modelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId;
++    apiModelId: typeof PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId;
++    maxOutputTokens: typeof PROMPT_REFINER_MAX_OUTPUT_TOKENS;
++    timeoutMs: typeof PROMPT_REFINER_TIMEOUT_MS;
++    retryCount: typeof PROMPT_REFINER_RETRY_COUNT;
++};
++
++export type PromptRefinerShadowAdapterRequest = PromptRefinerRequest & {
++    /** Future durable runner consumes the exact reservation here. */
++    onDispatch: (
++        fact: PromptRefinerShadowDispatchFact
++    ) => Promise<void> | void;
++};
++
++type GenerateResult = {
++    text?: unknown;
++    usage?: unknown;
++    warnings?: unknown;
++    steps?: unknown;
++};
++
++export type PromptRefinerShadowSdkDependencies = {
++    generate: (options: Record<string, unknown>) => Promise<GenerateResult>;
++    languageModel: unknown;
++    now?: () => number;
++};
++
++export class PromptRefinerShadowPreDispatchError extends Error {
++    constructor(readonly code: string) {
++        super(code);
++        this.name = "PromptRefinerShadowPreDispatchError";
++    }
++}
++
++const nullUsage = (): PromptRefinerShadowUsage => ({
++    inputTokens: null,
++    cachedInputTokens: null,
++    outputTokens: null,
++    reasoningTokens: null,
++    costUpperBoundMicroUsd: null,
++});
++
++const asRecord = (value: unknown): Record<string, unknown> =>
++    value !== null && typeof value === "object" && !Array.isArray(value)
++        ? (value as Record<string, unknown>)
++        : {};
++
++const count = (value: unknown): NullableCount =>
++    Number.isSafeInteger(value) && (value as number) >= 0
++        ? (value as number)
++        : null;
++
++const safeErrorFacts = (error: unknown): { name: string; statusCode: number | null } => {
++    try {
++        const value = asRecord(error);
++        return {
++            name:
++                error instanceof Error && /^[A-Za-z][A-Za-z0-9]*$/.test(error.name)
++                    ? error.name
++                    : "UnknownError",
++            statusCode:
++                Number.isSafeInteger(value.statusCode) &&
++                (value.statusCode as number) >= 400 &&
++                (value.statusCode as number) <= 599
++                    ? (value.statusCode as number)
++                    : null,
++        };
++    } catch {
++        return { name: "UnknownError", statusCode: null };
++    }
++};
++
++const usageFrom = (value: unknown): PromptRefinerShadowUsage => {
++    const usage = asRecord(value);
++    const inputTokens = count(usage.inputTokens);
++    const outputTokens = count(usage.outputTokens);
++    const cachedInputTokens = count(asRecord(usage.inputTokenDetails).cacheReadTokens);
++    const reasoningTokens = count(
++        asRecord(usage.outputTokenDetails).reasoningTokens
++    );
++    // The provider's total input/output counts already include cached input
++    // and billed reasoning output under the frozen pricing contract. Requiring
++    // all four fields is nevertheless intentional: partial provider telemetry
++    // must remain visibly unknown rather than looking like a complete cost
++    // observation.
++    const costUpperBoundMicroUsd =
++        inputTokens !== null &&
++        outputTokens !== null &&
++        cachedInputTokens !== null &&
++        reasoningTokens !== null
++            ? promptRefinerWorstCaseCostMicroUsd({
++                  inputTokens,
++                  outputTokens,
++              })
++            : null;
++    return {
++        inputTokens,
++        cachedInputTokens,
++        outputTokens,
++        reasoningTokens,
++        costUpperBoundMicroUsd,
++    };
++};
++
++/**
++ * Byte-level BPE safety prefilter: every content token covers at least one
++ * UTF-8 byte. The fixed allowance covers message framing. This deliberately
++ * does not satisfy the frozen preregistration's future actual-tokenizer
++ * requirement. The run remains unadmitted until that requirement is fulfilled
++ * or a separate contract revision is approved; this adapter only fails closed
++ * before dispatch when even the conservative bound exceeds the ceiling.
++ */
++export const promptRefinerRenderedInputTokenUpperBound = (
++    request: PromptRefinerRequest
++): number => {
++    const messages = promptRefinerModelMessages(request);
++    return (
++        messages.reduce(
++            (total, message) => total + Buffer.byteLength(message.content, "utf8"),
++            0
++        ) + PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE
++    );
++};
++
++const exactModel = (): AiModel => {
++    const model = getEnabledModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
++    if (
++        !model ||
++        promptRefinerExecutionContractProblems({ model }).length > 0 ||
++        promptRefinerShadowRunContractProblems().length > 0
++    ) {
++        throw new PromptRefinerShadowPreDispatchError(
++            "prompt_refiner_execution_contract_mismatch"
++        );
++    }
++    return model;
++};
++
++const outcomeBase = (durationMs: number, usage: PromptRefinerShadowUsage) => ({
++    adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++    provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++    modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++    durationMs,
++    usage,
++});
++
++export function createPromptRefinerShadowSdkAdapter(
++    dependencies: PromptRefinerShadowSdkDependencies
++) {
++    const model = exactModel();
++    const generationSettings = getModelGenerationSettings(model);
++    const now = dependencies.now ?? Date.now;
++
++    return async (
++        unsafeRequest: PromptRefinerShadowAdapterRequest
++    ): Promise<PromptRefinerShadowAdapterOutcome> => {
++        const request = promptRefinerRequestSchema.parse({
++            requestId: unsafeRequest.requestId,
++            prompt: unsafeRequest.prompt,
++        });
++        const upperBound = promptRefinerRenderedInputTokenUpperBound(request);
++        if (upperBound > PROMPT_REFINER_MAX_INPUT_TOKENS) {
++            throw new PromptRefinerShadowPreDispatchError(
++                "prompt_refiner_input_token_ceiling_exceeded"
++            );
++        }
++        const messages = promptRefinerModelMessages(request);
++        await unsafeRequest.onDispatch({
++            requestId: request.requestId,
++            adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++            provider: PROMPT_REFINER_EXECUTION_MODEL_PIN.provider,
++            modelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId,
++            apiModelId: PROMPT_REFINER_EXECUTION_MODEL_PIN.apiModelId,
++            maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++            timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++            retryCount: PROMPT_REFINER_RETRY_COUNT,
++        });
++
++        const started = now();
++        let generated: GenerateResult;
++        try {
++            generated = await dependencies.generate({
++                model: dependencies.languageModel,
++                system: messages[0].content,
++                prompt: messages[1].content,
++                ...generationSettings,
++                maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++                maxRetries: PROMPT_REFINER_RETRY_COUNT,
++                timeout: PROMPT_REFINER_TIMEOUT_MS,
++                include: { requestBody: false, responseBody: false },
++            });
++        } catch (error) {
++            const durationMs = Math.max(0, Math.round(now() - started));
++            const facts = safeErrorFacts(error);
++            const terminalReason =
++                facts.name === "AbortError" || facts.name === "TimeoutError"
++                    ? "timeout"
++                    : facts.statusCode !== null
++                      ? "provider_error"
++                      : "unknown_after_dispatch";
++            return {
++                ...outcomeBase(durationMs, nullUsage()),
++                status: "failed",
++                terminalReason,
++                refinedPrompt: null,
++            };
++        }
++
++        const durationMs = Math.max(0, Math.round(now() - started));
++        const usage = usageFrom(generated.usage);
++        const warnings = Array.isArray(generated.warnings)
++            ? generated.warnings
++            : [];
++        const steps = Array.isArray(generated.steps) ? generated.steps : null;
++        if (
++            warnings.length > 0 ||
++            (steps !== null && steps.length !== 1) ||
++            (usage.inputTokens !== null &&
++                usage.inputTokens > PROMPT_REFINER_MAX_INPUT_TOKENS) ||
++            (usage.outputTokens !== null &&
++                usage.outputTokens > PROMPT_REFINER_MAX_OUTPUT_TOKENS) ||
++            (usage.costUpperBoundMicroUsd !== null &&
++                usage.costUpperBoundMicroUsd >
++                    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD)
++        ) {
++            return {
++                ...outcomeBase(durationMs, usage),
++                status: "failed",
++                terminalReason: "unknown_after_dispatch",
++                refinedPrompt: null,
++            };
++        }
++
++        const parsed = parsePromptRefinerShadowOutput({
++            sourceText: request.prompt,
++            outputText: typeof generated.text === "string" ? generated.text : "",
++        });
++        if (parsed.status === "suggested") {
++            return {
++                ...outcomeBase(durationMs, usage),
++                status: "suggested",
++                terminalReason: "suggested",
++                refinedPrompt: parsed.refinedPrompt,
++            };
++        }
++        return {
++            ...outcomeBase(durationMs, usage),
++            status: "failed",
++            terminalReason: parsed.failureCode,
++            refinedPrompt: null,
++        };
++    };
++}
++
++/**
++ * The only concrete provider-capable export. It is intentionally unreachable
++ * from every shipped entry point until a separately reviewed durable runner
++ * records approval, consumes a reservation and owns terminal receipts.
++ */
++export async function runPromptRefinerShadowLiveAdapter(
++    request: PromptRefinerShadowAdapterRequest
++): Promise<PromptRefinerShadowAdapterOutcome> {
++    const model = exactModel();
++    const [{ generateText }, { getActiveAiModel }] = await Promise.all([
++        import("ai"),
++        import("@/lib/activeAiModel"),
++    ]);
++    const adapter = createPromptRefinerShadowSdkAdapter({
++        generate: (options) =>
++            generateText(options as Parameters<typeof generateText>[0]),
++        languageModel: getActiveAiModel(model),
++    });
++    return adapter(request);
++}
+diff --git a/lib/promptRefinerShadowRunContract.ts b/lib/promptRefinerShadowRunContract.ts
+new file mode 100644
+index 00000000..c6360aef
+--- /dev/null
++++ b/lib/promptRefinerShadowRunContract.ts
+@@ -0,0 +1,135 @@
++import { createHash } from "node:crypto";
++
++import {
++    PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
++    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++    PROMPT_REFINER_RETRY_COUNT,
++    PROMPT_REFINER_TIMEOUT_MS,
++    promptRefinerExecutionContractProblems,
++} from "@/lib/promptRefinerExecutionContract";
++import {
++    PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++} from "@/lib/promptRefinerReservationCore";
++import {
++    PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
++} from "@/lib/promptRefinerShadowAdmissionCore";
++import {
++    PROMPT_REFINER_SHADOW_CORPUS_CASES,
++    PROMPT_REFINER_SHADOW_CORPUS_ID,
++    PROMPT_REFINER_SHADOW_CORPUS_VERSION,
++} from "@/lib/promptRefinerShadowHarness";
++
++export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION =
++    "prompt-refiner-shadow-run-v1" as const;
++export const PROMPT_REFINER_SHADOW_ADAPTER_VERSION =
++    "prompt-refiner-openai-sdk-adapter-v1" as const;
++export const PROMPT_REFINER_SHADOW_CORPUS_DIGEST =
++    PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
++export const PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE = 32 as const;
++export const PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES =
++    PROMPT_REFINER_SHADOW_CORPUS_CASES;
++export const PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD =
++    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD *
++    PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES;
++
++const canonicalJson = (value: unknown): string => {
++    if (value === null || typeof value !== "object") return JSON.stringify(value);
++    if (Array.isArray(value)) {
++        return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
++    }
++    const object = value as Record<string, unknown>;
++    return `{${Object.keys(object)
++        .sort()
++        .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
++        .join(",")}}`;
++};
++
++/**
++ * The stage writer authorises a bounded reservation pool, not provider work.
++ * This second contract narrows one future paid run to the frozen 16-case
++ * synthetic corpus. The false readiness values are part of the digest: merely
++ * shipping the adapter must not turn the deployed stage into an executable
++ * run.
++ */
++export const PROMPT_REFINER_SHADOW_RUN_CONTRACT = Object.freeze({
++    runContractVersion: PROMPT_REFINER_SHADOW_RUN_CONTRACT_VERSION,
++    executionContractVersion: PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
++    reservationAuthorityVersion: PROMPT_REFINER_RESERVATION_AUTHORITY_VERSION,
++    reservationContractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++    adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++    corpus: Object.freeze({
++        schemaVersion: PROMPT_REFINER_SHADOW_CORPUS_VERSION,
++        corpusId: PROMPT_REFINER_SHADOW_CORPUS_ID,
++        corpusDigest: PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
++        cases: PROMPT_REFINER_SHADOW_CORPUS_CASES,
++    }),
++    request: Object.freeze({
++        timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++        retryCount: PROMPT_REFINER_RETRY_COUNT,
++        perRequestCostCeilingMicroUsd:
++            PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++        renderedInputPrefilter: Object.freeze({
++            method: "utf8_bytes_plus_fixed_framing" as const,
++            framingTokenAllowance:
++                PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
++            satisfiesActualTokenizerRequirement: false,
++        }),
++    }),
++    run: Object.freeze({
++        maxDispatches: PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++        costCeilingMicroUsd:
++            PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++        requiresExplicitCostApproval: true,
++        unknownOutcomePolicy: "stop_no_redispatch" as const,
++    }),
++    shadowAdapterImplemented: true,
++    durableRunWriterReady: false,
++    entryPointReady: false,
++    executionAdmitted: false,
++    productAdapterReady: false,
++} as const);
++
++const computedDigest = `sha256:${createHash("sha256")
++    .update(canonicalJson(PROMPT_REFINER_SHADOW_RUN_CONTRACT), "utf8")
++    .digest("hex")}`;
++
++// Replaced with the computed literal before review. A mismatch fails import.
++export const PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST =
++    "sha256:50a77992458e4fbdc3bf0325ec2df93feabe894b02eb242438cc036120e067dd" as const;
++
++if (computedDigest !== PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST) {
++    throw new Error(`Prompt Refiner shadow run contract digest drifted: ${computedDigest}`);
++}
++
++export const promptRefinerShadowRunContractProblems = (): string[] => {
++    const problems = promptRefinerExecutionContractProblems().map(
++        (problem) => `execution_${problem}`
++    );
++    if (
++        PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES !==
++        PROMPT_REFINER_SHADOW_CORPUS_CASES
++    ) {
++        problems.push("run_case_count_mismatch");
++    }
++    if (
++        PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD !==
++        PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD *
++            PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES
++    ) {
++        problems.push("run_cost_ceiling_mismatch");
++    }
++    if (PROMPT_REFINER_RETRY_COUNT !== 0) problems.push("retry_mismatch");
++    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted !== false) {
++        problems.push("execution_must_remain_unadmitted");
++    }
++    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady !== false) {
++        problems.push("entry_point_must_remain_unready");
++    }
++    if (PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady !== false) {
++        problems.push("durable_writer_must_remain_unready");
++    }
++    return problems;
++};
+diff --git a/package.json b/package.json
+index f85941f8..a557797e 100644
+--- a/package.json
++++ b/package.json
+@@ -217,6 +217,7 @@
+     "report:prompt-refiner-receipts": "node --import tsx scripts/report-prompt-refiner-receipts.mjs",
+     "shadow:prompt-refiner": "node --conditions=react-server --import tsx scripts/prompt-refiner-shadow-harness.mjs",
+     "test:prompt-refiner-shadow": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
++    "test:prompt-refiner-shadow-live-adapter": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowRunContract.test.mjs tests/promptRefinerShadowLiveAdapter.test.mjs",
+     "check:push-scope": "node scripts/check-push-scope.mjs",
+     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",
+     "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
+diff --git a/tests/promptRefinerShadowLiveAdapter.test.mjs b/tests/promptRefinerShadowLiveAdapter.test.mjs
+new file mode 100644
+index 00000000..2d8806b0
+--- /dev/null
++++ b/tests/promptRefinerShadowLiveAdapter.test.mjs
+@@ -0,0 +1,310 @@
++import assert from "node:assert/strict";
++import { readFileSync, readdirSync } from "node:fs";
++import { join, resolve } from "node:path";
++import test from "node:test";
++
++import {
++  PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++  PROMPT_REFINER_RETRY_COUNT,
++  PROMPT_REFINER_TIMEOUT_MS,
++} from "../lib/promptRefinerExecutionContract.ts";
++import {
++  createPromptRefinerShadowSdkAdapter,
++  promptRefinerRenderedInputTokenUpperBound,
++} from "../lib/promptRefinerShadowLiveAdapter.ts";
++import { PROMPT_REFINER_SHADOW_ADAPTER_VERSION } from "../lib/promptRefinerShadowRunContract.ts";
++
++const validRequest = (overrides = {}) => ({
++  requestId: "shadow-case-01",
++  prompt: "Summarize the launch plan.",
++  onDispatch: async () => {},
++  ...overrides,
++});
++
++const validResult = (overrides = {}) => ({
++  text: JSON.stringify({
++    refinedPrompt:
++      "Summarize the launch plan with its objective, owner, deadline, and primary risk.",
++  }),
++  usage: {
++    inputTokens: 100,
++    outputTokens: 20,
++    inputTokenDetails: { cacheReadTokens: 0 },
++    outputTokenDetails: { reasoningTokens: 8 },
++  },
++  warnings: [],
++  steps: [{}],
++  ...overrides,
++});
++
++const adapterWith = (generate, times = [1000, 1010]) => {
++  let index = 0;
++  return createPromptRefinerShadowSdkAdapter({
++    generate,
++    languageModel: { kind: "mock-language-model" },
++    now: () => times[Math.min(index++, times.length - 1)],
++  });
++};
++
++test("adapter records dispatch immediately before one exact bounded generation", async () => {
++  const events = [];
++  let options;
++  const adapter = adapterWith(async (candidate) => {
++    events.push("generate");
++    options = candidate;
++    return validResult();
++  });
++  const outcome = await adapter(
++    validRequest({
++      onDispatch: async (fact) => {
++        events.push("dispatch");
++        assert.deepEqual(fact, {
++          requestId: "shadow-case-01",
++          adapterVersion: PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++          provider: "openai",
++          modelId: "gpt-5-6-luna",
++          apiModelId: "gpt-5.6-luna",
++          maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++          timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++          retryCount: PROMPT_REFINER_RETRY_COUNT,
++        });
++      },
++    }),
++  );
++
++  assert.deepEqual(events, ["dispatch", "generate"]);
++  assert.equal(options.maxOutputTokens, 4096);
++  assert.equal(options.maxRetries, 0);
++  assert.equal(options.timeout, 15_000);
++  assert.deepEqual(options.include, {
++    requestBody: false,
++    responseBody: false,
++  });
++  assert.deepEqual(options.providerOptions, {
++    openai: { reasoningEffort: "medium" },
++  });
++  assert.equal("tools" in options, false);
++  assert.equal("temperature" in options, false);
++  assert.match(options.system, /untrusted quoted data/);
++  assert.deepEqual(JSON.parse(options.prompt), {
++    inputScope: "current_user_turn_text_only",
++    sourceText: "Summarize the launch plan.",
++  });
++  assert.equal(outcome.status, "suggested");
++  assert.equal(outcome.terminalReason, "suggested");
++  assert.equal(outcome.durationMs, 10);
++  assert.deepEqual(outcome.usage, {
++    inputTokens: 100,
++    cachedInputTokens: 0,
++    outputTokens: 20,
++    reasoningTokens: 8,
++    costUpperBoundMicroUsd: 44,
++  });
++});
++
++test("dispatch refusal is pre-dispatch and never calls generate", async () => {
++  let generated = false;
++  const adapter = adapterWith(async () => {
++    generated = true;
++    return validResult();
++  });
++  await assert.rejects(
++    adapter(
++      validRequest({
++        onDispatch: async () => {
++          throw new Error("reservation was not consumed");
++        },
++      }),
++    ),
++    /reservation was not consumed/,
++  );
++  assert.equal(generated, false);
++});
++
++test("invalid request is rejected before dispatch", async () => {
++  let dispatched = false;
++  let generated = false;
++  const adapter = adapterWith(async () => {
++    generated = true;
++    return validResult();
++  });
++  await assert.rejects(
++    adapter(
++      validRequest({
++        prompt: " ",
++        onDispatch: () => {
++          dispatched = true;
++        },
++      }),
++    ),
++  );
++  assert.equal(dispatched, false);
++  assert.equal(generated, false);
++});
++
++test("the maximum escaping case remains under the conservative input ceiling", () => {
++  const upperBound = promptRefinerRenderedInputTokenUpperBound({
++    requestId: "worst-case",
++    prompt: "\u0000".repeat(16_000),
++  });
++  assert.ok(upperBound <= 100_000, `${upperBound} exceeded the contract`);
++  assert.ok(upperBound >= 96_000);
++});
++
++test("strict parser failures remain fixed response-validation reasons", async (t) => {
++  for (const [name, text, reason] of [
++    ["fenced", "```json\n{\"refinedPrompt\":\"better\"}\n```", "invalid_response"],
++    ["empty", "", "empty_response"],
++    ["no change", '{"refinedPrompt":"Summarize the launch plan."}', "no_change"],
++  ]) {
++    await t.test(name, async () => {
++      const adapter = adapterWith(async () => validResult({ text }));
++      const outcome = await adapter(validRequest());
++      assert.equal(outcome.status, "failed");
++      assert.equal(outcome.terminalReason, reason);
++      assert.equal(outcome.refinedPrompt, null);
++    });
++  }
++});
++
++test("post-dispatch errors separate timeout, known provider failure, and unknown", async (t) => {
++  for (const [name, error, reason] of [
++    ["timeout", Object.assign(new Error("secret timeout prose"), { name: "TimeoutError" }), "timeout"],
++    ["provider", Object.assign(new Error("secret provider prose"), { statusCode: 429 }), "provider_error"],
++    ["unknown", new Error("secret unknown prose"), "unknown_after_dispatch"],
++  ]) {
++    await t.test(name, async () => {
++      const adapter = adapterWith(async () => {
++        throw error;
++      });
++      const outcome = await adapter(validRequest());
++      assert.equal(outcome.status, "failed");
++      assert.equal(outcome.terminalReason, reason);
++      assert.deepEqual(outcome.usage, {
++        inputTokens: null,
++        cachedInputTokens: null,
++        outputTokens: null,
++        reasoningTokens: null,
++        costUpperBoundMicroUsd: null,
++      });
++      assert.equal(JSON.stringify(outcome).includes("secret"), false);
++    });
++  }
++});
++
++test("warnings, multiple steps, or provider usage beyond the contract stop as unknown", async (t) => {
++  for (const [name, override] of [
++    ["warning", { warnings: [{ type: "unsupported-setting" }] }],
++    ["multiple steps", { steps: [{}, {}] }],
++    ["input overrun", { usage: { inputTokens: 100_001, outputTokens: 1 } }],
++    ["output overrun", { usage: { inputTokens: 1, outputTokens: 4_097 } }],
++  ]) {
++    await t.test(name, async () => {
++      const adapter = adapterWith(async () => validResult(override));
++      const outcome = await adapter(validRequest());
++      assert.equal(outcome.status, "failed");
++      assert.equal(outcome.terminalReason, "unknown_after_dispatch");
++    });
++  }
++});
++
++test("partial usage keeps cost unknown rather than fabricating complete telemetry", async () => {
++  const adapter = adapterWith(async () =>
++    validResult({ usage: { inputTokens: 100, outputTokens: 20 } }),
++  );
++  const outcome = await adapter(validRequest());
++  assert.equal(outcome.status, "suggested");
++  assert.deepEqual(outcome.usage, {
++    inputTokens: 100,
++    cachedInputTokens: null,
++    outputTokens: 20,
++    reasoningTokens: null,
++    costUpperBoundMicroUsd: null,
++  });
++});
++
++const SOURCE_SCAN_EXCLUDED_DIRECTORIES = new Set([
++  ".git",
++  ".next",
++  ".tmp",
++  "artifacts",
++  "docs",
++  "node_modules",
++  "public",
++  "tests",
++]);
++const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/;
++const STATIC_AI_IMPORT_PATTERN =
++  /(?:^|\n)\s*import[\s\S]*?from\s+["']ai["'];/;
++const STATIC_ACTIVE_MODEL_IMPORT_PATTERN =
++  /(?:^|\n)\s*import[\s\S]*?from\s+["']@\/lib\/activeAiModel["'];/;
++
++const sourceFiles = (root) =>
++  readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
++    const path = join(root, entry.name);
++    if (entry.isDirectory()) {
++      if (
++        SOURCE_SCAN_EXCLUDED_DIRECTORIES.has(entry.name) ||
++        (entry.name.startsWith(".") && entry.name !== ".railway")
++      ) {
++        return [];
++      }
++      return sourceFiles(path);
++    }
++    return SOURCE_FILE_PATTERN.test(entry.name) ? [path] : [];
++  });
++
++test("no shipped entry point imports the live adapter", () => {
++  const root = resolve(import.meta.dirname, "..");
++  const adapterPath = join(root, "lib/promptRefinerShadowLiveAdapter.ts");
++  const scanned = sourceFiles(root).filter((path) => path !== adapterPath);
++  assert.ok(scanned.some((path) => path === join(root, "instrumentation.ts")));
++  assert.ok(scanned.some((path) => path.startsWith(join(root, "components"))));
++  const offenders = scanned
++    .filter((path) =>
++      readFileSync(path, "utf8").includes("promptRefinerShadowLiveAdapter"),
++    )
++    .map((path) => path.slice(root.length + 1).replaceAll("\\", "/"));
++  assert.deepEqual(offenders, []);
++  assert.equal(
++    readFileSync(join(root, "package.json"), "utf8").includes(
++      "lib/promptRefinerShadowLiveAdapter",
++    ),
++    false,
++  );
++
++  const adapterSource = readFileSync(
++    adapterPath,
++    "utf8",
++  );
++  assert.match(adapterSource, /import\("ai"\)/);
++  assert.match(adapterSource, /import\("@\/lib\/activeAiModel"\)/);
++  assert.doesNotMatch(adapterSource, STATIC_AI_IMPORT_PATTERN);
++  assert.doesNotMatch(
++    adapterSource,
++    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
++  );
++});
++
++test("unreachability guard recognizes multiline imports and JS entry extensions", () => {
++  assert.match(
++    'import {\n  generateText,\n} from "ai";',
++    STATIC_AI_IMPORT_PATTERN,
++  );
++  assert.match(
++    'import {\n  getActiveAiModel,\n} from "@/lib/activeAiModel";',
++    STATIC_ACTIVE_MODEL_IMPORT_PATTERN,
++  );
++  for (const name of [
++    "entry.js",
++    "entry.cjs",
++    "entry.mjs",
++    "entry.jsx",
++    "entry.ts",
++    "entry.cts",
++    "entry.mts",
++    "entry.tsx",
++  ]) {
++    assert.equal(SOURCE_FILE_PATTERN.test(name), true, name);
++  }
++});
+diff --git a/tests/promptRefinerShadowRunContract.test.mjs b/tests/promptRefinerShadowRunContract.test.mjs
+new file mode 100644
+index 00000000..809a63c9
+--- /dev/null
++++ b/tests/promptRefinerShadowRunContract.test.mjs
+@@ -0,0 +1,78 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import {
++  PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++} from "../lib/promptRefinerExecutionContract.ts";
++import {
++  PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++  PROMPT_REFINER_RESERVATION_STAGE_ID,
++} from "../lib/promptRefinerReservationCore.ts";
++import {
++  PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
++} from "../lib/promptRefinerShadowAdmissionCore.ts";
++import {
++  PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++  PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE,
++  PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
++  PROMPT_REFINER_SHADOW_RUN_CONTRACT,
++  PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++  PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++  PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES,
++  promptRefinerShadowRunContractProblems,
++} from "../lib/promptRefinerShadowRunContract.ts";
++
++test("shadow run contract narrows the durable stage to the frozen 16-case run", () => {
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_MAX_DISPATCHES, 16);
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD,
++    16 * PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++  );
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_COST_CEILING_MICRO_USD, 398_656);
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.reservationContractDigest,
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++  );
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.stageId,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++  );
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.adapterVersion,
++    PROMPT_REFINER_SHADOW_ADAPTER_VERSION,
++  );
++  assert.equal(
++    PROMPT_REFINER_SHADOW_CORPUS_DIGEST,
++    PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
++  );
++  assert.equal(PROMPT_REFINER_SHADOW_BYTE_PREFILTER_FRAMING_ALLOWANCE, 32);
++  assert.deepEqual(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.request.renderedInputPrefilter,
++    {
++      method: "utf8_bytes_plus_fixed_framing",
++      framingTokenAllowance: 32,
++      satisfiesActualTokenizerRequirement: false,
++    },
++  );
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.unknownOutcomePolicy,
++    "stop_no_redispatch",
++  );
++  assert.equal(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT.run.requiresExplicitCostApproval,
++    true,
++  );
++  assert.deepEqual(promptRefinerShadowRunContractProblems(), []);
++});
++
++test("shipping the adapter does not make the run or product executable", () => {
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.shadowAdapterImplemented, true);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.durableRunWriterReady, false);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.entryPointReady, false);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.executionAdmitted, false);
++  assert.equal(PROMPT_REFINER_SHADOW_RUN_CONTRACT.productAdapterReady, false);
++  assert.match(
++    PROMPT_REFINER_SHADOW_RUN_CONTRACT_DIGEST,
++    /^sha256:[a-f0-9]{64}$/,
++  );
++});
+
+```
+
+## Test results (run by the control program)
+
+- PASS `npm run test:prompt-refiner-shadow-live-adapter && npm run test:prompt-refiner-shadow` (28900ms)
+  ℹ fail 0
+  ℹ cancelled 0
+  ℹ skipped 0
+  ℹ todo 0
+  ℹ duration_ms 26971.5822
+
+## Guard results (run by the control program)
+
+- PASS `npm run typecheck` (42051ms)
+  > ai-chat-hub@0.1.0 typecheck
+  > next typegen && tsc --noEmit --incremental false
+  
+  Generating route types...
+  ✓ Types generated successfully
+- PASS `npx eslint lib/promptRefinerShadowLiveAdapter.ts lib/promptRefinerShadowRunContract.ts tests/promptRefinerShadowLiveAdapter.test.mjs tests/promptRefinerShadowRunContract.test.mjs` (4090ms)
+- PASS `npm run check:model-pricing` (758ms)
+  > ai-chat-hub@0.1.0 check:model-pricing
+  > node --import tsx scripts/check-model-pricing.mjs
+  
+  
+  Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
+- PASS `npm run check:prompt-injection` (792ms)
+  adversarial_retrieved_content_instruction_precedence_violations = 0
+  18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)
+  not exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)
+  Untrusted content stayed data at every fenced and role-separated boundary.
+- PASS `npm run check:doc-references` (1633ms)
+  > ai-chat-hub@0.1.0 check:doc-references
+  > node scripts/check-doc-references.mjs
+  
+  Document reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3038 source file(s), all present.
+- PASS `npm run check:policy-section-references` (1148ms)
+  > ai-chat-hub@0.1.0 check:policy-section-references
+  > node scripts/check-policy-section-references.mjs
+  
+  Policy section reference check passed: 4543 citation(s) against 38 policy document(s). 2976 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).
+- PASS `npm run check:encoding:strict` (1522ms)
+  > ai-chat-hub@0.1.0 check:encoding:strict
+  > node scripts/check-text-encoding.mjs --strict
+  
+  Text encoding check passed. No mojibake markers found.
+
+## Findings from the previous round (check each was addressed)
+
+- [warning/evidence] lib/promptRefinerExecutionContract.ts:60-67: The frozen preregistration comment still states "A future adapter must still identify/count with its actual tokenizer" and "No runtime adapter consumes it" about PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE, while lib/promptRefinerShadowLiveAdapter.ts:194-204 consumes that constant at runtime and gates dispatch on a byte bound with no tokenizer, so the contract file asserts something this change falsified.
+- [nit/evidence] tests/promptRefinerShadowLiveAdapter.test.mjs:271-272: The static-vs-dynamic import guard uses single-line anchored regexes (/^import .* from "ai";/m, /^import .*activeAiModel/m), so a multi-line static import — the exact shape the repo's formatting produces for a longer import list — would not be caught while the positive import("ai") assertions still pass.
+- [nit/judgement] tests/promptRefinerShadowLiveAdapter.test.mjs:249: The repo-wide unreachability scan only matches /\.(?:ts|tsx|mjs)$/ files, so a future .js/.cjs/.jsx entry point, or a package.json script pointing node directly at the adapter, would not be caught by the guard that is this change's primary safety mechanism.
+
+## Author's account (read last; a claim, not a finding)
+
+Summary: (no summary supplied; the diff is the record)
+
+## Answer format
+
+Reply with exactly one JSON document and nothing else:
+
+```json
+{
+  "taskId": "prompt-refiner-shadow-live-adapter-v1",
+  "round": 2,
+  "reviewedDigest": "sha256:d4911de0427db084f06ef00fb3cf774ddf4f81a342f2a8b8cacd0c1e1302694d",
+  "conclusion": "approve | request_changes | blocked",
+  "findings": [
+    {
+      "location": "path:line or symbol",
+      "severity": "error | warning | nit",
+      "basis": "evidence | preference | judgement",
+      "claim": "what is wrong, in one sentence",
+      "reproduction": "how to see it: a command, or an input and its expected output (required for the finding to be acted on)"
+    }
+  ],
+  "nextAction": "one sentence"
+}
+```
+
+`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; any other finding is acted on only with a reproduction, and without one it is recorded and the current version stands.

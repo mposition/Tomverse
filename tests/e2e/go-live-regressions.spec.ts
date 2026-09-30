@@ -260,9 +260,8 @@ test("assistant markdown renders headings and tables as distinct blocks", async 
   expect(parseFloat(sizes!.cellBorderWidth)).toBeGreaterThan(0);
 });
 
-// UX-011 / COMPOSER-FOCUS-CLIP-01 - the primary composer must expose a visible
-// keyboard focus indicator. The textarea delegates that indicator to its
-// rounded container so the composer's overflow cannot clip it.
+// UX-011 - the primary composer set `outline-none` with no replacement ring, so
+// keyboard focus on the most important control was invisible.
 test("the composer shows a focus indicator when focused", async ({ page }) => {
   await prepareGuestPage(page, "en");
   await page.goto("/chat");
@@ -271,20 +270,17 @@ test("the composer shows a focus indicator when focused", async ({ page }) => {
     .getByTestId("chat-textarea")
     .evaluate((element) => {
       element.focus();
-      const composer = element.closest<HTMLElement>('[data-testid="chat-input"]');
-      if (!composer) return null;
-      const style = getComputedStyle(composer);
+      const style = getComputedStyle(element);
       return {
         matchesFocusVisible: element.matches(":focus-visible"),
-        focusRingOwner: element.getAttribute("data-focus-ring"),
         outlineStyle: style.outlineStyle,
         outlineWidth: parseFloat(style.outlineWidth),
       };
     });
 
-  expect(focusState, "expected the textarea to be inside the composer").not.toBeNull();
-  expect(focusState!.matchesFocusVisible).toBe(true);
-  expect(focusState!.focusRingOwner).toBe("container");
-  expect(focusState!.outlineStyle).not.toBe("none");
-  expect(focusState!.outlineWidth).toBeGreaterThan(0);
+  // A focused textarea always matches :focus-visible, so the baseline rule in
+  // app/globals.css must resolve to a real outline here.
+  expect(focusState.matchesFocusVisible).toBe(true);
+  expect(focusState.outlineStyle).not.toBe("none");
+  expect(focusState.outlineWidth).toBeGreaterThan(0);
 });

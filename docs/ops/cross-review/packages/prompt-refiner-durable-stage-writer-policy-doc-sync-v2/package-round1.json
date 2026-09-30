@@ -1,0 +1,89 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-durable-stage-writer-policy-doc-sync-v2",
+  "round": 1,
+  "baseCommit": "60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2",
+  "lineage": [
+    "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+    "prompt-refiner-durable-stage-writer-closure-doc-sync-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "docs/policy/prompt-refiner-observability.md:301-302, docs/policy/prompt-refiner-durable-stage-writer-threat-model.md:40",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Two live policy documents still say 186 fixed source files / 177 TypeScript-JavaScript sources and remain uncovered by the new count-binding test, but both files are outside this task's writableScope and outside the requirement's enumerated documents (Prisma schema plus 운영 계약·작업·진행 문서), so this is recorded for the announced follow-up task rather than actionable here.",
+      "reproduction": "rg -n '186개|177개' docs/policy — prints prompt-refiner-observability.md:301-302 and prompt-refiner-durable-stage-writer-threat-model.md:40; the new test at tests/promptRefinerRuntimeSourceClosure.test.mjs:1222-1227 checks only prisma/schema.prisma and the three docs/ops files, so these two lines stay green at 186."
+    }
+  ],
+  "changeDigest": "sha256:044952f70518f8217e13e2ec1a702404b1c63718a3ac64cc3298755b3330c4b5",
+  "commit": "e3572f073fbfd81e56d19c2656d5112bbec7ca60",
+  "headCommit": "e3572f073fbfd81e56d19c2656d5112bbec7ca60",
+  "worktreeDirty": false,
+  "changeSummary": "Round 0 finding을 닫았다. observability total/runtime-source count는 문서 전체의 느슨한 substring이 아니라 closure 설명의 정확한 연속 두 줄에서 함께 캡처하며, 각각 실제 total closure count와 runtimeImportClosure().length에 비교한다. 문서와 runtime 동작은 Round 0과 동일하다.",
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json",
+    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json",
+    "docs/policy/prompt-refiner-durable-stage-writer-threat-model.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2479.0211",
+      "durationMs": 2565
+    }
+  ],
+  "guardCommands": [
+    "npm run typecheck",
+    "npx eslint tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "npm run check:encoding:strict",
+    "npm run check:policy-section-references",
+    "git diff --check 60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2 HEAD -- ."
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 39754
+    },
+    {
+      "rule": "npx eslint tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2865
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1393
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4543 citation(s) against 38 policy document(s). 2976 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1136
+    },
+    {
+      "rule": "git diff --check 60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 57
+    }
+  ],
+  "producedAt": "2026-09-19T14:51:21.248Z",
+  "diff": "diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md\nnew file mode 100644\nindex 00000000..05a3f366\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md\n@@ -0,0 +1,28 @@\n+# Prompt Refiner runtime closure 정책 문서 동기화 Claude 독립 검토 제한 승인\n+\n+Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 중단된 자동 개발을 이어서\n+마무리하도록 요청했고, 앞선 지시에서 독립 검토가 필요하면 Claude에 요청하며\n+`--skip-preflight` 예외를 허용했다. 이 문서는 전자서명, 제품 실행 승인 또는 검토\n+통과 기록이 아니다.\n+\n+## 적용 범위\n+\n+이 승인은\n+[검토 task](prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json)에 정의된\n+마지막 continuation exchange의 Claude 읽기 전용 독립 검토에만 적용한다. 앞선 두\n+exchange의 `on_hold` 기록과 finding은 그대로 보존한다.\n+\n+## 유지되는 경계\n+\n+- Claude는 저장된 Claude Max `claude.ai` 로그인으로 `claude --print --safe-mode\n+  --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob\n+  --strict-mcp-config`를 사용한다. shell, write, 추가 MCP, 모델 override는 허용하지 않는다.\n+- review child 환경에서 `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 제거하고\n+  `claude auth status --json`이 `authMethod=claude.ai`, `subscriptionType=max`임을\n+  확인한다. 실패하면 API key 방식으로 전환하지 않는다.\n+- `--skip-preflight`만 허용하며 `--review-despite-check-failures`와 test/CI 우회는\n+  금지한다.\n+- 최초 검토와 actionable finding 대응 후 최대 두 번의 수정 검토만 허용한다.\n+- product database, provider/model 호출, external 또는 Railway API, credential 조회,\n+  stage mutation, flag/rollout, 유료 실행과 실제 지출은 승인하지 않는다.\n+- 이 기록의 작성·검증·커밋은 push, merge 또는 deploy 승인이 아니다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json\nnew file mode 100644\nindex 00000000..12b93e3a\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json\n@@ -0,0 +1,25 @@\n+{\n+  \"taskId\": \"prompt-refiner-durable-stage-writer-policy-doc-sync-v2\",\n+  \"requirement\": \"on_hold로 종결된 prompt-refiner-durable-stage-writer-closure-doc-sync-v1의 마지막 documentation-only finding을 닫는 마지막 continuation이다. Prompt Refiner observability policy와 durable stage writer threat model의 runtime import closure 설명을 187개 고정 파일, 그중 178개 TypeScript/JavaScript runtime source와 9개 고정 metadata 파일로 동기화한다. 기존 runtime source closure test가 두 policy 문서의 전체 count와 runtime-source count를 실제 PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT 및 runtimeImportClosure().length에 결속한다. 제품 runtime, database schema, fingerprint, provider/model, Railway, credential, stage mutation, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.\",\n+  \"completionCriteria\": [\n+    \"prompt-refiner-observability policy는 187개 source 파일 중 178개 runtime source와 9개 고정 metadata 파일을 기술한다.\",\n+    \"durable stage writer threat model은 import-closure로 검증되는 187개 고정 path allowlist를 기술한다.\",\n+    \"runtime source closure test가 두 policy 문서의 전체 count와 runtime-source count를 실제 계산값에 결속해 186/177 회귀를 fail-closed한다.\",\n+    \"focused runtime source closure test, typecheck, 수정 파일 lint, strict encoding, policy section reference 및 diff whitespace 검사가 통과한다.\",\n+    \"이 task는 이전 두 on_hold exchange와 finding을 수정하지 않고 supersedes lineage로 계승하며 product/runtime/database/fingerprint 동작을 바꾸지 않는다.\",\n+    \"Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다.\"\n+  ],\n+  \"baseCommit\": \"60fd9e52f6d33cfe9ba1d4a029174d2526cf75a2\",\n+  \"writableScope\": [\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.authorization.md\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-policy-doc-sync-v2.task.json\",\n+    \"docs/policy/prompt-refiner-durable-stage-writer-threat-model.md\",\n+    \"docs/policy/prompt-refiner-observability.md\",\n+    \"tests/promptRefinerRuntimeSourceClosure.test.mjs\"\n+  ],\n+  \"generatedPaths\": [],\n+  \"supersedes\": {\n+    \"taskId\": \"prompt-refiner-durable-stage-writer-closure-doc-sync-v1\",\n+    \"exchange\": \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1/exchange.json\"\n+  }\n+}\ndiff --git a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md\nindex b9123bc8..3fe8c2f7 100644\n--- a/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md\n+++ b/docs/policy/prompt-refiner-durable-stage-writer-threat-model.md\n@@ -37,7 +37,7 @@ journal/witness replay, corpus/source identity를 기존 proposal core로 다시\n | 만료된 승인을 서비스가 재사용 | reserve/consume이 DB clock, exact runtime facts, stage expiry를 재검증 |\n | 서비스 검사 우회 직접 reservation/consume | DB trigger가 stage approval expiry와 고정 contract를 다시 검사. application reserve/consume은 audit HMAC을 별도로 재검증해 위조 stage가 provider 경계로 진행하지 못하게 한다 |\n | model registry 또는 pricing drift | transaction에서 registry SHARE lock 후 exact execution contract 재검증 |\n-| symlink/path traversal 또는 거대 파일 | import-closure로 검증되는 186개 고정 path allowlist, fd open/fstat, symlink component 거부, bounded read/post-fstat, 파일당 8 MiB 및 전체 16 MiB cap |\n+| symlink/path traversal 또는 거대 파일 | import-closure로 검증되는 187개 고정 path allowlist, fd open/fstat, symlink component 거부, bounded read/post-fstat, 파일당 8 MiB 및 전체 16 MiB cap |\n | 보안 의존성 source drift 누락 | admin route/reservation/shadow execution/proxy root의 local runtime import 폐쇄를 TypeScript 실제 module resolution과 workspace exports로 재계산하고 TS↔SQL ordered path equality를 강제; type-only만 제외하며 aliased require/module.require/createRequire를 추적한다. `node:module`/`module`의 named·default·namespace `createRequire`는 지원하되 runtime re-export, dynamic namespace, 반환 namespace 직접 체이닝과 다른 module namespace surface는 거부한다. 현재 폐쇄에서 필요한 `process.env`, 직접 `process.cwd()`, 고정 operational state의 정확한 초기화와 Map `get`/`set`, `lib/prisma.ts`의 정확한 `globalForPrisma.prisma` singleton 필드, 검증된 `Reflect.apply` 캡처만 safe form으로 인정한다. Node `global`의 다른 직접·별칭 사용과 constructor/`__proto__`/임의 `prototype` chain, 열거된 Reflect/module/process/globalThis/eval/Function non-literal·간접 loader, unresolved local import를 거부한다. non-static element access는 기본 거부하고 현재 실행 폐쇄의 검토된 데이터 인덱싱만 path·line·column·정확한 source text의 정렬된 SHA-256 snapshot으로 동결한다. 접근의 추가·이동·표현 변경은 snapshot 불일치로 fail-closed하며, 갱신 전 loader/capability escape 여부를 별도 검토하고 negative fixture를 보강한다. 이 snapshot은 검토된 예외의 완전한 구조 목록이지 임의 JavaScript reflection 의미론의 증명이 아니다. snapshot 안의 `value[key]`를 유지한 채 다른 위치의 `key` binding 의미만 바꾸는 residual은 승인된 exact source-file bytes, full commit SHA와 deployment ID의 결속 및 독립 source review로 통제한다. |\n | prompt/credential/provider error가 provenance에 유입 | manifest schema는 path/size/hash와 고정 실행 숫자만 허용; audit reason은 request가 아니라 서버 내부 상수 |\n | 승인 endpoint 탐색·CSRF·탈취 session | 비관리자 404, owner-only, recent authentication, global origin guard, DB atomic rate limit |\ndiff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md\nindex f776d339..4193c4e7 100644\n--- a/docs/policy/prompt-refiner-observability.md\n+++ b/docs/policy/prompt-refiner-observability.md\n@@ -298,8 +298,8 @@ mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서\n \n 후속 `prompt-refiner-stage-admission-v1`은 과거 proposal을 현재 staging 배포에 다시\n 결속하는 create-only 관리자 writer다. 과거 evidence는 매 preview/승인에서 strict core로\n-다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 186개 source\n-파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 177개 source는\n+다시 replay하고, 현재 runtime은 full commit SHA, Railway deployment id와 고정 187개 source\n+파일의 exact bytes(개별/총 size와 SHA-256)를 canonical manifest로 만든다. 178개 source는\n admin/admission/reservation/shadow execution/proxy root의 local runtime import 폐쇄이며 9개는\n root/workspace resolution metadata를 포함한 고정 형식 파일이다. 파일당 8 MiB와 전체 16 MiB를\n 넘으면 거부한다. 별도 execution manifest는\ndiff --git a/tests/promptRefinerRuntimeSourceClosure.test.mjs b/tests/promptRefinerRuntimeSourceClosure.test.mjs\nindex 1c2245db..7a84a936 100644\n--- a/tests/promptRefinerRuntimeSourceClosure.test.mjs\n+++ b/tests/promptRefinerRuntimeSourceClosure.test.mjs\n@@ -1224,6 +1224,7 @@ test(\"operator-facing contracts name the enforced runtime source closure size\",\n     [\"docs/ops/prompt-refiner-durable-stage-writer-contract.md\", /deployment의 (\\d+)개 고정 source 파일/],\n     [\"docs/ops/prompt-refiner-durable-stage-writer-task.md\", /(\\d+)-file\\/16 MiB bounded exact-byte/],\n     [\"docs/ops/tomverse-chat-progress.md\", /exact (\\d+)-file runtime import-closure source manifest/],\n+    [\"docs/policy/prompt-refiner-durable-stage-writer-threat-model.md\", /검증되는 (\\d+)개 고정 path allowlist/],\n   ]) {\n     const source = readFileSync(join(repositoryRoot, path), \"utf8\");\n     const found = source.match(pattern);\n@@ -1245,4 +1246,22 @@ test(\"operator-facing contracts name the enforced runtime source closure size\",\n     new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),\n     \"runtime TypeScript/JavaScript source-count contract drifted\"\n   );\n+  const observabilityPolicy = readFileSync(\n+    join(repositoryRoot, \"docs/policy/prompt-refiner-observability.md\"),\n+    \"utf8\"\n+  );\n+  const observabilityClosureCounts = observabilityPolicy.match(\n+    /고정 (\\d+)개 source\\r?\\n파일의 exact bytes\\(개별\\/총 size와 SHA-256\\)를 canonical manifest로 만든다\\. (\\d+)개 source는/\n+  );\n+  assert.ok(observabilityClosureCounts, \"observability policy runtime closure paragraph is missing\");\n+  assert.equal(\n+    observabilityClosureCounts[1],\n+    expectedCount,\n+    \"observability policy total source count drifted\"\n+  );\n+  assert.equal(\n+    observabilityClosureCounts[2],\n+    expectedRuntimeSourceCount,\n+    \"observability policy runtime-source count drifted\"\n+  );\n });\n"
+}

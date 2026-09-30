@@ -4,7 +4,9 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
 import { useTurnstile } from "@/components/chat/useTurnstile";
+import { isGuestVerificationError } from "@/components/chat/guestVerificationFailure";
 import Link from "next/link";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
@@ -19,6 +21,12 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
+import {
+    readStoredSignupConsentChoice,
+    storeSignupConsentChoice,
+    withSignupConsentMarker,
+} from "@/components/auth/signupConsentClient";
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -65,7 +73,13 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons() {
+function SignInButtons({
+    turnstileSiteKey,
+    signupConsentEnabled = false,
+}: {
+    turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+}) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
@@ -105,6 +119,32 @@ function SignInButtons() {
         }
     }, [callbackUrl, hasAuthenticatedUser, router]);
 
+    // The sign-up consent devices (S4). Both start unset: an opt-in is never
+    // pre-ticked, and not ticking it is not a refusal.
+    const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    // After a reload the screen shows the choice this tab actually stored, not
+    // the unticked defaults: sending again then keeps that attempt instead of
+    // replacing it with an empty one.
+    useEffect(() => {
+        // Read after hydration (storage is the browser's), applied as the
+        // effect's callback rather than synchronously in its body.
+        const stored = readStoredSignupConsentChoice();
+        if (stored) queueMicrotask(() => setConsentChoice(stored));
+    }, []);
+    // The attempt the code request stored, so the verify step's landing carries
+    // its marker.
+    const [consentAttemptId, setConsentAttemptId] = useState<string | null>(null);
+    const storeConsent = (channel: "oauth" | "email_code", extra: { provider?: string; email?: string }) =>
+        signupConsentEnabled
+            ? storeSignupConsentChoice({
+                  channel,
+                  ...extra,
+                  expressOptInRequested: consentChoice.optIn,
+                  objected: consentChoice.objected,
+                  language: lang,
+              })
+            : Promise.resolve(null);
+
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
     const [code, setCode] = useState("");
@@ -113,9 +153,12 @@ function SignInButtons() {
     const [formError, setFormError] = useState<string | null>(null);
     const [emailError, setEmailError] = useState<string | null>(null);
     const isEmailValid = isValidLoginEmail(email);
-    const [needsTurnstile, setNeedsTurnstile] = useState(false);
-    const { containerRef: turnstileContainerRef, getToken: getTurnstileToken } =
-        useTurnstile(true, "email_login_request");
+    const {
+        containerRef: turnstileContainerRef,
+        getToken: getTurnstileToken,
+        failure: turnstileFailure,
+        isChallengeVisible,
+    } = useTurnstile(true, "email_login_request", turnstileSiteKey);
 
     // Drives the "N초 후 다시 시도" countdown on a minute-scoped rate limit:
     // retryAfterUntil is the fixed deadline from the server's Retry-After
@@ -184,12 +227,19 @@ function SignInButtons() {
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
+            // Stored at the first request only. A resend on the code step keeps
+            // the pending attempt: the choice is locked there, and superseding
+            // it before a request that then fails would leave the still-valid
+            // earlier code bound to nothing.
+            // The store keeps the pending attempt when the choice and address
+            // are unchanged (always so on the code step, where the devices are
+            // locked), and replaces it only when the person changed the choice.
+            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
                 data = await response.json().catch(() => null);
                 if (data?.code === "TURNSTILE_REQUIRED") {
-                    setNeedsTurnstile(true);
                     const token = await getTurnstileToken();
                     response = await requestCode(token);
                     data = null;
@@ -219,7 +269,11 @@ function SignInButtons() {
             await discardResponseBody(response);
             markSignupStarted("email-code");
             setStep("code");
-        } catch {
+        } catch (error) {
+            // The verification slot owns typed Turnstile failures. Replacing
+            // that precise sentence with the generic request failure produced
+            // the two contradictory errors reported in staging.
+            if (isGuestVerificationError(error)) return;
             setFormError(t("auth.emailLoginRequestFailed"));
         } finally {
             setIsSendingCode(false);
@@ -235,7 +289,7 @@ function SignInButtons() {
                 redirect: false,
                 email: email.trim(),
                 code: code.trim(),
-                callbackUrl,
+                callbackUrl: withSignupConsentMarker(callbackUrl, consentAttemptId),
             });
             // next-auth v4 collapses every authorize() rejection into the
             // generic "CredentialsSignin" code, so a specific "locked" vs
@@ -245,7 +299,8 @@ function SignInButtons() {
                 setFormError(t("auth.emailLoginInvalidCode"));
                 return;
             }
-            window.location.href = result?.url || callbackUrl;
+            window.location.href =
+                result?.url || withSignupConsentMarker(callbackUrl, consentAttemptId);
         } catch {
             setFormError(t("auth.emailLoginInvalidCode"));
         } finally {
@@ -296,33 +351,28 @@ function SignInButtons() {
                     {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
                 </div>
             ) : null}
-            <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
-                {t("auth.privacy")}{" "}
-                <Link
-                    href="/terms"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                >
-                    {t("auth.termsLink")}
-                </Link>
-                {" / "}
-                <Link
-                    href="/privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                >
-                    {t("auth.privacyPolicyLink")}
-                </Link>
-            </p>
+            {signupConsentEnabled ? (
+                <SignupConsentDevices
+                    disabled={step === "code"}
+                    language={lang}
+                    optIn={consentChoice.optIn}
+                    objected={consentChoice.objected}
+                    onChange={setConsentChoice}
+                />
+            ) : null}
 
             {/* Google */}
             <button
                 type="button"
                 onClick={() => {
                     markSignupStarted("google");
-                    void signIn("google", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "google" }).then((attemptId) =>
+                        signIn(
+                            "google",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -336,7 +386,13 @@ function SignInButtons() {
                 type="button"
                 onClick={() => {
                     markSignupStarted("azure-ad");
-                    void signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "azure-ad" }).then((attemptId) =>
+                        signIn(
+                            "azure-ad",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -362,6 +418,13 @@ function SignInButtons() {
                 <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </div>
 
+            <TurnstileFormSlot
+                containerRef={turnstileContainerRef}
+                isChallengeVisible={isChallengeVisible}
+                failure={turnstileFailure}
+                surface="emailLogin"
+                testId="email-login-verification"
+            />
             {step === "email" ? (
                 <div className="space-y-2">
                     <label htmlFor="email-login-address" className="sr-only">
@@ -397,10 +460,6 @@ function SignInButtons() {
                             {emailError}
                         </p>
                     ) : null}
-                    <div
-                        ref={turnstileContainerRef}
-                        className={needsTurnstile ? "flex justify-center py-1" : "hidden"}
-                    />
                     <button
                         type="button"
                         disabled={!isEmailValid || isSendingCode || retryCountdown > 0}
@@ -488,11 +547,41 @@ function SignInButtons() {
                     ) : null}
                 </>
             ) : null}
+            {/* Below the sign-in buttons, as one line rather than a card, so
+                the page fits a screen with the consent devices shown. Those
+                devices stay above the buttons: a provider click stores the
+                choice and records that the notice was shown. */}
+            <p data-testid="signin-terms-notice" className="px-1 text-center text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                {t("auth.privacy")}{" "}
+                <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.termsLink")}
+                </Link>
+                {" / "}
+                <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.privacyPolicyLink")}
+                </Link>
+            </p>
         </div>
     );
 }
 
-export function SignInPageContent() {
+export function SignInPageContent({
+    turnstileSiteKey,
+    signupConsentEnabled = false,
+}: {
+    turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+}) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
     // spanning the bottom of the screen, which could cross over the login
@@ -531,7 +620,10 @@ export function SignInPageContent() {
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons />
+                        <SignInButtons
+                            turnstileSiteKey={turnstileSiteKey}
+                            signupConsentEnabled={signupConsentEnabled}
+                        />
                     </Suspense>
                 </div>
             </div>

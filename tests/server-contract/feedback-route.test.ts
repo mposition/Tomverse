@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for /api/feedback.
@@ -157,6 +158,25 @@ async function loadRoute(): Promise<{
           world.emails.push({ to, subject, text, idempotencyKey });
           return { sent: true, skipped: false, id: "qa-email" };
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async ({
+          to,
+          subject,
+          text,
+          idempotencyKey,
+        }: {
+          to: string;
+          subject: string;
+          text: string;
+          idempotencyKey?: string;
+        }) => {
+          if (world.emailShouldFail) return { ok: false, status: 502 };
+          world.emails.push({ to, subject, text, idempotencyKey });
+          return { ok: true, providerMessageId: "qa-email", from: "support@tomverse.app", senderRole: "support" };
+        },
       },
     });
 
@@ -191,11 +211,11 @@ async function loadRoute(): Promise<{
         findUnique: async ({ where }: { where: { id: string } }) =>
           world.stored.find((row) => row.id === where.id) ?? null,
       },
-      suppressionEntry: {
+      suppressionCause: {
         findMany: async () => [],
       },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
+      // The address lock the send takes before it submits.
+      ...sendLockPrismaStubs(),
       userSettings: {
         findUnique: async () =>
           world.settingsLanguage ? { language: world.settingsLanguage } : null,

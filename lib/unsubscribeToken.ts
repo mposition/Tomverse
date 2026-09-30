@@ -1,9 +1,4 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac } from "node:crypto";
 
 /**
  * The token in an unsubscribe link.
@@ -41,6 +36,25 @@ import {
  * expires produces a dead link in an old email, and the recipient's remaining
  * option is the spam button. Key rotation is the control instead: old versions
  * stay decryptable for as long as they are listed.
+ *
+ * ## Why the IV is derived rather than random
+ *
+ * A retried message must render byte for byte what the first attempt rendered:
+ * the provider's idempotency key suppresses a second send only when the payload
+ * matches too (`idempotencyKey` in lib/emailProviderPortCore.ts). With a random
+ * IV every render produced a different link, so a retry after the provider had
+ * accepted the first attempt was a different request under the same key -- a
+ * second message, or a conflict reported as a failure after the first had
+ * arrived.
+ *
+ * So the IV is an HMAC of the plaintext under a key of its own (a synthetic IV).
+ * The same payload gives the same token; a different payload -- another
+ * delivery, purpose or account -- gives a different IV. An IV is reused only
+ * with the identical plaintext, which yields the identical ciphertext and leaks
+ * nothing but that equality, so GCM's nonce-reuse failure cannot occur. The
+ * payload carries the delivery id where there is one, so the equality is one
+ * message's own. Tokens issued with random IVs still open: the reader takes the
+ * IV from the token.
  */
 
 const ALGORITHM = "aes-256-gcm";
@@ -100,6 +114,10 @@ export const readUnsubscribeKeyring = (
 const keyFor = (secret: string) =>
   createHash("sha256").update(`email-unsubscribe:${secret}`).digest();
 
+/** A key for the IV alone, so the cipher key is never also a MAC key. */
+const ivKeyFor = (secret: string) =>
+  createHash("sha256").update(`email-unsubscribe-iv:${secret}`).digest();
+
 /** `u1.<version>.<iv>.<ciphertext>.<tag>`, all base64url. */
 export const createUnsubscribeToken = (
   payload: UnsubscribePayload,
@@ -110,12 +128,13 @@ export const createUnsubscribeToken = (
     throw new Error(`No unsubscribe key for version "${keyring.activeVersion}".`);
   }
 
-  const iv = randomBytes(IV_BYTES);
+  const plaintext = JSON.stringify(payload);
+  const iv = createHmac("sha256", ivKeyFor(secret))
+    .update(plaintext, "utf8")
+    .digest()
+    .subarray(0, IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, keyFor(secret), iv);
-  const ct = Buffer.concat([
-    cipher.update(JSON.stringify(payload), "utf8"),
-    cipher.final(),
-  ]);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 
   return [
     TOKEN_PREFIX,

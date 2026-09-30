@@ -93,8 +93,10 @@ export const adminModelRegistryMessages = defineAdminMessages({
       classSuggested:
         "Calculated from the price as the lowest class and credit weight. Confirm before saving.",
       reasoningSuggested:
-        "Proposed from the provider's information, not set — confirm it before saving.",
-      reasoningConfirm: "Confirm this value",
+        "Proposed from the provider's data, not read from it — confirm it before saving.",
+      confirmReasoning: "Confirm this value",
+      blankRequired: "Required · a blank does not save",
+      blankSavesAs: (value: string) => `${value} · applied when blank`,
       priceFromDocs:
         "Prices were filled from the provider's documentation. Compare them with the source documents named above before confirming — a temporary price cannot always be recognised from its wording.",
       confirmPrice: "Checked against the source",
@@ -251,8 +253,6 @@ export const adminModelRegistryMessages = defineAdminMessages({
       cachedInputMultiplier: "Cached input multiplier",
       inputUsd: "Input USD / 1M",
       outputUsd: "Output USD / 1M",
-      blankRequired: "Required · a blank will not save",
-      blankSavesAs: (value: string) => `${value} · what a blank saves as`,
     },
     validation: {
       title: "Configuration check",
@@ -359,7 +359,9 @@ export const adminModelRegistryMessages = defineAdminMessages({
       classSuggested:
         "가격으로 계산한 가장 낮은 등급과 크레딧입니다. 확정해야 저장됩니다.",
       reasoningSuggested: "공급자 정보로 제안한 값입니다 — 확정해야 저장됩니다.",
-      reasoningConfirm: "이 값으로 확정",
+      confirmReasoning: "이 값으로 확정",
+      blankRequired: "필수 · 비우면 저장되지 않습니다",
+      blankSavesAs: (value: string) => `${value} · 비워 두면 적용`,
       priceFromDocs:
         "가격이 공급자 문서에서 채워졌습니다. 위 안내의 출처 문서와 대조한 뒤 확정해야 저장됩니다 — 임시 가격은 문구로 항상 알아볼 수 있지 않습니다.",
       confirmPrice: "출처와 대조했습니다",
@@ -515,8 +517,6 @@ export const adminModelRegistryMessages = defineAdminMessages({
       cachedInputMultiplier: "캐시 입력 배수",
       inputUsd: "입력 USD / 1M",
       outputUsd: "출력 USD / 1M",
-      blankRequired: "필수 · 비우면 저장되지 않습니다",
-      blankSavesAs: (value: string) => `${value} · 비워 두면 적용`,
     },
     validation: {
       title: "구성 점검",

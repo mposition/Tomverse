@@ -6,7 +6,7 @@
 //   node scripts/check-conversation-writers.mjs
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -51,7 +51,12 @@ const paths = SCANNED_DIRECTORIES.flatMap((dir) => walk(dir)).filter((path) =>
     SCANNED_EXTENSIONS.has(extname(path))
 );
 
-const sources = paths.map((path) => ({ path: relative(".", path), text: read(path) }));
+// The core's repository-relative allowlist uses slash paths on every platform;
+// keep native separators for filesystem reads and normalize only the report key.
+const sources = paths.map((path) => ({
+    path: relative(".", path).split(sep).join("/"),
+    text: read(path),
+}));
 
 const findings = findDirectConversationWriters({ sources });
 

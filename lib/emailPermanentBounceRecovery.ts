@@ -2,10 +2,7 @@ import "server-only";
 
 import { normalizeSuppressionAddress } from "@/lib/emailSuppression";
 import { markCauseWriter, recordSuppressionCause } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -30,12 +27,14 @@ import { prisma } from "@/lib/prisma";
  *  - an address with any delivery reported at or after five minutes before the
  *    bounce is not written: older delivery times are receipt times, so the
  *    margin keeps a delivery that really came after from reading as before;
- *  - that check is repeated at write time, under the fence and the address lock
- *    every delivered-event writer also takes, so a delivery recorded during
- *    the run is seen;
- *  - an existing permanent entry (complaint, manual, privacy request, a hard
- *    bounce) is left as it is; only a missing or soft bounce entry becomes a
- *    hard bounce. The cause is added either way.
+ *  - that check is repeated at write time, under the address lock every
+ *    delivered-event writer also takes, so a delivery recorded during the run
+ *    is seen;
+ *  - what it writes is a cause, and only a cause. It used to also raise the
+ *    mirrored entry when that entry was missing or held a soft bounce, and
+ *    leave it alone when it held something permanent -- a ranking a single row
+ *    forced. A cause replaces nothing: the hard bounce is recorded beside
+ *    whatever else is active and the verdict reads them all.
  *
  * A dry run reads only. The report is counts, never an address or an id.
  */
@@ -66,8 +65,6 @@ export type PermanentBounceRecoveryReport = {
   recorded: number;
   /** Apply only: skipped at write time because a delivery had been recorded meanwhile. */
   deliveredDuringRun: number;
-  /** Apply only: soft or missing entries raised to a hard bounce. */
-  entriesRaised: number;
   /** Apply only: skipped at write time because this run had already recorded the message. */
   duplicatesInRun: number;
   /** Receipt time of the oldest bounce event on file, so the window is visible. */
@@ -148,7 +145,6 @@ export async function recoverPermanentBounces(input: {
     missingAddressesAlreadyHardSuppressed: 0,
     recorded: 0,
     deliveredDuringRun: 0,
-    entriesRaised: 0,
     duplicatesInRun: 0,
     oldestEventReceivedAt: null,
   };
@@ -267,14 +263,22 @@ export async function recoverPermanentBounces(input: {
 
   if (!input.apply) return report;
 
-  // Newest bounce first: the first write for an address raises its entry, and
-  // later (older) ones find a hard bounce there and leave it -- so the entry
-  // describes the most recent bounce.
+  // Newest bounce first.
+  //
+  // It decided something when this also raised the mirrored entry: the first
+  // write for an address set that single row, and the older ones found a hard
+  // bounce there and left it, so the order chose which bounce the row
+  // described. Causes are one row per event and none of them describes the
+  // address, so the suppression itself no longer depends on the order -- the
+  // address is suppressed from the first cause written either way.
+  //
+  // What is left is that an interrupted run has recorded the recent evidence
+  // rather than the stale evidence. Small, and the reason to keep the sort
+  // rather than the reason it was written.
   planned.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   for (const item of planned) {
     const outcome = await prisma.$transaction(
       async (tx) => {
-        await holdSuppressionFence(tx);
         await lockSuppressionAddress(tx, item.emailAddress);
         // Again, under the lock a delivered-event writer takes.
         if (await hasDeliverySince(tx, item.emailAddress, item.occurredAt)) {
@@ -310,51 +314,21 @@ export async function recoverPermanentBounces(input: {
           evidence: { recoveredFrom: RECOVERED_FROM },
           occurredAt: item.occurredAt,
         });
-        if (!written) return "duplicate" as const;
+        if (!written.recorded) return "duplicate" as const;
 
-        // The entry: raised only when there is none or it holds a soft bounce.
-        // A permanent reason already there -- a complaint, an operator's hold,
-        // a privacy request, a hard bounce -- keeps its own record.
-        const entry = await tx.suppressionEntry.findUnique({
-          where: {
-            emailAddress_scope_purposeKey: {
-              emailAddress: item.emailAddress,
-              scope: "global",
-              purposeKey: "*",
-            },
-          },
-          select: { id: true, reason: true },
-        });
-        const data = {
-          reason: "hard_bounce",
-          source: "provider_webhook",
-          expiresAt: null,
-          sourceStream: item.sourceStream,
-          sourceDomain: item.sourceDomain,
-          sourceClassification: item.sourceClassification,
-          sourceDeliveryId: item.sourceDeliveryId,
-          sourceMessageId: item.sourceMessageId,
-          occurredAt: item.occurredAt,
-          evidence: { recoveredFrom: RECOVERED_FROM },
-        };
-        if (!entry) {
-          await tx.suppressionEntry.create({
-            data: { emailAddress: item.emailAddress, scope: "global", purposeKey: "*", ...data },
-          });
-          return "raised" as const;
-        }
-        if (entry.reason === "soft_bounce") {
-          await tx.suppressionEntry.update({ where: { id: entry.id }, data });
-          return "raised" as const;
-        }
+        // The cause is the whole record now. What used to follow here was the
+        // mirrored entry -- raised when there was none or when it held a soft
+        // bounce, left alone when it held something permanent -- and that
+        // ranking is what a single row forced. A cause does not replace
+        // anything: the hard bounce is written beside whatever else is active,
+        // and the verdict reads them all.
         return "recorded" as const;
       },
       { timeout: 20_000 }
     );
     if (outcome === "delivered") report.deliveredDuringRun += 1;
     if (outcome === "duplicate") report.duplicatesInRun += 1;
-    if (outcome === "recorded" || outcome === "raised") report.recorded += 1;
-    if (outcome === "raised") report.entriesRaised += 1;
+    if (outcome === "recorded") report.recorded += 1;
   }
   return report;
 }

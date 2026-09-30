@@ -1,0 +1,22 @@
+{
+  "taskId": "prompt-refiner-planner03-hardening-v1",
+  "requirement": "종결된 prompt-refiner-planner03-surface-v1 exchange의 round 2에 남은 세 지적을 후속 변경으로 닫는다. 역할 메시지 배열에 null 또는 undefined 원소가 있어도 감사기는 throw하지 않고 fail-closed해야 한다. Prompt Refiner system instruction은 builder와 독립된 정확한 여섯 줄·순서·크기로 고정되어, 규칙을 추가·삭제·변경·재정렬하면 PLANNER-03 위반이어야 한다. JSON role 위조 corpus 항목의 source notation은 실제 payload bytes를 오해 없이 보여야 한다. 제품 adapter, provider 호출, billing, Router, AppSetting, flag와 rollout 상태는 변경하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "null 또는 undefined role-message 원소가 감사기를 crash시키지 않고 위반으로 반환된다.",
+    "독립 고정된 system instruction과 builder 출력은 정확히 일치해야 하며, 상충 규칙 한 줄을 추가한 회귀가 검출된다.",
+    "JSON role 위조 payload의 source notation과 runtime bytes가 명확하고 공용 18개 corpus 전체의 PLANNER-03 metric은 0이다.",
+    "관련 test, 전체 unit, typecheck, 전체 lint, build, release gate, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 승인된 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다."
+  ],
+  "baseCommit": "2f9df4d7449cf48b25240a921e4d1489e4406c1d",
+  "writableScope": [
+    "docs/ops/cross-review/packages/",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptInjectionAudit.ts",
+    "scripts/report-prompt-injection.mjs",
+    "tests/fixtures/promptInjectionCorpus.mjs",
+    "tests/promptInjectionAudit.test.mjs"
+  ],
+  "generatedPaths": []
+}

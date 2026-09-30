@@ -13,10 +13,8 @@ import {
  *
  * Preview and classification are pure. Nothing in this module opens a
  * transaction, writes an audit row, or creates a card. The service is the
- * only writer. Production apply needs both the environment latch and
- * `BOARD_IMPORT_APPLY_CODE_LATCH`. The one-time catalog import was consumed,
- * so this constant ships false again. The environment variable must still be
- * exactly `enabled` before a card can be created, and a card is still backlog.
+ * only writer, and production apply stays off until both the environment
+ * latch and `BOARD_IMPORT_APPLY_CODE_LATCH` are on. This constant ships false.
  *
  * The canonicalizer is `amux-json-v1`: object keys sort in JavaScript string
  * order, array order and string code points are preserved, and no Unicode
@@ -28,6 +26,8 @@ export const AMUX_MANIFEST_CANONICALIZATION_VERSION = "amux-json-v1";
 export const BOARD_IMPORT_POLICY_VERSION = 2;
 export const BOARD_IMPORT_SCANNER_VERSION = "amux-board-content-scan-v1";
 export const BOARD_IMPORT_SOURCE_VERIFICATION_MODE = "operator_attested";
+/** Fixed source identity assigned by the canonical private-workboard manifest contract. */
+export const BOARD_IMPORT_CANONICAL_SOURCE_SYSTEM = "tomverse_private_workboard";
 export const BOARD_IMPORT_CARD_STATUS = "backlog";
 export const BOARD_IMPORT_CARD_KIND = "unknown";
 /** Schema default for every imported card. Not a mapping from an investment rank. */
@@ -44,9 +44,6 @@ export const BOARD_IMPORT_APPLY_ENV = "TOMVERSE_AMUX_BOARD_IMPORT_APPLY";
 /**
  * Second apply latch. One environment variable must not be enough to write
  * cards. The HTTP route passes this constant and never a literal `true`.
- * The operator-approved one-time catalog import was consumed on 2026-09-23.
- * This constant is false again. It does not promote a card, start a worker,
- * or spend credits.
  */
 export const BOARD_IMPORT_APPLY_CODE_LATCH = false;
 

@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "router-development-collector-cache-observation-fix",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default)"
+  ],
+  "startedAt": "2026-09-10T06:39:41.440Z",
+  "durationMs": 155159,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 22,
+    "cachedInputTokens": 482542,
+    "outputTokens": 11300,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.13103,
+    "raw": {
+      "input_tokens": 22,
+      "cache_creation_input_tokens": 59571,
+      "cache_read_input_tokens": 482542,
+      "output_tokens": 11300,
+      "output_tokens_details": {
+        "thinking_tokens": 8306
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 59571,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1006,
+          "cache_read_input_tokens": 60268,
+          "cache_creation_input_tokens": 4045,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4045
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-10T06:42:16.653Z",
+  "verdict": {
+    "taskId": "router-development-collector-cache-observation-fix",
+    "round": 1,
+    "reviewedDigest": "sha256:0a9537d609e5ec898abe89eb90ba1c6231f75b7d5003b3bc06d15546eba15eba",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:61",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The receipt records only the historical `+33/-1` size of the dcabb4e3 patch and never states the current revision's size, so the durable record leaves the reviewed implementation diff (+35/-1 across the two files) unstated next to a criterion that names +33/-1.",
+        "reproduction": "Count added/removed implementation lines in artifacts/cross-review/router-development-collector-cache-observation-fix/change-round1.diff lines 142-204: lib +2/-0, test +33/-1, i.e. +35/-1 total, versus the receipt's only recorded figure `+33/-1` at line 61 and the criterion text in router-development-collector-cache-observation-fix.task.json. Adding one sentence naming the round-1 size (and that the two extra lines are the fixture comment and the servedProcessingTier assertion) closes it; no code change is implied."
+      }
+    ],
+    "nextAction": "Record this approval on the reviewed digest and await the separate go for any subsequent commit, publication or full-CI step; the optional nit above is a receipt-wording change only."
+  }
+}

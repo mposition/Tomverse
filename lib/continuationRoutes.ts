@@ -27,6 +27,8 @@
  * conversations.
  */
 
+import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
+
 export const CONTINUATION_SURFACE_PATH = "/continuations";
 
 export const continuationPath = (conversationId: string): string =>
@@ -36,7 +38,8 @@ export const continuationPath = (conversationId: string): string =>
  * Which surface a conversation opens at.
  *
  * `"workspace"` is the Review workspace every conversation has always opened
- * in; `"continuation"` is `/continuations/[id]`.
+ * in; `"continuation"` is `/continuations/[id]`, and `"chat"` is the additive
+ * gated Chat workspace (not the future `/chat` cutover).
  *
  * Server-decided, from a row rather than from a URL or a request body. That is
  * the whole point of it existing: a continuation is an ordinary `Conversation`
@@ -45,18 +48,18 @@ export const continuationPath = (conversationId: string): string =>
  * The conversation looked correct the moment it was created and wrong the next
  * time it was opened, which is the worst shape a defect can have.
  *
- * A boolean rather than a productKey: `productKey` is the product a
- * conversation belongs to and `PRODUCT_SURFACE_PATH` is where each product
- * will live after the cutover. Neither answers "where does *this* row open
- * today", and deriving the surface from the product would send every future
- * `chat` conversation here, continuation or not.
+ * The continuation bridge takes precedence. Otherwise only a stored Chat
+ * product selects the additive Chat surface; legacy rows retain the incumbent
+ * workspace. No client query or inferred conversation kind supplies authority.
  */
-export type ConversationSurface = "workspace" | "continuation";
+export type ConversationSurface = "workspace" | "continuation" | "chat";
 
 export const conversationSurface = (input: {
     hasContinuationBridge: boolean;
+    /** Stored server product only. Missing/legacy rows retain their surface. */
+    productKey?: string | null;
 }): ConversationSurface =>
-    input.hasContinuationBridge ? "continuation" : "workspace";
+    input.hasContinuationBridge ? "continuation" : input.productKey === "chat" ? "chat" : "workspace";
 
 /**
  * The fact a surface was derived from, read back out of it.
@@ -135,6 +138,6 @@ export const conversationHandoffHref = (
 ): string =>
     surface === "continuation"
         ? continuationPath(conversationId)
-        : `${workspacePath}?${CONVERSATION_HANDOFF_PARAM}=${encodeURIComponent(
+        : `${surface === "chat" ? CHAT_WORKSPACE_PATH : workspacePath}?${CONVERSATION_HANDOFF_PARAM}=${encodeURIComponent(
               conversationId
           )}`;

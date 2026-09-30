@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-evidence-gate-followup-v2",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T18:30:58.819Z",
+  "durationMs": 90097,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 18,
+    "cachedInputTokens": 214050,
+    "outputTokens": 7982,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.623575,
+    "raw": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 31691,
+      "cache_read_input_tokens": 214050,
+      "output_tokens": 7982,
+      "output_tokens_details": {
+        "thinking_tokens": 4445
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 31691,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2000,
+          "cache_read_input_tokens": 35604,
+          "cache_creation_input_tokens": 1030,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1030
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T18:32:28.961Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-evidence-gate-followup-v2",
+    "round": 0,
+    "reviewedDigest": "sha256:910e2ed81c8677635fe1b6db14c02289e77be4f0de69413e425d9f194a76c3cc",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "tests/promptRefinerShadowEvidenceCore.test.mjs:222-286",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The requirement asks for a regression test of the mixed state, but the suite only covers failed-only (:231-240, asserts case_evidence_failed and not case_evidence_incomplete) and unknown-only (:250-260, the inverse); no test evaluates a run containing both a `fail` case and an `insufficient_evidence` case, so the branch combination at lib/promptRefinerShadowEvidenceCore.ts:823-828 that emits both reasons together is never exercised.",
+        "reproduction": "grep -n \"case_evidence\" tests/promptRefinerShadowEvidenceCore.test.mjs returns only lines 234, 236, 253, 255 — two single-status scenarios. Expected: an additional scenario, e.g. `const mixed = passingRunCases(); mixed[0] = {caseId: mixed[0].caseId, terminalStatus: \"failed\", refinedPrompt: null, durationMs: 800, costMicroUsd: null}; mixed[1] = {caseId: mixed[1].caseId, terminalStatus: \"unknown\", refinedPrompt: null, durationMs: null, costMicroUsd: null};` whose bundle asserts gateReasons includes both `case_evidence_failed` and `case_evidence_incomplete` and gateOutcome is `fail`. Run `node --conditions=react-server --import tsx --test tests/promptRefinerShadowEvidenceCore.test.mjs` to confirm it passes once added (the implementation already behaves this way; only the coverage is absent)."
+      },
+      {
+        "location": "lib/promptRefinerShadowEvidenceCore.ts:829-831",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The `failedEvidenceCases === 0 && incompleteEvidenceCases === 0` fallback is unreachable, because evidenceStatus is one of pass/fail/insufficient_evidence, cases.length is pinned to 16 by the `run_requires_16_cases` check, and the digest-bound spec sets requiredCasePasses to 16 — so zero fails and zero incompletes implies passedCases === 16 and the outer `if` at :822 is never entered.",
+        "reproduction": "Inspection only (no runtime repro available under Read/Grep/Glob): docs/ops/prompt-refiner-shadow/evidence-spec-v1.json:10 pins requiredCasePasses to 16, tests/promptRefinerShadowEvidenceCore.test.mjs:310-311 shows a 15-row run throws before reaching the gate, and lib/promptRefinerShadowEvidenceCore.ts:584-585 shows the only three evidenceStatus values. The existing injection fallback at :840-842 is unreachable for the same reason, so keeping the symmetry is defensible; recorded so the dead branch is not mistaken for tested behaviour."
+      }
+    ],
+    "nextAction": "Add the mixed failed+unknown regression assertion to tests/promptRefinerShadowEvidenceCore.test.mjs and resubmit; both superseded v1 findings are otherwise correctly closed (unknown-only now yields case_evidence_incomplete alone, and the new fixture is valid JSON with a duplicate `purpose` key that makes parseBenchmarkJson throw json_duplicate_key directly while parsePromptRefinerShadowEvidenceSpec wraps it as spec_json_invalid)."
+  }
+}

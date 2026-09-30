@@ -268,6 +268,42 @@ test.describe("admin read surfaces", () => {
     );
   });
 
+  test("analytics' AI Review tab reports insufficient_evidence rather than zero", async ({
+    page,
+  }) => {
+    await page.goto("/admin/analytics?tab=ai-review");
+
+    await expect(page.getByTestId("admin-ai-review-scorecard")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "M5 scorecard" })
+    ).toBeVisible();
+
+    // The seeded database has no AI Review runs, and that is the state this
+    // test is for: a scorecard whose sample is below the floor must say so.
+    // A "0.0%" here would read as a measured failure of the feature, which is
+    // the single thing docs/policy/ai-review-m5-quality-contract.md §8.3
+    // forbids.
+    await expect(page.getByText("insufficient_evidence").first()).toBeVisible();
+    await expect(page.getByText("0.0%")).toHaveCount(0);
+
+    // No reviewer pair is approved, so the register half says exactly that
+    // rather than presenting an unmeasured zero as a clean bill.
+    await expect(
+      page.getByText("No approved reviewer pair")
+    ).toBeVisible();
+    await expect(
+      page.getByText("Not measured — no approved pair")
+    ).toBeVisible();
+    await expect(
+      page.getByText("The served reviewer pairs do not match the approved ones.")
+    ).toBeVisible();
+
+    // The product funnel belongs to another tab and is not fetched here.
+    await expect(
+      page.getByRole("heading", { name: "Go-live funnel and activation" })
+    ).toHaveCount(0);
+  });
+
   test("users lists seeded accounts with their plan and risk state", async ({
     page,
   }) => {
@@ -617,6 +653,50 @@ test.describe("admin read surfaces", () => {
       page.getByText(ADMIN_E2E_IDENTITIES.owner.email).first()
     ).toBeVisible();
     await expect(page.getByText(/most recent entries/)).toBeVisible();
+  });
+
+  test("an audit row named in the URL opens from a directly-opened link", async ({
+    page,
+  }) => {
+    // The integrity checker answers a failure with an id and nothing could take
+    // it: the search did not look at `id`, and the list is the newest N anyway
+    // while the checker stops at the oldest bad row. Resolved on the server, so
+    // this works for a row the list does not hold.
+    await page.goto(`/admin/audit?entry=${FIXTURE_AUDIT_LOG.id}`);
+
+    const card = page.getByTestId("admin-audit-requested-entry");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(FIXTURE_AUDIT_LOG.id);
+    await expect(card).toContainText(FIXTURE_AUDIT_LOG.summary);
+  });
+
+  test("a stale entry link says so instead of 404ing the workspace", async ({
+    page,
+  }) => {
+    // The workspace exists and the operator is looking at it; what is missing is
+    // one row. Answering 404 for the page would say the wrong thing.
+    await page.goto("/admin/audit?entry=audit-no-such-entry");
+
+    await expect(
+      page.getByRole("heading", { name: "Admin activity log" })
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("admin-audit-requested-entry-missing")
+    ).toContainText("audit-no-such-entry");
+    await expect(page.getByTestId("admin-audit-requested-entry")).toHaveCount(0);
+  });
+
+  test("the audit search accepts an id, which is what the checker hands over", async ({
+    page,
+  }) => {
+    await page.goto("/admin/audit");
+    await page
+      .getByPlaceholder(/Search/)
+      .first()
+      .fill(FIXTURE_AUDIT_LOG.id);
+    await expect(
+      page.getByRole("cell", { name: FIXTURE_AUDIT_LOG.summary }).first()
+    ).toBeVisible();
   });
 
   test("the sending-domain tab reports what it could not read", async ({

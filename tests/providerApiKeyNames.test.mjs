@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 import {
@@ -99,11 +99,14 @@ test("a key is returned trimmed, so a stray newline never reaches a header", () 
 // name a provider key variable directly.
 test("no module resolves a provider key by naming the variable itself", () => {
   const owner = "lib/modelRegistryShared.ts";
-  const files = execSync("git ls-files 'lib/*.ts' 'app/**/*.ts' 'app/**/*.tsx'", {
-    encoding: "utf8",
-  })
+  const files = execFileSync(
+    "git",
+    ["ls-files", "lib/*.ts", "app/**/*.ts", "app/**/*.tsx"],
+    { encoding: "utf8" }
+  )
     .trim()
-    .split("\n")
+    .split(/\r?\n/)
+    .filter(Boolean)
     .filter((file) => file !== owner);
 
   const names = new Set(

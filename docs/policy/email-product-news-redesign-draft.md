@@ -427,7 +427,11 @@ writer·drain이 공유합니다.**
 | **ZZ** | 발송 안 함 | — |
 
 **신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 5.1의 고지를 본
-계정에만 성립합니다. 그 전에 가입한 계정은 5.5·5.6입니다.
+계정 가운데 **그 고지가 동의 없이도 제품 소식이 갈 수 있음을 밝힌** 계정에만 성립합니다
+(2026-09-29 결정 B로 좁힘). 승인된 가입 고지(동의 문안 3.B·11.B)는 "켜시면 보내
+드립니다"이고 그 약속을 유지하므로, 오늘 이 조건을 충족하는 가입은 없습니다. 그런
+고지 문안과 그 범위를 적은 `/privacy` 문장은 별도 승인과 별도 개정입니다
+(docs/policy/email-policy-amendment-draft.md §1). 그 전에 가입한 계정은 5.5·5.6입니다.
 
 `risk_accepted`는 이 표의 값이 아닙니다 — 국가 rule은 그대로 두고, 그 위에서
 내린 결정으로 5.6에 따라 기록됩니다.
@@ -439,12 +443,24 @@ writer·drain이 공유합니다.**
 
 | 항목 | 정의 |
 |---|---|
-| 시작 사건 | 계정 생성 시 주소를 **본인이 직접 입력**했고, 그 시점 고지가 있었을 것 |
-| 유지 조건 | 계정이 살아 있고 최근 활동이 있을 것(기준값은 S4에서 정하고 문서에 적음) |
+| 시작 사건 | 계정 생성 시 주소를 **본인이 직접 입력**했고, 그 시점 고지가 있었으며 **그 고지가 동의 없이도 제품 소식이 갈 수 있음을 밝혔을 것**(결정 B, 2026-09-29 — "켜시면 보내 드립니다"만 본 사람에게 관계로 보내면 화면과 모순). OAuth로 가입한 주소도 본인이 고른 계정의 주소이므로 직접 입력으로 봅니다(R4, 소유자 결정 2026-09-29) |
+| 유지 조건 | 계정이 살아 있고 **마지막 로그인이 24개월 안**일 것(R4, 소유자 결정 2026-09-29) |
 | 종료 사건 | 계정 삭제·해지, 휴면 기준 초과, 수신거부 |
 | 휴면·무료 계정 | 휴면은 종료로 취급. 무료 계정도 관계는 성립하되 **콘텐츠 관련성**을 더 좁게 |
-| 관련 콘텐츠 범위 | 그 사람이 쓰는 제품의 기능. 별개 제품군 교차판매는 제외 |
+| 관련 콘텐츠 범위 | 그 사람이 쓰는 제품의 기능. 별개 제품군 교차판매는 제외. 수신자별 기능 필터는 코드에 없으므로, 이 범위와 무료 계정의 더 좁은 관련성은 **사람이 캠페인을 승인할 때** 내용으로 지킵니다 — 관계 계정이 포함된 캠페인의 승인은 이 두 줄을 확인한 것입니다 |
 | 종료 시 즉시 전환 | 종료 사건이 기록되면 그 순간부터 발송 불가. suppression과 동일 층 |
+
+**구현(S5b)** — `lib/auRelationshipCore.ts`가 판정하고 `lib/auRelationship.ts`가
+기록·조회합니다. 시작은 가입 finalize의 transaction 안에서 `relationship_started`
+(scope `marketing`)로 한 번 쓰며, 개정이 시행 중이고, 거부 장치를 쓰지 않았고, 본
+가입 고지 버전이 `RELATIONSHIP_DISCLOSING_SIGNUP_COPY_VERSIONS`에 있을 때만입니다 —
+**오늘 이 목록은 비어 있으므로 시작되는 관계는 없습니다.** 종료는 삭제 요청
+(`relationship_ended`, 같은 transaction), 마지막 로그인 24개월 경과(다음 로그인이
+`lastLoginAt`을 옮기기 전에 같은 transaction에서 `relationship_ended`로 기록 — 기록하지
+못하면 `lastLoginAt`도 움직이지 않습니다), 가입 때와 다른
+주소, 동의 철회로 판정하고, 수신거부는 suppression이 먼저 막습니다. **종료는 최종입니다**
+— 계정 복구나 재로그인이 관계를 다시 시작하지 않습니다. 발송 판정은 시작 사건을
+추론 동의의 증거로 인용합니다.
 
 ---
 
@@ -497,6 +513,41 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
   그 `EmailLoginAttempt`가 만든 사용자), 그 사용자에게 소비된 attempt가 아직
   없을 때(`userId` unique)만 소비합니다.
 - **기존 사용자의 로그인은 절대 소비하지 않습니다.**
+- **구현 결정(S4, 2026-09-29 검토 반영)** —
+  - 이 탭의 로그인만 소비합니다. 저장한 attempt의 id를 로그인 `callbackUrl`의
+    표지(`signupConsent`)로 싣고, finalize는 **그 표지를 가진 착지에서만** 요청합니다.
+    다른 탭의 세션 알림이나 같은 브라우저의 다른 가입은 표지가 없으므로 소비하지
+    않습니다. 표지는 재시도가 끝난 뒤 주소창에서 지웁니다. 유효 시간은 15분입니다.
+  - 서버는 **그 세션의 로그인이 계정을 만들었는지**를 봅니다. 계정을 만든 로그인의
+    JWT에만 `accountCreatedBySignIn`이 참이고(OAuth는 adapter의 `isNewUser`, 이메일
+    코드는 `authorize()`가 전달), 다른 탭의 가입이 만든 계정에 이 탭이 나중에 로그인한
+    세션은 거짓입니다(`not_created_by_this_sign_in`).
+  - 이메일 코드 경로의 선택은 **코드를 요청할 때** 저장되고, 코드 단계에서는 장치가
+    잠깁니다. 화면에서 바꿀 수 있는데 기록되지 않는 선택을 두지 않습니다.
+  - 메일의 로그인 **링크**는 선택을 한 **같은 탭**에서 열리면 코드 폼과 똑같이 표지를
+    싣고 소비됩니다. **다른 탭**에서 열리면 그 탭에는 nonce가 없어 소비하지 않고 선택은
+    만료됩니다 — 그 계정에는 `notice_shown`이 없으므로 제품 내 안내(5.4)가 나중에 다시
+    묻고, 거부도 그때 남길 수 있습니다. 동의 없이 발송되는 경로는 생기지 않습니다.
+  - 탭은 채널별로 attempt와 **그 선택**을 함께 보관합니다. 새로고침 뒤에는 저장된 선택이
+    화면에 다시 나타나고, 같은 선택·같은 주소로 다시 보내면 대기 중 attempt를 그대로
+    씁니다 — 실패할 수 있는 요청 앞에서 attempt를 갈아끼우지 않습니다. OAuth 클릭은
+    이메일 attempt를 대체하지 않습니다.
+  - email_code의 binding은 **선택 이후에 요청되어** 소비된 로그인 코드입니다. 선택 전에
+    요청된 코드(다른 로그인, 재활성화)는 이 흐름이 아닙니다.
+  - attempt의 시각은 **DB 시계**(`LOCALTIMESTAMP(3)`)로 찍습니다. `User.createdAt`·
+    `EmailLoginAttempt.createdAt`은 `DEFAULT CURRENT_TIMESTAMP`가 세션 시간대로
+    `timestamp(3)`에 넣은 값이고 `LOCALTIMESTAMP`는 바로 그 값입니다. 앱 인스턴스
+    시계로 찍으면 두 시계를 비교하게 됩니다.
+  - 착지에서 가입 선택을 처리했으면 그 세션의 IP 추정 기록(기존 계정용)은 건너뜁니다
+    — 방금 기록한 가입 시점의 추정을 곧바로 덮지 않기 위해서입니다.
+  - 체크한 opt-in은 **확인 메일로 끝나거나 아무것도 남기지 않습니다.** 확인 요청이
+    불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
+    503), 그 착지가 몇 번 다시 시도합니다. 그래서 화면은 **수집 게이트·확인 게이트와
+    키·신뢰할 수 있는 국가**가 모두 있을 때만 장치를 보여 주고, 하나라도 없으면 장치
+    없이 예전처럼 로그인합니다.
+  - 국가는 **origin secret으로 Cloudflare 경유가 증명된 요청**의 `cf-ipcountry`만 씁니다.
+    `T1`(Tor)·`XX` 등 국가가 아닌 코드는 버리고, profile 없는 국가의 추정은 알림 행에
+    `unresolved`로 남깁니다(docs/policy/email-notifications.md §6.3).
 - 체크 해제 후 재시도는 이전 행을 `supersededAt`으로 무효화하고, 무효화와 새 행
   발급은 한 transaction입니다.
 - 소비 실패·만료·탭 닫힘에도 **계정 생성은 성공**합니다.
@@ -578,6 +629,16 @@ DOI 확인 화면은 동의한 사람의 **주소 확인**만 담당합니다. �
   `notice_shown`으로 남되 **동의도 거부도 아닙니다.**
 
 이렇게 동의한 주소는 법역과 무관하게 `express_consent` 위에 섭니다.
+
+**구현(S8)** — `/api/user/consent-notice`와 `components/email/InProductConsentNotice.tsx`.
+안내는 **렌더될 때** `notice_shown`을 남기고(다시 뜨지 않게 하는 사실), "받지 않겠습니다"는
+주소에 대한 `objected`, "나중에"는 아무것도 더하지 않습니다. **"네, 받겠습니다"는 승인
+문안이 말하는 세 항목(제품 소식·뉴스레터·프로모션) 각각의 확인 메일을 요청**하고(DOI는
+항목별이므로 메일 세 통), 이메일 설정 화면으로 보냅니다 — 각 링크를 누르기 전에는
+동의가 아닙니다. 그래서 안내는 **계정이 해석되는 국가로 마케팅을 보낼 수 있을 때만**
+뜹니다. 거부가 기록되지 못하면 창은 닫히지 않고 실패를 알립니다(닫기로 바뀌지 않게).
+관할권과 후보는 서버가 해석하며 클라이언트가 보내지 않습니다. 수집 게이트·확인
+게이트·확인 키가 모두 있을 때만, 그리고 다른 대화상자가 열려 있지 않을 때만 뜹니다.
 
 ### 5.5 기존 사용자에게는 근거가 없습니다
 
@@ -852,6 +913,14 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   | **C (정리)** | 원인 — **설정 `causes`는 그대로 두고** 코드는 설정과 무관하게 원인을 읽음 | **중단** | 계속, **trigger 제거** | B. B는 설정 `causes`를 읽으므로 같은 기준 |
   | **D (설정 제거)** | 원인 | — | 계속 | C. 둘 다 설정과 무관하게 원인을 읽음 |
 
+  - **D는 실행 중에 둘로 갈렸습니다.** D-1이 설정을 읽는 **코드**를 없앴고
+    (email-notifications.md v27), 설정 **행**의 삭제는 조건부로 보류했습니다
+    (v28) — 저장된 값이 `causes`인 동안 그 행은 D-1 이전 build를 올바르게 만드는
+    것이므로 지우는 쪽이 위험을 만들고 남기는 쪽이 롤백을 지킵니다. **행이 없을
+    때의 동작은 어느 build인가에 따라 다르고**, 그 표가 v28 1번입니다 — 이 표의
+    D 행은 그 구분이 생기기 전에 쓰였습니다. 지울 수 있게 되는 조건은 v28
+    3번이고, 그 전까지는 `tests/emailSuppressionAuthorityRowRetention.test.mjs`가
+    활성 migration에 그 key가 들어오는 것을 막습니다.
   - **A의 trigger(C83)** — A migration이 `SuppressionEntry`에 AFTER INSERT·UPDATE·
     DELETE trigger를 둡니다. 새 build는 자기 transaction에서
     `SET LOCAL app.suppression_writer = 'causes'`를 걸고, trigger는 이 값이 없는 쓰기(=
@@ -885,12 +954,28 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   - **C로 넘어가는 gate** — 설정이 `causes`이고 B가 모두 배포되었을 때. C는 entry 쓰기와
     trigger를 제거하고 **설정은 `causes`로 남겨 둡니다**(C90) — 공존하는 B가 매 판정마다
     설정을 읽기 때문입니다.
-  - **D로 넘어가는 gate** — C가 모두 배포되었을 때. D는 설정 행과 그 읽기 코드를 지웁니다.
+  - ~~**D로 넘어가는 gate** — C가 모두 배포되었을 때. D는 설정 행과 그 읽기 코드를
+    지웁니다.~~ **email-notifications.md v27·v28이 대신합니다.** D는 둘로 갈렸고,
+    행을 지우는 쪽(D-2)의 gate는 "C가 모두 배포됨"이 아닙니다 — **production이
+    D-1 이후 build를 돌리고 있고, 되돌릴 대상도 설정 reader가 없는 트리일 때**
+    입니다(v28 3번). 아래 rollback 하한이 그 이유를 이미 담고 있는데, 이 줄이
+    그것을 C로 잘못 적었습니다.
   - **rollback 하한** — A 배포 중에는 지금 build까지. B 배포 중·설정 `entry`인 동안은
     A까지. 설정을 `causes`로 바꾼 뒤에는 **B까지**(A는 설정을 읽지 않으므로 금지). C 배포
-    중·후에는 B까지(설정 `causes` 유지). D 배포 중·후에는 C까지(B는 설정 부재 시 `entry`로
-    되돌아가므로 금지). 설정을 다시 `entry`로 돌리는 것은 C 이후 금지입니다 — entry 쓰기가
-    없습니다.
+    중·후에는 B까지(설정 `causes` 유지).
+
+    **행이 있는 동안은 D-1 배포 중·후에도 B까지입니다** — 행이 있으면 B도, 지금
+    main도, C-1도, C-2도 `causes`를 얻기 때문입니다.
+
+    **행을 지운 뒤에는 하한이 C가 아니라 D-1 이후입니다.** 이 줄은 한때 C라고
+    적었고 그것은 틀렸습니다 — 행이 없으면 C-1은 send가 `entry`로 되돌아가고,
+    C-2는 send만 원인을 읽을 뿐 console·preference·privacy intake·cutover 네
+    reader가 그대로 잘못 동작합니다. 되돌릴 수 있는 것은 **설정 reader가 하나도
+    없는 build**, 즉 D-1 이후뿐이며, 그것이 v28 3번의 "되돌릴 대상도 reader-free"
+    와 같은 말입니다. 원문은 행 삭제와 코드 삭제가 한 배포라는 전제 위에
+    있었습니다.
+
+    설정을 다시 `entry`로 돌리는 것은 C 이후 금지입니다 — entry 쓰기가 없습니다.
 
 
 - **만료의 기록(C66)** — 판정은 위 활성 정의로 만료를 즉시 제외하므로 기다리지
@@ -1255,7 +1340,7 @@ releaseNotesAuthorizationVerdict({
 | 본문 명시사항 — 명칭·**전자우편주소·전화번호**·주소 | 별표 6 | **implemented** | `contact_phone` footer block 추가. 없으면 fail-closed(불변식 9) |
 | 한·영 수신거부 안내와 간편한 기술적 조치 | 별표 6 | **implemented** | footer 문구 병기. one-click은 이미 있음 |
 | 수신거부에 로그인 요구 금지 | 안내서 | **implemented** | 이미 있음 |
-| **14일 이내 처리결과 통지** — 수신동의·수신거부·철회 | 제50조제7항, 시행령 제62조의2 | **implemented** | 아래 |
+| **14일 이내 처리결과 통지** — 수신동의·수신거부·철회 | 제50조제7항, 시행령 제62조의2 | **미정** — 동의·전체 수신거부는 구현, 항목별 철회 문안 승인 대기 | 아래 |
 | **2년마다 수신동의 사실 고지** | 제50조제8항, 시행령 제62조의3 | **deferred** — 첫 기한 전까지 | 아래 |
 | 제목 `(광고)` 표기 | 제50조제4항, 별표 6 | **waived** | 아래 |
 
@@ -1288,6 +1373,23 @@ releaseNotesAuthorizationVerdict({
   생깁니다.
 - 수신거부·철회는 **짧은 transactional 확인 메일**을 보냅니다(수신거부한 주소에도
 나가는 service 메일입니다). `risk_accepted`로 받던 사람이 수신거부해도 같습니다.
+
+**구현(S6b)** — 두 통지(`consent_result_notice`, `unsubscribe_result_notice`)는 동의 문안
+§4.1·§4.2의 승인 문안 그대로이며(한국어·영어; 그 밖의 언어는 영어), 변경을 기록한
+transaction 안에서 enqueue됩니다(`lib/emailPreferences.ts`의 `onConsentRecorded`,
+`lib/processingResultNotice.ts`). 수신거부 통지는 승인 문안이 "이 주소로 광고성 메일을 더
+보내지 않는다"이므로 **모든 마케팅을 끄는 요청**(링크의 전체 수신거부, 설정의 모두 끄기)에만
+보내고, 요청 하나에 하나이며 마지막 항목이 커밋된 뒤 넣습니다. 동의 없이 받던 사람의
+수신거부도 통지합니다. **항목 하나의 철회는 승인된 문안이 없어 통지하지 않으므로
+`consent_result_notice_14_days`는 아직 미정(한국 rule 차단)입니다 — 항목별 문안 승인은
+소유자 결정입니다.** 날짜는
+Asia/Seoul 달력이고, 모든 주소에 보냅니다 — 결과 보고라서 틀린 곳이 없고, 국가로
+고르면 아직 국가가 확인되지 않은 한국 수신자가 빠집니다. 한·영 수신거부 안내는
+footer가 프로필의 `UNSUBSCRIBE_NOTICE_LANGUAGES`대로 두 언어를 함께 싣고, 두 의무 모두
+실행 시점에 렌더해 보는 readiness check로 한·영 안내의 `implemented`를 뒷받침합니다.
+개인정보 삭제 요청으로 생기는 철회는 삭제 요청이라 통지하지 않고, 불만 신고로 생기는
+철회는 그 사람의 행위이지만 신고 직후의 메일이 다시 신고될 위험 때문에 보내지 않았습니다
+— 이것도 소유자 판단 사항입니다.
 
 **2년 고지 — 연기합니다.** 가장 이른 동의가 들어오는 날부터 첫 기한은 2028년입니다.
 지금 만들지 않되, **잊지 않는 장치는 지금 둡니다** — readiness가 한국 수신자마다
@@ -1460,10 +1562,10 @@ EEA·영국을 여는 선행 게이트입니다.
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8, **webhook·suppression 절 동기화(이메일 알림 9.6, 10.2, 12.3, 12.4, 13.2, 13.3, 13.5, 13.7, 14.4 — 중복 webhook은 processed·abandoned만 즉시 200이고 미처리는 7.4의 claim·lease 전이, 사건·delivery·entry 단일 transaction과 이유 병합은 7.4의 원인 모델로, entry 단위 이중 승인·감사는 해제 행위 × 원인 행렬과 원자적 해제 감사로, 보존 설명에 원인 장부)** | — | 문서 |
 | S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·보존 readiness | **닫힘** | **완료** — #1492 병합. Codex 코드 검토 3회. 보존 기간은 계약대로 1년 |
 | S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, 원인별 멱등 insert·활성 원인 효과 합성·A/B/C 권위 전환과 D cleanup, 총잠금 순서, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v24 — 19회차 조건부 승인) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
-| S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
+| S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | ~~R5~~ 해소(2026-09-23) | 해시할 문안이 먼저. 초안: [email-consent-copy-draft.md](email-consent-copy-draft.md) |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
-| S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | |
+| S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | ~~R4~~ 해소(2026-09-29) | 둘로 나눕니다. **S5a** — rule 테이블(draft에서만 쓰기, 한 `(ruleKey, ruleVersion)`은 한 내용), 수신자·호주 발신자 authority 판정, seed(정본 5.1.1). 선행 결정 없음. **S5b** — 호주 관계 lifecycle(4.4). R4는 해소(2026-09-29). 관계는 발송을 밝힌 가입 고지를 본 계정에만 시작하며, 그런 문안은 아직 없으므로 S5b 뒤에도 호주 `inferred_consent`로 나가는 계정은 없습니다 |
 | S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`(불변식 9), 한·영 안내, 14일 통지(`consent_result_notice` 포함) + 2년 고지 수신자별 기한 경고 | S3(승인 원장) | 2년 배치는 기한 전 별도 |
 | S7 | 템플릿 + 구조화 payload + 링크 표 | — | |
 | S8 | 기존 사용자 제품 내 동의 안내(5.4) + 기존 계정 IP 추정 국가 기록(5.3) + 제품 내 안내 화면(9절) + 78계정 승인·cohort 기록과 admin 표시 | S3 | |
@@ -1491,6 +1593,87 @@ EEA·영국을 여는 선행 게이트입니다.
    시간 예산, 운영자 발송 module 분리와 정적 검사, `login_method_linked`·
    `login_method_unlinked` template과 standard lane 이동. S1b-1의 잠금 API 위에 섭니다.
 
+**S10에서 코드가 한 것과 사람이 할 것** — S10은 문안을 쓰는 단계가 아니라, 문안이
+게시되기 전에는 release notes가 **켜진 것으로 읽히지 않게** 하는 단계입니다.
+
+- **게이트는 flag를 읽는 쪽에 있습니다**(`lib/emailPolicyPublication.ts`의
+  `isEmailReleaseNotesLive()`). flag에는 이 앱 안에 쓰는 경로가 없어서(운영자가
+  `AppSetting` 행을 설정) 쓰기 시점 거부는 아무것도 막지 못하고, 모든 정책 draft가
+  release notes 국가 rule을 담으므로 policy version 활성화를 막으면 release notes와
+  무관한 정책 변경까지 막힙니다. 그래서 enqueue 두 경로와 발송 판정이 모두 이
+  함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
+- **게시 여부는 "개정을 담은 승인된 버전인가"입니다.** 문서마다 개정을 담았다고
+  승인된 버전의 digest 목록(`APPROVED_AMENDED_DIGESTS`)을 두고, 현재 렌더되는
+  digest(`/privacy`는 `lib/sitemapContentDates.ts`, `tests/sitemapLastModified.test.mjs`가
+  실제 페이지와 대조)가 그 목록에 있어야 인정합니다. 처음에는 "개정 전 digest에서
+  바뀌었는가"로 판정했는데, 2026-09-28에 `/privacy`가 release notes와 **무관한 이유로**
+  바뀌었고 그 설계는 그것을 개정 게시로 셌을 것입니다. 개정 뒤의 모든 편집은 그
+  버전이 여전히 개정을 담는다고 승인해 목록에 넣기 전까지 게이트를 닫습니다.
+- **`/terms`는 지금 판정할 수 없습니다.** 그 페이지의 "Last updated" 줄은 본문이 세
+  번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
+  `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
+  `document_state_unrecorded`로 보고합니다.
+- **문서는 `/privacy`와 `/terms` 둘입니다**(`AMENDED_DOCUMENTS`). 동의 문안과
+  로그인 화면의 동의 문장은 개정 대상이 아닙니다 — 2026-09-29 결정 B가 동의 장치의
+  약속("요청하지 않으면 보내지 않는다")을 유지했으므로, 그 약속을 지우도록 요구하던
+  이전 조건(C안: 동의 문안 버전 목록과 `consent_copy_*` 거절)은 코드에서 제거됐습니다.
+  약속을 본 계정은 봉인 목록에서 빠지고(`promised_no_unrequested_send`), 관계도 그
+  고지 아래에서는 시작하지 않습니다(4.4). 그리고
+  **digest는 테스트가 렌더된 원본과 대조하는 것만 증거로 인정합니다**
+  (`DIGEST_VERIFIED_BY`). 표에 손으로 적은 digest는 페이지에 대한 주장이지 증거가
+  아닙니다(`document_state_unverified`).
+- **변경 고지는 `legal` 분류여야 합니다**(docs/policy/email-notifications.md §3.1의 5번 유형). 등록 가능한 분류 중
+  purpose도 수신거부도 없는 것은 `legal`뿐입니다 — `service`는 purpose가 필수라
+  끌 수 있고, `transactional`을 가리키면 로그인 코드·영수증이 고지로 세어집니다.
+  고지 기간은 `CHANGE_NOTICE_PERIOD_DAYS`(30일), 이 고지로 인정하는 발송의 범위는
+  시행일 전 `CHANGE_NOTICE_WINDOW_DAYS`(120일)입니다.
+- **"제때 고지받았는가"는 계정마다 판정합니다.** 시행일 전에 생긴 계정(생성 시각을
+  모르는 계정 포함)마다 SQL 한 문장으로 넷 중 하나로 분류합니다 — **told**(고지가
+  기한 전에, 또는 30일 이상 전에 메일함에 도달: `delivered`·`complained`. `sent`는
+  제공자가 받았다는 뜻일 뿐이라 webhook이 유실되면 반송된 고지가 도달로 남으므로 세지
+  않습니다. `bounced`도 도달이 아닙니다), **late**(도달했지만 기한 후이고 아직 30일이
+  지나지 않음, 차단 — 30일이 지나면 told가 되므로 시행일 뒤에 도달한 고지 하나가
+  게이트를 영구히 닫지 않습니다), **unreachable**(주소가 없거나, 고지가
+  거부·반송된 적이 있고 **지금 레인이 이 고지를 그 주소로 보내지 않음** —
+  `suppressionCheck()`에 고지의 분류·purpose로 직접 묻습니다. 마케팅 전용
+  `privacy_request`나 purpose 한정 수동 억제는 법정 고지를 막지 않으므로 해당하지
+  않습니다. 차단하지 않고 보고하며, 게이트가 열릴 때 계정 id와 사유를 구조화 이벤트와
+  운영 incident로 남깁니다 — docs/policy/email-notifications.md §3.2의 다른 채널이 대상을 알아야 하므로),
+  **untold**(그 밖 전부 — 소프트 바운스는 재시도 대상, `failed`·`abandoned`는 우리
+  실패이므로 차단).
+- **고지는 승인된 문안에 묶입니다.** template key만으로는 문안을 특정하지 못하므로
+  (현재 등록된 `legal` template은 계정 삭제 예고 하나뿐), 발송의 template version
+  `contentHash`가 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 있어야 셉니다.
+  기한은 **달력일로 시행일 30일 전 그날까지**이고, 시각은 제공자가 받은 때가 아니라
+  **메일함이 받은 때**(`deliveredAt`)입니다. 고지 기간 중 가입한 계정에도 더 짧은
+  기한을 두지 않습니다 — 기간 첫날 가입자는 아직 30일을 받을 수 있었으므로, 그런
+  계정도 자기 30일이 지날 때까지 late입니다. 게이트를 막는 계정(late·untold)은
+  id와 사유로 보고합니다(`email_policy_notice_blocking`) — 소프트 바운스된 법정 고지는
+  다시 시도되지 않으므로, 이름 없이는 가득 찬 메일함 하나가 전원을 막고 있어도 알 수
+  없습니다. 모든 시각은 `AT TIME ZONE 'UTC'`로 비교합니다.
+  이전 두 버전은 `sent`만 셌거나, 크기를 비교했거나, 가장 이른 한 통의 시각으로
+  기간을 쟀거나, 제공자에 넘기지도 않은 행을 시도로 셌습니다.
+- **개정은 시행일 하나입니다.** 문서마다 날짜가 다르면 `effective_dates_differ`.
+- **통과·실패 모두 1분만 기억하고, 조회 오류는 "미게시"가 아니라 오류로 다시
+  던집니다** — 판정의 `read()`가 재시도로 바꾸므로, 순간적인 DB 오류가 release
+  notes를 영구 skip하지 않습니다(불변식 11).
+
+**2026-09-29 소유자 결정으로 정리된 것**: 로그인 화면 동의 문장은 개정하지 않고(이메일을
+묶지 않음), 동의 장치 문안은 결정 B대로 약속을 유지합니다. 그래서 개정 대상은
+`/privacy`와 `/terms` 두 페이지이고, `/terms`의 현재 상태는
+`AMENDED_DOCUMENT_EVIDENCE`에 기록돼 검증기가 다시 계산합니다
+(`tests/support/amendedDocumentVerifiers.mjs`). 변경 고지 template
+`policy_change_notice`가 등록돼 있습니다.
+
+**남은 것은 전부 소유자 결정입니다** —
+[방침·약관 개정 초안](email-policy-amendment-draft.md)의 (1) `/privacy` 개정안 승인,
+(2) 변경 고지 문안 승인(그 template version의 `contentHash`를
+`CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에), (3) 시행일. 그 뒤 게시한 두 페이지의
+digest를 `APPROVED_AMENDED_DIGESTS`에 적고, 고지를 **사람이** 대상 전원에게 기한 안에
+보내면 게이트가 스스로 열립니다.
+`tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
+있음을 고정하므로, 그때 함께 고칩니다.
+
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.
 
@@ -1503,10 +1686,10 @@ EEA·영국을 여는 선행 게이트입니다.
 | R1 | freemium이 ePrivacy 13(2)의 "판매 맥락"인가 — **회원국별** 외부 자문 | EEA·영국 해제 |
 | R2 | marketing 스트림 발송의 평판 영향 | 발송 도메인 |
 | R3 | 싱가포르 "수신거부 요청을 보낼 이메일 주소"를 현재 footer가 충족하는가 | **SG 활성화 전 필수** |
-| R4 | 호주 관계의 유지·휴면 기준값 | 4.4에서 정하고 문서에 적음 |
-| R5 | 동의의 유효 기간 — ACMA는 숫자를 주지 않고 **약관에 적으면 그 기간이 기준** | 문서 문구 |
+| ~~R4~~ | **해소됨(소유자 결정 2026-09-29)** — 유지 조건은 마지막 로그인 후 24개월이고, 넘으면 휴면으로 관계가 끝납니다. OAuth 주소도 본인이 직접 입력한 주소로 봅니다. 4.4에 반영 | — |
+| ~~R5~~ | **해소됨(소유자 결정 2026-09-23)** — 동의는 **철회 시까지** 유효하며 만료 기간을 두지 않습니다. 이 결정은 `/terms`에 적히는 순간 ACMA 기준이 됩니다. 한국의 2년 고지는 유효기간이 아니라 주기적 확인 의무이므로 그대로 유지됩니다. 문안: [email-consent-copy-draft.md](email-consent-copy-draft.md) §1·§5 | — |
 
-**한국 의무** — 14일 통지는 구현, 2년 고지는 기한 전 구현으로 연기, `(광고)`는
+**한국 의무** — 14일 통지는 동의·전체 수신거부까지 구현(항목별 철회 문안은 소유자 승인 대기), 2년 고지는 기한 전 구현으로 연기, `(광고)`는
 면제입니다(7.7). 연기와 면제는 7.8의 기록으로 남습니다.
 
 **참고**: 불변식 5(전체 수신거부)는 법정 최소요건이 아니라 **보수적인 제품

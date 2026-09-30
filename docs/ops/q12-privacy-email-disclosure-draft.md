@@ -29,7 +29,7 @@
 | 동의·철회 이력(append-only), 관할권과 그 판정 근거, 정책 버전, 화면 식별자, 문구 해시 | `ConsentRecord` | 같음 |
 | **IP·User-Agent의 salted hash** (원본 아님) | `ConsentRecord.ipHash`·`userAgentHash` | `lib/emailPreferences.ts` |
 | 발송 시점의 주소·언어·관할권·템플릿 버전·전달 상태 | `EmailDelivery` | `prisma/schema.prisma` |
-| **계정 삭제 후에도 남는 수신거부 기록** | `SuppressionEntry`(주소 기준) | ADR §13.2 |
+| **계정 삭제 후에도 남는 수신거부 기록** | `SuppressionCause`(주소 기준) | ADR §13.2 |
 | 발송 대행자에게 주소와 본문 전달 | Resend | Q11 검토 기록 |
 
 마지막 두 줄이 특히 그렇습니다. **계정을 지워도 남는 데이터가 있다는 것**은
@@ -108,7 +108,7 @@ IP 주소와 브라우저 식별자를 값 그대로가 아니라 되돌릴 수 
 
 ## 5. 일부러 쓰지 않은 것
 
-- **보관 기간을 숫자로 쓰지 않았습니다.** Q6이 `ConsentRecord`·`SuppressionEntry`
+- **보관 기간을 숫자로 쓰지 않았습니다.** Q6이 `ConsentRecord`·`SuppressionCause`
   의 보관기간을 아직 정하지 않았습니다. 숫자를 지어 쓰면 지키지 못할 약속이
   되고, 방침이 지키지 못할 약속을 적는 것은 고지가 아니라 그 반대입니다.
 - **국가 이름과 subprocessor 목록을 쓰지 않았습니다.** Q11의 잔여 항목이며,

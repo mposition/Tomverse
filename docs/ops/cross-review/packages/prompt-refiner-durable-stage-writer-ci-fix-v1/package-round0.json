@@ -1,0 +1,89 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+  "round": 0,
+  "baseCommit": "29d7f98a4986ae8d1226854a43ed785b5086fd9f",
+  "lineage": [],
+  "inheritedFindings": [],
+  "changeDigest": "sha256:be274d65f2843093db0c834d83e70ebcbb62c52adcf4704a2cb77a5dcecd6939",
+  "commit": "a3119753bd874b433d13f98427bebaa47425eaca",
+  "headCommit": "a3119753bd874b433d13f98427bebaa47425eaca",
+  "worktreeDirty": false,
+  "changeSummary": "PR #1555 CI failures are fixed without expanding product behavior: FK-aware integration cleanup names dependent stage tables without CASCADE; fallback boundary permits only content-free source identity binding; Linux dependency declarations under node_modules are external while workspace sources remain local; protected-writer exceptions are exact-path/count read/lock declarations. Before packaging, the complete unit suite passed (server 9786 pass, 0 fail, 1 skipped; client 58 pass), the isolated PostgreSQL 17 accounts lane passed, and focused tests/typecheck/lint/strict encoding passed. No product database, provider, Railway management API, credential lookup, stage mutation, flag activation, or paid call occurred.",
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/automaticFallbackBoundary.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/protectedTableWriters.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 34251.4216",
+      "durationMs": 34403
+    }
+  ],
+  "guardCommands": [
+    "npm run check:protected-table-writers",
+    "npm run typecheck",
+    "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "npm run check:doc-references",
+    "npm run check:encoding:strict",
+    "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- ."
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "ected table writer check passed: 2019 source file(s) analysed; no direct AdminAuditLog write found outside lib/adminAudit.ts; no direct MarketingChannel write found outside lib/marketingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts.",
+      "durationMs": 6829
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 81060
+    },
+    {
+      "rule": "npx eslint scripts/check-protected-table-writers-core.mjs tests/automaticFallbackBoundary.test.mjs tests/integration/admin-audit-chain-writer.db.test.ts tests/integration/marketing-automation-schema.db.test.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 47557
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 898 referenced path(s) across 116 instruction document(s), and 1009 path(s) named by comments across 3025 source file(s), all present.",
+      "durationMs": 2367
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 4977
+    },
+    {
+      "rule": "git diff --check 29d7f98a4986ae8d1226854a43ed785b5086fd9f HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 66
+    }
+  ],
+  "producedAt": "2026-09-18T15:36:54.265Z",
+  "diff": "diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md\nnew file mode 100644\nindex 00000000..bb71c480\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md\n@@ -0,0 +1,35 @@\n+# Prompt Refiner durable stage writer CI 후속 수정 Claude 독립 검토 제한 승인\n+\n+Codex가 현재 대화의 사용자 승인을 기록한다. 사용자 메시지의 시각은 기록하거나\n+추정하지 않는다. 이 문서는 전자서명, 검토 통과, 구현 승인 또는 제품 실행 승인이\n+아니다.\n+\n+## 승인 문구와 적용 범위\n+\n+현재 대화에서 사용자는 다음과 같이 지시했다.\n+\n+> 네 권장 순서로 자동으로 진행해주세요. 단, 독립 검토 필요시에는 꼭 Claude에 요청해주세요. --skip-preflight 예외 또한 승인합니다.\n+\n+이 승인은\n+[검토 task](prompt-refiner-durable-stage-writer-ci-fix-v1.task.json)에 정의된 새\n+exchange의 Claude 읽기 전용 독립 검토에만 적용한다. author는 Codex,\n+reviewer는 Claude이며 exact base는\n+`29d7f98a4986ae8d1226854a43ed785b5086fd9f`이다. writable scope는 CI 후속\n+수정 5개 경로와 이 task 및 authorization 2개 경로인 exact 7개이고 generated\n+paths는 비어 있다.\n+\n+## 유지되는 경계\n+\n+- Claude는 저장된 Claude Max `claude.ai` 로그인으로 `claude --print\n+  --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools\n+  Read,Grep,Glob --strict-mcp-config`를 사용한다. shell, write, 추가 MCP, 모델\n+  override는 허용하지 않는다.\n+- review child 환경에서 `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 제거하고\n+  `claude auth status --json`이 `authMethod=claude.ai`,\n+  `subscriptionType=max`임을 확인한다. 실패하면 API key 방식으로 전환하지 않는다.\n+- `--skip-preflight`만 허용하며 `--review-despite-check-failures`와 test/CI 우회는\n+  금지한다.\n+- 최초 검토와 actionable finding 대응 후 최대 두 번의 수정 검토만 허용한다.\n+- Prompt Refiner provider/model 호출, external 또는 Railway API, credential 조회,\n+  stage mutation, flag/rollout, 유료 실행과 실제 지출은 승인하지 않는다.\n+- 이 기록의 작성·검증·커밋은 검토 통과, push, merge 또는 deploy 승인이 아니다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json\nnew file mode 100644\nindex 00000000..d87fb240\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json\n@@ -0,0 +1,24 @@\n+{\n+  \"taskId\": \"prompt-refiner-durable-stage-writer-ci-fix-v1\",\n+  \"requirement\": \"PR #1555의 Prompt Refiner durable stage writer가 추가한 외래 키, runtime source manifest, 설치 의존성 해석과 SQL 상수 때문에 기존 CI가 실패한 부분을 정확한 최소 예외와 FK-aware test cleanup으로 정합화한다. AdminAuditLog test cleanup은 PromptRefinerReservation 및 PromptRefinerReservationStage와 함께 명시적으로 truncate하되 CASCADE를 쓰지 않는다. automatic fallback 경계는 fallback source의 content-free digest manifest만 허용하고 exports 조회나 dispatch를 허용하지 않는다. runtime source closure는 node_modules 아래 설치 의존성 선언을 외부로 취급하되 realpath가 packages/*로 돌아오는 workspace source는 계속 local closure에 포함한다. protected-table writer 예외는 새 migration과 constant LOCK TABLE statement의 실제 동작·개수에 exact-match하며 protected table write를 허용하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.\",\n+  \"completionCriteria\": [\n+    \"두 PostgreSQL integration test의 cleanup은 PromptRefinerReservation, PromptRefinerReservationStage, AdminAuditLog를 한 TRUNCATE statement에 명시하고 CASCADE를 사용하지 않는다.\",\n+    \"automaticFallbackBoundary의 새 exact allowlist는 lib/promptRefinerStageAdmissionCore.ts가 providerFallbackCandidates source bytes를 content-free manifest에 결속하는 경우만 설명하며 fallback exports 조회 또는 model dispatch를 숨기지 않는다.\",\n+    \"runtime source closure는 Linux checkout 내부 node_modules resolution을 external dependency로 제외하면서 workspace realpath source와 @/* alias source를 계속 local closure에 포함하고 새 경계를 테스트한다.\",\n+    \"protected-table writer allowlist는 20260918130000 migration의 AdminAuditLog read-only FK/guard reference와 promptRefinerStageAdmission.ts의 constant ModelRegistryEntry lock만 exact path/count로 허용하며 실제 protected table write를 허용하지 않는다.\",\n+    \"관련 focused tests, full unit suite, PostgreSQL accounts integration lane, TypeScript, ESLint, strict encoding 및 diff whitespace 검사가 통과한다.\",\n+    \"변경은 CI 정합성으로 한정되고 Prompt Refiner product/provider/network/credential/stage seed/flag/rollout/spending 경계를 바꾸지 않는다.\",\n+    \"Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다.\"\n+  ],\n+  \"baseCommit\": \"29d7f98a4986ae8d1226854a43ed785b5086fd9f\",\n+  \"writableScope\": [\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json\",\n+    \"scripts/check-protected-table-writers-core.mjs\",\n+    \"tests/automaticFallbackBoundary.test.mjs\",\n+    \"tests/integration/admin-audit-chain-writer.db.test.ts\",\n+    \"tests/integration/marketing-automation-schema.db.test.ts\",\n+    \"tests/promptRefinerRuntimeSourceClosure.test.mjs\"\n+  ],\n+  \"generatedPaths\": []\n+}\ndiff --git a/scripts/check-protected-table-writers-core.mjs b/scripts/check-protected-table-writers-core.mjs\nindex af6f8854..bb28b3b0 100644\n--- a/scripts/check-protected-table-writers-core.mjs\n+++ b/scripts/check-protected-table-writers-core.mjs\n@@ -291,11 +291,19 @@ export const RAW_SQL_ALLOWLIST = [\n     reason:\n       \"The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.\",\n   },\n+  {\n+    path: \"prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql\",\n+    table: \"AdminAuditLog\",\n+    tableMentions: 2,\n+    writeVerbs: 14,\n+    reason:\n+      \"The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.\",\n+  },\n   {\n     path: \"scripts/report-unswept-tables-core.mjs\",\n     table: \"MarketingReport\",\n     tableMentions: 1,\n-    writeVerbs: 2,\n+    writeVerbs: 4,\n     reason:\n       \"The retention registry's prose: one entry says an AI visibility run has the same shape as MarketingReport's, and other entries in the file use the words delete and update. A report; it opens no database connection.\",\n   },\n@@ -368,6 +376,12 @@ export const RUNTIME_SQL_ALLOWLIST = [\n     count: 1,\n     reason: \"LOCK TABLE \\\"ModelRegistryEntry\\\" IN SHARE MODE, a constant string.\",\n   },\n+  {\n+    path: \"lib/promptRefinerStageAdmission.ts\",\n+    count: 1,\n+    reason:\n+      \"LOCK TABLE \\\"ModelRegistryEntry\\\" IN SHARE MODE before validating the pinned model row; the SQL is a constant and names no protected table.\",\n+  },\n   {\n     path: \"scripts/audit-image-backfill.mjs\",\n     count: 7,\ndiff --git a/tests/automaticFallbackBoundary.test.mjs b/tests/automaticFallbackBoundary.test.mjs\nindex f0676445..84f0e4a1 100644\n--- a/tests/automaticFallbackBoundary.test.mjs\n+++ b/tests/automaticFallbackBoundary.test.mjs\n@@ -174,6 +174,8 @@ test(\"only the surfaces that offer a choice import the fallback table\", () => {\n       \"names models still reachable in a provider-budget refusal, before any stream exists\",\n     \"components/chat/ProviderStatusBanner.tsx\":\n       \"renders those candidates for the user to pick from\",\n+    \"lib/promptRefinerStageAdmissionCore.ts\":\n+      \"binds the fallback table's source bytes into a content-free runtime manifest; it does not read the table's exports or dispatch a model\",\n   };\n \n   // The allowlist keys are POSIX-shaped literals, so the separator is\ndiff --git a/tests/integration/admin-audit-chain-writer.db.test.ts b/tests/integration/admin-audit-chain-writer.db.test.ts\nindex 2784d0f8..a7c8c6cc 100644\n--- a/tests/integration/admin-audit-chain-writer.db.test.ts\n+++ b/tests/integration/admin-audit-chain-writer.db.test.ts\n@@ -23,7 +23,13 @@ import { prisma } from \"@/lib/prisma\";\n const SECRET = \"admin-audit-chain-writer-db-secret-0032\";\n \n const reset = () =>\n-  prisma.$executeRawUnsafe(`TRUNCATE TABLE \"AdminAuditLog\" RESTART IDENTITY`);\n+  prisma.$executeRawUnsafe(`\n+    TRUNCATE TABLE\n+      \"PromptRefinerReservation\",\n+      \"PromptRefinerReservationStage\",\n+      \"AdminAuditLog\"\n+    RESTART IDENTITY\n+  `);\n \n const session = {\n   user: { id: \"admin-chain-writer\", email: \"owner@example.test\" },\ndiff --git a/tests/integration/marketing-automation-schema.db.test.ts b/tests/integration/marketing-automation-schema.db.test.ts\nindex d1038597..f7b0371b 100644\n--- a/tests/integration/marketing-automation-schema.db.test.ts\n+++ b/tests/integration/marketing-automation-schema.db.test.ts\n@@ -294,7 +294,13 @@ beforeEach(async () => {\n   previousAuditKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;\n   process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_SECRET;\n   await reset();\n-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE \"AdminAuditLog\" RESTART IDENTITY`);\n+  await prisma.$executeRawUnsafe(`\n+    TRUNCATE TABLE\n+      \"PromptRefinerReservation\",\n+      \"PromptRefinerReservationStage\",\n+      \"AdminAuditLog\"\n+    RESTART IDENTITY\n+  `);\n });\n \n after(async () => {\ndiff --git a/tests/promptRefinerRuntimeSourceClosure.test.mjs b/tests/promptRefinerRuntimeSourceClosure.test.mjs\nindex 58fdb3cd..e689be8f 100644\n--- a/tests/promptRefinerRuntimeSourceClosure.test.mjs\n+++ b/tests/promptRefinerRuntimeSourceClosure.test.mjs\n@@ -203,6 +203,9 @@ const compilerAliasCouldBeLocal = (specifier) =>\n       : specifier.startsWith(pattern.slice(0, star)) && specifier.endsWith(pattern.slice(star + 1));\n   });\n \n+const isInstalledDependencyResolution = (path) =>\n+  path.replaceAll(\"\\\\\", \"/\").split(\"/\").includes(\"node_modules\");\n+\n const resolveLocalRuntimeImport = (fromPath, specifier) => {\n   const workspace = workspaceForSpecifier(specifier);\n   const resolution = ts.resolveModuleName(\n@@ -214,6 +217,11 @@ const resolveLocalRuntimeImport = (fromPath, specifier) => {\n   if (resolution) {\n     const resolvedReal = realpathSync.native(resolution.resolvedFileName);\n     const path = relative(repositoryRootReal, resolvedReal);\n+    // npm installs external packages below node_modules inside the checkout on\n+    // Linux, while a Windows junction may resolve outside the checkout. Treat\n+    // both layouts alike. Workspace links realpath back to packages/* and are\n+    // still included by the local-runtime branch below.\n+    if (isInstalledDependencyResolution(path)) return null;\n     const inside = path !== \"..\" && !path.startsWith(`..\\\\`) && !path.startsWith(\"../\") && !isAbsolute(path);\n     if (inside) {\n       assert.equal(\n@@ -1139,6 +1147,12 @@ test(\"closure parser binds aliases and every supported runtime module loading fo\n   }\n });\n \n+test(\"installed dependency declarations are external but workspace sources remain local\", () => {\n+  assert.equal(isInstalledDependencyResolution(\"node_modules/next-auth/next.d.ts\"), true);\n+  assert.equal(isInstalledDependencyResolution(\"packages/example/node_modules/dependency/index.d.ts\"), true);\n+  assert.equal(isInstalledDependencyResolution(\"packages/chat-core/src/index.ts\"), false);\n+});\n+\n test(\"TypeScript options and workspace metadata control local resolution\", () => {\n   assert.equal(resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"@/lib/adminAudit\"), \"lib/adminAudit.ts\");\n   assert.equal(resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"@tomverse/chat-core\"), \"packages/chat-core/src/index.ts\");\n"
+}

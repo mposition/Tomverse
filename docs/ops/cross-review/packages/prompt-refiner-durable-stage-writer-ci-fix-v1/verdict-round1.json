@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-18T16:18:52.896Z",
+  "durationMs": 209370,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 26,
+    "cachedInputTokens": 512707,
+    "outputTokens": 15479,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.2795685000000003,
+    "raw": {
+      "input_tokens": 26,
+      "cache_creation_input_tokens": 62791,
+      "cache_read_input_tokens": 512707,
+      "output_tokens": 15479,
+      "output_tokens_details": {
+        "thinking_tokens": 11023
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 62791,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 5145,
+          "cache_read_input_tokens": 62203,
+          "cache_creation_input_tokens": 5330,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 5330
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-18T16:22:22.328Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:08d76228dd3170f4066025677c73f05bf6ed67265c6edabc99c8dbf28f718546",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "scripts/check-protected-table-writers-core.mjs:303-308",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The diff also recalibrates a third allowlist entry (scripts/report-unswept-tables-core.mjs, MarketingReport writeVerbs 2 -> 4), which the completion criterion's \"only the 20260918130000 migration and promptRefinerStageAdmission.ts\" wording does not mention, and the entry's reason text does not name the Prompt Refiner prose that accounts for the two added verbs.",
+        "reproduction": "Grep scripts/report-unswept-tables-core.mjs for whole-word write verbs inside string literals: line 52 (\"...no seed or update/delete path\", added by PR #1555's PromptRefinerReservationStage entry) contributes `update` and `delete`; line 78 (\"a delete the database refuses\") and line 107 (\"not a delete\") contribute the other two. Count = 4, matching the new value, and `npm run check:protected-table-writers` passes in both directions, so the edit is required and grants nothing new; only the criterion's enumeration and the reason prose are out of step."
+      },
+      {
+        "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:224",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The `workspace === null` gate closes round 0's finding for recognised workspace packages, but a `@tomverse/*` specifier that is not a workspace name (workspaceForSpecifier returns null) and resolves under node_modules is still classified external without reaching the `local workspace import resolved outside repository` assertion at line 234.",
+        "reproduction": "Add a scoped dependency `@tomverse/anything` under node_modules that is not one of packages/*|apps/* (so workspacePackages has no entry for it) and call `resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"@tomverse/anything\")`: it returns null via the new early return instead of failing the @tomverse assertion. For every name actually in package.json workspaces the fix is correct — npm's link realpaths back to packages/*, and a real copy under node_modules now falls through to `inside === true` and fails loudly on the pinned 186-path list, which is the intended direction."
+      }
+    ],
+    "nextAction": "Approve as CI-conformance-only: the three suites now truncate PromptRefinerReservation, PromptRefinerReservationStage and AdminAuditLog in one statement with no CASCADE (the FK graph Reservation -> Stage -> AdminAuditLog has no other dependents, so the no-CASCADE form is complete), the fallback allowlist entry matches the path-literal-only mention at lib/promptRefinerStageAdmissionCore.ts:210 with no import, export read or dispatch, the migration entry's tableMentions 2 / writeVerbs 14 and the single $executeRawUnsafe LOCK TABLE in lib/promptRefinerStageAdmission.ts:440 match the checker's exact-count rule, and both remaining items above are nits the author may take or leave."
+  }
+}

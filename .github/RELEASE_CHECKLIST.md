@@ -53,6 +53,123 @@ Date / timezone:    ____________________
       (`forbidden_nextjs_imports_in_shared_packages`) and proves every
       workspace package still type-checks with no DOM, no Node types and no
       app alias
+- [ ] `npm run check:capacitor-local-bundle` — scans every `capacitor.config.*`
+      for `server.url`, `server.cleartext` and `server.allowNavigation`. All
+      three are documented by Capacitor as not for production, and a remote
+      `server.url` is refused by the delivery plan (§2) and the mobile
+      authentication policy ("Deliberately excluded") because it changes the
+      origin the bearer-token boundary is defined against. Read as text, so a
+      URL supplied through an environment variable is still a finding
+- [ ] 모바일 인증 키링 검사 — 이 배포가 모바일 인증을 **서비스하는지**에 따라 명령이
+      갈립니다. 한 항목이고, 둘 중 하나를 실행해 통과시킵니다.
+      - 서비스하는 배포: 로컬 PC의 PowerShell, clone 폴더 안에서
+        `./scripts/ops/Check-MobileAuthKeyring.ps1 ... -RequireConfigured`.
+        **배포하려는 값**으로 돌립니다 — 지금 설정된 것이 아니라. 링 두 개는
+        script가 `Read-Host -AsSecureString`으로 받으므로 명령 이력에 남지 않습니다.
+        `-RequireConfigured`가 필요한 이유는, 없으면 아무것도 설정되지 않은 상태가
+        통과해서 변수를 불러오지 않은 셸에서도 초록이 되기 때문입니다
+      - 서비스하지 않는 배포: `npm run check:mobile-auth-keyring` — 완전 미설정을
+        정상으로 통과시키되 **일부만** 설정된 상태는 여전히 실패합니다
+
+      어느 쪽이든 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지 않은
+      키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 — CI에는
+      모바일 키가 없습니다. 절차와 한계는 `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 전 `-Mode preflight` 확인** —
+      `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1 ... -Mode preflight`를
+      **Active 값으로** 돌려, 지금 돌고 있는 배포가 Active의 재료를 쓰고 있는지 봅니다.
+      실패하면 **배포하지 않습니다**: Active를 기준으로 Railway를 복구하고 다시 확인합니다.
+      이 확인이 덮는 것은 활성 서명 키·활성 pepper·`iss`·`aud`이고, 유예 지난 잔여 항목은
+      덮지 않습니다(§2.2)
+- [ ] 모바일 인증을 서비스하는 배포라면 **1Password vault `Tomverse Production Secrets`의
+      `Mobile Auth Keyrings — Active`가 Railway 값과 일치**함 —
+      `docs/ops/mobile-auth-key-rotation.md` §2.2(2026-09-02 승인). 대조 대상은 **Active
+      뿐입니다**: `Pending`은 다음 배포 후보이므로 배포 전에 Railway와 다른 것이
+      정상입니다. Active가 어긋나면 이번 배포와 무관한 드리프트이므로 배포를 중단하고,
+      Active를 기준으로 복구한 뒤 §2.1 검사와 단일 staged 배포를 다시 합니다
+- [ ] 모바일 인증을 서비스하는 배포이고 **Pending 항목이 있다면**
+      `npm run check:mobile-auth-store-entries -- --active <Active 사본> --pending <Pending 사본>`
+      — 두 항목의 **비밀이 아닌 절반**(`kind`·`phase`·`rotationId`·`createdAt`·
+      fingerprint·`targetSha`·`deploymentId`)이 §2.2의 모양인지, 그리고 Pending이 이미
+      끝난 회전의 잔여물이 아닌지(같은 `rotationId`·같은 fingerprint·같은 deployment ID·
+      Active보다 이른 `createdAt`)를 봅니다. **링을 사본에 붙여 넣으면 실패합니다.**
+      **이것은 구조 검사이지 배포 결속이 아닙니다** — deployment ID를 포함한 모든 값을
+      사람이 손으로 적으므로, 통과가 "그 배포에 그 재료가 들어 있다"를 뜻하지 않습니다
+      (§2.2·§6의 5번). fingerprint는 `algorithm`·`value`가 비어 있지 않은지만 보며,
+      **계산 규칙은 아직 미결입니다**(§6의 2번)
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 후
+      `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1` → Pending 승격** — 통제된
+      exchange를 한 번 성공시켜 access token · refresh token과 그때 생긴
+      `MobileRefreshRotation` 행의 `secretDigest`·`pepperKid`를 모아 Pending 값으로
+      실행합니다. `-Mode rotation`과 `-BindingTolerance`를 **명시합니다**(둘 다 기본값이
+      없습니다. 관용은 Active가 결속 이전 세대이면 `open`, 결속을 가진 세대로 승격된
+      뒤에는 `closed`입니다). `-DeploymentId`에는 Pending에 적은 deployment ID를,
+      `-MintedByDeploymentId`에는 그 행의 값을 넣습니다(컬럼이 `NULL`이면 비웁니다).
+      **`PASS`는 "건네준 증거가 후보 재료로 만들어졌고, 양쪽이 기대한 deployment ID를
+      이름 댄다"까지 말합니다** — 그 이름 대기는 **자기 신고**이고 기대값은 사람이 손으로
+      적은 값이므로 "그 배포에서 나왔다"는 증명이 아닙니다(§2.2 rev.19). **재사용과
+      중복 제출은 어느 축도 잡지 못합니다.** 증거를 판정할 수 없으면
+      (만료·파싱 실패) 안내는 **보류·재수집**이지 롤백이 아니며, **같은 실행의 재료
+      불일치도 배포의 것으로 보지 않습니다** — 이전 키로 만든 낡은 증거가 새 후보와
+      어긋나는 것은 당연하기 때문입니다.
+      **증거는 15분 안에 모읍니다** — 재료 대조는 나이를 못 보므로 오래된 token은 "그때
+      맞았다"만 증명합니다. 신선함이 배제하는 것은 **오래된 증거**이고, "이 배포의
+      것"까지 증명하지는 않습니다(§2.2·§6의 5번). **그 exchange 세션은 폐기합니다.** **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
+      pepper가 들어가도 id 대조는 통과하고, 그 값이 Active로 승격되면 롤백이나 다음
+      회전에서 토큰이 끊깁니다. **통과한 뒤에만** Pending을 Active로 승격합니다. **통과하지 못했을 때는 두
+      갈래입니다** — 증거 불충분이면 **아무것도 바꾸지 않고** 증거를 다시 모아 다시
+      돌리고, 재료 불일치이면 Pending의 deployment ID를 기준으로 롤백하고 Pending을
+      폐기합니다. 그 exchange
+      세션은 폐기합니다 — 진짜 자격증명입니다. 배포 **후** 항목이므로 §7.6과 함께
+      기록합니다
+- [ ] 모바일 인증을 서비스하는 배포라면 **세 시료 회차**(§3의 6a) — 위 검증을 `iat`
+      기준 **2분 이상 간격으로 세 번** 하고(`-SummaryPath`로 run 파일을 남깁니다),
+      `npm run judge:mobile-auth-binding-round -- --round 1 <셋>`으로 **함께** 판정합니다.
+      하나라도 다르면 **그 회차는 미판정이고 재시도하지 않습니다** — 통과할 때까지 다시
+      뽑는 것은 통과 조건을 다시 뽑는 것입니다. 2회차 이상은 **사람이 재개를 결정**하고
+      `--resumed-by`로 기록합니다. **이 회차는 배포 안정화도, 구버전이 죽었다는 것도
+      증명하지 않습니다** — 기록에 적는 확률에는 명령이 출력하는 모형 단서를 함께
+      적습니다
+- [ ] 모바일 인증을 서비스하는 배포라면 **이전 세대 확인**(유예 안) — 배포 **전에** 받아
+      둔 access token이 아직 받아들여지고, 배포 전에 받아 둔 refresh token이 회전에
+      성공하는지. 이것이 증명하는 것은 **새 배포가 이전 세대를 계속 받아 준다**는 정방향
+      호환성이고, 배포 순간 아무도 로그아웃되지 않는 이유입니다. **롤백 호환성이
+      아닙니다** — 되돌린 배포에는 새 키가 없으므로 배포 이후 발급된 자격증명은 전부
+      거절되며, 그것이 롤백의 값입니다(§2.2). 실패가 뜻하는 것도 롤백 불가가 아니라
+      **지금 이 배포가 그 세대를 끊고 있다**는 것입니다. **다만 시료가 아직 유효한지
+      먼저 봅니다** — access token은 10분짜리라 증거 수집이 길어지면 스스로 만료되고,
+      refresh token은 **1회용이라 `exp` 이전이어도 이미 소비됐으면 `reuse_detected`**
+      입니다(그 실행이 family를 폐기하므로 그 세션은 버립니다). 둘 다 시료 문제이지
+      배포 문제가 아니므로 `미판정`이고 롤백 근거가 아닙니다. **응답은 그 구분을 주지
+      않습니다** — refresh는 다섯 가지를 전부 `MOBILE_REFRESH_REJECTED` 하나로 답하므로
+      (D15), 판정은 시료의 `familyId`와 실행 시각으로 좁힌 `MobileAuthEvent`의
+      `event`·`reason`에서 읽습니다. **시료는 앱이 들고 있지
+      않은 통제된 세션에서 받습니다** — 자동 refresh가 시료를 소비합니다(§3의 7번) 은퇴 항목은 이것 말고 관측 경로가
+      없습니다. 실패하면 승격하지 않습니다
+- [ ] 모바일 인증을 서비스하는 배포이고 `op run`으로 링을 주입한다면
+      `./scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` — `docs/ops/mobile-auth-op-env.template`이
+      **reference만 담고 링 둘만 담는지**(평문 링이 커밋되면 여기서 걸립니다), 그리고
+      주입된 값이 프롬프트에 덮어써지지 않고 검사기까지 가는지를 **합성값으로**
+      고정합니다(16건). **1Password는 실행되지 않습니다** — 실제 vault 해석은 별개
+      항목이며 이 검사로 대체되지 않습니다
+- [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`
+      — 배포 후 wrapper가 지키는 계약을 고정합니다(17 사례). 이쪽은 링 둘에 더해 **live
+      credential 둘**(access·refresh token)을 다루므로, 같은 부재 계약이 더 중요합니다.
+      출력을 release SHA와 함께 §8에 붙입니다
+- [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-CheckMobileAuthKeyring.ps1`
+      — wrapper가 지키는 다섯 가지(비밀이 parameter에 없음 / 출력에 없음 / 성공·실패·
+      중단 뒤 환경에 없음 / 검사기의 종료 코드를 그대로 반환 / `op run`이 주입한 링을
+      프롬프트가 덮어쓰지 않음)를 고정합니다. **전부 부재라서 검토로는 안 보입니다.** 자격증명도 네트워크도 필요 없고 실제 `npm`을
+      부르지 않습니다. 출력(19 사례)을 release SHA와 함께 §8에 붙입니다 — 비밀 유출은
+      되돌릴 수 없으므로 "돌렸다"가 아니라 기록이 증거입니다. 개발 중 통과 기록은 Linux의
+      PowerShell 7.4.6, Windows의 PowerShell Core 7.6.4, Windows PowerShell
+      5.1.19041.6456 셋 다 있지만 **전부 최종 release SHA가 아닙니다.** 막으려는 것이 운영자의 Windows PowerShell 습관이므로
+      이 항목은 그 셸에서 그 SHA로 돌린 기록을 요구하고, 그래서 CI 항목이 아닙니다
+- [ ] `npm run check:native-token-boundary` — scans everything `apps/mobile`
+      ships for the three endpoints whose responses carry a refresh token, and
+      for the field name itself. D19 states the rule as an absence — the bridge
+      hands JavaScript an access token and an expiry, and nothing else — and an
+      absence is what review is worst at seeing. It does **not** establish what
+      a real device does; `AUTH-03`'s evidence is a physical check
 - [ ] `npm run check:push-scope` — reports PUSH-01's metric
       (`unapproved_push_infrastructure_components_in_v1`). The gate is met by an
       absence, so this is the artefact that states it; approving a use case is
@@ -67,6 +184,15 @@ Date / timezone:    ____________________
       as a required argument. The three NOT VALID CHECKs all pass
       `productKey IS NULL`, so they stop wrong combinations and not omissions;
       this is what stops omissions (decision record v1.2 §6)
+- [ ] `npm run check:protected-table-writers` — the audit log has one writer
+      module (`lib/adminAudit.ts`). This refuses the direct writes it can read in
+      source: a delegate write, a string naming the delegate, a computed
+      delegate, raw SQL naming the table beside a write verb, and the
+      runtime-SQL spellings it lists. It does not by itself prove no other
+      write exists; the database refuses UPDATE and DELETE and checks that a
+      hashed insert links to the chain head
+      (`prisma/migrations/20260918090000_admin_audit_log_append_only`)
+      (docs/policy/marketing-automation.md §6)
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:starter-catalog` — proves every Chat starter card is still
       true: its flag key is a constant some module exports rather than a
@@ -78,6 +204,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
+      is structurally sound (a case with an unstated `goldCompleteness` or a
+      `prompt_injection` case with no marker produces numbers over the wrong
+      denominators rather than an error) and that no reviewer pair is marked
+      `approved` without the evidence
+      `docs/policy/ai-review-m5-quality-contract.md` §3 requires. Passing with
+      nothing approved is the expected state, not a gap
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
 - [ ] `npm run check:unconsumed-response-bodies` — the other half of that
@@ -93,6 +226,10 @@ Date / timezone:    ____________________
       own literal, so moving the sending domain moved one of them and no health
       check could tell: a check only sees the senders that ask it
       (docs/ops/email-sending-domains.md §1.2)
+- [ ] `npm run check:send-entry-points` — proves every customer-facing send
+      reaches the provider only through the address lock and suppression
+      re-check, while the one operator-only path chooses its configured
+      recipient rather than accepting an arbitrary address from a caller
 - [ ] `npm run check:email-provider-port` — proves the provider seam is still
       two methods over one implementation, and that nothing posts to the send
       endpoint around it. Templates, contacts and segments stay in our own
@@ -102,6 +239,14 @@ Date / timezone:    ____________________
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`
+- [ ] `npm run check:router-decision-preregistration` — `n` is still the
+      number that was frozen before the run, under the version it was
+      frozen as, and no more than one registration is active
+- [ ] `npm run check:router-human-review` — the human sample that
+      calibrates the model judges holds the shape it was drawn with:
+      four primary and two reserve per cell, no pair in both, no
+      substitution recorded against a verdict, and no diagnostic pair
+      inside the primary sixty
 - [ ] `npm run check:auto-rollout-readiness`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`
@@ -111,6 +256,37 @@ Date / timezone:    ____________________
       `MEMORY_EVAL_DATASET_FROZEN` claims a freeze the conditions of
       docs/ops/memory-extraction-eval-dataset.md §7.1 do not support;
       while the dataset is still being authored it reports progress
+- [ ] `npm run check:memory-eval-succ6` — the frozen decision set against
+      its signed manifest: the sample, the digests and the signature, none
+      of which `check:memory-eval-freeze` reads. It checks freeze
+      *conditions*, so succ-6 could lose a case and that check would still
+      pass
+- [ ] `npm run check:memory-eval-succ7` — the successor's own invariants,
+      which nothing else covers because succ-7 is not the harness target:
+      1,150 cases with every cell count preserved, 54 same-cell 1:1
+      replacements, the `assistant_only` subtype composition rather than
+      merely its floor, no case in both the decision set and the
+      regression corpus, the decision loader unable to import that corpus,
+      `frozen` kept out of the manifest's identity so the digest a
+      reviewer signs is the digest that gets frozen, and no claim of
+      adoption while the review sheet carries no signature
+- [ ] `npm run check:memory-eval-succ8` — the harness target, and the
+      dataset a signature is pending on. Its manifest is a pinned literal
+      compared with the builder rather than the builder compared with
+      itself, the record is re-hashed from its own fields so a field
+      edited with the digest left alone is caught, the contract-only
+      claim holds in both directions (the sample did not move, the
+      contract did), and the approval is all five signed fields or none —
+      a name without digests approves nothing in particular
+- [ ] `npm run check:memory-eval-succ9` — the successor that retires the five
+      cases the `mem-extract-v8` example kind was selected from. It proves
+      those five are out of the decision set *and* preserved runnable in the
+      regression corpus, because a retirement that deletes is a different act
+      from one that moves; that the replacements match their originals in
+      category, language, kind and polarity, so a 1:1 claim is a 1:1 fact; and
+      that succ-8 was not edited, since it is signed and a case removed from it
+      would void that signature. Unsigned by design until somebody signs its
+      two digests
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
@@ -124,6 +300,13 @@ Date / timezone:    ____________________
       shipped 105 citations of sections 31, 32 and 42 to 46, none of which any
       policy document has, each one beside a path the reference check found
       perfectly valid
+- [ ] `npm run check:consent-copy-immutability` — proves no approved consent
+      version's wording changed against the base revision. The fifty-six strings
+      are what a stored `copyHash` points at, so an edited byte makes an existing
+      consent a record of something nobody can reconstruct. Four designs that
+      compared digests of those strings were each broken by a commit that moved
+      the digest with them; this compares the bytes, and the two document pins
+      beside it are an in-tree signal rather than the guarantee
 - [ ] `npm run check:staging-verification-records` — proves the staging
       checklist still holds no results and every signed run record still
       hashes to what it was signed as. The previous shape kept an approval
@@ -822,6 +1005,48 @@ were still running.
 It is a floor under every lane above and a substitute for none of them: it
 answers "did the checks finish", never "was this exercised anywhere real".
 https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
+
+### 7.9.5 The next full release after `main` has carried a cherry-pick
+
+A `release/**` lane (7.9.1) leaves `main` holding commits that also exist on
+`develop` **as different objects**. The next full `develop` -> `main` release
+meets them again, and how it meets them has to be checked rather than assumed.
+
+**`main` having the files does not mean the branches converged.** On 2026-09-08
+twenty-one Voice commits were cherry-picked to `main` so that a production
+deployment would carry the code an operational check needed. `main` gained 46
+voice files and stayed thousands of commits behind `develop`. Anyone reading
+"main has voice now" as "main and develop agree" would be wrong about
+everything else.
+
+Before merging the next full release, for each commit the earlier cherry-pick
+moved:
+
+- [ ] **Compared by patch, not by SHA.** A cherry-picked commit is a different
+      object with different parents, so `git branch --contains` and any SHA
+      equality answer "not there" about a change that is. `git cherry
+      origin/main origin/develop` marks patch-equivalent commits with `-` and
+      genuinely absent ones with `+`; `git range-diff` shows what changed
+      between the two versions of one
+- [ ] **Both branches' own changes are listed.** `main` is not only behind:
+      hotfixes, deviations and the cherry-picks themselves are on it, and a
+      release that assumes a fast-forward will silently drop them
+- [ ] **Conflict resolutions are recorded.** A resolution the original commit
+      never had is new code on the release, and it is reviewed as new code.
+      The same applies to a resolution made during the original cherry-pick:
+      it is on `main` and not on `develop`, so the merge meets it as a
+      difference
+- [ ] **Checked for the same patch applied twice**, which a merge can produce
+      when one side was cherry-picked and the other later rewritten -- and for
+      a patch **dropped** because the merge resolved it as "already present"
+      when only part of it was
+- [ ] **`main === develop` is never inferred.** After the merge, if the two
+      are meant to agree, `git diff origin/main origin/develop --stat` is empty
+      or its output is explained in the release record
+
+None of this reopens the earlier release. A cherry-pick that was verified and
+signed stays verified and signed; this is about the merge that comes after it,
+which is a different change with its own evidence.
 
 ## 8. Unverified items and waivers
 

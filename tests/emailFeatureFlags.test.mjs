@@ -35,13 +35,19 @@ test("the ADR's three flag names are the keys the code reads", () => {
       `${key} is read by the code but named nowhere in the ADR`
     );
   }
-  // And the other direction: the document names exactly these four. The fourth
-  // is the double opt-in step added to §15.2 in v9.
+  // And the other direction: the document names exactly these five. The fourth
+  // is the double opt-in step added to §15.2 in v9; the fifth is the release
+  // notes product, which is a separate decision from marketing as a whole --
+  // one says this deployment may send marketing at all, the other says this
+  // product may send.
   assert.deepEqual([...EMAIL_FEATURE_FLAG_KEYS], [
     "feature.emailMarketingEnabled",
+    "feature.emailReleaseNotesEnabled",
     "feature.emailCampaignsEnabled",
     "feature.emailConsentReconfirmEnabled",
     "feature.emailConsentConfirmationEnabled",
+    // The sign-up consent devices (S4, 2026-09-29).
+    "feature.emailSignupConsentEnabled",
   ]);
 });
 

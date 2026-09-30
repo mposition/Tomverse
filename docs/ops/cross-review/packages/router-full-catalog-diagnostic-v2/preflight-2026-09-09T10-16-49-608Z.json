@@ -1,0 +1,48 @@
+{
+  "version": "cross-review-preflight-v1",
+  "taskId": "router-full-catalog-diagnostic-v2",
+  "reviewer": "codex",
+  "toolVersion": "codex-cli 0.146.0",
+  "command": [
+    "codex",
+    "--sandbox",
+    "read-only",
+    "exec",
+    "--ignore-user-config",
+    "--json",
+    "-c",
+    "model=gpt-5.6-sol",
+    "-c",
+    "model_reasoning_effort=low",
+    "-c",
+    "windows.sandbox=unelevated",
+    "-c",
+    "windows.sandbox_private_desktop=false",
+    "-"
+  ],
+  "cwd": "H:\\Project\\tomverse-router-diag-20260909",
+  "sandboxSignature": "codex --sandbox read-only exec --ignore-user-config --json -c windows.sandbox=unelevated -c windows.sandbox_private_desktop=false - @ H:\\Project\\tomverse-router-diag-20260909",
+  "expectedReadOutput": "41c1a1d23ac59ca8f6432202a4184e090f5e8a18",
+  "probePath": "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-write-probe-2026-09-09T10-16-29-724Z.txt",
+  "probeLanded": false,
+  "startedAt": "2026-09-09T10:16:29.727Z",
+  "durationMs": 19788,
+  "usage": {
+    "input_tokens": 81250,
+    "cached_input_tokens": 61056,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 288,
+    "reasoning_output_tokens": 117
+  },
+  "exitStatus": 0,
+  "report": {
+    "readOutput": "",
+    "writeAttempted": true,
+    "writeResult": "patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings"
+  },
+  "executorFailure": null,
+  "passed": false,
+  "problems": [
+    "the read did not produce the expected output (expected to contain \"41c1a1d23ac59ca8f6432202a4184e090f5e8a18\")"
+  ]
+}

@@ -4,7 +4,7 @@ import { createPageMetadata } from "@/lib/seo";
 export const metadata = createPageMetadata({
   title: "Chat Workspace Guide",
   description:
-    "Learn how to use Tomverse conversations, projects, personal labels, locks, sharing, model panels, AI Review, files, and credits.",
+    "Learn how to use Tomverse conversations, projects, locks, sharing, model panels, AI Review, files, and credits.",
   path: "/support/help-centre/chat-workspace",
 });
 

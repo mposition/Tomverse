@@ -4,11 +4,12 @@ import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
+import { extendChatReservationExpiry } from "@/lib/chatSecurity";
 import {
-  deserializeReservation,
-  extendChatReservationExpiry,
-  settleChatUsage,
-} from "@/lib/chatSecurity";
+  serializeDeepResearchSettlementUsage,
+  settleDeepResearchJob,
+  type DeepResearchSettlementUsage,
+} from "@/lib/deepResearchSettlement";
 import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
@@ -103,10 +104,21 @@ export async function POST(request: Request) {
       return conversationLockedResponse();
     }
 
-    // Already finalized by a previous poll (e.g. a second open tab) --
-    // return the cached outcome instead of calling Perplexity or settling
-    // credits again.
+    // Already finalized by a previous poll (e.g. a second open tab) -- answer
+    // from the stored outcome instead of calling Perplexity again.
+    //
+    // This poll makes no claim, and answering `completed` here is not one: the
+    // job *is* completed. What it does do is finish a settlement that a killed
+    // process left open. Before it did, this early return was the trap -- the
+    // poll that held the token counts had gone, every later poll returned here
+    // without reaching settlement, and the reservation expired into a full
+    // refund for a job that really cost money (issue #1285).
+    //
+    // Exactly-once is not this branch's to enforce and it does not try: it
+    // goes through the same lock every other caller does, and does nothing
+    // when the reservation is no longer `reserved`.
     if (job.status === "completed" || job.status === "failed") {
+      await settleDeepResearchJob(job);
       return Response.json(
         {
           status: job.status,
@@ -167,14 +179,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const reservationRow = await prisma.chatCreditReservation.findUnique({
-      where: { id: job.reservationId },
-      select: { reservationPayload: true },
-    });
-    const reservation = reservationRow
-      ? deserializeReservation(reservationRow.reservationPayload)
-      : null;
-
     const content = poll.status === "COMPLETED" ? (poll.content || "").trim() : "";
 
     if (poll.status === "COMPLETED" && content) {
@@ -187,6 +191,17 @@ export async function POST(request: Request) {
       // count 0 here (already claimed) or blocks until this commits and
       // then sees count 0 -- either way it can't double-settle the
       // reservation or double-write the Message row.
+      // What settlement will need, written with the claim rather than after
+      // it. Settlement itself cannot join this transaction -- it takes the
+      // credit account lock, and holding that here would serialize every poll
+      // of every job behind one account -- so what crosses the gap is this
+      // row, not a variable in a process that may not survive it.
+      const settlementUsage: DeepResearchSettlementUsage = {
+        inputTokens: poll.inputTokens,
+        outputTokens: poll.outputTokens,
+        outcome: "completed",
+        providerUsageSnapshot: poll.usageSnapshot ?? null,
+      };
       const finalized = await prisma.$transaction(async (tx) => {
         const claim = await tx.perplexityAsyncJob.updateMany({
           where: { id: job.id, status: { in: ["submitted", "in_progress"] } },
@@ -194,6 +209,8 @@ export async function POST(request: Request) {
             status: "completed",
             resultText: storedContent,
             completedAt: new Date(),
+            settlementUsage:
+              serializeDeepResearchSettlementUsage(settlementUsage),
           },
         });
         if (claim.count !== 1) return false;
@@ -209,23 +226,11 @@ export async function POST(request: Request) {
           { headers: { "Cache-Control": "no-store" } }
         );
       }
-      if (reservation) {
-        await settleChatUsage(
-          reservation,
-          {
-            inputTokens: poll.inputTokens,
-            outputTokens: poll.outputTokens,
-            outcome: "completed",
-          },
-          { providerUsageSnapshot: poll.usageSnapshot }
-        ).catch((error) =>
-          console.error("Deep research settlement failed:", {
-            traceId,
-            jobId: job.id,
-            ...safeErrorMetadata(error),
-          })
-        );
-      }
+      // The claimer settles first, because it is here and the money should
+      // land now. If it dies before this returns, the next poll or the
+      // fifteen-minute sweep finishes it from the row above -- and if it
+      // succeeds, both of those find nothing to do.
+      await settleDeepResearchJob({ ...job, settlementUsage, traceId });
       await Promise.all([
         recordProviderSuccess(provider),
         recordModelSuccess(job.modelId),
@@ -247,10 +252,28 @@ export async function POST(request: Request) {
     const diagnosticCode =
       poll.status === "FAILED" ? "DEEP_RESEARCH_JOB_FAILED" : "AI_EMPTY_RESPONSE";
 
+    // Same durable handoff on the failure path. The stakes are lower -- the
+    // refund this owes is what the expiry sweep would have done anyway, so an
+    // interruption here costs delay rather than money -- but a refund the
+    // ledger takes half an hour to notice is still a refund nobody promised
+    // to make, and the same row makes it prompt.
+    const failureSettlementUsage: DeepResearchSettlementUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      outcome: poll.status === "FAILED" ? "failed" : "empty",
+      providerUsageSnapshot: null,
+    };
     const finalizedFailure = await prisma.$transaction(async (tx) => {
       const claim = await tx.perplexityAsyncJob.updateMany({
         where: { id: job.id, status: { in: ["submitted", "in_progress"] } },
-        data: { status: "failed", errorMessage, completedAt: new Date() },
+        data: {
+          status: "failed",
+          errorMessage,
+          completedAt: new Date(),
+          settlementUsage: serializeDeepResearchSettlementUsage(
+            failureSettlementUsage
+          ),
+        },
       });
       if (claim.count !== 1) return false;
       await tx.message.update({
@@ -265,19 +288,11 @@ export async function POST(request: Request) {
         { headers: { "Cache-Control": "no-store" } }
       );
     }
-    if (reservation) {
-      await settleChatUsage(reservation, {
-        inputTokens: 0,
-        outputTokens: 0,
-        outcome: poll.status === "FAILED" ? "failed" : "empty",
-      }).catch((error) =>
-        console.error("Deep research refund failed:", {
-          traceId,
-          jobId: job.id,
-          ...safeErrorMetadata(error),
-        })
-      );
-    }
+    await settleDeepResearchJob({
+      ...job,
+      settlementUsage: failureSettlementUsage,
+      traceId,
+    });
     await Promise.allSettled([
       recordProviderFailure(provider, diagnosticCode, {
         modelId: job.modelId,

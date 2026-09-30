@@ -43,6 +43,7 @@ export type AdminNavBadgeKey =
   | "alerts"
   | "modelLifecycle"
   | "emailCampaigns"
+  | "marketing"
   | "amuxEscalations";
 
 export type AdminNavTab = {
@@ -149,6 +150,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "memory",
       "import",
       "external import",
+      "ai review",
+      "cross review",
+      "comparison review",
+      "reviewer",
     ],
     tabs: [
       {
@@ -165,6 +170,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "imports",
         label: "Imports & memory",
         description: "External conversation import and memory metrics",
+      },
+      {
+        id: "ai-review",
+        label: "AI Review",
+        description: "Reliability, adoption, and reviewer-pair evidence",
       },
     ],
   },
@@ -489,6 +499,100 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "marketing",
+    label: "Marketing",
+    href: "/admin/marketing",
+    description:
+      "Draft queue, published posts, brand accounts, and what the automation reported",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "marketing",
+    aliases: [
+      "social",
+      "posts",
+      "linkedin",
+      "zernio",
+      "campaign",
+      "brand account",
+      "draft queue",
+      "guard",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Queue",
+        description: "Drafts waiting on a person, and what the Guard said about each",
+      },
+      {
+        id: "published",
+        label: "Publish state",
+        description:
+          "Every approved post: waiting, in flight, published, failed, or unconfirmed",
+      },
+      {
+        id: "accounts",
+        label: "Accounts",
+        description: "Brand accounts, their mode, and why a paused one is paused",
+      },
+      {
+        id: "experiments",
+        label: "Experiments",
+        description: "Landing copy experiments and their results",
+      },
+      {
+        id: "reports",
+        label: "Reports",
+        description: "Weekly summaries, competitor facts, and retention runs",
+      },
+      {
+        id: "comments",
+        label: "Comments",
+        description: "Comment alerts the monitor raised and nobody has answered",
+      },
+    ],
+  },
+  {
+    id: "engineering-agent",
+    label: "Engineering agent",
+    href: "/admin/engineering-agent",
+    description:
+      "T2 drafts waiting on a decision, runs, the pull requests the agent opened, and its mode",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    aliases: [
+      "engineering",
+      "agent",
+      "t2 draft",
+      "patch",
+      "pull request",
+      "publisher",
+      "runner",
+      "freeze",
+    ],
+    tabs: [
+      {
+        id: "queue",
+        label: "Owner queue",
+        description: "T2 drafts, decisions and state mismatches waiting on a person",
+      },
+      {
+        id: "runs",
+        label: "Runs",
+        description: "Each run, the mode it started under, how it ended and any halt",
+      },
+      {
+        id: "pull-requests",
+        label: "Pull requests",
+        description: "What the agent bound: pull request, snapshot, approval and merge observations",
+      },
+      {
+        id: "settings",
+        label: "Mode",
+        description: "Mode, freeze, the kill switch and the owner queue against its caps",
+      },
+    ],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",
@@ -756,6 +860,20 @@ export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
   ADMIN_NAVIGATION.find((item) => matchesRoute(pathname, item.href)) || null;
 
 export const ADMIN_DETAIL_ROUTES = [
+  {
+    // Deliberately omitted from ADMIN_NAVIGATION and ADMIN_UNLISTED_PAGES:
+    // those tables feed the palette for every admin role, while this one-shot
+    // cost-authority surface is owner-only and should not be advertised to
+    // roles that receive a 404 from the page and API routes.
+    id: "prompt-refiner-shadow",
+    pattern: /^\/admin\/prompt-refiner-shadow$/,
+    label: "Prompt Refiner shadow run",
+    description:
+      "Owner-only approval and execution for the frozen synthetic shadow run",
+    parentLabel: "Models",
+    parentHref: "/admin/models",
+    group: "AI Platform" as const,
+  },
   {
     id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowRight, BarChart3, Lock, Paperclip, ScreenShare } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import { formatLocalizedInteger } from "@/lib/pricingFormat";
 import { getLandingCopy } from "./landingContent";
-import { ConditionLine, SectionHeading } from "./landingPrimitives";
+import { ModelCatalogueBlock } from "./ModelCatalogueSection";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ProofMetrics = {
@@ -17,12 +18,30 @@ type ProofMetrics = {
   minimumPublicCount: number;
 };
 
-const ITEM_ICONS = [Lock, ScreenShare, Paperclip] as const;
-
 /**
- * Storage, locks, sharing, attachment limits -- and the public 30-day usage
- * counts, which moved here from the walkthrough section because they are a
- * trust signal rather than a workflow one.
+ * What you are actually getting and whether you can rely on it: the model
+ * catalogue and its plan and availability conditions, then storage, locks,
+ * sharing, attachment limits, the provider-processing notice and the public
+ * 30-day counts.
+ *
+ * V1 ran these as two consecutive sections. Both answered the same question
+ * and the split cost a scroll stop for nothing, so the catalogue is the first
+ * block here. It owns the `trust` anchor the header points at.
+ *
+ * ## The one inverted band
+ *
+ * This section is near-black in both themes, and it is the only place on the
+ * page where that happens. It is a deliberate composition rather than a
+ * section that wandered off the palette: V1 alternated `bg-zinc-50` under
+ * every second section, which is the striped rhythm that makes a page read as
+ * a template, and it still ended up putting a dark catalogue box inside a
+ * light section anyway. One committed switch, at the point where the page
+ * stops selling and starts stating what it is bound by, does more than four
+ * grey bands.
+ *
+ * Because the band decides the ink, the shared `ConditionLine` is not used
+ * here: its `zinc-600` would fall below AA on near-black. The conditions keep
+ * their `data-landing-condition` marker so they are still findable as a class.
  *
  * The counts keep their original disclosure verbatim: the API only publishes
  * a figure once it clears a threshold and rounds it down to the nearest ten,
@@ -60,76 +79,92 @@ export function TrustSection() {
       id="trust"
       aria-labelledby="landing-trust-heading"
       data-testid="landing-trust-section"
-      className="border-b border-zinc-200 py-16 dark:border-zinc-800 sm:py-20"
+      className="border-y border-zinc-800 bg-zinc-950 py-14 text-white sm:py-24"
     >
       <div className="mx-auto max-w-7xl px-[16px] sm:px-6 lg:px-8">
-        <SectionHeading
-          title={copy.title}
-          description={copy.description}
-          lang={lang}
-          headingId="landing-trust-heading"
-        />
-
-        <div className="mt-9 grid gap-4 md:grid-cols-3">
-          {copy.items.map((item, index) => {
-            const Icon = ITEM_ICONS[index] ?? Lock;
-            return (
-              <article
-                key={item.title}
-                className="min-w-0 flex flex-col rounded-2xl border border-zinc-200 bg-zinc-50 p-[20px] dark:border-zinc-800 dark:bg-zinc-900/30"
-              >
-                <span className="flex h-[40px] w-[40px] items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
-                  <Icon className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <h3 className="mt-4 text-base font-bold break-words">{item.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300 break-words">
-                  {item.description}
-                </p>
-                {item.condition && <ConditionLine>{item.condition}</ConditionLine>}
-              </article>
-            );
-          })}
+        <div className="landing-reveal max-w-4xl">
+          <h2
+            id="landing-trust-heading"
+            className={`break-words text-3xl font-black leading-[1.02] tracking-[-0.02em] sm:text-5xl lg:text-[3.25rem] ${displayHeadingClass(lang)}`}
+          >
+            {copy.title}
+          </h2>
+          <p className="mt-5 max-w-2xl break-words text-base leading-7 text-zinc-300">
+            {copy.description}
+          </p>
         </div>
 
-        <div className="mt-6 flex flex-col items-start gap-4 lg:flex-row lg:items-center lg:justify-between">
-          {visibleMetrics.length > 0 ? (
-            <article
-              data-testid="landing-proof-metrics"
-              className="w-full rounded-2xl border border-status-success-500/30 bg-status-success-500/5 p-[16px] lg:max-w-2xl"
+        <div className="mt-10">
+          <ModelCatalogueBlock />
+        </div>
+
+        <ul className="landing-reveal mt-10 grid border-t-2 border-zinc-100 md:grid-cols-3">
+          {copy.items.map((item, index) => (
+            <li
+              key={item.title}
+              className={`min-w-0 border-b border-zinc-800 py-[26px] md:border-b-0 ${
+                index < 2 ? "md:border-r md:border-zinc-800 md:pr-[32px]" : ""
+              } ${index > 0 ? "md:pl-[32px]" : ""}`}
             >
-              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-status-success-600">
-                <BarChart3 className="h-4 w-4" aria-hidden="true" />
-                {copy.metricPeriod}
+              <h3 className="break-words text-lg font-black tracking-[-0.01em]">
+                {item.title}
+              </h3>
+              <p className="mt-3 break-words text-sm leading-6 text-zinc-300">
+                {item.description}
               </p>
-              <div className="mt-3 space-y-2">
-                {visibleMetrics.map((metric) => (
-                  <p key={metric.label} className="text-sm">
-                    <strong className="text-lg font-black break-words">
-                      {formatLocalizedInteger(metric.value, lang)}+
-                    </strong>{" "}
-                    <span className="text-zinc-500">{metric.label}</span>
-                  </p>
-                ))}
+              {item.condition && (
+                <p
+                  data-landing-condition="true"
+                  className="mt-4 break-words text-xs font-semibold leading-5 text-zinc-400"
+                >
+                  {item.condition}
+                </p>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        <div className="landing-reveal mt-8 flex flex-col items-start gap-6 border-t border-zinc-800 pt-8 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            {visibleMetrics.length > 0 && (
+              <div data-testid="landing-proof-metrics" className="min-w-0">
+                <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
+                  {copy.metricPeriod}
+                </p>
+                <div className="mt-4 flex flex-wrap gap-x-12 gap-y-4">
+                  {visibleMetrics.map((metric) => (
+                    <p key={metric.label} className="min-w-0">
+                      <strong className="block break-words text-4xl font-black tabular-nums tracking-[-0.02em] sm:text-5xl">
+                        {formatLocalizedInteger(metric.value, lang)}+
+                      </strong>
+                      <span className="mt-1 block break-words text-sm text-zinc-400">
+                        {metric.label}
+                      </span>
+                    </p>
+                  ))}
+                </div>
               </div>
-              <p
-                data-testid="landing-metric-disclosure"
-                className="mt-3 text-[11px] leading-5 text-zinc-500"
-              >
-                {copy.metricDisclosure}
-              </p>
-            </article>
-          ) : (
-            <ConditionLine testId="landing-metric-disclosure">
+            )}
+            <p
+              data-testid="landing-metric-disclosure"
+              data-landing-condition="true"
+              className={`max-w-2xl break-words text-xs leading-5 text-zinc-400 ${
+                visibleMetrics.length > 0 ? "mt-5" : ""
+              }`}
+            >
               {copy.metricDisclosure}
-            </ConditionLine>
-          )}
+            </p>
+          </div>
           <Link
             href="/safety"
             data-testid="landing-safety-cta"
-            className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-zinc-300 px-4 text-sm font-bold text-zinc-800 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            className="group inline-flex min-h-12 shrink-0 items-center gap-2 text-sm font-bold text-white underline underline-offset-4 transition hover:text-zinc-300"
           >
             {copy.safetyCta}
-            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            <ArrowRight
+              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+              aria-hidden="true"
+            />
           </Link>
         </div>
       </div>

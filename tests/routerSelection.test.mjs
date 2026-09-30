@@ -10,6 +10,7 @@ import {
     ROUTER_TTFT_TIE_EPSILON_MS,
 } from "../lib/routerScorePolicy.ts";
 import {
+    rankCandidates,
     ROUTER_SELECTION_VERSION,
     SELECTION_REASONS,
     selectRouterModel,
@@ -400,3 +401,326 @@ test("a model nothing has probed is not demoted for being unprobed", () => {
     assert.equal(result.selectedModelId, "model-b");
 });
 
+
+/**
+ * The cycle a pairwise comparator produced, and the order that replaced it.
+ *
+ * Criterion 3 is cost and criterion 6 is the model id. Give two candidates a
+ * cost and the third none, and a pairwise comparator answers three questions
+ * with two different criteria:
+ *
+ *   model-c vs model-a -> both priced  -> cost      -> model-c (cheaper)
+ *   model-a vs model-b -> b unpriced   -> model id  -> model-a
+ *   model-b vs model-c -> b unpriced   -> model id  -> model-b
+ *
+ * which is `model-c > model-a > model-b > model-c`. `Array.prototype.sort`
+ * meets that with an implementation-defined order rather than an error, so the
+ * winner depended on the order the filters happened to emit.
+ *
+ * The partition refinement answers it once: cost cannot speak for every member
+ * of the group, so it abstains for the group rather than for two of its three
+ * pairs, and the model id -- which is total -- decides.
+ */
+test("a criterion one candidate cannot answer no longer cycles", () => {
+    const signals = {
+        expectedTotalCostUsdByModelId: { "model-c": 0.1, "model-a": 0.5 },
+    };
+    const eligible = candidates("model-c", "model-a", "model-b");
+    const result = selectRouterModel({ profile: plainTurn, eligible, signals });
+
+    assert.equal(result.selectedModelId, "model-a");
+    assert.equal(result.decidedBy, "model_id");
+    assert.deepEqual(result.rankedModelIds, ["model-a", "model-b", "model-c"]);
+});
+
+/**
+ * Permutation invariance, which is the observable half of transitivity.
+ *
+ * A comparator that is not a total preorder does not announce itself; it just
+ * returns a different winner for a different input order. So the property is
+ * checked over every permutation rather than over one reversal, and with
+ * signals deliberately missing for some candidates -- a complete snapshot is
+ * the case that was never in doubt.
+ */
+const permutations = (items) =>
+    items.length <= 1
+        ? [items]
+        : items.flatMap((item, index) =>
+              permutations([
+                  ...items.slice(0, index),
+                  ...items.slice(index + 1),
+              ]).map((rest) => [item, ...rest])
+          );
+
+test("the ranking is the same for every order the filters could emit", () => {
+    const cases = [
+        {
+            name: "one candidate unpriced",
+            modelIds: ["model-a", "model-b", "model-c"],
+            signals: {
+                expectedTotalCostUsdByModelId: { "model-c": 0.1, "model-a": 0.5 },
+            },
+        },
+        {
+            name: "success rate known for some",
+            modelIds: ["model-a", "model-b", "model-c", "model-d"],
+            signals: {
+                expectedTotalCostUsdByModelId: {
+                    "model-a": 1,
+                    "model-b": 1,
+                    "model-c": 1,
+                    "model-d": 1,
+                },
+                recentSuccessRateByModelId: { "model-a": 0.99, "model-c": 0.5 },
+            },
+        },
+        {
+            name: "latency and degradation together",
+            modelIds: ["model-a", "model-b", "model-c", "model-d"],
+            signals: {
+                degradedModelIds: ["model-a"],
+                expectedTotalCostUsdByModelId: {
+                    "model-b": 2,
+                    "model-c": 2.05,
+                    "model-d": 4,
+                },
+                ttftP95MsByModelId: { "model-b": 900, "model-c": 100 },
+            },
+        },
+    ];
+
+    for (const { name, modelIds, signals } of cases) {
+        const orders = permutations(modelIds).map(
+            (order) =>
+                selectRouterModel({
+                    profile: plainTurn,
+                    eligible: candidates(...order),
+                    signals,
+                }).rankedModelIds
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], name);
+        }
+    }
+});
+
+/**
+ * The epsilon chain, which is intransitive on its own.
+ *
+ * At a 5% ratio 100 ties 104 and 104 ties 108, while 100 beats 108 outright,
+ * so "within epsilon is the same value" cannot be evaluated per pair. Each
+ * bucket is anchored to its own first value instead: 104 is within 5% of 100
+ * and joins it, 108 is not and starts the next bucket.
+ */
+test("an epsilon chain buckets deterministically rather than per pair", () => {
+    const costs = { "model-b": 100, "model-c": 104, "model-a": 108 };
+    assert.ok(Math.abs(104 - 100) / 104 <= ROUTER_COST_TIE_EPSILON_RATIO);
+    assert.ok(Math.abs(108 - 104) / 108 <= ROUTER_COST_TIE_EPSILON_RATIO);
+    assert.ok(Math.abs(108 - 100) / 108 > ROUTER_COST_TIE_EPSILON_RATIO);
+
+    for (const order of permutations(["model-a", "model-b", "model-c"])) {
+        const result = selectRouterModel({
+            profile: plainTurn,
+            eligible: candidates(...order),
+            signals: { expectedTotalCostUsdByModelId: costs },
+        });
+        // model-b and model-c share the cheapest bucket and the model id
+        // separates them; model-a is a bucket of its own and ranks last
+        // despite tying its neighbour pairwise.
+        assert.deepEqual(result.rankedModelIds, [
+            "model-b",
+            "model-c",
+            "model-a",
+        ]);
+    }
+});
+
+test("the criterion named as deciding is one that actually separates", () => {
+    const signals = {
+        degradedModelIds: ["model-d"],
+        expectedTotalCostUsdByModelId: {
+            "model-a": 1,
+            "model-b": 3,
+            "model-c": 1,
+            "model-d": 1,
+        },
+        recentSuccessRateByModelId: {
+            "model-a": 0.99,
+            "model-b": 0.99,
+            "model-c": 0.5,
+            "model-d": 0.99,
+        },
+    };
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-b", "model-c", "model-d"),
+        signals,
+    });
+    // model-d is degraded and loses at criterion 2; model-b is dearer and
+    // loses at 3; model-a and model-c share a price, so the success rate they
+    // both carry is what separates the top two.
+    assert.equal(result.selectedModelId, "model-a");
+    assert.equal(result.decidedBy, "recent_success_rate");
+    assert.equal(result.rankedModelIds[3], "model-d");
+});
+
+/**
+ * Values that are not numbers in the sense the bucketing needs.
+ *
+ * `partitionByMetric` groups by value, and a reading that is not equal to
+ * itself lands in no bucket: the candidate would leave that criterion with a
+ * shorter rank key than everybody else, and the final sort would fall back to
+ * input order for it -- the failure the whole ranking exists to remove. So a
+ * non-finite reading abstains the criterion, and `rankCandidates` checks that
+ * a partition covered its group rather than trusting it to.
+ */
+test("a non-finite measurement abstains rather than losing its candidate", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const signals = {
+            expectedTotalCostUsdByModelId: {
+                "model-a": 1,
+                "model-b": bad,
+                "model-c": 3,
+            },
+        };
+        const orders = permutations(["model-a", "model-b", "model-c"]).map(
+            (order) =>
+                selectRouterModel({
+                    profile: plainTurn,
+                    eligible: candidates(...order),
+                    signals,
+                }).rankedModelIds
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], String(bad));
+        }
+        // Cost could not speak for the whole group, so the model id did.
+        assert.deepEqual(orders[0], ["model-a", "model-b", "model-c"], String(bad));
+    }
+});
+
+test("negative zero and positive zero are one reading", () => {
+    const orders = permutations(["model-a", "model-b"]).map(
+        (order) =>
+            selectRouterModel({
+                profile: plainTurn,
+                eligible: candidates(...order),
+                signals: {
+                    expectedTotalCostUsdByModelId: { "model-a": 0, "model-b": -0 },
+                },
+            }).rankedModelIds
+    );
+    for (const order of orders) assert.deepEqual(order, orders[0]);
+    assert.deepEqual(orders[0], ["model-a", "model-b"]);
+});
+
+test("a duplicated model id leaves the ranking well defined", () => {
+    // The candidate type does not forbid it even though the catalogue does.
+    // Nothing separates the two, so they stay adjacent and the length is kept.
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-a", "model-b"),
+        signals: {},
+    });
+    assert.equal(result.rankedModelIds.length, 3);
+    assert.deepEqual(result.rankedModelIds, ["model-a", "model-a", "model-b"]);
+    assert.equal(result.decidedBy, "model_id");
+});
+
+/**
+ * The quality partition, tested directly.
+ *
+ * `ROUTER_SCORE_SNAPSHOT` carries no interval in any cell, so nothing routed
+ * through `selectRouterModel` can reach this branch -- which is how a cell
+ * whose interval was not a number could sit in it, unbucketed, until an
+ * independent review found it. `rankCandidates` takes the cells, so the branch
+ * is reachable from a test without inventing a snapshot.
+ */
+
+const cell = (qualityBand, qualityCi95Lower = null) => ({
+    qualityBand,
+    qualityCi95Lower,
+    evidenceRef: qualityCi95Lower === null ? null : "evidence",
+});
+const scored = (entries) =>
+    entries.map(([modelId, band, ci]) => ({ modelId, cell: cell(band, ci) }));
+const ids = (entries, signals = {}) =>
+    rankCandidates(scored(entries), signals).ranked.map((entry) => entry.modelId);
+
+test("the band decides before any interval does", () => {
+    // A high interval in a low band never outranks a higher band.
+    assert.deepEqual(
+        ids([
+            ["low-band-high-ci", 1, 0.99],
+            ["high-band-no-ci", 3, null],
+            ["mid", 2, 0.5],
+        ]),
+        ["high-band-no-ci", "mid", "low-band-high-ci"]
+    );
+});
+
+test("an interval refines a band only when every cell in it carries one", () => {
+    // Both measured: the interval orders them.
+    assert.deepEqual(
+        ids([
+            ["worse", 2, 0.4],
+            ["better", 2, 0.9],
+        ]),
+        ["better", "worse"]
+    );
+    // One unmeasured: the band keeps its whole membership, and the model id
+    // decides. "better" would have won on its interval; it does not, because
+    // the criterion cannot speak for everyone still tied with it.
+    assert.deepEqual(
+        ids([
+            ["zzz-better", 2, 0.9],
+            ["aaa-unmeasured", 2, null],
+        ]),
+        ["aaa-unmeasured", "zzz-better"]
+    );
+});
+
+test("an interval that is not a number abstains, and loses nobody", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const entries = [
+            ["aaa", 2, 0.9],
+            ["bbb", 2, bad],
+            ["ccc", 2, 0.4],
+        ];
+        const orders = permutations([0, 1, 2]).map((order) =>
+            ids(order.map((index) => entries[index]))
+        );
+        for (const order of orders) {
+            assert.deepEqual(order, orders[0], String(bad));
+        }
+        // Three in, three out: the unbucketable cell is still ranked.
+        assert.equal(orders[0].length, 3);
+        // The criterion abstained for the band, so the model id decided.
+        assert.deepEqual(orders[0], ["aaa", "bbb", "ccc"], String(bad));
+    }
+});
+
+test("cells sharing an interval share a bucket, and the model id orders them", () => {
+    assert.deepEqual(
+        ids([
+            ["zzz", 2, 0.9],
+            ["aaa", 2, 0.9],
+            ["mmm", 2, 0.4],
+        ]),
+        ["aaa", "zzz", "mmm"]
+    );
+});
+
+test("the criterion named is the one that separated the top two", () => {
+    const ranking = rankCandidates(
+        scored([
+            ["a", 3, null],
+            ["b", 2, null],
+        ]),
+        {}
+    );
+    assert.equal(
+        ranking.decidedBy(ranking.ranked[0], ranking.ranked[1]),
+        "quality_band"
+    );
+});

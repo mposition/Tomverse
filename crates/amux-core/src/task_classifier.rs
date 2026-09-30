@@ -9,9 +9,7 @@ use crate::board::ItemType;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     Architecture,
@@ -154,7 +152,10 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
     }
 
     if any_word(&text, &["migration", "migrate", "backfill"])
-        || any_phrase(&text, &["schema change", "schema migration", "data migration"])
+        || any_phrase(
+            &text,
+            &["schema change", "schema migration", "data migration"],
+        )
     {
         add(&mut scores, TaskKind::Migration, 7);
         push_signal(&mut signals, "kind:migration");
@@ -191,8 +192,10 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
         push_signal(&mut signals, "kind:security");
     }
 
-    if any_phrase(&text, &["code review", "architecture review", "security review"])
-        || any_word(&text, &["review", "audit"])
+    if any_phrase(
+        &text,
+        &["code review", "architecture review", "security review"],
+    ) || any_word(&text, &["review", "audit"])
     {
         add(&mut scores, TaskKind::Review, 6);
         push_signal(&mut signals, "kind:review");
@@ -200,15 +203,19 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
 
     if any_word(
         &text,
-        &["test", "tests", "testing", "coverage", "fixture", "fixtures"],
+        &[
+            "test", "tests", "testing", "coverage", "fixture", "fixtures",
+        ],
     ) || any_phrase(&text, &["flaky test", "integration test", "unit test"])
     {
         add(&mut scores, TaskKind::Tests, 6);
         push_signal(&mut signals, "kind:tests");
     }
 
-    if any_word(&text, &["refactor", "refactoring", "restructure", "cleanup"])
-        || any_phrase(&text, &["simplify code", "code cleanup"])
+    if any_word(
+        &text,
+        &["refactor", "refactoring", "restructure", "cleanup"],
+    ) || any_phrase(&text, &["simplify code", "code cleanup"])
     {
         add(&mut scores, TaskKind::Refactor, 6);
         push_signal(&mut signals, "kind:refactor");
@@ -216,15 +223,25 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
 
     if any_word(
         &text,
-        &["bug", "bugfix", "regression", "crash", "broken", "failure", "failing"],
+        &[
+            "bug",
+            "bugfix",
+            "regression",
+            "crash",
+            "broken",
+            "failure",
+            "failing",
+        ],
     ) || any_phrase(&text, &["fix error", "fix failure", "root cause"])
     {
         add(&mut scores, TaskKind::Bugfix, 6);
         push_signal(&mut signals, "kind:bugfix");
     }
 
-    if any_word(&text, &["investigate", "investigation", "analyze", "analysis"])
-        || any_phrase(&text, &["root cause", "reason about", "research why"])
+    if any_word(
+        &text,
+        &["investigate", "investigation", "analyze", "analysis"],
+    ) || any_phrase(&text, &["root cause", "reason about", "research why"])
     {
         add(&mut scores, TaskKind::Reasoning, 5);
         push_signal(&mut signals, "kind:reasoning");
@@ -233,7 +250,12 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
     if any_word(&text, &["integrate", "integration"])
         || any_phrase(
             &text,
-            &["merge conflict", "ci pipeline", "continuous integration", "end to end"],
+            &[
+                "merge conflict",
+                "ci pipeline",
+                "continuous integration",
+                "end to end",
+            ],
         )
     {
         add(&mut scores, TaskKind::Integration, 5);
@@ -267,20 +289,38 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
     // without a later explicit policy decision.
     let auth = any_word(
         &text,
-        &["auth", "authentication", "authorization", "oauth", "token", "jwt"],
+        &[
+            "auth",
+            "authentication",
+            "authorization",
+            "oauth",
+            "token",
+            "jwt",
+        ],
     );
     let permission = any_word(
         &text,
         &["permission", "permissions", "privilege", "acl", "rbac"],
     );
     let crypto = any_word(&text, &["encryption", "decrypt", "crypto", "cryptography"]);
-    let payment = any_word(&text, &["payment", "payments", "billing", "invoice", "checkout"]);
+    let payment = any_word(
+        &text,
+        &["payment", "payments", "billing", "invoice", "checkout"],
+    );
     let destructive = any_word(&text, &["truncate", "drop", "delete", "purge", "destroy"])
         && any_word(&text, &["table", "database", "data", "records", "rows"]);
-    let concurrency = any_word(&text, &["concurrency", "race", "deadlock", "locking", "mutex"]);
+    let concurrency = any_word(
+        &text,
+        &["concurrency", "race", "deadlock", "locking", "mutex"],
+    );
     let breaking_api = any_phrase(
         &text,
-        &["breaking api", "breaking change", "public api change", "api compatibility"],
+        &[
+            "breaking api",
+            "breaking change",
+            "public api change",
+            "api compatibility",
+        ],
     );
     let db_migration = (has_word(&text, "database") || has_word(&text, "schema"))
         && (has_word(&text, "migration") || has_word(&text, "migrate"));
@@ -337,7 +377,13 @@ pub fn classify(input: &ClassificationInput<'_>) -> DeterministicClassification 
     }
     if any_phrase(
         &text,
-        &["multi file", "multiple files", "repo wide", "repository wide", "cross service"],
+        &[
+            "multi file",
+            "multiple files",
+            "repo wide",
+            "repository wide",
+            "cross service",
+        ],
     ) {
         complexity += 1;
         push_signal(&mut signals, "scope:multi_file");
@@ -421,7 +467,10 @@ mod tests {
         assert_eq!(c.risk_floor, 3);
         assert!(c.complexity >= 8, "{c:?}");
         assert!(c.confidence >= 0.86, "{c:?}");
-        assert!(c.needs_model, "Risk-3 work escalates even when the kind is obvious");
+        assert!(
+            c.needs_model,
+            "Risk-3 work escalates even when the kind is obvious"
+        );
     }
 
     #[test]

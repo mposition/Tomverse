@@ -247,8 +247,16 @@ export type SkillPackageInventory = {
     knowledgeCandidates: { path: string; name: string }[];
     /** Executable entries. Present so they can be named; never inflated. */
     scriptPaths: string[];
-    /** Entries skipped for any other reason, with their reason. */
-    skippedCount: number;
+    /**
+     * Entries skipped for any other reason.
+     *
+     * Paths rather than a count, because the loss report names what it drops:
+     * "이 가져오기가 쓰지 않는 종류의 파일 1개." with nothing beside it left the
+     * owner to guess which file, on the one screen that asks them to
+     * acknowledge the loss. The archive scan already knows the paths -- this
+     * field used to throw them away.
+     */
+    skippedPaths: string[];
 };
 
 const codePoints = (value: string): number => [...value].length;
@@ -317,8 +325,12 @@ export function convertSkillPackage(input: {
     }
     losses.push({ kind: "icon" });
     losses.push({ kind: "model" });
-    if (inventory.skippedCount > 0) {
-        losses.push({ kind: "skipped_entries", count: inventory.skippedCount });
+    if (inventory.skippedPaths.length > 0) {
+        losses.push({
+            kind: "skipped_entries",
+            count: inventory.skippedPaths.length,
+            items: [...inventory.skippedPaths],
+        });
     }
 
     const candidates = inventory.knowledgeCandidates.slice(

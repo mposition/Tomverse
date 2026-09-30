@@ -1,0 +1,3147 @@
+import assert from "node:assert/strict";
+import { after, beforeEach, test } from "node:test";
+
+import type { Session } from "next-auth";
+
+import { Prisma } from "@prisma/client";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+
+import { MARKETING_CHANNEL_CAPS } from "@/lib/marketingAutomationSchema";
+import {
+  guardDraft,
+  sealMarketingFacts,
+  sealMarketingGuardContext,
+} from "@/lib/marketingGuardCore";
+import { createHash } from "node:crypto";
+import { marketingEnvelopeDigest } from "@/lib/marketingStore";
+import {
+  approveMarketingPost,
+  claimDueMarketingPost,
+  releaseMarketingPostClaim,
+  marketingSerializationFailure,
+  createMarketingChannel,
+  createMarketingPost,
+  insertAiVisibilityRun,
+  insertMarketingReport,
+  MarketingStoreRefusedError,
+  updateMarketingChannel,
+  MARKETING_RESUME_AUTONOMOUS_ACTION,
+  MARKETING_S2B1_ACTIONS,
+  lowerMarketingChannelCaps,
+  resumeMarketingChannelToApproval,
+  runMarketingTransaction,
+} from "@/lib/marketingStore";
+import { prisma } from "@/lib/prisma";
+import {
+  finishMarketingPublisherRun,
+  findSilentMarketingPublisherRuns,
+  heartbeatMarketingPublisherRun,
+  runBoundedMarketingTransaction,
+  startMarketingPublisherRun,
+} from "@/lib/marketingPublisherRun";
+import {
+  MARKETING_PUBLISHER_IDLE_TIMEOUT_MS,
+  MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
+  MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
+  marketingPublisherSilentRuns,
+} from "@/lib/marketingPublisherRunCore";
+
+// The marketing tables' invariants against a real database.
+//
+// Contract: docs/policy/marketing-automation.md, migration
+// 20260918120000_marketing_automation_tables. The unit suite
+// (tests/marketingAutomationSchema.test.mjs) pins the lists, the schemas and the
+// constants the SQL duplicates, which is the half that can be read from source.
+// This is the other half: the triggers and CHECK constraints refuse writes that
+// never go near the store module, because an insert that reached the table
+// another way is exactly the case they exist for. Almost every write below is a
+// direct Prisma call for that reason.
+//
+// The retention setting is a transaction-local GUC, so each test that needs it
+// opens its own transaction and sets it there; a test that forgets sees the
+// refusal, which is the default.
+
+const AUDIT_SECRET = "marketing-schema-db-secret-0041";
+
+const operator = {
+  user: { id: "marketing-operator", email: "owner@example.test" },
+  expires: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+} as Session;
+
+/**
+ * A real audit entry of the kind an operator route writes in S2.
+ *
+ * Written through the audit writer rather than inserted, so it carries a real
+ * hash and a real place in the chain -- which is what the evidence check reads.
+ * Returns the entry id.
+ */
+async function resumeAuditEntry(channelId: string, reasonCode: string) {
+  return writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing/resume"),
+    action: MARKETING_RESUME_AUTONOMOUS_ACTION,
+    targetType: "MarketingChannel",
+    targetId: channelId,
+    summary: "Resumed after the incident was resolved.",
+    metadata: { actorHadMarketingWrite: true, reasonCode },
+  });
+}
+
+const resumeAutonomous = async (
+  channelId: string,
+  auditLogId: string,
+  reasonCode: string,
+) => {
+  const current = await prisma.marketingChannel.findUniqueOrThrow({
+    where: { id: channelId },
+  });
+  return updateMarketingChannel(
+    prisma,
+    channelId,
+    {
+      status: "autonomous_mode",
+      graduatedAt: current.graduatedAt,
+      graduationSnapshot: current.graduationSnapshot as never,
+    },
+    { auditLogId, reasonCode: reasonCode as never },
+  );
+};
+
+const reset = () =>
+  prisma.$executeRawUnsafe(
+    `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun" RESTART IDENTITY CASCADE`,
+  );
+
+const RETENTION_ON = `SET LOCAL tomverse.marketing_retention_compaction = 'on'`;
+
+const DIGEST = "b".repeat(64);
+const OTHER_DIGEST = "c".repeat(64);
+const DAY = 24 * 60 * 60 * 1000;
+
+const envelope = (overrides: Record<string, unknown> = {}) => ({
+  channel: "linkedin",
+  accountSlug: "linkedin-1",
+  locale: "en",
+  renderedText: "Three models, three answers, side by side.",
+  claimIds: [],
+  assets: [],
+  finalUrl: null,
+  scheduledAt: null,
+  disclosureFlags: ["advertising"],
+  ...overrides,
+});
+
+const factSnapshot = {
+  priceRows: [],
+  catalogue: null,
+  modelRegistryRows: [],
+  evidenceDigests: [],
+};
+
+const historyEntry = (type: string, extra: Record<string, unknown> = {}) => ({
+  at: new Date().toISOString(),
+  type,
+  ...extra,
+});
+
+async function channel(overrides: Record<string, unknown> = {}) {
+  return createMarketingChannel(prisma, {
+    channel: "linkedin",
+    provider: "zernio",
+    externalAccountRef: `zernio-${Math.random().toString(36).slice(2)}`,
+    defaultLocale: "en",
+    allowedLocales: ["en"],
+    scopesDigest: DIGEST,
+    policyVersion: 1,
+    ...overrides,
+  } as Parameters<typeof createMarketingChannel>[1]);
+}
+
+/** Put an account into approval mode, which is where every post starts from. */
+async function approvedChannel(overrides: Record<string, unknown> = {}) {
+  const row = await channel(overrides);
+  return prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+}
+
+/** A post row written straight to the table, so a test can choose every column. */
+async function post(channelId: string, overrides: Record<string, unknown> = {}) {
+  return prisma.marketingPost.create({
+    data: {
+      channelId,
+      locale: "en",
+      kind: "social",
+      logicalKey: `post-${Math.random().toString(36).slice(2)}`,
+      envelope: envelope(),
+      envelopeDigest: DIGEST,
+      rendererVersion: "r1",
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot,
+      factsDigest: DIGEST,
+      guardDecision: "approval_required",
+      guardCodes: [],
+      guardRuleIds: [],
+      status: "drafted",
+      mode: "approval",
+      history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+      historyVersion: 0,
+      ...overrides,
+    },
+  });
+}
+
+/**
+ * A post that is already old.
+ *
+ * `createdAt` is written by the insert trigger from the server clock and refused
+ * any later change, which is the point of it -- so the only way to test an age
+ * boundary is to insert past that trigger. This is a disposable test database
+ * and the trigger is put back immediately; nothing else in the suite runs while
+ * it is off, because node:test runs a file's tests one at a time.
+ */
+async function agedPost(
+  channelId: string,
+  ageDays: number,
+  overrides: Record<string, unknown> = {},
+) {
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "MarketingPost" DISABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+  );
+  try {
+    return await post(channelId, {
+      createdAt: new Date(Date.now() - ageDays * DAY),
+      ...overrides,
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "MarketingPost" ENABLE TRIGGER "marketing_post_starts_as_one_draft"`,
+    );
+  }
+}
+
+/**
+ * A post carried to `publishing` the way the whitelist requires.
+ *
+ * Built by walking the real transitions rather than by inserting the end state:
+ * the insert trigger refuses a row created as though it had been published, and
+ * the dispatched-status CHECK refuses one without a provider request key, so a
+ * fixture that jumps straight there fails before the assertion it was written
+ * for and says nothing about the rule under test.
+ */
+async function dispatchedPost(channelId: string) {
+  const draft = await post(channelId);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-1",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled" });
+  return step({
+    status: "publishing",
+    publishAttempt: 1,
+    providerRequestKey: draft.logicalKey,
+  });
+}
+
+/** The same, one step further. */
+async function publishedPost(channelId: string) {
+  const dispatched = await dispatchedPost(channelId);
+  return prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "published", publishedAt: new Date() },
+  });
+}
+
+/**
+ * A write the database refuses, in a transaction of its own with the retention
+ * setting on.
+ *
+ * The rejection has to escape the transaction. A trigger's RAISE aborts it, so
+ * catching the error inside the callback and returning normally leaves Prisma
+ * committing an aborted transaction: that fails with `25P02`, and the assertion
+ * the test was written for never runs. For the same reason each refusal gets
+ * its own transaction rather than sharing one.
+ */
+const refusedUnderRetention = async (
+  operation: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  expected: RegExp,
+) => {
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(RETENTION_ON);
+      await operation(tx);
+    }),
+    (error: Error) => {
+      assert.match(error.message, expected);
+      return true;
+    },
+  );
+};
+
+const refusedCompaction = (id: string, history: unknown[], expected: RegExp) =>
+  refusedUnderRetention(
+    (tx) =>
+      tx.marketingPost.update({
+        where: { id },
+        data: {
+          history: history as Prisma.InputJsonValue[],
+          historyVersion: 1,
+        },
+      }),
+    expected,
+  );
+
+const refused = async (operation: Promise<unknown>, expected: RegExp) => {
+  await assert.rejects(operation, (error: Error) => {
+    assert.match(error.message, expected);
+    return true;
+  });
+};
+
+const refusedByStore = async (operation: Promise<unknown>, expectedCode: string) => {
+  await assert.rejects(operation, (error: Error) => {
+    assert.ok(error instanceof MarketingStoreRefusedError);
+    assert.equal(error.code, expectedCode);
+    return true;
+  });
+};
+
+let previousAuditKey: string | undefined;
+
+beforeEach(async () => {
+  previousAuditKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_SECRET;
+  await reset();
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "PromptRefinerShadowAttempt",
+      "PromptRefinerShadowRun",
+      "PromptRefinerReservation",
+      "PromptRefinerReservationStage",
+      "AmuxReviewDecision",
+      "EngineeringAgentApproval",
+      "AdminAuditLog"
+    RESTART IDENTITY
+  `);
+});
+
+after(async () => {
+  if (previousAuditKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousAuditKey;
+  await reset();
+  await prisma.$disconnect();
+});
+
+// ---------------------------------------------------------------------------
+// O15: the two channels whose posts the API cannot retract
+// ---------------------------------------------------------------------------
+
+test("an Instagram account cannot hold an autonomous status", async () => {
+  const row = await approvedChannel({ channel: "instagram" });
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        status: "autonomous_mode",
+        graduatedAt: new Date(),
+        graduationSnapshot: { graduationEpoch: 0 },
+      },
+    }),
+    /no_autonomy_channels|autonomous/i,
+  );
+});
+
+test("a post cannot be autonomous on a channel the API cannot retract", async () => {
+  const instagram = await approvedChannel({ channel: "instagram" });
+  await refused(
+    post(instagram.id, {
+      mode: "autonomous",
+      guardDecision: "autonomous_eligible",
+      templateId: "template.a",
+      templateDigest: DIGEST,
+    }),
+    /cannot be autonomous on instagram/,
+  );
+});
+
+test("a temporary table of the same name cannot answer for the channel", async () => {
+  // The trigger reads the channel from the schema its own table is in. Without
+  // that, a session with TEMP rights could put a row saying `linkedin` in front
+  // of the real Instagram one and have an autonomous post admitted against it,
+  // with the foreign key still pointing at the real account.
+  const instagram = await approvedChannel({ channel: "instagram" });
+
+  // The rejection escapes the transaction: a trigger's RAISE aborts it, so
+  // catching the error inside and returning normally would leave Prisma
+  // committing an aborted transaction and failing with 25P02 instead.
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `CREATE TEMPORARY TABLE "MarketingChannel" ("id" TEXT, "channel" TEXT, "allowedLocales" TEXT[]) ON COMMIT DROP`,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO pg_temp."MarketingChannel" VALUES ($1, 'linkedin', ARRAY['en'])`,
+        instagram.id,
+      );
+      await tx.marketingPost.create({
+        data: {
+          channelId: instagram.id,
+          locale: "en",
+          kind: "social",
+          logicalKey: "masked-1",
+          envelope: envelope(),
+          envelopeDigest: DIGEST,
+          rendererVersion: "r1",
+          claimIds: [],
+          assetIds: [],
+          claimRegistryVersion: 1,
+          assetRegistryVersion: 1,
+          factSnapshot,
+          factsDigest: DIGEST,
+          guardDecision: "autonomous_eligible",
+          guardCodes: [],
+          guardRuleIds: [],
+          status: "drafted",
+          mode: "autonomous",
+          templateId: "template.a",
+          templateDigest: DIGEST,
+          history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+          historyVersion: 0,
+        },
+      });
+    }),
+    (error: Error) => {
+      assert.match(error.message, /cannot be autonomous on instagram/);
+      return true;
+    },
+  );
+});
+
+test("autonomous mode is allowed on a channel that can retract", async () => {
+  const linkedin = await approvedChannel();
+  const row = await post(linkedin.id, {
+    mode: "autonomous",
+    guardDecision: "autonomous_eligible",
+    templateId: "template.a",
+    templateDigest: DIGEST,
+  });
+  assert.equal(row.mode, "autonomous");
+});
+
+test("a post cannot be in a language its account does not publish in", async () => {
+  const linkedin = await approvedChannel();
+  await refused(
+    post(linkedin.id, { locale: "zh-Hans" }),
+    /the account does not publish in it/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Channel identity, transitions and caps
+// ---------------------------------------------------------------------------
+
+test("a channel's platform, carrier and slug are immutable", async () => {
+  const row = await channel();
+  await refused(
+    prisma.marketingChannel.update({ where: { id: row.id }, data: { channel: "x" } }),
+    /identity is immutable/,
+  );
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: { provider: "manual", externalAccountRef: null },
+    }),
+    /identity is immutable/,
+  );
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: { accountSlug: "linkedin-9" },
+    }),
+    /slug is immutable/,
+  );
+});
+
+test("a slug always names its own channel", async () => {
+  // At insert, where the store is not the one choosing it. An update would only
+  // prove the immutability trigger fires, which is a different rule.
+  await refused(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "MarketingChannel" ("id","channel","provider","externalAccountRef","accountSlug","defaultLocale","allowedLocales","scopesDigest","status","updatedAt")
+       VALUES ('mismatched-slug','linkedin','zernio','zernio-mismatch','tiktok-1','en',ARRAY['en'],$1,'connect_pending', now())`,
+      DIGEST,
+    ),
+    /accountSlug_shape/,
+  );
+});
+
+test("a manual channel has no external account and an API channel must have one", async () => {
+  const manual = await channel({
+    channel: "rednote",
+    provider: "manual",
+    externalAccountRef: null,
+    defaultLocale: "zh-Hans",
+    allowedLocales: ["zh-Hans"],
+  });
+  assert.equal(manual.externalAccountRef, null);
+
+  await refused(
+    channel({ channel: "x", provider: "manual", externalAccountRef: "should-not-exist" }),
+    /external_ref_matches_provider/,
+  );
+});
+
+test("a reconnect returns the account to approval mode with a new epoch", async () => {
+  const row = await approvedChannel();
+
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: { scopesDigest: OTHER_DIGEST },
+    }),
+    /must return to approval mode with a new epoch/,
+  );
+
+  const updated = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      scopesDigest: OTHER_DIGEST,
+      status: "approval_mode",
+      graduationEpoch: 1,
+    },
+  });
+  assert.equal(updated.graduationEpoch, 1);
+  assert.ok(
+    updated.approvalStartedAt &&
+      updated.approvalStartedAt.getTime() >= row.approvalStartedAt!.getTime(),
+    "the server sets the start of the new window",
+  );
+});
+
+test("the approval window starts when the server says, not when the caller does", async () => {
+  const row = await channel();
+  const longAgo = new Date(Date.now() - 400 * DAY);
+  const updated = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode", approvalStartedAt: longAgo },
+  });
+  assert.ok(
+    updated.approvalStartedAt!.getTime() > longAgo.getTime() + 300 * DAY,
+    "a caller cannot back-date its way to a graduation",
+  );
+});
+
+test("a connecting account cannot jump straight to autonomous mode", async () => {
+  const row = await channel();
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        status: "autonomous_mode",
+        graduatedAt: new Date(),
+        graduationSnapshot: { graduationEpoch: 0 },
+      },
+    }),
+    /cannot move from connect_pending to autonomous_mode/,
+  );
+});
+
+test("the pause origin is the trigger's to write, and cannot be edited afterwards", async () => {
+  const row = await approvedChannel();
+  const paused = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "paused" },
+  });
+  assert.equal(paused.pausedFromMode, "approval_mode");
+
+  // The bypass this closes: sit in `paused`, rewrite the origin, then resume
+  // into an autonomy the account never had.
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        pausedFromMode: "autonomous_mode",
+        graduatedAt: new Date(),
+        graduationSnapshot: { graduationEpoch: 0 },
+      },
+    }),
+    /lifecycle columns only change with its status/,
+  );
+
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        status: "autonomous_mode",
+        graduatedAt: new Date(),
+        graduationSnapshot: { graduationEpoch: 0 },
+      },
+    }),
+    /was not autonomous before it was paused/,
+  );
+});
+
+test("an account that never went live cannot be paused into a resume", async () => {
+  const row = await channel();
+  await refused(
+    prisma.marketingChannel.update({ where: { id: row.id }, data: { status: "paused" } }),
+    /cannot move from connect_pending to paused/,
+  );
+});
+
+test("a cap override may only lower the policy cap", async () => {
+  const row = await channel();
+  const caps = MARKETING_CHANNEL_CAPS.linkedin;
+  assert.ok(caps);
+
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: { dailyCapOverride: caps.daily + 1 },
+    }),
+    /above the policy cap/,
+  );
+
+  const lowered = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { dailyCapOverride: 0 },
+  });
+  assert.equal(lowered.dailyCapOverride, 0);
+});
+
+test("a manual channel has no cap to override", async () => {
+  const row = await channel({
+    channel: "rednote",
+    provider: "manual",
+    externalAccountRef: null,
+    defaultLocale: "zh-Hans",
+    allowedLocales: ["zh-Hans"],
+  });
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: { weeklyCapOverride: 1 },
+    }),
+    /no posting cap to override/,
+  );
+});
+
+test("a channel is never deleted", async () => {
+  const row = await channel();
+  await refused(
+    prisma.marketingChannel.delete({ where: { id: row.id } }),
+    /not deletable; disconnect it instead/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Post creation and the status ledger
+// ---------------------------------------------------------------------------
+
+test("a post starts as a draft, at version zero, with one draft entry", async () => {
+  const row = await approvedChannel();
+  await refused(
+    post(row.id, { historyVersion: 3 }),
+    /must start at history version zero/,
+  );
+  await refused(post(row.id, { history: [] }), /one draft history entry/);
+  await refused(
+    post(row.id, { history: [historyEntry("guard_result")] }),
+    /one draft history entry/,
+  );
+  await refused(
+    post(row.id, {
+      status: "published",
+      providerRequestKey: "x",
+      publishAttempt: 1,
+    }),
+    /must be created as a draft|dispatched_has_request_key/,
+  );
+});
+
+/**
+ * A real `approval_required` decision, sealed by the Guard that made it.
+ *
+ * The draft is read out of `envelope()` rather than written out a second time.
+ * The store recomputes the draft digest from the envelope it is handed and
+ * refuses a decision made about anything else, so two copies of this text are
+ * a test that breaks the moment either copy is edited -- which is what
+ * happened.
+ */
+function approvalDecision(channelId: string) {
+  const forDigest = envelope();
+  return guardDraft({
+    draft: {
+      renderedText: forDigest.renderedText,
+      locale: forDigest.locale,
+      channel: forDigest.channel,
+      channelId,
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: storeFacts(channelId),
+    templates: [],
+    context: sealMarketingGuardContext({
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    }),
+  });
+}
+
+/**
+ * The facts bundle the store will check the decision against.
+ *
+ * Sealed, because the Guard takes nothing else, and carrying the digest of the
+ * exact snapshot this test stores -- the store recomputes it and refuses a
+ * decision resolved against anything else.
+ */
+function storeFacts(channelId: string) {
+  return sealMarketingFacts({
+    channelId,
+    channel: "linkedin",
+    locale: "en",
+    claims: [],
+    assets: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshotDigest: createHash("sha256")
+      .update(JSON.stringify(canonical(factSnapshot)), "utf8")
+      .digest("hex"),
+  });
+}
+
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, inner]) => [key, canonical(inner)]),
+    );
+  }
+  return value;
+};
+
+test("the store's create writes the draft entry itself", async () => {
+  const row = await approvedChannel();
+  const created = await createMarketingPost(prisma, {
+    channelId: row.id,
+    locale: "en",
+    kind: "social",
+    logicalKey: "store-created-1",
+    envelope: envelope() as never,
+    // Computed from the envelope, which is what the store now requires: a
+    // digest the caller states says nothing about the content it names.
+    envelopeDigest: marketingEnvelopeDigest(envelope() as never),
+    rendererVersion: "r1",
+    templateId: null,
+    templateDigest: null,
+    claimIds: [],
+    assetIds: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshot: factSnapshot as never,
+    // The Guard's own object, not a verdict typed out here. The store derives
+    // the verdict, the codes, the rule ids, the status and the mode from it,
+    // and refuses one it did not seal.
+    decision: approvalDecision(row.id),
+    draftedAt: new Date(),
+  });
+  assert.equal(created.historyVersion, 0);
+  assert.equal(created.guardDecision, "approval_required");
+  assert.equal(created.factsDigest, approvalDecision(row.id).factsDigest);
+  assert.equal(created.mode, "approval");
+  assert.equal((created.history as { type: string }[]).length, 1);
+});
+
+test("the store refuses a decision the Guard did not make", async () => {
+  const row = await approvedChannel();
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-unsealed",
+      envelope: envelope() as never,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      // A plain object of the right shape, which is what writing
+      // `guardDecision: "autonomous_eligible"` used to amount to.
+      decision: {
+        verdict: "approval_required",
+        codes: [],
+        ruleIds: [],
+      } as never,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_sealed|decision/i,
+  );
+});
+
+test("the store refuses a decision made about a different draft", async () => {
+  const row = await approvedChannel();
+  // Sealed, and about nothing this post says. Provenance without binding is a
+  // stamp on a blank page: the Guard saw one body and the row carries another.
+  const elsewhere = guardDraft({
+    draft: {
+      renderedText: "Something else entirely.",
+      locale: "en",
+      channel: envelope().channel,
+      channelId: row.id,
+      claimIds: [],
+      assetIds: [],
+    },
+    facts: storeFacts(row.id),
+    templates: [],
+    context: sealMarketingGuardContext({
+      priceFallbackAlertReady: false,
+      incidentOrSecurity: "proved_false",
+      testimonial: "proved_false",
+      legalOrPolicy: "proved_false",
+    }),
+  });
+
+  await assert.rejects(
+    createMarketingPost(prisma, {
+      channelId: row.id,
+      locale: "en",
+      kind: "social",
+      logicalKey: "store-created-other-draft",
+      envelope: envelope() as never,
+      envelopeDigest: marketingEnvelopeDigest(envelope() as never),
+      rendererVersion: "r1",
+      templateId: null,
+      templateDigest: null,
+      claimIds: [],
+      assetIds: [],
+      claimRegistryVersion: 1,
+      assetRegistryVersion: 1,
+      factSnapshot: factSnapshot as never,
+      decision: elsewhere,
+      draftedAt: new Date(),
+    }),
+    /guard_decision_not_about_this_post|different draft/i,
+  );
+});
+
+test("a dispatched post cannot go back to a state that says it never left", async () => {
+  const row = await approvedChannel();
+  const published = await publishedPost(row.id);
+
+  for (const status of ["rejected", "guard_rejected", "approval_expired", "scheduled"]) {
+    await refused(
+      prisma.marketingPost.update({
+        where: { id: published.id },
+        data: { status },
+      }),
+      new RegExp(`cannot move from published to ${status}`),
+    );
+  }
+
+  // And a post that has not been dispatched cannot skip to a state that says it
+  // was.
+  const draft = await post(row.id);
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { status: "published" },
+    }),
+    /cannot move from drafted to published/,
+  );
+});
+
+test("an approval that names no digest is not an approval", async () => {
+  const row = await approvedChannel();
+  const draft = await post(row.id);
+  await prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: {
+      status: "pending_approval",
+      historyVersion: 1,
+      history: [
+        ...(draft.history as Prisma.InputJsonValue[]),
+        historyEntry("guard_result", {
+          decision: "approval_required",
+          codes: [],
+          ruleIds: [],
+        }),
+      ],
+    },
+  });
+
+  // The bypass this closes: `approvedDigest = envelopeDigest` is NULL when the
+  // digest is NULL, and a CHECK treats NULL as satisfied.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { status: "approved", approvalAuditLogId: "audit-1" },
+    }),
+    /approval_binding/,
+  );
+
+  const approved = await prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: {
+      status: "approved",
+      approvalAuditLogId: "audit-1",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+  assert.equal(approved.status, "approved");
+});
+
+test("a post cannot become published without recording when", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  // The purge clock reads publishedAt first, so a NULL here would date a post
+  // published today from whenever its draft was written.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "published" },
+    }),
+    /cannot become published without recording when|published_records_when/,
+  );
+});
+
+test("a post records a publication time only when it becomes published", async () => {
+  const row = await approvedChannel();
+  const draft = await post(row.id);
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { publishedAt: new Date() },
+    }),
+    /records a publication time only when it becomes published/,
+  );
+});
+
+test("a publication time is written once", async () => {
+  const row = await approvedChannel();
+  const published = await publishedPost(row.id);
+  const first = published.publishedAt!;
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: published.id },
+      data: { publishedAt: new Date(first.getTime() + 1000) },
+    }),
+    /publication time is written once/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// History and purge
+// ---------------------------------------------------------------------------
+
+test("history is append-only and its version moves by exactly one", async () => {
+  const row = await approvedChannel();
+  const created = await post(row.id);
+  const original = created.history as Prisma.InputJsonValue[];
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: {
+        history: [...original, historyEntry("guard_result")],
+        historyVersion: 5,
+      },
+    }),
+    /history version moves by one/,
+  );
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: { history: [historyEntry("guard_result")], historyVersion: 1 },
+    }),
+    /history is append-only/,
+  );
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: { history: [], historyVersion: 1 },
+    }),
+    /history cannot lose entries/,
+  );
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: {
+        history: [...original, historyEntry("retention_compaction", { removedEntryCount: 1 })],
+        historyVersion: 1,
+      },
+    }),
+    /retention entries are written by retention/,
+  );
+
+  const appended = await prisma.marketingPost.update({
+    where: { id: created.id },
+    data: {
+      history: [...original, historyEntry("guard_result")],
+      historyVersion: 1,
+    },
+  });
+  assert.equal(appended.historyVersion, 1);
+});
+
+test("content is purged only by retention, only when it is old, never under hold", async () => {
+  const row = await approvedChannel();
+  const fresh = await post(row.id);
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: fresh.id },
+      data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
+    }),
+    /content is only purged by retention/,
+  );
+
+  await refusedUnderRetention(
+    (tx) =>
+      tx.marketingPost.update({
+        where: { id: fresh.id },
+        data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
+      }),
+    /not yet twenty-four months old/,
+  );
+
+  const held = await agedPost(row.id, 800, { legalHold: true });
+  await refusedUnderRetention(
+    (tx) =>
+      tx.marketingPost.update({
+        where: { id: held.id },
+        data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
+      }),
+    /under legal hold/,
+  );
+
+  const old = await agedPost(row.id, 800);
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: old.id },
+      data: { envelope: Prisma.DbNull, contentPurgedAt: new Date() },
+    });
+  });
+
+  const purged = await prisma.marketingPost.findUniqueOrThrow({ where: { id: old.id } });
+  assert.equal(purged.envelope, null);
+  assert.equal(purged.envelopeDigest, DIGEST, "the digest survives the purge");
+});
+
+test("compaction drops only old attempts and webhook ids, and says what it dropped", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  const oldAttempt = {
+    at: new Date(Date.now() - 200 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  const youngAttempt = {
+    at: new Date(Date.now() - 2 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 2,
+    outcome: "failed",
+    errorCode: null,
+  };
+  const created = await agedPost(row.id, 400, {
+    history: [draftEntry, oldAttempt, youngAttempt],
+    historyVersion: 0,
+  });
+
+  const summary = {
+    at: new Date().toISOString(),
+    type: "retention_summary",
+    summarises: "attempt",
+    count: 1,
+    firstAt: oldAttempt.at,
+    lastAt: oldAttempt.at,
+  };
+  const compaction = historyEntry("retention_compaction", { removedEntryCount: 1 });
+
+  // One transaction per refusal. A RAISE leaves the transaction aborted, so a
+  // second statement in the same one fails with 25P02 rather than the error the
+  // assertion is about -- the first version of this test proved nothing after
+  // its first line.
+  await refusedCompaction(
+    created.id,
+    [summary, compaction],
+    /cannot compact a draft entry at any age/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, summary, compaction],
+    /cannot compact an entry younger than ninety days/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, compaction],
+    /needs exactly one summary of its removed attempt entries/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, summary, { ...summary, count: 1 }, compaction],
+    /summarises something it did not remove/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, { ...summary, lastAt: youngAttempt.at }, compaction],
+    /does not span them/,
+  );
+  // `x ->> 'type'` on an entry with no type is NULL, and a NULL comparison does
+  // not raise; an entry like this used to pass every tail check.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, youngAttempt, summary, {}, compaction],
+    /may only add summaries/,
+  );
+  await refusedCompaction(
+    created.id,
+    [
+      draftEntry,
+      youngAttempt,
+      { ...summary, note: "tidied up" },
+      compaction,
+    ],
+    /is not the shape a summary has/,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: created.id },
+      data: {
+        history: [draftEntry, youngAttempt, summary, compaction],
+        historyVersion: 1,
+      },
+    });
+  });
+
+  const compacted = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: created.id },
+  });
+  const entries = compacted.history as { type: string }[];
+  assert.equal(entries.at(-1)?.type, "retention_compaction");
+  assert.equal(entries.filter((entry) => entry.type === "attempt").length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Deletes
+// ---------------------------------------------------------------------------
+
+test("a post is deleted only as an old refused draft that never reached a platform", async () => {
+  const row = await approvedChannel();
+  const fresh = await post(row.id, { status: "guard_rejected", guardDecision: "reject" });
+  await refused(
+    prisma.marketingPost.delete({ where: { id: fresh.id } }),
+    /only deleted by retention/,
+  );
+
+  await refusedUnderRetention(
+    (tx) => tx.marketingPost.delete({ where: { id: fresh.id } }),
+    /not yet ninety days old/,
+  );
+
+  const dispatched = await agedPost(row.id, 200, {
+    status: "guard_rejected",
+    guardDecision: "reject",
+    publishAttempt: 1,
+  });
+  await refusedUnderRetention(
+    (tx) => tx.marketingPost.delete({ where: { id: dispatched.id } }),
+    /reached a platform and is not deletable/,
+  );
+
+  const deletable = await agedPost(row.id, 200, { status: "approval_expired" });
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.delete({ where: { id: deletable.id } });
+  });
+  assert.equal(await prisma.marketingPost.count({ where: { id: deletable.id } }), 0);
+});
+
+// ---------------------------------------------------------------------------
+// Reports and visibility runs
+// ---------------------------------------------------------------------------
+
+test("a report's retention date is the database's, not the caller's", async () => {
+  const report = await insertMarketingReport(prisma, {
+    kind: "weekly_kpi",
+    periodStart: new Date("2026-01-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-01-07T00:00:00.000Z"),
+    payload: {
+      postsPublished: 3,
+      postsRejected: 1,
+      guardRejectionsByCode: [],
+      channelTotals: [],
+    },
+    sourceVersion: "v1",
+  });
+
+  assert.ok(
+    report.retentionUntil.getTime() > report.createdAt.getTime() + 700 * DAY,
+    "two years from when the database wrote it",
+  );
+
+  // A direct insert cannot choose either column: the trigger overwrites both.
+  const backdated = await prisma.marketingReport.create({
+    data: {
+      kind: "comment_alerts",
+      periodStart: new Date("2020-01-01T00:00:00.000Z"),
+      periodEnd: new Date("2020-01-01T00:00:00.000Z"),
+      payload: {
+        postId: "post.1",
+        alertCount: 0,
+        riskCodes: [],
+        firstDetectedAt: "2020-01-01T00:00:00.000Z",
+        externalUrlHost: "www.linkedin.com",
+      },
+      sourceVersion: "v1",
+      createdAt: new Date("2020-01-01T00:00:00.000Z"),
+      retentionUntil: new Date("2020-04-01T00:00:00.000Z"),
+    },
+  });
+  assert.ok(
+    backdated.createdAt.getTime() > Date.now() - 60_000,
+    "a caller cannot date a report into the past",
+  );
+  await refused(
+    prisma.marketingReport.delete({ where: { id: backdated.id } }),
+    /only deleted by retention/,
+  );
+});
+
+test("a report's anchors cannot move, and it is deleted only after them", async () => {
+  const report = await insertMarketingReport(prisma, {
+    kind: "comment_alerts",
+    periodStart: new Date(),
+    periodEnd: new Date(),
+    payload: {
+      postId: "post.1",
+      alertCount: 1,
+      riskCodes: [],
+      firstDetectedAt: new Date().toISOString(),
+      externalUrlHost: "www.linkedin.com",
+    },
+    sourceVersion: "v1",
+  });
+
+  await refused(
+    prisma.marketingReport.update({
+      where: { id: report.id },
+      data: { retentionUntil: new Date(Date.now() - DAY) },
+    }),
+    /retention anchors are immutable/,
+  );
+
+  await refusedUnderRetention(
+    (tx) => tx.marketingReport.delete({ where: { id: report.id } }),
+    /retained until/,
+  );
+});
+
+test("a visibility run keeps cited urls https and an answer digest only", async () => {
+  const runAt = new Date("2026-09-18T00:00:00.000Z");
+  const run = await insertAiVisibilityRun(prisma, {
+    promptSetVersion: "p1",
+    promptId: "prompt.compare",
+    locale: "en",
+    model: "gpt-5-6-luna",
+    modelVersion: "2026-09-01",
+    searchMode: "with_search",
+    region: "AU",
+    runAt,
+    mentioned: true,
+    citedUrls: ["https://tomverse.app/"],
+    answerDigest: DIGEST,
+    accuracyFlags: { flags: ["wrong_price"] },
+  });
+  assert.equal(run.retentionUntil.toISOString(), "2028-09-18T00:00:00.000Z");
+
+  const directRun = (citedUrls: string[], answerDigest = DIGEST) =>
+    prisma.aiVisibilityRun.create({
+      data: {
+        promptSetVersion: "p1",
+        promptId: "prompt.compare",
+        locale: "en",
+        model: "gpt-5-6-luna",
+        modelVersion: "2026-09-01",
+        searchMode: "with_search",
+        region: "AU",
+        runAt,
+        mentioned: true,
+        citedUrls,
+        answerDigest,
+      },
+    });
+
+  await refused(directRun(["http://tomverse.app/"]), /citedUrls/);
+  // bool_and ignores NULLs, so a NULL element would otherwise pass the check.
+  await refused(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "AiVisibilityRun" ("id","promptSetVersion","promptId","locale","model","modelVersion","searchMode","region","runAt","mentioned","citedUrls","answerDigest")
+       VALUES ('null-url','p1','prompt.compare','en','m','v','with_search','AU', now(), true, ARRAY['https://ok.example', NULL], $1)`,
+      DIGEST,
+    ),
+    /citedUrls/,
+  );
+  await refused(directRun([], "not-a-digest"), /answerDigest/);
+});
+
+// ---------------------------------------------------------------------------
+// The two movements that are an operator's decision
+// ---------------------------------------------------------------------------
+
+test("a reconnect cannot ride in on another column's change", async () => {
+  const row = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+  const disconnected = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "disconnected" },
+  });
+  assert.equal(disconnected.status, "disconnected");
+
+  // Changing the scopes digest at the same time used to reach the reconnect
+  // branch's early return, which skipped the generation check below it.
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        status: "approval_mode",
+        scopesDigest: OTHER_DIGEST,
+        graduationEpoch: disconnected.graduationEpoch + 1,
+      },
+    }),
+    /reconnects only with a new connection generation/,
+  );
+
+  const reconnected = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      status: "approval_mode",
+      scopesDigest: OTHER_DIGEST,
+      connectionGeneration: disconnected.connectionGeneration + 1,
+      graduationEpoch: disconnected.graduationEpoch + 1,
+    },
+  });
+  assert.equal(reconnected.connectionGeneration, disconnected.connectionGeneration + 1);
+});
+
+test("the resume columns cannot be written on the way past", async () => {
+  const row = await approvedChannel();
+  await refused(
+    prisma.marketingChannel.update({
+      where: { id: row.id },
+      data: {
+        scopesDigest: OTHER_DIGEST,
+        status: "approval_mode",
+        graduationEpoch: 1,
+        lastResumeAuditLogId: "audit-invented",
+        lastResumeReasonCode: "incident_resolved",
+      },
+    }),
+    /records a resume reason only when it resumes into autonomous mode/,
+  );
+});
+
+test("an audit entry resumes an account once, and only after the pause", async () => {
+  const row = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "approval_mode" },
+  });
+  const graduated = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: {
+      status: "autonomous_mode",
+      graduatedAt: new Date(),
+      graduationSnapshot: {
+        graduationEpoch: 0,
+        approvedPostCount: 20,
+        guardRejectionRate: 0,
+        operatorEditRate: 0,
+        observedFromAt: new Date().toISOString(),
+        observedUntilAt: new Date().toISOString(),
+        approvalAuditLogId: "audit-graduation",
+        policyVersion: 1,
+      },
+    },
+  });
+  assert.equal(graduated.status, "autonomous_mode");
+
+  // An entry written before the pause is a record of an earlier decision.
+  const staleAuditId = await resumeAuditEntry(row.id, "incident_resolved");
+  const paused = await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "paused" },
+  });
+  assert.equal(paused.pausedFromMode, "autonomous_mode");
+
+  await refusedByStore(
+    resumeAutonomous(row.id, staleAuditId, "incident_resolved"),
+    "resume_evidence_entry_predates_decision",
+  );
+
+  const freshAuditId = await resumeAuditEntry(row.id, "incident_resolved");
+  const resumed = await updateMarketingChannel(
+    prisma,
+    row.id,
+    {
+      status: "autonomous_mode",
+      graduatedAt: graduated.graduatedAt,
+      graduationSnapshot: graduated.graduationSnapshot as never,
+    },
+    { auditLogId: freshAuditId, reasonCode: "incident_resolved" },
+  );
+  assert.equal(resumed.lastResumeAuditLogId, freshAuditId);
+
+  // The same entry cannot bring it back a second time.
+  await prisma.marketingChannel.update({
+    where: { id: row.id },
+    data: { status: "paused" },
+  });
+  await refusedByStore(
+    resumeAutonomous(row.id, freshAuditId, "incident_resolved"),
+    "resume_evidence_reused",
+  );
+});
+
+test("a retention entry's values are typed, not just keyed", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  const oldAttempt = {
+    at: new Date(Date.now() - 200 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "outcome_unknown",
+    errorCode: null,
+  };
+  const created = await agedPost(row.id, 400, {
+    history: [draftEntry, oldAttempt],
+    historyVersion: 0,
+  });
+
+  const summary = {
+    at: new Date().toISOString(),
+    type: "retention_summary",
+    summarises: "attempt",
+    count: 1,
+    firstAt: oldAttempt.at,
+    lastAt: oldAttempt.at,
+  };
+  const compaction = historyEntry("retention_compaction", { removedEntryCount: 1 });
+
+  // A string that reads as a number passes `::INTEGER` and would be written.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, count: "1" }, compaction],
+    /is not the shape a summary has/,
+  );
+  await refusedCompaction(
+    created.id,
+    [draftEntry, summary, { ...compaction, removedEntryCount: "1" }],
+    /is not the shape it has/,
+  );
+  // Not a time at all.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, at: 0 }, compaction],
+    /is not the shape a summary has/,
+  );
+  // A time Postgres reads happily and the module's schema refuses, which is the
+  // pair that would write a row nothing can read back.
+  await refusedCompaction(
+    created.id,
+    [draftEntry, { ...summary, firstAt: "2026-09-18 00:00:00" }, compaction],
+    /not an instant this store can read back/,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: created.id },
+      data: { history: [draftEntry, summary, compaction], historyVersion: 1 },
+    });
+  });
+  const compacted = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: created.id },
+  });
+  assert.equal((compacted.history as { type: string }[]).length, 3);
+});
+
+test("a post cannot become failed without recording this attempt failing", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed without recording the failure of attempt/,
+  );
+
+  const failed = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [
+        ...(dispatched.history as Prisma.InputJsonValue[]),
+        historyEntry("attempt", { attempt: 1, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  assert.equal(failed.status, "failed");
+});
+
+test("compacting a failure away does not open a path into failed", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  const oldFailure = {
+    at: new Date(Date.now() - 200 * DAY).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  const created = await agedPost(row.id, 400, {
+    // The counter matches the failure already in the history: a dispatch moves it
+    // by exactly one, so a fixture that started at zero could not reach attempt
+    // two and would fail before the compaction this test is about.
+    publishAttempt: 1,
+    history: [draftEntry, oldFailure],
+    historyVersion: 0,
+  });
+
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: created.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-2",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled" });
+  await step({
+    status: "publishing",
+    publishAttempt: 2,
+    providerRequestKey: created.logicalKey,
+  });
+
+  // Compaction is allowed here: the post is not failed, so nothing is measuring
+  // against that attempt yet.
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(RETENTION_ON);
+    await tx.marketingPost.update({
+      where: { id: created.id },
+      data: {
+        history: [
+          draftEntry,
+          {
+            at: new Date().toISOString(),
+            type: "retention_summary",
+            summarises: "attempt",
+            count: 1,
+            firstAt: oldFailure.at,
+            lastAt: oldFailure.at,
+          },
+          historyEntry("retention_compaction", { removedEntryCount: 1 }),
+        ],
+        historyVersion: 1,
+      },
+    });
+  });
+
+  // And now the post cannot become failed without recording the failure, so the
+  // two-step route to a failed post with no way out is closed.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: created.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed without recording the failure of attempt/,
+  );
+});
+
+test("an earlier failure does not stand in for the current attempt's", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  // A second in the past, so the operator approval below is deterministically
+  // later than the failure it answers rather than possibly the same millisecond.
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+
+  // A person re-queues it, and the publisher sends attempt two.
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-1",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+
+  // Attempt one's failure is still in the history, and it is not this failure.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /cannot be failed without recording the failure of attempt 2/,
+  );
+
+  const failedAgain = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [
+        ...history,
+        firstFailure,
+        historyEntry("attempt", { attempt: 2, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 2,
+    },
+  });
+  assert.equal(failedAgain.status, "failed");
+});
+
+test("winding the attempt counter back does not reuse an old failure", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-2",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+
+  // The counter is the only thing tying a failure entry to an attempt, so a
+  // write that could wind it back could make attempt one's failure answer for
+  // attempt two.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed", publishAttempt: 1 },
+    }),
+    /attempt counter changes only when the post is dispatched/,
+  );
+
+  // Forward is refused for the same reason backward is: moving it on would leave
+  // the real last failure unprotected from retention.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { publishAttempt: 3 },
+    }),
+    /attempt counter changes only when the post is dispatched/,
+  );
+
+  // And even at the right number, the failure has to be recorded by this write
+  // rather than found somewhere in the history.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /in the same write/,
+  );
+});
+
+test("a failure stamped finer than a millisecond is still protected", async () => {
+  const row = await approvedChannel();
+  const draftEntry = historyEntry("draft", { envelopeDigest: DIGEST });
+  // The store's schema accepts any sub-second precision. The protection used to
+  // compare this against a TIMESTAMP(3) copy of itself, which is a different
+  // value, so the entry it exists to keep was removable.
+  const preciseFailure = {
+    at: new Date(Date.now() - 200 * DAY).toISOString().replace("Z", "456789Z"),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  // The dispatched-status CHECK requires the provider key to be the logical
+  // key, so the fixture names both.
+  const logicalKey = `post-precise-${Math.random().toString(36).slice(2)}`;
+  const created = await agedPost(row.id, 400, {
+    status: "failed",
+    publishAttempt: 1,
+    logicalKey,
+    providerRequestKey: logicalKey,
+    history: [draftEntry, preciseFailure],
+    historyVersion: 0,
+  });
+
+  await refusedCompaction(
+    created.id,
+    [
+      draftEntry,
+      {
+        at: new Date().toISOString(),
+        type: "retention_summary",
+        summarises: "attempt",
+        count: 1,
+        firstAt: preciseFailure.at,
+        lastAt: preciseFailure.at,
+      },
+      historyEntry("retention_compaction", { removedEntryCount: 1 }),
+    ],
+    /the failure of attempt 1 is what a re-queue is measured against/,
+  );
+});
+
+test("a failure already in the history is not this statement's record of it", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  // The publisher appends the failure and moves the status in one write. Split
+  // across two, the second write records nothing, and the rule is about what a
+  // write records rather than about what the row happens to contain.
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      history: [
+        ...history,
+        historyEntry("attempt", { attempt: 1, outcome: "failed", errorCode: null }),
+      ],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "failed" },
+    }),
+    /in the same write/,
+  );
+});
+
+test("a second dispatch cannot reuse the first attempt's number", async () => {
+  const row = await approvedChannel();
+  const dispatched = await dispatchedPost(row.id);
+  const history = dispatched.history as Prisma.InputJsonValue[];
+
+  const firstFailure = {
+    at: new Date(Date.now() - 1000).toISOString(),
+    type: "attempt",
+    attempt: 1,
+    outcome: "failed",
+    errorCode: null,
+  };
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "failed",
+      history: [...history, firstFailure],
+      historyVersion: dispatched.historyVersion + 1,
+    },
+  });
+  await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: {
+      status: "scheduled",
+      approvalAuditLogId: "audit-requeue-3",
+      approvedAt: new Date(),
+      approvedDigest: DIGEST,
+    },
+  });
+
+  // Leaving the counter alone was the remaining way to give two real attempts
+  // the same number, which would make the failure entries of both indistinguishable.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "publishing" },
+    }),
+    /dispatch moves the attempt counter by one/,
+  );
+
+  // Nor may it skip: the number is the ordinal of a real dispatch, so a gap
+  // would be an attempt nothing happened on.
+  await refused(
+    prisma.marketingPost.update({
+      where: { id: dispatched.id },
+      data: { status: "publishing", publishAttempt: 3 },
+    }),
+    /dispatch moves the attempt counter by one/,
+  );
+
+  const second = await prisma.marketingPost.update({
+    where: { id: dispatched.id },
+    data: { status: "publishing", publishAttempt: 2 },
+  });
+  assert.equal(second.publishAttempt, 2);
+});
+
+// ---------------------------------------------------------------------------
+// S2b1 ordinary Admin store writes
+// ---------------------------------------------------------------------------
+
+// These are integration tests on purpose. The Admin E2E harness builds its
+// database with `prisma db push`, which installs none of the migration SQL;
+// putting a trigger-refusal assertion there would produce a green test that
+// never exercised the trigger this contract depends on.
+
+const postAuditEntry = (
+  action: string,
+  targetId: string,
+  metadata: Prisma.InputJsonObject,
+) =>
+  writeAdminAuditLog({
+    session: operator,
+    request: new Request("https://tomverse.app/api/admin/marketing"),
+    action,
+    targetType: "MarketingPost",
+    targetId,
+    summary: "S2b1 operator decision.",
+    metadata: { actorHadMarketingWrite: true, ...metadata },
+  });
+
+test("two S2b1 approvers racing one digest and version produce one winner", async () => {
+  const account = await approvedChannel();
+  const draft = await post(account.id);
+  const pending = await prisma.marketingPost.update({
+    where: { id: draft.id },
+    data: { status: "pending_approval" },
+  });
+  const [firstAudit, secondAudit] = await Promise.all([
+    postAuditEntry(MARKETING_S2B1_ACTIONS.postApprove, pending.id, {
+      digest: DIGEST,
+    }),
+    postAuditEntry(MARKETING_S2B1_ACTIONS.postApprove, pending.id, {
+      digest: DIGEST,
+    }),
+  ]);
+  const expiry = new Date(Date.now() + DAY);
+  const attempt = (approvalAuditLogId: string) =>
+    prisma.$transaction((tx) =>
+      approveMarketingPost(tx, {
+        id: pending.id,
+        expectedEnvelopeDigest: DIGEST,
+        expectedHistoryVersion: pending.historyVersion,
+        approvalAuditLogId,
+        approvalExpiresAt: expiry,
+      }),
+    );
+  const results = await Promise.allSettled([
+    attempt(firstAudit),
+    attempt(secondAudit),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+
+  const stored = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: pending.id },
+  });
+  assert.equal(stored.status, "approved");
+  assert.equal(stored.approvedDigest, DIGEST);
+  assert.equal(stored.approvalExpiresAt?.toISOString(), expiry.toISOString());
+  assert.ok([firstAudit, secondAudit].includes(stored.approvalAuditLogId ?? ""));
+});
+
+test("approval-mode resume expires every due approved or scheduled post in its transaction", async () => {
+  const account = await approvedChannel();
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "paused", pauseReasonCode: "incident_review" },
+  });
+  const due = await post(account.id);
+  await prisma.marketingPost.update({
+    where: { id: due.id },
+    data: { status: "pending_approval" },
+  });
+  await prisma.marketingPost.update({
+    where: { id: due.id },
+    data: {
+      status: "approved",
+      approvalAuditLogId: "fixture-approval",
+      approvedAt: new Date(Date.now() - 2 * DAY),
+      approvedDigest: DIGEST,
+      approvalExpiresAt: new Date(Date.now() - DAY),
+    },
+  });
+
+  const result = await runMarketingTransaction(prisma, (tx) =>
+    resumeMarketingChannelToApproval(tx, { id: account.id }),
+  );
+  assert.deepEqual(result.expiredPostIds, [due.id]);
+  const [resumed, expired, audit] = await Promise.all([
+    prisma.marketingChannel.findUniqueOrThrow({ where: { id: account.id } }),
+    prisma.marketingPost.findUniqueOrThrow({ where: { id: due.id } }),
+    prisma.adminAuditLog.findFirstOrThrow({
+      where: {
+        action: MARKETING_S2B1_ACTIONS.postApprovalExpiredOnResume,
+        targetId: due.id,
+      },
+    }),
+  ]);
+  assert.equal(resumed.status, "approval_mode");
+  assert.equal(expired.status, "approval_expired");
+  assert.equal(expired.historyVersion, due.historyVersion);
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "marketing-guard");
+});
+
+test("the S2b1 cap writer refuses an effective increase before the DB trigger", async () => {
+  const account = await approvedChannel();
+  await lowerMarketingChannelCaps(prisma, {
+    id: account.id,
+    dailyCapOverride: 0,
+    weeklyCapOverride: 2,
+  });
+  await refusedByStore(
+    lowerMarketingChannelCaps(prisma, {
+      id: account.id,
+      dailyCapOverride: 1,
+      weeklyCapOverride: 2,
+    }),
+    "cap_change_raises_limit",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// S1 r7 amendment 2: the one row that may be inserted already scheduled
+// ---------------------------------------------------------------------------
+//
+// The store's own refusals are unit-tested against a fake
+// (tests/marketingS2b2AutonomousInsert.test.ts). These are the other half: the
+// trigger's, against a real PostgreSQL, because the whole reason the exception
+// is written in SQL is that it holds for a write that never goes near the
+// store module.
+
+/** The shape the exception is defined as, with nothing else set. */
+const autonomousScheduledRow = (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown> = {},
+) => ({
+  channelId,
+  locale: "en",
+  kind: "social",
+  logicalKey: `auto-${Math.random().toString(36).slice(2)}`,
+  envelope: envelope({ scheduledAt: slot.toISOString() }),
+  envelopeDigest: DIGEST,
+  rendererVersion: "r1",
+  templateId: "template-1",
+  templateDigest: OTHER_DIGEST,
+  claimIds: [],
+  assetIds: [],
+  claimRegistryVersion: 1,
+  assetRegistryVersion: 1,
+  factSnapshot,
+  factsDigest: DIGEST,
+  guardDecision: "autonomous_eligible",
+  guardCodes: [] as string[],
+  // Empty, because that is what `guardDraft()` returns for an autonomous
+  // decision: the rule ids it collects are the ones that had something to say.
+  // The fixture used to write `["rule.template"]`, and that one value hid a
+  // trigger clause that refused every legitimate row.
+  guardRuleIds: [] as string[],
+  status: "scheduled",
+  mode: "autonomous",
+  scheduledAt: slot,
+  history: [historyEntry("draft", { envelopeDigest: DIGEST })],
+  historyVersion: 0,
+  ...overrides,
+});
+
+const refusesAutonomousRow = async (
+  channelId: string,
+  slot: Date,
+  overrides: Record<string, unknown>,
+) =>
+  assert.rejects(
+    prisma.marketingPost.create({
+      data: autonomousScheduledRow(channelId, slot, overrides) as never,
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+
+test("an autonomous scheduled row of the right shape is accepted", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  const created = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot) as never,
+  });
+  assert.equal(created.status, "scheduled");
+  assert.equal(created.mode, "autonomous");
+  assert.equal(created.historyVersion, 0);
+  // The trigger still stamps `createdAt` from the server clock. The exception
+  // widens which statuses may be inserted; it does not hand the caller the
+  // clock.
+  assert.ok(Math.abs(created.createdAt.getTime() - Date.now()) < 60_000);
+  assert.deepEqual(created.guardRuleIds, []);
+
+  // A decision that did collect a rule id is accepted too. The clause is about
+  // the decision being autonomous, not about how much it had to say.
+  const withRule = await prisma.marketingPost.create({
+    data: autonomousScheduledRow(account.id, slot, {
+      guardRuleIds: ["rule.template"],
+    }) as never,
+  });
+  assert.deepEqual(withRule.guardRuleIds, ["rule.template"]);
+});
+
+test("the first history entry names the envelope the row stores", async () => {
+  // The store checks the digest; a row inserted another way does not go
+  // through it, and the first entry is what every later append is compared
+  // against.
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft", { envelopeDigest: OTHER_DIGEST })],
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    history: [historyEntry("draft")],
+  });
+});
+
+test("the exception is exactly scheduled-and-autonomous, not either half", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // `scheduled` with an approval-mode row is the ordinary refusal, unchanged.
+  await refusesAutonomousRow(account.id, slot, {
+    mode: "approval",
+    guardDecision: "approval_required",
+  });
+  // And an autonomous row that is not scheduled is not this exception either:
+  // it falls back to the draft rule, which permits only two statuses.
+  await refusesAutonomousRow(account.id, slot, {
+    status: "approved",
+    scheduledAt: null,
+  });
+});
+
+test("a scheduled autonomous row goes out when its envelope says, or not at all", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  // The column and the envelope disagreeing is the case this clause exists
+  // for: the publisher acts on the column and the Guard judged the envelope.
+  await refusesAutonomousRow(account.id, slot, {
+    scheduledAt: new Date(slot.getTime() + DAY),
+  });
+  await refusesAutonomousRow(account.id, slot, {
+    envelope: envelope({ scheduledAt: null }),
+  });
+  await refusesAutonomousRow(account.id, slot, { scheduledAt: null });
+});
+
+test("a scheduled autonomous row carries a sealed autonomous decision", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, {
+    guardDecision: "approval_required",
+  });
+  await refusesAutonomousRow(account.id, slot, { guardCodes: ["new_copy"] });
+  // No `factsDigest: null` case here any more. Since S2b3 the column is NOT
+  // NULL, so the generated client refuses the null before a statement is sent
+  // -- a PrismaClientValidationError, which says something about Prisma's
+  // types and nothing about the database. The guarantee this case stood for
+  // is now stronger than the trigger clause it exercised: every row, not just
+  // an autonomous one, must carry a digest, and "a marketing post cannot be
+  // written without its facts digest" proves that with raw SQL against the
+  // column itself.
+});
+
+test("autonomy is only ever inside a named template", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  await refusesAutonomousRow(account.id, slot, { templateId: null });
+  await refusesAutonomousRow(account.id, slot, { templateDigest: null });
+});
+
+test("a scheduled autonomous row cannot mint its own approval", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { approvalAuditLogId: "audit-1" },
+    { approvedAt: new Date() },
+    { approvedDigest: DIGEST },
+    { approvalExpiresAt: new Date(Date.now() + DAY) },
+    // Nor become the source another autonomous post inherits from.
+    { reusableAsTemplate: true },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("a scheduled autonomous row arrives unclaimed and without an outcome", async () => {
+  const account = await channel();
+  const slot = new Date(Date.now() + DAY);
+  for (const field of [
+    { slotDate: new Date() },
+    { claimToken: "token-1" },
+    { leaseUntil: new Date(Date.now() + 60_000) },
+    { externalUrl: "https://www.tomverse.app/p/1" },
+    { verifiedPublicAt: new Date() },
+    { verificationMethod: "api_lookup" },
+    { errorCode: "provider_rejected" },
+    { outcomeUnknownAt: new Date() },
+    { deletedAt: new Date() },
+    { deletionMethod: "operator_unpublish" },
+    { contentPurgedAt: new Date() },
+    { legalHold: true },
+    // The clauses outside the exception still apply to it.
+    { publishedAt: new Date() },
+    { publishAttempt: 1 },
+    { providerRequestKey: "key-1" },
+    { externalPostId: "external-1" },
+  ]) {
+    await refusesAutonomousRow(account.id, slot, field);
+  }
+});
+
+test("the exception adds no drafted-to-scheduled edge", async () => {
+  // The other half of "this is not a lifted refusal". A post that started as a
+  // draft still cannot walk to `scheduled`: the only route is to be inserted
+  // as one.
+  const account = await channel();
+  const draft = await post(account.id);
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: draft.id },
+      data: { status: "scheduled", mode: "autonomous" },
+    }),
+    /check_violation|violates|MarketingPost/,
+  );
+});
+
+test("a serialization failure is one the retry loop recognises", async () => {
+  // Not about the admission, and not named as though it were. Two overlapping
+  // `SERIALIZABLE` transactions each read what the other writes, which is the
+  // shape SSI exists to catch; whether it catches this particular pair is
+  // PostgreSQL's business and not something to assert.
+  //
+  // What is asserted is the property the bounded retry depends on: if
+  // PostgreSQL does refuse to order two of these, it says so in a way
+  // `marketingSerializationFailure()` recognises. That predicate was wrong
+  // once -- it compared `error.code` to "40001", which a Prisma caller never
+  // sees -- and a conflict the classifier does not recognise is a conflict
+  // nothing retries.
+  //
+  // The store's own refusal on withdrawn evidence, and the row the trigger
+  // accepts, are proved end to end in marketing-templates.db.test.ts, which
+  // calls the store rather than a copy of its SQL.
+  const account = await channel();
+  const first = await publishedPost(account.id);
+  const second = await publishedPost(account.id);
+
+  const bump = (id: string, claim: string) =>
+    prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT DISTINCT used."value"
+          FROM "MarketingPost" AS post,
+               unnest(post."claimIds") AS used("value")
+          WHERE post."channelId" = ${account.id}
+            AND post."status" IN ('published')
+        `);
+        await tx.marketingPost.update({
+          where: { id },
+          data: { claimIds: [claim] },
+        });
+        return "done" as const;
+      },
+      { isolationLevel: "Serializable" },
+    );
+
+  const results = await Promise.all([
+    bump(first.id, "claim.one").catch((error: unknown) => error),
+    bump(second.id, "claim.two").catch((error: unknown) => error),
+  ]);
+
+  for (const result of results) {
+    if (result instanceof Error) {
+      assert.ok(
+        marketingSerializationFailure(result),
+        `unrecognised concurrency failure: ${result.message}`,
+      );
+    } else {
+      assert.equal(result, "done");
+    }
+  }
+});
+
+test("a marketing post cannot be written without its facts digest", async () => {
+  // S2b3. The column was nullable while rows predating it might exist; the
+  // migration establishes there are none and the database now says so for
+  // every future row.
+  //
+  // Against a real PostgreSQL rather than against Prisma's types, because the
+  // types are regenerated from the schema and would agree with a schema the
+  // database had not been given. Twice in this slice's review a rule the code
+  // and its types agreed on turned out to be one the database did not have.
+  const account = await channel();
+  await assert.rejects(
+    prisma.$executeRaw`
+      INSERT INTO "MarketingPost" (
+        "id", "channelId", "locale", "kind", "logicalKey",
+        "envelope", "envelopeDigest", "rendererVersion",
+        "claimIds", "assetIds", "claimRegistryVersion", "assetRegistryVersion",
+        "factSnapshot", "factsDigest",
+        "guardDecision", "guardCodes", "guardRuleIds",
+        "status", "mode", "history", "historyVersion", "updatedAt"
+      ) VALUES (
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${account.id}, 'en', 'social',
+        ${`no-digest-${Math.random().toString(36).slice(2)}`},
+        ${JSON.stringify(envelope())}::jsonb, ${DIGEST}, 'r1',
+        ARRAY[]::text[], ARRAY[]::text[], 1, 1,
+        ${JSON.stringify(factSnapshot)}::jsonb, NULL,
+        'approval_required', ARRAY[]::text[], ARRAY[]::text[],
+        'drafted', 'approval',
+        ${JSON.stringify([historyEntry("draft", { envelopeDigest: DIGEST })])}::jsonb,
+        0, now()
+      )
+    `,
+    /factsDigest|not-null|null value/i,
+  );
+
+  // And the ordinary fixture, which does set it, still goes in -- so the test
+  // above is about the digest and not about the statement being malformed.
+  const written = await post(account.id);
+  assert.equal(written.factsDigest, DIGEST);
+});
+
+// ---------------------------------------------------------------------------
+// S2c: one slot, one winner
+// ---------------------------------------------------------------------------
+
+/** A channel in approval mode with one post due to go out. */
+async function accountWithDuePost() {
+  const account = await channel();
+  await prisma.marketingChannel.update({
+    where: { id: account.id },
+    data: { status: "approval_mode", approvalStartedAt: new Date(Date.now() - DAY) },
+  });
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-claim",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  // Due: a moment that has already passed at the database's clock.
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+  return { account, postId: draft.id };
+}
+
+const admits = async () => ({ publish: true });
+
+test("a claim writes only the slot, and the row stays scheduled", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const before = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  const result = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(result.claimed);
+  assert.equal(result.id, postId);
+
+  const after = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(after.status, "scheduled");
+  assert.equal(after.claimToken, "worker-a");
+  assert.ok(after.slotDate);
+  assert.ok(after.leaseUntil);
+  // The three that would say something left for the platform, and the two that
+  // would say the post moved on.
+  assert.equal(after.publishAttempt, before.publishAttempt);
+  assert.equal(after.providerRequestKey, null);
+  assert.equal(after.historyVersion, before.historyVersion);
+  assert.deepEqual(after.history, before.history);
+
+  const audit = await prisma.adminAuditLog.findFirst({
+    where: { action: "marketing_post.claimed", targetId: postId },
+  });
+  assert.ok(audit, "the claim wrote no audit entry");
+});
+
+test("two workers race for one slot and exactly one wins", async () => {
+  // The reason the channel is locked before the counts are read. Both
+  // transactions want the same post and the same day; the channel row is the
+  // mutex, so the second waits and then finds the slot gone.
+  const { account } = await accountWithDuePost();
+
+  const claim = (token: string) =>
+    runMarketingTransaction(
+      prisma,
+      (tx) =>
+        claimDueMarketingPost(tx, {
+          channelId: account.id,
+          claimToken: token,
+          resolveAdmission: admits,
+        }),
+      { isolationLevel: "Serializable" },
+    ).catch((error: unknown) => error);
+
+  const results = await Promise.all([claim("worker-a"), claim("worker-b")]);
+
+  const claimed = results.filter(
+    (result): result is { claimed: true; id: string; leaseUntil: Date } =>
+      !(result instanceof Error) && result !== null && (result as { claimed?: unknown }).claimed === true,
+  );
+  assert.equal(claimed.length, 1, "exactly one worker may hold a slot");
+
+  // The loser is either answered or told to retry. At SERIALIZABLE, a worker
+  // that waited on the channel lock while the winner updated that row receives
+  // a serialization failure -- that is PostgreSQL doing its job, and it arrives
+  // from a raw statement as P2010, not P2034. What matters is that the
+  // classifier recognises it, because a failure it does not recognise is one
+  // nothing retries. The first version of this test demanded an answer and so
+  // asserted something PostgreSQL does not do.
+  const losers = results.filter((result) => result !== claimed[0]);
+  assert.equal(losers.length, 1);
+  const loser = losers[0];
+  if (loser instanceof Error) {
+    assert.ok(
+      marketingSerializationFailure(loser),
+      `a losing worker's failure must be one the retry recognises: ${loser.message}`,
+    );
+    // And retrying it is an answer: the slot is taken, so the retried claim
+    // finds nothing it may take.
+    const retried = await claim("worker-b");
+    assert.ok(!(retried instanceof Error), "the retry must be answered");
+    assert.equal((retried as { claimed: boolean }).claimed, false);
+  } else {
+    assert.equal((loser as { claimed: boolean }).claimed, false);
+  }
+
+  const rows = await prisma.marketingPost.findMany({
+    where: { channelId: account.id, claimToken: { not: null } },
+  });
+  assert.equal(rows.length, 1);
+});
+
+test("a release gives the slot back and another worker can take it", async () => {
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  const released = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(released, { released: true });
+
+  const free = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(free.claimToken, null);
+  assert.equal(free.slotDate, null);
+  assert.equal(free.leaseUntil, null);
+  assert.equal(free.status, "scheduled");
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(second.claimed);
+});
+
+test("a release must present the claim it is giving back", async () => {
+  const { account, postId } = await accountWithDuePost();
+  await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+
+  // A worker whose lease expired, trying to tidy up, must not clear the claim
+  // of whoever took the slot after it.
+  const wrongToken = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-b",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(wrongToken, { released: false });
+
+  const wrongVersion = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: held.leaseUntil as Date,
+        expectedHistoryVersion: held.historyVersion + 1,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+
+  // And a release naming a lease this row no longer has.
+  const wrongLease = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      releaseMarketingPostClaim(tx, {
+        id: postId,
+        claimToken: "worker-a",
+        expectedLeaseUntil: new Date((held.leaseUntil as Date).getTime() - 1000),
+        expectedHistoryVersion: held.historyVersion,
+        reason: "worker_shutdown",
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(wrongLease, { released: false });
+  assert.deepEqual(wrongVersion, { released: false });
+
+  const still = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(still.claimToken, "worker-a");
+});
+
+test("a crashed worker's slot is renewed on a one-a-day channel, not refused", async () => {
+  // The round-two blocker, against a real PostgreSQL. LinkedIn is allowed one
+  // post a day. Worker A claims today's slot and dies; its lease runs out;
+  // worker B reclaims the same row. That row is today's one post, and counting
+  // it against the cap refused its own renewal -- so the only recovery path
+  // for a crashed worker was a permanent refusal.
+  //
+  // Also the proof the day survives the trip: `slotDate` goes in as a `DATE`
+  // and comes back through `to_char` as text, and a renewal is recognised only
+  // if the two strings agree.
+  const { account, postId } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+  const held = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.ok(held.slotDate);
+
+  // Worker A is gone. Its lease is made to have run out -- directly, because
+  // the only other way is to wait fifteen minutes, and a test is allowed to
+  // write a row the store would not.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { leaseUntil: new Date(Date.now() - 60_000) },
+  });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(second.claimed, "a renewal must not be refused by its own slot");
+
+  const renewed = await prisma.marketingPost.findUniqueOrThrow({
+    where: { id: postId },
+  });
+  assert.equal(renewed.claimToken, "worker-b");
+  assert.deepEqual(
+    renewed.slotDate,
+    held.slotDate,
+    "a renewal leaves the day it already held",
+  );
+
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "marketing_post.claimed", targetId: postId },
+    orderBy: { createdAt: "asc" },
+  });
+  assert.equal(audits.length, 2);
+  assert.equal(
+    (audits[1]?.metadata as { renewed?: unknown } | null)?.renewed,
+    true,
+  );
+});
+
+test("a second post on a one-a-day channel is refused the same day", async () => {
+  // The other half of the same rule: renewal is exempt from the cap, a new
+  // spend is not.
+  const { account } = await accountWithDuePost();
+  const first = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-a",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.ok(first.claimed);
+
+  // A second approved post on the same account, due now.
+  const draft = await post(account.id);
+  const step = (data: Record<string, unknown>) =>
+    prisma.marketingPost.update({ where: { id: draft.id }, data });
+  await step({ status: "pending_approval" });
+  await step({
+    status: "approved",
+    approvalAuditLogId: "audit-approval-second",
+    approvedAt: new Date(),
+    approvedDigest: DIGEST,
+  });
+  await step({ status: "scheduled", scheduledAt: new Date(Date.now() - 60_000) });
+
+  const second = await runMarketingTransaction(
+    prisma,
+    (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: account.id,
+        claimToken: "worker-b",
+        resolveAdmission: admits,
+      }),
+    { isolationLevel: "Serializable" },
+  );
+  assert.deepEqual(second, { claimed: false, reason: "daily_cap_reached" });
+});
+
+test("a claim token and its lease are set together or not at all", async () => {
+  // A row holding a token with no lease is claimed by nobody and reclaimable
+  // by nobody, so it would never go out and nothing would say why. The store
+  // never writes one; the constraint is there for the writer that someday
+  // does, so it fails at the write rather than as a post that quietly stops.
+  const { postId } = await accountWithDuePost();
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: "orphan", leaseUntil: null },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  await assert.rejects(
+    prisma.marketingPost.update({
+      where: { id: postId },
+      data: { claimToken: null, leaseUntil: new Date() },
+    }),
+    /MarketingPost_claim_pair_check|check constraint|violates/i,
+  );
+  // Both, or neither, is fine.
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: "held", leaseUntil: new Date(Date.now() + 60_000) },
+  });
+  await prisma.marketingPost.update({
+    where: { id: postId },
+    data: { claimToken: null, leaseUntil: null },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S2d1: a publisher run's deadline, enforced by the database
+// ---------------------------------------------------------------------------
+//
+// The one rule the plan calls mandatory: a run that finished after its
+// deadline is not recorded as a success. The route cannot promise that --
+// a COMMIT can become durable after the deadline on 16 and 17 alike -- so the
+// table does.
+
+const runUuid = () => crypto.randomUUID();
+const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+
+test("a publisher run starts on the database's clock and closes on it", async () => {
+  const runId = runUuid();
+  const deadlineAt = minutesFromNow(4);
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: true,
+    runId,
+  });
+
+  const opened = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(opened.status, "running");
+  assert.ok(opened.heartbeatAt, "the trigger stamps the first heartbeat");
+  assert.equal(opened.completedAt, null);
+
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), { beat: true });
+
+  const closed = await finishMarketingPublisherRun(prisma, runId, {
+    status: "succeeded",
+    processedCount: 0,
+    result: { skipped: "no_adapter_implemented" },
+  });
+  assert.deepEqual(closed, { status: "succeeded" });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.ok(row.completedAt);
+  assert.ok(row.completedAt <= deadlineAt);
+});
+
+test("a run that closes after its deadline is failed, never succeeded", async () => {
+  // The deadline is moved into the past directly, because the only other way
+  // is to wait four minutes. The trigger refuses to move a deadline once set,
+  // so it is done with the trigger off, in a disposable test database, and
+  // put straight back.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    await prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60_000) },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+
+  // Straight at the table: the trigger itself refuses.
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { status: "succeeded", completedAt: new Date() },
+    }),
+    /after its deadline/,
+  );
+
+  // Through the module: the refusal is caught and the run closed failed,
+  // rather than left running for the silence monitor to misreport as a dead
+  // worker.
+  const closed = await finishMarketingPublisherRun(prisma, runId, {
+    status: "succeeded",
+    processedCount: 0,
+    result: {},
+  });
+  assert.deepEqual(closed, { status: "failed" });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "failed");
+  assert.equal(row.error, "deadline_exceeded");
+});
+
+test("a deadline cannot be moved, removed, or started already past", async () => {
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  // Moving it later would make a late run punctual; removing it would take
+  // the row out of every rule the trigger applies.
+  for (const deadlineAt of [minutesFromNow(60), null]) {
+    await assert.rejects(
+      prisma.scheduledJobRun.update({ where: { id: runId }, data: { deadlineAt } }),
+      /deadline belongs to the insert/,
+    );
+  }
+  await assert.rejects(
+    prisma.scheduledJobRun.create({
+      data: {
+        id: runUuid(),
+        jobKey: "marketing_publisher",
+        status: "running",
+        deadlineAt: new Date(Date.now() - 1_000),
+      },
+    }),
+    /cannot start after its own deadline/,
+  );
+});
+
+test("a deadline cannot be added to a row that does not have one", async () => {
+  // The hole the first version of this trigger left, and the widest one there
+  // is. The immutability check only fired when the row *already* had a
+  // deadline, so a closed row without one could be given a deadline in the
+  // past: its status and `completedAt` did not move, so the closed-row branch
+  // returned happily, and the result was a `succeeded` run that finished after
+  // its deadline -- the single row this trigger exists to make impossible.
+  //
+  // Any other scheduled job's row will do, because every one of them is
+  // written without a deadline. That is the point: rows outside this slice are
+  // not exempt from the rule, they are simply never given a deadline.
+  const runId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: runId,
+      jobKey: "infrastructure_threshold_monitor",
+      status: "succeeded",
+      completedAt: new Date(),
+    },
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60 * 60_000) },
+    }),
+    /deadline belongs to the insert/,
+  );
+  // Still a success with no deadline, which is what it was.
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.equal(row.deadlineAt, null);
+  // A future deadline is refused for the same reason: the rule is about where
+  // a deadline may come from, not about whether this particular one would have
+  // been violated.
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: minutesFromNow(60) },
+    }),
+    /deadline belongs to the insert/,
+  );
+  // And a still-running row without one is refused too, so the rule does not
+  // depend on the row being closed.
+  const openId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: openId, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: openId },
+      data: { deadlineAt: minutesFromNow(4) },
+    }),
+    /deadline belongs to the insert/,
+  );
+});
+
+test("an ordinary scheduled job row is still writable end to end", async () => {
+  // The rule above refuses *adding* a deadline, and must not refuse the
+  // updates every other job already makes. A trigger that broke
+  // `completeScheduledJob` for the whole repository would be a far larger
+  // defect than the one it fixed.
+  const runId = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: runId, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await prisma.scheduledJobRun.update({
+    where: { id: runId },
+    data: { status: "succeeded", completedAt: new Date(), processedCount: 3 },
+  });
+  const row = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(row.status, "succeeded");
+  assert.equal(row.processedCount, 3);
+  // Its completion time is its own: the trigger returns before touching a row
+  // with no deadline, so the process clock still stamps these.
+  assert.ok(row.completedAt instanceof Date);
+});
+
+test("a run past its deadline cannot report a sign of life", async () => {
+  // The heartbeat had become a way to hide the thing the silence monitor
+  // watches for: the worker is force-killed at the deadline but the app route it
+  // called is not, and every beat moved `heartbeatAt` to the database's current
+  // time -- so a run whose worker died an hour ago looked alive and the incident
+  // was deferred indefinitely.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  const before = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+
+  // The deadline is moved into the past directly, because the only other way is
+  // to wait four minutes. The trigger refuses to move a deadline, so it is
+  // disabled for that one statement and immediately re-enabled.
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    await prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { deadlineAt: new Date(Date.now() - 60_000) },
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), {
+    beat: false,
+    reason: "past_deadline",
+  });
+  // And the column did not move, which is the whole point -- a beat that was
+  // refused but still stamped would leave the monitor exactly as blind.
+  const after = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.equal(after.heartbeatAt?.getTime(), before.heartbeatAt?.getTime());
+  assert.equal(after.status, "running");
+});
+
+test("a heartbeat before the deadline still moves to the database's clock", async () => {
+  // The rule above must not have switched the ordinary case off.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  const before = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.deepEqual(await heartbeatMarketingPublisherRun(prisma, runId), { beat: true });
+  const after = await prisma.scheduledJobRun.findUniqueOrThrow({ where: { id: runId } });
+  assert.ok(after.heartbeatAt);
+  assert.ok(before.heartbeatAt);
+  assert.ok(after.heartbeatAt.getTime() >= before.heartbeatAt.getTime());
+  // The caller's value is discarded: it asked for a time it chose and got the
+  // database's.
+  assert.ok(Math.abs(after.heartbeatAt.getTime() - Date.now()) < 60_000);
+});
+
+/**
+ * Insert publisher rows that are already stale, which the trigger exists to make
+ * impossible.
+ *
+ * Two of its rules stand in the way, and both are correct: a marketing publisher
+ * row must carry a deadline, and an insert with one has its `startedAt` stamped
+ * from the database clock. Together they mean a run cannot be *born* stale --
+ * which is the point, because staleness is something that happens to a live run
+ * by the passage of time, and the silence query's job is to find runs that got
+ * there honestly.
+ *
+ * A test cannot wait sixteen minutes, so it disables the trigger for exactly
+ * these inserts and turns it straight back on. What is being exercised is the
+ * query, not the trigger; the trigger has its own cases above.
+ */
+const insertStalePublisherRuns = async (
+  rows: Array<{ id: string; startedAt: Date; heartbeatAt: Date | null }>,
+) => {
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "ScheduledJobRun" DISABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+  );
+  try {
+    for (const row of rows) {
+      await prisma.scheduledJobRun.create({
+        data: {
+          id: row.id,
+          jobKey: "marketing_publisher",
+          status: "running",
+          startedAt: row.startedAt,
+          heartbeatAt: row.heartbeatAt,
+          // Carried because the rule requires it of every publisher row; the
+          // silence query does not read it.
+          deadlineAt: new Date(row.startedAt.getTime() + 4 * 60_000),
+        },
+      });
+    }
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "ScheduledJobRun" ENABLE TRIGGER "scheduled_job_run_deadline_guard"`,
+    );
+  }
+};
+
+test("a publisher run cannot be created without a deadline", async () => {
+  // The rule the two fixtures above have to work around, asserted directly so the
+  // workaround cannot quietly become the only thing that knows about it.
+  //
+  // Scoping the trigger to rows carrying a deadline is what keeps it away from
+  // every other scheduled job, and it was also the way out of it:
+  // `startScheduledJob` accepts this job key and writes no deadline, so the row
+  // returned at the trigger's early exit and `completeScheduledJob` could record
+  // `succeeded` an hour late.
+  await assert.rejects(
+    prisma.scheduledJobRun.create({
+      data: { id: runUuid(), jobKey: "marketing_publisher", status: "running" },
+    }),
+    /must carry a deadline/,
+  );
+  // Every other job is untouched: this is the scoping, still doing its job.
+  const other = runUuid();
+  await prisma.scheduledJobRun.create({
+    data: { id: other, jobKey: "infrastructure_threshold_monitor", status: "running" },
+  });
+  await prisma.scheduledJobRun.delete({ where: { id: other } });
+});
+
+test("the silence query compares and orders by the last sign of life", async () => {
+  // Codex's scenario, round 3, and the reason this is asked of PostgreSQL rather
+  // than of a fake: fifty rows that never beat and started just past the
+  // threshold, and one row whose heartbeat was ten hours ago. Ordering by
+  // `heartbeatAt` -- with nulls first or last -- gets this wrong, because the
+  // value the rule compares is `COALESCE(heartbeatAt, startedAt)`. Nulls first
+  // put the fifty sixteen-minute rows ahead of the ten-hour one and the page cut
+  // it off; nulls last would drop them instead.
+  const now = new Date();
+  const runIds = Array.from({ length: 50 }, () => runUuid());
+  const stale = runUuid();
+  const alive = runUuid();
+  await insertStalePublisherRuns([
+    ...runIds.map((id) => ({
+      id,
+      startedAt: new Date(now.getTime() - 16 * 60_000),
+      heartbeatAt: null,
+    })),
+    {
+      id: stale,
+      startedAt: new Date(now.getTime() - 11 * 60 * 60_000),
+      heartbeatAt: new Date(now.getTime() - 10 * 60 * 60_000),
+    },
+    // Alive: beat a moment ago, however long ago it started. It must not be
+    // counted, which the `startedAt`-only predicate got wrong.
+    {
+      id: alive,
+      startedAt: new Date(now.getTime() - 6 * 60 * 60_000),
+      heartbeatAt: new Date(now.getTime() - 1_000),
+    },
+  ]);
+  // A different job's row, however silent, is not this alert's.
+  await prisma.scheduledJobRun.create({
+    data: {
+      id: runUuid(),
+      jobKey: "infrastructure_threshold_monitor",
+      status: "running",
+      startedAt: new Date(now.getTime() - 40 * 60_000),
+    },
+  });
+
+  const { total, runs } = await findSilentMarketingPublisherRuns(prisma, now);
+
+  // Fifty-one silent: the fifty at sixteen minutes and the stale one. Not the
+  // one that beat a second ago, and not the other job's.
+  assert.equal(total, 51);
+  // The page is fifty, and the count is not capped by it -- they came out of one
+  // statement, so they describe one snapshot.
+  assert.equal(runs.length, 50);
+  // And the longest-silent row is first, which is the assertion the two wrong
+  // orderings failed.
+  assert.equal(runs[0]?.id, stale);
+  assert.equal(runs.some((run) => run.id === alive), false);
+  // The pure rule, handed these rows, names the same oldest signal.
+  const silent = marketingPublisherSilentRuns(runs, now);
+  assert.equal(silent[0]?.id, stale);
+  assert.equal(
+    silent[0]?.lastSignOfLifeAt,
+    new Date(now.getTime() - 10 * 60 * 60_000).toISOString(),
+  );
+
+  await prisma.scheduledJobRun.deleteMany({
+    where: { id: { in: [...runIds, stale, alive] } },
+  });
+});
+
+test("a run exactly at the silence threshold is not yet silent", async () => {
+  // The boundary is strict, on the database's side of the comparison as well as
+  // the application's -- the two forms of this rule have to agree there or the
+  // alert fires a threshold early.
+  const now = new Date();
+  const runId = runUuid();
+  await insertStalePublisherRuns([
+    { id: runId, startedAt: new Date(now.getTime() - 15 * 60_000), heartbeatAt: null },
+  ]);
+  const { total } = await findSilentMarketingPublisherRuns(prisma, now);
+  assert.equal(total, 0);
+  assert.deepEqual(
+    marketingPublisherSilentRuns(
+      [{ id: runId, startedAt: new Date(now.getTime() - 15 * 60_000), heartbeatAt: null }],
+      now,
+    ),
+    [],
+  );
+  await prisma.scheduledJobRun.delete({ where: { id: runId } });
+});
+
+test("a closed run stays closed", async () => {
+  // Otherwise a failed run could be flipped to succeeded afterwards, and the
+  // late-run rule would be a rule about the first write only.
+  const runId = runUuid();
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(4) });
+  await finishMarketingPublisherRun(prisma, runId, {
+    status: "failed",
+    error: "test",
+  });
+  await assert.rejects(
+    prisma.scheduledJobRun.update({
+      where: { id: runId },
+      data: { status: "succeeded" },
+    }),
+    /already closed/,
+  );
+});
+
+test("a duplicate run id is never a second run", async () => {
+  const runId = runUuid();
+  const deadlineAt = minutesFromNow(4);
+  await startMarketingPublisherRun(prisma, { runId, deadlineAt });
+  // The same request again, while it runs: answered, not repeated.
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: false,
+    reason: "already_running",
+  });
+  // The same id with another deadline is not a retry of anything.
+  assert.deepEqual(
+    await startMarketingPublisherRun(prisma, { runId, deadlineAt: minutesFromNow(3) }),
+    { started: false, reason: "deadline_mismatch" },
+  );
+  await finishMarketingPublisherRun(prisma, runId, { status: "failed", error: "test" });
+  assert.deepEqual(await startMarketingPublisherRun(prisma, { runId, deadlineAt }), {
+    started: false,
+    reason: "already_closed",
+  });
+});
+
+test("a scheduled job with no deadline is untouched by the publisher's rules", async () => {
+  // The trigger is scoped to rows that carry a deadline. Every other job
+  // writes this table without one, stamps its own completion time, and may be
+  // closed in any order -- none of which this slice has authority to change.
+  const row = await prisma.scheduledJobRun.create({
+    data: { jobKey: "retention_cleanup", status: "running" },
+  });
+  const chosen = new Date("2020-01-01T00:00:00.000Z");
+  const closed = await prisma.scheduledJobRun.update({
+    where: { id: row.id },
+    data: { status: "succeeded", completedAt: chosen },
+  });
+  assert.deepEqual(closed.completedAt, chosen, "a job without a deadline keeps its own clock");
+});
+
+test("the bounded transaction arms all three timeouts on this server", async () => {
+  // What the fake in tests/marketingPublisherTransaction.test.ts cannot show:
+  // that PostgreSQL took the settings. On 16 the first of them does not exist
+  // and the wrapper refuses, which is why CI runs 17 for this slice.
+  const shown = await runBoundedMarketingTransaction(prisma, async (tx) =>
+    tx.$queryRaw<Array<{ transaction: string; statement: string; idle: string }>>`
+      SELECT
+        current_setting('transaction_timeout') AS "transaction",
+        current_setting('statement_timeout') AS "statement",
+        current_setting('idle_in_transaction_session_timeout') AS "idle"
+    `,
+  );
+  const settings = shown[0];
+  assert.ok(settings);
+  // PostgreSQL reports these with units; compare in milliseconds.
+  const ms = (value: string) => {
+    const match = /^(\d+)(ms|s|min)?$/.exec(value.trim());
+    assert.ok(match, `unreadable setting: ${value}`);
+    const n = Number(match[1]);
+    return match[2] === "s" ? n * 1000 : match[2] === "min" ? n * 60_000 : n;
+  };
+  assert.equal(ms(settings.transaction), MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS);
+  assert.equal(ms(settings.statement), MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS);
+  assert.equal(ms(settings.idle), MARKETING_PUBLISHER_IDLE_TIMEOUT_MS);
+});
+
+test("the statement ceiling is armed, not merely set", async () => {
+  // The ordering trap made concrete: a statement longer than the ceiling is
+  // cancelled. If transaction_timeout had been set below statement_timeout,
+  // PostgreSQL would have switched the ceiling off and this would sleep for
+  // the full six seconds.
+  await assert.rejects(
+    runBoundedMarketingTransaction(prisma, async (tx) =>
+      tx.$queryRaw`SELECT pg_sleep(${(MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS + 1_000) / 1000})`,
+    ),
+    /statement timeout|canceling statement/i,
+  );
+});

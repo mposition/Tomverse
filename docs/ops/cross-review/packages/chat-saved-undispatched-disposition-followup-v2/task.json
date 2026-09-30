@@ -1,0 +1,30 @@
+{
+  "taskId": "chat-saved-undispatched-disposition-followup-v2",
+  "requirement": "종료된 chat-history-pagination-recovery-v1 exchange의 round 2 승인 verdict에 남은 대화 범위 notice 지적 두 건만 보완한다. Chat 전역 전송의 user Message가 durable 저장된 뒤 불완전한 history 때문에 provider dispatch 전 대화를 떠난 경우 prompt/admission/context를 보관하거나 자동 재전송하지 않고, 원래 identity와 conversation으로 돌아왔을 때만 saved-but-undispatched 안내를 표시한다. Review model-only 저장이 최신 run에 밀린 경우에도 같은 identity의 다른 conversation에는 안내를 노출하지 않고 원래 conversation에서만 표시한다. 기존 v1 exchange는 변경하지 않는다. 실제 provider 호출, 유료 실행, staging/production, flag 변경, push·merge·deploy는 범위 밖이다. author는 Codex, 독립 reviewer는 Cursor CLI다.",
+  "completionCriteria": [
+    "Chat 전역 prompt payload가 history failure 뒤 다른 conversation 선택으로 소멸하거나 durable Message commit 응답이 conversation/ticket 변경 뒤 늦게 도착해도, 답변 요청이 시작되지 않았다는 disposition을 identity와 originating conversation에만 결속한다. 다른 conversation에서는 toast를 표시하지 않고 원래 conversation 재선택 때 한 번 표시한다. same-conversation cleanup도 opaque disposition을 저장하되 exact durable payload가 mount된 responsive remount 동안만 소비를 보류하고, full unmount 또는 active-row 재선택으로 payload가 사라지면 한 번 소비한다. 최초 URL conversation handoff가 도달 성공, lock 취소, missing/unowned target 또는 fallback 선택으로 terminal된 뒤에는 frozen initial id가 이후 conversation의 disposition 소비를 막지 않으며 실제 in-flight handoff 동안만 transient conversation의 소비를 막는다. 새 conversation의 commit 응답은 기존 pending-adoption current 판정이 유지된다.",
+    "disposition에는 prompt text, attachment, admission token, context bundle 또는 provider 재실행 권한을 보관하지 않는다. conversation 전환 뒤 blind resend나 자동 provider POST를 만들지 않고 기존 savedQuestionNotSent의 reload 확인 문구를 사용한다.",
+    "Review model-only Message 저장이 최신 local run에 밀린 뒤 사용자가 같은 identity의 다른 conversation에 있어도 toast를 그 화면에 표시하지 않는다. Review 전역 composer의 durable commit도 모든 surface에서 캡처한 conversation과 committed selection ticket을 확인하므로 same-identity A→B→A 뒤 provider payload를 발행하지 않고 origin notice를 한 번 표시한다. 원래 conversation으로 돌아왔을 때만 한 번 표시하고, identity epoch가 바뀐 A→B 및 A→B→A의 늦은 durable callback은 같은 account key로 돌아왔더라도 notice 없이 폐기한다. callback authority는 active identity, namespace, submit-fence identity key 및 epoch를 모두 요구해 unresolved/loading 경계도 old identity를 승인하지 않는다. ChatPage가 완전히 unmount된 동안 identity가 바뀐 경우에도 sessionStorage owner marker가 mismatch disposition을 폐기하며 같은 identity remount만 복구한다. browser identity epoch는 layout commit에서만 채택하고 SSR에서는 module fence를 읽거나 쓰지 않는다.",
+    "desktop/mobile Chromium focused E2E가 유형별 계약을 검증한다. Chat/Review abandonment와 late global commit은 다른 conversation notice 0건, origin notice 1건, saved question provider POST 0건과 테스트가 확인하는 durable Message 1건을 검증한다. 같은 Chat의 full unmount와 active-row 재선택은 origin notice 1건·provider POST 0건을 검증하며, continuation New Chat은 loopback-only onBeforeModelSend barrier로 durable commit 이후 provider 전 경계를 고정해 재진입 notice 1건·provider POST 0건·durable Message 1건을 검증한다. Review와 continuation의 다중 panel은 첫 panel의 실제 provider POST 뒤 둘째 panel cleanup 순서를 고정해 provider POST 1건, savedQuestionNotSent notice 0건, persisted disposition 0건을 검증한다. lock 취소는 notice 0건, current conversation 불변 및 cleanup/remount 뒤 false notice 0건을 검증하고, locked initial URL 취소와 missing/unowned initial URL 뒤에는 다른 origin의 notice가 정상 소비됨을 검증한다. same-identity rapid conversation A→B→A는 origin notice 1건과 provider POST 0건을, identity A→B/A→B→A는 old identity notice 0건과 old prompt provider POST 0건을 검증한다. full-unmount A disposition→B mount→A mount는 old A notice와 provider POST 0건을 검증한다. async fixture는 고정 sleep 대신 response-settled 상태를 기다린다. bounded storage/identity unit, typecheck, 변경 범위 lint, production build 및 diff guard 결과를 정직하게 기록한다.",
+    "기존 chat-history-pagination-recovery-v1 exchange와 records는 on_hold(revisions_exhausted) 상태로 바이트 불변 보존하고 이 successor의 supersedes lineage가 그 exchange를 가리킨다.",
+    "새 package digest는 audit-only base bef622a565468fb9857639bc4ef24171c2c57a5f 이후 지정된 아홉 제품·테스트 파일과 이 task/authorization만 검토 변경으로 포함한다. 제품 source lineage는 그 base의 parent 93b18c8f37be46cbfce47658cc638e77aa008d63이며, audit-only base commit은 v1 authorization과 records만 추가한다. 이 successor의 생성 records 디렉터리만 동일한 exact out/diff-exclude로 제외하고 Cursor CLI verdict는 그 digest에 결속한다."
+  ],
+  "baseCommit": "bef622a565468fb9857639bc4ef24171c2c57a5f",
+  "writableScope": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "components/chat/ChatApp.tsx",
+    "components/chat/DesktopChatShell.tsx",
+    "components/chat/MobileChatShell.tsx",
+    "lib/chatIdentityEpoch.ts",
+    "lib/chatSavedQuestionDisposition.ts",
+    "tests/chatIdentityEpoch.test.mjs",
+    "tests/chatSavedQuestionDisposition.test.mjs",
+    "tests/e2e/chat-unified-workspace.spec.ts",
+    "docs/ops/cross-review/packages/chat-saved-undispatched-disposition-followup-v2"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat-history-pagination-recovery-v1",
+    "exchange": "docs/ops/cross-review/packages/chat-history-pagination-recovery-v1/records/exchange.json"
+  }
+}

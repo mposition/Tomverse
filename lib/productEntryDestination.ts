@@ -11,17 +11,15 @@
  * So the destination is decided on the server, per visitor, before the link is
  * rendered -- not by the client reading a flag it is not allowed to have.
  *
- * ## Today this changes nothing
- *
- * Chat is not released and `chatSurfaceAvailable` is false for everybody, so
- * every visitor gets the Review workspace, which is still at `/chat`. The
- * function exists so that the day `/chat` changes meaning is a change to one
- * constant here rather than a scramble across every CTA.
+ * Eligible visitors use the additive `/chat/workspace` entry. Everyone else
+ * keeps the incumbent Review entry at `/chat`. The separate `chatPathIsChat`
+ * input describes a future cutover; this helper does not activate it or any
+ * availability flag.
  *
  * Pure.
  */
 
-import { LEGACY_REVIEW_PATH, PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
+import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH, PRODUCT_SURFACE_PATH } from "@/lib/productSurfaceRoutes";
 
 export type WorkspaceDestinationInput = {
   /**
@@ -55,7 +53,9 @@ export const workspaceDestination = ({
   chatPathIsChat = false,
 }: WorkspaceDestinationInput): string => {
   const reviewPath = chatPathIsChat ? PRODUCT_SURFACE_PATH.review : LEGACY_REVIEW_PATH;
-  const path = chatSurfaceAvailable ? PRODUCT_SURFACE_PATH.chat : reviewPath;
+  const path = chatSurfaceAvailable
+    ? (chatPathIsChat ? PRODUCT_SURFACE_PATH.chat : CHAT_WORKSPACE_PATH)
+    : reviewPath;
 
   const query = `lang=${encodeURIComponent(lang)}`;
   // The guest preview marker belongs to the Review entry. A guest cannot be

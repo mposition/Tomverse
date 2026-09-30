@@ -1,0 +1,114 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-run-writer-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-run-writer-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-run-writer-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T04:11:33.434Z",
+  "durationMs": 355227,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 30,
+    "cachedInputTokens": 2109474,
+    "outputTokens": 28260,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.2205364999999992,
+    "raw": {
+      "input_tokens": 30,
+      "cache_creation_input_tokens": 168567,
+      "cache_read_input_tokens": 2109474,
+      "output_tokens": 28260,
+      "output_tokens_details": {
+        "thinking_tokens": 22788
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 90773,
+        "ephemeral_5m_input_tokens": 77794
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3635,
+          "cache_read_input_tokens": 168984,
+          "cache_creation_input_tokens": 2476,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 2476,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T04:17:28.721Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-run-writer-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:1453b58b513123744516fe9b5f769953a7ea209b3c8160a2165119d50d53d6f7",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "tests/promptRefinerShadowLiveAdapter.test.mjs:271-278 (\"no shipped entry point imports the live adapter\")",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The entry-point guard backing \"route는 live adapter를 import하지 않는다\" was relaxed from a whole-file substring match to two import-statement regexes, so a re-export (`export ... from \"...promptRefinerShadowLiveAdapter\"`) or a `require()` of the adapter in a shipped entry point now passes the guard while still loading the adapter at runtime.",
+        "reproduction": "Append `export * from \"@/lib/promptRefinerShadowLiveAdapter\";` to app/api/admin/prompt-refiner/shadow-run/route.ts, then run `node --conditions=react-server --import tsx --test tests/promptRefinerShadowLiveAdapter.test.mjs`. The test still reports 0 failures (offenders === []), although the route module now pulls in the adapter; the pre-change substring check failed on exactly this input. The relaxation was needed only because lib/promptRefinerShadowRunContract.ts:68 now contains the adapter path as a manifest string, which can be handled by exempting that one declaration instead of weakening the pattern for all files."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunStore.ts:878-910 (sweepPromptRefinerShadowUnknowns)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The sweeper can close at most one stale intent per run — closing the first latches the run to `stopped_unknown`, after which every remaining stale intent refuses with PROMPT_REFINER_SHADOW_RUN_TERMINAL, is silently swallowed at line 899-909, and can never become terminal nor be surfaced again, contradicting the documented \"최대 16건을 unknown_after_dispatch로 terminal 처리\" boundary.",
+        "reproduction": "In tests/integration/prompt-refiner-shadow-run.db.test.ts, after approveStage()/approveRun(), call `dispatch({requestId:\"a\",caseIndex:0})` and `dispatch({requestId:\"b\",caseIndex:1})` with no terminal in between (the writer at lines 538-684 permits a second intent while the first is open), age both rows by 61 seconds with the same trigger-disable technique the existing sweep test uses, then call `sweepPromptRefinerShadowUnknowns()`. Expected per the contract: both ids in `closedUnknownAttemptIds`. Actual: exactly one id; the other attempt stays `status='dispatch_intent'` forever (the run guard rejects any further update of a terminal run), and a second sweep returns `staleCandidates: 0` because the query filter at line 884 excludes attempts of stopped runs, while `consumedWithoutAttempt` does not list it either — so the open intent is invisible to the operator."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunStore.ts:879",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The 60-second unknown cutoff is computed from the application clock (`Date.now()`) and compared against the DB-clock-written `dispatchIntentAt`, unlike every other boundary in this writer which reads `clock_timestamp()` via `dbClock()`; app-clock skew can therefore close an in-flight dispatch early and irreversibly latch the one-shot run to `stopped_unknown`.",
+        "reproduction": "In the DB integration test, after `dispatch({requestId:\"x\",caseIndex:0})`, stub the process clock (`const real = Date.now; Date.now = () => real() + 120_000;`) and call `sweepPromptRefinerShadowUnknowns()`. Expected: no candidates, because `SELECT clock_timestamp()` shows well under 60 s since `dispatchIntentAt`. Actual: the fresh intent is closed as `unknown_after_dispatch` and the run latches `stopped_unknown`, which no code path can undo."
+      },
+      {
+        "location": "scripts/check-protected-table-writers-core.mjs:157 and :163 (contract field)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "Both new protected-table entries cite `docs/policy/prompt-refiner-observability.md §8`, which is the \"다음 연결 단계\" roadmap list; the invariants for these two tables live in §12 and in docs/ops/prompt-refiner-durable-run-writer-contract.md.",
+        "reproduction": "`rg -n \"^## \" docs/policy/prompt-refiner-observability.md` shows §8 = \"다음 연결 단계\" (lines 200-207, a five-item roadmap that never mentions PromptRefinerShadowRun/Attempt), while §12 (line 342 onward) is the section this change actually extended."
+      },
+      {
+        "location": "prisma/schema.prisma (Conversation, ChatComposerDraft, ChatResponseAttempt, FeedbackAutoFixCase, EmailUnsubscribeKeyAdoption)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The diff carries whitespace/attribute-order reformatting of five models unrelated to the Prompt Refiner run writer, enlarging the reviewed surface of a file that is itself bound into the stage provenance manifest.",
+        "reproduction": "`git diff a63a2852f707efbd0a2108b53ac4f87b943120bc -- prisma/schema.prisma` shows alignment-only hunks for `pinnedAt`/`pinSeq`, ChatComposerDraft, ChatResponseAttempt and FeedbackAutoFixCase, plus `singleton Boolean @unique @default(true)` reordering, none of which relate to PromptRefinerShadowRun/Attempt."
+      }
+    ],
+    "nextAction": "Codex should restore a non-bypassable live-adapter entry-point guard, make the unknown sweeper either close or explicitly report every stale intent on a latched run, and move the cutoff to the database clock; the two documentation nits can be folded into the same revision for round 1."
+  }
+}

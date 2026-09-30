@@ -11,11 +11,15 @@
  *
  * ## Why a script and not a reading
  *
- * The rules are five boolean fields in a manifest, and re-deciding what each
- * one means at the end of a run — with the verdict already on screen — is
- * exactly the drift the pre-registration exists to prevent. Written down here,
- * "was this run admissible" stops being a judgement and goes back to being a
- * lookup.
+ * The rules are a handful of signals in a manifest — mostly booleans, and one
+ * derived from a pair of numbers for artifacts that predate its flag — and
+ * re-deciding what each one means at the end of a run, with the verdict
+ * already on screen, is exactly the drift the pre-registration exists to
+ * prevent. Written down here, "was this run admissible" stops being a
+ * judgement and goes back to being a lookup.
+ *
+ * The count used to be written as "five boolean fields". It was six by the
+ * time anybody noticed, and one of them is not a boolean.
  *
  * ## What it does not decide
  *
@@ -25,6 +29,11 @@
  */
 
 import { readFileSync } from "node:fs";
+
+// Plain `.mjs`, so this script keeps running under bare `node` with no loader.
+// The same function decides the question inside the harness, which is what
+// stops the two drifting into different answers about the same run.
+import { manifestExceededSpendCeiling } from "../lib/memoryEvalSpendCeiling.mjs";
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -73,6 +82,58 @@ const RULES = [
         discards: true,
         met: "stopped at the cost ceiling, so this is not the whole sample",
         action: "discard and re-run with a ceiling that fits the run",
+    },
+    {
+        // Its own rule, not folded into the truncation above. The two are
+        // different facts about a run and only one of them was checked: a
+        // truncated run stopped early at the ceiling, an over-ceiling run
+        // finished having passed it on a call the pre-dispatch comparison
+        // could not see. An artifact carrying `exceededCostCeiling: true` and
+        // `decisionGrade: true` — which the harness will not now produce, but
+        // which an older artifact or a hand-edited one can — read as
+        // Admissible with exit 0.
+        key: "exceededCostCeiling",
+        // A `false` flag never rescues; a `true` flag can always condemn.
+        //
+        // Not "the flag first", which is how this comment used to read and is
+        // not what `manifestExceededSpendCeiling()` does: numbers that say a
+        // run went over beat a `false` flag beside them, and numbers that
+        // cannot be read are not rescued by one either. A `true` flag outlives
+        // both — the harness wrote it from its own live state — and honouring
+        // it records the more specific reason, since either way the run is
+        // discarded.
+        //
+        // The first version read only the flag, so an artifact written before
+        // 2026-09-05 — carrying `accruedCostUsd: 7.0001` beside
+        // `runCeilingUsd: 7` and no verdict — came back Admissible with exit 0.
+        // Every artifact this project has ever produced is in that category,
+        // which makes reading the figures the part that matters.
+        fails: (m) => manifestExceededSpendCeiling(m).exceeded,
+        discards: true,
+        met: "finished having spent more than the approved ceiling",
+        action: "discard — the run that happened is not the run approved",
+    },
+    {
+        // Not the same as "did not overspend". A live artifact carrying no
+        // spend figures, or a corrupted one, produces
+        // `{ exceeded: false, source: "unknown" }` — and the rule above reads
+        // only `.exceeded`, so it printed `OK exceededCostCeiling` and the run
+        // exited 0. That is a live run whose spend nobody can compare against
+        // its ceiling, presented as one that stayed inside it.
+        //
+        // Distinct from `spendCeilingReliable`, which is deliberately not a
+        // discard: that says *some calls* could not be priced, so the accrued
+        // figure is a lower bound and the verdict stands while the cost is
+        // settled from the invoice. This says the artifact cannot state what it
+        // spent at all, which is not a cost-accounting problem but a missing
+        // fact about the run.
+        key: "spendComparableToCeiling",
+        fails: (m) =>
+            m.mode === "live" &&
+            manifestExceededSpendCeiling(m).source === "unknown",
+        discards: true,
+        met: "a live run with no comparable spend and ceiling figures",
+        action: "discard — nothing here can say the run stayed within approval",
     },
     {
         key: "abortedOnConsecutiveFailures",

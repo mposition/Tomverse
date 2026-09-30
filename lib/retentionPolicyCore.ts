@@ -303,6 +303,53 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         windowDays: 365,
         maintenanceStep: "provider_model_catalog_runs",
     },
+    {
+        key: "mobileAuthEvents",
+        label: "Mobile sign-in events",
+        // Ninety days is the approved ceiling (mobile auth design decision 9,
+        // 2026-08-31), and it is a ceiling rather than a target: the table is
+        // how a support question about somebody's phone gets answered and how a
+        // replayed refresh token is counted afterwards, and neither of those
+        // questions is asked about a quarter-old event.
+        //
+        // Independent of account deletion, which takes every row naming the
+        // person through the cascade the same day.
+        policy: "Delete mobile sign-in events older than 90 days.",
+        action: "delete",
+        windowDays: 90,
+        maintenanceStep: "mobile_auth_events",
+    },
+    {
+        key: "mobileLoginGrants",
+        label: "Mobile login grants",
+        // A per-row expiry, sixty seconds after issue, so there is no age to
+        // compute -- the same shape as request leases above.
+        policy: "Delete mobile login grants once they expire.",
+        action: "delete",
+        windowDays: null,
+        maintenanceStep: "mobile_login_grants",
+    },
+    {
+        key: "mobileRefreshRotations",
+        label: "Mobile refresh rotations",
+        // Deliberately *not* "older than N days", and the difference matters.
+        //
+        // A consumed rotation row is what turns a replayed refresh token into
+        // `reuse_detected` rather than `unknown_record`, and that judgement
+        // destroys the family. Deleting rows by age would quietly convert the
+        // detection into a shrug for exactly the tokens an attacker has had the
+        // longest to work with.
+        //
+        // So the sweep takes only rows whose family can never rotate again --
+        // revoked, or past its absolute expiry. On such a family the detection
+        // has nothing left to protect: the family is already dead, and revoking
+        // it a second time is not a security outcome.
+        policy:
+            "Delete mobile refresh rotations belonging to families that are revoked or past their absolute expiry.",
+        action: "delete",
+        windowDays: null,
+        maintenanceStep: "mobile_refresh_rotations",
+    },
 ];
 
 export const retentionPolicy = (key: string) => {

@@ -1,0 +1,61 @@
+{
+  "version": "cross-review-verdict-v1",
+  "taskId": "router-full-catalog-diagnostic-v1",
+  "round": 2,
+  "reviewer": "codex",
+  "command": [
+    "codex",
+    "--sandbox",
+    "read-only",
+    "exec",
+    "--ignore-user-config",
+    "--json",
+    "-c",
+    "model=gpt-5.6-sol",
+    "-c",
+    "model_reasoning_effort=xhigh",
+    "-c",
+    "windows.sandbox=elevated",
+    "-"
+  ],
+  "startedAt": "2026-09-09T08:17:14.814Z",
+  "durationMs": 411902,
+  "receivedAt": "2026-09-09T08:24:06.717Z",
+  "verdict": {
+    "taskId": "router-full-catalog-diagnostic-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:6500e0e274e884de9ea1d720c7488387bea96e6764ce088016dd0946cb01073a",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "lib/routerFullCatalogDiagnostic.ts:FALLBACK_UNDECIDED_OFFLINE, fallbackReachabilityFor",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "reachable=true인 결과도 budget_refused, candidate_unavailable, no_provider_hold 등을 미판정 상태로 남기므로, 요구된 'actually executable fallback'을 보고하지 않고 이름만 reachable로 바꿨습니다.",
+        "reproduction": "저장소 루트에서 `npm run report:router-full-catalog -- --fallback-flag=on --json=artifacts/router-full-catalog/repro.json`을 실행하고 reachableIfFlagOn.reachable=true인 항목을 확인하면, 같은 결과의 undecidedOffline에 실제 실행을 막을 수 있는 네 조건이 그대로 남아 있습니다."
+      },
+      {
+        "location": "scripts/cross-review.mjs:diffExcluded validation and excludedDigests",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "--out의 상위 경로도 --diff-exclude로 허용하면서 그 경로를 digest하지 않아, 패키지 디렉터리를 scoped 소스 아래에 두면 변경을 review diff와 digest에서 계속 숨길 수 있습니다.",
+        "reproduction": "현재 task로 `--out=docs/ops/cross-review/repro --diff-exclude=docs/ops/cross-review`를 사용해 package를 만들면 검사가 허용합니다. 이후 docs/ops/cross-review/README.md를 다시 변경해도 review 단계의 scopedDiff가 같은 디렉터리를 제외하고 excludedDigests도 비어 있어 package digest가 변하지 않습니다."
+      },
+      {
+        "location": "lib/crossReviewExecutors.ts:CLI_INVOCATIONS.claude.reviewer",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "Claude reviewer는 user/project/local 설정을 그대로 로드하므로, Read 전용 도구 목록과 strict MCP 설정에도 불구하고 전체 사용자 권한으로 실행되는 설정 hook이 작업공간에 쓸 수 있어 reviewer의 무쓰기 조건이 보장되지 않습니다.",
+        "reproduction": "CLI args에 `--setting-sources`가 없는 것을 확인한 뒤 Read 또는 SessionStart에 파일 생성 command hook을 설정하고 reviewer를 실행하면 파일이 생성됩니다. 공식 [CLI reference](https://code.claude.com/docs/en/cli-usage)는 setting source 기본 로딩을 제어하는 별도 옵션을 문서화하고, [hooks reference](https://code.claude.com/docs/en/hooks)는 command hook이 전체 사용자 권한으로 실행된다고 명시합니다."
+      },
+      {
+        "location": "Test results (run by the control program)",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "필수 Router 회귀 테스트 묶음이 117개 중 1개 실패한 상태이므로 기존 Router 테스트 통과 및 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.",
+        "reproduction": "저장소 루트에서 제출된 control-program test command를 grep 없이 실행하면 실패한 테스트의 상세 내용과 함께 `# tests 117`, `# pass 116`, `# fail 1`이 재현됩니다."
+      }
+    ],
+    "nextAction": "두 fix round가 모두 소진됐으므로 변경을 on_hold로 두고, 새 변경과 새 digest로 다시 검토해야 합니다."
+  }
+}

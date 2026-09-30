@@ -6,6 +6,7 @@ import {
   SCHEDULED_JOB_DEFINITIONS,
   evaluateScheduledJobTiming,
   nextScheduledAt,
+  type RecordableScheduledJobKey,
   type ScheduledJobKey,
 } from "@/lib/scheduledJobsCore";
 
@@ -14,18 +15,24 @@ import {
 // so a fixed-clock unit test can reach them. Re-exported here because every
 // existing caller imports them from this module.
 export {
+  MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY,
+  PENDING_SCHEDULED_JOB_KEYS,
   SCHEDULED_JOB_DEFINITIONS,
   silenceBudgetMsFor,
   nextScheduledAt,
 } from "@/lib/scheduledJobsCore";
-export type { ScheduledJobKey } from "@/lib/scheduledJobsCore";
+export type {
+  PendingScheduledJobKey,
+  RecordableScheduledJobKey,
+  ScheduledJobKey,
+} from "@/lib/scheduledJobsCore";
 
 const serializeError = (error: unknown) =>
   error instanceof Error
     ? `${error.name}: ${error.message}`.slice(0, 4_000)
     : String(error).slice(0, 4_000);
 
-export async function startScheduledJob(jobKey: ScheduledJobKey) {
+export async function startScheduledJob(jobKey: RecordableScheduledJobKey) {
   try {
     return await prisma.scheduledJobRun.create({
       data: { jobKey, status: "running" },

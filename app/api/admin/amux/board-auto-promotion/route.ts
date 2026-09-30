@@ -20,6 +20,7 @@ import {
   resumeAutoPromotion,
 } from "@/lib/amux/autoPromotionService";
 import { BoardImportError, boardImportContentTypeAccepted } from "@/lib/amux/boardImportCore";
+import { AmuxDbBoundaryError } from "@/lib/amux/dbBoundary";
 import { BOARD_PROMOTION_RAW_BODY_MAX_BYTES } from "@/lib/amux/boardPromotionCore";
 
 /**
@@ -113,6 +114,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: error.code, ...(error.code === "outcome_unknown" ? { retry: false } : {}) },
         { status: error.httpStatus, headers: noStoreHeaders },
+      );
+    }
+    // A deadline that ran out before COMMIT: the transaction rolled back and
+    // nothing was written, so this is not a lost outcome and may be tried again.
+    if (error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_DEADLINE_EXCEEDED") {
+      return NextResponse.json(
+        { error: "database_deadline_exceeded" },
+        { status: 503, headers: noStoreHeaders },
       );
     }
     const security = apiSecurityResponse(error);

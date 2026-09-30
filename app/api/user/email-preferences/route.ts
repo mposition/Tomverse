@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
+import { prepareProcessingResultNotice } from "@/lib/processingResultNotice";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -39,6 +40,15 @@ const updateSchema = z
     purpose: z.enum(EMAIL_PURPOSES).optional(),
     enabled: z.boolean().optional(),
     withdrawAllMarketing: z.literal(true).optional(),
+    /**
+     * Only invalidate the confirmation link already mailed for this purpose.
+     *
+     * The one control that means that and not "stop sending me this": the
+     * cancel link beside a pending confirmation. A literal, so a client cannot
+     * switch a purpose off *without* recording the refusal by passing a falsy
+     * value of some other shape.
+     */
+    cancelRequestOnly: z.literal(true).optional(),
     country: z
       .string()
       .trim()
@@ -46,7 +56,24 @@ const updateSchema = z
       .transform((value) => value.toUpperCase())
       .optional(),
   })
-  .strict();
+  .strict()
+  // The flag belongs to one control, and that control sends one shape: this
+  // purpose, switching off. Accepting it beside `withdrawAllMarketing`, with
+  // `enabled: true`, or with no purpose at all would let a client ask for a
+  // switch-off that records no refusal -- which is the one difference the flag
+  // draws, so a body that does not name that control's action does not get its
+  // exemption. `applyPreferenceChange()` refuses the same cases under the row
+  // lock; this refuses them earlier and says why.
+  .refine(
+    (body) =>
+      !body.cancelRequestOnly ||
+      (body.purpose !== undefined && body.enabled === false && !body.withdrawAllMarketing),
+    {
+      message:
+        "cancelRequestOnly names one purpose being switched off, and cannot be combined with withdrawAllMarketing.",
+      path: ["cancelRequestOnly"],
+    }
+  );
 
 const state = async (userId: string) => {
   const [preferences, jurisdiction] = await Promise.all([
@@ -200,6 +227,7 @@ export async function PATCH(req: Request) {
       }
     } else if (body.withdrawAllMarketing) {
       await withdrawAllMarketing({
+        onConsentRecorded: await prepareProcessingResultNotice(userId, { stopsAllMarketing: true }),
         userId,
         capturedVia: "preference_center",
         source: "preference_center",
@@ -217,12 +245,18 @@ export async function PATCH(req: Request) {
       }
 
       const result = await setPreference({
+        // A withdrawal answers with its result; switching on only requests a
+        // confirmation, which the confirmation path reports when it is used.
+        ...(body.enabled === false
+          ? { onConsentRecorded: await prepareProcessingResultNotice(userId) }
+          : {}),
         userId,
         purpose: body.purpose,
         enabled: body.enabled,
         capturedVia: "preference_center",
         source: "preference_center",
         userAgent: req.headers.get("user-agent"),
+        ...(body.cancelRequestOnly ? { cancelRequestOnly: true } : {}),
       });
       // `locked` is the one refusal worth naming: the client renders those
       // rows as unswitchable, so reaching here means the two disagree and a

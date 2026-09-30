@@ -1,8 +1,8 @@
 /**
- * Shared AMUX audit identity and closed claim refusal vocabulary.
+ * Shared AMUX audit identity re-export and closed claim refusal vocabulary.
  *
- * Keep this module framework-free so TypeScript routes, the canonical store
- * writer, and the Rust wire contract can use the same finite reason set.
+ * This module stays framework-free so the route, canonical store writers,
+ * and cross-language parity test share the registry's canonical actor.
  */
 export { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 
@@ -22,6 +22,10 @@ export const AMUX_CLAIM_CLOSED_REFUSAL_REASONS = [
 export type AmuxClaimClosedRefusalReason =
   (typeof AMUX_CLAIM_CLOSED_REFUSAL_REASONS)[number];
 
+/**
+ * Reasons recorded by the canonical audit writer. Input refusals are audited
+ * without retaining request bytes; CAS loss is non-terminal for the server.
+ */
 export const AMUX_CLAIM_AUDIT_REFUSAL_REASONS = [
   ...AMUX_CLAIM_CLOSED_REFUSAL_REASONS,
   "invalid_request",

@@ -23,12 +23,16 @@ import { marketingReachReport } from "@/lib/marketingReach";
 //    addresses arrive in whatever case the provider reports. A comparison that
 //    is not case-insensitive silently reports somebody as reachable who is
 //    suppressed.
+//  - suppression is now several append-only causes per address rather than one
+//    merged row, so the query has to say what "still suppressed" means:
+//    released causes and expired ones do not count, and a classification-scope
+//    cause -- which no purpose-keyed lookup would find -- does.
 
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ConsentRecord", "EmailPreference", "SuppressionEntry", "EmailPolicyVersion",
-      "User"
+      "ConsentRecord", "EmailPreference", "SuppressionCause", "SuppressionEntry",
+      "EmailPolicyVersion", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -45,6 +49,48 @@ const someone = (email: string) =>
 const policyVersion = () =>
   prisma.emailPolicyVersion.create({
     data: { version: `test-${randomUUID()}`, changeSummary: "fixture" },
+  });
+
+/**
+ * A suppression, as one event.
+ *
+ * The report reads `SuppressionCause`, which is what the send gate reads. It
+ * read `SuppressionEntry` until deploy C-2 stopped writing that table; a
+ * fixture that still wrote entries would have proved the report read a table
+ * nothing fills, and reported every suppression since as reachable.
+ */
+const suppress = (input: {
+  emailAddress: string;
+  scope: string;
+  purposeKey: string;
+  reason: string;
+  source: string;
+  expiresAt?: Date;
+  releasedAt?: Date;
+}) =>
+  prisma.suppressionCause.create({
+    data: {
+      emailAddress: input.emailAddress,
+      scope: input.scope,
+      purposeKey: input.purposeKey,
+      reason: input.reason,
+      source: input.source,
+      sourceEventKey: `test:${randomUUID()}`,
+      occurredAt: new Date(),
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+      // `SuppressionCause_release_check`: a released cause carries what
+      // released it. A row with a `releasedAt` and nothing beside it is a
+      // release with no author, which is what the constraint refuses -- and a
+      // fixture able to write one would be testing the report against a row
+      // the application cannot produce.
+      ...(input.releasedAt
+        ? {
+            releasedAt: input.releasedAt,
+            releaseKind: "admin",
+            releaseEvidence: { kind: "admin" },
+          }
+        : {}),
+    },
   });
 
 const preference = (userId: string, enabled: boolean, source: string) =>
@@ -129,33 +175,108 @@ test("a later reconfirmation restores provable consent", async () => {
 test("suppression matches the address whatever case it arrived in", async () => {
   const person = await someone("mixed@example.com");
   await preference(person.id, true, "signup");
-  await prisma.suppressionEntry.create({
-    data: {
-      emailAddress: "MiXeD@Example.COM",
-      scope: "global",
-      purposeKey: "*",
-      reason: "complaint",
-      source: "provider_webhook",
-    },
+  await suppress({
+    emailAddress: "MiXeD@Example.COM",
+    scope: "global",
+    purposeKey: "*",
+    reason: "complaint",
+    source: "provider_webhook",
   });
 
+  assert.equal(
+    await prisma.suppressionEntry.count(),
+    0,
+    "the fixture is only meaningful if the report is not reading entries"
+  );
   const row = newsletter(await marketingReachReport());
   assert.equal(row.enabled, 1);
   assert.equal(row.suppressed, 1);
   assert.equal(row.sendable, 0);
 });
 
+test("a marketing classification stop counts, though it names no purpose", async () => {
+  // What a deletion intake writes. It is the shape a purpose-keyed lookup
+  // cannot find -- scope `classification`, purposeKey `marketing` -- and the
+  // send gate refuses every marketing message to it, so a report that missed
+  // it would offer somebody who asked to be deleted as reachable.
+  const person = await someone(`classification-${randomUUID()}@example.com`);
+  await preference(person.id, true, "signup");
+  await suppress({
+    emailAddress: person.email!,
+    scope: "classification",
+    purposeKey: "marketing",
+    reason: "privacy_request",
+    source: "admin",
+  });
+
+  const row = newsletter(await marketingReachReport());
+  assert.equal(row.suppressed, 1);
+  assert.equal(row.sendable, 0);
+});
+
+test("a released cause and an expired one do not count", async () => {
+  // Causes are append-only: lifting one sets `releasedAt` rather than deleting
+  // the row, and a soft bounce carries an expiry. An entry was deleted when its
+  // suppression ended, so "a row exists" used to be the same question as "it is
+  // still in force". It is not any more, and a report that read it that way
+  // would show an address as unreachable years after it was released.
+  const lifted = await someone(`lifted-${randomUUID()}@example.com`);
+  await preference(lifted.id, true, "signup");
+  await suppress({
+    emailAddress: lifted.email!,
+    scope: "global",
+    purposeKey: "*",
+    reason: "manual",
+    source: "admin",
+    releasedAt: new Date(),
+  });
+
+  const expired = await someone(`expired-${randomUUID()}@example.com`);
+  await preference(expired.id, true, "signup");
+  await suppress({
+    emailAddress: expired.email!,
+    scope: "global",
+    purposeKey: "*",
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() - 60_000),
+  });
+
+  const row = newsletter(await marketingReachReport());
+  assert.equal(row.enabled, 2);
+  assert.equal(row.suppressed, 0);
+  assert.equal(row.sendable, 2);
+});
+
+test("several causes on one address are one suppressed person", async () => {
+  // The record they replaced was one row per selector, so counting rows and
+  // counting people were the same number. They are not now: a provider that
+  // retries a soft bounce writes a cause each time.
+  const person = await someone(`several-${randomUUID()}@example.com`);
+  await preference(person.id, true, "signup");
+  for (const reason of ["hard_bounce", "complaint", "manual"]) {
+    await suppress({
+      emailAddress: person.email!,
+      scope: "global",
+      purposeKey: "*",
+      reason,
+      source: reason === "manual" ? "admin" : "provider_webhook",
+    });
+  }
+
+  const row = newsletter(await marketingReachReport());
+  assert.equal(row.suppressed, 1);
+});
+
 test("a suppression scoped to another purpose does not count", async () => {
   const person = await someone("scoped@example.com");
   await preference(person.id, true, "signup");
-  await prisma.suppressionEntry.create({
-    data: {
-      emailAddress: person.email!,
-      scope: "purpose",
-      purposeKey: "promotions",
-      reason: "unsubscribe",
-      source: "unsubscribe_link",
-    },
+  await suppress({
+    emailAddress: person.email!,
+    scope: "purpose",
+    purposeKey: "promotions",
+    reason: "unsubscribe",
+    source: "unsubscribe_link",
   });
 
   const row = newsletter(await marketingReachReport());
@@ -181,14 +302,12 @@ test("no query behind the report returns an address, a name or an id", async () 
   const person = await someone("findable@example.com");
   await preference(person.id, true, "signup");
   await consent(person.id, person.email!, version.id, "granted", new Date("2026-01-01"));
-  await prisma.suppressionEntry.create({
-    data: {
-      emailAddress: person.email!,
-      scope: "global",
-      purposeKey: "*",
-      reason: "hard_bounce",
-      source: "provider_webhook",
-    },
+  await suppress({
+    emailAddress: person.email!,
+    scope: "global",
+    purposeKey: "*",
+    reason: "hard_bounce",
+    source: "provider_webhook",
   });
 
   const serialised = JSON.stringify(await marketingReachReport());

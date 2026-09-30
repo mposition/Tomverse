@@ -603,6 +603,13 @@ export function AnalyticsProvider({
         if (ageMs >= dayMs * 7 && ageMs < dayMs * 8) {
           trackProductEventOnce("return_day_7", "return_day_7");
         }
+        // The same one-shot shape as the other two, and with the same known
+        // limitation: a user who did not open the app on that exact day is
+        // counted by nothing, so the scorecard reads these as a floor on
+        // return rather than as the return rate.
+        if (ageMs >= dayMs * 30 && ageMs < dayMs * 31) {
+          trackProductEventOnce("return_day_30", "return_day_30");
+        }
       }
 
       const signup = userCreatedAt ? consumeSignupStarted() : null;

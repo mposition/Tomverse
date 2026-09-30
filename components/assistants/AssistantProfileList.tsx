@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Bot, Loader2, Plus } from "lucide-react";
+import { AlertTriangle, Bot, Loader2, PackageOpen, Plus } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useSearchParams } from "next/navigation";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
@@ -40,6 +40,9 @@ const sectionClass =
 const primaryButtonClass =
     "inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
 
+const secondaryButtonClass =
+    "inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
+
 type ProfileSummary = {
     id: string;
     name: string;
@@ -59,6 +62,8 @@ type ListState =
           status: "ready";
           profiles: ProfileSummary[];
           maxProfilesPerAccount: number;
+          /** Whether `/settings/assistants/import` exists for this account. */
+          packageImport: boolean;
       };
 
 /**
@@ -104,11 +109,16 @@ export function AssistantProfileListContent({
             const data = (await response.json()) as {
                 profiles: ProfileSummary[];
                 limits: { maxProfilesPerAccount: number };
+                features?: { packageImport?: boolean };
             };
             setState({
                 status: "ready",
                 profiles: data.profiles,
                 maxProfilesPerAccount: data.limits.maxProfilesPerAccount,
+                // Absent reads as off, like every other rollout flag here: a
+                // response from a deploy that predates the field must not
+                // offer a route that deploy answers 404 on.
+                packageImport: data.features?.packageImport === true,
             });
         } catch {
             setState({ status: "error" });
@@ -219,23 +229,46 @@ export function AssistantProfileListContent({
                                 max: state.maxProfilesPerAccount,
                             })}
                         </p>
-                        {atCapacity ? (
-                            <p
-                                className="text-sm font-semibold text-amber-600 dark:text-amber-400"
-                                data-testid="assistants-at-capacity"
-                            >
-                                {t("assistantProfiles.atCapacity")}
-                            </p>
-                        ) : (
-                            <Link
-                                href="/settings/assistants/new"
-                                className={primaryButtonClass}
-                                data-testid="assistants-create"
-                            >
-                                <Plus className="h-4 w-4" aria-hidden="true" />
-                                {t("assistantProfiles.create")}
-                            </Link>
-                        )}
+                        <div className="flex flex-wrap items-center gap-3">
+                            {/*
+                              Offered at capacity too, and not by oversight: a
+                              merge import publishes a revision of a profile
+                              that already exists and occupies no slot, so an
+                              account holding the maximum can still use this.
+                              Hiding it here would be the screen inventing a
+                              rule the server does not have.
+                            */}
+                            {state.packageImport && (
+                                <Link
+                                    href="/settings/assistants/import"
+                                    className={secondaryButtonClass}
+                                    data-testid="assistants-import-package"
+                                >
+                                    <PackageOpen
+                                        className="h-4 w-4"
+                                        aria-hidden="true"
+                                    />
+                                    {t("assistantProfiles.importPackage")}
+                                </Link>
+                            )}
+                            {atCapacity ? (
+                                <p
+                                    className="text-sm font-semibold text-amber-600 dark:text-amber-400"
+                                    data-testid="assistants-at-capacity"
+                                >
+                                    {t("assistantProfiles.atCapacity")}
+                                </p>
+                            ) : (
+                                <Link
+                                    href="/settings/assistants/new"
+                                    className={primaryButtonClass}
+                                    data-testid="assistants-create"
+                                >
+                                    <Plus className="h-4 w-4" aria-hidden="true" />
+                                    {t("assistantProfiles.create")}
+                                </Link>
+                            )}
+                        </div>
                     </div>
 
                     {state.profiles.length === 0 ? (

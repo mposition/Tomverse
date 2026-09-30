@@ -1,0 +1,23 @@
+{
+  "taskId": "prompt-refiner-confirmatory-shadow-v4-followup-v2",
+  "requirement": "prompt-refiner-confirmatory-shadow-v4 exchange가 round 2에서 approve와 재현 가능한 PostgreSQL 함수 속성 finding 1건을 함께 남기고 on_hold(revisions_exhausted)로 종료됐다. 기존 구현과 검토 기록은 보존한다. 후속 변경은 v4 prompt_refiner_runtime_manifest_valid wrapper가 위임 대상 v2 validator와 동일하게 STRICT 및 PARALLEL SAFE가 되도록 migration을 수정하고, fresh migration DB의 pg_proc에서 두 함수가 모두 proisstrict=true 및 proparallel='s'임을 통합 테스트로 고정한다. 그 밖의 Prompt Refiner 계약, provider 호출, 권한, 비용, flag, stage/run 또는 rollout 동작은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max다.",
+  "completionCriteria": [
+    "원 exchange의 on_hold 상태와 round 2 finding을 supersedes lineage와 inherited finding으로 보존한다.",
+    "v4 migration의 runtime-manifest wrapper가 IMMUTABLE, STRICT, PARALLEL SAFE이고 기존 v2 validator의 반환·위임 의미는 변하지 않는다.",
+    "fresh migration DB에서 v2 validator와 v4 wrapper의 proisstrict=true 및 proparallel='s'를 실제 pg_proc로 검증한다.",
+    "Prompt Refiner DB integration, unit, TypeScript, ESLint, schema·문서·정책·protected-writer 검사가 통과한다.",
+    "검토 record 디렉터리만 reviewed diff에서 제외하고 task, authorization, migration과 테스트는 exact digest에 포함한다.",
+    "Claude verdict는 exact package digest에 결속하고 open finding 없이 approve해야 한다."
+  ],
+  "baseCommit": "bc5a47468b046406ce7631cf2732a26356294352",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-confirmatory-shadow-v4",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json"
+  }
+}

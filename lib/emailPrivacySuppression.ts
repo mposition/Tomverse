@@ -9,11 +9,7 @@ import {
   seedPreferencesIfAccountExists,
 } from "@/lib/emailPreferences";
 import { normalizeSuppressionAddress, recordSuppression } from "@/lib/emailSuppression";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-  readSuppressionAuthority,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 
 /**
@@ -38,8 +34,8 @@ export async function preparePrivacyIntake(input: { userId: string | null }) {
 }
 
 /**
- * Takes the fence and the User row, in the one order every writer uses, and
- * returns the account's address as locked. Called first in the intake
+ * Takes the User row, in the one order every writer uses, and returns the
+ * account's address as locked. Called first in the intake
  * transaction, before the request row is written: the request records that
  * address, and the foreign key's share lock on the User row comes after the row
  * lock rather than before it.
@@ -48,17 +44,21 @@ export async function lockPrivacyIntake(
   tx: Prisma.TransactionClient,
   input: { userId: string | null }
 ) {
-  await holdSuppressionFence(tx);
   return input.userId ? lockUserEmail(tx, input.userId) : null;
 }
 
 /**
  * Intake of a deletion request, in the transaction that creates it.
  *
- * A withdrawal alone is not enough: a preference that is already off writes no
- * row, and an account in the `risk_accepted` cohort has no consent to withdraw,
- * so the cohort override would keep sending. A suppression is a blocker the
- * override cannot pass.
+ * A withdrawal alone is not enough: an account in the `risk_accepted` cohort
+ * has no consent to withdraw, so the cohort override would keep sending. A
+ * suppression is a blocker the override cannot pass. Switching a purpose off
+ * does write one of its own now (`applyPreferenceChange()`), but a deletion
+ * request stops every purpose and is written here, before any preference
+ * change, rather than relying on that. Writing it first is also what keeps
+ * this from collecting a second row per purpose: the classification cause
+ * below is a refusal covering every one of them, which is what that writer
+ * looks for before adding another.
  */
 export async function recordPrivacyIntake(
   tx: Prisma.TransactionClient,
@@ -90,27 +90,14 @@ export async function recordPrivacyIntake(
     tx
   );
 
-  // While entries still decide, a classification cause is invisible to the send
-  // check, which reads only global and purpose entries. The same stop is written
-  // per marketing purpose so it holds today; once causes decide these are
-  // redundant beside the classification cause and harmless.
-  if ((await readSuppressionAuthority(tx)) === "entry") {
-    for (const purpose of EMAIL_PURPOSES) {
-      if (!recordsConsent(purpose)) continue;
-      await recordSuppression(
-        {
-          emailAddress,
-          purposeKey: purpose,
-          reason: "privacy_request",
-          source: "admin",
-          sourceEventKey: `privacy:${input.requestId}:intake:${purpose}`,
-          sourceRequestId: input.requestId,
-          occurredAt: input.now,
-        },
-        tx
-      );
-    }
-  }
+  // The classification cause above stops every marketing message on its own.
+  //
+  // What stood here wrote the same stop again, once per marketing purpose,
+  // because an entry read saw only global and purpose rows and a classification
+  // cause was invisible to it. Nothing reads entries now, so those rows would
+  // be duplicates of a stop that already holds -- and a privacy request
+  // duplicated per purpose is a record that is harder to answer questions
+  // about, not an extra guarantee.
 
   // The account's own marketing preferences, switched off under the same locks.
   if (!input.userId || !userEmail) return;

@@ -1,0 +1,466 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "router-full-catalog-diagnostic-v2",
+  "requirement": "Continue router-full-catalog-diagnostic-v1, which concluded on hold after its two fix rounds with four findings open, by finishing the foundation so the same reasons do not block the next exchange. (1) Package exclusions: a --diff-exclude path is accepted only when it is exactly one of the task's declared generated paths or the package's own output directory; a parent of the package directory, or any scoped source, is refused, and a regression test holds that a change hidden that way is refused. (2) The Claude Code reviewer invocation loads no user, project or local customisation -- hooks above all -- while keeping the stored login: --safe-mode, not --bare, pinned by test. (3) The Windows failure of tests/automaticFallbackBoundary.test.mjs is fixed by path-separator normalisation only, with its allowlist and assertions unchanged, so the required test set passes on Windows and Linux alike. (4) Before any paid review, a preflight runs the reviewer's own invocation on a prompt that is not a review: it must read something the control program knows to be true (the HEAD commit) and must fail to write a probe file; the call, its command, its usage and its result are recorded, and a review refuses to start on a failing preflight or on a package whose tests or guards failed unless a person overrides explicitly on the command line. An environment failure is recorded as such, apart from the change's own findings. (5) The fallback part of the diagnostic separates three things by name: the offline diagnosis (which candidate is reachable on the given inputs, and each refusal's reason, with the product's own gate and decideFallback), the conditions an offline report cannot verify (credits and budget, the runtime registry row, the provider reservation, the request's search path), and the pre-dispatch check that decides on a real request; a reachable candidate is labelled execution-unverified and never executable. (6) This task names the exchange it continues; round 0's reviewer is shown that exchange's four open findings; and a chain of continuations is capped so that starting a new task is not a way to reset the revision cap. No production routing behaviour, score, flag or pre-registration changes; no model calls except the approved preflight and reviews; no push; no workflow dispatch.",
+  "completionCriteria": [
+    "packageExclusionProblems refuses a parent of the package directory and any path not declared in generatedPaths, and tests/crossReview.test.mjs holds it; a review refuses to run when an excluded generated file changed since packaging.",
+    "CLI_INVOCATIONS.claude.reviewer carries --safe-mode and not --bare, with --tools Read,Grep,Glob, --allowedTools and --strict-mcp-config, pinned by tests/crossReview.test.mjs.",
+    "tests/automaticFallbackBoundary.test.mjs passes on this Windows checkout with its ALLOWED map and assertions unchanged; the required eight-file test set reports 0 failures.",
+    "scripts/cross-review.mjs --mode=preflight records a preflight (command, cwd, sandbox signature, usage, result) and --mode=review refuses without a passing preflight for the same sandbox signature or with failing package checks, unless --skip-preflight or --review-despite-check-failures is given.",
+    "The diagnostic's fallback block carries decision, firstCandidate, reachableAsDeployed and reachableIfFlagOn with execution: \"unverified\" and unverifiedConditions on every reachable answer, and the word executable appears nowhere in it (tests/routerFullCatalogDiagnostic.test.mjs).",
+    "This task's package records lineage [router-full-catalog-diagnostic-v1] and the four inherited findings; supersessionProblems refuses to continue an exchange that is not on hold or failed, and refuses a chain deeper than MAX_SUPERSESSIONS (tests/crossReview.test.mjs).",
+    "Existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified."
+  ],
+  "baseCommit": "787a37c8",
+  "roles": {
+    "author": "claude",
+    "reviewer": "codex"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:844c7b204172afc87871b78d6061e8804489064768d82b2c09a0a046de948961",
+      "commit": "937bbf939f774d16ffc84a5f363936fa74cd0f1d",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round0.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-prompt.md",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Continuation of router-full-catalog-diagnostic-v1, which concluded on hold with four findings open after its two fix rounds. This round finishes the foundation those findings named, against the v1 tip 787a37c8. (1) Package exclusions: only an exact generatedPaths entry or the package directory itself (or under it) may be excluded; a parent of the package directory is refused by name (packageExclusionProblems, with the ancestor case the reviewer reproduced held by test). (2) The Claude Code reviewer runs with --safe-mode, which drops user, project and local customisations including hooks while keeping the stored login; --bare would drop the login and is not used; pinned by test. (3) tests/automaticFallbackBoundary.test.mjs normalises the separator of the importer paths it compares with its POSIX-shaped allowlist (the pattern tests/typographyPolicy.test.mjs uses); the ALLOWED map and every assertion are unchanged, and the eight-file set is 120 of 120 on this Windows checkout, with the three guard rules passing. (4) --mode=preflight runs the reviewer invocation on a non-review prompt (read HEAD, try to write a probe) and records command, sandbox signature, tool version, usage and result; --mode=review refuses on failing checks or without a passing preflight for the same signature unless a person overrides on the command line, and an override is written into the verdict; --codex-shell=windows-powershell keeps the sandbox off the Store-installed PowerShell under WindowsApps, whose ACLs deny the restricted token (two recorded preflights show that refusal). (5) The diagnostic separates the offline diagnosis, the unverified conditions and the pre-dispatch check by name; a reachable answer carries execution unverified and the word executable appears nowhere in the fallback block; report v3 regenerated. (6) This task supersedes v1: the package records lineage and the four inherited findings, the reviewer is shown them, only an exchange on hold or failed can be continued, and the chain is capped at MAX_SUPERSESSIONS 2. No routing behaviour, score, flag or pre-registration changed.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": true,
+          "output": "# tests 120\n# pass 120\n# fail 0",
+          "durationMs": 634
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 869 path(s) named by comments across 2592 source file(s), all present.",
+          "durationMs": 1369
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 582
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+          "durationMs": 638
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/crossReviewCore.ts:packageExclusionProblems",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "outDir 자체나 하위 경로를 writableScope와 대조하지 않고 먼저 허용하므로 `--out=. --diff-exclude=.`처럼 package directory를 scoped source의 부모로 지정해 모든 변경을 review diff에서 숨길 수 있습니다.",
+          "reproduction": "`packageExclusionProblems({ excluded: [\".\"], generatedPaths: [], outDir: \".\" })`의 실제 결과는 `[]`이고, 변경된 `lib/crossReviewCore.ts`에 `git diff --name-only 787a37c8 -- lib/crossReviewCore.ts ':(exclude).'`를 적용하면 출력이 비지만 예상 결과는 exclusion 거부입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:excludedDigests, scopedDiff",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "검증 시 separator를 정규화한 generated path를 이후에는 raw 문자열로 비교하므로 Windows 표기의 허용된 exclusion이 digest에 기록되지 않고 packaging 이후 변경도 review에서 감지되지 않습니다.",
+          "reproduction": "`excluded=[\"docs\\\\ops\\\\router-full-catalog-diagnostic\\\\development-v0.md\"]`와 POSIX형 generatedPaths를 주면 `packageExclusionProblems`는 `[]`을 반환하지만 `diffExcluded.filter(path => generatedPaths.includes(path))`는 빈 배열이며, Git for Windows의 같은 backslash pathspec은 실제 파일을 diff에서 제외하므로 이후 파일을 수정해도 liveDiff와 excludedDigests 어느 쪽도 거부하지 않습니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:judgePreflight",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "preflight는 실제 write 시도나 실패 증거를 검사하지 않고 reviewer가 반환한 boolean만 믿어, 쓰기를 시도하지 않았거나 성공했다고 보고한 결과도 probe가 없으면 통과할 수 있습니다.",
+          "reproduction": "`judgePreflight({ report: { readOutput: \"abc\", writeAttempted: true, writeResult: \"written\" }, expectedReadOutput: \"abc\", probeExists: false })`의 실제 결과는 `{ \"passed\": true, \"problems\": [] }`이지만 write가 실패했다는 증거가 없으므로 예상 결과는 실패입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:usageFrom",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "usageFrom은 Codex의 `turn.completed` JSONL만 처리하여 Claude reviewer의 `--output-format json` 응답이 제공하는 usage를 항상 null로 기록합니다.",
+          "reproduction": "Claude의 `{ \"type\": \"result\", \"usage\": { \"input_tokens\": 10 }, \"result\": \"...\" }` envelope를 usageFrom에 주면 실제 결과는 null이고 예상 결과는 usage 객체이며, 공식 [Claude Code programmatic CLI 문서](https://code.claude.com/docs/en/headless)는 JSON 응답에 usage metadata가 포함된다고 명시합니다.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "scoped-source exclusion 충돌과 generated-path 정규화·상태 기록을 막고, preflight의 실제 write-failure 검증 및 Claude usage 추출을 추가한 뒤 회귀 테스트와 함께 round 1을 제출하십시오."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:acdba9eed9311f855c45b59aa691748b7e1663cdde527570430fd07d83ddcdd3",
+      "commit": "b9ce8626d4cb60b33d31ded90467d828287f4418",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round0.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-prompt.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/verdict-round0.json",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Round 1 answers the four round-0 findings. (1) packageExclusionProblems now takes the writable scope: a path that is, or contains, a scope entry is refused whatever it is named as, and a package directory that itself contains a scope entry (--out=.) admits nothing under it; the reviewer reproduction (--out=. --diff-exclude=.) is held by test. (2) normalizeRepoPath gives every path one spelling at the script edge (generated paths, exclusions, pathspecs, digests), so a Windows spelling can no longer pass the check, be excluded by git and go undigested; the package records normalised paths; held by test. (3) judgePreflight requires the tool own output to show the refused write (writeRefusalObservedIn: a rejected patch, a failed file change, a denied command, a permission denial) and fails a report that claims the write was done; the passing preflight on this machine shows the refusal in stderr. (4) extractUsage reads Codex turn.completed usage and the Claude Code JSON envelope usage and total_cost_usd, with the tool named; held by test. Test set 122 of 122, guard rules 3 of 3 on this checkout. No routing behaviour, score, flag or pre-registration changed.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": true,
+          "output": "# tests 122\n# pass 122\n# fail 0",
+          "durationMs": 636
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 869 path(s) named by comments across 2592 source file(s), all present.",
+          "durationMs": 1409
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 615
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+          "durationMs": 657
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/crossReviewCore.ts:normalizeRepoPath, packageExclusionProblems",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "출력 디렉터리의 임의 하위 경로를 허용하면서 `..`를 정규화하거나 거부하지 않아, 패키지 디렉터리 아래처럼 작성한 path traversal로 scoped source를 review diff에서 숨길 수 있습니다.",
+          "reproduction": "저장소 루트에서 packageExclusionProblems에 excluded=[\"docs/ops/cross-review/packages/demo/../../README.md\"], outDir=\"docs/ops/cross-review/packages/demo\", generatedPaths=[], writableScope=[\"docs/ops/cross-review/\"]를 주면 []가 반환됩니다. 이어 `git diff --name-only 787a37c8 -- docs/ops/cross-review/ ':(exclude)docs/ops/cross-review/packages/demo/../../README.md'`를 실행하면 변경된 README.md가 사라집니다. 이 경로는 선언된 generated path도 정확한 outDir도 아니므로 예상 결과는 exclusion 거부입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:excludedDigests, review excluded-file verification",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "패키징 시 존재하지 않는 excluded generated file은 상태가 기록되지 않아, 패키징 후 생성되어도 review가 변경을 감지하지 못합니다.",
+          "reproduction": "존재하지 않는 파일을 generatedPaths와 --diff-exclude에 지정해 package하면 excludedDigests에 해당 경로가 없습니다. 그 파일을 만든 뒤 같은 package를 --mode=review --skip-preflight로 읽으면 scopedDiff는 파일을 제외하고 digest 검증 반복문에도 경로가 없어 reviewer 단계까지 진행하지만, 예상 결과는 packaging 이후 excluded file이 변경되었다는 거부입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:writeRefusalObservedIn, judgePreflight",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "write-refusal 증거를 probe path와 연결하지 않아 다른 파일이나 도구의 permission denial만 있어도 reviewer의 writeAttempted 주장과 결합해 preflight가 통과합니다.",
+          "reproduction": "stdout을 {\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"Set-Content other.txt\",\"aggregated_output\":\"Access is denied\",\"status\":\"failed\"}}로 주면 writeRefusalObservedIn은 true이고, 이를 readOutput=\"abc\", writeAttempted=true, writeResult=\"denied\", expectedReadOutput=\"abc\", probeExists=false와 함께 judgePreflight에 주면 passed=true입니다. 거부된 명령은 probe가 아닌 other.txt이므로 예상 결과는 실패입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:passingPreflight",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "동일 sandbox signature의 더 최신 preflight가 실패해도 실패 기록을 먼저 제거하고 과거의 성공 기록을 선택하므로 review가 환경 실패 뒤에도 시작됩니다.",
+          "reproduction": "같은 sandboxSignature로 startedAt이 이른 passed=true 기록과 startedAt이 늦은 passed=false 기록을 outDir에 둔 뒤 review를 실행하면 passingPreflight가 최신 실패를 filter에서 버리고 이전 성공을 반환합니다. 예상 결과는 최신 preflight 실패로 review를 거부하는 것입니다.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "exclusion을 canonical한 exact allowlist로 제한하고 absent 상태도 snapshot하며, probe별 refusal과 동일 signature의 최신 preflight 결과를 검증하도록 수정한 뒤 실제 package/review 경로의 회귀 테스트를 추가하십시오."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:e8f9d8359e4b367bdfe3ccaf6079eab454b6208e565727221ad873bf411ff9c8",
+      "commit": "152eff4a9d457f79928ab125a3d329a0b88f6b75",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round0.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round1.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round1.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-prompt.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round1.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/verdict-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/verdict-round1.json",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Round 2 answers the four round-1 findings. (1) Exclusions are an exact allow list after .. resolves: normalizeRepoPath resolves . and .. segments and reports a path that climbs above the repository; packageExclusionProblems accepts only a path that is exactly a generated path or exactly the package directory, and refuses a file under the package directory, a parent of it, a path above the repository and any scoped source. The reviewer's reproduction (out/../../README.md) is checked as the README.md it resolves to and refused; held by test at the core and through the script. (2) Absence is recorded: every excluded generated path is snapshotted at packaging as its content digest, a tree digest or the word absent; the review requires a record for each and compares it, so a file that appeared, changed or disappeared since packaging is refused. Held by a test that runs the script's package and review paths in a repository made for it, with the reviewer's reproduction. (3) A refused write is evidence only at the probe path: the preflight prompt asks for one shell command naming the probe path, writeRefusalEvidence counts only a refusal the tool reported at that path (a command naming it whose output says it was denied, a failed file change there, a permission denial naming it, a stderr line naming it), and the tool's own pathless patch-rejected line does not. The evidence is written into the record, whose version is now cross-review-preflight-v2, and a review accepts only records of the current version, so the 10:53 pass, which rested on the pathless line, is not reused and a new preflight precedes this review. (4) The newest preflight decides: preflightGate takes the newest record for the sandbox signature and requires it to be a pass under the current rule; none, a newer failure or an older rule each refuse, an older pass is never picked past a newer failure, and --skip-preflight records the reason it overrode; held by test at the core and through the script. Test set 124 of 124, guard rules 3 of 3 on this checkout. No routing behaviour, score, flag or pre-registration changed.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": true,
+          "output": "# tests 124\n# pass 124\n# fail 0",
+          "durationMs": 3110
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 869 path(s) named by comments across 2592 source file(s), all present.",
+          "durationMs": 1313
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 564
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+          "durationMs": 630
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "scripts/cross-review.mjs:scopedDiff / lib/crossReviewCore.ts:packageExclusionProblems",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "허용된 출력 디렉터리를 Git의 literal path가 아닌 pathspec으로 전달하므로, 파일명에 유효한 대괄호 패턴을 사용하면 임의의 scoped source를 diff와 digest에서 숨길 수 있습니다.",
+          "reproduction": "저장소 루트에서 packageExclusionProblems({ excluded: [\"lib/[c]rossReviewCore.ts\"], generatedPaths: [], outDir: \"lib/[c]rossReviewCore.ts\", writableScope: [\"lib/crossReviewCore.ts\"] })가 []를 반환하는 것을 확인한 뒤 `git diff --name-only 787a37c8 -- lib/crossReviewCore.ts ':(exclude)lib/[c]rossReviewCore.ts'`를 실행하면, 마지막 pathspec이 없을 때 표시되는 lib/crossReviewCore.ts가 숨겨집니다; 이 입력은 거부되거나 Git에 literal pathspec으로 전달되어야 합니다.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:writeRefusalEvidence(namesProbe)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "probe 경로를 경계 없는 부분 문자열로 매칭하므로 다른 경로의 permission denial을 probe 자체의 쓰기 거부 증거로 인정해 실패해야 할 preflight가 통과합니다.",
+          "reproduction": "probePath를 \"docs/ops/pkg/probe.txt\"로 두고 stdout에 {\"permission_denials\":[{\"tool_input\":{\"file_path\":\"shadow/docs/ops/pkg/probe.txt\"}}]}를 전달하면 writeRefusalEvidence가 null이 아닌 값을 반환하며, 올바른 readOutput·probeExists=false·writeAttempted=true와 결합한 judgePreflight도 passed=true를 반환합니다; 거부된 파일은 별도의 shadow 경로이므로 기대 결과는 증거 없음과 preflight 실패입니다.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "revisions exhausted"
+    }
+  ],
+  "changeDigest": "sha256:e8f9d8359e4b367bdfe3ccaf6079eab454b6208e565727221ad873bf411ff9c8",
+  "commit": "152eff4a9d457f79928ab125a3d329a0b88f6b75",
+  "changeSummary": "Round 2 answers the four round-1 findings. (1) Exclusions are an exact allow list after .. resolves: normalizeRepoPath resolves . and .. segments and reports a path that climbs above the repository; packageExclusionProblems accepts only a path that is exactly a generated path or exactly the package directory, and refuses a file under the package directory, a parent of it, a path above the repository and any scoped source. The reviewer's reproduction (out/../../README.md) is checked as the README.md it resolves to and refused; held by test at the core and through the script. (2) Absence is recorded: every excluded generated path is snapshotted at packaging as its content digest, a tree digest or the word absent; the review requires a record for each and compares it, so a file that appeared, changed or disappeared since packaging is refused. Held by a test that runs the script's package and review paths in a repository made for it, with the reviewer's reproduction. (3) A refused write is evidence only at the probe path: the preflight prompt asks for one shell command naming the probe path, writeRefusalEvidence counts only a refusal the tool reported at that path (a command naming it whose output says it was denied, a failed file change there, a permission denial naming it, a stderr line naming it), and the tool's own pathless patch-rejected line does not. The evidence is written into the record, whose version is now cross-review-preflight-v2, and a review accepts only records of the current version, so the 10:53 pass, which rested on the pathless line, is not reused and a new preflight precedes this review. (4) The newest preflight decides: preflightGate takes the newest record for the sandbox signature and requires it to be a pass under the current rule; none, a newer failure or an older rule each refuse, an older pass is never picked past a newer failure, and --skip-preflight records the reason it overrode; held by test at the core and through the script. Test set 124 of 124, guard rules 3 of 3 on this checkout. No routing behaviour, score, flag or pre-registration changed.",
+  "testResults": [
+    {
+      "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+      "passed": true,
+      "output": "# tests 124\n# pass 124\n# fail 0",
+      "durationMs": 3110
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 869 path(s) named by comments across 2592 source file(s), all present.",
+      "durationMs": 1313
+    },
+    {
+      "rule": "npm run check:release-gate-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+      "durationMs": 564
+    },
+    {
+      "rule": "npm run security:regression",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+      "durationMs": 630
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "request_changes",
+  "findings": [
+    {
+      "location": "scripts/cross-review.mjs:scopedDiff / lib/crossReviewCore.ts:packageExclusionProblems",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "허용된 출력 디렉터리를 Git의 literal path가 아닌 pathspec으로 전달하므로, 파일명에 유효한 대괄호 패턴을 사용하면 임의의 scoped source를 diff와 digest에서 숨길 수 있습니다.",
+      "reproduction": "저장소 루트에서 packageExclusionProblems({ excluded: [\"lib/[c]rossReviewCore.ts\"], generatedPaths: [], outDir: \"lib/[c]rossReviewCore.ts\", writableScope: [\"lib/crossReviewCore.ts\"] })가 []를 반환하는 것을 확인한 뒤 `git diff --name-only 787a37c8 -- lib/crossReviewCore.ts ':(exclude)lib/[c]rossReviewCore.ts'`를 실행하면, 마지막 pathspec이 없을 때 표시되는 lib/crossReviewCore.ts가 숨겨집니다; 이 입력은 거부되거나 Git에 literal pathspec으로 전달되어야 합니다.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "lib/crossReviewCore.ts:writeRefusalEvidence(namesProbe)",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "probe 경로를 경계 없는 부분 문자열로 매칭하므로 다른 경로의 permission denial을 probe 자체의 쓰기 거부 증거로 인정해 실패해야 할 preflight가 통과합니다.",
+      "reproduction": "probePath를 \"docs/ops/pkg/probe.txt\"로 두고 stdout에 {\"permission_denials\":[{\"tool_input\":{\"file_path\":\"shadow/docs/ops/pkg/probe.txt\"}}]}를 전달하면 writeRefusalEvidence가 null이 아닌 값을 반환하며, 올바른 readOutput·probeExists=false·writeAttempted=true와 결합한 judgePreflight도 passed=true를 반환합니다; 거부된 파일은 별도의 shadow 경로이므로 기대 결과는 증거 없음과 preflight 실패입니다.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "unresolved after 2 revision(s); on hold with the findings and reproductions recorded",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-09T12:12:25.367Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [
+    "router-full-catalog-diagnostic-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "lib/routerFullCatalogDiagnostic.ts:FALLBACK_UNDECIDED_OFFLINE, fallbackReachabilityFor",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "reachable=true인 결과도 budget_refused, candidate_unavailable, no_provider_hold 등을 미판정 상태로 남기므로, 요구된 'actually executable fallback'을 보고하지 않고 이름만 reachable로 바꿨습니다.",
+      "reproduction": "저장소 루트에서 `npm run report:router-full-catalog -- --fallback-flag=on --json=artifacts/router-full-catalog/repro.json`을 실행하고 reachableIfFlagOn.reachable=true인 항목을 확인하면, 같은 결과의 undecidedOffline에 실제 실행을 막을 수 있는 네 조건이 그대로 남아 있습니다."
+    },
+    {
+      "location": "scripts/cross-review.mjs:diffExcluded validation and excludedDigests",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "--out의 상위 경로도 --diff-exclude로 허용하면서 그 경로를 digest하지 않아, 패키지 디렉터리를 scoped 소스 아래에 두면 변경을 review diff와 digest에서 계속 숨길 수 있습니다.",
+      "reproduction": "현재 task로 `--out=docs/ops/cross-review/repro --diff-exclude=docs/ops/cross-review`를 사용해 package를 만들면 검사가 허용합니다. 이후 docs/ops/cross-review/README.md를 다시 변경해도 review 단계의 scopedDiff가 같은 디렉터리를 제외하고 excludedDigests도 비어 있어 package digest가 변하지 않습니다."
+    },
+    {
+      "location": "lib/crossReviewExecutors.ts:CLI_INVOCATIONS.claude.reviewer",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "Claude reviewer는 user/project/local 설정을 그대로 로드하므로, Read 전용 도구 목록과 strict MCP 설정에도 불구하고 전체 사용자 권한으로 실행되는 설정 hook이 작업공간에 쓸 수 있어 reviewer의 무쓰기 조건이 보장되지 않습니다.",
+      "reproduction": "CLI args에 `--setting-sources`가 없는 것을 확인한 뒤 Read 또는 SessionStart에 파일 생성 command hook을 설정하고 reviewer를 실행하면 파일이 생성됩니다. 공식 [CLI reference](https://code.claude.com/docs/en/cli-usage)는 setting source 기본 로딩을 제어하는 별도 옵션을 문서화하고, [hooks reference](https://code.claude.com/docs/en/hooks)는 command hook이 전체 사용자 권한으로 실행된다고 명시합니다."
+    },
+    {
+      "location": "Test results (run by the control program)",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "필수 Router 회귀 테스트 묶음이 117개 중 1개 실패한 상태이므로 기존 Router 테스트 통과 및 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.",
+      "reproduction": "저장소 루트에서 제출된 control-program test command를 grep 없이 실행하면 실패한 테스트의 상세 내용과 함께 `# tests 117`, `# pass 116`, `# fail 1`이 재현됩니다."
+    }
+  ],
+  "headCommit": "152eff4a9d457f79928ab125a3d329a0b88f6b75",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/README.md",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2.task.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round0.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change-round1.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/change.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/exchange.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round0.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/package-round1.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T08-48-32-848Z.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-16-49-608Z.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-29-14-894Z.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-47-15-382Z.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-2026-09-09T10-53-10-800Z.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-prompt.md",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round0.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round1.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/review-round1.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/verdict-round0.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/verdict-round1.json",
+    "docs/ops/router-full-catalog-diagnostic/README.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+    "lib/crossReviewCore.ts",
+    "lib/crossReviewExecutors.ts",
+    "lib/routerFullCatalogDiagnostic.ts",
+    "scripts/cross-review.mjs",
+    "scripts/report-router-full-catalog.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "tests/crossReview.test.mjs",
+    "tests/routerFullCatalogDiagnostic.test.mjs"
+  ]
+}

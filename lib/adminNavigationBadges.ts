@@ -38,6 +38,16 @@ export type AdminNavigationCounts = {
    */
   overdueCampaignWaves: number | null;
   /**
+   * Marketing drafts the Guard sent to a person
+   * (docs/policy/marketing-automation.md §6).
+   *
+   * The Guard's second verdict is "a person decides", and a draft that reaches
+   * it waits until someone does. Without this count the queue is a page nobody
+   * opens, and the automation's output stays invisible until an approval
+   * expires.
+   */
+  pendingMarketingApprovals: number | null;
+  /**
    * AMUX escalations waiting on a person: `open` and `acknowledged`, the same
    * statuses the Assignment section lists (AMUX_ESCALATION_AWAITING_STATUSES).
    *
@@ -78,6 +88,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   abandonedLegalEmail: null,
   openModelLifecycle: null,
   overdueCampaignWaves: null,
+  pendingMarketingApprovals: null,
   openAmuxEscalations: null,
   openFeedback: null,
   supportFeedback: null,
@@ -142,6 +153,8 @@ export const adminNavigationBadge = (
       return counts.openModelLifecycle;
     case "emailCampaigns":
       return counts.overdueCampaignWaves;
+    case "marketing":
+      return counts.pendingMarketingApprovals;
     case "amuxEscalations":
       return counts.openAmuxEscalations;
     default:

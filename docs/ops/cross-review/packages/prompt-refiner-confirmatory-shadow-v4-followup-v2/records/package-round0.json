@@ -1,0 +1,102 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4-followup-v2",
+  "round": 0,
+  "baseCommit": "bc5a47468b046406ce7631cf2732a26356294352",
+  "lineage": [
+    "prompt-refiner-confirmatory-shadow-v4"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:11-20 (CREATE FUNCTION \"prompt_refiner_runtime_manifest_valid\")",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The replacement wrapper keeps IMMUTABLE but drops the PARALLEL SAFE marker the renamed v2 validator carries, so a CHECK constraint on PromptRefinerReservationStage now calls a parallel-unsafe function; correctness is unaffected (the STRICT loss is inert because a STRICT function also yields NULL on NULL input, and every argument column is NOT NULL), only planning is.",
+      "reproduction": "Apply the migration to an empty database, then run: SELECT proname, proparallel, proisstrict FROM pg_proc WHERE proname IN ('prompt_refiner_runtime_manifest_valid','prompt_refiner_runtime_manifest_v2_valid'); the v2 validator reports proparallel='s', proisstrict=true, while the new wrapper reports proparallel='u', proisstrict=false. Adding PARALLEL SAFE (and optionally STRICT) to the wrapper restores parity."
+    }
+  ],
+  "changeDigest": "sha256:774e004606fe6a745822a4396c7cc6e92e1576377e0d2090d3df14f4b7fb28ef",
+  "commit": "24cb29092be5311a8c612a46c69561d750edfe2d",
+  "headCommit": "24cb29092be5311a8c612a46c69561d750edfe2d",
+  "worktreeDirty": false,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts"
+  ],
+  "treeFilesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json",
+    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts"
+  ],
+  "diffExcluded": [
+    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/records"
+  ],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "npm run test:unit",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13084.8463",
+      "durationMs": 1116739
+    }
+  ],
+  "guardCommands": [
+    "npm run typecheck",
+    "npm run lint",
+    "npm run check:enum-constraints",
+    "npm run check:protected-table-writers",
+    "npm run check:doc-references",
+    "npm run check:policy-section-references",
+    "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4g?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4g?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts"
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 74679
+    },
+    {
+      "rule": "npm run lint",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+      "durationMs": 70273
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 118 closed list(s) in the schema — 62 compared against an application list, 22 held only as a TypeScript union, 34 written down only in the database.",
+      "durationMs": 1111
+    },
+    {
+      "rule": "npm run check:protected-table-writers",
+      "passed": true,
+      "detail": "tingStore.ts; no direct MarketingPost write found outside lib/marketingStore.ts; no direct MarketingReport write found outside lib/marketingStore.ts; no direct AiVisibilityRun write found outside lib/marketingStore.ts; no direct PromptRefinerShadowRun write found outside lib/promptRefinerShadowRunStore.ts; no direct PromptRefinerShadowAttempt write found outside lib/promptRefinerShadowRunStore.ts.",
+      "durationMs": 3115
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 903 referenced path(s) across 119 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.",
+      "durationMs": 1462
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).",
+      "durationMs": 1131
+    },
+    {
+      "rule": "NODE_ENV=test DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4g?schema=public DIRECT_DATABASE_URL=postgresql://postgres@127.0.0.1:55439/tomverse_test_v4g?schema=public NEXTAUTH_SECRET=tomverse-db-integration-test-secret-2026 MANIFEST_HASH_KEYS=db-integration-test:tomverse-db-integration-manifest-key-2026 MANIFEST_HASH_ACTIVE_KEY_ID=db-integration-test node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-reservation.db.test.ts tests/integration/prompt-refiner-reservation-admission.db.test.ts tests/integration/prompt-refiner-shadow-run.db.test.ts",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 83476.3948",
+      "durationMs": 83561
+    }
+  ],
+  "producedAt": "2026-09-21T00:30:38.355Z",
+  "diff": "diff --git a/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md\nnew file mode 100644\nindex 00000000..8e7e0d0c\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md\n@@ -0,0 +1,18 @@\n+# Prompt Refiner confirmatory shadow v4 후속 검토 승인 기록\n+\n+- approvedBy: `mposition`\n+- approvedAt: `2026-09-21` (Australia/Brisbane)\n+- author: `codex`\n+- independentReviewer: `claude-code-max`\n+\n+사용자는 Tomverse Chat 개발을 완료할 때까지 권장 순서로 자동 진행하고, 필요한\n+Claude Code Max 독립 검토와 `--skip-preflight` 예외를 허용했으며 수정 round 상한을\n+두지 않았다. 원 exchange는 round 2에서 `approve`와 재현 가능한 finding 1건을 함께\n+남겨 `on_hold(revisions_exhausted)`로 닫혔다. 이 successor는 그 finding을 수정하고\n+동일한 읽기 전용 reviewer에게 다시 확인받기 위한 기록이다.\n+\n+승인 범위는 PostgreSQL 함수 속성 parity 수정, 그 회귀 테스트, package·검토 기록,\n+로컬 검증, push와 PR 및 CI 확인까지다. provider 호출, stage/run 승인, Railway flag,\n+유료 shadow 실행, 제품 Prompt Refiner 노출, Router 결합 또는 rollout 승인이 아니다.\n+Claude 호출은 저장된 `claude.ai` Max 구독만 사용하며 API key/token 환경 변수는\n+제거하고 `firstParty`·`max` 인증을 확인한다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json\nnew file mode 100644\nindex 00000000..16ace8d6\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json\n@@ -0,0 +1,23 @@\n+{\n+  \"taskId\": \"prompt-refiner-confirmatory-shadow-v4-followup-v2\",\n+  \"requirement\": \"prompt-refiner-confirmatory-shadow-v4 exchange가 round 2에서 approve와 재현 가능한 PostgreSQL 함수 속성 finding 1건을 함께 남기고 on_hold(revisions_exhausted)로 종료됐다. 기존 구현과 검토 기록은 보존한다. 후속 변경은 v4 prompt_refiner_runtime_manifest_valid wrapper가 위임 대상 v2 validator와 동일하게 STRICT 및 PARALLEL SAFE가 되도록 migration을 수정하고, fresh migration DB의 pg_proc에서 두 함수가 모두 proisstrict=true 및 proparallel='s'임을 통합 테스트로 고정한다. 그 밖의 Prompt Refiner 계약, provider 호출, 권한, 비용, flag, stage/run 또는 rollout 동작은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max다.\",\n+  \"completionCriteria\": [\n+    \"원 exchange의 on_hold 상태와 round 2 finding을 supersedes lineage와 inherited finding으로 보존한다.\",\n+    \"v4 migration의 runtime-manifest wrapper가 IMMUTABLE, STRICT, PARALLEL SAFE이고 기존 v2 validator의 반환·위임 의미는 변하지 않는다.\",\n+    \"fresh migration DB에서 v2 validator와 v4 wrapper의 proisstrict=true 및 proparallel='s'를 실제 pg_proc로 검증한다.\",\n+    \"Prompt Refiner DB integration, unit, TypeScript, ESLint, schema·문서·정책·protected-writer 검사가 통과한다.\",\n+    \"검토 record 디렉터리만 reviewed diff에서 제외하고 task, authorization, migration과 테스트는 exact digest에 포함한다.\",\n+    \"Claude verdict는 exact package digest에 결속하고 open finding 없이 approve해야 한다.\"\n+  ],\n+  \"baseCommit\": \"bc5a47468b046406ce7631cf2732a26356294352\",\n+  \"writableScope\": [\n+    \"docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2\",\n+    \"prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql\",\n+    \"tests/integration/prompt-refiner-shadow-run.db.test.ts\"\n+  ],\n+  \"generatedPaths\": [],\n+  \"supersedes\": {\n+    \"taskId\": \"prompt-refiner-confirmatory-shadow-v4\",\n+    \"exchange\": \"docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json\"\n+  }\n+}\ndiff --git a/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql b/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql\nindex a03abb36..88fdf224 100644\n--- a/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql\n+++ b/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql\n@@ -17,6 +17,8 @@ CREATE FUNCTION \"prompt_refiner_runtime_manifest_valid\"(\n RETURNS BOOLEAN\n LANGUAGE plpgsql\n IMMUTABLE\n+STRICT\n+PARALLEL SAFE\n AS $$\n DECLARE\n     files JSONB;\ndiff --git a/tests/integration/prompt-refiner-shadow-run.db.test.ts b/tests/integration/prompt-refiner-shadow-run.db.test.ts\nindex 23fd7243..44fae750 100644\n--- a/tests/integration/prompt-refiner-shadow-run.db.test.ts\n+++ b/tests/integration/prompt-refiner-shadow-run.db.test.ts\n@@ -463,6 +463,35 @@ test(\"v4 terminal duration is bounded before an immutable receipt can be stored\"\n     );\n });\n \n+test(\"v4 runtime manifest wrapper preserves strict and parallel-safe validator metadata\", async () => {\n+    const functions = await prisma.$queryRawUnsafe<\n+        Array<{ name: string; parallel: string; strict: boolean }>\n+    >(`\n+        SELECT\n+          proname AS name,\n+          proparallel::TEXT AS parallel,\n+          proisstrict AS strict\n+        FROM pg_proc\n+        WHERE proname IN (\n+          'prompt_refiner_runtime_manifest_valid',\n+          'prompt_refiner_runtime_manifest_v2_valid'\n+        )\n+        ORDER BY proname\n+    `);\n+    assert.deepEqual(functions, [\n+        {\n+            name: \"prompt_refiner_runtime_manifest_v2_valid\",\n+            parallel: \"s\",\n+            strict: true,\n+        },\n+        {\n+            name: \"prompt_refiner_runtime_manifest_valid\",\n+            parallel: \"s\",\n+            strict: true,\n+        },\n+    ]);\n+});\n+\n test(\"completed durable evidence rebuilds a content-free aggregate from all 16 cases\", async () => {\n     await approveStage();\n     await approveRun();\n"
+}

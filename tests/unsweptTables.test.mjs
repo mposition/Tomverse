@@ -30,6 +30,7 @@ test("a table written and never deleted from is reported", () => {
         deleted: new Set(),
         bounded: {},
         retained: {},
+        purgePending: {},
     });
     assert.deepEqual(unswept, ["ProbeResult"]);
 });
@@ -45,6 +46,7 @@ test("a cascade is reported separately, because it answers a different question"
         deleted: new Set(),
         bounded: {},
         retained: {},
+        purgePending: {},
     });
     assert.deepEqual(unswept, []);
     assert.deepEqual(cascadeOnly, ["RoutingAttempt"]);
@@ -57,6 +59,7 @@ test("a table the application deletes from is not reported at all", () => {
         deleted: new Set(["Swept"]),
         bounded: {},
         retained: {},
+        purgePending: {},
     });
     assert.deepEqual(unswept, []);
     assert.deepEqual(cascadeOnly, []);
@@ -69,6 +72,7 @@ test("a table nothing writes to is not this survey's business", () => {
         deleted: new Set(),
         bounded: {},
         retained: {},
+        purgePending: {},
     });
     assert.deepEqual(unswept, []);
 });
@@ -82,6 +86,7 @@ test("a registry entry for a table that no longer exists is an error", () => {
         deleted: new Set(["Real"]),
         bounded: { Gone: "used to be one row per provider" },
         retained: {},
+        purgePending: {},
         // Isolated the same way `retained` already is: the real pending
         // decision names three models this fixture does not have, and its
         // errors are not what this test is about.
@@ -148,6 +153,7 @@ const auditAt = (iso, extra = []) =>
         deleted: new Set(),
         bounded: {},
         retained: {},
+        purgePending: {},
         now: new Date(iso),
     });
 
@@ -218,10 +224,58 @@ test("every held table is a real model", () => {
         deleted: new Set(),
         bounded: {},
         retained: {},
+        purgePending: {},
         now: new Date("2026-08-15T00:00:00Z"),
     });
     assert.match(
         missing.errors.join("\n"),
         /ImageCreditReservation is registered here but is not a model/
     );
+});
+
+test("a decided period with no job yet is its own answer, not silence", () => {
+    // The distinction this category exists for: "unswept" would send somebody
+    // to decide a retention period that docs/policy/marketing-automation.md
+    // §12.2 already sets, and leaving it out of the report entirely would claim
+    // a sweep that has not been written.
+    const { unswept, purgePendingTables } = auditUnsweptTables({
+        models: [{ name: "MarketingReport", hasUserCascade: false }],
+        created: new Set(["MarketingReport"]),
+        deleted: new Set(),
+        bounded: {},
+        retained: {},
+        purgePending: { MarketingReport: "90 days to 36 months by kind; sweep in S3" },
+        pending: [],
+    });
+    assert.deepEqual(unswept, []);
+    assert.deepEqual(purgePendingTables, ["MarketingReport"]);
+});
+
+test("a table cannot have both a decided period and a settled registry entry", () => {
+    const { errors } = auditUnsweptTables({
+        models: [{ name: "MarketingReport", hasUserCascade: false }],
+        created: new Set(["MarketingReport"]),
+        deleted: new Set(),
+        bounded: {},
+        retained: { MarketingReport: "kept forever" },
+        purgePending: { MarketingReport: "deleted after retentionUntil" },
+        pending: [],
+    });
+    assert.match(
+        errors.join("\n"),
+        /MarketingReport has a decided retention period and is also registered/
+    );
+});
+
+test("every table with a decided period is a real model", () => {
+    const { errors } = auditUnsweptTables({
+        models: [{ name: "MarketingReport", hasUserCascade: false }],
+        created: new Set(["MarketingReport"]),
+        deleted: new Set(),
+        bounded: {},
+        retained: {},
+        purgePending: { Gone: "used to have a retention period" },
+        pending: [],
+    });
+    assert.match(errors.join("\n"), /Gone is registered here but is not a model/);
 });

@@ -23,9 +23,16 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, getModel } from "../lib/models.ts";
 import { evaluationRecordProblems } from "../lib/routerQualityEvalCore.ts";
-import { evalSetProblems } from "../lib/routerQualityEvalSet.ts";
+import { calibrationArtefactProblems } from "../lib/routerJudgeCalibration.ts";
+import {
+  cellFill,
+  freezeDrift,
+  evalSetProblems,
+  unrecordedProvenanceItems,
+} from "../lib/routerQualityEvalSet.ts";
+import { duplicatePrompts } from "../lib/routerEvalReviewSheet.ts";
 
 const SET_DIRECTORY = "docs/ops/router-evaluation-set";
 const MARGIN_PP = -2;
@@ -66,7 +73,120 @@ const checkSet = (path) => {
   // *allowed* to be full of candidates, and demanding otherwise would make
   // the drafting stage impossible. What the file may not do is claim to be a
   // decision set without carrying a decision set's records.
-  report(`${path} (${set.purpose ?? "no purpose"})`, [...evalSetProblems(set)]);
+  const problems = [...evalSetProblems(set)];
+
+  // Refused here rather than in cellFill, which reaches for set.items and
+  // takes the whole check down with a stack trace that says nothing about
+  // which file or what to do with it.
+  if (!Array.isArray(set.items)) {
+    report(path, [
+      "has no items array, so it is not an evaluation set. Every .json under " +
+        `${SET_DIRECTORY} is read as one; records that are not belong elsewhere.`,
+    ]);
+    return;
+  }
+
+  // Duplicate IDS are caught by evalSetProblems; duplicate TEXT is not, and it
+  // is the one that matters here. The same prompt under two ids is one item
+  // counted twice, which inflates a cell towards its target without adding
+  // anything for the Router to be measured on.
+  for (const duplicate of duplicatePrompts(set.items ?? [])) {
+    problems.push(
+      `${duplicate.ids.join(", ")} share one prompt; the same question under two ids ` +
+        "fills a cell without adding evidence"
+    );
+  }
+
+  // docs/ops/tomverse-chat-router-evaluation-set.md §2. Cells are independent, so fill is reported per cell and never pooled.
+  // A short cell is only an ERROR once a person has said the pool is finished:
+  // during collection every cell is short, and a check that is red throughout
+  // the work it is meant to supervise stops being read.
+  const fill = cellFill(set);
+  const short = fill.filter((cell) => cell.short > 0);
+  if (set.pilotReady === true && short.length > 0) {
+    for (const cell of short) {
+      problems.push(
+        `${cell.stratum}/${cell.cell} has ${cell.adopted} adopted of ${cell.target}; ` +
+          "the file declares pilotReady"
+      );
+    }
+  }
+
+  report(`${path} (${set.purpose ?? "no purpose"})`, problems);
+
+  if (fill.some((cell) => cell.target > 0)) {
+    const source = (set.cellTargets ?? []).length > 0 ? "frozen cellTargets" : "proposedPilotCellTarget (a proposal, not the docs/ops/tomverse-chat-router-evaluation-set.md §11 freeze record)";
+    console.log(`\n       cell fill against ${source}`);
+    for (const cell of fill) {
+      const bar = cell.short === 0 ? "full" : `short ${cell.short}`;
+      console.log(
+        `         ${`${cell.stratum}/${cell.cell}`.padEnd(44)}` +
+          `${String(cell.adopted).padStart(3)} adopted  ` +
+          `${String(cell.candidates).padStart(3)} candidate  of ${cell.target}  ${bar}`
+      );
+    }
+    const totalAdopted = fill.reduce((sum, cell) => sum + cell.adopted, 0);
+    const totalTarget = fill.reduce((sum, cell) => sum + cell.target, 0);
+    console.log(
+      `         ${"total".padEnd(44)}${String(totalAdopted).padStart(3)} adopted of ${totalTarget}` +
+        (set.pilotReady === true ? "  [pilotReady]" : "  [collection in progress]")
+    );
+  }
+
+  // The baseline decides what a run is compared against, so a run reported
+  // without one has no verdict in it. Printed next to the fill because the two
+  // together are what docs/ops/tomverse-chat-router-evaluation-set.md §11 asks of
+  // a set before it is frozen: a stated target, and a stated thing to beat.
+  const baseline = set.baseline ?? null;
+  console.log(
+    baseline?.modelId
+      ? `\n       baseline ${baseline.modelId}, pre-registered ${baseline.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${baseline.preRegisteredBy ?? "nobody named"}, catalogue ${baseline.catalogueVersion ?? "unpinned"}`
+      : "\n       no baseline pre-registered — a run against this set would have nothing to beat"
+  );
+  // freezeDrift, not `set.frozenAt`: a date in the file says a person typed
+  // one, and the question a reader has is whether the set still holds what was
+  // frozen. Reported for a development set too -- it is not a failure there,
+  // but it is the same fact, and a check that only mentions drift once it is
+  // fatal teaches nobody to look for it.
+  const drift = freezeDrift(set);
+  console.log(
+    drift
+      ? `       ${drift}`
+      : `       frozen ${set.frozenAt} by ${set.frozenBy}, sample digest verified`
+  );
+  // The judge and the seed decide what the numbers mean as much as the
+  // baseline does: who grades, and which answer they read first. Printed here
+  // so a reader can see all three fixed points at once, or see one missing.
+  console.log(
+    set.judge?.modelId
+      ? `       judge ${set.judge.modelId}, pre-registered ${set.judge.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${set.judge.preRegisteredBy ?? "nobody named"}`
+      : "       no judge pre-registered — nothing fixes who grades the pairs"
+  );
+  console.log(
+    set.seed?.value
+      ? `       seed ${set.seed.value}, pre-registered ${set.seed.preRegisteredAt ?? "at no stated time"} ` +
+          `by ${set.seed.preRegisteredBy ?? "nobody named"}`
+      : "       no seed pre-registered — the arm ordering was not fixed in advance"
+  );
+
+  // A drafted item recording provider "unrecorded" satisfies the schema while
+  // reconstructing nothing. Counted here so the gap is visible rather than
+  // reading as a filled field.
+  const unrecorded = unrecordedProvenanceItems(set);
+  if (unrecorded.length > 0) {
+    console.log(
+      `\n       ${unrecorded.length} drafted item(s) have no reconstructable drafter ` +
+        `(provider "unrecorded"): ${unrecorded.slice(0, 4).map((item) => item.id).join(", ")}` +
+        `${unrecorded.length > 4 ? ", …" : ""}`
+    );
+    console.log(
+      "         Not a failure — a truthful record of a real gap. docs/ops/tomverse-chat-router-evaluation-set.md §8 makes the drafter a\n" +
+        "         confound the reviewer weighs, so an item that cannot name one is weaker\n" +
+        "         evidence and a reviewer may reject it on that ground alone."
+    );
+  }
 };
 
 const checkReport = (path) => {
@@ -76,7 +196,33 @@ const checkReport = (path) => {
     return;
   }
 
-  const problems = [...evaluationRecordProblems(record, { routableModelIds })];
+  // The judge identity is taken from the report rather than the catalogue: the
+  // check has to work on a report written months ago, against a catalogue that
+  // has since moved, and a calibration is of the model that actually graded.
+  const judge = getModel(String(record.judge?.identity ?? ""));
+  const problems = [
+    ...evaluationRecordProblems(record, {
+      routableModelIds,
+      checkCalibration: judge
+        ? (artefact) =>
+            calibrationArtefactProblems(artefact, {
+              judgeIdentity: {
+                modelId: judge.id,
+                provider: judge.provider,
+                apiModel: judge.apiModel,
+              },
+              judgeTemplateVersion: String(record.versions?.template ?? ""),
+              evaluationSetPurpose: String(record.evaluationSetPurpose ?? ""),
+            })
+        : undefined,
+    }),
+  ];
+  if (!judge && record.judge?.isRoutableModel === true) {
+    problems.push(
+      `its judge "${String(record.judge?.identity)}" is not in the catalogue, so the calibration ` +
+        "it cites cannot be checked against the model that graded"
+    );
+  }
 
   // A pilot or bias run is a valid artefact and an invalid citation. §7 keeps
   // them apart precisely because a pilot's numbers look exactly like a
@@ -134,6 +280,11 @@ if (setPath) {
   checkSet(setPath);
 } else if (existsSync(SET_DIRECTORY)) {
   console.log("Evaluation sets");
+  // Every .json here is read as an evaluation set. A file that is not one
+  // reaches `cellFill` with no items and takes the whole check down with a
+  // stack trace, which says nothing about what to do; `checkSet` refuses it
+  // with a sentence instead. Non-set records belong in their own directory --
+  // see docs/ops/router-decision-preregistration/.
   const files = readdirSync(SET_DIRECTORY).filter((name) => name.endsWith(".json"));
   if (files.length === 0) {
     console.log(`  none committed under ${SET_DIRECTORY}`);

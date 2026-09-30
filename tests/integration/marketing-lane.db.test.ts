@@ -11,6 +11,7 @@ import { MARKETING_HALT_SETTING_KEY } from "@/lib/marketingSendHealthCore";
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
 } from "@/lib/emailFeatureFlags";
 import {
   approveCampaign,
@@ -25,6 +26,8 @@ import {
 } from "@/lib/emailJurisdictionPolicy";
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
+import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   drainStandardEmailDeliveries,
   enqueueStandardEmail,
@@ -83,6 +86,11 @@ const IDENTITY_ENV = {
   EMAIL_BUSINESS_LEGAL_NAME: "Tomverse Pty Ltd",
   EMAIL_BUSINESS_POSTAL_ADDRESS: "1 Example Street, Brisbane QLD 4000",
   EMAIL_BUSINESS_CONTACT_EMAIL: "support@tomverse.app",
+  // Korea names this block from the 2026-09-23 seed (시행령 별표 6), and the
+  // renderer drops a footer whose named block has no value -- so without it a
+  // Korean message carries no footer at all, which is the refusal this value
+  // exists to make rather than a defect in these cases.
+  EMAIL_BUSINESS_CONTACT_PHONE: "+61 7 0000 0000",
   EMAIL_BUSINESS_REGISTRATION_NUMBER: "000-00-00000",
   EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER: "2026-Seoul-00000",
   EMAIL_BUSINESS_ABN: "00 000 000 000",
@@ -120,6 +128,11 @@ beforeEach(async () => {
   // suite's whole subject is the marketing path, so it has to opt in -- and
   // having to opt in is itself the evidence that the default is off.
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  // product_updates is the release-notes product now, behind its own switch
+  // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
   await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
 });
 
@@ -131,8 +144,46 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+// Every marketing template carries `product_updates`, which is the release-notes
+// product, so every send in this suite goes through the section 7.6 verdict.
+// That verdict needs Korea's six duties settled, and the seed settles three: the
+// other three are waiting on owner decisions and approvals that do not exist
+// yet. For the cases here to be about what they name -- a label, a window, a
+// footer -- the remaining three are settled on the draft, before activation, the
+// only time a draft's duty rows may be written. `advertising_subject_label` is
+// `implemented` rather than waived, which is why the label is still printed.
+const KOREAN_DUTIES_THE_SEED_LEAVES_OPEN = [
+  ["consent_result_notice_14_days", "emailProcessingResultNotice"],
+  ["advertising_subject_label", "emailSubjectLabels"],
+] as const;
+
 const activatePolicy = async () => {
   const draft = await ensureJurisdictionPolicyDraft();
+  const korea = await prisma.releaseNotesCountryRule.findFirst({
+    where: { policyVersionId: draft.version.id, countryCode: "KR" },
+    select: { id: true },
+  });
+  if (korea) {
+    const present = new Set(
+      (
+        await prisma.releaseNotesRuleObligation.findMany({
+          where: { countryRuleId: korea.id },
+          select: { obligationKey: true },
+        })
+      ).map((row) => row.obligationKey)
+    );
+    await prisma.releaseNotesRuleObligation.createMany({
+      data: KOREAN_DUTIES_THE_SEED_LEAVES_OPEN.filter(([key]) => !present.has(key)).map(
+        ([obligationKey, readinessCheck]) => ({
+          countryRuleId: korea.id,
+          obligationKey,
+          state: "implemented",
+          readinessCheck,
+          notes: "Test fixture: settled so the case is about one thing.",
+        })
+      ),
+    });
+  }
   await activatePolicyVersion({
     versionId: draft.version.id,
     actorId: randomUUID(),
@@ -173,6 +224,24 @@ const subscriber = async (options?: {
         confirmedAt: options?.confirmed === false ? null : new Date(),
       },
     });
+    // The act of consent the verdict cites. The preference row says the answer
+    // is still yes; the consent record is the evidence, and the Australian
+    // sender authority has nothing to rest on without it.
+    if (options?.confirmed !== false) {
+      await prisma.consentRecord.create({
+        data: {
+          userId: user.id,
+          emailAddress: user.email!,
+          purpose: "product_updates",
+          action: "granted",
+          occurredAt: new Date(Date.now() - 60_000),
+          jurisdiction: options?.country ?? "US",
+          jurisdictionSource: "self_declared",
+          policyVersionId: await ensureBootstrapPolicyVersion(),
+          capturedVia: "signup_form",
+        },
+      });
+    }
   }
   return user;
 };
@@ -205,20 +274,65 @@ test("an account that never opted in is not sent product news", async () => {
   assert.equal(delivery.skipReason, "no_consent");
 });
 
-test("marketing to a Korean recipient at night waits for 08:00 Seoul time", async () => {
-  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
-  // and waiting does not spend an attempt.
+/**
+ * The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after a row's
+ * own nextAttemptAt, so the row is due and the clock sits deep inside the old
+ * night-time window whatever time of day the suite runs.
+ */
+const nextSeoulNight = () => {
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  return at;
+};
+
+test("a Korean recipient at night is sent: email left the night-time rule", async () => {
+  // docs/policy/email-notifications.md §0 v13: 시행령 제61조제2항 excludes
+  // electronic mail from the media the Network Act's 21:00-08:00 rule names,
+  // so the Korean profile carries no window and 23:00 in Seoul is an ordinary
+  // send. The lane keeps the machinery -- the test below exercises it against
+  // a version that does carry a window.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  // The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after the
-  // row's own nextAttemptAt, so the row is due and the clock is inside the
-  // window whatever time of day the suite runs.
-  const at = new Date(Date.now() + 60 * 60 * 1_000);
-  at.setUTCMinutes(0, 0, 0);
-  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulNight() });
+
+  assert.equal(calls.length, 1, "no window means nothing to wait for");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, deferReason: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", deferReason: null, skipReason: null });
+});
+
+test("a window on the active version still holds a message until it ends", async () => {
+  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
+  // and waiting does not spend an attempt.
+  //
+  // No seeded profile has carried a window since v13, so this writes one onto
+  // the version under test rather than borrowing a jurisdiction's. A window is
+  // policy-version data, not code: the day a jurisdiction needs one it is a
+  // seed line, and this is the path it will take through the lane.
+  const draft = await ensureJurisdictionPolicyDraft();
+  await prisma.jurisdictionProfile.updateMany({
+    where: { policyVersionId: draft.version.id, profileKey: "KR" },
+    data: { quietHours: { start: "21:00", end: "08:00", tz: "Asia/Seoul" } },
+  });
+  await activatePolicyVersion({
+    versionId: draft.version.id,
+    actorId: randomUUID(),
+    actorEmail: "ops@example.test",
+  });
+
+  const calls = stubProvider();
+  const user = await subscriber({ country: "KR" });
+  const rows = await queue(user);
+
+  const at = nextSeoulNight();
   const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
 
   await drainStandardEmailDeliveries({ limit: 1, now: at });
@@ -497,6 +611,117 @@ test("a consent campaign reaches the provider with its authored content", async 
   assert.equal(delivery.status, "sent");
 });
 
+test("a sealed allowed send is never replaced under a new key", async () => {
+  // The first attempt seals an allowed decision and then reaches the provider.
+  // Whether the provider accepted it is not always known -- a process that dies
+  // between the acceptance and `sent` leaves exactly this row -- so a retry
+  // whose verdict now disagrees must not produce a replacement: that carries a
+  // new idempotency key, and the provider would deliver it as a second message.
+  // A 500 stands in for the unknown outcome; the contract moving in between is
+  // the case the review found.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  let calls = 0;
+  mock.method(globalThis, "fetch", async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ message: "upstream" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  const first = new Date();
+  await drainStandardEmailDeliveries({ limit: 1, now: first });
+  assert.equal(calls, 1);
+  const retrying = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, nextAttemptAt: true },
+  });
+  assert.equal(retrying.status, "pending");
+  const sealed = await prisma.emailPermissionDecision.findFirstOrThrow({
+    where: { deliveryId: rows.deliveryId, phase: "send" },
+    select: { allowed: true },
+  });
+  assert.equal(sealed.allowed, true);
+
+  // The contract moves: the pin no longer matches what the duties require.
+  await prisma.emailDelivery.update({
+    where: { id: rows.deliveryId },
+    data: { displayContractHash: "f".repeat(64) },
+  });
+
+  const incidents: string[] = [];
+  const stop = observeOperationalIncidents((incident) => incidents.push(incident.code));
+  try {
+    await drainStandardEmailDeliveries({
+      limit: 1,
+      now: new Date(retrying.nextAttemptAt!.getTime() + 1_000),
+    });
+  } finally {
+    stop();
+  }
+
+  assert.equal(calls, 1, "the retry reached the provider");
+  const after = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, lastErrorKind: true },
+  });
+  assert.deepEqual(after, { status: "failed", lastErrorKind: "outcome_unknown" });
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { supersedesDeliveryId: rows.deliveryId } }),
+    0,
+    "a replacement was enqueued under a new key"
+  );
+  assert.ok(incidents.includes("EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN"));
+});
+
+test("a sealed allowed send is not replaced even when the last attempt stopped before the provider", async () => {
+  // The last attempt's record does not cover the attempts before it: one that
+  // reached the provider and died before `sent` leaves nothing, and a later lock
+  // failure writes send_not_submitted over that. A replacement would then be a
+  // second message under a second key, so the row stops for a person.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  mock.method(globalThis, "fetch", async () =>
+    new Response(JSON.stringify({ message: "upstream" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1, now: new Date() });
+  const retrying = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, nextAttemptAt: true },
+  });
+  assert.equal(retrying.status, "pending");
+  await prisma.emailDelivery.update({
+    where: { id: rows.deliveryId },
+    data: { deferReason: "send_not_submitted", displayContractHash: "e".repeat(64) },
+  });
+
+  await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(retrying.nextAttemptAt!.getTime() + 1_000),
+  });
+
+  const after = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, lastErrorKind: true },
+  });
+  assert.deepEqual(after, { status: "failed", lastErrorKind: "outcome_unknown" });
+  assert.equal(
+    await prisma.emailDelivery.count({ where: { supersedesDeliveryId: rows.deliveryId } }),
+    0
+  );
+});
+
 test("a Korean subscriber's subject carries the advertising label", async () => {
   // The marketing stream has its own key by design: it does not fall back to
   // the transactional one, so a promotion cannot be sent on the credential
@@ -567,6 +792,67 @@ test("an incomplete business identity holds marketing rather than sending it", a
   });
   assert.equal(delivery.status, "skipped");
   assert.equal(delivery.skipReason, "jurisdiction_footer_incomplete");
+});
+
+test("Korea's missing telephone does not hold a US message whose footer is complete", async () => {
+  // The footer readiness check covers Korea and the United States. Folded into
+  // one answer, Korea's missing contact telephone failed the US postal-address
+  // duty too, and skipped US release notes that had every block they need.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  delete process.env.EMAIL_BUSINESS_CONTACT_PHONE;
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", skipReason: null });
+  assert.equal(calls.length, 1);
+});
+
+test("another row's incomplete footer does not hold a US message whose own is complete", async () => {
+  // The footer readiness check folds every pending row's pin into its answer. A
+  // later US row pinned to a profile with no postal address made that answer
+  // false for the country, and the drain skipped -- for good -- a message whose
+  // own footer had every block.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "US" });
+  const rows = await queue(user);
+  const own = await prisma.emailDelivery.findUniqueOrThrow({ where: { id: rows.deliveryId } });
+  await prisma.emailDelivery.create({
+    data: {
+      eventId: own.eventId,
+      recipientKey: `addr:stale-${randomUUID()}`,
+      emailAddress: `stale-${randomUUID().slice(0, 8)}@example.test`,
+      language: "en",
+      lane: "standard",
+      templateVersionId: own.templateVersionId,
+      policyVersionId: own.policyVersionId,
+      jurisdictionCountry: "US",
+      // A profile with no US postal address block.
+      jurisdictionProfileKey: "ZZ",
+      idempotencyKey: randomUUID(),
+      nextAttemptAt: new Date(Date.now() + 24 * 60 * 60_000),
+    },
+  });
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", skipReason: null });
+  assert.equal(calls.length, 1);
 });
 
 test("a transactional message keeps its own stream and carries no unsubscribe", async () => {

@@ -15,7 +15,6 @@ import {
   recordSuppression,
   type RecordSuppressionInput,
 } from "@/lib/emailSuppression";
-import { holdSuppressionFence } from "@/lib/emailSuppressionAuthority";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -59,8 +58,6 @@ export async function recordProviderComplaint(input: {
 
   return prisma.$transaction(
     async (tx) => {
-      await holdSuppressionFence(tx);
-
       // Preferences and consent belong to a person, suppressions to a mailbox.
       // The person is the one the message was sent to, and only while that
       // account still has the address it was sent to: a changed or reused

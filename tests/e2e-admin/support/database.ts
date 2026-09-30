@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { resolvePostgresConnectionConfig } from "../../../lib/postgresConnectionConfigCore.mjs";
+import { readAmuxCommitDeadlineInstallSql } from "../../../scripts/amux-commit-deadline-install.mjs";
 import { staticModelRegistrySeedRows } from "../../../lib/modelRegistryShared";
 import { userChatUsageKey } from "../../../lib/chatUsageKey";
 import {
@@ -24,6 +27,7 @@ import {
   FIXTURE_HEALTH_CHECK,
   FIXTURE_INCIDENT,
   FIXTURE_JOB_RUN,
+  FIXTURE_MARKETING,
   FIXTURE_MODEL,
   FIXTURE_NOTIFICATION,
   FIXTURE_PRIVACY_REQUEST,
@@ -143,7 +147,44 @@ const assertAdminSchemaPresent = async () => {
       "The admin E2E database has no tables. Run `npm run test:e2e:admin`, which pushes the Prisma schema before starting Playwright."
     );
   }
+  await ensureAmuxCommitDeadlineCheck();
   schemaAsserted = true;
+};
+
+/**
+ * Installs the AMUX commit deadline check, then proves it is there.
+ *
+ * `prisma db push` builds this database with the `AmuxCommitDeadline` table
+ * and without the deferred trigger that fails a late COMMIT, so every AMUX
+ * mutation the server attempts would be refused with
+ * AMUX_DB_COMMIT_CHECK_MISSING. The text comes from the migration file itself
+ * (scripts/amux-commit-deadline-install.mjs), not from a copy here. It always
+ * replaces the function, replaces a trigger whose definition differs, and
+ * leaves a matching one alone, so running it again changes nothing. Done once
+ * per process, before the first reset, so it precedes every test.
+ */
+const ensureAmuxCommitDeadlineCheck = async () => {
+  const prisma = adminFixtureDatabase();
+  await prisma.$executeRawUnsafe(
+    readAmuxCommitDeadlineInstallSql(process.cwd())
+  );
+  const triggers = await prisma.$queryRaw<
+    { deferrable: boolean; initiallyDeferred: boolean }[]
+  >`
+    SELECT t.tgdeferrable AS "deferrable", t.tginitdeferred AS "initiallyDeferred"
+    FROM pg_catalog.pg_trigger t
+    WHERE t.tgrelid = to_regclass('"AmuxCommitDeadline"')
+      AND t.tgname = 'amux_commit_deadline_check'
+  `;
+  if (
+    triggers.length !== 1 ||
+    triggers[0].deferrable !== true ||
+    triggers[0].initiallyDeferred !== true
+  ) {
+    throw new Error(
+      "The admin E2E database has no deferred AMUX commit deadline trigger after the install step."
+    );
+  }
 };
 
 /**
@@ -921,13 +962,28 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
     ],
   });
 
-  await prisma.suppressionEntry.create({
+  // Both records, because deploy C-1 moved the console onto causes while
+  // entries are still written beside them.
+  //
+  // The cause is written explicitly rather than left to the trigger that
+  // mirrors entries into causes: this database is built with `prisma db push`,
+  // which creates what schema.prisma can express and no triggers at all. The
+  // entry on its own would leave the suppressions screen empty here while
+  // being perfectly correct in production -- a fixture that proves the wrong
+  // thing.
+  const suppression = {
+    emailAddress: FIXTURE_SUPPRESSION.emailAddress,
+    scope: FIXTURE_SUPPRESSION.scope,
+    purposeKey: FIXTURE_SUPPRESSION.purposeKey,
+    reason: FIXTURE_SUPPRESSION.reason,
+    source: FIXTURE_SUPPRESSION.source,
+  };
+  await prisma.suppressionEntry.create({ data: suppression });
+  await prisma.suppressionCause.create({
     data: {
-      emailAddress: FIXTURE_SUPPRESSION.emailAddress,
-      scope: FIXTURE_SUPPRESSION.scope,
-      purposeKey: FIXTURE_SUPPRESSION.purposeKey,
-      reason: FIXTURE_SUPPRESSION.reason,
-      source: FIXTURE_SUPPRESSION.source,
+      ...suppression,
+      sourceEventKey: `e2e:${FIXTURE_SUPPRESSION.emailAddress}`,
+      occurredAt: new Date(),
     },
   });
 
@@ -1013,6 +1069,212 @@ const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
       plan: "Pro",
       occurredAt: at(-(index + 1) * HOUR),
     })),
+  });
+
+  // Marketing rows, written the way the migration allows: a slug of the
+  // shape the CHECK requires, one draft history entry, the status whitelist
+  // walked in order, and the attempt counter moved by one on dispatch.
+  //
+  // The harness builds this database with `prisma db push`, which installs the
+  // Prisma schema and none of the migration SQL, so none of those rules is
+  // enforced here. They are honoured anyway: a fixture that could not exist in
+  // production is a fixture whose passing test proves nothing about it.
+  await prisma.marketingChannel.create({
+    data: {
+      id: FIXTURE_MARKETING.channel.id,
+      channel: FIXTURE_MARKETING.channel.channel,
+      provider: FIXTURE_MARKETING.channel.provider,
+      externalAccountRef: "e2e-external-ref",
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      defaultLocale: FIXTURE_MARKETING.channel.defaultLocale,
+      allowedLocales: ["en", "ko"],
+      scopesDigest: "e2e-scopes-digest",
+      status: "connect_pending",
+    },
+  });
+  await prisma.marketingChannel.update({
+    where: { id: FIXTURE_MARKETING.channel.id },
+    data: { status: "approval_mode", approvalStartedAt: at(-6 * DAY) },
+  });
+
+  const marketingDraft = (
+    id: string,
+    logicalKey: string,
+    renderedText: string,
+    digest: string
+  ) => ({
+    id,
+    channelId: FIXTURE_MARKETING.channel.id,
+    locale: "en",
+    kind: "social",
+    logicalKey,
+    envelope: {
+      channel: FIXTURE_MARKETING.channel.channel,
+      accountSlug: FIXTURE_MARKETING.channel.accountSlug,
+      locale: "en",
+      renderedText,
+      claimIds: [],
+      assets: [],
+      finalUrl: null,
+      scheduledAt: null,
+      disclosureFlags: ["advertising"],
+    },
+    envelopeDigest: digest,
+    rendererVersion: "e2e-r1",
+    claimIds: [],
+    assetIds: [],
+    claimRegistryVersion: 1,
+    assetRegistryVersion: 1,
+    factSnapshot: {},
+    // Not optional since 20260923140000. A post records which resolver answers
+    // its Guard decision was made from, and a row without one is a decision
+    // nobody can reconstruct -- so the fixture states it rather than leaving a
+    // shape the database would refuse.
+    //
+    // Derived from the envelope digest rather than equal to it. They are
+    // different questions -- one is what the post says, the other is what the
+    // Guard was told -- and a fixture that made them the same value would be
+    // planting an identity that does not hold, for the next test that compares
+    // them to find.
+    factsDigest: createHash("sha256")
+      .update(`facts:${digest}`, "utf8")
+      .digest("hex"),
+    guardDecision: "approval_required",
+    guardCodes: [FIXTURE_MARKETING.pending.guardCode],
+    guardRuleIds: [],
+    status: "drafted",
+    mode: "approval",
+    // The insert trigger requires exactly one entry and it must be the draft.
+    history: [{ at: new Date(now).toISOString(), type: "draft", envelopeDigest: digest }],
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.pending.id,
+      FIXTURE_MARKETING.pending.logical,
+      FIXTURE_MARKETING.pending.renderedText,
+      FIXTURE_MARKETING.pending.envelopeDigest
+    ),
+  });
+  await prisma.marketingPost.update({
+    where: { id: FIXTURE_MARKETING.pending.id },
+    data: { status: "pending_approval", approvalExpiresAt: at(2 * DAY) },
+  });
+
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.published.id,
+      FIXTURE_MARKETING.published.logical,
+      "Answers from three models, in one place.",
+      FIXTURE_MARKETING.published.envelopeDigest
+    ),
+  });
+  for (const step of [
+    { status: "pending_approval", data: {} },
+    {
+      status: "approved",
+      data: {
+        approvalAuditLogId: "e2e-marketing-approval-audit",
+        approvedAt: at(-3 * DAY),
+        approvedDigest: FIXTURE_MARKETING.published.envelopeDigest,
+        approvalExpiresAt: at(4 * DAY),
+      },
+    },
+    { status: "scheduled", data: { scheduledAt: at(-2 * DAY) } },
+    {
+      status: "publishing",
+      data: {
+        providerRequestKey: FIXTURE_MARKETING.published.logical,
+        // Dispatch moves the attempt counter by exactly one (S1 trigger).
+        publishAttempt: 1,
+      },
+    },
+    {
+      status: "published",
+      data: {
+        publishedAt: at(-2 * DAY),
+        externalPostId: "e2e-external-post",
+        externalUrl: FIXTURE_MARKETING.published.externalUrl,
+      },
+    },
+  ]) {
+    await prisma.marketingPost.update({
+      where: { id: FIXTURE_MARKETING.published.id },
+      data: { status: step.status, ...step.data },
+    });
+  }
+
+  // A post that failed, so the publish-state section is exercised on the row
+  // an operator most needs to see. Listing only the terminal successes would
+  // leave a stuck post invisible on the screen built to surface it.
+  await prisma.marketingPost.create({
+    data: marketingDraft(
+      FIXTURE_MARKETING.failed.id,
+      FIXTURE_MARKETING.failed.logical,
+      "A post the provider refused.",
+      FIXTURE_MARKETING.failed.envelopeDigest
+    ),
+  });
+  for (const step of [
+    { status: "pending_approval", data: {} },
+    {
+      status: "approved",
+      data: {
+        approvalAuditLogId: "e2e-marketing-failed-audit",
+        approvedAt: at(-1 * DAY),
+        approvedDigest: FIXTURE_MARKETING.failed.envelopeDigest,
+        approvalExpiresAt: at(5 * DAY),
+      },
+    },
+    { status: "scheduled", data: { scheduledAt: at(-12 * HOUR) } },
+    {
+      status: "publishing",
+      data: {
+        providerRequestKey: FIXTURE_MARKETING.failed.logical,
+        publishAttempt: 1,
+      },
+    },
+    {
+      status: "failed",
+      data: {
+        errorCode: FIXTURE_MARKETING.failed.errorCode,
+        // The failure has to be recorded by the statement that fails the post,
+        // and the attempt number in the entry has to match the counter. The
+        // history is append-only with a version that moves by one, so the
+        // draft entry the insert wrote stays first.
+        history: [
+          {
+            at: new Date(now).toISOString(),
+            type: "draft",
+            envelopeDigest: FIXTURE_MARKETING.failed.envelopeDigest,
+          },
+          {
+            at: at(-11 * HOUR),
+            type: "attempt",
+            outcome: "failed",
+            attempt: 1,
+            errorCode: FIXTURE_MARKETING.failed.errorCode,
+          },
+        ],
+        historyVersion: 1,
+      },
+    },
+  ]) {
+    await prisma.marketingPost.update({
+      where: { id: FIXTURE_MARKETING.failed.id },
+      data: { status: step.status, ...step.data },
+    });
+  }
+
+  await prisma.marketingReport.create({
+    data: {
+      id: FIXTURE_MARKETING.report.id,
+      kind: FIXTURE_MARKETING.report.kind,
+      periodStart: at(-7 * DAY),
+      periodEnd: at(0),
+      payload: { posts: 1 },
+      sourceVersion: FIXTURE_MARKETING.report.sourceVersion,
+    },
   });
 
   return { seededAt: new Date(now) };

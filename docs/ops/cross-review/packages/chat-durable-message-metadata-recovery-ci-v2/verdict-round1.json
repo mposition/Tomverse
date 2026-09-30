@@ -1,0 +1,78 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v2",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T09:08:16.434Z",
+  "durationMs": 35758,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 6,
+    "cachedInputTokens": 26821,
+    "outputTokens": 2445,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.1816685,
+    "raw": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 10394,
+      "cache_read_input_tokens": 26821,
+      "output_tokens": 2445,
+      "output_tokens_details": {
+        "thinking_tokens": 1715
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 10394,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 826,
+          "cache_read_input_tokens": 13589,
+          "cache_creation_input_tokens": 1547,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1547
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T09:08:52.248Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-ci-v2",
+    "round": 1,
+    "reviewedDigest": "sha256:bf2f781c0b46030ddc1eb5c081a84dff5323eed552af9f684c7fc75bb9175e33",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "Land the test-only change; both inherited findings are closed and no product, policy, or API code is touched."
+  }
+}

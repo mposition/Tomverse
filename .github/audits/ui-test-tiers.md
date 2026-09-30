@@ -42,26 +42,25 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-26 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니다
-(project당 708).
+현재 실측: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈).
 
-`email-notification-settings.spec.ts`가 2026-09-16에 합류합니다. marketing 동의는
-화면에서 수집되고, 국가 선택 목록·사전 선택 없는 CTA·한 번에 철회하는 동작은
-렌더된 화면에서만 확인됩니다. 틀리면 동의 증거가 틀린 채로 남고 회수가
-성립하지 않으므로 이 tier입니다. **합류 후 총계는 이 포트에서 재실측하지
-않았습니다** — 위 2026-08-26 수치 이후 main에 합류한 spec이 더 있어 그 기준값과
-직접 더할 수 없습니다. 재실측은 `CI=1 npx playwright test --grep=@ui-risk --list`
-입니다.
+이전 값: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**를
+선택합니다(두 project 합계 1,732). 파일 수는 그대로이고 +4는 전부
+`conversation-export.spec.ts`의 기존 `@ui-risk` describe 안입니다 — 대화 컨텍스트
+메뉴의 가로 overflow를 재는 case 4건(원문 available·deleted × 텍스트 배율
+100%·200%)이며, 문자열이 아니라 렌더된 폭을 재므로 번역이 길어질 때도
+같은 판정을 냅니다.
 
-`unsubscribe-link.spec.ts`가 2026-09-16에 합류합니다(project당 4 test).
-메일 클라이언트가 여는 수신거부 링크는 로그인 없이 한 번에 동작해야 하는데,
-그 페이지가 어느 route group에 있는지에 따라 hydration이 막히거나 서버
-`searchParams`가 비는 것이 production에서 실제로 일어났습니다. 화면 없이는
-드러나지 않는 경계라 @ui-risk입니다. **이 줄의 합류 후 파일·test 총계는 이
-포트에서 재실측하지 않았습니다** — 위 2026-08-26 수치 이후 main에 합류한
-spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
-`CI=1 npx playwright test --grep=@ui-risk --list`입니다.
+이전 값 862의 산정 기록: 2026-09-15의 60개 파일 848 test에서 +2 파일 +14 test이며,
+그 14 중 **9는 이번에 합류한 두 spec**(`external-conversation-continuation.spec.ts` 6,
+`conversation-export.spec.ts` 3)이고 나머지 5는 그 사이 develop에서 기존 태그 spec이 늘어난 몫입니다
+— 같은 날 태그 없이 develop을 기준으로 다시 세면 60개 파일 851 test입니다.
+848은 `unsubscribe-link.spec.ts` 합류로 +1 파일, +4 test였던 시점의 값입니다. 같은 날 `chat-starter-catalog.spec.ts`와
+`prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
+825 test(project당)였습니다. Starter spec은 staging에서 찾은 씨앗 토글 결함
+회귀를 포함해 +9, Refiner spec은 +10입니다. 2026-08-26의 51개 파일,
+1,416 test(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
 |---|
@@ -70,8 +69,10 @@ spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
 | `chat-analytics-settings-placement.spec.ts` |
 | `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
+| `chat-unified-workspace.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
+| `email-notification-settings.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |
@@ -113,34 +114,20 @@ spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
 | `assistant-knowledge-upload.spec.ts` |
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
-| `email-notification-settings.spec.ts` |
-
+| `prompt-refiner-focus.spec.ts` |
+| `prompt-refiner-chat-input.spec.ts` |
+| `chat-starter-catalog.spec.ts` |
 | `unsubscribe-link.spec.ts` |
 | `external-conversation-continuation.spec.ts` |
 | `conversation-export.spec.ts` |
-| `chat-starter-catalog.spec.ts` |
 | `help-guide.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
 
-`conversation-export.spec.ts`가 2026-09-16에 합류했습니다(project당 +3 test,
-원문 포함 다운로드 describe만 태그). 이 파일이 막는 것은 파일 하나가 사용자 계정 밖으로
-나가는 순간입니다 — 어떤 항목을 눌렀을 때 원문이 들어가는지, 끝까지 받지 못한 파일이
-저장되지 않는지, 잠긴 원문이 이유와 함께 거절되는지는 화면에서만 확인되고, 내려받은
-파일은 회수할 수 없습니다(docs/policy/external-conversation-continuation.md §9.1).
-
-`external-conversation-continuation.spec.ts`가 2026-09-16에 합류했습니다
-(project당 +6, 검색 describe만 태그). 이어가기 화면에서 원문 검색 결과를 눌렀을 때
-그 메시지로 실제로 이동하는지, 잠금 grant가 만료된 발췌가 화면에서 사라지는지는
-정적 검사가 답할 수 없습니다. 후자는 권한 없는 본문 노출이라 회수가 성립하지 않고,
-전자는 결과가 대화만 열고 위치를 잃으면 기능이 조용히 반쪽이 됩니다
-(docs/policy/external-conversation-continuation.md §8.2.1). 나머지 describe는
-태그 없이 전체 CI에 남습니다.
-
-`chat-starter-catalog.spec.ts`가 합류합니다(project당 +8). develop에서는 2026-09-15에
-합류해 58개였고, main 이식(2026-09-17)의 합류 후 파일 수는 재실측하지 않았습니다. 시작 카탈로그는 신규 계정이 처음 보는 화면이고, 이 tier가
+`chat-starter-catalog.spec.ts`가 2026-09-15에 합류해 58개입니다
+(project당 +8). 시작 카탈로그는 신규 계정이 처음 보는 화면이고, 이 tier가
 막아야 하는 것은 그 화면이 **없는 기능을 약속하는 상태**입니다. flag가 꺼진
 배포에서 아무것도 렌더하지 않는다는 것, 잠긴 카드가 클릭 전에 요구사항을
 말한다는 것, 클릭이 초안만 채우고 전송하지 않는다는 것은 정적 검사가 답할 수
@@ -149,12 +136,70 @@ spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
 두 shell이 환영 화면을 서로 다르게(overlay와 일반 flow) 그리므로
 desktop·mobile 양쪽에서 돌립니다.
 
+`conversation-export.spec.ts`가 2026-09-16에 합류해 62개입니다(project당 +3 test,
+원문 포함 다운로드 describe만 태그). 이 파일이 막는 것은 파일 하나가 사용자 계정 밖으로
+나가는 순간입니다 — 어떤 항목을 눌렀을 때 원문이 들어가는지, 끝까지 받지 못한 파일이
+저장되지 않는지, 잠긴 원문이 이유와 함께 거절되는지는 화면에서만 확인되고, 내려받은
+파일은 회수할 수 없습니다(docs/policy/external-conversation-continuation.md §9.1).
+
+`external-conversation-continuation.spec.ts`가 2026-09-16에 합류해 61개입니다
+(project당 +6, 검색 describe만 태그). 이어가기 화면에서 원문 검색 결과를 눌렀을 때
+그 메시지로 실제로 이동하는지, 잠금 grant가 만료된 발췌가 화면에서 사라지는지는
+정적 검사가 답할 수 없습니다. 후자는 권한 없는 본문 노출이라 회수가 성립하지 않고,
+전자는 결과가 대화만 열고 위치를 잃으면 기능이 조용히 반쪽이 됩니다
+(docs/policy/external-conversation-continuation.md §8.2.1). 나머지 describe는
+태그 없이 전체 CI에 남습니다.
+
 `conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
 같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로
 격리되는지는 화면에서만 확인되고, 틀리면 다음 계정이 이전 계정의 미전송
 글과 이미지 미리보기를 읽습니다(docs/policy/conversation-draft-identity-scope.md).
 회수가 성립하지 않는 종류라 merge를 막는 쪽이 맞습니다. 두 test 파일이며
 desktop·mobile 두 project에서 돕니다.
+
+`chat-unified-workspace.spec.ts`가 2026-09-13에 합류해 55개입니다. 새
+`/chat/workspace` 진입이 한 대화 안에서 모델을 바꿔도 transcript를 나누지
+않는지, 중단된 답변의 일부와 정확한 질문·첨부 복구 동작이 reload 뒤에도
+사용자에게 명시적으로 보이는지, 320px·390px와 200% text에서 composer가
+동작하는지를 실제 화면으로 확인합니다. 이 경계가 깨지면 대화 신원이나 기존
+답변을 잃거나 잘못된 질문을 다시 보내게 되므로 release를 막습니다. 합류 당시
+`CI=1 --grep=@ui-risk --list` 실측은 CI가 쓰는 각 Chromium project에서
+**55개 파일, 765 test**(두 project 합계 1,530)이며, 이 spec은 project당
+36 test입니다. PR Fast Gate run 34726247430에서 새 목록을 실행한 네 shard는
+모두 통과했고, 가장 느린 desktop-chromium 1/2 job은 12분 57초로 25분 예산의
+약 52%를 사용했습니다(desktop 2/2 11분 12초, mobile 1/2 8분 33초,
+mobile 2/2 9분 24초).
+
+`prompt-refiner-focus.spec.ts`가 2026-09-14에 합류해 56개입니다. 제안형
+composer의 focus는 실제 DOM에서만 검증할 수 있고, 같은 요청이 draft 편집 뒤
+재등장할 때 textarea caret를 빼앗으면 한국어 IME와 키보드 입력이 중단됩니다.
+다섯 case를 desktop·mobile Chromium 양쪽에서 실행하므로 project당 5 test를
+추가합니다. 직전 55개/765 test 수치는 이후 기존 spec에 추가된 case를 반영하지
+못한 낡은 기록이었고, 이번에는 전체 tier를 다시 `--list`해 현재 824를 확인했습니다.
+이는 provider 호출이나 제품 기능 활성화가 아닌, loopback에서만 열리는 fixture의
+release-blocking 회귀 검사입니다.
+
+`email-notification-settings.spec.ts`가 2026-09-15에 합류해 57개입니다.
+마케팅 동의를 켜는 강조 CTA도 세부 토글과 같은 국가 확인을 거치고, 확인한
+국가와 동의가 한 요청에 함께 저장되며, 그 전에는 쓰기 요청이 발생하지 않는지
+확인합니다. 이 경계가 깨지면 관할 규칙을 정하지 않은 채 마케팅 동의가
+기록되므로 PR에서 막습니다. 태그된 test는 한 건이고 desktop·mobile 두
+project에서 실행됩니다. 같은 날 `CI=1 --grep=@ui-risk --list` 실측은 각
+project에서 **57개 파일, 825 test**(두 project 합계 1,650)입니다.
+
+`prompt-refiner-chat-input.spec.ts`도 2026-09-15에 합류했습니다. 격리 panel이
+아니라 실제 `/chat`의 mobile composer에서 server default-off, 두 decision 뒤 focus
+복귀와 무전송, 요청 중 편집의 late result 폐기, invalid response 실패·재시도,
+최대 길이 입력, IME, 320px·200% text/zoom과 44px action을 검증합니다. 이 경계가
+깨지면 사용자의 작성 중 원문을 덮거나 전송 의사 없이 요청을 보낼 수 있어 release를
+막습니다. 이 spec은 project당 10 test입니다.
+
+`unsubscribe-link.spec.ts`가 2026-09-15에 합류했습니다. 수신거부 링크의 두 경로 —
+수신자가 여는 `/unsubscribe` 페이지와 mailbox provider가 같은 URL로 보내는 RFC 8058
+one-click `POST` — 를 빌드된 앱에서 확인합니다. 둘 다 framework의 routing에서 깨져
+있었고(force-static layout이 페이지의 `searchParams`를 비움, 페이지가 `POST`에 200 HTML로
+답함) 어느 단위 테스트도 닿지 않았습니다. 이 경계가 깨지면 수신거부했다고 믿는 사람에게
+marketing이 계속 나가므로 PR에서 막습니다. project당 4 test입니다(최초 HTML에 오류 문구가 없고 nonce CSP가 붙는지도 확인).
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —

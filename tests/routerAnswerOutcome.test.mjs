@@ -1,0 +1,429 @@
+/**
+ * An empty answer is a real failure for the person who asked, so it is counted
+ * against the arm that produced it rather than dropped.
+ *
+ * mposition's ruling after the 2026-08-27 run, which was voided as
+ * VOID_GENERATION_VALIDATION_MISMATCH: 62 empty answer slots reached a bundle
+ * because the writer took `result.text ?? ""` and nothing checked it, and the
+ * judge graded emptiness against prose 210 times. Dropping those pairs would
+ * have been worse than counting them -- it deletes an arm's worst turns and
+ * flatters whichever arm fails least gracefully.
+ */
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+    classifyProviderError,
+    displayableText,
+    failureRecord,
+    generatedTokens,
+    isHarnessAttributable,
+    isUsableAnswerText,
+    normalizeFinishReason,
+    outcomeFromReply,
+} from "../lib/routerAnswerOutcome.ts";
+import {
+    computeWinRateDelta,
+    decidePairFromAnswers,
+    outcomeScore,
+    pairAccounting,
+    pairAccountingProblems,
+    pairScore,
+} from "../lib/routerQualityEvalCore.ts";
+
+const identity = {
+    arm: "auto",
+    modelId: "deepseek-v4-flash",
+    provider: "deepseek",
+    apiModel: "deepseek-v4-flash",
+    latencyMs: 12,
+    requestedMaxOutputTokens: 384_000,
+    resolvedProductOutputCap: 384_000,
+};
+
+const pair = (outcome, overrides = {}) => ({
+    itemId: "coding-en-001",
+    stratum: "coding",
+    cell: "en",
+    autoModelId: "deepseek-v4-flash",
+    baselineModelId: "gpt-5-6-luna",
+    autoPosition: "first",
+    outcome,
+    ...overrides,
+});
+
+test("whitespace is not an answer, and neither is an empty string", () => {
+    assert.equal(displayableText("a"), "a");
+    assert.equal(displayableText("  hello  "), "hello");
+    assert.equal(displayableText(""), null);
+    assert.equal(displayableText("   "), null);
+    assert.equal(displayableText("\n\t \r\n"), null);
+    assert.equal(displayableText(null), null);
+    assert.equal(displayableText(undefined), null);
+
+    assert.equal(isUsableAnswerText("   \n  "), false);
+    assert.equal(isUsableAnswerText(" x "), true);
+});
+
+test("an empty reply becomes a failure carrying what a root cause would need", () => {
+    const outcome = outcomeFromReply(
+        { text: "", finishReason: "length", usage: { inputTokens: 80, outputTokens: 2048 } },
+        identity
+    );
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.reason, "empty_output");
+    assert.equal(outcome.metadata.finishReason, "length");
+    assert.equal(outcome.metadata.usage.outputTokens, 2048);
+    assert.equal(outcome.metadata.arm, "auto");
+    assert.equal(outcome.metadata.apiModel, "deepseek-v4-flash");
+});
+
+test("whitespace-only is a failure, and says it was whitespace rather than nothing", () => {
+    const outcome = outcomeFromReply({ text: "   \n " }, identity);
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.reason, "empty_output");
+    assert.match(outcome.detail, /whitespace/);
+    assert.equal(outcome.metadata.rawTextLength, 5);
+});
+
+const emptyWith = (over = {}) =>
+    failureRecord(
+        outcomeFromReply(
+            { text: over.text ?? "", finishReason: over.finishReason ?? null, usage: over.usage ?? {}, traceId: over.traceId ?? null },
+            {
+                ...identity,
+                requestedMaxOutputTokens: over.requestedMaxOutputTokens ?? 2_048,
+                resolvedProductOutputCap: over.resolvedProductOutputCap ?? 384_000,
+            }
+        )
+    );
+
+test("content that arrived and was normalised away is this harness's loss", () => {
+    const record = emptyWith({ text: "    " });
+    assert.equal(record.symptom, "empty_text");
+    assert.equal(record.emptinessReason, "text_normalization_loss");
+    assert.equal(record.attribution, "harness");
+    assert.equal(record.rawTextLength, 4);
+});
+
+test("budget exhaustion needs all four conditions, and gets them", () => {
+    // The 2026-08-28 defect: 2,048 asked for against a product cap of 384,000,
+    // the provider stopped at the output limit, and the whole budget was
+    // billed. Nothing was written because nothing was left to write with.
+    const record = emptyWith({
+        finishReason: "length",
+        usage: { inputTokens: 80, outputTokens: 2_048 },
+        requestedMaxOutputTokens: 2_048,
+        resolvedProductOutputCap: 384_000,
+    });
+    assert.equal(record.emptinessReason, "output_budget_exhausted");
+    assert.equal(record.attribution, "harness");
+    assert.equal(record.normalizedFinishReason, "output_limit");
+    assert.match(record.detail, /budget was spent before any answer text was written/);
+});
+
+test("a request already asking for the product's cap is not the harness being stingy", () => {
+    // Same three symptoms, but the harness asked for everything the product
+    // asks for. Whatever cut this answer short, it was not our budget.
+    const record = emptyWith({
+        finishReason: "length",
+        usage: { outputTokens: 384_000 },
+        requestedMaxOutputTokens: 384_000,
+        resolvedProductOutputCap: 384_000,
+    });
+    assert.equal(record.emptinessReason, "undetermined");
+    assert.equal(record.attribution, "undetermined");
+});
+
+test("three of the four conditions decide nothing", () => {
+    // Finish reason alone.
+    assert.equal(
+        emptyWith({ finishReason: "length", usage: {} }).emptinessReason,
+        "undetermined"
+    );
+    // Tokens near the cap, but the provider did not say it stopped there.
+    assert.equal(
+        emptyWith({ finishReason: "stop", usage: { outputTokens: 2_040 } }).emptinessReason,
+        "undetermined"
+    );
+    // Stopped at the limit, but nowhere near having spent the budget -- so
+    // whatever happened, it was not this budget running out.
+    assert.equal(
+        emptyWith({ finishReason: "length", usage: { outputTokens: 12 } }).emptinessReason,
+        "undetermined"
+    );
+});
+
+test("only the provider's own account of itself convicts the model", () => {
+    const record = emptyWith({ finishReason: "stop", usage: { inputTokens: 80, outputTokens: 0 } });
+    assert.equal(record.emptinessReason, "provider_confirmed_empty");
+    assert.equal(record.attribution, "model");
+
+    // Zero tokens with no finish reason is not a confirmation: the call may
+    // have died before the provider decided anything.
+    assert.equal(emptyWith({ usage: { outputTokens: 0 } }).emptinessReason, "undetermined");
+});
+
+test("an empty string on its own convicts nobody", () => {
+    const record = emptyWith({});
+    assert.equal(record.emptinessReason, "undetermined");
+    assert.equal(record.attribution, "undetermined");
+    assert.match(record.detail, /do not establish why/);
+});
+
+test("finish reasons are compared in one spelling", () => {
+    assert.equal(normalizeFinishReason("length"), "output_limit");
+    assert.equal(normalizeFinishReason("MAX_TOKENS"), "output_limit");
+    assert.equal(normalizeFinishReason("  max_output_tokens "), "output_limit");
+    assert.equal(normalizeFinishReason("stop"), "stop");
+    assert.equal(normalizeFinishReason(""), null);
+    assert.equal(normalizeFinishReason(null), null);
+});
+
+test("an unattributable empty carries what somebody would need to go and ask", () => {
+    const record = emptyWith({ finishReason: "content_filter", traceId: "resp_01ABC" });
+    assert.equal(record.attribution, "undetermined");
+    assert.equal(record.arm, "auto");
+    assert.equal(record.callRole, "answer");
+    assert.equal(record.provider, "deepseek");
+    assert.equal(record.apiModel, "deepseek-v4-flash");
+    assert.equal(record.finishReason, "content_filter");
+    assert.equal(record.traceId, "resp_01ABC");
+    assert.equal(record.requestedMaxOutputTokens, 2_048);
+    assert.equal(record.resolvedProductOutputCap, 384_000);
+});
+
+test("a missing output-token count survives as unknown rather than becoming zero", () => {
+    assert.equal(generatedTokens({}), null);
+    assert.equal(generatedTokens({ inputTokens: 40 }), null);
+    assert.equal(generatedTokens({ outputTokens: 0 }), 0);
+    assert.equal(generatedTokens({ completion_tokens: 7 }), 7);
+});
+
+test("an exhausted account is ours to fix, and is not the provider failing", () => {
+    // The 2026-08-28c pilot lost its last three answers to DeepSeek's
+    // `Insufficient Balance`. Filing that under `provider` says the provider
+    // failed, and it did not -- it refused correctly, in 0.6 seconds, because
+    // the account behind the key had run out.
+    const record = failureRecord({
+        status: "failed",
+        reason: "provider_error",
+        detail: "AI_APICallError: Insufficient Balance",
+        metadata: {
+            ...identity,
+            finishReason: null,
+            usage: {},
+            rawTextLength: 0,
+            traceId: null,
+            requestedMaxOutputTokens: 384_000,
+            resolvedProductOutputCap: 384_000,
+        },
+    });
+    assert.equal(record.providerErrorReason, "provider_account_balance_exhausted");
+    assert.equal(record.attribution, "operational_configuration");
+    assert.equal(isHarnessAttributable(record), false);
+    // And it stops the run: the balance does not come back mid-run, so every
+    // later call fails the same way.
+    assert.equal(record.haltsRun, true);
+});
+
+test("balance exhaustion is matched narrowly, because a false match halts a healthy run", () => {
+    for (const detail of [
+        "Insufficient Balance",
+        "insufficient balance",
+        "Error: insufficient_funds for this account",
+        "You exceeded your current quota, please check your plan",
+        "billing_hard_limit_reached",
+    ]) {
+        assert.equal(
+            classifyProviderError(detail).reason,
+            "provider_account_balance_exhausted",
+            detail
+        );
+    }
+    // The cost of missing the message is one wasted pilot; the cost of
+    // matching it wrongly is every pilot.
+    for (const detail of [
+        "ETIMEDOUT",
+        "503 Service Unavailable",
+        "rate limit exceeded, please retry",
+        "The model produced an invalid response",
+        "balance sheet analysis failed to parse",
+    ]) {
+        const classified = classifyProviderError(detail);
+        assert.equal(classified.reason, "provider_call_failed", detail);
+        assert.equal(classified.attribution, "provider");
+        assert.equal(classified.haltsRun, false);
+    }
+});
+
+test("a provider error is a provider failure with no emptiness to explain", () => {
+    const record = failureRecord({
+        status: "failed",
+        reason: "provider_error",
+        detail: "ETIMEDOUT",
+        metadata: {
+            ...identity,
+            finishReason: null,
+            usage: {},
+            rawTextLength: 0,
+            traceId: null,
+            requestedMaxOutputTokens: 2_048,
+            resolvedProductOutputCap: 384_000,
+        },
+    });
+    assert.equal(record.emptinessReason, null);
+    assert.equal(record.symptom, null);
+    assert.equal(record.providerErrorReason, "provider_call_failed");
+    assert.equal(record.attribution, "provider");
+    assert.equal(record.haltsRun, false);
+    assert.equal(isHarnessAttributable(record), false);
+});
+
+test("a usable reply is trimmed and kept", () => {
+    const outcome = outcomeFromReply({ text: "  the answer  ", finishReason: "stop" }, identity);
+    assert.equal(outcome.status, "ok");
+    assert.equal(outcome.text, "the answer");
+    assert.equal(outcome.metadata.finishReason, "stop");
+});
+
+test("an empty arm loses that pair end to end, and is absent from the quality delta", () => {
+    const autoEmpty = pair({ status: "excluded", reason: "auto_arm_empty" });
+    const baselineEmpty = pair({ status: "excluded", reason: "baseline_arm_empty" });
+    const bothEmpty = pair({ status: "excluded", reason: "both_arms_empty" });
+
+    assert.equal(pairScore(autoEmpty), null);
+    assert.equal(pairScore(baselineEmpty), null);
+    assert.equal(pairScore(bothEmpty), null);
+
+    assert.equal(outcomeScore(autoEmpty), -1);
+    assert.equal(outcomeScore(baselineEmpty), 1);
+    assert.equal(outcomeScore(bothEmpty), 0);
+});
+
+test("a provider error counts the same as an empty answer, so neither arm is favoured", () => {
+    // An arm that hard-errors and an arm that returns nothing both left the
+    // person with nothing. Counting only one would reward the other.
+    assert.equal(outcomeScore(pair({ status: "excluded", reason: "auto_arm_failed" })), -1);
+    assert.equal(outcomeScore(pair({ status: "excluded", reason: "baseline_arm_failed" })), 1);
+});
+
+test("the Router declining, blinding and judge failures stay out of both estimates", () => {
+    for (const reason of ["no_candidate", "self_identified", "judge_failed"]) {
+        assert.equal(outcomeScore(pair({ status: "excluded", reason })), null, reason);
+    }
+});
+
+test("the four buckets add up to every pair, and say so when they do not", () => {
+    const pairs = [
+        pair({ status: "judged", verdict: "auto" }),
+        pair({ status: "judged", verdict: "baseline" }),
+        pair({ status: "excluded", reason: "auto_arm_empty" }),
+        pair({ status: "excluded", reason: "baseline_arm_failed" }),
+        pair({ status: "excluded", reason: "both_arms_empty" }),
+        pair({ status: "excluded", reason: "self_identified" }),
+        pair({ status: "excluded", reason: "no_candidate" }),
+    ];
+    const accounting = pairAccounting(pairs);
+    assert.deepEqual(accounting, {
+        total: 7,
+        judgeable: 2,
+        singleArmFailure: 2,
+        doubleArmFailure: 1,
+        otherExclusions: 2,
+    });
+    assert.deepEqual(pairAccountingProblems(accounting), []);
+    assert.match(
+        pairAccountingProblems({ ...accounting, total: 8 }).join(" "),
+        /the buckets sum to 7 against 8 pairs/
+    );
+});
+
+test("the two deltas answer different questions over different denominators", () => {
+    // Auto wins both pairs it answered, and produced nothing on three others.
+    const pairs = [
+        pair({ status: "judged", verdict: "auto" }),
+        pair({ status: "judged", verdict: "auto" }),
+        pair({ status: "excluded", reason: "auto_arm_empty" }),
+        pair({ status: "excluded", reason: "auto_arm_empty" }),
+        pair({ status: "excluded", reason: "auto_arm_empty" }),
+    ];
+    const quality = computeWinRateDelta(pairs, { method: "normal_approximation" });
+    const endToEnd = computeWinRateDelta(pairs, {
+        method: "normal_approximation",
+        score: outcomeScore,
+    });
+
+    assert.equal(quality.n, 2);
+    assert.equal(quality.pointEstimatePp, 100);
+
+    assert.equal(endToEnd.n, 5);
+    assert.equal(endToEnd.pointEstimatePp, (2 - 3) / 5 * 100);
+
+    // The point of reporting both: on these pairs Auto is flawless on quality
+    // and behind on what the person received.
+    assert.ok(quality.pointEstimatePp > 0 && endToEnd.pointEstimatePp < 0);
+});
+
+test("both arms empty is a zero in the denominator, not a pair nobody counted", () => {
+    const pairs = [
+        pair({ status: "judged", verdict: "auto" }),
+        pair({ status: "excluded", reason: "both_arms_empty" }),
+    ];
+    const endToEnd = computeWinRateDelta(pairs, { method: "normal_approximation", score: outcomeScore });
+    assert.equal(endToEnd.n, 2);
+    assert.equal(endToEnd.wins, 1);
+    assert.equal(endToEnd.losses, 0);
+    assert.equal(endToEnd.ties, 1);
+});
+
+// The judge call in scripts/eval-router-quality.mjs is reachable only through
+// `action: "judge"`. These are the ways a pair can arrive, and only one of
+// them gets there.
+
+const okAnswer = (arm) => outcomeFromReply({ text: "an answer", finishReason: "stop" }, { ...identity, arm });
+const emptyAnswer = (arm) => outcomeFromReply({ text: "", finishReason: "length" }, { ...identity, arm });
+const whitespaceAnswer = (arm) => outcomeFromReply({ text: "  \n " }, { ...identity, arm });
+const erroredAnswer = (arm) => ({
+    status: "failed",
+    reason: "provider_error",
+    detail: "socket hang up",
+    metadata: { ...identity, arm, finishReason: null, usage: {}, rawTextLength: 0 },
+});
+
+test("no judge is called when either arm produced nothing", () => {
+    assert.deepEqual(decidePairFromAnswers(okAnswer("auto"), okAnswer("baseline")), { action: "judge" });
+
+    const autoOnly = decidePairFromAnswers(emptyAnswer("auto"), okAnswer("baseline"));
+    assert.equal(autoOnly.action, "exclude");
+    assert.equal(autoOnly.reason, "auto_arm_empty");
+    assert.match(autoOnly.detail, /auto: empty_output/);
+
+    const baselineOnly = decidePairFromAnswers(okAnswer("auto"), emptyAnswer("baseline"));
+    assert.equal(baselineOnly.action, "exclude");
+    assert.equal(baselineOnly.reason, "baseline_arm_empty");
+
+    const both = decidePairFromAnswers(emptyAnswer("auto"), emptyAnswer("baseline"));
+    assert.equal(both.action, "exclude");
+    assert.equal(both.reason, "both_arms_empty");
+    assert.match(both.detail, /auto: empty_output/);
+    assert.match(both.detail, /baseline: empty_output/);
+});
+
+test("whitespace-only reaches the same exclusion as an empty string", () => {
+    const decision = decidePairFromAnswers(whitespaceAnswer("auto"), okAnswer("baseline"));
+    assert.equal(decision.action, "exclude");
+    assert.equal(decision.reason, "auto_arm_empty");
+    assert.match(decision.detail, /4 character\(s\) of whitespace/);
+});
+
+test("a provider error is excluded under its own reason, and still loses the pair", () => {
+    const decision = decidePairFromAnswers(erroredAnswer("auto"), okAnswer("baseline"));
+    assert.equal(decision.reason, "auto_arm_failed");
+    assert.equal(outcomeScore(pair({ status: "excluded", reason: decision.reason })), -1);
+
+    const baseline = decidePairFromAnswers(okAnswer("auto"), erroredAnswer("baseline"));
+    assert.equal(baseline.reason, "baseline_arm_failed");
+    assert.equal(outcomeScore(pair({ status: "excluded", reason: baseline.reason })), 1);
+});

@@ -22,6 +22,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/amux/staging-verification-records",
     },
     {
+        key: "admin-usage-analytics",
+        label: "Admin Console usage tab (active users, model share, time, geography)",
+        checklist: "docs/ops/admin-usage-analytics-staging-checklist.md",
+        records: "docs/ops/admin-usage-analytics-staging-verification-records",
+    },
+    {
         key: "chat-starter-catalog",
         label: "Chat starter catalogue (welcome screen entry point)",
         checklist: "docs/ops/chat-starter-catalog-staging-checklist.md",
@@ -82,18 +88,35 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/app-managed-web-search-staging-verification-records",
     },
     {
-        key: "voice-input",
-        label: "voice input real-device verification (B-6)",
-        checklist: "docs/ops/voice-input-staging-checklist.md",
-        records: "docs/ops/voice-input-staging-verification-records",
-    },
-    {
         key: "external-conversation-continuation",
         label: "continuing an imported conversation in Tomverse",
         checklist:
             "docs/ops/external-conversation-continuation-staging-checklist.md",
         records:
             "docs/ops/external-conversation-continuation-staging-verification-records",
+    },
+    {
+        // Not a staging flag verification: what this one records is a procedure
+        // an operator carried out, and a run that only executed the pre-deploy
+        // check is still a run worth a file. The machinery is identical, which
+        // is the point -- a second copy of it would be a second thing to keep
+        // in step.
+        key: "mobile-auth-key-rotation",
+        label: "mobile auth key rotation (operator procedure)",
+        checklist: "docs/ops/mobile-auth-key-rotation-checklist.md",
+        records: "docs/ops/mobile-auth-key-rotation-verification-records",
+    },
+    {
+        key: "deep-research",
+        label: "deep research expansion offer and the model swap at the cap",
+        checklist: "docs/ops/deep-research-staging-checklist.md",
+        records: "docs/ops/deep-research-staging-verification-records",
+    },
+    {
+        key: "voice-input",
+        label: "voice input real-device verification (B-6)",
+        checklist: "docs/ops/voice-input-staging-checklist.md",
+        records: "docs/ops/voice-input-staging-verification-records",
     },
 ];
 

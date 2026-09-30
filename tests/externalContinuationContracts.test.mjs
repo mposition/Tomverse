@@ -10,6 +10,7 @@ import {
 import {
     CONTINUATION_SURFACE_PATH,
     continuationPath,
+    conversationHandoffHref,
     conversationSurface,
     conversationSurfaceHref,
 } from "../lib/continuationRoutes.ts";
@@ -25,6 +26,7 @@ import { planContinuationSeed } from "../lib/externalContinuationSeedCore.ts";
 import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 import { PRODUCT_SURFACE_PATH } from "../lib/productSurfaceRoutes.ts";
 import { splitProviderInstructions } from "../lib/chatProviderPrompt.ts";
+import { compileContinuationRouting, extractContinuationRouting } from "./support/continuationRouting.mjs";
 
 /**
  * docs/policy/external-conversation-continuation.md §5, §8, §9 — the contracts
@@ -47,7 +49,7 @@ const systemBlockInput = (overrides = {}) => ({
     ...overrides,
 });
 
-/* pricing: docs/policy/external-conversation-continuation.md §4.4 and §5 */
+/* ------------------------------------------------------- pricing (§4.4, §5) */
 
 const seedFor = (turns) =>
     buildContinuationSeedPrompt({
@@ -276,7 +278,7 @@ test("the two routes that price a turn both pass the seed through", () => {
     }
 });
 
-/* share: docs/policy/external-conversation-continuation.md §9 */
+/* ------------------------------------------------------------ share (§9) */
 
 test("an ordinary conversation is not refused", () => {
     assert.equal(
@@ -315,7 +317,7 @@ test("the share route and the export route both read this one module", () => {
     assert.match(exportedAll, /sourceDeleted: bridge\.externalConversationId === null/);
 });
 
-/* export: docs/policy/external-conversation-continuation.md §9 */
+/* ----------------------------------------------------------- export (§9) */
 
 test("the export provenance names the source and says the original is elsewhere", () => {
     const lines = continuationExportProvenance({
@@ -354,7 +356,7 @@ test("no imported message text can reach the provenance lines", () => {
     }
 });
 
-/* surface: docs/policy/external-conversation-continuation.md §8.2 */
+/* ---------------------------------------------------------- surface (§8.2) */
 
 test("the continuation surface is its own path, not the future Chat path", () => {
     assert.equal(CONTINUATION_SURFACE_PATH, "/continuations");
@@ -483,51 +485,420 @@ test("every route that can lead into a conversation reports its surface", () => 
     assert.doesNotMatch(naming, /password: bridge\./);
 });
 
-test("the client routes by the server's answer, never by a derived one", () => {
-    const client = readFileSync(
-        "app/(site)/(application)/chat/ChatPageClient.tsx",
-        "utf8"
-    );
-    assert.match(client, /conversationSurfaceHref/);
-    /*
-      The surface comes from the row the server sent, and the destination is
-      that row's own path.
+const routingClient = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
+const routingIds = ["owned/a", "continuation_a", "chat_a"];
 
-      Two questions, and conflating them was a defect in both directions.
-      Asking only "is this a different surface" dropped the clicked id on the
-      way out of a continuation -- the workspace has no per-conversation URL,
-      so the navigation lost it and the session restore reopened the
-      continuation the user had just left -- and it navigated nowhere at all
-      between two continuations, which are the same surface at different URLs.
-    */
-    assert.match(
-        client,
-        /const targetSurface =\s*\n?\s*surfaceHint \?\? conversations\.find\(\(c\) => c\.id === id\)\?\.surface;/
-    );
-    assert.match(
-        client,
-        /const ownPath = conversationSurfaceHref\(targetSurface, id\)/
-    );
-    assert.match(client, /if \(pathname !== ownPath\) \{/);
-    assert.match(
-        client,
-        /conversationHandoffHref\(targetSurface, id, LEGACY_REVIEW_PATH\)/
-    );
-    // Never from the product, the modality or the id's shape.
-    const routing = client.slice(
-        client.indexOf("const targetSurface ="),
-        client.indexOf("localComparisonResponsesRef.current.clear()")
-    );
-    for (const forbidden of ["productKey", "kind", "startsWith"]) {
-        assert.ok(
-            !routing.includes(forbidden),
-            `the surface must not be derived from ${forbidden}`
-        );
+// Run the same contract against the production source and every in-memory
+// mutation below. The page's actual routing prefix is executed with a local
+// fetch stub; there are no account, provider or database requests. The later
+// owned-detail handoff's isolated conditional block is also executed. The rest
+// of workspace restoration is outside this contract harness.
+async function assertClientSurfaceRouting(client) {
+    const { prefix, trailing } = compileContinuationRouting(client);
+    // These representative ids expose prefix/substring/regex regressions; they
+    // do not claim to prove independence for every possible client derivation.
+    for (const id of routingIds) {
+        const encodedId = encodeURIComponent(id);
+        const cases = [
+            { name: "search hint wins over a conflicting list row", hint: "continuation", row: "workspace", path: `/continuations/${encodedId}` },
+            { name: "an outstanding URL handoff settles and continues the explicit selection", handoffRequestedId: "url-origin", row: "continuation", path: `/continuations/${encodedId}`, events: ["settle", "promote:account:test", "push"] },
+            { name: "a search hit absent from the list carries its answer", hint: "continuation", path: `/continuations/${encodedId}` },
+            { name: "the list row supplies the server answer", row: "continuation", path: `/continuations/${encodedId}` },
+            { name: "a same-id cross-surface departure promotes before routing", currentId: "clicked", row: "continuation", path: `/continuations/${encodedId}`, events: ["promote:account:test", "settle", "push"] },
+            { name: "two continuations navigate to the clicked id", row: "continuation", mounted: "continuation", path: `/continuations/${encodedId}` },
+            { name: "the current continuation does not push itself", row: "continuation", mounted: "continuation", pathname: `/continuations/${encodedId}`, workspace: true },
+            { name: "leaving a continuation preserves the workspace id", row: "workspace", mounted: "continuation", path: `/chat?conversation=${encodedId}` },
+            { name: "a Chat hint crosses to the additive Chat path", hint: "chat", path: `/chat/workspace?conversation=${encodedId}` },
+            { name: "the current workspace selects in place", row: "workspace", workspace: true },
+            { name: "the matching list row is selected after a decoy", rows: [{ id: "other", surface: "continuation" }, { surface: "workspace" }], workspace: true },
+            { name: "the matching list row is selected before a decoy", rows: [{ surface: "workspace" }, { id: "other", surface: "continuation" }], workspace: true },
+            { name: "the matching list row routes its own continuation", rows: [{ id: "other", surface: "workspace" }, { surface: "continuation" }], path: `/continuations/${encodedId}` },
+            { name: "a refused lookup never promotes before acceptance", mounted: "chat", status: 403, lookup: true, discarded: true },
+            { name: "a Chat list miss ignores a decoy and reads the owned row", rows: [{ id: "other", surface: "continuation" }], mounted: "chat", detail: "workspace", lookup: true, path: `/chat?conversation=${encodedId}` },
+            { name: "a workspace list miss ignores a decoy and resolves in place", rows: [{ id: "other", surface: "continuation" }], workspace: true },
+            { name: "an unresolved workspace mount resolves in place without an early owned read", detail: "workspace", workspace: true },
+            { name: "an unresolved continuation mount resolves in place without an early owned read", mounted: "continuation", detail: "continuation", pathname: `/continuations/${encodedId}`, workspace: true },
+            { name: "a Chat list miss reads the owned continuation", mounted: "chat", detail: "continuation", lookup: true, path: `/continuations/${encodedId}` },
+            { name: "an owned lookup promotes only after its accepted answer", mounted: "chat", detail: "continuation", lookup: true, path: `/continuations/${encodedId}`, events: ["fetch", "promote:account:test", "settle", "push"] },
+            { name: "a Chat list miss reads the owned workspace", mounted: "chat", detail: "workspace", lookup: true, path: `/chat?conversation=${encodedId}` },
+            { name: "an owned Chat proceeds in place", mounted: "chat", detail: "chat", lookup: true, workspace: true },
+            { name: "a non-account id cannot start an owned read", mounted: "chat", accountId: null },
+            { name: "a refused owned read cannot select or navigate", mounted: "chat", status: 403, lookup: true, discarded: true },
+            { name: "a missing owned row cannot select or navigate", mounted: "chat", status: 404, lookup: true, discarded: true },
+            ...[403, 404].flatMap((status) => ["continuation", "workspace", "chat"].map((detail) => ({
+                name: `a refused owned read (${status}) cannot use a ${detail} surface from its body`,
+                mounted: "chat", status, detail, lookup: true, discarded: true,
+            }))),
+            { name: "an invalid owned surface cannot select or navigate", mounted: "chat", detail: "invented", lookup: true },
+            { name: "a failed owned read cannot select or navigate", mounted: "chat", fail: true, lookup: true },
+            { name: "a newer selection invalidates an owned response", mounted: "chat", detail: "continuation", stale: "response", lookup: true, discarded: true },
+            { name: "a newer selection invalidates parsed owned detail", mounted: "chat", detail: "continuation", stale: "json", lookup: true },
+            { name: "a missing identity cannot start an owned read", mounted: "chat", detail: "continuation", identity: "", namespace: "" },
+            { name: "an initial identity namespace mismatch cannot start an owned read", mounted: "chat", detail: "continuation", namespace: "account:other" },
+            { name: "identity namespace drift invalidates an owned response", mounted: "chat", detail: "continuation", namespaceDrift: "response", lookup: true, discarded: true },
+            { name: "identity namespace drift invalidates parsed owned detail", mounted: "chat", detail: "continuation", namespaceDrift: "json", lookup: true },
+            { name: "origin conversation drift invalidates an owned response", mounted: "chat", detail: "continuation", originDrift: "response", lookup: true, discarded: true },
+            { name: "origin conversation drift invalidates parsed owned detail", mounted: "chat", detail: "continuation", originDrift: "json", lookup: true },
+            { name: "a locked target does not promote before acceptance", rows: [{ surface: "continuation", isLocked: true }], locked: true },
+            { name: "guest selection keeps the existing in-place path", guest: true, mounted: "chat", workspace: true },
+        ];
+        for (const scenario of cases) {
+            const label = `${scenario.name} (${id})`;
+            const paths = [];
+            const reads = [];
+            const events = [];
+            const promotions = [];
+            let locked = 0;
+            let discarded = 0;
+            const ticket = { current: 0 };
+            const navigationAttempt = { current: 0 };
+            let nextNavigationAttempt = 0;
+            let nextSelectionTicket = 0;
+            const initialConversationHandoff = {
+                current: { requestedId: scenario.handoffRequestedId ?? id, settled: false },
+            };
+            const identityNamespace = { current: scenario.namespace ?? "account:test" };
+            const currentConversation = {
+                current: scenario.currentId === "clicked" ? id : (scenario.currentId ?? "previous"),
+            };
+            const invalidate = (phase) => {
+                if (scenario.stale === phase) navigationAttempt.current += 1;
+                if (scenario.namespaceDrift === phase) identityNamespace.current = "account:changed";
+                if (scenario.originDrift === phase) currentConversation.current = "other-conversation";
+            };
+            const context = {
+                conversations: scenario.rows?.map((row) => ({ ...row, id: row.id ?? id })) ??
+                    (scenario.row ? [{ id, surface: scenario.row }] : []),
+                mountedSurface: scenario.mounted ?? "workspace",
+                pathname: scenario.pathname ?? "/continuations/other",
+                isGuestMode: scenario.guest ?? false,
+                conversationSelectionTicketRef: ticket,
+                conversationNavigationAttemptRef: navigationAttempt,
+                allocateConversationNavigationAttempt: () => {
+                    nextNavigationAttempt += 1;
+                    return nextNavigationAttempt;
+                },
+                allocateConversationSelectionTicket: () => {
+                    nextSelectionTicket += 1;
+                    return nextSelectionTicket;
+                },
+                initialConversationHandoffRef: initialConversationHandoff,
+                settleInitialConversationHandoff: (requestedId) => {
+                    const handoff = initialConversationHandoff.current;
+                    if (handoff.settled ||
+                        (requestedId !== undefined && handoff.requestedId !== requestedId)) return false;
+                    handoff.settled = true;
+                    events.push("settle");
+                    return true;
+                },
+                currentChatIdRef: currentConversation,
+                identityKey: scenario.identity ?? "account:test", identityNamespaceRef: identityNamespace,
+                identityNamespaceKey: (namespace) => namespace,
+                accountConversationId: () => scenario.accountId === null ? null : "owned-id",
+                promoteCurrentUndispatchedTurns: (namespace) => {
+                    promotions.push(namespace);
+                    events.push(`promote:${namespace}`);
+                },
+                conversationSurfaceHref, conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+                PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
+                router: { push: (path) => {
+                    events.push("push");
+                    paths.push(path);
+                } },
+                setLockedSelectDialog: () => {
+                    locked += 1;
+                    events.push("lock");
+                },
+                discardResponseBody: async () => { discarded += 1; },
+                showToast: () => {}, t: (key) => key,
+                fetch: async (url, options) => {
+                    events.push("fetch");
+                    reads.push([url, options.cache]);
+                    if (scenario.fail) throw new Error("fixture read failure");
+                    invalidate("response");
+                    return {
+                        ok: !scenario.status, status: scenario.status ?? 200,
+                        json: async () => {
+                            invalidate("json");
+                            return { surface: scenario.detail };
+                        },
+                    };
+                },
+            };
+            const result = await prefix(context)(id, false, scenario.hint);
+            assert.deepEqual(paths, scenario.path ? [scenario.path] : [], label);
+            assert.equal(result, scenario.workspace ? "workspace" : undefined, label);
+            assert.deepEqual(reads, scenario.lookup ? [["/api/conversations/owned-id", "no-store"]] : [], label);
+            assert.equal(discarded, scenario.discarded ? 1 : 0, label);
+            assert.deepEqual(promotions, scenario.path ? [scenario.namespace ?? "account:test"] : [],
+                `${label}: an accepted departure promotes exactly once and no refused/stale/locked lookup promotes`);
+            assert.equal(locked, scenario.locked ? 1 : 0, label);
+            if (scenario.events) assert.deepEqual(events, scenario.events, `${label}: routing barrier order`);
+        }
     }
+
+    // Execute the actual trailing if/body against valid and invalid server
+    // surfaces, current/stale origins, current/stale navigation attempts and
+    // the same finite id set. A locked/refused selection still allocates a
+    // newer navigation attempt even though it does not change the committed
+    // conversation; A -> B -> A likewise restores the id without restoring
+    // authority to A's older owned-detail response.
+    // Merely mentioning a guard cannot satisfy these assertions. This does not
+    // prove independence from every possible id derivation or run restoration.
+    for (const id of routingIds) {
+        for (const mountedSurface of ["workspace", "chat", "continuation"]) {
+            for (const surface of ["workspace", "chat", "continuation", "invented", null, undefined]) {
+                for (const navigationState of [
+                    { name: "current", captured: 7, current: 7, currentId: id },
+                    { name: "newer locked or refused selection", captured: 7, current: 8, currentId: id },
+                    { name: "A-to-B-to-A", captured: 7, current: 9, currentId: id },
+                    { name: "different current origin", captured: 7, current: 7, currentId: "other" },
+                ]) {
+                    const { captured: navigationAttempt, current: currentAttempt, currentId } = navigationState;
+                    const valid = ["workspace", "chat", "continuation"].includes(surface);
+                    const paths = [];
+                    const committed = [];
+                    const promotions = [];
+                    const departureEvents = [];
+                    trailing({ data: { surface }, id, currentChatIdRef: { current: currentId },
+                        navigationAttempt,
+                        conversationNavigationAttemptRef: { current: currentAttempt },
+                        mountedSurface, router: { push: (path) => {
+                            departureEvents.push("push");
+                            paths.push(path);
+                        } },
+                        commitConversationSelection: (forceRouteTransition) => {
+                            departureEvents.push("commit");
+                            committed.push(forceRouteTransition);
+                            promotions.push("account:test");
+                        },
+                        conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+                        PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
+                    })();
+                    const fresh = navigationAttempt === currentAttempt;
+                    const expected = fresh && valid && currentId === id && surface !== mountedSurface
+                        ? [conversationHandoffHref(surface, id, "/chat")] : [];
+                    const message = !valid ? "trailing handoff rejects an invalid server surface"
+                        : currentId !== id ? "trailing handoff rejects a stale origin"
+                        : !fresh ? `trailing handoff rejects ${navigationState.name}`
+                        : "trailing handoff follows the current owned server surface";
+                    assert.deepEqual(paths, expected, `${message} (${id}, ${mountedSurface}, ${surface}, ${currentId})`);
+                    assert.deepEqual(committed, expected.length > 0 ? [true] : [],
+                        `trailing handoff commits the selection before route (${id}, ${mountedSurface}, ${surface}, ${currentId})`);
+                    assert.deepEqual(promotions, expected.length > 0 ? ["account:test"] : [],
+                        `trailing handoff cannot promote a stale navigation (${id}, ${mountedSurface}, ${surface}, ${navigationState.name})`);
+                    assert.deepEqual(departureEvents, expected.length > 0 ? ["commit", "push"] : [],
+                        `trailing handoff barrier order (${id}, ${mountedSurface}, ${surface}, ${currentId})`);
+                }
+            }
+        }
+    }
+}
+
+test("the client routes by the server's answer, never by a derived one", async () => {
+    await assertClientSurfaceRouting(routingClient);
     // A search hit can name a conversation the list never loaded, so the row
     // carries its own answer.
     const sidebar = readFileSync("components/chat/ChatSidebar.tsx", "utf8");
     assert.match(sidebar, /result\.surface/);
+});
+
+function routingFixture(source) {
+    const bounds = extractContinuationRouting(source);
+    const replaceRange = (start, end, replacement) => source.slice(0, start) + replacement + source.slice(end);
+    const anchor = (name) => {
+        const matches = bounds.anchors[name];
+        assert.equal(matches.length, 1, `mutation requires exactly one ${name} anchor`);
+        return matches[0];
+    };
+    const anchorText = (name) => {
+        const { start, end } = anchor(name);
+        return source.slice(start, end);
+    };
+    const replaceAnchor = (name, replacement) => {
+        const { start, end } = anchor(name);
+        return replaceRange(start, end, replacement);
+    };
+    const replaceWithin = (start, end, before, after) => {
+        const section = source.slice(start, end);
+        assert.equal(section.split(before).length, 2, "mutation must replace exactly one scoped routing expression");
+        return replaceRange(start, end, section.replace(before, after));
+    };
+    return {
+        source, bounds, replaceRange, replaceAnchor, anchorText,
+        replaceHandler: (before, after) => replaceWithin(bounds.handlerStart, bounds.handlerEnd, before, after),
+        replaceRouting: (before, after) => replaceWithin(bounds.start, bounds.end, before, after),
+        replaceTrailingRouting: (before, after) => replaceWithin(bounds.end, bounds.handlerEnd, before, after),
+        removeConjunct: (name) => {
+            const removal = anchor(name).removal;
+            assert.ok(removal, "mutation requires the selected trailing conjunct's parent AND");
+            return replaceRange(removal.start, removal.end, removal.replacement);
+        },
+        targetText: source.slice(bounds.start, bounds.targetEnd),
+        boundaryText: source.slice(bounds.end, bounds.boundaryEnd),
+        initializerText: source.slice(bounds.initializerStart, bounds.initializerEnd),
+        trailingHandoffText: anchorText("trailingHandoff"),
+    };
+}
+
+test("routing extraction ignores global decoys and accepts declaration keywords without empty slices", async () => {
+    const f = routingFixture(routingClient);
+    assert.ok(f.bounds.end > f.bounds.start);
+    // A prior unrelated clear stays outside the extracted handler.
+    assert.ok(routingClient.indexOf("localComparisonResponsesRef.current.clear()") < f.bounds.start);
+    for (const keyword of ["const", "let", "var"]) {
+        const variant = f.replaceRange(f.bounds.targetKeywordStart, f.bounds.targetKeywordEnd, keyword);
+        const fixture = routingFixture(variant);
+        assert.ok(fixture.bounds.end > fixture.bounds.start);
+        // Const parses; only mutable declarations can execute the owned assignment.
+        if (keyword !== "const") await assertClientSurfaceRouting(variant);
+        await assert.rejects(() => assertClientSurfaceRouting(fixture.replaceRange(
+            fixture.bounds.handlerNameStart, fixture.bounds.handlerNameEnd, "missingHandler")),
+        /exactly one selection handler/);
+    }
+    await assertClientSurfaceRouting("// const handleSelectConversation = () => {}; productKey kind startsWith\n" +
+        'const decoy = "localComparisonResponsesRef.current.clear(); let targetSurface = kind";\n' + routingClient);
+    await assertClientSurfaceRouting(f.replaceTrailingRouting('selectedTarget?.kind === "image"',
+        'selectedTarget?.["kind"] === "image"'));
+});
+
+// Every entry is a lazy source mutation. Failed preparation belongs to its
+// named test, so it cannot prevent unrelated continuation contracts registering.
+const routingMutations = [
+    ["missing handler", (f) => f.replaceRange(f.bounds.handlerNameStart, f.bounds.handlerNameEnd, "missingHandler"), /exactly one selection handler/],
+    ["duplicate handler", (f) => f.source + "\nconst handleSelectConversation = async () => {};", /exactly one selection handler/],
+    ["empty handler", (f) => f.replaceRange(f.bounds.handlerStart, f.bounds.handlerEnd, "async () => {}"), /empty selection handler/],
+    ["expression handler", (f) => f.replaceRange(f.bounds.handlerStart, f.bounds.handlerEnd, "async () => null"), /must have a block body/],
+    ["malformed handler", (f) => f.replaceRange(f.bounds.handlerStart, f.bounds.handlerEnd, "async () => {"), /malformed source/],
+    ["missing target", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, ""), /exactly one targetSurface/],
+    ["duplicate target", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, `${f.targetText}\nlet targetSurface;`), /exactly one targetSurface/],
+    ["uninitialized target", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, "let targetSurface;"), /must be initialized/],
+    ["nested target", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, `{ ${f.targetText} }`), /targetSurface must be a direct handler statement/],
+    ["empty routing", (f) => f.replaceRange(f.bounds.start, f.bounds.end, `${f.targetText}\n`), /search hint wins/],
+    ["comment target decoy", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, `/* ${f.targetText} */`), /exactly one targetSurface/],
+    ["string target decoy", (f) => f.replaceRange(f.bounds.start, f.bounds.targetEnd, `${JSON.stringify(f.targetText)};`), /exactly one targetSurface/],
+    ["missing boundary", (f) => f.replaceRange(f.bounds.end, f.bounds.boundaryEnd, ""), /exactly one workspace boundary/],
+    ["duplicate boundary", (f) => f.replaceRange(f.bounds.end, f.bounds.boundaryEnd, `${f.boundaryText}\n${f.boundaryText}`), /exactly one workspace boundary/],
+    ["comment boundary decoy", (f) => f.replaceRange(f.bounds.end, f.bounds.boundaryEnd, `/* ${f.boundaryText} */`), /exactly one workspace boundary/],
+    ["string boundary decoy", (f) => f.replaceRange(f.bounds.end, f.bounds.boundaryEnd, `${JSON.stringify(f.boundaryText)};`), /exactly one workspace boundary/],
+    ["nested boundary", (f) => f.replaceRange(f.bounds.end, f.bounds.boundaryEnd, `if (true) { ${f.boundaryText} }`), /direct handler statement/],
+    ["reversed bounds", (f) => f.replaceRange(f.bounds.start, f.bounds.boundaryEnd,
+        f.boundaryText + f.source.slice(f.bounds.start, f.bounds.end)), /ordered bounds/],
+    ["product inference", (f) => f.replaceRouting(f.initializerText, `${f.initializerText} ?? conversations.find((c) => c.id === id)?.productKey`), /derived from productKey/],
+    ["kind inference", (f) => f.replaceRouting(f.initializerText, `${f.initializerText} ?? conversations.find((c) => c.id === id)?.kind`), /derived from kind/],
+    ["id-prefix inference", (f) => f.replaceRouting(f.initializerText, `id.startsWith("continuation_") ? "continuation" : (${f.initializerText})`), /derived from startsWith/],
+    ["computed product inference", (f) => f.replaceRouting(f.initializerText, `${f.initializerText} ?? conversations[0]?.["productKey"]`), /derived from productKey/],
+    ["owned detail product inference", (f) => f.replaceAnchor("targetAssignment", "targetSurface = detail.productKey"), /derived from productKey/],
+    ["list overrides search hint", (f) => f.replaceRouting(f.initializerText, "conversations.find((c) => c.id === id)?.surface ?? surfaceHint"), /search hint wins/],
+    ["comment destination decoy", (f) => f.replaceAnchor("ownPath",
+        "const ownPath = null; /* conversationSurfaceHref(targetSurface, id) */"), /two continuations navigate/],
+    ["string destination decoy", (f) => f.replaceAnchor("ownPath",
+        'const ownPath = "conversationSurfaceHref(targetSurface, id)";'), /search hint wins/],
+    ["handoff drops the clicked id", (f) => f.replaceAnchor("prefixHandoff", "LEGACY_REVIEW_PATH"), /preserves the workspace id/],
+    ["owned answer is ignored", (f) => f.replaceAnchor("targetAssignment", "/* targetSurface = detail.surface */"), /a Chat list miss ignores a decoy and reads the owned row/],
+    ["owned refusal falls through", (f) => f.replaceRouting("if (!response.ok) {", "if (false) {"), /refused owned read|refused lookup never promotes/],
+    ["refused response return is removed", (f) => f.replaceRouting(/return;(?=\s*\}\s*const detail = await response\.json\(\);)/, ""), /refused owned read/],
+    ["owned read escapes the Chat mount", (f) => f.replaceRouting('mountedSurface === "chat" && !targetSurface', "!targetSurface"), /resolves in place/],
+    ["invalid owned answer is accepted", (f) => f.replaceAnchor("detailGuard", ""), /invalid owned surface/],
+    ["stale navigation check is bypassed", (f) => f.replaceRouting("navigationAttempt === conversationNavigationAttemptRef.current", "true"), /newer selection invalidates/],
+    ["an outstanding handoff stops the replacement selection", (f) => f.replaceHandler(
+        "settleInitialConversationHandoff();\n        }\n        const navigationAttempt",
+        "settleInitialConversationHandoff();\n            return;\n        }\n        const navigationAttempt"), /outstanding URL handoff settles and continues/],
+    ["the departure barrier drops promotion", (f) => f.replaceRouting(
+        "promoteCurrentUndispatchedTurns(selectionIdentityKey);", ""), /promotes exactly once/],
+    ["a forced same-id departure skips promotion", (f) => f.replaceRouting(
+        "if (forceRouteTransition || id !== currentChatIdRef.current) {",
+        "if (id !== currentChatIdRef.current) {"), /same-id cross-surface departure promotes/],
+    ["promotion runs before an owned lookup is accepted", (f) => f.replaceRouting(
+        "const accountId = accountConversationId(id);",
+        "promoteCurrentUndispatchedTurns(selectionIdentityKey);\n            const accountId = accountConversationId(id);"), /refused lookup never promotes/],
+    ["missing identity guard is bypassed", (f) => f.replaceRouting("Boolean(identityKey)", "true"), /missing identity/],
+    ["identity namespace guard is bypassed", (f) => f.replaceRouting("identityKey === identityNamespaceKey(identityNamespaceRef.current)", "true"), /identity namespace/],
+    ["origin conversation guard is bypassed", (f) => f.replaceRouting("originConversationId === currentChatIdRef.current", "true"), /origin conversation/],
+    ["pre-fetch current-state guard is removed", (f) => f.replaceRouting(/if \(!lookupIsCurrent\(\)\) return;\s*(?=try \{)/, ""), /missing identity|initial identity namespace/],
+    ["trailing detail derives from kind", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", "data.kind !== mountedSurface"), /derived from kind/],
+    ["trailing detail derives from product", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", "data.productKey !== mountedSurface"), /derived from productKey/],
+    ["trailing detail derives from id prefix", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface", 'id.startsWith("continuation_")'), /derived from startsWith/],
+    ["trailing handoff argument derives from kind", (f) => f.replaceAnchor("trailingHandoff",
+        "router.push(conversationHandoffHref(data.kind, id, LEGACY_REVIEW_PATH));"), /derived from kind/],
+    ["trailing handoff drops the departure barrier", (f) => f.replaceTrailingRouting(
+        "commitConversationSelection(true);", ""), /trailing handoff commits the selection/],
+    ["trailing handoff runs the departure barrier after push", (f) => f.replaceTrailingRouting(
+        "commitConversationSelection(true);\n          router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));",
+        "router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));\n          commitConversationSelection(true);"), /trailing handoff barrier order/],
+    ["missing trailing handoff", (f) => f.replaceAnchor("trailingHandoff", ""), /exactly one trailing owned handoff/],
+    ["duplicate trailing handoff", (f) => f.replaceAnchor("trailingHandoff", `${f.trailingHandoffText}\n${f.trailingHandoffText}`), /exactly one trailing owned handoff/],
+    ["comment trailing handoff decoy", (f) => f.replaceAnchor("trailingHandoff", `/* ${f.trailingHandoffText} */`), /exactly one trailing owned handoff/],
+    ["string trailing handoff decoy", (f) => f.replaceAnchor("trailingHandoff", `${JSON.stringify(f.trailingHandoffText)};`), /exactly one trailing owned handoff/],
+    ["handoff uses the future Review path", (f) => f.replaceAnchor("prefixHandoff",
+        "conversationHandoffHref(targetSurface, id, PRODUCT_SURFACE_PATH.review)"), /preserves the workspace id/],
+    ["an arbitrary first row supplies the surface", (f) => f.replaceAnchor("listSurface", "conversations[0]?.surface"), /matching list row|list miss/],
+    ["trailing allowlist is removed", (f) => f.removeConjunct("trailingAllowlist"), /trailing handoff rejects an invalid/],
+    ["trailing origin check is removed", (f) => f.removeConjunct("trailingOrigin"), /trailing handoff rejects a stale/],
+    ["trailing navigation freshness check is removed", (f) => f.removeConjunct(
+        "trailingNavigationFreshness"), /newer locked or refused selection|A-to-B-to-A/],
+    ["id substring infers the surface", (f) => f.replaceRouting(f.initializerText, `${f.initializerText} ?? (id.includes("continuation_") ? "continuation" : undefined)`), /list miss|resolves in place|refused lookup never promotes/],
+    ["id regex infers the surface", (f) => f.replaceRouting(f.initializerText, `${f.initializerText} ?? (/^continuation_/.test(id) ? "continuation" : undefined)`), /list miss|resolves in place|refused lookup never promotes/],
+    ["an arbitrary last row supplies the surface", (f) => f.replaceAnchor("listSurface", "conversations.at(-1)?.surface"), /matching list row|list miss/],
+    ["trailing allowlist is bypassed", (f) => f.replaceAnchor("trailingAllowlist", "true"), /trailing handoff rejects an invalid/],
+    ["trailing origin check is bypassed", (f) => f.replaceAnchor("trailingOrigin", "true"), /trailing handoff rejects a stale/],
+    ["trailing guard is changed from AND to OR", (f) => f.replaceAnchor("trailingCondition",
+        '(currentChatIdRef.current === id || ["chat", "workspace", "continuation"].includes(data.surface)) && data.surface !== mountedSurface'), /trailing handoff rejects an invalid|trailing handoff rejects a stale|newer locked or refused selection|A-to-B-to-A/],
+    ["trailing id substring infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
+        '(id.includes("continuation_") || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
+    ["trailing id regex infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
+        '(/^continuation_/.test(id) || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
+    ["trailing allowlist drops a valid surface", (f) => f.replaceAnchor("trailingAllowlist",
+        '(data.surface === "workspace" || data.surface === "continuation")'), /trailing handoff follows the current owned server surface/],
+    ["trailing allowlist admits an unknown surface", (f) => f.replaceAnchor("trailingAllowlist",
+        '(["chat", "workspace", "continuation", "invented"].includes(data.surface))'), /trailing handoff rejects an invalid/],
+];
+
+async function assertRoutingMutation([name, build, expected], source) {
+    const mutant = build(routingFixture(source));
+    assert.notEqual(mutant, source, `the actual production source must be mutated: ${name}`);
+    await assert.rejects(() => assertClientSurfaceRouting(mutant), expected, name);
+}
+for (const mutation of routingMutations) {
+    test(`the routing contract rejects production-source mutation: ${mutation[0]}`, async () => {
+        await assertRoutingMutation(mutation, routingClient);
+    });
+}
+
+test("equivalent trailing guard grouping and order preserve routing behavior", async () => {
+    // First/middle/last guard positions, both association directions, and a
+    // reversed/parenthesized origin or freshness comparison must preserve
+    // behavior and the AST-backed guard-removal mutation.
+    for (const condition of [
+        "navigationAttempt === conversationNavigationAttemptRef.current && (data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)) && (currentChatIdRef.current === id)",
+        "(['chat', 'workspace', 'continuation'].includes(data.surface) && (((conversationNavigationAttemptRef.current) === (navigationAttempt)) && (((id) === (currentChatIdRef.current)) && (data.surface !== mountedSurface))))",
+        "(((currentChatIdRef.current) === (id)) && ((data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)))) && ((navigationAttempt) === (conversationNavigationAttemptRef.current))",
+    ]) {
+        const regrouped = routingFixture(routingClient).replaceAnchor("trailingCondition", condition);
+        assert.ok(routingFixture(regrouped).anchorText("trailingNavigationFreshness").length > 0,
+            "the AST freshness anchor survives operand order, parentheses and conjunct position");
+        await assertClientSurfaceRouting(regrouped);
+        for (const mutation of routingMutations) await assertRoutingMutation(mutation, regrouped);
+    }
+});
+
+test("equivalent surface-guard formatting preserves behavior and every mutation", async () => {
+    const reformatted = routingFixture(routingClient).replaceAnchor("detailGuard",
+        "if (!['chat', 'workspace', 'continuation'].includes(detail.surface)) {\n return;\n}");
+    await assertClientSurfaceRouting(reformatted);
+    for (const mutation of routingMutations) await assertRoutingMutation(mutation, reformatted);
+});
+
+test("equivalent strict OR surface membership preserves behavior and every mutation", async () => {
+    for (const membership of [
+        '(data.surface === "chat" || data.surface === "workspace" || data.surface === "continuation")',
+        "((('continuation' === (data.surface)) || ((data.surface) === 'workspace')) || ('chat' === data.surface))",
+        '(data.surface === "chat" || data.surface === "workspace" || data.surface === "continuation" || data.surface === "chat")',
+    ]) {
+        const equivalent = routingFixture(routingClient).replaceAnchor("trailingAllowlist", membership);
+        await assertClientSurfaceRouting(equivalent);
+        for (const mutation of routingMutations) await assertRoutingMutation(mutation, equivalent);
+    }
 });
 
 /* ------------------------------------------------------- flag operability */
@@ -772,36 +1143,50 @@ test("the cached flag is never the last word before imported text goes out", () 
 });
 
 test("a retry reuses the attempt's idempotency key and only cancel clears it", () => {
-    const card = readFileSync(
-        "components/imports/ContinueInTomverseCard.tsx",
+    // The contract moved into the shared launcher when the imported-conversation
+    // list gained its own quick action: two components creating continuations
+    // must not be able to disagree about what a retry is, so neither of them
+    // owns the key any more. The claim is unchanged and is asserted where the
+    // code now lives.
+    const launcher = readFileSync(
+        "components/imports/useContinuationLauncher.ts",
         "utf8"
     );
-    const arm = card.slice(card.indexOf("const arm = useCallback"));
-    const armBody = arm.slice(0, arm.indexOf("}, []);"));
+    const start = launcher.slice(launcher.indexOf("const start = useCallback"));
+    const startBody = start.slice(0, start.indexOf("const cancel = useCallback"));
 
-    // The failed card renders the same CTA the idle card does, so `arm` runs
-    // again on every retry. Minting unconditionally there issued a fresh key
-    // and turned one lost response into two conversations.
+    // A failed attempt is retried by calling `start()` again. Minting
+    // unconditionally there issued a *new* key on every retry, so a POST that
+    // had already stored a conversation and only lost its response produced a
+    // second one on the next press.
     assert.match(
-        armBody,
+        startBody,
         /idempotencyKeyRef\.current\s*\?\?=/,
-        "arm mints only when the card is holding no key"
+        "start mints only when the launcher is holding no key"
     );
     assert.doesNotMatch(
-        armBody,
+        startBody,
         /idempotencyKeyRef\.current\s*=[^=?]/,
         "no unconditional assignment"
     );
 
     // Cancel is the one place the key is dropped, because that is the only
-    // deliberate "start a second fork" in the card.
-    const clears = card.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
+    // deliberate "start a second fork" in the product.
+    const clears = launcher.match(/idempotencyKeyRef\.current\s*=\s*null/g) ?? [];
     assert.equal(clears.length, 1);
-    const cancelAt = card.indexOf("continuation-cancel");
     assert.ok(
-        card.indexOf("idempotencyKeyRef.current = null") > cancelAt,
-        "the only clear belongs to the cancel button"
+        launcher.indexOf("idempotencyKeyRef.current = null") >
+            launcher.indexOf("const cancel = useCallback"),
+        "the only clear belongs to cancel"
     );
+
+    // And no component may hold a key of its own.
+    for (const path of [
+        "components/imports/ContinueInTomverseCard.tsx",
+        "components/imports/ContinuationQuickAction.tsx",
+    ]) {
+        assert.doesNotMatch(readFileSync(path, "utf8"), /idempotencyKey/, path);
+    }
 });
 
 /* --------------------------------- the CTA is not offered with the flag off */

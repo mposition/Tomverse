@@ -1,6 +1,9 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
+import { estimatedCountryFromHeader } from "@/lib/signupConsentCore";
 import {
   normalizeCountry,
   resolveEmailJurisdiction,
@@ -34,8 +37,22 @@ export async function jurisdictionForUser(input: {
    * committed with consent in the same transaction.
    */
   countryConfirmation?: { country: string; confirmedAt: Date };
+  /**
+   * The transaction to read in, when the answer has to be the one true inside
+   * it.
+   *
+   * Without it the country is read on the global client, which cannot see a
+   * country the caller's transaction has just written. That is harmless for a
+   * pure read and not harmless when the answer decides whether a permanent row
+   * may be written in the same transaction -- the in-product notice records
+   * `notice_shown` once per account, and asking a stale snapshot whether the
+   * override will mail somebody let it record a promise the override broke
+   * the moment the transaction committed.
+   */
+  client?: Prisma.TransactionClient;
 }): Promise<JurisdictionForUser> {
-  const settings = await prisma.userSettings.findUnique({
+  const db = input.client ?? prisma;
+  const settings = await db.userSettings.findUnique({
     where: { userId: input.userId },
     select: {
       country: true,
@@ -51,7 +68,7 @@ export async function jurisdictionForUser(input: {
   // The jurisdiction resolved the last time they actually agreed to something.
   // Only a consent that still stands counts: a withdrawal says nothing about
   // where somebody is.
-  const lastConsent = await prisma.consentRecord.findFirst({
+  const lastConsent = await db.consentRecord.findFirst({
     where: { userId: input.userId, action: { in: ["granted", "reconfirmed"] } },
     orderBy: { occurredAt: "desc" },
     select: { jurisdiction: true },
@@ -64,6 +81,10 @@ export async function jurisdictionForUser(input: {
       ? normalizeCountry(settings.country)
       : null;
   const selfDeclaredCountry = confirmedCountry ?? storedSelfDeclaredCountry;
+  // Recorded from the IP at sign-up or sign-in, and a weaker source than a
+  // declaration: read as an estimate, never as what the person said.
+  const estimatedCountry =
+    settings?.countrySource === "ip_estimated" ? normalizeCountry(settings.country) : null;
 
   const resolved = resolveEmailJurisdiction({
     billingCountry: settings?.billingCountry ?? null,
@@ -79,6 +100,7 @@ export async function jurisdictionForUser(input: {
       lastConsent?.jurisdiction && lastConsent.jurisdiction !== "ZZ"
         ? lastConsent.jurisdiction
         : null,
+    estimatedCountry,
     language: settings?.language ?? null,
     timeZone: settings?.timeZone ?? null,
     ipCountry: input.ipCountry ?? null,
@@ -88,6 +110,57 @@ export async function jurisdictionForUser(input: {
     ...resolved,
     selfDeclaredCountry,
   };
+}
+
+/**
+ * Records the country estimated from a request's IP address, when nothing
+ * stronger is recorded.
+ *
+ * Only into an empty country or over an earlier estimate: a declaration, a
+ * billing country or any other source is never overwritten, because a weaker
+ * signal must not silently replace a stronger one (the column's own contract).
+ * An invalid or unknown IP country (`XX`, `T1`, empty) records nothing.
+ *
+ * Contract: docs/policy/email-notifications.md §6.1 and §6.2 step 4.
+ */
+export async function recordEstimatedCountry(input: {
+  userId: string;
+  ipCountry: string | null | undefined;
+  now?: Date;
+  client?: Prisma.TransactionClient;
+}): Promise<{ recorded: boolean; country: string | null }> {
+  // One list of codes that name no country (Cloudflare's `XX` and `T1`, this
+  // system's `ZZ`, and the rest), shared with the sign-up screen.
+  const country = estimatedCountryFromHeader(input.ipCountry);
+  if (!country) return { recorded: false, country: null };
+  const db = input.client ?? prisma;
+  const now = input.now ?? new Date();
+  const existing = await db.userSettings.findUnique({
+    where: { userId: input.userId },
+    select: { country: true, countrySource: true },
+  });
+  if (existing?.country && existing.countrySource !== "ip_estimated") {
+    return { recorded: false, country: null };
+  }
+  if (existing?.country === country && existing.countrySource === "ip_estimated") {
+    return { recorded: false, country };
+  }
+  if (existing) {
+    // Conditional, so a declaration committed between the read and this write
+    // is not replaced by the estimate.
+    const updated = await db.userSettings.updateMany({
+      where: {
+        userId: input.userId,
+        OR: [{ country: null }, { countrySource: "ip_estimated" }],
+      },
+      data: { country, countrySource: "ip_estimated", countryUpdatedAt: now },
+    });
+    return { recorded: updated.count > 0, country: updated.count > 0 ? country : null };
+  }
+  await db.userSettings.create({
+    data: { userId: input.userId, country, countrySource: "ip_estimated", countryUpdatedAt: now },
+  });
+  return { recorded: true, country };
 }
 
 /**

@@ -1,0 +1,25 @@
+{
+  "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+  "requirement": "PR #1555의 Prompt Refiner durable stage writer가 추가한 외래 키, runtime source manifest, 설치 의존성 해석과 SQL 상수 때문에 기존 CI가 실패한 부분을 정확한 최소 예외와 FK-aware test cleanup으로 정합화한다. AdminAuditLog test cleanup은 관련된 세 integration suite 모두 PromptRefinerReservation 및 PromptRefinerReservationStage와 함께 명시적으로 truncate하되 CASCADE를 쓰지 않는다. automatic fallback 경계는 fallback source의 content-free digest manifest만 허용하고 exports 조회나 dispatch를 허용하지 않는다. runtime source closure는 node_modules 아래 비-workspace 설치 의존성 선언을 외부로 취급하되 등록된 workspace source는 계속 local closure 규칙과 정확한 진단을 적용하고, 미등록 @tomverse/* 이름은 fail-closed한다. protected-table writer 예외는 새 migration과 constant LOCK TABLE statement의 실제 동작·개수에 exact-match하며, retention report의 Prompt Refiner 문구 때문에 바뀐 정적 write-verb count도 정확히 설명하고 protected table write를 허용하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "세 PostgreSQL integration test의 cleanup은 PromptRefinerReservation, PromptRefinerReservationStage, AdminAuditLog를 한 TRUNCATE statement에 명시하고 CASCADE를 사용하지 않는다.",
+    "automaticFallbackBoundary의 새 exact allowlist는 lib/promptRefinerStageAdmissionCore.ts가 providerFallbackCandidates source bytes를 content-free manifest에 결속하는 경우만 설명하며 fallback exports 조회 또는 model dispatch를 숨기지 않는다.",
+    "runtime source closure는 Linux checkout 내부 node_modules resolution을 external dependency로 제외하면서 등록된 workspace source와 @/* alias source를 계속 local closure에 포함하고 실제 next-auth/next resolution 경로와 미등록 @tomverse/* 거부를 테스트한다.",
+    "protected-table writer allowlist는 20260918130000 migration의 AdminAuditLog read-only FK/guard reference, promptRefinerStageAdmission.ts의 constant ModelRegistryEntry lock 및 report-unswept-tables의 Prompt Refiner retention 문구로 인한 정적 count를 exact path/count로 설명하며 실제 protected table write를 허용하지 않는다.",
+    "관련 focused tests, full unit suite, PostgreSQL accounts integration lane, TypeScript, ESLint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "변경은 CI 정합성으로 한정되고 Prompt Refiner product/provider/network/credential/stage seed/flag/rollout/spending 경계를 바꾸지 않는다.",
+    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "29d7f98a4986ae8d1226854a43ed785b5086fd9f",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-ci-fix-v1.task.json",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

@@ -1,0 +1,353 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-same-instance-fixture-v1",
+  "requirement": "Prompt Refiner의 loopback E2E fixture에서만 서버 mode prop을 off→on→off/on으로 바꾸고, 동일 mounted ChatPageClient에서 이전 ready·accepted preview와 전환 전 pending 응답이 폐기되는지 브라우저로 증명한다. 사용자 원문은 composer와 durable draft에 그대로 남고 합성 제안문이 draft PUT 또는 Chat POST로 승격되지 않아야 한다. fixture trigger는 서버측 loopback/auth/database-bypass 게이트와 별도 테스트 cookie 뒤에만 있으며 일반 사용자 DOM에는 없다. 제품 mode·공급자·Router·flag·stage/run·유료 호출·실제 사용자 traffic은 이 작업의 범위 밖이다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
+  "completionCriteria": [
+    "desktop 및 mobile Chromium에서 off→on→off/on을 전체 문서 reload 없이 같은 ChatPageClient의 textarea DOM node로 재현하고, 새 server prop 적용을 각 전환에서 확인한다.",
+    "ready와 accepted preview는 mode-off 직후 및 재활성화 후 나타나지 않고, 전환 전 pending 요청의 늦은 응답도 owner scope epoch에서 거부한다. Refiner fixture 요청의 늦은 응답 시험은 Router refresh의 AbortController 동작을 바꾸지 않는다.",
+    "authored 원문은 composer와 durable draft PUT에서 보존되고 합성문이 durable draft에 기록되지 않는다. fixture-on 동안 Chat POST는 0건이며 fixture-off positive control의 Chat POST 1건은 원문을 포함하고 합성문을 포함하지 않으며 브라우저에서 중단된다.",
+    "테스트용 refresh control의 Client loader는 서버측 loopback E2E 게이트와 별도 cookie 없이는 렌더되지 않으며 제품 Refiner mode, provider, Router, rollout flag, stage/run 승인 또는 실제 사용자 traffic을 활성화하지 않는다.",
+    "focused desktop/mobile E2E, Prompt Refiner unit 및 React render, prompt-injection 검사, 변경 파일 ESLint와 diff guard 결과를 각각 재현 가능하게 기록한다. 전체 typecheck에 기존 무관 오류가 남으면 경로·진단을 명시하고 전체 통과로 주장하지 않는다.",
+    "검토 package는 exact base 이후 변경된 다섯 source/test/UI 계약 경로와 이 task/authorization을 모두 포함하고, 생성된 records만 diff에서 제외한다. Claude verdict는 package digest와 일치해야 한다.",
+    "Claude는 요구사항과 diff를 먼저, 작성자 테스트 기록을 다음에 검토한다. 저장된 Claude Code Max 구독 CLI의 Read/Grep/Glob 읽기 전용 제한과 사용자 승인 --skip-preflight 예외만 사용한다. Anthropic API, provider 유료 호출, 테스트 실패 우회, 자동 병합·배포는 허용하지 않는다."
+  ],
+  "baseCommit": "96a6990ee82cfa624affefac43e711a5244cd9ae",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:fe535cd0d0ca2073def7ee1db13f34b23b2364daa59e5bc313506608d9fa8654",
+      "commit": null,
+      "filesChanged": [
+        "components/chat/PromptRefinerFixtureRefresh.tsx",
+        "components/chat/ReviewWorkspaceShell.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/task.json",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "tests/e2e/prompt-refiner-chat-input.spec.ts"
+      ],
+      "changeSummary": "Loopback-only same-instance Prompt Refiner mode transition regression; product path unchanged.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2777.5965",
+          "durationMs": 2877
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --import tsx --test --test-reporter=spec tests/client/promptRefinerSuggestionRender.test.tsx",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 713.8267",
+          "durationMs": 792
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 867
+        },
+        {
+          "rule": "npx eslint components/chat/PromptRefinerFixtureRefresh.tsx components/chat/ReviewWorkspaceShell.tsx tests/e2e/prompt-refiner-chat-input.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 33378
+        },
+        {
+          "rule": "git diff --cached --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 58
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/authorization.md:37 (and records/package-round0.json testResults/guardCommands)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "The browser proof that is this task's entire deliverable is recorded only as prose (\"desktop·mobile 신규 4건 모두 통과\") with no command, project names or output, so completion criterion 5's \"focused desktop/mobile E2E ... 재현 가능하게 기록\" is unmet and criteria 1-3 rest on an unverifiable claim.",
+          "reproduction": "Read docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/records/package-round0.json lines 33-46: testResults holds only the promptRefinerSuggestion unit command and guardCommands holds render/prompt-injection/eslint/git-diff --check; no Playwright invocation appears anywhere in the package. Fix by recording the exact command and per-project result, e.g. `npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts -g \"same-instance fixture mode transitions\" --project=desktop-chromium --project=mobile-chromium` with its 4-passed output.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:109-111 (enterChat, used by both new tests)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The new transitions never exercise the desktop shell: enterChat forces a 390x680 viewport and asserts `mobile-chat-shell`, so a `--project=desktop-chromium` run still renders the mobile composer, making criterion 1's \"desktop 및 mobile Chromium\" coverage nominal (same DOM, different device emulation).",
+          "reproduction": "Run `npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts -g \"same-instance fixture mode transitions\" --project=desktop-chromium` and observe the run passes the `await expect(page.getByTestId(\"mobile-chat-shell\")).toBeVisible()` gate at line 111 because line 109 overrides the project viewport; `desktop-chat-shell` is never queried. Passing `{ viewport: { width: 1366, height: 768 } }` for the desktop case (and asserting the desktop shell) would cover the other composer.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:560-563 and 622-625 (chat-send-button click then chatPosts === 0)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The `chatPosts === 0` assertion may be vacuous rather than evidence that no synthetic text was promoted, because a guest send in this fixture can be blocked before any fetch, in which case the counter could never have been non-zero for any change to the Refiner.",
+          "reproduction": "In the same fixture (no Refiner interaction at all: enterChat with durableChat+modeRefresh, fill the textarea, click chat-send-button) count POSTs matching /\\/api\\/chat(?:$|\\?)/; if that count is also 0, the assertion cannot discriminate a promotion from a blocked send. Asserting the send attempt observably happened (or that the composer reported why it did not) would restore the signal.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/ReviewWorkspaceShell.tsx:289 and :295",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "`promptRefinerOffered ? \"e2e_fixture\" : \"off\"` is written twice, once for the probe's data-mode and once for ChatPageClient's promptRefinerMode, so the attribute the E2E trusts as proof of \"the new server prop applied\" can drift from the prop it stands for.",
+          "reproduction": "Edit line 295 alone to `promptRefinerOffered ? \"off\" : \"off\"`: the new specs still pass their `toHaveAttribute(\"data-mode\", \"e2e_fixture\")` transition checks because line 289 is independent. Hoisting one `const promptRefinerModeProp = ...` above the JSX and using it in both places removes the gap.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Record the exact desktop and mobile Playwright command and its results in the package (records/testResults, not only authorization.md prose) so the same-instance transition, epoch-rejected late response, and draft/Chat-POST assertions are independently reproducible; the code and spec themselves read correct."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:c16950c96b5e80b78ee4222feb4590a7b58e8414a147c399c01c50828e12abe7",
+      "commit": null,
+      "filesChanged": [
+        "components/chat/PromptRefinerFixtureRefresh.tsx",
+        "components/chat/ReviewWorkspaceShell.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/task.json",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "tests/e2e/prompt-refiner-chat-input.spec.ts"
+      ],
+      "changeSummary": "Round 0 four findings addressed: the package executes and records actual desktop/mobile Playwright E2E; desktop uses 1366x768 desktop-chat-shell while mobile uses 390x680 mobile-chat-shell; fixture-on Chat POST is zero and fixture-off positive control observes one POST aborted in the browser before any provider; the probe and ChatPageClient share one promptRefinerMode const. Global typecheck baseline errors remain disclosed in authorization.",
+      "testResults": [
+        {
+          "command": "npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --project=mobile-chromium --grep 'same-instance fixture mode transitions' --workers=1 --retries=0",
+          "passed": true,
+          "output": "  ok 2 [desktop-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:629:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (5.7s)\n  ok 3 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:568:7 › Prompt Refiner same-instance fixture mode transitions › off/on/off/on discards ready and accepted previews without changing the authored draft @ui-risk (6.2s)\n  ok 4 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:629:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (4.4s)\n\n  4 passed (47.0s)",
+          "durationMs": 48521
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1585.1516",
+          "durationMs": 1673
+        },
+        {
+          "rule": "node --import tsx --test --test-reporter=spec tests/client/promptRefinerSuggestionRender.test.tsx",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 853.9794",
+          "durationMs": 943
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 1003
+        },
+        {
+          "rule": "npx eslint components/chat/PromptRefinerFixtureRefresh.tsx components/chat/ReviewWorkspaceShell.tsx tests/e2e/prompt-refiner-chat-input.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3630
+        },
+        {
+          "rule": "git diff --cached --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 57
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:565 (describe \"Prompt Refiner same-instance fixture mode transitions\")",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "Unlike the file's other describe (line 226-231, which skips every project but desktop-chromium), the new describe has no project restriction and derives its shell expectation from `testInfo.project.name === \"desktop-chromium\"`, so a full-suite run also executes it on WebKit `mobile-safari` and on `desktop-compact` (whose native 1366x768 desktop viewport is then overridden to 390x680 and asserted as `mobile-chat-shell`) — neither covered by the recorded two-project evidence.",
+          "reproduction": "npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --grep 'same-instance fixture mode transitions' --list  → lists 8 entries across desktop-chromium, desktop-compact, mobile-safari, mobile-chromium, while package-round1.json testResults records only --project=desktop-chromium --project=mobile-chromium; add a project guard (or drive the shell from viewport) if only Chromium is intended.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:585-596 (blockAndCountChatPosts) and :617-620, :686-689",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The Chat probe only counts POSTs and never reads `route.request().postData()`, so the requirement's \"합성 제안문이 … Chat POST로 승격되지 않아야 한다\" is evidenced only by a count; the one POST the positive control does observe is never checked to carry the authored text rather than the synthetic proposal.",
+          "reproduction": "In the `/\\/api\\/chat(?:$|\\?)/` handler capture `route.request().postData()` into an array before `route.abort(\"aborted\")`, then after the positive-control click assert the captured body contains SOURCE_PROMPT and `not.toContain(synthetic)`; re-run `npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --project=mobile-chromium --grep 'same-instance fixture mode transitions' --workers=1 --retries=0`.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/PromptRefinerFixtureRefresh.tsx:1-17 and components/chat/ReviewWorkspaceShell.tsx:53 (static import)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The fixture-only client component is statically imported by the production chat shell, so its code is emitted into the client bundle of every chat route even though the loopback+cookie gate means it can never render there.",
+          "reproduction": "npm run build; then grep -r \"prompt-refiner-fixture-refresh\" .next/static/chunks — the testid appears in a shipped chunk; a `next/dynamic` import (or a test-only module boundary) keeps it out.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/e2e/prompt-refiner-chat-input.spec.ts:565 (describe \"Prompt Refiner same-instance fixture mode transitions\"); open finding: tests/e2e/prompt-refiner-chat-input.spec.ts:585-596 (blockAndCountChatPosts) and :617-620, :686-689; open finding: components/chat/PromptRefinerFixtureRefresh.tsx:1-17 and components/chat/ReviewWorkspaceShell.tsx:53 (static import)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:26882d26dd20e5c8c0d7f2cd2a5c1d538d0b168c6a448806b3916e051230e2da",
+      "commit": null,
+      "filesChanged": [
+        "components/chat/PromptRefinerFixtureRefresh.tsx",
+        "components/chat/PromptRefinerFixtureRefreshLoader.tsx",
+        "components/chat/ReviewWorkspaceShell.tsx",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/task.json",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "tests/e2e/prompt-refiner-chat-input.spec.ts"
+      ],
+      "changeSummary": "Loopback-only Prompt Refiner same-instance mode regression, explicit Chromium project scope, original-only Chat POST positive control, deferred fixture helper",
+      "testResults": [
+        {
+          "command": "npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --project=mobile-chromium --grep 'same-instance fixture mode transitions' --workers=1 --retries=0",
+          "passed": true,
+          "output": "  ok 2 [desktop-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:644:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (5.0s)\n  ok 3 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:580:7 › Prompt Refiner same-instance fixture mode transitions › off/on/off/on discards ready and accepted previews without changing the authored draft @ui-risk (5.9s)\n  ok 4 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:644:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (4.7s)\n\n  4 passed (51.1s)",
+          "durationMs": 52453
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 394.2071",
+          "durationMs": 477
+        },
+        {
+          "rule": "node --import tsx --test --test-reporter=spec tests/client/promptRefinerSuggestionRender.test.tsx",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 420.9646",
+          "durationMs": 496
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 766
+        },
+        {
+          "rule": "npx eslint components/chat/PromptRefinerFixtureRefresh.tsx components/chat/PromptRefinerFixtureRefreshLoader.tsx components/chat/ReviewWorkspaceShell.tsx tests/e2e/prompt-refiner-chat-input.spec.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3779
+        },
+        {
+          "rule": "git diff --cached --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 51
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:237 (\"default-off server decision renders no disabled teaser\")",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The only assertion that the fixture refresh control is absent runs with neither `__tomverse_e2e_prompt_refiner` nor `__tomverse_e2e_prompt_refiner_mode_refresh` set, so the \"separate cookie\" half of completion criterion 4 (the loader must not render for a refiner-enabled fixture session that lacks the second cookie) is never exercised in the browser.",
+          "reproduction": "Add `await expect(page.getByTestId(\"prompt-refiner-fixture-refresh\")).toHaveCount(0);` to the existing `enterChat(page, { offered: true })` test at tests/e2e/prompt-refiner-chat-input.spec.ts:241 and run `npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --grep 'both explicit decisions'`; it passes today (ReviewWorkspaceShell.tsx:211-212 keys the loader on the second cookie only), which is exactly the fact no current test pins.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:590-598 (blockAndCountChatPosts, `**/api/products/chat/conversations` handler)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The probe aborts every non-POST request to `/api/products/chat/conversations` instead of `route.fallback()`-ing, so any query-less GET to that path is killed by the probe rather than served by the underlying authenticated fixture; today the URL glob happens not to match the app's query-bearing list GET, which is why `unexpectedCreateMethods()` is empty.",
+          "reproduction": "Inside either new test, after `blockAndCountChatPosts`, run `await page.evaluate(() => fetch(\"/api/products/chat/conversations\").catch(() => null));` then `expect(chatProbe.unexpectedCreateMethods()).toEqual([])` — it now fails with `[\"GET\"]`, showing the handler aborts rather than delegating. Replacing `await route.abort(\"aborted\")` with `await route.fallback()` for non-POST keeps the POST accounting and removes the hazard.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/e2e/prompt-refiner-chat-input.spec.ts:237 (\"default-off server decision renders no disabled teaser\"); open finding: tests/e2e/prompt-refiner-chat-input.spec.ts:590-598 (blockAndCountChatPosts, `**/api/products/chat/conversations` handler)) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:26882d26dd20e5c8c0d7f2cd2a5c1d538d0b168c6a448806b3916e051230e2da",
+  "commit": null,
+  "changeSummary": "Loopback-only Prompt Refiner same-instance mode regression, explicit Chromium project scope, original-only Chat POST positive control, deferred fixture helper",
+  "testResults": [
+    {
+      "command": "npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --project=mobile-chromium --grep 'same-instance fixture mode transitions' --workers=1 --retries=0",
+      "passed": true,
+      "output": "  ok 2 [desktop-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:644:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (5.0s)\n  ok 3 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:580:7 › Prompt Refiner same-instance fixture mode transitions › off/on/off/on discards ready and accepted previews without changing the authored draft @ui-risk (5.9s)\n  ok 4 [mobile-chromium] › tests\\e2e\\prompt-refiner-chat-input.spec.ts:644:7 › Prompt Refiner same-instance fixture mode transitions › a pending response stays stale after off/on while the same Chat instance survives @ui-risk (4.7s)\n\n  4 passed (51.1s)",
+      "durationMs": 52453
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 394.2071",
+      "durationMs": 477
+    },
+    {
+      "rule": "node --import tsx --test --test-reporter=spec tests/client/promptRefinerSuggestionRender.test.tsx",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 420.9646",
+      "durationMs": 496
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 766
+    },
+    {
+      "rule": "npx eslint components/chat/PromptRefinerFixtureRefresh.tsx components/chat/PromptRefinerFixtureRefreshLoader.tsx components/chat/ReviewWorkspaceShell.tsx tests/e2e/prompt-refiner-chat-input.spec.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3779
+    },
+    {
+      "rule": "git diff --cached --check",
+      "passed": true,
+      "detail": "",
+      "durationMs": 51
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:237 (\"default-off server decision renders no disabled teaser\")",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The only assertion that the fixture refresh control is absent runs with neither `__tomverse_e2e_prompt_refiner` nor `__tomverse_e2e_prompt_refiner_mode_refresh` set, so the \"separate cookie\" half of completion criterion 4 (the loader must not render for a refiner-enabled fixture session that lacks the second cookie) is never exercised in the browser.",
+      "reproduction": "Add `await expect(page.getByTestId(\"prompt-refiner-fixture-refresh\")).toHaveCount(0);` to the existing `enterChat(page, { offered: true })` test at tests/e2e/prompt-refiner-chat-input.spec.ts:241 and run `npx playwright test tests/e2e/prompt-refiner-chat-input.spec.ts --project=desktop-chromium --grep 'both explicit decisions'`; it passes today (ReviewWorkspaceShell.tsx:211-212 keys the loader on the second cookie only), which is exactly the fact no current test pins.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "tests/e2e/prompt-refiner-chat-input.spec.ts:590-598 (blockAndCountChatPosts, `**/api/products/chat/conversations` handler)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The probe aborts every non-POST request to `/api/products/chat/conversations` instead of `route.fallback()`-ing, so any query-less GET to that path is killed by the probe rather than served by the underlying authenticated fixture; today the URL glob happens not to match the app's query-bearing list GET, which is why `unexpectedCreateMethods()` is empty.",
+      "reproduction": "Inside either new test, after `blockAndCountChatPosts`, run `await page.evaluate(() => fetch(\"/api/products/chat/conversations\").catch(() => null));` then `expect(chatProbe.unexpectedCreateMethods()).toEqual([])` — it now fails with `[\"GET\"]`, showing the handler aborts rather than delegating. Replacing `await route.abort(\"aborted\")` with `await route.fallback()` for non-POST keeps the POST accounting and removes the hazard.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 2 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-21T14:06:15.522Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "96a6990ee82cfa624affefac43e711a5244cd9ae",
+  "worktreeDirty": true,
+  "filesChanged": [
+    "components/chat/PromptRefinerFixtureRefresh.tsx",
+    "components/chat/PromptRefinerFixtureRefreshLoader.tsx",
+    "components/chat/ReviewWorkspaceShell.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-same-instance-fixture-v1/task.json",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "tests/e2e/prompt-refiner-chat-input.spec.ts"
+  ]
+}

@@ -1,0 +1,21 @@
+-- Indexes the lookup the expiry reconciliation makes while holding a lock.
+--
+-- Issue: https://github.com/mposition/Tomverse/issues/1285
+--
+-- `reconcileExpiredChatCreditReservations` settles an expired reservation as a
+-- full refund unless a deep research job left a handoff saying the work really
+-- ran. That question is now asked inside the settlement's own transaction,
+-- after `pg_advisory_xact_lock` -- which is correct, and which is also the
+-- worst possible place for a sequential scan.
+--
+-- `PerplexityAsyncJob.reservationId` had no index. The sweep takes up to a
+-- thousand expired reservations per pass, and the table grows with every deep
+-- research request ever made, so the scan gets slower as history accumulates
+-- while a lock that blocks every settlement of that reservation is held.
+--
+-- Not unique. One reservation has one job today, but the column carries no
+-- such constraint and inventing one here would turn a future retry that wrote
+-- a second row into a write failure rather than a lookup this code can decide
+-- about.
+CREATE INDEX "PerplexityAsyncJob_reservationId_idx"
+  ON "PerplexityAsyncJob"("reservationId");

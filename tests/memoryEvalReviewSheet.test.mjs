@@ -23,11 +23,32 @@ const ALL_BATCHES = [...CANDIDATE_BATCHES, ...ADOPTED_BATCHES];
  */
 const isDurable = (batch) =>
     batch.cases.every((testCase) => testCase.category === "durable_facts");
+/**
+ * A durable batch whose committed record is a 20% sample.
+ *
+ * Not simply the first one any more. docs/ops/memory-extraction-eval-dataset.md §6.3 sends a batch back to full review
+ * when the drafting setup changes, and batch-101 — the first successor batch —
+ * is recorded that way, so its sheet legitimately carries a verdict slot per
+ * case. Picking the first durable batch made this test assert the sample rule
+ * against the one batch the rule exempts.
+ */
 const durableBatch = () => {
-    const batch = ALL_BATCHES.find(isDurable);
-    assert.ok(batch, "expected a durable_facts batch to exist");
+    const batch = ALL_BATCHES.filter(isDurable).find(
+        (candidate) =>
+            parseBatchRecord(readFileSync(candidate.record, "utf8")).cases
+                .length < candidate.cases.length
+    );
+    assert.ok(batch, "expected a sampled durable_facts batch to exist");
     return batch;
 };
+
+/** One recorded as full review, if the repository has one. */
+const fullReviewDurableBatch = () =>
+    ALL_BATCHES.filter(isDurable).find(
+        (candidate) =>
+            parseBatchRecord(readFileSync(candidate.record, "utf8")).cases
+                .length === candidate.cases.length
+    );
 const criticalBatch = () => ALL_BATCHES.find((batch) => !isDurable(batch));
 
 /**
@@ -183,4 +204,21 @@ test("--write refuses to overwrite a sheet that already carries a verdict", () =
             `${batch.id}: --write overwrote a reviewed record`
         );
     }
+});
+
+test("a batch recorded as full review keeps a verdict slot per case", () => {
+    // The other side of the sample rule, and the reason it is not decoration:
+    // docs/ops/memory-extraction-eval-dataset.md §6.3 returns a batch to full review when the drafting setup changes, and
+    // a generator that quietly re-sampled it would erase that.
+    const batch = fullReviewDurableBatch();
+    if (!batch) return;
+    const record = parseBatchRecord(readFileSync(batch.record, "utf8"));
+    assert.equal(record.cases.length, batch.cases.length);
+    const rendered = sheet(batch.id);
+    const verdictTables = rendered.match(/\| 판정 \| 사유/g) ?? [];
+    assert.equal(
+        verdictTables.length,
+        batch.cases.length,
+        "regenerating a full-review sheet must not shrink it back to a sample"
+    );
 });

@@ -73,10 +73,25 @@ const ALLOWED_LINKAGE_ROLES = new Set(["subject", "actor"]);
 // here, so the reference cannot point at a table nothing grades. Saying `none`
 // for them would have been false, and `untyped_target` describes a pair of
 // columns they do not have.
+//
+// `child_rows` is the mirror of `parent_row` and is checkable the same way:
+// EmailSendApproval is about the accounts in its cohort, and the cohort is a
+// real table with a real foreign key back to it, so the reference names both
+// and the child must be registered here. `none` would have been false --
+// "this row is about nobody" -- and `parent_row` points the wrong way.
+//
+// `unverified` is the honest state when nobody has established the path yet.
+// It is not an exemption: the row is still counted, still blocks PRIVACY-01/02
+// through its own unverified axes, and still appears in the undecided list. It
+// exists because the alternative on 2026-09-21 was twenty-one invented
+// reference paths, and a registry whose value is that it holds no claims
+// cannot be filled with plausible ones.
 const ALLOWED_SUBJECT_REFERENCE_KINDS = new Set([
   "untyped_target",
   "parent_row",
+  "child_rows",
   "none",
+  "unverified",
 ]);
 const ALLOWED_SUBJECT_ACTIONS = new Set(["delete", "retain"]);
 
@@ -99,7 +114,13 @@ const ALLOWED_EXPORT_STATES = new Set([
 // deleted their own account: the relation was onDelete: SetNull, which cleared
 // the id and left the address beside it.
 const DIRECT_IDENTIFIER_COLUMNS = ["userId", "ownerId", "subjectKey", "traceId"];
-const DIRECT_IDENTIFIER_PATTERN = /^(email|.*Email)$/;
+// 2026-09-22: and `emailAddress`. The pattern read `email` or something
+// ending in `Email`, which let `SuppressionCause` and `SuppressionEntry` hold
+// a mailbox outside this registry -- the two tables whose whole purpose is to
+// remember an address after the account is gone. A name is not a reason, so
+// the pattern now matches the word wherever it sits rather than only where it
+// happened to sit in the tables somebody had already thought about.
+const DIRECT_IDENTIFIER_PATTERN = /^(.*[Ee]mail([Aa]ddress)?)$/;
 
 const isDirectIdentifier = (column) =>
   DIRECT_IDENTIFIER_COLUMNS.includes(column) || DIRECT_IDENTIFIER_PATTERN.test(column);
@@ -118,7 +139,35 @@ const errors = [];
 const fail = (message) => errors.push(message);
 
 /** parent_row references, checked once every row has been read. */
+/**
+ * The scalar columns a child model uses to point at a given parent.
+ *
+ * Read from the relation attribute rather than from a naming convention:
+ * `@relation(fields: [approvalId], references: [id])` on a field typed
+ * `EmailSendApproval` is what makes `approvalId` a foreign key to it, and
+ * nothing about the column's name says so.
+ */
+const childForeignKeys = (childModel, parentModel) => {
+  const keys = new Set();
+  const body = modelBodies.get(childModel);
+  if (!body) return keys;
+  const pattern = new RegExp(
+    String.raw`^\s{2}\w+\s+${parentModel}(\[\])?\??\s+@relation\(([^)]*)\)`,
+    "gm"
+  );
+  for (const [, , attributes] of body.matchAll(pattern)) {
+    const fields = /fields:\s*\[([^\]]*)\]/.exec(attributes);
+    if (!fields) continue;
+    for (const field of fields[1].split(",")) {
+      const name = field.trim();
+      if (name) keys.add(name);
+    }
+  }
+  return keys;
+};
+
 const parentReferences = [];
+const childReferences = [];
 
 const isFilledString = (value) => typeof value === "string" && value.trim() !== "";
 
@@ -127,6 +176,8 @@ const models = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)].map(([, na
   name,
   body,
 }));
+
+const modelBodies = new Map(models.map(({ name, body }) => [name, body]));
 
 // A model holds user data when it names a user column or relates to User.
 //
@@ -162,10 +213,48 @@ const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map
 // that no script can derive, so widening it would have failed the build on a
 // governance question. Both are registered now as `unverified` on both axes,
 // which records the outstanding decision without letting the table escape.
-const USER_COLUMN = /^\s{2}\w*[Uu]serId\s+String\b/m;
+// `approvedBy` is also a durable operator identifier. The Prompt Refiner stage
+// deliberately has no User relation: deleting an operator must not rewrite the
+// immutable approval evidence. Treat that exact column as user data so future
+// approval tables cannot escape the registry merely by choosing a different
+// name for the actor id.
+//
+// 2026-09-21: the exact name was the hole. `approvedBy` matched and
+// `approvedById`/`approvedByEmail` did not, so EmailSendApproval and
+// EmailSendApprovalRevocation -- both holding an operator's id *and* address,
+// both immutable, both deliberately without a User relation for the reason
+// above -- passed the sweep as if they held nothing.
+//
+// What replaces the one spelling is the address, not a wider name match on the
+// id. A bare `<verb>ById` is ambiguous: `MobileRefreshRotation.supersededById`
+// points at another token row and `AmuxExecutionAttempt.endedBy` names a
+// worker, and reading either as a person would put rows in this registry that
+// hold none. An address is never ambiguous, so that is what the rule reads --
+// and it reads *every* address column, not only `<verb>ByEmail`. Scoping it to
+// that one shape was the same mistake one size larger: it would have left
+// `ModelLifecycleWorkItem.reviewerEmail`, `ownerEmail` and
+// `ModelLifecycleWorkItemEvent.actorEmail` outside the registry while looking
+// like it had closed the hole.
+//
+// The pattern is the one `isDirectIdentifier` already uses for minimisation,
+// so a column this file calls a direct identifier in one place cannot be
+// invisible in the other.
+const ADDRESS_COLUMN = /^\s{2}(\w+)\s+String\b/gm;
+const holdsActorIdentity = (body) => {
+  ADDRESS_COLUMN.lastIndex = 0;
+  let match;
+  while ((match = ADDRESS_COLUMN.exec(body)) !== null) {
+    if (DIRECT_IDENTIFIER_PATTERN.test(match[1])) return true;
+  }
+  return false;
+};
+const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
 const holdsUserData = new Set(
   models
-    .filter(({ body }) => USER_LINK.test(body) || USER_COLUMN.test(body))
+    .filter(
+      ({ body }) =>
+        USER_LINK.test(body) || USER_COLUMN.test(body) || holdsActorIdentity(body)
+    )
     .map(({ name }) => name)
 );
 // User does not point at a user; it is one. The derivation cannot see that, and
@@ -311,6 +400,35 @@ for (const row of registry.domains) {
         fail(`${model}: subjectReference.parentModel is missing.`);
       } else {
         parentReferences.push({ model, parentModel: reference.parentModel });
+      }
+    } else if (reference.kind === "child_rows") {
+      const childModel = reference.childModel;
+      const childColumn = reference.childColumn;
+      if (!isFilledString(childModel)) {
+        fail(`${model}: subjectReference.childModel is missing.`);
+      } else if (!columnsByModel.has(childModel)) {
+        fail(
+          `${model}: subjectReference.childModel names "${childModel}", which is not a model.`
+        );
+      } else if (!isFilledString(childColumn)) {
+        fail(`${model}: subjectReference.childColumn is missing.`);
+      } else if (!(columnsByModel.get(childModel) ?? new Map()).has(childColumn)) {
+        fail(
+          `${model}: subjectReference.childColumn names "${childColumn}", which is not a ` +
+            `column of ${childModel}.`
+        );
+      } else if (!childForeignKeys(childModel, model).has(childColumn)) {
+        // Existing is not the same as pointing here. A column named
+        // `userId` exists on plenty of children and points at User, and a
+        // reference through it would claim a path back to this row that the
+        // database does not have. The column has to be the scalar a
+        // `@relation(fields: [...])` on the child uses to reach this model.
+        fail(
+          `${model}: subjectReference.childColumn "${childColumn}" is not a foreign key ` +
+            `from ${childModel} to ${model}, so it does not reach the subject it claims to.`
+        );
+      } else {
+        childReferences.push({ model, childModel });
       }
     } else if (reference.kind === "untyped_target") {
       const columns = columnsByModel.get(model) ?? new Map();
@@ -613,6 +731,15 @@ for (const { model, parentModel } of parentReferences) {
   }
 }
 
+for (const { model, childModel } of childReferences) {
+  if (!registered.has(childModel)) {
+    fail(
+      `${model}: subjectReference.childModel "${childModel}" is not in the registry, so the ` +
+        "subject is reached through a table whose own deletion path is unrecorded."
+    );
+  }
+}
+
 // The promise itself: a new table cannot escape the privacy workflows.
 //
 // Widened on 2026-08-27 from the relation rule to the column rule, which is the
@@ -624,6 +751,15 @@ for (const { model, parentModel } of parentReferences) {
 // letting the table escape. With those two in, the delta between the two rules
 // is empty, so the narrower rule was protecting nothing except the next table
 // to drop a relation while keeping the column.
+// 2026-09-21: the rule above named twenty models that had been holding an
+// address outside this registry. They were listed in an exemption set for one
+// review round, on the argument that a row is a decision and twenty of them
+// were not a reviewer's to invent. The review ruled that it was suppression,
+// and it was right: an exempted model leaves the registry's own counts and its
+// undecided list, so the gap becomes invisible again -- which is the failure
+// this whole derivation exists to prevent. `unverified` is what this registry
+// says when the decision is outstanding, it costs no invented legal basis, and
+// it keeps the table in every count. They are registered that way.
 for (const model of holdsUserData) {
   if (!registered.has(model)) {
     fail(

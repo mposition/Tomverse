@@ -1,0 +1,37 @@
+{
+  "taskId": "prompt-refiner-fixture-handoff-v2",
+  "requirement": "종결된 Prompt Refiner fixture handoff v1 검토의 미해결 지적 6건을 수정하고 같은 fixture-only 경계에서 다시 독립 검토한다. 기존 on_hold 기록은 수정하거나 지우지 않는다. 준비된 제안·정확한 사용자 원문·scope·decision·provenance를 재검증하고 stale·위조·중복을 거부한다. 수락은 읽기 전용 합성 미리보기만 만들고 controlled composer·영속 draft·Message·Image seed·Router·provider로 전달하지 않는다. fixture mode의 Chat submit은 모든 경로에서 차단한다. 제품 mode, 유료 공급자 호출, flag/rollout, stage/run 승인 및 실제 사용자 traffic은 활성화하지 않는다. author는 Codex, reviewer는 저장된 Claude Code Max 구독 CLI이며 사용자가 승인한 --skip-preflight 예외만 사용한다.",
+  "completionCriteria": [
+    "v1 round 2의 여섯 지적을 source·test·UI 계약·승인 기록에서 각각 disposition한다. 브라우저 E2E와 unit에서 실제 검증한 경계를 구분해 서술하고, 검토자가 재현 가능하게 한다.",
+    "handoff validator는 정확한 원문, 구조화된 browser scope, decision별 원문/실행문 분리와 request/suggestion/version/inputScope provenance를 대조하고, stale·위조·중복을 fail-closed한다.",
+    "fixture 채택은 합성문을 composer나 영속 draft에 쓰지 않고 읽기 전용 미리보기만 남긴다. 원문 편집·scope 변경·mode 변경 시 미리보기를 폐기하고 같은 제안의 재소비를 막는다.",
+    "fixture mode에서는 kept-original, accepted, restored draft, override submit, 대화 전환, Image handoff를 통해 Chat 또는 Image 제품 dispatch로 빠져나가는 경로가 없다. 제품 mode 동작과 기존 일반 Chat은 바꾸지 않는다.",
+    "7개 언어 UI의 fixture 미리보기 문구는 실제 동작을 정확히 설명하고, 순수 unit·React render·브라우저 E2E가 provenance, scope, 중복, 영속 draft 및 submit 경계를 확인한다.",
+    "검토 diff는 exact base 59e77abc8452bd30160e974752b2687cbc030a2d 이후의 변경된 제품·테스트·UI 계약 경로와 v1 및 v2 task/승인 기록만 포함한다. 검토 산출물 디렉터리만 제외하고 source나 test를 제외하지 않는다.",
+    "focused test 및 guard는 실패 없이 통과한다. Windows 로컬 typecheck의 base Next 생성 assistant-profiles export 실패는 별도 환경 관찰로 기록하고 검토를 위한 실패 gate 우회로 취급하지 않는다.",
+    "Claude는 요구사항과 diff를 먼저, 테스트 기록과 작성자 설명을 그다음 읽고 package digest에 결속된 verdict를 남긴다. Read/Grep/Glob only, strict MCP, 저장된 구독 로그인과 --skip-preflight만 허용한다. Anthropic API key fallback, 실패 검사 우회, 유료 공급자 호출, 자동 병합·배포는 허용하지 않는다."
+  ],
+  "baseCommit": "59e77abc8452bd30160e974752b2687cbc030a2d",
+  "writableScope": [
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "components/chat/ChatInput.tsx",
+    "components/chat/DesktopChatShell.tsx",
+    "components/chat/MobileChatShell.tsx",
+    "components/chat/PromptRefinerSuggestionPanel.tsx",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerCopy.ts",
+    "lib/promptRefinerSuggestion.ts",
+    "tests/client/promptRefinerSuggestionRender.test.tsx",
+    "tests/e2e/prompt-refiner-chat-input.spec.ts",
+    "tests/promptRefinerSuggestion.test.mjs",
+    "docs/ops/cross-review/packages/prompt-refiner-fixture-handoff-v1.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-fixture-handoff-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-fixture-handoff-v2.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-fixture-handoff-v2.authorization.md"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-fixture-handoff-v1",
+    "exchange": "artifacts/cross-review/prompt-refiner-fixture-handoff-v1/exchange.json"
+  }
+}

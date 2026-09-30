@@ -94,7 +94,19 @@ export async function deliverEmailOnce(
  * name the recipient, nothing parses it, and it was ending up in a stored
  * `lastError`.
  */
-export async function sendTransactionalEmail(input: SendEmailInput) {
+export async function sendTransactionalEmail(
+  input: SendEmailInput & {
+    /**
+     * Passed through to the provider call, where it becomes an
+     * `AbortSignal.timeout`. A caller holding the address lock across this
+     * call has to be able to bound it: without a signal the request can
+     * outlive the transaction that protects it, and a message would then be
+     * submitted after the lock was released (docs/policy/email-notifications.md
+     * section 9.8).
+     */
+    timeoutMs?: number;
+  }
+) {
   if (!input.to) {
     console.warn(
       JSON.stringify({

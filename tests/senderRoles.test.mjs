@@ -350,20 +350,26 @@ test("the templates that had to move are the ones that moved", () => {
   assert.equal(roleOf("account_welcome"), "general");
 });
 
-test("the login-code sender is named identically wherever it is written", () => {
-  // lib/emailLoginEmails.ts names the role rather than importing it, because
-  // lib/emailTemplateDefinitions.ts imports *it* for the renderer and a cycle
-  // for one string is the worse trade. This is what stops the two drifting.
-  const definition = allTemplateDefinitions().find(
-    (entry) => entry.key === "auth_login_code"
-  );
+test("the login emails name no sender role of their own", () => {
+  // They used to: the file sent as well as rendered, so it named the role and
+  // lib/emailTemplateDefinitions.ts named it again, and this test existed to
+  // stop the two drifting. The file only renders now -- the credential lane
+  // carries the login code and the standard lane carries the login-method
+  // notices -- so the role is the registry's, in one place, and there is
+  // nothing left to drift against (docs/policy/email-notifications.md v23).
   const source = readFileSync("lib/emailLoginEmails.ts", "utf8");
-  const declared = [...source.matchAll(/senderRole:\s*"([a-z]+)"/g)].map(
-    (match) => match[1]
-  );
-  assert.ok(declared.length > 0, "the login emails name no sender role");
-  for (const role of declared) {
-    assert.equal(role, definition.senderRole);
+  assert.deepEqual([...source.matchAll(/senderRole:\s*"([a-z]+)"/g)], []);
+
+  // And the roles those templates go out as are the ones the contract names: a
+  // login code and a login-method change are both security.
+  for (const key of [
+    "auth_login_code",
+    "login_method_linked",
+    "login_method_unlinked",
+  ]) {
+    const definition = allTemplateDefinitions().find((entry) => entry.key === key);
+    assert.ok(definition, key);
+    assert.equal(definition.senderRole, "security", key);
   }
 });
 
@@ -392,20 +398,22 @@ test("every notification kind names a sender, and the right one", () => {
   }
 });
 
-test("both lanes log the sender they used, with no credential and no recipient", () => {
+test("every customer-facing lane logs the sender it used, with no credential or recipient", () => {
   // The lanes record an outcome on a row; the wire call logs nothing. Before
   // this a message that left as the wrong sender left no trace of having done
   // so, which is the question this whole axis exists to make answerable.
   for (const [file, event] of [
     ["lib/standardEmailLane.ts", "standard_email_sent"],
     ["lib/credentialEmailLane.ts", "credential_email_sent"],
+    ["lib/notificationDeliveries.ts", "notification_email_sent"],
   ]) {
     const source = readFileSync(file, "utf8");
-    const block = source.slice(
-      source.indexOf(`event: "${event}"`),
-      source.indexOf(`event: "${event}"`) + 700
-    );
-    assert.ok(block.length > 0, `${file} logs no ${event}`);
+    const eventStart = source.indexOf(`event: "${event}"`);
+    assert.notEqual(eventStart, -1, `${file} logs no ${event}`);
+    const block = source
+      .slice(eventStart)
+      .match(/^[\s\S]*?\n[ \t]*}\)[ \t]*\r?\n[ \t]*\);/)?.[0];
+    assert.ok(block, `${file} has no bounded ${event} log object`);
     assert.match(block, /stream:/, `${event} names no stream`);
     assert.match(block, /senderRole:/, `${event} names no sender role`);
     // Neither the address it went to nor anything rendered. On the credential

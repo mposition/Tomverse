@@ -38,7 +38,7 @@ export const infoPages = {
     en: {
       eyebrow: "Legal",
       title: "Terms and Conditions",
-      description: "These terms govern free and paid use of Tomverse Review, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
+      description: "These terms govern free and paid use of Tomverse, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
       updated: "Last updated: July 15, 2026",
       sections: [
         {
@@ -95,7 +95,7 @@ export const infoPages = {
     ko: {
       eyebrow: "법적 고지",
       title: "이용약관",
-      description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse Review의 무료·유료 서비스 이용 조건입니다.",
+      description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse의 무료·유료 서비스 이용 조건입니다.",
       updated: "최종 업데이트: 2026년 7월 15일",
       sections: [
         {
@@ -152,7 +152,7 @@ export const infoPages = {
     zh: {
       eyebrow: "法律",
       title: "条款与条件",
-      description: "这些条款适用于 Tomverse Review 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
+      description: "这些条款适用于 Tomverse 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
       updated: "最后更新：2026 年 7 月 15 日",
       sections: [
         { title: "协议、运营方和联系方式", body: "Tomverse 是 tomverse.app 使用的服务和运营名称（‘我们’），旗下运营 Tomverse Review 等 Tomverse 产品。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },

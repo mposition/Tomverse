@@ -1,0 +1,301 @@
+# Independent review — task prompt-refiner-shadow-evidence-gate-followup-v2, round 2
+
+Review the change against the original requirement below. Read the requirement and the diff before anything else.
+Do not take the author's summary as a description of what the change does; the diff is.
+
+## Requirement (original)
+
+종결된 prompt-refiner-shadow-evidence-gate-v1 exchange의 round 2에 남은 재현 가능한 두 finding을 수정한다. unknown-only case shortfall은 case_evidence_incomplete로, 실제 case failure는 case_evidence_failed로 분리하고 혼합 상태를 회귀 테스트한다. evidence spec duplicate-key 검사는 실제 duplicate parser branch를 실행함을 직접 증명한다. 기존 provider-independent content-free 경계, frozen corpus 결속, authority false 값과 비용·UI·Router 비승인 상태는 유지한다. author는 Codex, reviewer는 Claude Code Max이며 사용자 승인 --skip-preflight 예외 아래 Read/Grep/Glob only로 검토한다.
+
+## Completion criteria
+
+- unknown-only case shortfall은 case_evidence_incomplete만 기록하고 case_evidence_failed를 기록하지 않는다.
+- 실제 failed 또는 suggested evidence failure는 case_evidence_failed를 기록하며 incomplete와 구분한다.
+- spec duplicate-key fixture가 syntactically valid한 중복 key를 포함하고 parseBenchmarkJson의 json_duplicate_key branch를 직접 확인한다.
+- 기존 evidence core 집중 테스트, 전체 unit, TypeScript, 수정 파일 ESLint, 문서·정책 절 참조, diff whitespace 검사가 통과한다.
+- Claude verdict는 새 package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.
+- provider 호출, Railway 변경, stage/run 승인, 유료 실행, 제품 UI, Router 결합 또는 rollout 권한을 추가하지 않는다.
+
+## Change under review — digest sha256:b9f7524a8ddf8a6dbff38d1bc4b115595c58d3e522c3d4c9778130a7fb651e80, commit 06fa1ab800e66e3ef74b3bf4f3a655726353e8ce
+
+```diff
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.authorization.md
+new file mode 100644
+index 00000000..243ac14b
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.authorization.md
+@@ -0,0 +1,26 @@
++# Prompt Refiner shadow evidence gate 후속 Claude 독립 검토 제한 승인
++
++Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 Tomverse Chat 개발율 100%까지
++권장 순서에 따른 자동 진행, 독립 검토가 필요할 때 Claude 검토, 이 작업의
++`--skip-preflight` 예외와 수정 round 상한 없음을 승인했다. 이 문서는 전자서명,
++검토 통과, provider 실행, 비용 또는 배포 승인이 아니다.
++
++## 적용 범위
++
++- 대상은 [task](prompt-refiner-shadow-evidence-gate-followup-v2.task.json)가 정한
++  exact diff와 후속 수정본의 Claude Code Max 읽기 전용 검토다.
++- 선행 exchange의 `on_hold (revisions_exhausted)`와 원본 verdict는 그대로 보존한다.
++  이번 successor는 두 open finding을 새 digest에서 닫기 위한 별도 기록이다.
++- 새 exchange 상한에 닿아도 finding을 무시하지 않고 사용자의 지시에 따라 새 검토
++  기록으로 계속한다.
++
++## 유지되는 경계
++
++- Claude는 저장된 Claude Code Max `claude.ai` 로그인만 사용한다. child 환경에서
++  `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 제거하고 `loggedIn=true`,
++  `authMethod=claude.ai`, `apiProvider=firstParty`, `subscriptionType=max`를 확인한다.
++- reviewer는 Read/Grep/Glob만 사용하고 shell, write, hook, plugin, skill, MCP를
++  사용할 수 없다. 사용자 승인 `--skip-preflight`만 환경 제약 예외로 기록한다.
++- test/guard 실패 우회, provider/model 호출, Railway 변경, database mutation,
++  stage/run 승인, flag 활성화, 유료 shadow 실행, 제품 UI 또는 Router 활성화는
++  이 검토에 포함하지 않는다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.task.json
+new file mode 100644
+index 00000000..3c31ee54
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.task.json
+@@ -0,0 +1,24 @@
++{
++  "taskId": "prompt-refiner-shadow-evidence-gate-followup-v2",
++  "requirement": "종결된 prompt-refiner-shadow-evidence-gate-v1 exchange의 round 2에 남은 재현 가능한 두 finding을 수정한다. unknown-only case shortfall은 case_evidence_incomplete로, 실제 case failure는 case_evidence_failed로 분리하고 혼합 상태를 회귀 테스트한다. evidence spec duplicate-key 검사는 실제 duplicate parser branch를 실행함을 직접 증명한다. 기존 provider-independent content-free 경계, frozen corpus 결속, authority false 값과 비용·UI·Router 비승인 상태는 유지한다. author는 Codex, reviewer는 Claude Code Max이며 사용자 승인 --skip-preflight 예외 아래 Read/Grep/Glob only로 검토한다.",
++  "completionCriteria": [
++    "unknown-only case shortfall은 case_evidence_incomplete만 기록하고 case_evidence_failed를 기록하지 않는다.",
++    "실제 failed 또는 suggested evidence failure는 case_evidence_failed를 기록하며 incomplete와 구분한다.",
++    "spec duplicate-key fixture가 syntactically valid한 중복 key를 포함하고 parseBenchmarkJson의 json_duplicate_key branch를 직접 확인한다.",
++    "기존 evidence core 집중 테스트, 전체 unit, TypeScript, 수정 파일 ESLint, 문서·정책 절 참조, diff whitespace 검사가 통과한다.",
++    "Claude verdict는 새 package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
++    "provider 호출, Railway 변경, stage/run 승인, 유료 실행, 제품 UI, Router 결합 또는 rollout 권한을 추가하지 않는다."
++  ],
++  "baseCommit": "a08cdaff64ac00004d29b7b8d9ffa4f16bd0c54f",
++  "writableScope": [
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.authorization.md",
++    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.task.json",
++    "lib/promptRefinerShadowEvidenceCore.ts",
++    "tests/promptRefinerShadowEvidenceCore.test.mjs"
++  ],
++  "generatedPaths": [],
++  "supersedes": {
++    "taskId": "prompt-refiner-shadow-evidence-gate-v1",
++    "exchange": "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1/exchange.json"
++  }
++}
+diff --git a/lib/promptRefinerShadowEvidenceCore.ts b/lib/promptRefinerShadowEvidenceCore.ts
+index 0476fe42..fbf242dc 100644
+--- a/lib/promptRefinerShadowEvidenceCore.ts
++++ b/lib/promptRefinerShadowEvidenceCore.ts
+@@ -125,6 +125,7 @@ export type PromptRefinerShadowEvidenceCaseFailure =
+ 
+ export type PromptRefinerShadowEvidenceGateReason =
+     | "case_evidence_failed"
++    | "case_evidence_incomplete"
+     | "injection_evidence_failed"
+     | "injection_evidence_incomplete"
+     | "terminal_failure_present"
+@@ -784,6 +785,12 @@ export function evaluatePromptRefinerShadowEvidence(input: {
+         (item) => item.terminalStatus === "unknown"
+     ).length;
+     const passedCases = cases.filter((item) => item.evidenceStatus === "pass").length;
++    const failedEvidenceCases = cases.filter(
++        (item) => item.evidenceStatus === "fail"
++    ).length;
++    const incompleteEvidenceCases = cases.filter(
++        (item) => item.evidenceStatus === "insufficient_evidence"
++    ).length;
+     const passedInjectionCases = cases.filter(
+         (item) =>
+             item.category === "prompt_injection" && item.evidenceStatus === "pass"
+@@ -813,7 +820,12 @@ export function evaluatePromptRefinerShadowEvidence(input: {
+         durations.length === runCases.length ? Math.max(...durations) : null;
+     const gateReasons: PromptRefinerShadowEvidenceGateReason[] = [];
+     if (passedCases !== spec.thresholds.requiredCasePasses) {
+-        gateReasons.push("case_evidence_failed");
++        if (failedEvidenceCases > 0) {
++            gateReasons.push("case_evidence_failed");
++        }
++        if (incompleteEvidenceCases > 0) {
++            gateReasons.push("case_evidence_incomplete");
++        }
+     }
+     if (passedInjectionCases !== spec.thresholds.requiredInjectionPasses) {
+         if (failedInjectionCases > 0) {
+@@ -822,9 +834,6 @@ export function evaluatePromptRefinerShadowEvidence(input: {
+         if (incompleteInjectionCases > 0) {
+             gateReasons.push("injection_evidence_incomplete");
+         }
+-        if (failedInjectionCases === 0 && incompleteInjectionCases === 0) {
+-            gateReasons.push("injection_evidence_incomplete");
+-        }
+     }
+     if (failedCases > spec.thresholds.maximumFailedCases) {
+         gateReasons.push("terminal_failure_present");
+diff --git a/tests/promptRefinerShadowEvidenceCore.test.mjs b/tests/promptRefinerShadowEvidenceCore.test.mjs
+index f6a5d926..e3346276 100644
+--- a/tests/promptRefinerShadowEvidenceCore.test.mjs
++++ b/tests/promptRefinerShadowEvidenceCore.test.mjs
+@@ -3,11 +3,13 @@ import { readFileSync } from "node:fs";
+ import { join, resolve } from "node:path";
+ import test from "node:test";
+ import {
++  PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES,
+   PROMPT_REFINER_SHADOW_EVIDENCE_SPEC_DIGEST,
+   evaluatePromptRefinerShadowEvidence,
+   parsePromptRefinerShadowEvidenceSpec,
+   validatePromptRefinerShadowEvidenceSpec,
+ } from "../lib/promptRefinerShadowEvidenceCore.ts";
++import { parseBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
+ import {
+   parsePromptRefinerShadowCorpus,
+   promptRefinerShadowCorpusDigest,
+@@ -69,11 +71,19 @@ test("the preregistered evidence spec is strict, bound and complete", () => {
+     2
+   );
+ 
++  const duplicateSpecText = specText.replace(
++    '"purpose": "development-only",',
++    '"purpose": "development-only",\n  "purpose": "development-only",'
++  );
++  assert.throws(
++    () => parseBenchmarkJson(
++      duplicateSpecText,
++      PROMPT_REFINER_SHADOW_EVIDENCE_MAX_SPEC_BYTES
++    ),
++    /json_duplicate_key/
++  );
+   assert.throws(
+-    () => parsePromptRefinerShadowEvidenceSpec(specText.replace(
+-      '"schemaVersion"',
+-      '"schemaVersion"\n, "schemaVersion"'
+-    )),
++    () => parsePromptRefinerShadowEvidenceSpec(duplicateSpecText),
+     /spec_json_invalid/
+   );
+   assert.throws(
+@@ -185,6 +195,7 @@ test("a dangerous directive must remain quoted and explicitly non-executable", (
+     unquotedEvidence.failureReasons.includes("unsafe_injection_framing")
+   );
+   const unquotedBundle = evaluate(unquoted);
++  assert.ok(unquotedBundle.gateReasons.includes("case_evidence_failed"));
+   assert.ok(unquotedBundle.gateReasons.includes("injection_evidence_failed"));
+   assert.equal(
+     unquotedBundle.gateReasons.includes("injection_evidence_incomplete"),
+@@ -221,6 +232,11 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
+   const failedBundle = evaluate(failed);
+   assert.equal(failedBundle.gateOutcome, "fail");
+   assert.ok(failedBundle.gateReasons.includes("terminal_failure_present"));
++  assert.ok(failedBundle.gateReasons.includes("case_evidence_failed"));
++  assert.equal(
++    failedBundle.gateReasons.includes("case_evidence_incomplete"),
++    false
++  );
+   assert.ok(failedBundle.gateReasons.includes("cost_incomplete"));
+   assert.equal(failedBundle.cases[0].failureReasons[0], "not_suggested");
+ 
+@@ -235,10 +251,35 @@ test("terminal failures fail while unknown or incomplete telemetry is insufficie
+   const unknownBundle = evaluate(unknown);
+   assert.equal(unknownBundle.gateOutcome, "insufficient_evidence");
+   assert.ok(unknownBundle.gateReasons.includes("unknown_present"));
++  assert.ok(unknownBundle.gateReasons.includes("case_evidence_incomplete"));
++  assert.equal(
++    unknownBundle.gateReasons.includes("case_evidence_failed"),
++    false
++  );
+   assert.ok(unknownBundle.gateReasons.includes("cost_incomplete"));
+   assert.ok(unknownBundle.gateReasons.includes("latency_incomplete"));
+   assert.deepEqual(unknownBundle.cases[0].failureReasons, []);
+ 
++  const mixed = passingRunCases();
++  mixed[0] = {
++    caseId: mixed[0].caseId,
++    terminalStatus: "failed",
++    refinedPrompt: null,
++    durationMs: 800,
++    costMicroUsd: null,
++  };
++  mixed[1] = {
++    caseId: mixed[1].caseId,
++    terminalStatus: "unknown",
++    refinedPrompt: null,
++    durationMs: null,
++    costMicroUsd: null,
++  };
++  const mixedBundle = evaluate(mixed);
++  assert.equal(mixedBundle.gateOutcome, "fail");
++  assert.ok(mixedBundle.gateReasons.includes("case_evidence_failed"));
++  assert.ok(mixedBundle.gateReasons.includes("case_evidence_incomplete"));
++
+   const unknownInjection = passingRunCases();
+   unknownInjection[2] = {
+     caseId: unknownInjection[2].caseId,
+
+```
+
+## Test results (run by the control program)
+
+- PASS `npm run test:unit` (762423ms)
+  ℹ fail 0
+  ℹ cancelled 0
+  ℹ skipped 0
+  ℹ todo 0
+  ℹ duration_ms 2455.9125
+
+## Guard results (run by the control program)
+
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowEvidenceCore.test.mjs` (403ms)
+  ℹ fail 0
+  ℹ cancelled 0
+  ℹ skipped 0
+  ℹ todo 0
+  ℹ duration_ms 326.1368
+- PASS `npm run typecheck -- --pretty false` (42954ms)
+  > ai-chat-hub@0.1.0 typecheck
+  > next typegen && tsc --noEmit --incremental false --pretty false
+  
+  Generating route types...
+  ✓ Types generated successfully
+- PASS `npx eslint lib/promptRefinerShadowEvidenceCore.ts tests/promptRefinerShadowEvidenceCore.test.mjs` (3060ms)
+- PASS `npm run check:doc-references` (1449ms)
+  > ai-chat-hub@0.1.0 check:doc-references
+  > node scripts/check-doc-references.mjs
+  
+  Document reference check passed: 903 referenced path(s) across 118 instruction document(s), and 1013 path(s) named by comments across 3057 source file(s), all present.
+- PASS `npm run check:policy-section-references` (1102ms)
+  > ai-chat-hub@0.1.0 check:policy-section-references
+  > node scripts/check-policy-section-references.mjs
+  
+  Policy section reference check passed: 4545 citation(s) against 38 policy document(s). 2978 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 233 predate this change).
+- PASS `git diff --check a08cdaff64ac00004d29b7b8d9ffa4f16bd0c54f` (57ms)
+
+## Findings from the previous round (check each was addressed)
+
+- [nit/judgement] tests/promptRefinerShadowEvidenceCore.test.mjs:197-202: The second completion criterion names suggested-evidence failures as a source of `case_evidence_failed`, but the only assertions on that reason use terminal `failed` rows (:234, :279); the suggested-but-failing path at :197-202 asserts only the injection reasons even though the same bundle also carries `case_evidence_failed`.
+
+## Author's account (read last; a claim, not a finding)
+
+Summary: Successor round 2 pins that a suggested-but-failing injection case emits the general case_evidence_failed reason as well as injection_evidence_failed, closing the final open round-1 coverage finding without changing runtime behavior or authority.
+
+## Answer format
+
+Reply with exactly one JSON document and nothing else:
+
+```json
+{
+  "taskId": "prompt-refiner-shadow-evidence-gate-followup-v2",
+  "round": 2,
+  "reviewedDigest": "sha256:b9f7524a8ddf8a6dbff38d1bc4b115595c58d3e522c3d4c9778130a7fb651e80",
+  "conclusion": "approve | request_changes | blocked",
+  "findings": [
+    {
+      "location": "path:line or symbol",
+      "severity": "error | warning | nit",
+      "basis": "evidence | preference | judgement",
+      "claim": "what is wrong, in one sentence",
+      "reproduction": "how to see it: a command, or an input and its expected output (required for the finding to be acted on)"
+    }
+  ],
+  "nextAction": "one sentence"
+}
+```
+
+`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; any other finding is acted on only with a reproduction, and without one it is recorded and the current version stands.

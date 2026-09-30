@@ -39,6 +39,15 @@ export type BusinessIdentity = {
   legalName?: string | null;
   postalAddress?: string | null;
   contactEmail?: string | null;
+  /**
+   * A telephone number the recipient can reach the sender on.
+   *
+   * Korea's 시행령 별표 6 names it alongside the sender's name, address and
+   * email, so the KR profile asks for it (draft section 7.7). Nothing else
+   * does, and it is not in the common footer: a value that exists only to
+   * satisfy one jurisdiction does not belong in every message.
+   */
+  contactPhone?: string | null;
   /** 사업자등록번호. Korea. */
   businessRegistrationNumber?: string | null;
   /** 통신판매업 신고번호. Korea. */
@@ -66,6 +75,13 @@ export type FooterInput = {
   unsubscribeUrl?: string | null;
   /** Why this person is receiving it (C4). One short clause. */
   reasonLine?: string | null;
+  /**
+   * The languages the unsubscribe notice must also appear in, whatever the
+   * message's own language (draft section 7.7: Korea's 별표 6 asks for Korean
+   * and English). The message's language comes first; the rest follow in the
+   * order given. Absent or empty: the notice is in the message's language only.
+   */
+  unsubscribeNoticeLanguages?: readonly string[];
 };
 
 export type FooterResult =
@@ -88,6 +104,7 @@ const normalizeLanguage = (value: string | null | undefined): FooterLanguage =>
   LANGUAGES.includes(value as FooterLanguage) ? (value as FooterLanguage) : "en";
 
 type FooterCopy = {
+  phone: string;
   businessRegistration: string;
   mailOrderRegistration: string;
   abn: string;
@@ -109,6 +126,7 @@ type FooterCopy = {
  */
 const COPY: Record<FooterLanguage, FooterCopy> = {
   en: {
+    phone: "Phone",
     businessRegistration: "Business registration number",
     mailOrderRegistration: "Mail-order business registration number",
     abn: "ABN",
@@ -120,6 +138,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "You are receiving this because you agreed to receive it from your account settings.",
   },
   ko: {
+    phone: "전화번호",
     businessRegistration: "사업자등록번호",
     mailOrderRegistration: "통신판매업 신고번호",
     abn: "ABN",
@@ -131,6 +150,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "회원님이 계정 설정에서 수신에 동의하셨기 때문에 발송되었습니다.",
   },
   zh: {
+    phone: "电话",
     businessRegistration: "营业执照号码",
     mailOrderRegistration: "邮购业务登记号",
     abn: "ABN",
@@ -141,6 +161,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
     defaultReason: "您收到此邮件是因为您在账户设置中同意接收。",
   },
   fr: {
+    phone: "Téléphone",
     businessRegistration: "Numéro d'enregistrement de l'entreprise",
     mailOrderRegistration: "Numéro d'enregistrement de vente à distance",
     abn: "ABN",
@@ -152,6 +173,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Vous recevez ce message parce que vous y avez consenti dans les paramètres de votre compte.",
   },
   de: {
+    phone: "Telefon",
     businessRegistration: "Handelsregisternummer",
     mailOrderRegistration: "Registernummer für den Versandhandel",
     abn: "ABN",
@@ -163,6 +185,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Sie erhalten diese Nachricht, weil Sie in Ihren Kontoeinstellungen zugestimmt haben.",
   },
   es: {
+    phone: "Teléfono",
     businessRegistration: "Número de registro mercantil",
     mailOrderRegistration: "Número de registro de venta a distancia",
     abn: "ABN",
@@ -174,6 +197,7 @@ const COPY: Record<FooterLanguage, FooterCopy> = {
       "Recibe este mensaje porque lo aceptó en la configuración de su cuenta.",
   },
   pt: {
+    phone: "Telefone",
     businessRegistration: "Número de registo comercial",
     mailOrderRegistration: "Número de registo de venda à distância",
     abn: "ABN",
@@ -227,6 +251,8 @@ const renderBlock = (
       return plain(identity.postalAddress);
     case "contact_email":
       return labelled(copy.contact, identity.contactEmail);
+    case "contact_phone":
+      return labelled(copy.phone, identity.contactPhone);
     case "business_registration":
       return labelled(copy.businessRegistration, identity.businessRegistrationNumber);
     case "mail_order_registration":
@@ -239,17 +265,22 @@ const renderBlock = (
     case "unsubscribe_link": {
       const url = input.unsubscribeUrl?.trim();
       if (!url) return null;
-      return {
-        text: `${copy.unsubscribe}: ${url}`,
+      const noticeIn = (notice: FooterCopy) => ({
+        text: `${notice.unsubscribe}: ${url}`,
         html:
           `<a href="${escapeHtml(url)}" style="color:#2563eb;">` +
-          `${escapeHtml(copy.unsubscribe)}</a> &middot; ` +
+          `${escapeHtml(notice.unsubscribe)}</a> &middot; ` +
           escapeHtml(
-            copy.unsubscribeSla.replace(
+            notice.unsubscribeSla.replace(
               "{days}",
               String(input.profile.unsubscribeSlaBusinessDays)
             )
           ),
+      });
+      const notices = unsubscribeNoticeCopies(input, copy).map(noticeIn);
+      return {
+        text: notices.map((notice) => notice.text).join("\n"),
+        html: notices.map((notice) => notice.html).join("<br>"),
       };
     }
     case "unsubscribe_reason": {
@@ -259,6 +290,50 @@ const renderBlock = (
     default:
       return null;
   }
+};
+
+/**
+ * The unsubscribe notice's copies: the message's language, then each required
+ * language not already covered, in the order given. One copy when nothing more
+ * is required.
+ */
+const unsubscribeNoticeCopies = (input: FooterInput, copy: FooterCopy): FooterCopy[] => {
+  const own = normalizeLanguage(input.language);
+  const languages: FooterLanguage[] = [own];
+  for (const language of input.unsubscribeNoticeLanguages ?? []) {
+    const normalized = normalizeLanguage(language);
+    if (!languages.includes(normalized)) languages.push(normalized);
+  }
+  return languages.map((language) => (language === own ? copy : COPY_BY_LANGUAGE(language)));
+};
+
+/**
+ * Whether a footer rendered for a country that requires the unsubscribe notice
+ * in `languages` actually carries it in each of them, for a message in any of
+ * the footer's languages. The readiness check behind Korea's
+ * `bilingual_unsubscribe_notice` duty: a code property, asked at runtime so a
+ * build that stops doing it cannot keep the duty settled.
+ */
+export const unsubscribeNoticeCarriesLanguages = (languages: readonly string[]): boolean => {
+  // Nothing required is not the duty done: a table that lost Korea's row would
+  // otherwise keep the duty settled.
+  if (languages.length < 2) return false;
+  const url = "https://example.invalid/unsubscribe";
+  return LANGUAGES.every((messageLanguage) => {
+    const rendered = renderJurisdictionFooter({
+      profile: { profileKey: "check", footerBlocks: ["unsubscribe_link"], unsubscribeSlaBusinessDays: 10 },
+      identity: {},
+      language: messageLanguage,
+      unsubscribeUrl: url,
+      unsubscribeNoticeLanguages: languages,
+    });
+    return (
+      rendered.ok &&
+      languages.every((language) =>
+        rendered.text.includes(`${COPY_BY_LANGUAGE(normalizeLanguage(language)).unsubscribe}: ${url}`)
+      )
+    );
+  });
 };
 
 /**
@@ -272,12 +347,32 @@ export const RENDERABLE_FOOTER_BLOCKS = [
   "legal_name",
   "postal_address",
   "contact_email",
+  "contact_phone",
   "business_registration",
   "mail_order_registration",
   "abn",
   "unsubscribe_link",
   "unsubscribe_reason",
 ] as const;
+
+const COPY_BY_LANGUAGE = (language: FooterLanguage): FooterCopy => {
+  switch (language) {
+    case "ko":
+      return COPY.ko;
+    case "zh":
+      return COPY.zh;
+    case "fr":
+      return COPY.fr;
+    case "de":
+      return COPY.de;
+    case "es":
+      return COPY.es;
+    case "pt":
+      return COPY.pt;
+    default:
+      return COPY.en;
+  }
+};
 
 export const renderJurisdictionFooter = (input: FooterInput): FooterResult => {
   const copy = COPY[normalizeLanguage(input.language)];

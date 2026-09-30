@@ -11,6 +11,7 @@ import {
   auditUnsweptTables,
   BOUNDED_TABLES,
   RETAINED_TABLES,
+  RETENTION_DECIDED_PURGE_PENDING,
 } from "./report-unswept-tables-core.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -60,7 +61,14 @@ for (const { name } of models) {
   }
 }
 
-const { unswept, cascadeOnly, errors, heldTables, decisions } = auditUnsweptTables({
+const {
+  unswept,
+  cascadeOnly,
+  errors,
+  heldTables,
+  purgePendingTables,
+  decisions,
+} = auditUnsweptTables({
   models,
   created,
   deleted,
@@ -93,6 +101,18 @@ if (unswept.length > 0) {
   );
 } else {
   console.log("\nNo unbounded, unswept table without a stated reason.");
+}
+
+if (purgePendingTables.length > 0) {
+  console.log(
+    `\n${purgePendingTables.length} table(s) have a decided retention period and no job that applies it yet:\n` +
+      purgePendingTables
+        .map((name) => `  - ${name}: ${RETENTION_DECIDED_PURGE_PENDING[name]}`)
+        .join("\n") +
+      "\n  These are not awaiting a decision. The period is written down and the\n" +
+      "  database already refuses a deletion before it; what is missing is the\n" +
+      "  sweep that performs one after it."
+  );
 }
 
 // Printed before the registry problems and after the unswept list, because

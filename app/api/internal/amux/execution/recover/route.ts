@@ -1,13 +1,18 @@
 export const dynamic = "force-dynamic";
 
 import { z } from "zod";
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import { readLimitedJson } from "@/lib/apiSecurity";
 import {
   AMUX_DB_BOUNDARIES,
   AMUX_LIFECYCLE_ROUTE_BUDGET_MS,
   amuxRouteHasBudgetFor,
   withAmuxRouteBudget,
 } from "@/lib/amux/dbBoundary";
+import {
+  amuxInternalErrorResponse,
+  amuxJsonNoStore,
+  isAmuxInputError,
+} from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
   reclaimExpiredAmuxClaims,
@@ -36,7 +41,7 @@ export async function POST(request: Request) {
       await readLimitedJson(request, 1 * 1_024, requestSchema);
 
       // Selection-only can still accept quota telemetry. Keep its 90-day
-      // evidence bound without opening execution mutations during that phase.
+      // evidence bounded without opening execution mutations during that phase.
       step = "quota_sweep";
       const quotaObservationsDeleted =
         await sweepExpiredAmuxQuotaObservations();
@@ -90,17 +95,12 @@ export async function POST(request: Request) {
         },
       );
     } catch (error) {
-      const securityResponse = apiSecurityResponse(error);
-      if (securityResponse) return securityResponse;
+      if (isAmuxInputError(error)) {
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      }
       // The response stays opaque; the log names the step and error class only.
       console.error("AMUX recovery failed", amuxRecoverFailureFields(step, error));
-      return Response.json(
-        { error: "AMUX recovery is unavailable." },
-        {
-          status: 500,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
+      return amuxInternalErrorResponse("execution_recover", error);
     }
   }, AMUX_LIFECYCLE_ROUTE_BUDGET_MS);
 }

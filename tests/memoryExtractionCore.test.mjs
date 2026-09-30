@@ -28,6 +28,7 @@ import {
     findApprovedEvalPair,
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EVAL_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 
 // --- revocation semantics (§12.1, lib/memoryAccess.ts) ---
 
@@ -169,6 +170,11 @@ const approvedEntry = (overrides = {}) => ({
         artifactRef: "artifacts/mem-extract-v1",
         evaluatedCommit: "a".repeat(40),
         datasetVersion: "v1",
+        // The schema an approved entry must declare, which is whatever the
+        // gate requires now. Written as 2 until 2026-08-28, when the gate
+        // moved to 3 and this fixture started describing an approval §12.3
+        // would refuse.
+        datasetSchemaVersion: MEMORY_EVAL_DATASET_SCHEMA_VERSION,
         languages: ["ko", "en"],
         sampleCounts: Object.fromEntries(
             ["1", "2", "3", "4"].flatMap((category) =>
@@ -222,6 +228,29 @@ test("a complete approved entry passes and resolves, unless revoked", () => {
     assert.equal(
         findApprovedEvalPair(pair, { kind: "revoke_all", reason: "malformed" }, register),
         null
+    );
+});
+
+test("an approval that does not state the dataset schema fails closed", () => {
+    // The 2026-08-25 scoring amendment added two metrics that a schema-1
+    // dataset cannot produce. Silence is refused rather than read as
+    // schema 2: an approval nobody wrote the schema on is an approval
+    // nobody checked it on.
+    const unstated = approvedEntry();
+    delete unstated.evaluation.datasetSchemaVersion;
+    const problems = findEvalRegisterProblems([unstated], NOW);
+    assert.ok(
+        problems.some((line) => line.includes("(unstated)")),
+        problems.join("\n")
+    );
+
+    const legacy = approvedEntry({
+        evaluation: { ...approvedEntry().evaluation, datasetSchemaVersion: 1 },
+    });
+    assert.ok(
+        findEvalRegisterProblems([legacy], NOW).some((line) =>
+            line.includes("dataset schema 1")
+        )
     );
 });
 

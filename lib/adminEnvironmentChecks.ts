@@ -221,11 +221,9 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
     {
       name: "MARKETING_RESEND_WEBHOOK_SECRET",
       configured: isConfigured(process.env.MARKETING_RESEND_WEBHOOK_SECRET),
-      // Needed only once marketing sends: nothing reports to that endpoint
-      // before then.
-      severity: marketingConfigured ? "required" : "conditional",
+      severity: "conditional",
       condition:
-        "Required once MARKETING_EMAIL_FROM is set, so marketing bounces and complaints reach the suppression list.",
+        "Needed only once marketing email is sent from its own Resend account. Whether this deployment sends marketing email is an operator decision the environment cannot answer.",
       description:
         "Svix signing secret for the marketing Resend account's webhook, at " +
         "/api/webhooks/email/resend/marketing. Separate from RESEND_WEBHOOK_SECRET " +

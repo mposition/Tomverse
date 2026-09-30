@@ -130,11 +130,28 @@ if (process.argv.includes("--preview")) {
   process.exit(0);
 }
 
-const path = join(RECORDS, `${date}__${sha}.md`);
+// A second run of the same procedure on the same day against the same build.
+// It happens: change one variable and check again, and the date and the SHA
+// are both unchanged. Without a way to say which run this is, the second one
+// could only be recorded by overwriting the first, and overwriting is the one
+// thing this directory does not do.
+//
+// Optional, and appended rather than woven in, so every record written before
+// this stays a valid name.
+const run = argument("run");
+if (run !== undefined && !/^[a-z0-9-]{1,20}$/.test(run)) {
+  fail("--run takes 1-20 characters of a-z, 0-9 and '-'. It goes in a filename.");
+}
+
+const path = join(RECORDS, `${date}__${sha}${run ? `__${run}` : ""}.md`);
 if (existsSync(path)) {
   fail(
     `${path} already exists. A record is the record of one run; a second run is\n` +
-      "a second file. Nothing here overwrites one."
+      "a second file. Nothing here overwrites one.\n" +
+      (run
+        ? "Give --run a different value."
+        : "If this is a second run of the same day against the same build, name it:\n" +
+          "  --run 2   (or anything short: 'after-fix', 'retry')")
   );
 }
 writeFileSync(path, record, "utf8");

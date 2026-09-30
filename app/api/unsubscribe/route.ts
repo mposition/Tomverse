@@ -10,6 +10,7 @@ import {
 } from "@/lib/apiSecurity";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
+import { prepareProcessingResultNotice } from "@/lib/processingResultNotice";
 import { readUnsubscribeKeyring, readUnsubscribeToken } from "@/lib/unsubscribeToken";
 
 /**
@@ -142,11 +143,23 @@ export async function POST(req: Request) {
   };
 
   if (all) {
-    await withdrawAllMarketing({ ...common, source: "unsubscribe_link" });
+    await withdrawAllMarketing({
+      ...common,
+      source: "unsubscribe_link",
+      onConsentRecorded: await prepareProcessingResultNotice(common.userId, {
+        stopsAllMarketing: true,
+      }),
+    });
     return answer({ ok: true, scope: "all" });
   }
 
-  const result = await setPreference({ ...common, purpose, enabled: false, viaToken: true });
+  const result = await setPreference({
+    ...common,
+    purpose,
+    enabled: false,
+    viaToken: true,
+    onConsentRecorded: await prepareProcessingResultNotice(common.userId),
+  });
 
   // `already_set` is a success from the recipient's point of view: they asked
   // not to receive this and they will not. Reporting it as a failure would send

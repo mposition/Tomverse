@@ -5,13 +5,14 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
 import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
 import rehypeHighlight from "rehype-highlight";
 import {
@@ -56,10 +57,13 @@ import {
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
+import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
 
 type ChatMessageListProps = {
   messages: Message[];
   onRetryLast?: () => void;
+  /** Chat restores this message's question to the composer; never dispatches. */
+  onRestoreQuestion?: (messageId: string) => void;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -71,7 +75,7 @@ type ChatMessageListProps = {
    * and no stored message changes.
    */
   onContinueWithoutUnavailableAttachments?: (attachmentIds: string[]) => void;
-  onRequestCloseModel?: () => void;
+  onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentModelId?: string | null;
   currentPlan?: string | null;
@@ -82,6 +86,8 @@ type ChatMessageListProps = {
   // distinct from msg.status, which doesn't tell "still streaming" apart
   // from "finished normally".
   isSending?: boolean;
+  /** True while a retry/follow-up is awaiting its pre-send persistence gate. */
+  isSendPreparing?: boolean;
   // Aborts only this panel's in-flight request, distinct from the shell's
   // "stop all" button.
   onStopGenerating?: () => void;
@@ -144,7 +150,7 @@ type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
 const classifyError = (message: Message): ErrorCategory => {
   if (message.errorCode === "MODEL_RETIRED") return "model_retired";
   if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
-  if (message.errorHadAttachments && isFileParsingError(message.content)) return "attachment";
+  if (message.errorHadAttachments && isFileParsingError(message.recoveryNotice ?? message.content)) return "attachment";
   return "generic";
 };
 
@@ -319,6 +325,7 @@ function TypingIndicator({ label }: { label?: string }) {
 export function ChatMessageList({
   messages,
   onRetryLast,
+  onRestoreQuestion,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRequestCloseModel,
@@ -328,6 +335,7 @@ export function ChatMessageList({
   isGuestMode = false,
   currentChatId = null,
   isSending = false,
+  isSendPreparing = false,
   onStopGenerating,
   importedTranscript,
 }: ChatMessageListProps) {
@@ -354,6 +362,12 @@ export function ChatMessageList({
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const recoveryEnabled = Boolean(onRestoreQuestion);
+  const recoveryPrompts = useMemo(
+    () => recoveryPromptsForMessages(recoveryEnabled ? messages : [], currentChatId),
+    [currentChatId, messages, recoveryEnabled]
+  );
+
   // Coarse announcement of the response lifecycle. Deliberately NOT an
   // aria-live region around the transcript itself: streaming token-by-token
   // into a live region floods a screen reader with partial words. Only the
@@ -363,10 +377,10 @@ export function ChatMessageList({
   const liveStatusMessage = (() => {
     if (!lastMessage || lastMessage.role !== "assistant") return "";
     if (lastMessage.id === "welcome") return "";
-    if (!lastMessage.content) return t("chat.responseGenerating");
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
     if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
+    if (!lastMessage.content) return t("chat.responseGenerating");
     return t("chat.responseComplete");
   })();
 
@@ -573,9 +587,15 @@ export function ChatMessageList({
         // as wheel/trackpad/touch/scrollbar input already does via the
         // browser's own scroll handling -- no extra key handling needed.
         tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-6"
+        // Vertical padding and the gap below are the transcript's structural
+        // spacing, not its reading rhythm: the text size and line height are
+        // untouched. Measured at 375px, a one-line exchange spent 14px between
+        // messages and 24px at the ends while the message itself was 36px, so
+        // this is where a screen buys another turn without anything getting
+        // harder to read.
+        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-4"
       >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-2.5 pb-3 md:gap-3.5 md:pb-4">
           {importedTranscript && (
             /*
               Where this conversation came from, as one line at the top of it.
@@ -723,14 +743,16 @@ export function ChatMessageList({
             // the primary, user-facing message; any remaining lines are
             // rendered separately below as a de-emphasized auxiliary layer
             // (see errorAuxiliaryLines) rather than dropped entirely.
+            const errorText = msg.recoveryNotice ?? msg.content;
             const displayContent =
-              !isUser && msg.status === "error"
+              !isUser && msg.status === "error" && msg.recoveryNotice === undefined
                 ? msg.content.split("\n")[0]
                 : msg.content;
             const errorAuxiliaryLines =
               !isUser && msg.status === "error"
-                ? msg.content.split("\n").slice(1).filter(Boolean)
+                ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
+            const canRestoreQuestion = recoveryEnabled && !isSending && recoveryPrompts.has(msg.id);
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole
@@ -916,28 +938,34 @@ export function ChatMessageList({
                   </div>
                 )}
 
-                {isUser && (
+                {/*
+                  An imported question keeps its header, because it says
+                  something the bubble cannot: this was asked somewhere else.
+                  Naming it "You" would be true of the person and false of the
+                  conversation -- it was not sent in this Tomverse conversation
+                  and this turn cannot edit or resend it.
+
+                  An ordinary question does not. The bubble is on the right and
+                  it is the product's own colour; "나" above every one of them
+                  repeated that at 30px a message -- a name row of 24px and the
+                  6px under it -- which on a 375px screen is nearly as tall as
+                  the one-line message it introduces. The name stays in the
+                  accessibility tree, where the right-hand edge says nothing.
+                */}
+                {isUser && imported && (
                   <div className="mb-1.5 mr-1 flex select-none items-center gap-2">
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                      {/*
-                        An imported question was asked somewhere else. Naming
-                        it "You" would be true of the person and false of the
-                        conversation: it was not sent in this Tomverse
-                        conversation, and it is not something this turn can
-                        edit or resend.
-                      */}
-                      {imported
-                        ? t("continuation.importedYou").replaceAll(
-                            "{provider}",
-                            providerLabel(imported.provider)
-                          )
-                        : t("chat.you")}
+                      {t("continuation.importedYou").replaceAll(
+                        "{provider}",
+                        providerLabel(imported.provider)
+                      )}
                     </span>
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white">
                       <UserRound className="h-3.5 w-3.5" />
                     </span>
                   </div>
                 )}
+                {isUser && !imported && <span className="sr-only">{t("chat.you")}</span>}
 
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
@@ -1112,7 +1140,7 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && !msg.content ? (
+                  {msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
@@ -1382,6 +1410,11 @@ export function ChatMessageList({
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
+                  {!isUser && msg.status === "error" && msg.recoveryNotice !== undefined && (
+                    <p data-testid="chat-recovery-notice" className="mt-3 whitespace-pre-wrap text-sm font-medium">
+                      {msg.recoveryNotice.split("\n")[0]}
+                    </p>
+                  )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
                     // UI-ERR-001. These actions move the conversation
@@ -1465,6 +1498,7 @@ export function ChatMessageList({
                               <button
                                 type="button"
                                 onClick={onRetryLast}
+                                disabled={isSending || isSendPreparing}
                                 className={primaryButtonClass}
                               >
                                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1475,6 +1509,7 @@ export function ChatMessageList({
                             <button
                               type="button"
                               onClick={onRetryWithoutAttachments}
+                              disabled={isSending || isSendPreparing}
                               className={secondaryButtonClass}
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
@@ -1496,6 +1531,7 @@ export function ChatMessageList({
                               <button
                                 type="button"
                                 data-testid="continue-without-unavailable-attachments"
+                                disabled={isSending || isSendPreparing}
                                 onClick={() =>
                                   onContinueWithoutUnavailableAttachments(
                                     msg.unavailableAttachmentIds ?? []
@@ -1508,10 +1544,10 @@ export function ChatMessageList({
                               </button>
                             )}
                           <FeedbackButton
-                            currentModelId={currentModelId}
+                            currentModelId={msg.modelId ?? currentModelId}
                             currentPlan={currentPlan}
                             attachmentCount={msg.errorHadAttachments ? 1 : 0}
-                            rawErrorDetails={msg.content}
+                            rawErrorDetails={errorText}
                             errorReport={msg.errorReport}
                             triggerLabel={t("chat.reportError")}
                             triggerClassName={secondaryButtonClass}
@@ -1575,12 +1611,29 @@ export function ChatMessageList({
                         <button
                           type="button"
                           onClick={onRetryLast}
+                          disabled={isSending || isSendPreparing}
                           className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
                           {t("chat.regenerate")}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {canRestoreQuestion && (
+                    <div className="mt-3 space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
+                      <button
+                        type="button"
+                        data-testid="restore-chat-question"
+                        onClick={() => onRestoreQuestion?.(msg.id)}
+                        className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t("chat.restoreQuestion")}
+                      </button>
+                      <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
+                        {t("chat.restoreQuestionHint")}
+                      </p>
                     </div>
                   )}
                 </div>

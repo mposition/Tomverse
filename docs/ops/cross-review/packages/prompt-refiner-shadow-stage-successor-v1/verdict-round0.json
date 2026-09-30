@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-stage-successor-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-stage-successor-20260927 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-stage-successor-20260927 shell:default)"
+  ],
+  "startedAt": "2026-09-27T15:48:40.862Z",
+  "durationMs": 1180831,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 54,
+    "cachedInputTokens": 3257905,
+    "outputTokens": 22606,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.8312725000000003,
+    "raw": {
+      "input_tokens": 54,
+      "cache_creation_input_tokens": 163690,
+      "cache_read_input_tokens": 3257905,
+      "output_tokens": 22606,
+      "output_tokens_details": {
+        "thinking_tokens": 14947
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 163690,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3316,
+          "cache_read_input_tokens": 165699,
+          "cache_creation_input_tokens": 992,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 992
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-27T16:08:21.741Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-stage-successor-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:2a4164b79d13da616fbdbdc57157321bf41fda4fa4294d9b03c2a691016810a0",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "docs/ops/prompt-refiner-durable-stage-writer-contract.md:150-164 (§8 오류와 운영 판단)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The stage endpoint's own operator contract never mentions the new mandatory precondition (both downstream flags exactly \"true\", else 503 PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED): its §2/§4 request description and its §8 503 list still name only runtime identity/source and audit signing key, so an operator reading the writer contract cannot explain a flags-off 503.",
+        "reproduction": "`rg -n \"PROMPT_REFINER_SHADOW_(RUN_APPROVAL|EXECUTION)_ENABLED|ACTIVATION_FLAGS|activationReady\" docs/ops/prompt-refiner-durable-stage-writer-contract.md` returns no matches, while lib/promptRefinerStageAdmission.ts:518-524 refuses with 503 `PROMPT_REFINER_STAGE_ACTIVATION_FLAGS_REQUIRED` before any audit or stage write (asserted by tests/integration/prompt-refiner-reservation-admission.db.test.ts:134-155). Expected: the same contract that lists the writer's refusal codes names this one. The gate is documented only in the new docs/ops/prompt-refiner-confirmatory-shadow-v5.md §2."
+      },
+      {
+        "location": "docs/ops/prompt-refiner-confirmatory-shadow-v4.md:31-41 (§2 현행 runtime 결속)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The v4 contract still asserts in the present tense that the admin stage preview and create-only writer bind 188 fixed source files (\"188개 중 178개 … 나머지 10개는 … 두 migration\") and carries no supersession marker, which is now false for the shipped writer and contradicts the new v5 doc.",
+        "reproduction": "`rg -n \"188개 고정 source 파일|두 migration\" docs/ops/prompt-refiner-confirmatory-shadow-v4.md` vs `PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT = 189` in lib/promptRefinerStageAdmissionCore.ts:41 and the 189-file list at lines 60-71. Nothing fails, because tests/promptRefinerRuntimeSourceClosure.test.mjs:1423,1432 moved the count assertion from the v4 doc to prompt-refiner-confirmatory-shadow-v5.md, leaving the v4 count unguarded. Expected: a one-line 상태/supersession note (v4 계약은 v5 successor로 대체됨) rather than editing the round's approval record."
+      },
+      {
+        "location": "prisma/migrations/20260927130000_prompt_refiner_shadow_stage_successor_v3/migration.sql:228-252 (prompt_refiner_stage_guard INSERT audit metadata)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The pinned success-audit metadata records no flag state, so the durable row plus audit cannot themselves show that both downstream flags were enabled at approval time; the evidence rests entirely on the bound source closure containing the refusal path.",
+        "reproduction": "Read the `jsonb_build_object(...)` shape in the INSERT branch: keys are admissionVersion … reason, with no runApprovalEnabled/executionEnabled. Compare docs/ops/prompt-refiner-confirmatory-shadow-v5.md §2, which makes the two-flag conjunction the gating fact. Adding the pair would require changing the trigger's exact metadata shape and the writer together, so it is reasonable to defer; recorded only so the omission is deliberate."
+      }
+    ],
+    "nextAction": "Approve as is; optionally add the flag-gate precondition and its 503 to docs/ops/prompt-refiner-durable-stage-writer-contract.md §2/§8 and a supersession line to the v4 confirmatory doc before merge."
+  }
+}

@@ -28,6 +28,7 @@ test("assistant code blocks keep readable contrast in the light theme", async ({
         shareEnabled: false,
         shareExpiresAt: null,
         nextCursor: null,
+        messagePage: { hasMore: false, nextCursor: null },
         messages: [
           {
             id: "assistant-code-block",

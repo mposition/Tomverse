@@ -123,7 +123,6 @@ export async function forwardAmuxAdminReviewCommand(
       body: JSON.stringify(command),
       cache: "no-store",
       redirect: "manual",
-      // One protected detail may require three bounded GitHub reads (PR, diff, PR).
       signal: AbortSignal.timeout(AMUX_REVIEW_PROXY_TIMEOUT_MS),
     });
     if (!response.ok) {

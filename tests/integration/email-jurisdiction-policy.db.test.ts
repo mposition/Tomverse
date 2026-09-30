@@ -75,11 +75,13 @@ test("the seeded version carries every profile and country", async () => {
   const korea = detail!.profiles.find((profile) => profile.profileKey === "KR")!;
   assert.equal(korea.subjectPrefix, "(광고)");
   assert.equal(korea.consentNoticeIntervalMonths, 24);
-  assert.deepEqual(korea.quietHours, {
-    start: "21:00",
-    end: "08:00",
-    tz: "Asia/Seoul",
-  });
+  // docs/policy/email-notifications.md §0 v13: the 21:00-08:00 window left on
+  // 2026-09-16. 시행령 제61조제2항
+  // excludes electronic mail from the media the Network Act's night-time rule
+  // names, and the window had been a conservative default while that question
+  // was open. The column stays -- it is how the next jurisdiction that does
+  // need one will say so.
+  assert.equal(korea.quietHours, null);
   // §12.5: the sources have to reach the edit screen, which means they have to
   // reach the row.
   assert.ok(korea.notes.includes("제50조"));

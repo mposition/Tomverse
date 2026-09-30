@@ -98,6 +98,7 @@ const FEATURE_ICONS = {
 } as const;
 
 export type ModelPickerPanelProps = {
+  singleModelSelection?: boolean;
   models: readonly AiModel[];
   selectedModelIds: string[];
   maxSelectableModels: number;
@@ -171,6 +172,7 @@ export type ModelPickerPanelProps = {
 };
 
 export function ModelPickerPanel({
+  singleModelSelection = false,
   models,
   selectedModelIds,
   maxSelectableModels,
@@ -247,7 +249,7 @@ export function ModelPickerPanel({
     selectedCount: selectedModelIds.length,
     maxCount: maxSelectableModels,
   });
-  const isAtCapacity = selectionLimit.limitReached;
+  const isAtCapacity = !singleModelSelection && selectionLimit.limitReached;
   const activeFilterCount = countActiveModelCatalogueFilters(filters);
 
   // The recommendation rows carry the same search badge the catalogue does, so
@@ -373,7 +375,7 @@ export function ModelPickerPanel({
   ) => {
     const isSelected = selectedModelIds.includes(model.id);
     onRememberRecentModel(model.id);
-    if (!isSelected && isAtCapacity) {
+    if (!singleModelSelection && !isSelected && isAtCapacity) {
       onTrackEvent("model_picker_max_reached", { model_id: model.id });
       onRequestSwap(model, trigger);
       return;
@@ -752,7 +754,7 @@ export function ModelPickerPanel({
                   />
                   <ModelLogo model={model} size="xs" />
                   <span className="max-w-[120px] truncate">{model?.name || modelId}</span>
-                  <button
+                  {!singleModelSelection && <button
                     type="button"
                     aria-label={t("chat.removeModelFromComparison")}
                     onClick={() => onToggleModel(modelId)}
@@ -763,7 +765,7 @@ export function ModelPickerPanel({
                     }
                   >
                     <X className="h-3 w-3" />
-                  </button>
+                  </button>}
                 </span>
               );
             })}
@@ -779,7 +781,10 @@ export function ModelPickerPanel({
         reachable -- announced once on reaching the cap, and referenced by every
         model whose activation would require a swap -- without costing a row.
       */}
-      {selectionLimit.limitReached && (
+      {singleModelSelection && (
+        <p className="px-1 py-2 text-xs text-zinc-600 dark:text-zinc-300">{t("chat.singleModelRequired")}</p>
+      )}
+      {!singleModelSelection && selectionLimit.limitReached && (
         <p
           id={limitDescriptionId}
           data-testid="model-picker-max-reached"
@@ -878,7 +883,7 @@ export function ModelPickerPanel({
 
           {isCompactLayout ? null : openAllEntry}
 
-          {comboFinderSlot}
+          {!singleModelSelection && comboFinderSlot}
         </div>
       )}
 

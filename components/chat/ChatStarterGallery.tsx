@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { displayHeadingClass } from "@/lib/displayHeading";
 import type {
   ChatStarterEntry,
   StarterAccentRole,
@@ -36,7 +37,7 @@ type StarterLock = Extract<StarterAvailability, { state: "locked" }>;
  * ## What this component is not allowed to do
  *
  * **It does not send.** A click seeds the composer draft and stops. The rule
- * is `docs/ui-contracts/chat-starter-catalog.md` section 4's: a surface
+ * is `docs/ui-contracts/prompt-refiner-suggestion.md` section 1's: a surface
  * that fills the box is offering a starting point, and a surface that sends is
  * spending a credit on the user's behalf on a sentence they have not read.
  *
@@ -62,10 +63,28 @@ type StarterLock = Extract<StarterAvailability, { state: "locked" }>;
  * node to both shells, and a 768px tablet on the desktop shell is as narrow as
  * a phone.
  *
- * The full outcome sentence sits in a line under the cards, replacing the hint
+ * The full outcome sentence sits in a line above the cards, replacing the hint
  * while a card is hovered or focused. It is the card's accessible description
  * in every shape, because on a touch screen nothing is hovered and the label
  * is all the eye gets (section 1).
+ *
+ * ## Why the guidance line is above the cards, not under them
+ *
+ * It used to be the last thing in the welcome group, directly above the
+ * bottom dock. When the group is taller than the space between the header and
+ * the dock, the region scrolls, and whatever is last is what crosses its
+ * bottom edge. On a 412px phone with the OS text size a step up, that was this
+ * sentence: its second line was cut in half at the composer's top edge on
+ * the first screen, and whole only after a scroll (staging 2026-09-16,
+ * finding 6). No spacing tweak fixes that; it moves the height at which it
+ * happens. Above the cards, the sentence is reached before any card, and what
+ * crosses the fold on a short screen is a row of cards, which reads as "there
+ * is more below".
+ *
+ * The line keeps two lines of height (`min-h-10`, rem-based so it scales with
+ * text) whether it shows the hint or a card's sentence. It now sits ABOVE the
+ * cards, so any change in its height would move the cards under the pointer
+ * that caused the change.
  *
  * ## Why the icon is derived rather than declared
  *
@@ -123,7 +142,7 @@ export function ChatStarterGallery({
   onSeed,
   onLocked,
 }: ChatStarterGalleryProps) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const idPrefix = useId();
   const [previewId, setPreviewId] = useState<string | null>(null);
   // `offered=false` reaches this component as an empty list, and an empty list
@@ -167,8 +186,21 @@ export function ChatStarterGallery({
       <span id={hintId} className="sr-only">
         {t("chatStarter.hint")}
       </span>
+      {/*
+        The hint, or the full sentence behind whichever card is under the
+        pointer or the keyboard. Hidden from assistive technology because both
+        are already each card's description; this is the same text for the eye.
+        Above the cards and two lines tall, for the reasons in the header.
+      */}
+      <p
+        data-testid="chat-starter-preview"
+        aria-hidden="true"
+        className="mx-auto flex min-h-10 max-w-xl items-center justify-center text-balance text-center text-[13px] leading-5 text-zinc-600 dark:text-zinc-400"
+      >
+        {previewed ? t(previewed.entry.outcomeKey) : t("chatStarter.hint")}
+      </p>
       <ul
-        className="m-0 grid list-none grid-cols-2 gap-2 p-0 @max-[18rem]/starters:grid-cols-1 @min-[30rem]/starters:flex @min-[30rem]/starters:flex-wrap @min-[30rem]/starters:justify-center"
+        className="mx-0 mb-0 mt-3 grid list-none grid-cols-2 gap-2 p-0 @max-[18rem]/starters:grid-cols-1 @min-[30rem]/starters:flex @min-[30rem]/starters:flex-wrap @min-[30rem]/starters:justify-center"
         onMouseLeave={() => setPreviewId(null)}
       >
         {cards.map(({ entry, availability }) => {
@@ -225,7 +257,19 @@ export function ChatStarterGallery({
                       </span>
                     </span>
                   )}
-                  <span className="min-w-0 break-words">
+                  {/*
+                    Whole Korean words (staging 2026-09-16, finding 7: "PDF 붙여
+                    여러 모 / 델에 질문"). `displayHeadingClass` is the one place
+                    that decides this: `keep-all` for ko only, with `break-words`
+                    as the escape hatch so a word too long for its tile still
+                    wraps instead of being clipped. It goes on this label and
+                    nowhere else -- not the page, the hint, the composer or any
+                    answer (lib/displayHeading.ts on why not globally).
+                  */}
+                  <span
+                    data-testid="chat-starter-label"
+                    className={`min-w-0 ${displayHeadingClass(lang)}`}
+                  >
                     {t(entry.labelKey)}
                     {/*
                       The card declared that its question expects a file, so
@@ -252,18 +296,6 @@ export function ChatStarterGallery({
           );
         })}
       </ul>
-      {/*
-        The hint, or the full sentence behind whichever card is under the
-        pointer or the keyboard. Hidden from assistive technology because both
-        are already each card's description; this is the same text for the eye.
-      */}
-      <p
-        data-testid="chat-starter-preview"
-        aria-hidden="true"
-        className="mx-auto mt-3 max-w-xl text-balance text-center text-[13px] leading-5 text-zinc-600 dark:text-zinc-400"
-      >
-        {previewed ? t(previewed.entry.outcomeKey) : t("chatStarter.hint")}
-      </p>
     </section>
   );
 }

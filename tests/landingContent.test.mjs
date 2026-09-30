@@ -42,8 +42,8 @@ const SHARED_BY_DESIGN = new Set([
   "pricing.plans[1].title",
   "pricing.plans[2].title",
   "evidence.deepResearch.title",
-  "proof.stages[2].title",
-  "support.items[4].title",
+  "preview.stages[2].title",
+  "support.secondary[0].title",
   // "Contradiction" is spelled identically in French; this is a real
   // collision, not a missing translation.
   "preview.reviewItems[1]",
@@ -119,7 +119,7 @@ test("every locale names the four evidence capabilities", () => {
 
 test("the review boundary keeps its generation-step limits and names the separate web check", () => {
   for (const language of languages) {
-    const boundary = landingCopy[language].proof.reviewBoundary;
+    const boundary = landingCopy[language].loop.reviewBoundary;
     for (const pattern of BOUNDARY_PATTERNS[language]) {
       assert.match(boundary, pattern, `${language} boundary notice lost a required clause`);
     }
@@ -156,11 +156,11 @@ test("the hero keeps the guest-start note and the AI Review promise unqualified"
     assert.ok(copy.heroSignupNote.length > 10, `${language} lost the guest-start note`);
     assert.match(copy.description, /AI Review/, `${language} hero dropped AI Review`);
     assert.match(
-      copy.proof.steps[2].title + copy.proof.steps[2].description,
+      copy.loop.steps[2].title + copy.loop.steps[2].description,
       /AI Review/,
       `${language} lost the AI Review step`
     );
-    for (const field of [copy.heroSignupNote, copy.guestNote, copy.description]) {
+    for (const field of [copy.heroSignupNote, copy.description]) {
       assert.doesNotMatch(
         field,
         /Account required|계정 필요/,

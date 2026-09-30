@@ -8,6 +8,8 @@ import { enqueueArtifactCleanupForUser } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForUser } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
+import { recordRelationshipEnded } from "@/lib/auRelationship";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 
 const ACCOUNT_DELETION_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -58,23 +60,34 @@ export async function scheduleTomverseAccountDeletion(userId: string) {
   await scheduleStripeSubscriptionCancellation(user.stripeSubscriptionId);
   const requestedAt = new Date();
   const scheduledFor = new Date(requestedAt.getTime() + ACCOUNT_DELETION_GRACE_MS);
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      accountStatus: "pending_deletion",
-      accountDeletionRequestedAt: requestedAt,
-      accountDeletionScheduledFor: scheduledFor,
-      // subscriptionStatus is intentionally left alone -- the subscription
-      // is still genuinely active (just non-renewing), and the
-      // customer.subscription.updated webhook is the source of truth for
-      // it. plan/stripeSubscriptionId/stripePriceId/period end are also
-      // untouched, so a restore within the grace period needs no separate
-      // entitlement bookkeeping: it's still exactly what it was.
-      subscriptionCancelAtPeriodEnd: Boolean(user.stripeSubscriptionId),
-      aiUsageRestricted: true,
-      aiUsageRestrictedAt: requestedAt,
-      aiUsageRestrictionReason: "Account deletion is scheduled.",
-    },
+  // One transaction with the end of the account's email relationship
+  // (docs/policy/email-product-news-redesign-draft.md section 4.4): a deletion
+  // request is an end event, and an end recorded apart from the request could
+  // be missing while the request stood.
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        accountStatus: "pending_deletion",
+        accountDeletionRequestedAt: requestedAt,
+        accountDeletionScheduledFor: scheduledFor,
+        // subscriptionStatus is intentionally left alone -- the subscription
+        // is still genuinely active (just non-renewing), and the
+        // customer.subscription.updated webhook is the source of truth for
+        // it. plan/stripeSubscriptionId/stripePriceId/period end are also
+        // untouched, so a restore within the grace period needs no separate
+        // entitlement bookkeeping: it's still exactly what it was.
+        subscriptionCancelAtPeriodEnd: Boolean(user.stripeSubscriptionId),
+        aiUsageRestricted: true,
+        aiUsageRestrictedAt: requestedAt,
+        aiUsageRestrictionReason: "Account deletion is scheduled.",
+      },
+    });
+    await recordRelationshipEnded(tx, {
+      userId: user.id,
+      reason: "account_deletion_requested",
+      occurredAt: requestedAt,
+    });
   });
   await revokeAllUserSessions(user.id);
   return {
@@ -265,6 +278,14 @@ export async function deleteTomverseAccount(
     // provider request identifiers indefinitely. SetNull on its own is not
     // anonymisation; it renames the row and leaves every join intact.
     await anonymiseAccountData(tx, user.id);
+
+    // The mobile devices, families and rotations go with the cascade below --
+    // all four tables reach User by ON DELETE CASCADE, which is what
+    // docs/policy/tomverse-chat-data-domain-registry.yaml records and what
+    // tests/integration/mobile-auth-schema.db.test.ts proves. What the cascade
+    // cannot leave behind is the fact that it happened, so that one
+    // de-identified row is written here, before the User row goes.
+    await recordMobileSessionsEndedByDeletion(tx, user.id);
 
     await tx.user.delete({
       where: { id: user.id },

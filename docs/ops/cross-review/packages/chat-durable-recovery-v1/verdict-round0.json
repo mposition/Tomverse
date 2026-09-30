@@ -1,0 +1,108 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-recovery-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-recovery-20260913 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-recovery-20260913 shell:default)"
+  ],
+  "startedAt": "2026-09-13T20:24:56.573Z",
+  "durationMs": 810381,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 70,
+    "cachedInputTokens": 12451079,
+    "outputTokens": 62336,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 11.972659499999997,
+    "raw": {
+      "input_tokens": 70,
+      "cache_creation_input_tokens": 418837,
+      "cache_read_input_tokens": 12451079,
+      "output_tokens": 62336,
+      "output_tokens_details": {
+        "thinking_tokens": 53141
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 418837,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3347,
+          "cache_read_input_tokens": 418865,
+          "cache_creation_input_tokens": 2772,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2772
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-13T20:38:27.011Z",
+  "verdict": {
+    "taskId": "chat-durable-recovery-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:5dda55ccd7ec09525a6cd7cc4c1cb8c7ff51a572f817a9b6a6eb81b19b367b27",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "components/chat/ChatInput.tsx:1282 (with ChatInput.tsx:2264, ChatPageClient.tsx:3987, ChatPageClient.tsx:6880/7009, ChatApp.tsx:1226)",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "Dropping `isSending` from `isDisabled` removes the composer's submit barrier on every surface where the new `draftLocked` replacement is hard-coded false (`/review`, `/chat`, `/continuations/[id]`, i.e. mountedSurface \"workspace\"/\"continuation\"), so pressing Enter during an active stream now persists a second user Message, spends preflight/admission and discards the draft while every still-streaming panel silently drops the send.",
+        "reproduction": "Sign in and open the Review product at `/review?lang=en` (app/(site)/(application)/review/page.tsx renders ReviewWorkspaceShell with no `mountedSurface`, so ChatPageClient.tsx:606 defaults it to \"workspace\"; `durableDraftLocked` at ChatPageClient.tsx:6880 is therefore always false and no `disabled` prop is passed to ChatInput from DesktopChatShell.tsx:1321-1369). Send a question; while the answer is still streaming (the Stop button is rendered by ChatInput.tsx:3707), click into the textarea, type a second question and press Enter. Base c91a7c74 behaviour: `isDisabled` included `isSending`, the textarea was `disabled`, keydown never fired and nothing was sent. Current behaviour: ChatInput.tsx:2264 calls `onSubmit()`; ChatPageClient.tsx:3987 skips its streaming guard because it is gated on `mountedSurface === \"chat\"`; `runGlobalSubmit` runs preflight, POSTs `/api/conversations/{id}/messages` (a second stored user turn), unconditionally clears the draft at ChatPageClient.tsx:4843-4851 (`mountedSurface !== \"chat\"`), and publishes a promptPayload that ChatApp.tsx:1226 discards for every panel with `isChatRuntimeStreaming(runKey)` true — leaving a stored question with no answer and the typed text gone. Same on `/continuations/[conversationId]` (mountedSurface=\"continuation\"). Watch the network tab, or assert `messageSaveBodies.length` and provider POST count in a chat-unified-workspace-style fixture run against `/review`.",
+        "note": "The intended relaxation is Chat-only; gating the `isSending` term on the same condition that produces `draftLocked` (or passing an explicit `allowEditingWhileSending` flag from the Chat surface) restores Review/continuation behaviour without weakening the durable path."
+      },
+      {
+        "location": "components/chat/chatDurableRecoveryClient.ts:391-397 (with lib/chatResponseAttemptCore.ts:246, tests/chatDurableRecoveryClient.test.mjs \"an empty pre-dispatch refusal does not create a phantom assistant bubble\")",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "`isInvisiblePreDispatchAttempt` requires `checkpointRevision === 0`, but every terminal transition increments the revision, so a real `failed/request_refused` row is always at revision >= 1; the client-side phantom-assistant guard the comment keeps \"defensive for old or rolling-deploy responses\" can never fire, and its unit test only passes because the fixture uses a revision the server cannot produce.",
+        "reproduction": "In the isolated DB suite, reuse the row that tests/integration/chat-durable-recovery.db.test.ts already builds in \"conversation discovery hides an empty pre-dispatch refusal...\": `claimChatResponseAttempt(...)` then `terminalChatResponseAttempt({ expectedRevision: 0, status: \"failed\", finalContent: \"\", finishReason: \"error\", failureCode: \"request_refused\" })`, and read the row back — `checkpointRevision` is 1 (lib/chatResponseAttemptCore.ts:246 returns `checkpointRevision + 1`, and lib/chatResponseAttemptPersistence.ts:468 writes it). Pass `publicChatResponseAttempt(row)` to `mergeChatResponseAttempts([userMessage], [attempt], modelId, notice, \"conversation\")`: `isInvisiblePreDispatchAttempt` returns false and an empty assistant error bubble is inserted. Expected: the same result the existing unit test asserts for its `checkpointRevision: 0` fixture (`messages` unchanged, `attemptBackedIds.size === 0`). Fix the predicate to key on `partialContent === \"\"` + `failureCode === \"request_refused\"` alone (or on `terminalAt` with no committed prefix) and change the unit fixture to the revision the server actually writes."
+      },
+      {
+        "location": "app/api/products/chat/drafts/[scopeKey]/route.ts:87-92 (GET catch) vs :150-160 (PUT catch); lib/chatComposerDraftPersistence.ts:80; lib/messageAttachmentStorage.ts:497-507; components/chat/useConversationDrafts.ts:630",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The draft GET has no handler for `MessageAttachmentResolveError` — the error class the PUT explicitly answers with 400 `CHAT_DRAFT_ATTACHMENT_INVALID` — so an unresolvable stored reference makes the scope return 500 on every read with no escape: the hook never sets `hydrated`, `scheduleSave` returns early, and `prepareDraftSend` then fails, leaving that conversation unable to save a draft or send at all.",
+        "reproduction": "Against the isolated test database, insert a `ChatComposerDraft` row for an owned `kind/productKey = chat` conversation with `revision = 1`, non-empty `text` and `attachmentReferences = [{\"attachmentId\":\"<id-of-no-row>\"}]`, then call `GET /api/products/chat/drafts/<conversationId>` as that account. Expected: a recoverable answer in the same class the PUT already gives for this error (400 `CHAT_DRAFT_ATTACHMENT_INVALID`), or a draft returned with the dangling reference dropped. Observed: `resolveMessageAttachmentReferences` throws `ATTACHMENT_NOT_FOUND` (lib/messageAttachmentStorage.ts:497) and the route returns 500 `CHAT_DRAFT_READ_FAILED`; in the browser the red \"Draft sync failed\" banner never clears (\"Retry draft sync\" re-issues the same GET via useConversationDrafts.ts:1261), typing is never persisted (useConversationDrafts.ts:630 returns because `meta.hydrated` is false), and Send always toasts `chat.questionSaveFailed` because the PUT's 409 readback re-throws the same error and returns 400 rather than the 409 the client parses. I could not find an application path that creates such a dangling reference today (the only Message deletion is the assistant-only per-model clear at app/api/conversations/[conversationId]/messages/route.ts:435, and conversation deletion cascades the draft too), so this is reported as a state-machine gap with no reachable trigger rather than a live break."
+      },
+      {
+        "location": "app/(site)/(application)/chat/ChatPageClient.tsx:7119 and :7146",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The new `message-receipt-recovery-dialog` and `draft-conflict-dialog` declare `role=\"alertdialog\" aria-modal=\"true\"` on a bottom-anchored `<section>` with no backdrop, no focus move, no focus trap and no Escape handler, so assistive tech is told the rest of the page is inert while it stays fully mouse-operable — unlike every other `aria-modal` dialog in this repo.",
+        "reproduction": "Trigger the draft conflict (two tabs on the same Chat conversation: edit in tab A to take revision 1, then edit in tab B, which gets the 409 and renders `draft-conflict-dialog`). In tab B press Tab repeatedly: focus never enters the dialog and cycles through the still-focusable composer, sidebar and model controls; press Escape: nothing happens. Compare with the repo's own convention at components/billing/CreditPackPurchaseButton.tsx:551-557 (full-screen backdrop) plus its Escape/top-most-dialog handling at :323-331, and components/chat/AiDisclaimerNotice.tsx:71-78. Either drop `aria-modal` (these are alerts, not modals) or add the backdrop/focus/Escape handling the other dialogs have."
+      }
+    ],
+    "nextAction": "Re-scope the ChatInput submit barrier so the streaming relaxation applies only where the durable draft lock does, then address the three warnings; I will re-review the corrected package as round 1."
+  }
+}

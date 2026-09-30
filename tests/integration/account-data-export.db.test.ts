@@ -42,7 +42,8 @@ const reset = () =>
       "CreditDebtEntry", "ImageGenerationGroup", "ImageGenerationTarget",
       "ImageGeneration", "RefundRequest", "PlanChangeRequest",
       "ExternalImport", "ExternalConversation", "ExternalMessage",
-      "MemoryEvidence", "MemoryExtractionRun", "User"
+      "MemoryEvidence", "MemoryExtractionRun",
+      "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -580,6 +581,157 @@ const seedUser = async () => {
     },
   });
 
+  // The permission ledger. What the person is owed here is why a message to
+  // them was or was not permitted, and what an approval that covered them
+  // said. What is not theirs is the operator behind it -- who approved, their
+  // reasoning, and what would make them look again.
+  // Everything below is dated from one fixed instant, written into
+  // `createdAt` rather than left to default. The ledger's constraints order
+  // `sealedAt` and the rest at or after `createdAt`, and a fixture that reads
+  // the clock before several queries and then adds a second is one that fails
+  // on a slow database for a reason unrelated to what it tests.
+  const now = new Date("2026-09-21T00:00:00.000Z");
+
+  const policy = await prisma.emailPolicyVersion.create({
+    data: {
+      version: `export-${randomUUID()}`,
+      changeSummary: "fixture",
+      approvedByEmail: sentinel("emailPolicyVersion-approvedByEmail"),
+    },
+  });
+
+  const approval = await prisma.emailSendApproval.create({
+    data: {
+      approvalType: "risk_accepted",
+      approvedById: sentinel("emailSendApproval-approvedById"),
+      approvedByEmail: sentinel("emailSendApproval-approvedByEmail"),
+      createdAt: now,
+      approvedAt: now,
+      reason: sentinel("emailSendApproval-reason"),
+      reviewCondition: sentinel("emailSendApproval-reviewCondition"),
+      policyVersionId: policy.id,
+      purposeKey: "*",
+    },
+  });
+  await prisma.emailSendApprovalMember.create({
+    data: {
+      approvalId: approval.id,
+      userId,
+      addressDigest: sentinel("emailSendApprovalMember-addressDigest"),
+      addressNormalizationVersion: "v1",
+      noticeAnchorAt: now,
+      noticeAnchorSource: "signup_date_deemed",
+    },
+  });
+  await prisma.emailSendApproval.update({
+    where: { id: approval.id },
+    data: { sealedAt: new Date(now.getTime() + 1000) },
+  });
+  await prisma.emailSendApprovalRevocation.create({
+    data: {
+      approvalId: approval.id,
+      revokedById: sentinel("emailSendApprovalRevocation-revokedById"),
+      revokedByEmail: sentinel("emailSendApprovalRevocation-revokedByEmail"),
+      revokedAt: new Date(now.getTime() + 2000),
+      reason: sentinel("emailSendApprovalRevocation-reason"),
+    },
+  });
+
+  const permissionEvent = await prisma.emailPermissionEvent.create({
+    data: {
+      userId,
+      emailAddress: "subject@example.test",
+      addressNormalizationVersion: "v1",
+      kind: "notice_shown",
+      scopeKey: "product_updates",
+      occurredAt: now,
+      capturedVia: "in_product_notice",
+      createdAt: now,
+      sourceEventKey: sentinel("emailPermissionEvent-sourceEventKey"),
+      policyVersionId: policy.id,
+      evidence: { screen: sentinel("emailPermissionEvent-evidence") },
+    },
+  });
+
+  // A verdict is taken for a delivery and the insert trigger requires one,
+  // so the fixture builds the template, version, event and delivery it needs.
+  const template = await prisma.emailTemplate.create({
+    data: {
+      key: `product_news_${randomUUID()}`,
+      classification: "marketing",
+      purpose: "product_updates",
+      requiresUnsubscribe: true,
+    },
+  });
+  const templateVersion = await prisma.templateVersion.create({
+    data: {
+      templateId: template.id,
+      version: 1,
+      language: "en",
+      subject: "s",
+      bodyHtml: "<p>s</p>",
+      bodyText: "s",
+      contentHash: "hash",
+      classification: "marketing",
+      purpose: "product_updates",
+      requiresUnsubscribe: true,
+      status: "published",
+      publishedAt: now,
+    },
+  });
+  const emailEvent = await prisma.emailEvent.create({
+    data: {
+      kind: "product.news",
+      templateId: template.id,
+      payload: {},
+      audienceKind: "single_user",
+    },
+  });
+  const delivery = await prisma.emailDelivery.create({
+    data: {
+      eventId: emailEvent.id,
+      userId,
+      recipientKey: `user:${userId}`,
+      lane: "standard",
+      emailAddress: "subject@example.test",
+      language: "en",
+      jurisdictionCountry: "AU",
+      jurisdictionProfileKey: "AU",
+      policyVersionId: policy.id,
+      templateVersionId: templateVersion.id,
+      idempotencyKey: randomUUID(),
+    },
+  });
+
+  const decision = await prisma.emailPermissionDecision.create({
+    data: {
+      userId,
+      deliveryId: delivery.id,
+      createdAt: now,
+      phase: "enqueue",
+      purpose: "product_updates",
+      classification: "marketing",
+      emailAddress: "subject@example.test",
+      addressNormalizationVersion: sentinel("emailPermissionDecision-normalisation"),
+      authorities: [{ authority: "au_sender", verdict: "allowed" }],
+      legalAllowed: true,
+      blockers: [],
+      allowed: true,
+      pinnedDisplayContractHash: sentinel("emailPermissionDecision-pinnedHash"),
+      requiredDisplayContractHash: sentinel("emailPermissionDecision-requiredHash"),
+      ruleVersions: { AU: 1 },
+      policyVersionId: policy.id,
+      evaluatedAt: new Date(now.getTime() + 1000),
+    },
+  });
+  await prisma.emailPermissionDecisionEvidence.create({
+    data: {
+      decisionId: decision.id,
+      eventId: permissionEvent.id,
+      authority: "au_sender",
+    },
+  });
+
   return userId;
 };
 
@@ -649,6 +801,63 @@ test("the export still contains the data the user is owed", async () => {
 
 // Keys are the stable public names, and every exported domain appears even when
 // it holds nothing -- an absent key is indistinguishable from an empty table.
+test("the permission ledger exports what it decided and what it rested on", async () => {
+  // A membership that does not say what the approval was is a membership of
+  // nothing, and a verdict without its evidence is a conclusion the person
+  // cannot connect to a fact. Both were true of the first version of these
+  // fetchers; the withheld half is covered by the sentinel test above.
+  const userId = await seedUser();
+  const exported = await buildAccountDataExport(userId);
+  const at = (name: string) =>
+    (exported.data as Record<string, Record<string, unknown>[]>)[name] ?? [];
+
+  const membership = at("email_send_approval_membership");
+  assert.equal(membership?.length, 1);
+  const approval = membership[0].approval as Record<string, unknown> & {
+    revocations?: Record<string, unknown>[];
+  };
+  assert.equal(approval.approvalType, "risk_accepted");
+  assert.equal(approval.purposeKey, "*");
+  assert.notEqual(approval.approvedAt, null);
+  assert.notEqual(approval.sealedAt, null);
+  assert.equal(approval.revocations?.length, 1);
+  assert.notEqual(approval.revocations[0].revokedAt, null);
+  // The override's scope travels whole: which purpose, under which policy
+  // version. A waiver's rule and country are not here because a cohort belongs
+  // to an override and a trigger holds that, so no membership can reach one.
+  assert.notEqual(approval.policyVersionId, null);
+  assert.ok(!("ruleKey" in approval));
+  assert.ok(!("country" in approval));
+  assert.ok(!("reason" in approval), "the approver's reasoning is not theirs");
+  assert.ok(!("approvedByEmail" in approval), "the approver's address is not theirs");
+
+  const events = at("email_permission_events");
+  const decisions = at("email_permission_decisions") as (Record<string, unknown> & {
+    evidence?: Record<string, unknown>[];
+  })[];
+  assert.equal(decisions?.length, 1);
+  assert.equal(decisions[0].purpose, "product_updates");
+  assert.equal(decisions[0].classification, "marketing");
+  assert.notEqual(decisions[0].ruleVersions, null);
+  assert.notEqual(decisions[0].policyVersionId, null);
+  // The two timestamps the policy calls the core of a verdict. They are null
+  // on this enqueue fixture and the point is that the keys are returned: an
+  // export that omits them says nothing about when the message was acted on.
+  assert.ok("suppressionCheckedAt" in decisions[0]);
+  assert.ok("providerSubmittedAt" in decisions[0]);
+  assert.ok("policyVersionId" in events[0]);
+  assert.equal(decisions[0].evidence?.length, 1);
+  assert.equal(decisions[0].evidence[0].authority, "au_sender");
+  assert.notEqual(decisions[0].evidence[0].eventId, null);
+  assert.ok(!("deliveryId" in decisions[0]));
+
+  // The evidence points at a row that is in the export beside it.
+
+  assert.equal(events?.length, 1);
+  assert.equal(events[0].id, decisions[0].evidence[0].eventId);
+  assert.equal(events[0].kind, "notice_shown");
+});
+
 test("the export is keyed by public name and covers every exported domain", async () => {
   const userId = await seedUser();
   const result = await buildAccountDataExport(userId);
