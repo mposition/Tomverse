@@ -96,6 +96,9 @@ confirmationRequestedAt DateTime?
 | **확인 대기** | **false** | 있음 | NULL |
 | 켜짐 | true | 있음 | 있음 |
 
+§14의 즉시 동의로 켜진 행은 `confirmationRequestedAt`이 NULL이고 `confirmedAt`이
+있습니다. 상태는 `confirmedAt`으로 "켜짐"입니다(`consentConfirmationState()`).
+
 `enabled`를 확인 전에 `true`로 두지 않는 것이 핵심입니다. 그렇게 하면 발송 gate를
 고치는 것을 잊은 어떤 경로든 곧바로 미확인 주소로 발송합니다.
 
@@ -238,7 +241,7 @@ https://tomverse.app/api/admin/marketing-reach
 | 만료 | 72시간. 만료된 토큰은 "다시 보내기" 화면으로 보냅니다 |
 | 재발송 | `confirmationRequestedAt` 기준 rate limit. 기존 `consumeApiRateLimit` 패턴 |
 | suppression | 확인 메일도 transactional 규칙을 따릅니다 — hard bounce된 주소에는 나가지 않습니다 |
-| 취소 후 재구독 | 다시 확인합니다. `confirmedAt`은 `enabled=false`로 갈 때 `NULL`로 되돌립니다 |
+| 취소 후 재구독 | 다시 확인합니다. `confirmedAt`은 `enabled=false`로 갈 때 `NULL`로 되돌립니다. 증명된 세션에서는 메일이 아니라 그 자리의 `confirmedAt`이 그 확인입니다(§14) |
 | 국가 미확정 | 확인 메일은 동의 *전에* 나가므로 docs/policy/email-notifications.md §6.3의 "marketing 보류"에 걸리지 않습니다. transactional이기 때문입니다 |
 | footer | 확인 메일은 marketing이 아니므로 관할권 footer가 없어도 발송됩니다(degraded 경고만) |
 
@@ -377,9 +380,18 @@ https://tomverse.app/api/admin/marketing-reach
 - **Microsoft는 출처가 아닙니다.** 조직 계정(Entra ID)의 이메일 값은 테넌트 관리자가
   정할 수 있어, 그 값만으로는 메일함 소유를 증명하지 못합니다. Microsoft로만 로그인한
   세션의 동의는 지금처럼 **확인 메일**로 갑니다.
-- 증명은 **로그인 시점에 서버가 세션 토큰에 기록**합니다(방법과 증명된 주소).
+- 증명은 **로그인 시점에 서버가 세션 토큰에 기록**합니다(방법, 증명된 주소, 시각).
   클라이언트가 말하는 값이 아니며, 이 변경 이전에 발급된 세션에는 없습니다 — 그
   세션은 확인 메일로 갑니다.
+- 기록은 **로그인 분기에서만** 합니다. 출처는 이메일 코드 로그인의 `authorize()`
+  결과, 또는 Google 로그인의 **원본 프로필**(`profile.email`, `email_verified === true`)
+  입니다. 매핑된 user 객체, `User.emailVerified`(OAuth 계정은 NULL), 세션 갱신
+  (`trigger: "update"`)의 클라이언트 값은 출처가 아닙니다. 저장하는 주소는 원본
+  프로필 주소를 trim·소문자로 정규화한 것이고, **그 토큰의 사용자 주소와 같을 때만**
+  저장합니다 — 세션이 있는 상태의 OAuth 로그인은 NextAuth가 그 제공자를 기존 사용자에게
+  연결하므로, 다른 주소의 Google 프로필이 이 계정을 증명하지 않게 하기 위해서입니다.
+- Microsoft 로그인, 로그인 방법 연결(`app/api/user/login-methods/**`), 이메일 로그인
+  재활성화는 증명을 기록하지 않습니다. 새 로그인은 이전 토큰의 증명을 잇지 않습니다.
 - 증명된 주소와 계정의 현재 주소가 다르면(주소 변경 이후) 증명이 아닙니다. 대조는
   동의를 쓰는 트랜잭션 안, User 행 잠금 아래에서 합니다(§13.1 항목 15와 같은 순서).
 
@@ -417,6 +429,31 @@ https://tomverse.app/api/admin/marketing-reach
 `ConsentRecord(action="granted")`의 `evidence`는 링크 확인의
 `{ tokenVersion, requestedAt, confirmedVia: "link" }` 대신
 `{ confirmedVia: "verified_session", proof: "email_code" | "google_verified",
-provenAt }`입니다. `capturedVia`(`signup_form`·`in_product_notice`·
-`preference_center`), 정책 버전, IP/UA hash는 지금과 같습니다. 주소 digest는 링크의
+provenAt }`입니다. `capturedVia`는 지금과 같이 `signup_form`(가입) 또는
+`preference_center`(설정·제품 내 안내)이고, 제품 내 안내는 `evidence.via`에 화면을
+적습니다 — `in_product_notice`는 `ConsentRecord`의 수집 경로 값이 아닙니다. 정책
+버전, IP/UA hash는 지금과 같습니다. 주소 digest는 링크의
 토큰 대신 세션이 증명한 주소에서 계산해 잠금 아래에서 대조합니다.
+
+### 14.6 구현 제약 (독립 검토 2026-09-30 반영)
+
+1. **확인 증거는 두 갈래입니다.** `link`는 지금의 토큰 증거이며 행의
+   `confirmationRequestId`와 일치해야 합니다. `verified_session`은 `proof`·`provenAt`·
+   증명된 주소의 digest·정책 버전을 갖고 `requestId`가 없습니다. 두 갈래는 서로의
+   검사를 통과시키지 못하며, `verified_session`은 **서버가 연 세션 토큰에서만**
+   만들어지고 요청 본문으로 받지 않습니다.
+2. **검사는 잠금 안에서 합니다.** User 행을 잠근 뒤 증명된 주소의 digest를 잠근 주소와
+   대조하고, 그다음 EmailPreference 행을 잠급니다(§13.1 항목 15의 순서). 수집 flag,
+   `preferenceChangeDecision()`, 관할권 재판정도 같은 갈래가 직접 보장합니다 —
+   `setPreference()` 밖에만 있으면 우회됩니다.
+3. **이미 열린 트랜잭션에서 씁니다.** 가입 finalize와 제품 내 안내는 자기 트랜잭션
+   안에서 `applyPreferenceChange(tx, …)`로 grant합니다. privacy intake·complaint의
+   기존 호출(`enabled: false`)에는 이 갈래를 열지 않습니다.
+4. **남은 요청은 지웁니다.** 증명된 세션의 grant는 행에 남아 있던
+   `confirmationRequestId`를 비워, 이미 발송된 확인 링크가 나중에 아무것도 바꾸지
+   못하게 합니다. `unconfirmed`·대기 행의 "확인 메일 보내기"도 설정의 같은 분기입니다.
+5. **한국 처리 결과 알림은 grant 트랜잭션에서 enqueue합니다.** 템플릿 준비는 그
+   트랜잭션 밖에서 합니다(§13.1 항목 16).
+6. **호주 관계와는 별개입니다.** 가입의 `relationship_started`(지금은 비활성)는
+   opt-in과 독립이며 즉시 동의가 대신하지 않습니다.
+
