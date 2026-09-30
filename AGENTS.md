@@ -460,6 +460,24 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
 - **로그인 시 guest localStorage를 삭제하지 않습니다.** 전환은 *선택*만 해제하고
   guest snapshot은 import modal이 결정할 수 있도록 보존합니다.
 
+# Code managed-path credits, guardrail and concurrency
+
+Code 제품 서비스(TomverseCode 관리형 모델 카탈로그 경로)의 예약·정산·동시 실행을
+만들거나 건드리기 전에 읽습니다. **설계 정책이며 코드는 아직 없습니다.**
+
+- `docs/policy/code-task-cost-guardrails.md`
+- `docs/policy/code-concurrency.md`
+
+- **코딩 전용 크레딧 풀이나 숨은 USD 한도를 만들지 않습니다.** 채팅과 같은 크레딧·
+  `op-cost-*`·provider 예산을 쓰고, 코딩을 따로 막는 장치는 guardrail이거나 동시 실행입니다.
+- **예약은 태스크 단위, 정산은 호출 단위입니다.** 정산을 모르면 예약만큼 쓴 것으로 치고
+  0으로 해제하지 않습니다. 잠금은 `lockCreditAccount()`가 먼저입니다
+  (docs/policy/credit-and-cost-limits.md §9).
+- **코딩은 채팅의 rate·동시 실행 scope를 쓰지도, 소비하지도 않습니다.** 태스크 슬롯과
+  호출 슬롯을 따로 세고, Fleet admission은 전부 아니면 전무입니다.
+- **관리형 코딩 호출은 Conversation을 만들지 않고 `Conversation.productKey`에 `code`를 넣지
+  않습니다.** 제품 귀속은 서버가 Code 자격증명에서 유도합니다.
+
 # 프로모션 할인과 통화
 
 프로모션의 할인 형태, `discountAmountCents`, Admin billing PATCH의 프로모션
