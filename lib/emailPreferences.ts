@@ -292,8 +292,32 @@ export type SetPreferenceInput = {
     /** The mailbox the link was sent to, re-checked under the user row lock. */
     addressDigest: string;
   };
+  /**
+   * Called inside the transaction that wrote a consent record, with that
+   * record. How a caller queues the 14-day processing-result notice with the
+   * change it reports (docs/policy/email-product-news-redesign-draft.md 7.7),
+   * without this module reaching the outbox itself.
+   */
+  onConsentRecorded?: ConsentRecordedHook;
   now?: Date;
 };
+
+/**
+ * What a consent-record hook receives: a consent record, or -- for a refusal
+ * by somebody who never consented (the risk_accepted cohort) -- the
+ * suppression the refusal wrote, as `action: "withdrawn"`.
+ */
+export type ConsentRecordedHook = (
+  tx: Prisma.TransactionClient,
+  record: {
+    id: string;
+    referenceType: "consent_record" | "suppression_event";
+    userId: string;
+    emailAddress: string;
+    action: string;
+    occurredAt: Date;
+  }
+) => Promise<void>;
 
 export async function setPreference(input: SetPreferenceInput): Promise<PreferenceChangeResult> {
   const decision = preferenceChangeDecision({
@@ -512,6 +536,9 @@ export async function applyPreferenceChange(
         select: { id: true },
       });
       if (!refusal) {
+        const sourceEventKey =
+          input.suppressionEventKey ??
+          `preference-unchanged:${input.userId}:${purpose}:${randomUUID()}`;
         await recordSuppression(
           {
             emailAddress: email,
@@ -522,12 +549,22 @@ export async function applyPreferenceChange(
               (input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center"),
             sourceDeliveryId: input.deliveryId ?? null,
             occurredAt: now,
-            sourceEventKey:
-              input.suppressionEventKey ??
-              `preference-unchanged:${input.userId}:${purpose}:${randomUUID()}`,
+            sourceEventKey,
           },
           tx
         );
+        // A refusal by somebody with no consent to withdraw is still a
+        // refusal to report (the cohort the override mails is exactly this).
+        if (input.onConsentRecorded) {
+          await input.onConsentRecorded(tx, {
+            id: sourceEventKey,
+            referenceType: "suppression_event",
+            userId: input.userId,
+            emailAddress: normalizeSuppressionAddress(email),
+            action: "withdrawn",
+            occurredAt: now,
+          });
+        }
       }
     }
     return cancelledRequest ? ("cancelled" as const) : ("already_set" as const);
@@ -656,6 +693,16 @@ export async function applyPreferenceChange(
       },
     });
     consentRecordId = consentRecord.id;
+    if (input.onConsentRecorded) {
+      await input.onConsentRecorded(tx, {
+        id: consentRecord.id,
+        referenceType: "consent_record",
+        userId: input.userId,
+        emailAddress: consentRecord.emailAddress,
+        action: consentRecord.action,
+        occurredAt: consentRecord.occurredAt,
+      });
+    }
   }
 
   // Every change of the enabled state, append-only. The id keys the suppression
@@ -748,20 +795,118 @@ export async function withdrawAllMarketing(input: {
   deliveryId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  /** Called once, for the first withdrawal this request records. */
+  onConsentRecorded?: ConsentRecordedHook;
   now?: Date;
 }) {
-  const results: PreferenceChangeResult[] = [];
+  // Without a hook, the per-purpose path as before: nothing has to commit
+  // together.
+  if (!input.onConsentRecorded) {
+    const results: PreferenceChangeResult[] = [];
+    for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+      results.push(
+        await setPreference({
+          ...input,
+          purpose,
+          enabled: false,
+          viaToken: input.source === "unsubscribe_link",
+        })
+      );
+    }
+    return results;
+  }
+
+  // With one, the whole request is one transaction, and its processing result
+  // commits with it. Split per purpose, a notice queued with the first said
+  // "all marketing is off" while a later purpose could still fail; queued
+  // after the last in its own transaction, a failure there left the
+  // withdrawals committed and a retry -- finding nothing left to change --
+  // never queued it.
+  //
+  // Reported once, when this request changed anything: a consent withdrawn, a
+  // refusal recorded, or a switch that was on without a confirmation turned
+  // off (that one writes no consent record, and is still an unsubscribe). A
+  // retry that changes nothing reports nothing, so a double click sends one.
+  const hook = input.onConsentRecorded;
+  const now = input.now ?? new Date();
   for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
-    results.push(
-      await setPreference({
+    const decision = preferenceChangeDecision({
+      purpose,
+      enabled: false,
+      viaToken: input.source === "unsubscribe_link",
+      confirmed: false,
+    });
+    if (!decision.allowed) return BULK_UNSUBSCRIBE_PURPOSES.map(() => ({ changed: false, reason: decision.reason }));
+  }
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { email: true },
+  });
+  if (!user?.email) {
+    return BULK_UNSUBSCRIBE_PURPOSES.map(() => ({ changed: false, reason: "unknown_purpose" as const }));
+  }
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  await ensureDefaultPreferences(input.userId);
+
+  return prisma.$transaction(async (tx) => {
+    let first: Parameters<ConsentRecordedHook>[1] | null = null;
+    const note: ConsentRecordedHook = async (_tx, record) => {
+      if (!first) first = record;
+    };
+    const results: PreferenceChangeResult[] = [];
+    let changed = false;
+    for (const purpose of BULK_UNSUBSCRIBE_PURPOSES) {
+      const outcome = await applyPreferenceChange(tx, {
         ...input,
-        purpose,
+        purpose: purpose as EmailPurpose,
         enabled: false,
         viaToken: input.source === "unsubscribe_link",
-      })
-    );
-  }
-  return results;
+        onConsentRecorded: note,
+        now,
+        policyVersionId,
+        confirmedCountry: null,
+      });
+      if (outcome === "changed" || outcome === "cancelled") changed = true;
+      results.push(
+        outcome === "changed" || outcome === "cancelled"
+          ? { changed: true, purpose: purpose as EmailPurpose, enabled: false }
+          : {
+              changed: false,
+              reason:
+                outcome === "no_address" || outcome === "address_changed"
+                  ? outcome === "no_address"
+                    ? "unknown_purpose"
+                    : "address_changed"
+                  : outcome === "already_set"
+                    ? "already_set"
+                    : outcome === "superseded"
+                      ? "superseded"
+                      : "suppressed",
+            }
+      );
+    }
+    const recorded = first as Parameters<ConsentRecordedHook>[1] | null;
+    if (recorded || changed) {
+      // The address as it is under the user row lock the purposes above took,
+      // so the notice goes where the suppression was written -- not the one
+      // read before the transaction, which may have changed since.
+      const locked = await lockUserEmail(tx, input.userId);
+      if (!locked) return results;
+      const email = normalizeSuppressionAddress(locked);
+      await hook(
+        tx,
+        recorded ?? {
+          id: `withdraw-all:${input.userId}:${now.toISOString()}`,
+          referenceType: "suppression_event",
+          userId: input.userId,
+          emailAddress: email,
+          action: "withdrawn",
+          occurredAt: now,
+        }
+      );
+    }
+    return results;
+  });
 }
 
 /**

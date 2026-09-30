@@ -109,11 +109,6 @@ test("the duties this build does not do have no row", () => {
   // are absent and their rule does not send. Two of Korea's are in that state
   // for different reasons, and both are the mechanism working:
   //
-  // - `bilingual_unsubscribe_notice`: the footer renders one language, never
-  //   both, so the duty is simply not done.
-  // - `consent_result_notice_14_days`: the notice needs the wording approved
-  //   in S2 section 4, which is not in this tree, so there is nothing to
-  //   confirm yet.
   // - `advertising_subject_label`: waived by the owner, and a waiver is an
   //   approval that only a person can write.
   const korean = releaseNotesObligationSeed()
@@ -121,12 +116,13 @@ test("the duties this build does not do have no row", () => {
     .map((duty) => duty.obligationKey);
   assert.deepEqual(
     obligationsFor("KR").filter((key) => !korean.includes(key)),
-    [
-      "bilingual_unsubscribe_notice",
-      "consent_result_notice_14_days",
-      "advertising_subject_label",
-    ]
+    ["consent_result_notice_14_days", "advertising_subject_label"]
   );
+  // `consent_result_notice_14_days` stays open: a single purpose's withdrawal
+  // has no approved wording (S6b sends the consent and all-marketing notices).
+  // `bilingual_unsubscribe_notice` is done since S6b: the footer prints the
+  // notice in Korean and English, and the check renders it to confirm.
+  assert.ok(korean.includes("bilingual_unsubscribe_notice"));
 });
 
 test("a duty with no row blocks its rule", () => {

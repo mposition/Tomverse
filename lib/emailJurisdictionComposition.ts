@@ -60,6 +60,8 @@ export type CompositionInput = {
   language: string;
   unsubscribeUrl?: string | null;
   reasonLine?: string | null;
+  /** The languages the unsubscribe notice must also be in (Korea: ko and en). */
+  unsubscribeNoticeLanguages?: readonly string[];
   rendered: RenderedMessage;
 };
 
@@ -142,6 +144,7 @@ export const composeJurisdictionalMessage = (
         language: input.language,
         unsubscribeUrl: input.unsubscribeUrl,
         reasonLine: input.reasonLine,
+        unsubscribeNoticeLanguages: input.unsubscribeNoticeLanguages,
       })
     : ({ ok: false, missing: [] as string[] } as const);
 

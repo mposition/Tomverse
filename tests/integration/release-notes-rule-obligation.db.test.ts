@@ -150,18 +150,16 @@ test("a draft carries the duty states that are settled without a decision", asyn
     if (row.state === "deferred") assert.ok(row.dueBy);
   }
 
-  // Korea's three unsettled duties have no row, which is what would block the
-  // Korean rule once S9 reads these.
+  // Korea's two unsettled duties have no row, which is what blocks the Korean
+  // rule: the 14-day notice waits on an approved purpose-scoped wording and the
+  // subject label on the owner's waiver. The bilingual unsubscribe notice is
+  // settled since S6b.
   const korean = stored
     .filter((row) => row.countryRule.countryCode === "KR")
     .map((row) => row.obligationKey);
   assert.deepEqual(
     obligationsFor("KR").filter((key) => !korean.includes(key)),
-    [
-      "bilingual_unsubscribe_notice",
-      "consent_result_notice_14_days",
-      "advertising_subject_label",
-    ]
+    ["consent_result_notice_14_days", "advertising_subject_label"]
   );
 });
 

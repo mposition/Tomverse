@@ -14,6 +14,7 @@ import {
   CONSENT_CONFIRMATION_TTL_MS,
 } from "@/lib/emailConsentToken";
 import { jurisdictionForUser, recordEstimatedCountry } from "@/lib/emailJurisdiction";
+import { prepareProcessingResultNotice } from "@/lib/processingResultNotice";
 import {
   marketingJurisdictionVerdict,
   normalizeCountry,
@@ -405,10 +406,15 @@ export async function confirmConsent(input: {
     return { confirmed: false, reason: "country_not_allowed" };
   }
 
+  // Korea's 14-day result notice, queued in the transaction that records the
+  // consent (docs/policy/email-product-news-redesign-draft.md 7.7). Prepared
+  // here because preparing may insert template rows.
+  const onConsentRecorded = await prepareProcessingResultNotice(payload.userId);
   const result = await setPreference({
     userId: payload.userId,
     purpose: payload.purpose,
     enabled: true,
+    onConsentRecorded,
     capturedVia: "preference_center",
     source: "preference_center",
     jurisdiction: jurisdiction.countryCode,
