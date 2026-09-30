@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 
-use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask, SelectionRead, TomverseApi};
+use crate::tomverse_api::{
+    is_database_busy, ExecutionStartResponse, OwnedTodoTask, SelectionRead, TomverseApi,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeIdentity {
@@ -32,6 +34,14 @@ pub enum DriveOutcome {
         task_id: String,
         worker: String,
         reason: Option<String>,
+    },
+    /// execution_start answered the exact database-busy body: its transaction
+    /// never started, so no attempt exists and the task is still an owned
+    /// Todo. The next tick reads it again and starts it with the same
+    /// revision and runtime.
+    ExecutionStartDeferred {
+        task_id: String,
+        worker: String,
     },
     ExecutionStarted {
         task_id: String,
@@ -192,6 +202,12 @@ where
          */
         let start = match self.control.execution_start(task, &runtime).await {
             Ok(start) => start,
+            Err(error) if is_database_busy(&error) => {
+                return Ok(DriveOutcome::ExecutionStartDeferred {
+                    task_id: task.id.clone(),
+                    worker: task.owner.clone(),
+                });
+            }
             Err(_) => {
                 tracing::warn!(
                     task_id = %task.id,
@@ -258,6 +274,7 @@ mod tests {
         tasks: Vec<OwnedTodoTask>,
         start: ExecutionStartResponse,
         start_error: bool,
+        start_busy: bool,
         start_calls: Arc<AtomicUsize>,
     }
 
@@ -273,6 +290,7 @@ mod tests {
                     reason: None,
                 },
                 start_error: false,
+                start_busy: false,
                 start_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
@@ -291,6 +309,10 @@ mod tests {
             self.start_calls.fetch_add(1, Ordering::SeqCst);
             if self.start_error {
                 return Err(anyhow::anyhow!("unverified execution-start response"));
+            }
+            if self.start_busy {
+                return Err(anyhow::Error::new(crate::tomverse_api::DatabaseBusy)
+                    .context("execution start"));
             }
             Ok(self.start.clone())
         }
@@ -433,6 +455,25 @@ mod tests {
         assert!(error
             .to_string()
             .contains("execution start reported success without attempt_id"));
+    }
+
+    #[tokio::test]
+    async fn a_busy_start_is_deferred_not_unknown() {
+        // The exact busy answer: the start transaction never ran, no attempt
+        // exists. The task is deferred to the next tick; the tick does not fail.
+        let mut control = FakeControl::successful();
+        control.start_busy = true;
+        let calls = control.start_calls.clone();
+        let driver = BoardDriver::new(control, FakeAdapter::idle_running());
+        let outcomes = driver.tick().await.expect("a busy start is not an unknown outcome");
+        assert_eq!(
+            outcomes,
+            vec![DriveOutcome::ExecutionStartDeferred {
+                task_id: "TASK-1".into(),
+                worker: "worker-a".into(),
+            }]
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

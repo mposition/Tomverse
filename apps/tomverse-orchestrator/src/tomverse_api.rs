@@ -142,9 +142,68 @@ const SELECTION_READ_STATUSES: &[StatusCode] = &[
 /// Whether a 503 body is exactly the database-busy answer. Any other 503 body
 /// -- `amux_outcome_unknown` with its incident id, a deadline, an extra field
 /// -- is not.
-fn is_database_busy(body: &[u8]) -> bool {
+fn is_database_busy_body(body: &[u8]) -> bool {
     serde_json::from_slice::<DatabaseBusyAnswer>(body)
         .is_ok_and(|answer| answer.reason == DATABASE_BUSY)
+}
+
+/// A write, or any call other than the three selection reads, answered with
+/// the exact database-busy body at 503: the app decided that nothing was
+/// written, because the transaction never started (or, for a read inside the
+/// route, found the database busy) before the route had written anything
+/// (`amuxDbBoundaryFailure`, lib/amux/dbBoundary.ts). Every such call still
+/// returns it as an error, so a caller that does not look for it stops as it
+/// always did; only a caller that asks `is_database_busy` treats it as a
+/// request that did not happen and sends it again on a later tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DatabaseBusy;
+
+impl std::fmt::Display for DatabaseBusy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Tomverse AMUX answered 503 amux_database_busy; the request did not start")
+    }
+}
+
+impl std::error::Error for DatabaseBusy {}
+
+/// Whether this error is, anywhere in its chain, the exact database-busy
+/// answer. A timeout, a lost response, any other status or body is not.
+pub fn is_database_busy(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<DatabaseBusy>().is_some())
+}
+
+/// A 503 body is small; this is only enough to recognise the busy answer.
+const MAX_BUSY_PROBE_BYTES: usize = 1024;
+
+/// The error for a status the caller does not accept. A 503 whose body is
+/// exactly the busy answer is `DatabaseBusy`; anything else is `otherwise`,
+/// the error the caller returned before this answer existed.
+async fn database_busy_or(mut response: reqwest::Response, otherwise: &'static str) -> anyhow::Error {
+    if response.status() != StatusCode::SERVICE_UNAVAILABLE
+        || ensure_identity_encoding(&response).is_err()
+    {
+        return anyhow::anyhow!(otherwise);
+    }
+    let mut body = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if body.len() + chunk.len() > MAX_BUSY_PROBE_BYTES {
+                    return anyhow::anyhow!(otherwise);
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => return anyhow::anyhow!(otherwise),
+        }
+    }
+    if is_database_busy_body(&body) {
+        anyhow::Error::new(DatabaseBusy)
+    } else {
+        anyhow::anyhow!(otherwise)
+    }
 }
 
 /// `POST /api/internal/amux/queue` at 409: `{error, reason}`.
@@ -201,7 +260,7 @@ pub(crate) fn parse_queue_body(
         }
         bail!("unexpected Tomverse AMUX queue conflict");
     }
-    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy_body(body) {
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
@@ -233,7 +292,7 @@ pub(crate) fn parse_owned_queue_body(
         }
         bail!("unexpected Tomverse AMUX owned-queue conflict");
     }
-    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy_body(body) {
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
@@ -267,7 +326,7 @@ pub(crate) fn parse_routing_snapshot_body(
         }
         bail!("unexpected Tomverse AMUX routing snapshot conflict");
     }
-    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy(body) {
+    if status == StatusCode::SERVICE_UNAVAILABLE && is_database_busy_body(body) {
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
@@ -443,7 +502,7 @@ async fn read_bounded_body(
 ) -> Result<(StatusCode, Vec<u8>)> {
     let status = response.status();
     if !allowed_statuses.contains(&status) {
-        bail!("unsupported Tomverse internal response status");
+        return Err(database_busy_or(response, "unsupported Tomverse internal response status").await);
     }
     ensure_identity_encoding(&response)?;
 
@@ -765,6 +824,15 @@ impl TomverseApi {
             .await?;
 
         if !claim_response_status_is_bounded(response.status()) {
+            // A claim that never started answers the exact busy body at 503;
+            // the scheduler skips the tick on it. Any other status stays the
+            // error it was.
+            if response.status() == StatusCode::SERVICE_UNAVAILABLE {
+                return Err(
+                    database_busy_or(response, "unsupported Tomverse AMUX claim response status")
+                        .await,
+                );
+            }
             response.error_for_status_ref()?;
             bail!("unsupported Tomverse AMUX claim response status");
         }

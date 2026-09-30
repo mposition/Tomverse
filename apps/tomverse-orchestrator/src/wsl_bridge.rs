@@ -27,9 +27,25 @@ use crate::local_card::{
     review_pr_number_from, valid_local_card_id, LinkDecision, LocalCardSummary,
 };
 use crate::tomverse_api::{
-    ExecutionStartResponse, OwnedTodoTask, PulledDelivery, SelectionRead, BOARD_CAPACITY_EXCEEDED,
-    DATABASE_BUSY,
+    is_database_busy, ExecutionStartResponse, OwnedTodoTask, PulledDelivery, SelectionRead,
+    BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
+
+/// The idle reason for an execution start that answered the exact
+/// database-busy body: its transaction never ran, no attempt exists, and the
+/// owned Todo is started again next tick with the same revision and runtime.
+pub const START_DATABASE_BUSY: &str = "execution_start_database_busy";
+
+/// An attempt Tomverse started whose delivery pull or ack answered the exact
+/// database-busy body. That call wrote nothing; the attempt is open on the
+/// server with its delivery still queued or leased. The next tick pulls it
+/// again for the same worker, instance and generation, and the server returns
+/// the same live receipt (or a fresh one if the receipt lease ran out).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AwaitingDelivery {
+    pub worker: String,
+    pub attempt_id: String,
+}
 
 pub const WSL_BRIDGE_CODE_LATCH: bool = true;
 
@@ -164,6 +180,11 @@ pub enum BridgeTickResult {
     ResultRejected {
         attempt_id: String,
     },
+    /// Started, not yet delivered: see `AwaitingDelivery`. Not a halt.
+    AwaitingDelivery {
+        worker: String,
+        attempt_id: String,
+    },
 }
 
 pub struct BridgeTickInput<'a> {
@@ -178,6 +199,9 @@ pub struct BridgeTickInput<'a> {
     pub lease_expires_at: i64,
     pub now: i64,
     pub worker_outcome: Option<&'a str>,
+    /// Started attempts whose delivery an earlier tick could not pull or ack
+    /// because Tomverse answered busy. Pulled again before new work.
+    pub awaiting_delivery: &'a [AwaitingDelivery],
 }
 
 pub struct LocalExchange {
@@ -249,6 +273,20 @@ impl ExistingSessionAdapter {
 
     pub fn names(&self) -> Vec<String> {
         self.sessions.keys().cloned().collect()
+    }
+
+    /// A session whose registration a later tick completed (its first attempt
+    /// answered busy). Not at a boundary until the next roster read says so.
+    pub fn register(&mut self, name: String, instance_id: String, generation: i64) {
+        self.sessions.insert(
+            name,
+            SessionPresence {
+                running: true,
+                at_boundary: false,
+                instance_id,
+                generation,
+            },
+        );
     }
 
     pub fn observe(&mut self, name: &str, running: bool, at_boundary: bool) {
@@ -417,6 +455,8 @@ pub enum SettleResult {
     Settled,
     DropAndHalt,
     KeepAndHalt,
+    /// Tomverse answered busy: the settle did not happen. Keep, no halt.
+    RetryNextTick,
 }
 
 pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
@@ -427,11 +467,24 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
     }
 }
 
+/// A settle call's answer. The exact busy answer wrote nothing: the attempt
+/// stays and is settled again next tick from the same local card, without a
+/// halt. Anything else is `plan_settle_result` as before.
+pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
+    match answer {
+        Ok(settled) => plan_settle_result(Some(*settled)),
+        Err(error) if is_database_busy(error) => SettleResult::RetryNextTick,
+        Err(_) => plan_settle_result(None),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingHeartbeat {
     Keep,
     KeepAndHalt,
     DropAndHalt,
+    /// Tomverse answered busy: the heartbeat did not happen. Keep, no halt.
+    RetryNextTick,
 }
 
 pub fn plan_pending_heartbeat(accepted: Option<bool>) -> PendingHeartbeat {
@@ -439,6 +492,41 @@ pub fn plan_pending_heartbeat(accepted: Option<bool>) -> PendingHeartbeat {
         Some(true) => PendingHeartbeat::Keep,
         Some(false) => PendingHeartbeat::DropAndHalt,
         None => PendingHeartbeat::KeepAndHalt,
+    }
+}
+
+/// An execution heartbeat's answer. The exact busy answer wrote nothing: the
+/// attempt stays pending and is heartbeaten again next tick, without a halt.
+/// If the busy answers outlast the attempt lease, the server's recovery ends
+/// the attempt and the next heartbeat's refusal drops it, as for any expiry.
+pub fn plan_heartbeat_answer(answer: &Result<bool>) -> PendingHeartbeat {
+    match answer {
+        Ok(accepted) => plan_pending_heartbeat(Some(*accepted)),
+        Err(error) if is_database_busy(error) => PendingHeartbeat::RetryNextTick,
+        Err(_) => plan_pending_heartbeat(None),
+    }
+}
+
+/// What a worker registration's answer means for the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationAnswer {
+    Registered(i64),
+    /// Tomverse answered busy: the registration did not happen. Register
+    /// again next tick with the same instance id.
+    RetryNextTick,
+    Skip,
+}
+
+pub fn plan_registration_answer(
+    answer: &Result<crate::tomverse_api::WorkerRegisterResponse>,
+) -> RegistrationAnswer {
+    match answer {
+        Ok(response) if response.registered => response
+            .generation
+            .map_or(RegistrationAnswer::Skip, RegistrationAnswer::Registered),
+        Ok(_) => RegistrationAnswer::Skip,
+        Err(error) if is_database_busy(error) => RegistrationAnswer::RetryNextTick,
+        Err(_) => RegistrationAnswer::Skip,
     }
 }
 
@@ -691,6 +779,34 @@ where
         }]);
     }
 
+    let snapshot = sessions.clone();
+    let mut results = Vec::new();
+    let mut halted = false;
+
+    // Deliveries an earlier tick could not pull: those attempts are already
+    // open on the server, so they come before any new start.
+    for awaiting in input.awaiting_delivery {
+        if halted {
+            break;
+        }
+        let result = deliver_started(
+            input,
+            &snapshot,
+            prompts,
+            local,
+            &awaiting.worker,
+            &awaiting.attempt_id,
+        )
+        .await?;
+        if matches!(result, BridgeTickResult::Halted { .. }) {
+            halted = true;
+        }
+        results.push(result);
+    }
+    if halted {
+        return Ok(results);
+    }
+
     // A board too large for one complete owned-queue response, and a database
     // too busy to take the read just then, are known answers that wrote
     // nothing, not unknown outcomes: no new assignment this tick, no halt.
@@ -699,20 +815,19 @@ where
     let tasks = match control.owned_queue().await? {
         SelectionRead::Ready(tasks) => tasks,
         SelectionRead::BoardCapacityExceeded => {
-            return Ok(vec![BridgeTickResult::Idle {
+            results.push(BridgeTickResult::Idle {
                 reason: BOARD_CAPACITY_EXCEEDED,
-            }]);
+            });
+            return Ok(results);
         }
         SelectionRead::DatabaseBusy => {
-            return Ok(vec![BridgeTickResult::Idle {
+            results.push(BridgeTickResult::Idle {
                 reason: DATABASE_BUSY,
-            }]);
+            });
+            return Ok(results);
         }
     };
-    let snapshot = sessions.clone();
     let mut seen = HashSet::new();
-    let mut results = Vec::new();
-    let mut halted = false;
 
     for task in tasks {
         if !seen.insert(task.owner.clone()) {
@@ -738,22 +853,10 @@ where
                     worker,
                     attempt_id,
                     ..
-                } => {
-                    let prompt = prompts
-                        .prompt_for(&worker, &attempt_id)
-                        .await?
-                        .unwrap_or_default();
-                    let presence = snapshot.presence(&worker);
-                    dispatch_started(
-                        input,
-                        presence.map(|_| worker.as_str()),
-                        presence.is_some_and(|session| session.running),
-                        &attempt_id,
-                        &prompt,
-                        local,
-                    )
-                    .await
-                }
+                } => deliver_started(input, &snapshot, prompts, local, &worker, &attempt_id).await?,
+                DriveOutcome::ExecutionStartDeferred { .. } => BridgeTickResult::Idle {
+                    reason: START_DATABASE_BUSY,
+                },
                 DriveOutcome::StartFailed { .. }
                 | DriveOutcome::StartReportedNotRunning { .. }
                 | DriveOutcome::MidTurn { .. }
@@ -772,6 +875,44 @@ where
     }
 
     Ok(results)
+}
+
+/// Pulls and acks a started attempt's delivery, then hands it to the local
+/// session. A pull or ack that answered the exact busy body wrote nothing:
+/// the attempt waits for the next tick instead of halting. Any other failure
+/// is returned, and halts, as before.
+async fn deliver_started<P, L>(
+    input: &BridgeTickInput<'_>,
+    snapshot: &ExistingSessionAdapter,
+    prompts: &mut P,
+    local: &mut L,
+    worker: &str,
+    attempt_id: &str,
+) -> Result<BridgeTickResult>
+where
+    P: AttemptPrompts,
+    L: LocalAmux,
+{
+    let prompt = match prompts.prompt_for(worker, attempt_id).await {
+        Ok(prompt) => prompt.unwrap_or_default(),
+        Err(error) if is_database_busy(&error) => {
+            return Ok(BridgeTickResult::AwaitingDelivery {
+                worker: worker.to_owned(),
+                attempt_id: attempt_id.to_owned(),
+            });
+        }
+        Err(error) => return Err(error),
+    };
+    let presence = snapshot.presence(worker);
+    Ok(dispatch_started(
+        input,
+        presence.map(|_| worker),
+        presence.is_some_and(|session| session.running),
+        attempt_id,
+        &prompt,
+        local,
+    )
+    .await)
 }
 
 async fn dispatch_started<L>(
@@ -1049,6 +1190,34 @@ impl AttemptPrompts for DeliveryPrompts<'_> {
     }
 }
 
+/// Registers the sessions whose first registration answered busy -- it did
+/// not happen -- with the instance id minted for them at startup. A name that
+/// is already registered is never registered again: registering bumps the
+/// generation, and a lost lease halts instead (see the heartbeat loop).
+async fn retry_registrations(
+    api: &crate::tomverse_api::TomverseApi,
+    awaiting: &mut Vec<(String, String)>,
+    sessions: &mut ExistingSessionAdapter,
+) {
+    let mut still_awaiting = Vec::new();
+    for (name, instance_id) in awaiting.drain(..) {
+        if sessions.presence(&name).is_some() {
+            continue;
+        }
+        match plan_registration_answer(&api.worker_register(&name, &instance_id).await) {
+            RegistrationAnswer::Registered(generation) => {
+                sessions.register(name, instance_id, generation);
+            }
+            RegistrationAnswer::RetryNextTick => {
+                eprintln!("amux wsl bridge warn: worker register answered 503 {DATABASE_BUSY}; registering again next tick");
+                still_awaiting.push((name, instance_id));
+            }
+            RegistrationAnswer::Skip => {}
+        }
+    }
+    *awaiting = still_awaiting;
+}
+
 pub async fn run_from_env() -> i32 {
     let Ok(local_url) = std::env::var(WSL_BRIDGE_LOCAL_URL_ENV) else {
         eprintln!("amux wsl bridge local url is unset");
@@ -1091,17 +1260,21 @@ pub async fn run_from_env() -> i32 {
         }
     };
     let mut registered = BTreeMap::new();
+    // Sessions whose registration answered busy: it did not happen, so they
+    // register next tick with the same instance id.
+    let mut awaiting_registration: Vec<(String, String)> = Vec::new();
     for row in &running {
         let instance_id = Uuid::new_v4().to_string();
-        let Ok(response) = api.worker_register(&row.name, &instance_id).await else {
-            continue;
-        };
-        if !response.registered {
-            continue;
-        }
-        let Some(generation) = response.generation else {
-            continue;
-        };
+        let generation =
+            match plan_registration_answer(&api.worker_register(&row.name, &instance_id).await) {
+                RegistrationAnswer::Registered(generation) => generation,
+                RegistrationAnswer::RetryNextTick => {
+                    eprintln!("amux wsl bridge warn: worker register answered 503 {DATABASE_BUSY}; registering again next tick");
+                    awaiting_registration.push((row.name.clone(), instance_id));
+                    continue;
+                }
+                RegistrationAnswer::Skip => continue,
+            };
         registered.insert(
             row.name.clone(),
             SessionPresence {
@@ -1112,7 +1285,7 @@ pub async fn run_from_env() -> i32 {
             },
         );
     }
-    if registered.is_empty() {
+    if registered.is_empty() && awaiting_registration.is_empty() {
         eprintln!("amux wsl bridge could not register a running session");
         return 1;
     }
@@ -1127,11 +1300,19 @@ pub async fn run_from_env() -> i32 {
     let mut halted = false;
     let mut halt_reported = false;
     let empty_prompts = BTreeMap::new();
+    let mut awaiting_delivery: Vec<AwaitingDelivery> = Vec::new();
 
     loop {
+        if !halted && !awaiting_registration.is_empty() {
+            retry_registrations(&api, &mut awaiting_registration, &mut sessions).await;
+        }
         let roster_ok = refresh_registered_sessions(&client, &base, &mut sessions).await;
-        let pending_workers: HashSet<String> =
-            pending.iter().map(|entry| entry.delivery.worker.clone()).collect();
+        // A worker whose started attempt waits for its delivery is busy too.
+        let pending_workers: HashSet<String> = pending
+            .iter()
+            .map(|entry| entry.delivery.worker.clone())
+            .chain(awaiting_delivery.iter().map(|entry| entry.worker.clone()))
+            .collect();
         for name in sessions.names() {
             let Some(session) = sessions.presence(&name).cloned() else {
                 continue;
@@ -1173,6 +1354,7 @@ pub async fn run_from_env() -> i32 {
         }
 
         if !halted {
+            let carried = std::mem::take(&mut awaiting_delivery);
             let mut prompts = DeliveryPrompts {
                 api: &api,
                 sessions: &sessions,
@@ -1190,6 +1372,7 @@ pub async fn run_from_env() -> i32 {
                 lease_expires_at: 0,
                 now: 0,
                 worker_outcome: None,
+                awaiting_delivery: &carried,
             };
             let mut accepted = Vec::new();
             match bridge_tick_sourced(
@@ -1208,6 +1391,12 @@ pub async fn run_from_env() -> i32 {
                         }
                         if let Some(warning) = bridge_tick_warning(result) {
                             eprintln!("{warning}");
+                        }
+                        if let BridgeTickResult::AwaitingDelivery { worker, attempt_id } = result {
+                            awaiting_delivery.push(AwaitingDelivery {
+                                worker: worker.clone(),
+                                attempt_id: attempt_id.clone(),
+                            });
                         }
                         if let BridgeTickResult::Pending { attempt_id } = result {
                             if let Some(delivery) = prompts
@@ -1242,13 +1431,19 @@ pub async fn run_from_env() -> i32 {
                 halted = true;
                 continue;
             };
-            let accepted = api
+            let answer = api
                 .execution_heartbeat(&entry.delivery, &session.instance_id, session.generation)
                 .await
-                .ok()
                 .map(|response| response.accepted);
-            match plan_pending_heartbeat(accepted) {
+            match plan_heartbeat_answer(&answer) {
                 PendingHeartbeat::Keep => still_pending.push(entry),
+                PendingHeartbeat::RetryNextTick => {
+                    eprintln!(
+                        "amux wsl bridge warn: execution heartbeat for attempt {} answered 503 {DATABASE_BUSY}; kept, not halted",
+                        entry.delivery.attempt_id
+                    );
+                    still_pending.push(entry);
+                }
                 PendingHeartbeat::KeepAndHalt => {
                     still_pending.push(entry);
                     halted = true;
@@ -1295,13 +1490,19 @@ pub async fn run_from_env() -> i32 {
                                 (to_status == "review").then_some(review_pr_number),
                             )
                             .await
-                            .ok()
                             .map(|response| response.settled);
-                        match plan_settle_result(settled) {
+                        match plan_settle_answer(&settled) {
                             SettleResult::Settled => {}
                             SettleResult::DropAndHalt => halted = true,
                             SettleResult::KeepAndHalt => {
                                 halted = true;
+                                still_running.push(entry);
+                            }
+                            SettleResult::RetryNextTick => {
+                                eprintln!(
+                                    "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
+                                    entry.delivery.attempt_id
+                                );
                                 still_running.push(entry);
                             }
                         }
@@ -1338,6 +1539,12 @@ fn bridge_tick_warning(result: &BridgeTickResult) -> Option<String> {
         )),
         BridgeTickResult::Idle { reason } if *reason == DATABASE_BUSY => Some(format!(
             "amux wsl bridge warn: owned queue answered 503 {reason}; no new assignment this tick, not halted"
+        )),
+        BridgeTickResult::Idle { reason } if *reason == START_DATABASE_BUSY => Some(format!(
+            "amux wsl bridge warn: execution start answered 503 {DATABASE_BUSY}; not started, retrying next tick, not halted"
+        )),
+        BridgeTickResult::AwaitingDelivery { attempt_id, .. } => Some(format!(
+            "amux wsl bridge warn: delivery for attempt {attempt_id} answered 503 {DATABASE_BUSY}; pulling again next tick, not halted"
         )),
         _ => None,
     }
@@ -1598,6 +1805,7 @@ mod tests {
             lease_expires_at: 200,
             now: 100,
             worker_outcome: outcome,
+            awaiting_delivery: &[],
         }
     }
 
@@ -2280,4 +2488,301 @@ mod tests {
             assert!(bridge_tick_warning(&result).is_none());
         }
     }
+
+    // --- 2026-09-30: lifecycle calls that answered the exact busy body. ---
+
+    const LIFECYCLE_DATABASE_BUSY_BODY: &str =
+        r#"{"error":"AMUX database is busy.","reason":"amux_database_busy"}"#;
+    const OUTCOME_UNKNOWN_BODY: &str = r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#;
+
+    fn pulled_delivery() -> PulledDelivery {
+        PulledDelivery {
+            attempt_id: ATTEMPT_ID.into(),
+            task_id: "TASK-1".into(),
+            worker: "claude-impl".into(),
+            task_revision: 3,
+            prompt: brief_prompt(),
+            receipt_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d".into(),
+            lease_expires_at: "2026-09-30T00:01:30.000Z".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_busy_execution_heartbeat_keeps_the_attempt_without_a_halt() {
+        let busy = tomverse_api(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY))
+            .execution_heartbeat(&pulled_delivery(), "00000000-0000-4000-8000-000000000001", 4)
+            .await
+            .map(|response| response.accepted);
+        assert_eq!(plan_heartbeat_answer(&busy), PendingHeartbeat::RetryNextTick);
+
+        // Any other failure still halts new assignments, as before.
+        for (status, body) in [
+            ("503 Service Unavailable", OUTCOME_UNKNOWN_BODY),
+            ("500 Internal Server Error", LIFECYCLE_DATABASE_BUSY_BODY),
+        ] {
+            let answer = tomverse_api(tomverse_answering(status, body))
+                .execution_heartbeat(&pulled_delivery(), "00000000-0000-4000-8000-000000000001", 4)
+                .await
+                .map(|response| response.accepted);
+            assert_eq!(plan_heartbeat_answer(&answer), PendingHeartbeat::KeepAndHalt, "{status}");
+        }
+        assert_eq!(plan_heartbeat_answer(&Ok(true)), PendingHeartbeat::Keep);
+        assert_eq!(plan_heartbeat_answer(&Ok(false)), PendingHeartbeat::DropAndHalt);
+    }
+
+    #[tokio::test]
+    async fn a_busy_settle_keeps_the_attempt_for_the_next_tick_without_a_halt() {
+        let settle = |base_url: String| async move {
+            tomverse_api(base_url)
+                .execution_settle_with_review_pr(
+                    ATTEMPT_ID,
+                    "claude-impl",
+                    "00000000-0000-4000-8000-000000000001",
+                    4,
+                    3,
+                    "succeeded",
+                    "review",
+                    Some("local_card_done"),
+                    Some(Some(1740)),
+                )
+                .await
+                .map(|response| response.settled)
+        };
+        let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
+        assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
+        let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
+        assert_eq!(plan_settle_answer(&unknown), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
+        assert_eq!(plan_settle_answer(&Ok(false)), SettleResult::DropAndHalt);
+    }
+
+    #[tokio::test]
+    async fn a_busy_registration_is_retried_with_the_same_instance_and_never_for_a_registered_name() {
+        let busy = tomverse_api(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY))
+            .worker_register("claude-impl", "00000000-0000-4000-8000-000000000009")
+            .await;
+        assert_eq!(plan_registration_answer(&busy), RegistrationAnswer::RetryNextTick);
+        let unknown = tomverse_api(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY))
+            .worker_register("claude-impl", "00000000-0000-4000-8000-000000000009")
+            .await;
+        assert_eq!(plan_registration_answer(&unknown), RegistrationAnswer::Skip);
+
+        // A later tick registers the waiting session with its own instance id.
+        let api = tomverse_api(tomverse_answering(
+            "200 OK",
+            r#"{"registered":true,"generation":7,"lease_expires_at":"2026-09-30T00:01:30.000Z","reason":null}"#,
+        ));
+        let mut sessions = ExistingSessionAdapter::new(BTreeMap::new());
+        let mut awaiting = vec![(
+            "codex-impl".to_owned(),
+            "00000000-0000-4000-8000-000000000009".to_owned(),
+        )];
+        retry_registrations(&api, &mut awaiting, &mut sessions).await;
+        assert!(awaiting.is_empty());
+        assert_eq!(
+            sessions.presence("codex-impl"),
+            Some(&SessionPresence {
+                running: true,
+                at_boundary: false,
+                instance_id: "00000000-0000-4000-8000-000000000009".into(),
+                generation: 7,
+            })
+        );
+
+        // A name already registered is never registered again, not even from
+        // the waiting list: no request is sent (the server would answer 500).
+        let api = tomverse_api(tomverse_answering("500 Internal Server Error", "{}"));
+        let mut sessions = running_session();
+        let mut awaiting = vec![(
+            "claude-impl".to_owned(),
+            "00000000-0000-4000-8000-000000000009".to_owned(),
+        )];
+        retry_registrations(&api, &mut awaiting, &mut sessions).await;
+        assert!(awaiting.is_empty());
+        assert_eq!(
+            sessions.presence("claude-impl").map(|session| session.generation),
+            Some(4)
+        );
+    }
+
+    struct BusyStartControl {
+        tasks: Vec<OwnedTodoTask>,
+        starts: Arc<AtomicUsize>,
+    }
+
+    impl BoardControlPlane for BusyStartControl {
+        async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
+            Ok(SelectionRead::Ready(self.tasks.clone()))
+        }
+
+        async fn execution_start(
+            &self,
+            _task: &OwnedTodoTask,
+            _runtime: &RuntimeIdentity,
+        ) -> Result<ExecutionStartResponse> {
+            self.starts.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::Error::new(crate::tomverse_api::DatabaseBusy))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_busy_execution_start_is_an_idle_tick_not_a_halt() {
+        let prompts = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let starts = Arc::new(AtomicUsize::new(0));
+        let results = bridge_tick(
+            &input(true, &prompts, None),
+            BusyStartControl {
+                tasks: vec![task()],
+                starts: starts.clone(),
+            },
+            running_session(),
+            &mut local,
+        )
+        .await
+        .expect("a busy start is not an error that halts");
+        assert_eq!(
+            results,
+            vec![BridgeTickResult::Idle {
+                reason: START_DATABASE_BUSY,
+            }]
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        assert!(local.sends.is_empty());
+        assert_eq!(
+            bridge_tick_warning(&results[0]).as_deref(),
+            Some("amux wsl bridge warn: execution start answered 503 amux_database_busy; not started, retrying next tick, not halted"),
+        );
+    }
+
+    /// Prompts that answer the first request busy and the rest with the brief.
+    struct BusyOncePrompts {
+        busy_left: usize,
+        asked: Vec<(String, String)>,
+    }
+
+    impl AttemptPrompts for BusyOncePrompts {
+        async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>> {
+            self.asked.push((worker.to_owned(), attempt_id.to_owned()));
+            if self.busy_left > 0 {
+                self.busy_left -= 1;
+                return Err(anyhow::Error::new(crate::tomverse_api::DatabaseBusy))
+                    .context("delivery pull failed");
+            }
+            Ok(Some(brief_prompt()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_busy_delivery_waits_for_the_next_tick_and_is_delivered_then() {
+        let empty = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let mut prompts = BusyOncePrompts {
+            busy_left: 1,
+            asked: Vec::new(),
+        };
+
+        // Tick 1: the start commits, the pull answers busy.
+        let first = bridge_tick_sourced(
+            &input(true, &empty, None),
+            FlagControl {
+                calls: Arc::new(AtomicUsize::new(0)),
+                tasks: vec![task()],
+                start: started(),
+            },
+            running_session(),
+            &mut prompts,
+            &mut local,
+        )
+        .await
+        .expect("a busy pull is not an error that halts");
+        let waiting = BridgeTickResult::AwaitingDelivery {
+            worker: "claude-impl".into(),
+            attempt_id: ATTEMPT_ID.into(),
+        };
+        assert_eq!(first, vec![waiting.clone()]);
+        assert!(local.sends.is_empty());
+        assert_eq!(
+            bridge_tick_warning(&first[0]).as_deref(),
+            Some(format!("amux wsl bridge warn: delivery for attempt {ATTEMPT_ID} answered 503 amux_database_busy; pulling again next tick, not halted").as_str()),
+        );
+
+        // Tick 2: the same attempt is pulled again before any new work, and
+        // delivered. The task is Doing now, so the owned queue is empty.
+        let carried = vec![AwaitingDelivery {
+            worker: "claude-impl".into(),
+            attempt_id: ATTEMPT_ID.into(),
+        }];
+        let mut second_input = input(true, &empty, None);
+        second_input.awaiting_delivery = &carried;
+        let control_calls = Arc::new(AtomicUsize::new(0));
+        let second = bridge_tick_sourced(
+            &second_input,
+            FlagControl {
+                calls: control_calls.clone(),
+                tasks: Vec::new(),
+                start: started(),
+            },
+            running_session(),
+            &mut prompts,
+            &mut local,
+        )
+        .await
+        .expect("the retried delivery goes through");
+        assert_eq!(
+            second,
+            vec![BridgeTickResult::Pending {
+                attempt_id: ATTEMPT_ID.into(),
+            }]
+        );
+        assert_eq!(local.sends.len(), 1);
+        assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
+        // Same worker and attempt both times; no second start.
+        assert_eq!(
+            prompts.asked,
+            vec![
+                ("claude-impl".to_owned(), ATTEMPT_ID.to_owned()),
+                ("claude-impl".to_owned(), ATTEMPT_ID.to_owned()),
+            ]
+        );
+        assert_eq!(control_calls.load(Ordering::SeqCst), 1, "only the owned-queue read");
+    }
+
+    #[tokio::test]
+    async fn any_other_delivery_failure_still_halts() {
+        struct FailingPrompts;
+        impl AttemptPrompts for FailingPrompts {
+            async fn prompt_for(&mut self, _worker: &str, _attempt_id: &str) -> Result<Option<String>> {
+                Err(anyhow::anyhow!("unsupported Tomverse internal response status"))
+                    .context("delivery pull failed")
+            }
+        }
+        let empty = BTreeMap::new();
+        let mut local = LocalExchange::accepting();
+        let result = bridge_tick_sourced(
+            &input(true, &empty, None),
+            FlagControl {
+                calls: Arc::new(AtomicUsize::new(0)),
+                tasks: vec![task()],
+                start: started(),
+            },
+            running_session(),
+            &mut FailingPrompts,
+            &mut local,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(local.sends.is_empty());
+    }
+
+    #[test]
+    fn the_busy_answer_is_found_through_context_and_only_there() {
+        let busy = Err::<(), _>(anyhow::Error::new(crate::tomverse_api::DatabaseBusy))
+            .context("delivery ack failed")
+            .unwrap_err();
+        assert!(is_database_busy(&busy));
+        let other = anyhow::anyhow!("Tomverse AMUX answered 503 amux_database_busy; the request did not start");
+        assert!(!is_database_busy(&other), "the text alone is not the answer");
+    }
+
 }

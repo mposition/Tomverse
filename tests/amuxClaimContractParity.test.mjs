@@ -485,13 +485,24 @@ test("TypeScript and Rust share the database-busy reason and its exact body", as
     );
     assert.ok(source.includes(`r#"${body}"#`), file);
   }
-  // Only the selection reads skip a tick on it; the claim is a write.
+  // The selection reads skip a tick on it. So do the claim and the recovery
+  // sweep since 2026-09-30: for a write the server sends it only when the
+  // transaction never started and the route had written nothing
+  // (AMUX_DB_NOT_STARTED). Anything else from them still stops the run.
   assert.match(schedulerSource, /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("queue"\);/);
   assert.match(
     schedulerSource,
     /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("routing_snapshot"\);/,
   );
-  assert.match(schedulerSource, /fn a_database_busy_answer_to_a_claim_still_stops_the_run\(/);
+  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Ok\(\(\)\);/);
+  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => warn!\([\s\S]*?verdict = "recovery_skipped"/);
+  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)\)/);
+  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_RECOVERY_OUTCOME_UNKNOWN"\)\)/);
+  assert.match(schedulerSource, /fn any_other_claim_failure_still_stops_the_run\(/);
+  // Only the exact body at 503 is the busy answer, a typed error a caller
+  // must ask for: a caller that does not still stops.
+  assert.match(rustSource, /pub fn is_database_busy\(error: &anyhow::Error\) -> bool/);
+  assert.match(rustSource, /if is_database_busy_body\(&body\) \{\s*anyhow::Error::new\(DatabaseBusy\)/);
 });
 
 test("unknown future-lifecycle outcomes stop the whole runtime run", () => {
