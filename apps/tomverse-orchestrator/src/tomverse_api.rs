@@ -174,33 +174,120 @@ pub fn is_database_busy(error: &anyhow::Error) -> bool {
         .any(|cause| cause.downcast_ref::<DatabaseBusy>().is_some())
 }
 
+/// A selection read (`queue`, `routing_snapshot`) answered with a status that
+/// carries no evidence anything was written: any 5xx other than the exact
+/// database-busy body (already `DatabaseBusy`), or 429 (rejected before the
+/// app started a transaction). Attached by `database_busy_or` and by
+/// `parse_queue_body`/`parse_routing_snapshot_body` for the one status
+/// (503 with a body other than the busy answer) that reaches them directly.
+/// Never attached for a status outside that set: a 4xx other than 429 is an
+/// auth/config problem a retry cannot fix, and a malformed 2xx body is a
+/// contract break, so both keep the plain error they had before this type
+/// existed. Nothing outside `scheduler.rs`'s selection-read handling looks
+/// for this marker, so attaching it here changes no other caller's control
+/// flow (claim, recovery, auto-promotion, lifecycle routes, and the WSL
+/// bridge's owned-queue read all still see a plain `Err` and stop as before).
+#[derive(Debug, Clone, Copy)]
+pub struct SelectionReadTransientStatus {
+    pub status: StatusCode,
+}
+
+impl SelectionReadTransientStatus {
+    /// A short, secret-free label for the WARN log: which of the two known
+    /// buckets this status fell into. Never the response body or the request
+    /// URL.
+    pub fn error_class(self) -> &'static str {
+        if self.status == StatusCode::TOO_MANY_REQUESTS {
+            "http_429"
+        } else {
+            "http_5xx"
+        }
+    }
+}
+
+impl std::fmt::Display for SelectionReadTransientStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Tomverse AMUX selection read answered {}; nothing is known to have been written",
+            self.status
+        )
+    }
+}
+
+impl std::error::Error for SelectionReadTransientStatus {}
+
+/// Whether a status carries the "nothing was written" evidence
+/// `SelectionReadTransientStatus` names: any 5xx, or 429.
+fn is_selection_transient_status_code(status: StatusCode) -> bool {
+    status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS
+}
+
+/// Whether this error is, anywhere in its chain, a transport failure (never
+/// reached the app: connect, send, timeout, or a body read that failed after
+/// the response started) or the `SelectionReadTransientStatus` marker. Used
+/// only by the scheduler's two selection reads (`queue`, `routing_snapshot`);
+/// every other caller of this module still treats any `Err` as unknown and
+/// stops, so this classification changes nothing for them.
+pub fn is_selection_read_recoverable(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<SelectionReadTransientStatus>().is_some()
+            || cause.downcast_ref::<reqwest::Error>().is_some()
+    })
+}
+
+/// The short, secret-free error class for a recoverable selection-read
+/// failure's WARN log. `is_selection_read_recoverable` must already be true;
+/// callers that skip that check get `"transport"` as a safe default.
+pub fn selection_read_error_class(error: &anyhow::Error) -> &'static str {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<SelectionReadTransientStatus>())
+        .map(|marker| marker.error_class())
+        .unwrap_or("transport")
+}
+
 /// A 503 body is small; this is only enough to recognise the busy answer.
 const MAX_BUSY_PROBE_BYTES: usize = 1024;
 
 /// The error for a status the caller does not accept. A 503 whose body is
-/// exactly the busy answer is `DatabaseBusy`; anything else is `otherwise`,
-/// the error the caller returned before this answer existed.
+/// exactly the busy answer is `DatabaseBusy`; a 5xx or 429 with any other
+/// body is `SelectionReadTransientStatus` (inert for every caller except the
+/// scheduler's selection reads, see that type's doc comment); anything else
+/// is `otherwise`, the error the caller returned before either answer
+/// existed.
 async fn database_busy_or(mut response: reqwest::Response, otherwise: &'static str) -> anyhow::Error {
-    if response.status() != StatusCode::SERVICE_UNAVAILABLE
-        || ensure_identity_encoding(&response).is_err()
-    {
-        return anyhow::anyhow!(otherwise);
+    let status = response.status();
+    if status != StatusCode::SERVICE_UNAVAILABLE || ensure_identity_encoding(&response).is_err() {
+        return transient_status_or(status, otherwise);
     }
     let mut body = Vec::new();
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) => {
                 if body.len() + chunk.len() > MAX_BUSY_PROBE_BYTES {
-                    return anyhow::anyhow!(otherwise);
+                    return transient_status_or(status, otherwise);
                 }
                 body.extend_from_slice(&chunk);
             }
             Ok(None) => break,
-            Err(_) => return anyhow::anyhow!(otherwise),
+            Err(_) => return transient_status_or(status, otherwise),
         }
     }
     if is_database_busy_body(&body) {
         anyhow::Error::new(DatabaseBusy)
+    } else {
+        transient_status_or(status, otherwise)
+    }
+}
+
+/// `otherwise`, tagged with `SelectionReadTransientStatus` when `status` is a
+/// 5xx or 429. The tag is inert unless a caller looks for it (only the
+/// scheduler's selection reads do), so `.to_string()` on the result is still
+/// exactly `otherwise`.
+fn transient_status_or(status: StatusCode, otherwise: &'static str) -> anyhow::Error {
+    if is_selection_transient_status_code(status) {
+        anyhow::Error::new(SelectionReadTransientStatus { status }).context(otherwise)
     } else {
         anyhow::anyhow!(otherwise)
     }
@@ -247,7 +334,11 @@ fn queue_invariants_hold(tasks: &[QueueTask]) -> bool {
 
 /// Reads a queue answer. 200 is the queue, held to its invariants; 409 is the
 /// board-capacity refusal and nothing else; 503 is the database-busy answer
-/// and nothing else. Any other status or body is an error, as before.
+/// and nothing else. Any other status still reaching here is a 503 with some
+/// other body (the only status besides 200/409/503 `queue()` accepts at all;
+/// see `SELECTION_READ_STATUSES`), so it is tagged `SelectionReadTransientStatus`
+/// for the scheduler to skip on. Any other body at 503, or a malformed 200, is
+/// still a plain error, as before.
 pub(crate) fn parse_queue_body(
     status: StatusCode,
     body: &[u8],
@@ -264,7 +355,10 @@ pub(crate) fn parse_queue_body(
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
-        bail!("unsupported Tomverse internal response status");
+        return Err(transient_status_or(
+            status,
+            "unsupported Tomverse internal response status",
+        ));
     }
     let tasks: Vec<QueueTask> =
         serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
@@ -313,7 +407,10 @@ pub(crate) fn parse_owned_queue_body(
 }
 
 /// Reads a routing snapshot answer, the same way as the queue. Its 409 body is
-/// `{eligible, reason}`; its 503 body is the queue's `{error, reason}`.
+/// `{eligible, reason}`; its 503 body is the queue's `{error, reason}`. A 503
+/// with any other body -- the only other status `routing_snapshot()` accepts
+/// at all, see `SELECTION_READ_STATUSES` -- is tagged
+/// `SelectionReadTransientStatus` for the scheduler to skip on.
 pub(crate) fn parse_routing_snapshot_body(
     status: StatusCode,
     body: &[u8],
@@ -330,7 +427,10 @@ pub(crate) fn parse_routing_snapshot_body(
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
-        bail!("unsupported Tomverse internal response status");
+        return Err(transient_status_or(
+            status,
+            "unsupported Tomverse internal response status",
+        ));
     }
     let snapshot: RoutingSnapshotResponse =
         serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;

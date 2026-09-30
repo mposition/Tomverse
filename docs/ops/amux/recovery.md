@@ -179,6 +179,57 @@ setup·콜백·fence SQL이 하나도 나가지 않았음을 확인한다. 같�
 - 선택 읽기의 첫 트랜잭션 대기는 Rust의 5초 기한 때문에 800 ms와 500 ms로 제한된다.
 - DB 통합 테스트(routing 레인)는 이 PC에서 돌리지 못했다. CI의 Linux Rust job이 기준이다.
 
+### 2026-09-30 selection read 전송 오류·5xx 메모
+
+아래 관측은 운영 로그에서 보고된 것이고, 이 메모를 쓴 사람이 직접 본 것이 아니다.
+
+- 05:51:14 UTC orchestrator가 `error sending request for url
+  (https://tomverse.app/api/internal/amux/routing-snapshot)`,
+  `error_code=AMUX_INTERNAL_API_UNVERIFIED`, `verdict=internal_api_outcome_unknown_dormant`를
+  남기고 종료 코드 1로 끝났다. Railway가 1초 안에 다시 시작했다.
+- 05:58:07 UTC 다시 시작된 프로세스가 같은 코드로 끝났다. 이번에는 web이 `POST
+  /api/internal/amux/routing-snapshot`에 418 ms 만에 HTTP 500을 답했고, orchestrator는
+  "unsupported Tomverse internal response status"를 남긴 뒤 `AMUX_INTERNAL_API_UNVERIFIED`로
+  끝났다. 이번에는 다시 시작되지 않고 CRASHED로 남았다.
+- 두 시각 사이에 web 서비스가 재배포되던 중이었다. 큐가 바쁠 때의 정확한 `amux_database_busy`
+  503 body는 이미 #1780에서 건너뛰도록 고쳐졌으므로 이 사건의 원인이 아니었다.
+
+**원인.** 두 실패 모두 **selection read**(queue, routing-snapshot)에서 났고, 둘 다 아무것도
+쓰지 않았다. 하나는 요청이 앱에 닿지도 못한 전송 오류였고, 다른 하나는 앱이 정확한 busy body가
+아닌 HTTP 500으로 답한 경우였다. 이전 판정표(`amuxDbBoundaryFailure`)는 읽기 경계 안에서 난
+`P2024`·`P2028`·연결 오류만 503 `amux_database_busy`로 좁혀 답하므로, 그 경계 **밖**에서 난
+전송 오류나 앱이 그 판정표 자체를 못 따라간 500(예: 처리되지 않은 예외)은 이 규칙에 걸리지
+않는다. Rust 쪽도 그 정확한 busy body가 아닌 5xx나 전송 오류를 전부 "결과 불명"으로 묶어
+프로세스를 끝냈다 -- **읽기는 아무것도 쓰지 않는데도** 쓰기와 같은 규칙을 썼다.
+
+**지금의 동작.** `apps/tomverse-orchestrator/src/scheduler.rs`의 `handle_selection_read`가
+queue와 routing-snapshot 두 selection read를 모두 지난다.
+
+- 전송 오류(연결, 전송, timeout, 응답 도중의 body read 실패)와 정확한 busy body가 아닌 5xx·429는
+  이제 WARN(`verdict = "selection_skipped"`, `endpoint`와 `error_class`만 남기고 URL이나
+  응답 body는 남기지 않는다)을 남기고 그 tick을 건너뛴다. 이 두 사건이 정확히 이 범주다.
+- 그 밖의 상태 코드(429가 아닌 4xx: 인증·설정 문제라 재시도로 고쳐지지 않는다)와 2xx인데
+  파싱·불변식이 깨진 응답은 전처럼 "결과 불명"으로 프로세스를 끝낸다. 이 규칙은 바뀌지 않았다.
+- 연속으로 건너뛴 횟수가 tick 간격(`TICK_INTERVAL`, 5초) 기준 5분 분량인
+  `MAX_CONSECUTIVE_SELECTION_READ_SKIPS`(60)를 넘으면, 지속되는 서버 결함이 영원히 조용하게
+  건너뛰어지지 않도록 그동안과 같은 `AMUX_INTERNAL_API_UNVERIFIED`로 끝낸다. 성공한 selection
+  read 한 번이 이 카운터를 0으로 되돌린다.
+- board-capacity 초과와 정확한 busy body 건너뛰기(위 두 메모의 동작)는 이 새 상한에 넣지 않고
+  그대로 둔다. 이 문서가 이미 지속적인 busy를 WARN만으로 영원히 받아들이기로 했으므로(바로 위
+  섹션), 그 조건을 이번 상한에 넣으면 지금까지 절대 끝내지 않던 상황에서 새로 프로세스를 끝내게
+  된다.
+- claim, recovery sweep, auto-promotion tick과 그 밖의 모든 lifecycle 호출(WSL bridge의
+  owned-queue 읽기 포함)은 건드리지 않았다. 전처럼 정확한 busy body만 건너뛰고 그 밖은 멈춘다.
+
+**남는 것.**
+
+- WSL bridge의 owned-queue 읽기는 이번에 다루지 않았다. `apps/tomverse-orchestrator/src/tomverse_api.rs`의
+  `read_bounded_body`를 selection read 세 곳(queue, routing-snapshot, owned-queue)이
+  공유하므로 전송 오류·5xx 분류 자체는 owned-queue 응답에도 같은 방식으로 닿을 수 있지만,
+  `wsl_bridge.rs`의 호출부는 이 새 분류를 보지 않고 여전히 `is_database_busy`만 확인한다.
+  따라서 owned-queue가 정확한 busy body가 아닌 5xx나 전송 오류를 받으면 지금도 halt한다 --
+  이 커밋이 고치는 범위가 아니다. WSL bridge에 같은 규칙이 필요한지는 별도로 검토한다.
+
 ### 재시작 정책
 
 - 이 저장소에는 AMUX Orchestrator 서비스의 선언이 없다. `.railway/railway.ts`는 named
@@ -199,6 +250,11 @@ setup·콜백·fence SQL이 하나도 나가지 않았음을 확인한다. 같�
 - 읽기 busy에는 도달 실패(`P1001`, `ENOTFOUND`, `ECONNREFUSED`)도 들어간다. 호스트 설정이 잘못돼 계속 실패해도 orchestrator는 incident 없이 매 tick을 건너뛰고, 로그의 `amux_database_busy` WARN이 반복되는 것으로만 드러난다. 그 WARN이 몇 분 넘게 이어지면 연결 설정을 확인한다. `08004`(서버가 연결 거절)와 `08P01`(protocol violation)은 busy가 아니라 500 incident다.
 - 이번 사건의 원인인 읽기 busy는 이제 프로세스를 끝내지 않는다. 재시작 정책으로 덮을
   일이 아니다.
+- 05:51/05:58Z 사건의 원인(selection read의 전송 오류와 정확한 busy body가 아닌 5xx)도
+  이제 프로세스를 끝내지 않는다(위 "2026-09-30 selection read 전송 오류·5xx 메모"). 다만
+  같은 실패가 5분(`MAX_CONSECUTIVE_SELECTION_READ_SKIPS`) 넘게 연속되면 여전히
+  `AMUX_INTERNAL_API_UNVERIFIED`로 끝나므로, 그 경우의 재시작 여부는 위 결과 불명 규칙과
+  같다.
 
 운영자 단계(대시보드, 읽기부터):
 
