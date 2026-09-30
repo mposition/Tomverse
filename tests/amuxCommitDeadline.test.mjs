@@ -47,10 +47,13 @@ const filesUnder = (directory) =>
 const migration = read(AMUX_COMMIT_DEADLINE_MIGRATION);
 const boundary = read("lib/amux/dbBoundary.ts");
 
-test("the migration is additive, later than every other, and holds one table, one function and one trigger", () => {
+test("the migration is additive, later than every other AMUX migration, and holds one table, one function and one trigger", () => {
   const directory = AMUX_COMMIT_DEADLINE_MIGRATION.split("/")[2];
+  // Ordered after the AMUX migrations whose tables its trigger guards. It was
+  // written as "later than every other migration", which held only until the
+  // next migration of any feature landed after it.
   const others = readdirSync(join(root, "prisma", "migrations"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== directory)
+    .filter((entry) => entry.isDirectory() && entry.name !== directory && /amux/i.test(entry.name))
     .map((entry) => entry.name);
   assert.ok(others.length > 0);
   for (const name of others) assert.ok(name < directory, `${name} sorts after ${directory}`);

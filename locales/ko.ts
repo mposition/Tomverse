@@ -1127,7 +1127,7 @@ export const ko = {
         signupLink: "회원가입",
         haveAccountPrompt: "이미 회원이신가요?",
         signinLink: "로그인",
-        noAccountOAuth: "이 {provider} 계정으로 가입된 계정이 없습니다. 가입하시려면 아래에서 {provider}로 다시 계속해 주세요.",
+        noAccountOAuth: "이 {provider} 계정으로 가입된 계정이 없습니다. 가입하시려면 아래에서 {provider} 버튼을 다시 눌러 주세요.",
         noAccountEmail: "{email}(으)로 가입된 계정이 없습니다. 이 주소로 가입하시겠어요?",
         signupWithThisEmail: "이 주소로 가입하기",
         existingAccountSignedIn: "이미 가입된 계정으로 로그인했습니다. 가입 화면에서 고른 이메일 수신 선택은 적용되지 않았습니다.",
