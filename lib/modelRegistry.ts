@@ -471,8 +471,11 @@ export async function getModelRegistrySecurityFindings(): Promise<
 }
 
 // Imported here rather than with the others for the same reason the function
-// below lives here: an import at the top would move every line under it.
-import { isWebSearchOverride } from "@/lib/webSearchOverride";
+// below lives here: an import at the top would move every line under it. From
+// lib/webSearchCapability.ts rather than lib/webSearchOverride.ts because the
+// former is already inside the Prompt Refiner runtime closure this file is in;
+// the latter would add a file to it.
+import { isWebSearchOverride } from "@/lib/webSearchCapability";
 
 /**
  * The runtime model for a registry row, with its web search override applied.

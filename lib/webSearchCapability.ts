@@ -26,7 +26,7 @@ import {
   type WebSearchBackend,
   type WebSearchBackendReadiness,
 } from "@/lib/webSearchBackends";
-import { getModel } from "@/lib/models";
+import { getModel, type AiModel } from "@/lib/models";
 
 export type WebSearchSupport =
   /** The model's own provider ships the search tool and runs it. */
@@ -443,13 +443,45 @@ export const webSearchCapabilityFromCode = (
   return inferredWebSearchCapability(provider, apiModel);
 };
 
-// Imported here rather than at the top for the reason `registeredWebSearchCapability`
-// sits where it does: an import above it would move the line the Prompt Refiner
-// runtime-closure test pins.
-import {
-  isWebSearchOverride,
-  WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
-} from "@/lib/webSearchOverride";
+/**
+ * An administrator's per-model web search override: the closed list, and who
+ * may not take one. Documented, and re-exported for everything outside the
+ * Prompt Refiner runtime closure, in lib/webSearchOverride.ts.
+ *
+ * Defined here rather than imported from there: this module is inside that
+ * closure, and the test pinning it counts every file the closure reaches. A new
+ * import would have grown the closure by one file for three constants.
+ */
+export const WEB_SEARCH_OVERRIDES = ["off", "app-managed"] as const satisfies readonly NonNullable<
+  AiModel["webSearchOverride"]
+>[];
+
+export type WebSearchOverride = (typeof WEB_SEARCH_OVERRIDES)[number];
+
+/**
+ * Compile-time: the list and `AiModel["webSearchOverride"]` name the same
+ * values. `satisfies` above proves the list is inside the field's union; this
+ * proves the union has nothing the list lacks.
+ */
+export const WEB_SEARCH_OVERRIDE_LIST_IS_EXHAUSTIVE: Exclude<
+  NonNullable<AiModel["webSearchOverride"]>,
+  WebSearchOverride
+> extends never
+  ? true
+  : never = true;
+
+export const isWebSearchOverride = (value: unknown): value is WebSearchOverride =>
+  typeof value === "string" &&
+  (WEB_SEARCH_OVERRIDES as readonly string[]).includes(value);
+
+/**
+ * Providers whose models take no override at all: Perplexity searches inside
+ * every completion, so `off` cannot be honoured and `app-managed` would add a
+ * second, separately billed search.
+ */
+export const WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS: ReadonlySet<string> = new Set([
+  "perplexity",
+]);
 
 /**
  * A model's web search capability: the code's answer, then an administrator's

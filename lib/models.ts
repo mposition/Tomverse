@@ -687,5 +687,8 @@ for (const model of AVAILABLE_MODELS as readonly AiModel[]) {
  * position. Absent means "follow the code" -- see lib/webSearchOverride.ts.
  */
 export type ModelWebSearchOverrideField = {
-    webSearchOverride?: import("@/lib/webSearchOverride").WebSearchOverride;
+    // Spelled out rather than imported: lib/webSearchCapability.ts imports this
+    // module. It holds the closed list (`WEB_SEARCH_OVERRIDES`) and fails to
+    // compile if the two ever name different values.
+    webSearchOverride?: "off" | "app-managed";
 };

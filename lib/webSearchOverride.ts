@@ -20,30 +20,28 @@
  * one fails review rather than an invoice. See
  * docs/policy/credit-and-cost-limits.md.
  *
- * Pure and dependency-free: the model catalogue, the capability resolver, the
- * admin schema and the database CHECK all read this one list.
+ * The model catalogue, the capability resolver, the admin schema and the
+ * database CHECK all read one list.
  */
 
-export const WEB_SEARCH_OVERRIDES = ["off", "app-managed"] as const;
+// The values live in lib/webSearchCapability.ts, which sits inside the Prompt
+// Refiner runtime closure: defining them here and importing them there would
+// have grown that pinned closure by this file. Everything outside the closure
+// -- the admin schema, the registry panel, the enum-constraint check --
+// imports from here.
+import {
+  WEB_SEARCH_OVERRIDES,
+  WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
+  isWebSearchOverride,
+  type WebSearchOverride,
+} from "@/lib/webSearchCapability";
 
-export type WebSearchOverride = (typeof WEB_SEARCH_OVERRIDES)[number];
-
-export const isWebSearchOverride = (value: unknown): value is WebSearchOverride =>
-  typeof value === "string" &&
-  (WEB_SEARCH_OVERRIDES as readonly string[]).includes(value);
-
-/**
- * Providers whose models take no override at all.
- *
- * Perplexity's chat models search inside every completion; there is no switch
- * to turn off, so `off` would make every badge claim a search did not happen
- * when it did. `app-managed` would add a second, separately billed search on
- * top of the one the answer already ran. Neither can be honoured, so neither
- * is accepted.
- */
-export const WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS: ReadonlySet<string> = new Set([
-  "perplexity",
-]);
+export {
+  WEB_SEARCH_OVERRIDES,
+  WEB_SEARCH_OVERRIDE_REFUSED_PROVIDERS,
+  isWebSearchOverride,
+  type WebSearchOverride,
+};
 
 /** Why this override cannot be saved for this provider, or null when it can. */
 export const webSearchOverrideRefusal = (
