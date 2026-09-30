@@ -119,3 +119,33 @@ export const amuxTransientDatabaseCode = (error: unknown): string | null => {
   }
   return null;
 };
+
+/**
+ * Prisma's two answers for a transaction that never got going: no pool
+ * connection in time (P2024), and the transaction manager's `maxWait` expiring
+ * before the transaction started (P2028, "Unable to start a transaction in
+ * the given time"). Read only at the top level, where Prisma throws them.
+ *
+ * The code alone does not prove nothing ran: P2028 is also the interactive
+ * transaction's own timeout once it is running. The boundary's phase decides
+ * that (`amuxDbBoundaryFailure`); this only names the code.
+ */
+const TRANSACTION_NOT_STARTED_CODES = new Set(["P2024", "P2028"]);
+
+export const amuxTransactionNotStartedCode = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === "string" && TRANSACTION_NOT_STARTED_CODES.has(code)
+    ? code
+    : null;
+};
+
+/**
+ * The `AmuxDbBoundaryError` codes answered 503 `amux_database_busy`: a busy
+ * read, and a transaction that never started, in a route that wrote nothing
+ * (lib/amux/dbBoundary.ts). One list for the boundary and the internal route.
+ */
+const AMUX_DB_BUSY_ERROR_CODES = new Set(["AMUX_DB_READ_BUSY", "AMUX_DB_NOT_STARTED"]);
+
+export const isAmuxDbBusyCode = (code: unknown): boolean =>
+  typeof code === "string" && AMUX_DB_BUSY_ERROR_CODES.has(code);

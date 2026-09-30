@@ -7,7 +7,9 @@ import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxTransactionNotStartedCode,
   amuxTransientDatabaseCode,
+  isAmuxDbBusyCode,
 } from "@/lib/amux/readFailureCore";
 
 export const AMUX_INTERNAL_RESPONSE_MAX_BYTES = 512 * 1_024;
@@ -56,20 +58,27 @@ export const amuxInternalErrorResponse = (
   operation: string,
   error: unknown,
 ): Response => {
-  // A read that the database could not take just then, in a route that had
-  // written nothing (decided once, in amuxDbBoundaryFailure). Nothing was
-  // written, so this is never an unknown outcome and opens no incident; the
-  // caller asks again on its next tick. A warning keeps the rate visible.
-  if (
-    error instanceof AmuxDbBoundaryError &&
-    error.code === "AMUX_DB_READ_BUSY"
-  ) {
+  // A read that the database could not take just then, or a transaction that
+  // never started, in a route that had written nothing (decided once, in
+  // amuxDbBoundaryFailure). Nothing was written, so this is never an unknown
+  // outcome and opens no incident; the caller asks again on its next tick. A
+  // warning keeps the rate visible, with the pool's counts at the time.
+  if (error instanceof AmuxDbBoundaryError && isAmuxDbBusyCode(error.code)) {
+    const notStarted = error.code === "AMUX_DB_NOT_STARTED";
     console.warn(
       JSON.stringify({
         subsystem: "amux",
         event: "internal_route_database_busy",
         operation,
-        error_code: amuxTransientDatabaseCode(error.cause) ?? "unknown",
+        path: notStarted ? "not_started" : "read",
+        error_code:
+          (notStarted
+            ? amuxTransactionNotStartedCode(error.cause)
+            : amuxTransientDatabaseCode(error.cause)) ?? "unknown",
+        connection_wait_ms: error.connectionWaitMs ?? null,
+        pool_total: error.poolUsage?.total ?? null,
+        pool_idle: error.poolUsage?.idle ?? null,
+        pool_waiting: error.poolUsage?.waiting ?? null,
       }),
     );
     return new Response(
@@ -120,9 +129,11 @@ export const amuxInternalErrorResponse = (
   // A mutation that failed after its callback returned (anything but the
   // commit deadline trigger's AX001, which is a deadline refusal above) may or
   // may not have committed: the same answer as a Prisma transaction timeout.
-  // A P2028 still reaches here from a mutation boundary, and from a read that
-  // failed after its route had started a mutation; a busy read of a route
-  // that wrote nothing was answered above.
+  // A P2028 still reaches here from a mutation boundary whose callback had
+  // begun (its own interactive-transaction timeout), and from any transaction
+  // that failed after its route had started a mutation, or outside a route. A
+  // busy or never-started transaction of a route that wrote nothing was
+  // answered above.
   if (
     databaseCode === "P2028" ||
     (error instanceof AmuxDbBoundaryError &&

@@ -105,3 +105,29 @@ test("the walk is bounded and survives cycles", () => {
   for (let depth = 0; depth < 32; depth += 1) deep = { code: "X", cause: deep };
   assert.equal(amuxTransientDatabaseCode(deep), null, "past the node bound nothing is read");
 });
+
+test("only Prisma's own P2024 and P2028, at the top, name a transaction that did not start", async () => {
+  const { amuxTransactionNotStartedCode } = await import("../lib/amux/readFailureCore.ts");
+  assert.equal(
+    amuxTransactionNotStartedCode({
+      name: "TransactionManagerError",
+      code: "P2028",
+      message: "Transaction API error: Unable to start a transaction in the given time.",
+    }),
+    "P2028",
+  );
+  assert.equal(amuxTransactionNotStartedCode({ code: "P2024" }), "P2024");
+  for (const error of [
+    undefined,
+    null,
+    "P2028",
+    { code: "P1017" },
+    postgres("57014"),
+    // Nested codes are not a start refusal: only Prisma's own top-level answer.
+    new Error("outer", { cause: { code: "P2028" } }),
+    { code: "P2010", meta: { code: "P2028" } },
+    new Error("Transaction API error: P2028"),
+  ]) {
+    assert.equal(amuxTransactionNotStartedCode(error), null, String(error?.message ?? JSON.stringify(error)));
+  }
+});
