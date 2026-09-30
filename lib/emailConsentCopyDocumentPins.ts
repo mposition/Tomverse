@@ -38,7 +38,7 @@
  * other pins exist. Not a claim that the owner approved every byte: the approval
  * covers sections 1 to 6 and says so.
  */
-export const APPROVED_DOCUMENT_DIGEST = "c78200d4c8a44dbcc24166e9185da2b6";
+export const APPROVED_DOCUMENT_DIGEST = "53cd6e3e6960ac6b11fb391e9024b5ec";
 
 /**
  * The depth-2 sections no version owns, in document order.

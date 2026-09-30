@@ -814,3 +814,134 @@ zh `向您发送`). 한국어는 `보내드린`의 경어로 표시하므로 해
 
 코드의 문안이 이 값과 다르면 테스트가 실패합니다. 이 줄을 고치는 것은 승인된
 기록을 고치는 것이고, §10이 금지하는 편집입니다.
+## 13. 버전 2026-09-30 — 동의 장치
+
+소유자 결정(2026-09-30)을 반영한 버전입니다. 소유자가 정한 규칙은 하나입니다 —
+**가입 고지에서 법이 요구하지 않는 문장은 뺍니다.** 바뀐 곳은 §13.B의 고지
+문장과 §13.D의 본문, 두 칸이고 7개 언어 전부입니다. 두 칸 모두에서 같은 두
+가지를 뺐습니다.
+
+1. **이 설정과 무관하게 계속 오는 메일을 알리는 문장.** B의 "로그인 코드, 결제
+   영수증, 서비스 공지는 이 설정과 무관하게 발송됩니다", D의 "로그인 코드,
+   영수증, 서비스 공지는 영향을 받지 않습니다", 그리고 두 문장의 여섯 언어
+   번역입니다. 소유자는 동의 전에 이것을 알리라는 법적 요구가 없다고
+   판단했습니다.
+2. **철회 문장의 "로그인 없이".** 철회 문장 자체는 남깁니다. GDPR 제7조제3항은
+   (UK GDPR도 같습니다) 동의하기 **전에** 언제든 철회할 수 있다는 사실을
+   알리라고 요구하고, 발송 허용 국가(`lib/emailJurisdictionCore.ts`의
+   `MARKETING_ALLOWED_COUNTRY_CODES`)에 DE·FR·AT·GB·CH가 들어 있습니다. "로그인
+   없이"라는 한정은 그 조항이 요구하지 않습니다. 예: 한국어 "언제든 로그인 없이
+   끄실 수 있습니다." → "언제든 끄실 수 있습니다.", 영어 "You can turn it off at
+   any time, without signing in." → "You can turn it off at any time."
+
+**바뀌지 않는 것**을 같이 적어 둡니다. 문안에서 문장이 빠졌다고 그 문장이 말하던
+사실이 바뀌지는 않습니다.
+
+- **수신거부는 지금도 로그인 없이 됩니다.** 그 동작은
+  docs/policy/email-notifications.md §11.3이 정하고, 이 버전은 그것을 건드리지
+  않습니다. 뺀 것은 그 사실의 **고지**이지 동작이 아닙니다.
+- **분류 경계도 그대로입니다.** 로그인 코드·영수증·서비스 공지는 여전히 동의
+  대상이 아니고 이 설정과 무관하게 발송됩니다(docs/policy/email-notifications.md §3).
+  화면이 그것을 말하지 않을 뿐입니다.
+- **D 본문의 첫 두 문장은 버전 `2026-09-29`와 같은 바이트입니다** — "보낸 적이
+  없고 요청하지 않으면 보내지 않는다"는 약속, 그리고 켜면 무엇을 보내는지.
+  그래서 이 버전도 §9.1의 약속을 하는 버전입니다. 각 언어에서 D 본문의 마지막
+  문장은 같은 언어의 B 마지막 문장과 같고, `2026-09-29`에서도 그랬습니다.
+- **나머지 문안** — A, C, 그리고 D의 제목과 세 버튼 — 은 버전 `2026-09-29`와
+  같습니다.
+
+§10에 따라 §3·§8·§11·§12는 고치지 않았고, 그 버전들에 저장된 `copyHash`는 계속
+그 문안을 가리킵니다. §3.B 아래의 "충족하는 것"은 그 버전의 고지에 대한 설명이며,
+이 버전의 B에는 그중 분류 경계와 로그인 없는 수신거부를 말하는 문장이 없습니다.
+
+### 13.0 네 장치
+
+| # | 장치 | 어디에 | 무엇을 기록하는가 |
+|---|---|---|---|
+| A | opt-in 체크박스 (미체크 상태) | 가입 흐름 | **동의** → DOI |
+| B | 고지 문장 | 가입 흐름, A 옆 | `notice_shown` |
+| C | 독립 거부 수단 | 가입 흐름, A와 **별개** | `objected` |
+| D | 제품 내 일회성 안내 | 기존 계정의 다음 접속 | A·B·C와 같은 세 상태 |
+
+### 13.A opt-in 체크박스 라벨
+
+| 언어 | 문안 |
+|---|---|
+| ko | **이메일 광고성 정보 수신동의 (선택)** |
+| en | Send me product news and offers by email (optional) |
+| de | Produktneuigkeiten und Angebote per E-Mail erhalten (optional) |
+| es | Quiero recibir novedades y ofertas por correo electrónico (opcional) |
+| fr | Recevoir les actualités produit et les offres par e-mail (facultatif) |
+| pt | Quero receber novidades e ofertas por e-mail (opcional) |
+| zh | 接收产品资讯和优惠邮件（可选） |
+
+### 13.B 고지 문장
+
+| 언어 | 문안 |
+|---|---|
+| ko | 켜시면 계정에 등록된 주소로 제품 소식, 뉴스레터, 프로모션을 보내 드립니다. 언제든 끄실 수 있습니다. |
+| en | If you turn this on, Tomverse sends product updates, newsletters and promotions to the address on your account. You can turn it off at any time. |
+| de | Wenn Sie dies aktivieren, sendet Tomverse Produkt-Updates, Newsletter und Angebote an die Adresse Ihres Kontos. Sie können es jederzeit deaktivieren. |
+| es | Si lo activas, Tomverse enviará novedades del producto, boletines y promociones a la dirección de tu cuenta. Puedes desactivarlo en cualquier momento. |
+| fr | Si vous l'activez, Tomverse envoie les actualités produit, les infolettres et les promotions à l'adresse de votre compte. Vous pouvez le désactiver à tout moment. |
+| pt | Se você ativar, a Tomverse envia novidades do produto, boletins e promoções para o endereço da sua conta. Você pode desativar a qualquer momento. |
+| zh | 开启后，Tomverse 会向您账户中的地址发送产品动态、资讯邮件和优惠信息。您可以随时关闭。 |
+
+### 13.C 독립 거부 수단 라벨
+
+| 언어 | 문안 |
+|---|---|
+| ko | 광고성 이메일을 받지 않겠습니다 |
+| en | I do not want marketing email |
+| de | Ich möchte keine Werbe-E-Mails erhalten |
+| es | No quiero recibir correos de marketing |
+| fr | Je ne souhaite pas recevoir d'e-mails marketing |
+| pt | Não quero receber e-mails de marketing |
+| zh | 我不想接收营销邮件 |
+
+### 13.D 제품 내 일회성 안내 (기존 계정)
+
+**제목**
+
+| 언어 | 문안 |
+|---|---|
+| ko | 제품 소식을 이메일로 받아보시겠습니까? |
+| en | Would you like product news by email? |
+| de | Möchten Sie Produktneuigkeiten per E-Mail erhalten? |
+| es | ¿Quieres recibir novedades del producto por correo? |
+| fr | Souhaitez-vous recevoir les actualités produit par e-mail ? |
+| pt | Quer receber novidades do produto por e-mail? |
+| zh | 是否希望通过邮件接收产品动态？ |
+
+**본문**
+
+| 언어 | 문안 |
+|---|---|
+| ko | Tomverse는 지금까지 제품 소식을 보내드린 적이 없고, 요청하지 않으시면 앞으로도 보내지 않습니다. 켜시면 계정에 등록된 주소로 제품 소식, 뉴스레터, 프로모션을 보내 드립니다. 언제든 끄실 수 있습니다. |
+| en | Tomverse has not sent you product news, and will not unless you ask. Turning this on sends product updates, newsletters and promotions to the address on your account. You can turn it off at any time. |
+| de | Tomverse hat Ihnen bisher keine Produktneuigkeiten gesendet und wird dies ohne Ihre Zustimmung auch nicht tun. Wenn Sie dies aktivieren, senden wir Produkt-Updates, Newsletter und Angebote an die Adresse Ihres Kontos. Sie können es jederzeit deaktivieren. |
+| es | Tomverse no te ha enviado novedades del producto y no lo hará a menos que lo pidas. Si lo activas, enviaremos novedades, boletines y promociones a la dirección de tu cuenta. Puedes desactivarlo en cualquier momento. |
+| fr | Tomverse ne vous a pas envoyé d'actualités produit et ne le fera pas sans votre demande. Si vous l'activez, nous enverrons les actualités produit, les infolettres et les promotions à l'adresse de votre compte. Vous pouvez le désactiver à tout moment. |
+| pt | A Tomverse não lhe enviou novidades do produto e não enviará a menos que você peça. Se ativar, enviaremos novidades, boletins e promoções para o endereço da sua conta. Você pode desativar a qualquer momento. |
+| zh | Tomverse 尚未向您发送过产品动态，未经您同意也不会发送。开启后，我们会向您账户中的地址发送产品动态、资讯邮件和优惠信息。您可以随时关闭。 |
+
+**세 버튼**
+
+| 역할 | ko | en | de | es | fr | pt | zh |
+|---|---|---|---|---|---|---|---|
+| 동의 | 네, 받겠습니다 | Yes, send them | Ja, senden | Sí, quiero recibirlas | Oui, envoyez-les | Sim, pode enviar | 好，请发送 |
+| 거부 | 받지 않겠습니다 | No, thank you | Nein, danke | No, gracias | Non, merci | Não, obrigado | 不用了 |
+| 닫기 | 나중에 | Not now | Später | Ahora no | Plus tard | Agora não | 以后再说 |
+
+## 14. 버전 2026-09-30 승인란
+
+| 절 | 내용 | 승인 |
+|---|---|---|
+| §13 | 동의 장치 4개의 문안 — B·D 고지에서 법이 요구하지 않는 문구 삭제 | **mposition, 2026-09-30** |
+
+**승인된 문안의 digest**(버전 `2026-09-30`, §13의 장치 4개 × 7개 언어 전체):
+
+`sha256:58d34a5ca713d42ff0e0356f2eda676d4707137d8fe4ba3f740a7f600f73b4ce`
+
+코드의 문안이 이 값과 다르면 테스트가 실패합니다. 이 줄을 고치는 것은 승인된
+기록을 고치는 것이고, §10이 금지하는 편집입니다.
