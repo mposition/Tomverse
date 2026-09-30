@@ -67,19 +67,30 @@ const FORBIDDEN_IDENTIFIERS = [
 
 /**
  * Comments explain why these names are absent; that is not a use of them.
- * Repeated until nothing changes, so removing one comment cannot leave the
- * pieces of another behind.
+ * One left-to-right pass: a comment's body is skipped as it is met, so removing
+ * one comment cannot join the pieces of another into a new opener. A `//` right
+ * after `:` is a URL scheme, not a comment. An unterminated block comment runs
+ * to the end of the file, as the parser would read it.
  */
 const stripComments = (source) => {
-  let current = source;
-  for (;;) {
-    const next = current
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/<!--[\s\S]*?-->/g, "")
-      .replace(/(^|[^:])\/\/.*$/gm, "$1");
-    if (next === current) return current;
-    current = next;
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    if (source.startsWith("/*", i)) {
+      const end = source.indexOf("*/", i + 2);
+      i = end < 0 ? source.length : end + 2;
+    } else if (source.startsWith("<!--", i)) {
+      const end = source.indexOf("-->", i + 4);
+      i = end < 0 ? source.length : end + 3;
+    } else if (source.startsWith("//", i) && source[i - 1] !== ":") {
+      const end = source.indexOf("\n", i + 2);
+      i = end < 0 ? source.length : end;
+    } else {
+      out += source[i];
+      i += 1;
+    }
   }
+  return out;
 };
 
 const walk = (directory) => {
