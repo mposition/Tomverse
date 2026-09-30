@@ -1,8 +1,8 @@
 # Prompt Refiner durable run writer 운영 계약
 
-## 1. 범위와 현재 readiness
+## 1. 원래 v3 writer 범위와 당시 readiness
 
-- run: `prompt-refiner-shadow-run-v3`
+- 원래 writer run: `prompt-refiner-shadow-run-v3`
 - corpus: 동결된 한국어 8건·영어 8건, 합계 16건
 - provider/model/가격: execution contract에 고정된 exact identity와 단가
 - 요청당 비용 상한: 24,916 microUSD
@@ -16,6 +16,8 @@
 `executionAdmitted=true`다. 단, 실행 경로는 owner 전용 관리자 API와 정확히 16개 합성 case로만
 제한되고 서버 kill switch `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED`는 기본 비활성이다.
 `productAdapterReady=false`이므로 제품 Chat 요청이나 사용자 content에는 연결되지 않는다.
+후속 v6 run의 historical evidence GET은 §2에 별도로 기록한다. 이 절의 v3 식별자는
+후속 v6 run의 현재 승인 권한이나 실행 계약을 뜻하지 않는다.
 
 ## 2. owner 승인 route
 
@@ -23,6 +25,15 @@
 preview다. 승인된 stage와 현재 deployment/commit, stage source manifest, run delta source
 manifest, corpus, model, 비용과 unknown 정책을 canonical binding digest로 반환한다. 응답은
 `private, no-store`다.
+
+후속 v6 합성 실행의 `GET /api/admin/prompt-refiner/shadow-run/evidence`는 owner·recent
+authentication·별도 rate limit을 요구하는 `private, no-store` 읽기 전용 진단이다. 동결된
+evidence bundle에서 gate 결과와 16건의 상태·실패 코드만 투영하며, 원문·제안문·provider
+오류 텍스트를 반환하지 않는다. 만료된 승인이나 이후의 무관한 source 변경과 독립적으로 읽지만,
+현재 v6 run·corpus·evidence spec과 저장된 bundle의 결속이 달라지면 fail-closed로 거부한다.
+따라서 이 조회는 모든 미래 계약 변경에 대한 영구 archive가 아니다. 과거 bundle을 새로운
+run 계약으로 재해석하지 않으며, 계약 변경 후 조회가 필요하면 별도 검증된 이관 절차가 필요하다.
+이 GET은 새 stage/run 승인, 재실행, 제품 UI 또는 Router 결합 권한을 부여하지 않는다.
 
 `POST /api/admin/prompt-refiner/shadow-run`은 같은 인증과 전역 origin 검사, DB rate limit,
 4 KiB strict JSON을 적용한다. body는 네 digest와 고정 confirmation만 받는다. 서버의
