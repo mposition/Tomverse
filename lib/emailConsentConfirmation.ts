@@ -19,17 +19,23 @@ import {
   marketingJurisdictionVerdict,
   normalizeCountry,
   profileForCountry,
+  type ResolvedJurisdiction,
 } from "@/lib/emailJurisdictionCore";
 import {
   CONSENT_REQUIRED_PURPOSES,
+  addressProofCovers,
   isEmailPurpose,
+  preferenceChangeDecision,
 } from "@/lib/emailPreferenceCore";
 import {
   ensureDefaultPreferences,
   lockEmailPreferenceRow,
   lockUserEmail,
+  sealVerifiedSessionConfirmation,
   setPreference,
   type ConsentCapture,
+  type ConsentRecordedHook,
+  type VerifiedSessionConfirmation,
 } from "@/lib/emailPreferences";
 import { normalizeSuppressionAddress } from "@/lib/emailSuppression";
 import {
@@ -441,3 +447,130 @@ export async function confirmConsent(input: {
   if (result.reason === "suppressed") return { confirmed: false, reason: "suppressed" };
   return { confirmed: false, reason: "superseded" };
 }
+
+/* ---------------------- consent from a proven session (docs/policy/email-double-opt-in.md §14) */
+
+export type VerifiedSessionGrant = {
+  confirmation: VerifiedSessionConfirmation;
+  /** Queues Korea's result notice in the transaction that records the grant. */
+  onConsentRecorded: ConsentRecordedHook;
+  jurisdiction: { countryCode: string; source: string };
+  /** The active policy version, resolved before the caller's transaction. */
+  policyVersionId: string;
+};
+
+export type VerifiedSessionGrantRefusal =
+  | "no_proof"
+  | "disabled"
+  | "not_consent_purpose"
+  | "country_not_allowed"
+  | "no_address";
+
+/**
+ * Everything a consent from a proven session needs, checked before the
+ * caller's transaction (docs/policy/email-double-opt-in.md §14.6).
+ *
+ * The collection flag, the purposes, the proof against the account's current
+ * address and the jurisdiction are decided here; the address is decided again
+ * under the user row lock by `applyPreferenceChange()`, which honours only
+ * the sealed confirmation this returns. A refusal is not an error: the caller
+ * falls back to the confirmation mail, which makes its own checks.
+ *
+ * `jurisdiction` is for a caller that has resolved it already and whose user
+ * row does not hold it yet -- the sign-up, whose estimated country is recorded
+ * in the same transaction as the grant.
+ */
+export async function prepareVerifiedSessionGrant(input: {
+  userId: string;
+  proof: unknown;
+  purposes: readonly string[];
+  jurisdiction?: ResolvedJurisdiction;
+}): Promise<{ ok: true; grant: VerifiedSessionGrant } | { ok: false; reason: VerifiedSessionGrantRefusal }> {
+  for (const purpose of input.purposes) {
+    if (!isEmailPurpose(purpose) || !CONSENT_REQUIRED_PURPOSES.has(purpose)) {
+      return { ok: false, reason: "not_consent_purpose" };
+    }
+    if (!preferenceChangeDecision({ purpose, enabled: true, confirmed: true }).allowed) {
+      return { ok: false, reason: "not_consent_purpose" };
+    }
+  }
+  if (!(await isEmailConsentConfirmationEnabled())) return { ok: false, reason: "disabled" };
+
+  const user = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { email: true },
+  });
+  if (!user?.email) return { ok: false, reason: "no_address" };
+  if (!addressProofCovers(input.proof, user.email)) return { ok: false, reason: "no_proof" };
+
+  const resolved = input.jurisdiction ?? (await jurisdictionForUser({ userId: input.userId }));
+  if (!marketingJurisdictionVerdict(resolved).allowed) {
+    return { ok: false, reason: "country_not_allowed" };
+  }
+
+  // Before any transaction: both may insert rows (docs/policy/email-double-opt-in.md §13.1 item 16).
+  await ensureDefaultPreferences(input.userId);
+  const onConsentRecorded = await prepareProcessingResultNotice(input.userId);
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+
+  return {
+    ok: true,
+    grant: {
+      confirmation: sealVerifiedSessionConfirmation(input.proof),
+      onConsentRecorded,
+      jurisdiction: { countryCode: resolved.countryCode, source: resolved.source },
+      policyVersionId,
+    },
+  };
+}
+
+/**
+ * Switches one consent purpose on from a proven session, in its own
+ * transaction -- the logged-in settings screen (docs/policy/email-double-opt-in.md §14.2). Returns
+ * `granted: false` with the reason when the session cannot consent this way,
+ * so the caller can send the confirmation mail instead.
+ */
+export async function grantConsentWithVerifiedSession(input: {
+  userId: string;
+  purpose: string;
+  proof: unknown;
+  capturedVia: ConsentCapture;
+  jurisdiction?: ResolvedJurisdiction;
+  confirmedCountry?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  now?: Date;
+}): Promise<
+  | { granted: true; alreadyConfirmed: boolean }
+  | { granted: false; reason: VerifiedSessionGrantRefusal | "address_changed" | "suppressed" }
+> {
+  const prepared = await prepareVerifiedSessionGrant({
+    userId: input.userId,
+    proof: input.proof,
+    purposes: [input.purpose],
+    ...(input.jurisdiction ? { jurisdiction: input.jurisdiction } : {}),
+  });
+  if (!prepared.ok) return { granted: false, reason: prepared.reason };
+  const { grant } = prepared;
+  const result = await setPreference({
+    userId: input.userId,
+    purpose: input.purpose,
+    enabled: true,
+    capturedVia: input.capturedVia,
+    source: "preference_center",
+    jurisdiction: grant.jurisdiction.countryCode,
+    jurisdictionSource: grant.jurisdiction.source,
+    confirmedCountry: input.confirmedCountry ?? null,
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
+    confirmation: grant.confirmation,
+    onConsentRecorded: grant.onConsentRecorded,
+    ...(input.now ? { now: input.now } : {}),
+  });
+  if (result.changed) return { granted: true, alreadyConfirmed: false };
+  if (result.reason === "already_set") return { granted: true, alreadyConfirmed: true };
+  if (result.reason === "address_changed") return { granted: false, reason: "address_changed" };
+  if (result.reason === "suppressed") return { granted: false, reason: "suppressed" };
+  return { granted: false, reason: "no_proof" };
+}
+

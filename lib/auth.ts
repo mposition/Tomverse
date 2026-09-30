@@ -11,6 +11,7 @@ import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { parseEmailLoginIntent, verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
 import { appUrl } from "@/lib/accountEmails";
 import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
+import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -214,9 +215,22 @@ export const authOptions: NextAuthOptions = {
                 return false;
             }
         },
-        async jwt({ token, user, isNewUser }) {
+        async jwt({ token, user, account, profile, isNewUser }) {
             if (user) {
                 token.id = user.id;
+                // What this sign-in proved about the account's address, from
+                // the sign-in itself only: the email-code authorize() result or
+                // Google's raw profile with email_verified, and only for this
+                // user's own address. Written here and nowhere else -- not on a
+                // session update -- and not carried over from an earlier
+                // sign-in (docs/policy/email-double-opt-in.md §14.1).
+                token.addressProof =
+                    addressProofForSignIn({
+                        provider: account?.provider,
+                        profile,
+                        userEmail: user.email,
+                        now: new Date(),
+                    }) ?? undefined;
                 // OAuth reports it through the adapter; the email code through
                 // authorize(). Set on every sign-in, so a later sign-in into an
                 // existing account clears it.
@@ -284,6 +298,7 @@ export const authOptions: NextAuthOptions = {
             session.user.authenticatedAt = token.authenticatedAt;
             session.user.accountCreatedBySignIn = token.accountCreatedBySignIn === true;
             session.user.signupEmailLoginAttemptId = token.signupEmailLoginAttemptId;
+            session.user.addressProof = token.addressProof;
             return session;
         },
     },

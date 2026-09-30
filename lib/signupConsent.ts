@@ -11,9 +11,13 @@ import {
   type ConsentCopyLanguage,
 } from "@/lib/emailConsentCopy";
 import { consentCopyHash } from "@/lib/emailConsentCopyHash";
-import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
+import {
+  prepareVerifiedSessionGrant,
+  requestConsentConfirmation,
+} from "@/lib/emailConsentConfirmation";
+import { applyPreferenceChange } from "@/lib/emailPreferences";
 import { recordEstimatedCountry } from "@/lib/emailJurisdiction";
-import { profileForCountry } from "@/lib/emailJurisdictionCore";
+import { profileForCountry, type ResolvedJurisdiction } from "@/lib/emailJurisdictionCore";
 import { normalizeEmailLoginAddress } from "@/lib/emailLogin";
 import { recordNoticeObjection, recordNoticeShown } from "@/lib/inProductConsentNotice";
 import { noticeJurisdictionColumns } from "@/lib/inProductConsentNoticeCore";
@@ -202,7 +206,12 @@ export async function issueSignupConsentAttempt(input: {
 }
 
 export type FinalizeSignupConsentResult =
-  | { ok: true; confirmationRequested: boolean }
+  | {
+      ok: true;
+      confirmationRequested: boolean;
+      /** The opt-in was consented at once from a proven session (docs/policy/email-double-opt-in.md §14). */
+      consentGranted?: boolean;
+    }
   | {
       ok: false;
       reason: "disabled" | "not_found" | "confirmation_unavailable" | SignupConsentRefusal;
@@ -247,6 +256,12 @@ export async function finalizeSignupConsentAttempt(input: {
   createdBySignIn: boolean;
   /** The login row that sign-in spent, from its token (`signupEmailLoginAttemptId`). */
   emailLoginAttemptId?: string | null;
+  /**
+   * What that sign-in proved about the address, from its token
+   * (`addressProof`). With it a ticked opt-in is consented at once; without it
+   * the confirmation mail goes (docs/policy/email-double-opt-in.md §14).
+   */
+  addressProof?: unknown;
   attemptId: string;
   nonce: string;
   now?: Date;
@@ -338,7 +353,32 @@ export async function finalizeSignupConsentAttempt(input: {
   const amendmentInForce = attempt.objected ? false : await isEmailPolicyPublished(now);
   const jurisdictionColumns = noticeJurisdictionColumns(resolved);
 
+  // A ticked box from a session that proved the address is the consent itself
+  // (docs/policy/email-double-opt-in.md §14.2). Checked before the transaction;
+  // the grant is written inside it, under the user row lock. Refused -- no
+  // proof, a country marketing cannot reach -- it takes the confirmation mail,
+  // which makes its own checks and rolls everything back if it cannot go.
+  const sessionGrant =
+    attempt.expressOptInRequested && candidate
+      ? await prepareVerifiedSessionGrant({
+          userId: input.userId,
+          proof: input.addressProof,
+          purposes: [SIGNUP_OPT_IN_PURPOSE],
+          // The estimate this transaction is about to record: the user row does
+          // not hold it yet.
+          jurisdiction: {
+            countryCode: candidate.country,
+            profileKey: profileForCountry(candidate.country),
+            confidence: "estimated",
+            source: "ip_estimated",
+            conflicts: [],
+            observedIpCountry: candidate.country,
+          } satisfies ResolvedJurisdiction,
+        })
+      : null;
+
   let confirmationRequested = false;
+  let consentGranted = false;
   try {
     await prisma.$transaction(async (tx) => {
       const consumed = await tx.signupConsentAttempt.updateMany({
@@ -387,7 +427,27 @@ export async function finalizeSignupConsentAttempt(input: {
       // and the attempt stays pending for the tab to try again. The page only
       // shows the box where a country and the confirmation lane exist, so this
       // is the lane going away between the two, not an ordinary path.
-      if (attempt.expressOptInRequested) {
+      if (attempt.expressOptInRequested && sessionGrant?.ok) {
+        const { grant } = sessionGrant;
+        const outcome = await applyPreferenceChange(tx, {
+          userId: input.userId,
+          purpose: SIGNUP_OPT_IN_PURPOSE,
+          enabled: true,
+          capturedVia: "signup_form",
+          source: "signup",
+          jurisdiction: grant.jurisdiction.countryCode,
+          jurisdictionSource: grant.jurisdiction.source,
+          confirmation: grant.confirmation,
+          onConsentRecorded: grant.onConsentRecorded,
+          now,
+          policyVersionId: grant.policyVersionId,
+          confirmedCountry: null,
+        });
+        // A consent that could not be written leaves nothing: the whole
+        // consumption rolls back and the landing tries again.
+        if (outcome !== "changed" && outcome !== "already_set") throw CONFIRMATION_UNAVAILABLE;
+        consentGranted = true;
+      } else if (attempt.expressOptInRequested) {
         if (!candidate) throw CONFIRMATION_UNAVAILABLE;
         const requested = await requestConsentConfirmation({
           userId: input.userId,
@@ -422,7 +482,9 @@ export async function finalizeSignupConsentAttempt(input: {
     if (error === CONFIRMATION_UNAVAILABLE) return { ok: false, reason: "confirmation_unavailable" };
     throw error;
   }
-  return { ok: true, confirmationRequested };
+  return consentGranted
+    ? { ok: true, confirmationRequested, consentGranted }
+    : { ok: true, confirmationRequested };
 }
 
 /**
