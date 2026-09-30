@@ -29,7 +29,7 @@ test("the operator page is owner-only", () => {
 });
 
 test("the mounted effect reads only and every mutation is a named click action", () => {
-  const effect = panel.match(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/)?.[1];
+  const effect = panel.match(/useEffect\(\(\) => \{\s*let active = true;([\s\S]*?)\n  \}, \[m\.requestFailed, readStage\]\);/)?.[1];
   assert.ok(effect, "the initial effect remains inspectable");
   assert.match(effect, /readStage\(\)/);
   assert.doesNotMatch(effect, /method:\s*"POST"/);
@@ -101,4 +101,58 @@ test("an existing run can load execution status after the approval flag is off",
     /!run\.approvalEnabled &&\s*run\.status === "ready_for_explicit_cost_approval"/
   );
   assert.match(panel, /setError\(`\$\{failure\} \$\{m\.postFailureStop\}`\)/);
+});
+
+test("historical diagnostics mount independently of approval preview and never mutate", () => {
+  assert.match(panel, /const readHistorical = useCallback\(async \(\) => \{/);
+  assert.match(panel, /adminFetch\(\s*PROMPT_REFINER_SHADOW_HISTORICAL_EVIDENCE_PATH,[\s\S]*?cache: "no-store"/);
+  assert.match(panel, /parsePromptRefinerShadowHistoricalDiagnostics\(body\)/);
+  assert.match(panel, /useEffect\(\(\) => \{[\s\S]*?queueMicrotask\(\(\) => \{\s*if \(active\) void readHistorical\(\);/);
+  assert.match(panel, /<Step title=\{m\.historicalTitle\} description=\{m\.historicalBody\}>/);
+  assert.match(panel, /const historicalRead = readHistorical\(\);/);
+  const historicalRead = panel.match(/const readHistorical = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[\]\);/)?.[1];
+  assert.ok(historicalRead);
+  assert.doesNotMatch(historicalRead, /method:\s*"POST"|readStage\(|readRun\(|readExecution\(/);
+});
+
+test("locale changes update historical errors without repeating the mount GET", () => {
+  const historicalRead = panel.match(/const readHistorical = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[\]\);/)?.[1];
+  assert.ok(historicalRead, "the historical reader has stable identity");
+  assert.match(historicalRead, /setHistoricalFailure\(\{\s*kind: "api",\s*status: response\.status,/);
+  assert.match(historicalRead, /setHistoricalFailure\(\{ kind: "invalid_response" \}\)/);
+  assert.match(historicalRead, /setHistoricalFailure\(\{ kind: "request_failed" \}\)/);
+  assert.doesNotMatch(historicalRead, /\bm\./);
+  assert.match(panel, /const historicalFailureDisplay = historicalFailure\?\.kind === "api"\s*\? describeAdminApiFailure\(\{[\s\S]*?fallback: m\.requestFailed,\s*locale,/);
+  assert.match(panel, /historicalFailure\.kind === "invalid_response"\s*\? m\.responseInvalid\s*: m\.requestFailed/);
+  assert.match(panel, /\{historicalFailureDisplay \? \([\s\S]*?historicalFailureDisplay\.message[\s\S]*?historicalFailureDisplay\.requiresReauthentication/);
+  assert.doesNotMatch(panel, /historicalLocaleMessages|historicalReauthenticationRequired|setHistoricalError/);
+  assert.match(panel, /queueMicrotask\(\(\) => \{\s*if \(active\) void readHistorical\(\);\s*\}\);[\s\S]*?\}, \[readHistorical\]\);/);
+});
+
+test("historical refresh keeps the previous diagnostics table visible while loading", () => {
+  const historicalSection = panel.match(/<Step title=\{m\.historicalTitle\} description=\{m\.historicalBody\}>([\s\S]*?)<\/Step>/)?.[1];
+  assert.ok(historicalSection);
+  assert.match(historicalSection, /\{historicalLoading \? \(\s*<p role="status"[\s\S]*?<\/p>\s*\) : null\}\s*\{historicalFailureDisplay \? \(/);
+  assert.match(historicalSection, /: historical \? \(\s*<div data-testid="prompt-refiner-historical-evidence">/);
+  assert.match(historicalSection, /: historicalLoading \? null : \(/);
+});
+
+test("an older historical GET cannot replace a later refresh result or loading state", () => {
+  const historicalRead = panel.match(/const readHistorical = useCallback\(async \(\) => \{([\s\S]*?)\n  \}, \[\]\);/)?.[1];
+  assert.ok(historicalRead);
+  assert.match(panel, /const historicalRequestGeneration = useRef\(0\)/);
+  assert.match(historicalRead, /const requestGeneration = \+\+historicalRequestGeneration\.current/);
+  assert.match(historicalRead, /const body = await responseJson\(response\);\s*if \(requestGeneration !== historicalRequestGeneration\.current\) return;/);
+  assert.match(historicalRead, /if \(requestGeneration === historicalRequestGeneration\.current\) \{\s*setHistoricalFailure\(\{ kind: "request_failed" \}\);\s*\}/);
+  assert.match(historicalRead, /if \(requestGeneration === historicalRequestGeneration\.current\) \{\s*setHistoricalLoading\(false\);\s*\}/);
+  assert.match(panel, /return \(\) => \{\s*active = false;\s*historicalRequestGeneration\.current \+= 1;\s*\};/);
+});
+
+test("a known execution terminal GET refreshes historical evidence without retrying POST", () => {
+  const execution = panel.match(/const execute = async \(\) => \{([\s\S]*?)\n  \};\n\n  const refresh/)?.[1];
+  assert.ok(execution);
+  assert.match(execution, /const refreshed = await readExecution\(run!\);/);
+  assert.match(execution, /if \(refreshed\?\.status === "completed" \|\|\s*refreshed\?\.status === "stopped_unknown"\) \{\s*await readHistorical\(\);\s*\}/);
+  assert.match(execution, /if \(refreshed && parsed\?\.status === "paused"\) \{\s*setExecutionPostLocked\(false\);\s*\}/);
+  assert.equal((execution.match(/method:\s*"POST"/g) ?? []).length, 1);
 });

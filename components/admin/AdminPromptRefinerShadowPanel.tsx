@@ -10,7 +10,7 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   useAdminLocale,
@@ -19,6 +19,11 @@ import {
 import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminPromptRefinerShadowMessages } from "@/lib/adminMessages/promptRefinerShadow";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import {
+  PROMPT_REFINER_SHADOW_HISTORICAL_EVIDENCE_PATH,
+  parsePromptRefinerShadowHistoricalDiagnostics,
+  type PromptRefinerShadowHistoricalDiagnostics,
+} from "@/lib/promptRefinerShadowHistoricalDiagnostics";
 import {
   PROMPT_REFINER_SHADOW_EXECUTION_PATH,
   PROMPT_REFINER_SHADOW_OPERATOR_PATH,
@@ -46,6 +51,9 @@ const EXECUTION_POST_TIMEOUT_MS = 330_000;
 
 type Busy = "stage" | "run" | "execution" | "refresh" | null;
 type FailureBody = { error?: string; code?: string };
+type HistoricalFailure =
+  | { kind: "api"; status: number; error?: string; code?: string }
+  | { kind: "invalid_response" | "request_failed" };
 
 const usd = (microUsd: number) => `US$${(microUsd / 1_000_000).toFixed(6)}`;
 
@@ -88,6 +96,12 @@ export function AdminPromptRefinerShadowPanel() {
     useState<PromptRefinerExecutionPreview | null>(null);
   const [lastExecution, setLastExecution] =
     useState<PromptRefinerExecutionResult | null>(null);
+  const [historical, setHistorical] =
+    useState<PromptRefinerShadowHistoricalDiagnostics | null>(null);
+  const [historicalLoading, setHistoricalLoading] = useState(true);
+  const [historicalFailure, setHistoricalFailure] =
+    useState<HistoricalFailure | null>(null);
+  const historicalRequestGeneration = useRef(0);
   const [busy, setBusy] = useState<Busy>("stage");
   const [error, setError] = useState<string | null>(null);
   const [reauthenticationRequired, setReauthenticationRequired] =
@@ -135,6 +149,58 @@ export function AdminPromptRefinerShadowPanel() {
     setStage(parsed);
     return parsed;
   }, [failResponse, m.previewInvalid]);
+
+  // This read does not depend on stage/run preview, which can legitimately
+  // fail after approval expiry or a later deployment's source drift.
+  const readHistorical = useCallback(async () => {
+    const requestGeneration = ++historicalRequestGeneration.current;
+    setHistoricalLoading(true);
+    setHistoricalFailure(null);
+    try {
+      const response = await adminFetch(
+        PROMPT_REFINER_SHADOW_HISTORICAL_EVIDENCE_PATH,
+        { cache: "no-store" }
+      );
+      const body = await responseJson(response);
+      if (requestGeneration !== historicalRequestGeneration.current) return;
+      if (!response.ok) {
+        const candidate = body && typeof body === "object"
+          ? body as FailureBody
+          : null;
+        setHistoricalFailure({
+          kind: "api",
+          status: response.status,
+          error: typeof candidate?.error === "string" ? candidate.error : undefined,
+          code: typeof candidate?.code === "string" ? candidate.code : undefined,
+        });
+        return;
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+        Object.keys(body).length !== 1 ||
+        !Object.hasOwn(body, "diagnostics")) {
+        setHistoricalFailure({ kind: "invalid_response" });
+        return;
+      }
+      if ((body as { diagnostics: unknown }).diagnostics === null) {
+        setHistorical(null);
+        return;
+      }
+      const parsed = parsePromptRefinerShadowHistoricalDiagnostics(body);
+      if (!parsed) {
+        setHistoricalFailure({ kind: "invalid_response" });
+        return;
+      }
+      setHistorical(parsed);
+    } catch {
+      if (requestGeneration === historicalRequestGeneration.current) {
+        setHistoricalFailure({ kind: "request_failed" });
+      }
+    } finally {
+      if (requestGeneration === historicalRequestGeneration.current) {
+        setHistoricalLoading(false);
+      }
+    }
+  }, []);
 
   const readRun = useCallback(
     async (knownStage: PromptRefinerStagePreview) => {
@@ -198,6 +264,17 @@ export function AdminPromptRefinerShadowPanel() {
       active = false;
     };
   }, [m.requestFailed, readStage]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void readHistorical();
+    });
+    return () => {
+      active = false;
+      historicalRequestGeneration.current += 1;
+    };
+  }, [readHistorical]);
 
   const approveStage = async () => {
     if (!stage || busy) return;
@@ -333,6 +410,10 @@ export function AdminPromptRefinerShadowPanel() {
       if (refreshed && parsed?.status === "paused") {
         setExecutionPostLocked(false);
       }
+      if (refreshed?.status === "completed" ||
+        refreshed?.status === "stopped_unknown") {
+        await readHistorical();
+      }
     } catch {
       setError(m.statusRefreshFailed);
     } finally {
@@ -343,6 +424,7 @@ export function AdminPromptRefinerShadowPanel() {
   const refresh = async () => {
     if (busy) return;
     setBusy("refresh");
+    const historicalRead = readHistorical();
     try {
       if (execution && run) await readExecution(run);
       else if (run && stage) await readRun(stage);
@@ -350,6 +432,7 @@ export function AdminPromptRefinerShadowPanel() {
     } catch {
       setError(m.requestFailed);
     } finally {
+      await historicalRead;
       setBusy(null);
     }
   };
@@ -362,6 +445,22 @@ export function AdminPromptRefinerShadowPanel() {
     !terminal &&
     !execution?.inFlightAttemptId &&
     !executionPostLocked;
+  const historicalFailureDisplay = historicalFailure?.kind === "api"
+    ? describeAdminApiFailure({
+        status: historicalFailure.status,
+        error: historicalFailure.error,
+        code: historicalFailure.code,
+        fallback: m.requestFailed,
+        locale,
+      })
+    : historicalFailure
+      ? {
+          message: historicalFailure.kind === "invalid_response"
+            ? m.responseInvalid
+            : m.requestFailed,
+          requiresReauthentication: false,
+        }
+      : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5" data-testid="prompt-refiner-shadow-operator">
@@ -409,6 +508,59 @@ export function AdminPromptRefinerShadowPanel() {
           ) : null}
         </div>
       ) : null}
+
+      <Step title={m.historicalTitle} description={m.historicalBody}>
+        {historicalLoading ? (
+          <p role="status" className="text-sm text-zinc-300">{m.historicalLoading}</p>
+        ) : null}
+        {historicalFailureDisplay ? (
+          <div role="alert" className="text-sm text-red-200">
+            <p>{historicalFailureDisplay.message}</p>
+            {historicalFailureDisplay.requiresReauthentication ? (
+              <Link
+                href={adminRecentAuthenticationHref(
+                  PROMPT_REFINER_SHADOW_OPERATOR_PATH
+                )}
+                className="mt-2 inline-flex min-h-11 items-center font-bold underline underline-offset-4"
+              >
+                {m.reauthenticate}
+              </Link>
+            ) : null}
+          </div>
+        ) : historical ? (
+          <div data-testid="prompt-refiner-historical-evidence">
+            <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Field label={m.historicalRun} value={historical.runId} />
+              <Field label={m.evidenceGate} value={historical.gateOutcome} />
+              <Field
+                label={m.evidenceCases}
+                value={`${historical.passedCases}/${historical.attemptedCases}`}
+              />
+              <Field
+                label={m.historicalGateReasons}
+                value={historical.gateReasons.join(", ") || m.none}
+              />
+            </dl>
+            <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+              {historical.cases.map((item) => (
+                <li
+                  key={item.caseId}
+                  className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-200"
+                >
+                  <span className="font-mono font-semibold">{item.caseId}</span>
+                  <span className="ml-2">{item.terminalStatus} / {item.evidenceStatus}</span>
+                  <span className="mt-1 block break-all font-mono text-zinc-400">
+                    {item.failureReasons.join(", ") || m.none}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 text-sm text-amber-100">{m.historicalBoundary}</p>
+          </div>
+        ) : historicalLoading ? null : (
+          <p className="text-sm text-zinc-400">{m.historicalNotComplete}</p>
+        )}
+      </Step>
 
       {!stage && busy === "stage" ? (
         <div role="status" className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-4 text-sm text-zinc-300">

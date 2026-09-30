@@ -19,6 +19,15 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
     executionTitle: "3. Execute and observe",
     executionBody:
       "Runs only the approved synthetic corpus. No product conversation or customer content is read.",
+    historicalTitle: "Historical evidence (read only)",
+    historicalBody:
+      "Reads the immutable synthetic run after expiry or deployment changes. This view does not approve, resume or retry anything.",
+    historicalLoading: "Loading stored case evidence...",
+    historicalRun: "Stored run",
+    historicalGateReasons: "Gate reason codes",
+    historicalNotComplete: "No completed 16-case evidence bundle is available.",
+    historicalBoundary:
+      "These deterministic anchors require human review. A passing or failing result alone does not authorize product UI, Router coupling or another paid run.",
     approveStage: "Approve 60-minute stage",
     continueToRun: "Load run preview",
     approveRun: "Approve frozen 16-case run",
@@ -92,6 +101,15 @@ export const adminPromptRefinerShadowMessages = defineAdminMessages({
     executionTitle: "3. 실행 및 관찰",
     executionBody:
       "승인된 합성 corpus만 실행합니다. 제품 대화나 고객 content는 읽지 않습니다.",
+    historicalTitle: "이전 실행의 증거 (읽기 전용)",
+    historicalBody:
+      "승인 만료나 배포 변경 후에도 저장된 합성 실행을 조회합니다. 여기서는 승인·재개·재시도하지 않습니다.",
+    historicalLoading: "저장된 case 증거를 불러오는 중...",
+    historicalRun: "저장된 run",
+    historicalGateReasons: "게이트 사유 코드",
+    historicalNotComplete: "완료된 16건 증거 묶음이 없습니다.",
+    historicalBoundary:
+      "이 결정적 anchor는 사람의 검토가 필요합니다. 통과·실패만으로 제품 UI, Router 결합 또는 추가 유료 실행이 승인되지 않습니다.",
     approveStage: "60분 stage 승인",
     continueToRun: "run preview 불러오기",
     approveRun: "동결된 16건 run 승인",
