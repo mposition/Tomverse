@@ -80,7 +80,10 @@
 
 import type { ComparisonModelStatus } from "@/lib/comparisonReadiness";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
-import { modelWebSearchIsDispatchable } from "@/lib/webSearchCapability";
+import {
+  modelWebSearchIsDispatchable,
+  type WebSearchModelRef,
+} from "@/lib/webSearchCapability";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 import { hasExplicitSourceOrSearchIntent } from "@/lib/webSearchSuggestion";
 
@@ -427,11 +430,19 @@ export const anySelectedModelCanSearch = (input: {
    * remove.
    */
   searchBackendReadiness: WebSearchBackendReadiness;
+  /**
+   * The runtime catalogue's own model for a selected id -- a registry-only
+   * model's provider is known nowhere else. See `deriveWebSearchComposerState`.
+   */
+  resolveModel: (modelId: string) => WebSearchModelRef | undefined;
 }) =>
   input.selectedModelIds
     .filter((modelId) => !input.disabledModelIds.includes(modelId))
     .some((modelId) =>
-      modelWebSearchIsDispatchable(modelId, input.searchBackendReadiness)
+      modelWebSearchIsDispatchable(
+        input.resolveModel(modelId) ?? modelId,
+        input.searchBackendReadiness
+      )
     );
 
 /**
