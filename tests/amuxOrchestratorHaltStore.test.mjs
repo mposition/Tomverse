@@ -36,8 +36,14 @@ test("one store module writes the three tables; nothing else in the application 
     .flatMap((top) => walk(join(root, top)))
     .map((path) => relative(root, path).split("\\").join("/"));
   assert.ok(files.length > 200, "the scan must reach the application");
+  // The export declaration names the Prisma model as data, to exclude it from
+  // the customer export; it neither reads nor writes the table.
+  const declarations = new Set(["lib/accountDataExportDomains.ts"]);
   const offenders = files.filter(
-    (path) => path !== STORE && pattern.test(withoutComments(readFileSync(join(root, path), "utf8"))),
+    (path) =>
+      path !== STORE &&
+      !declarations.has(path) &&
+      pattern.test(withoutComments(readFileSync(join(root, path), "utf8"))),
   );
   assert.deepEqual(offenders, []);
   assert.match(read(STORE), /INSERT INTO "AmuxOrchestratorWrite"/);
