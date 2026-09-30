@@ -228,8 +228,8 @@ export const AMUX_QUOTA_SWEEP_BATCH_SIZE = 200;
 export async function sweepExpiredAmuxQuotaObservations() {
   return withAmuxDbBoundary(
     AMUX_DB_BOUNDARIES.quotaObservationSweep,
-    async (tx) =>
-      tx.$executeRaw`
+    async (tx, context) => {
+      const deleted = await tx.$executeRaw`
         WITH expired AS MATERIALIZED (
           SELECT "id"
           FROM "AmuxQuotaObservation"
@@ -241,6 +241,14 @@ export async function sweepExpiredAmuxQuotaObservations() {
         DELETE FROM "AmuxQuotaObservation" AS observation
         USING expired
         WHERE observation."id" = expired."id"
-      `,
+      `;
+      // Orchestration policy version 20, section 4: a sweep that deleted rows
+      // changed state, and its receipt names the batch rather than a row. One
+      // that deleted nothing changed nothing and records none.
+      if (deleted > 0) {
+        context.recordReceipt("quota_observation_batch", null, deleted);
+      }
+      return deleted;
+    },
   );
 }

@@ -1283,6 +1283,12 @@ export async function reclaimExpiredAmuxExecutions(
             throw new Error("AMUX expired execution changed while reclaiming");
           }
 
+          // Orchestration policy version 20, section 4: the card's status and
+          // revision and the attempt, as receipts of an admitted recover. The
+          // escalation, delivery and runtime rows below commit with them.
+          context.recordReceipt("work_item", attempt.taskId, 1);
+          context.recordReceipt("execution_attempt", attempt.id, 1);
+
           if (effectiveToStatus === "blocked") {
             await openAmuxHumanEscalation(tx, {
               taskId: attempt.taskId,
@@ -1475,6 +1481,10 @@ export async function reclaimExpiredAmuxClaims(
           if (released.count !== 1) {
             return false;
           }
+
+          // Orchestration policy version 20, section 4: the released owner and
+          // revision, as a receipt of an admitted recover.
+          context.recordReceipt("work_item", task.id, 1);
 
           await writeSystemAuditLog({
             systemActor: AMUX_SYSTEM_AUDIT_ACTOR,

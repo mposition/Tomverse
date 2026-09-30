@@ -47,13 +47,26 @@ const filesUnder = (directory) =>
 const migration = read(AMUX_COMMIT_DEADLINE_MIGRATION);
 const boundary = read("lib/amux/dbBoundary.ts");
 
-test("the migration is additive, later than every other, and holds one table, one function and one trigger", () => {
+// Migrations written after this one, each named here on purpose, so a new
+// migration cannot slip in ahead of it by a mistyped timestamp.
+const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
+  // Orchestration policy version 20: the orchestrator halt tables.
+  "20260930120000_amux_orchestrator_halt",
+]);
+
+test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {
   const directory = AMUX_COMMIT_DEADLINE_MIGRATION.split("/")[2];
   const others = readdirSync(join(root, "prisma", "migrations"), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && entry.name !== directory)
     .map((entry) => entry.name);
   assert.ok(others.length > 0);
-  for (const name of others) assert.ok(name < directory, `${name} sorts after ${directory}`);
+  for (const name of others) {
+    if (MIGRATIONS_AFTER_COMMIT_DEADLINE.has(name)) {
+      assert.ok(name > directory, `${name} was written after ${directory}`);
+      continue;
+    }
+    assert.ok(name < directory, `${name} sorts after ${directory}`);
+  }
 
   const statements = migration
     .split("\n")

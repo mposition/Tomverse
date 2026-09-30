@@ -226,6 +226,12 @@ run(
     // exactly one owner and one append-only route decision, and a failed
     // decision write must roll the ownership change back.
     "tests/integration/amux-orchestration.db.test.ts",
+    // Orchestration policy version 20: the orchestrator's write admission,
+    // receipts written with the change under the admission's row lock, the
+    // resolver that confirms a rollback only on that evidence, and the halt
+    // that only a person clears -- each refused by the database, not only by
+    // the application, when it is broken.
+    "tests/integration/amux-orchestration-halt.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
