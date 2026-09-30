@@ -1,6 +1,7 @@
 # Development Agent Orchestration
 
 상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 같은 운영자가 2026-09-29에 버전 19로 버전 18의 활성화 증거 절을 갱신했다. late COMMIT을 DB가 COMMIT 시점에 거부하는 장치와 그 테스트가 `develop`에서 `routing` 레인을 통과했다는 사실을 run 링크와 head SHA로 기록하고, 남는 구간을 적는다. 그 승인은 `main` 이식 조건의 2와 3을 면제하지 않고, 환경 변수를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 20으로 orchestrator 정지와 재시작을 승인했다. 알려진 답만 지금처럼 처리하고, 결과 불명 쓰기와 그 밖의 응답에서는 프로세스를 끝내지 않고 앱 DB에 기록하는 정지로 들어가며, 쓰기 접수와 영수증으로 기록 전 종료도 잡는다. 해제는 owner와 최근 step-up의 사람 조작뿐이다. 그 승인은 환경 변수와 Railway 재시작 정책을 바꾸지 않고, 외부 알림을 만들지 않으며, WSL bridge와 실행 모드를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 21로 버전 20 절 5의 데이터 도메인 레지스트리 문장을 개정했다. 레지스트리에는 사람의 id를 가진 `AmuxOrchestratorHalt`만 등록한다. 그 승인은 동작, 테이블, 보존 규칙을 바꾸지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태(최신): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -21,6 +22,9 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 18
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 19
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 20
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 21
+approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 22
+
+버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -45,6 +49,7 @@ approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 21
 | 19 | 2026-09-29 mposition | 버전 18의 활성화 증거 절 갱신. late COMMIT을 deferred constraint trigger가 COMMIT 시점에 `AX001`로 거부하는 장치(migration `20260929200000_amux_commit_deadline_check`)와 그 DB 테스트가 #1765 head `4339769bf`에서 `routing` 레인을 통과했음을 run 링크와 함께 기록한다. 남는 구간을 적는다. `main` 이식 PR은 자기 head SHA에서 같은 레인을 다시 통과해야 한다. 환경 변수는 바꾸지 않는다. |
 | 20 | 2026-09-30 mposition | orchestrator 정지와 재시작. 알려진 답만 지금처럼 처리하고, 그 밖의 응답·무응답과 선택 읽기 61번째 연속 실패에서 프로세스를 끝내지 않고 앱 DB `AmuxOrchestratorHalt`에 기록하는 정지로 들어간다. 쓰기 호출은 처리 전에 접수를 커밋하고 쓰기와 같은 트랜잭션에 영수증을 남겨, 기한이 지난 뒤 영수증이 없으면 롤백 확정, 있으면 사람 확인으로 가른다. 해제는 owner와 최근 step-up의 Admin 조작과 사람 감사로만 하며 원래 작업을 다시 하지 않는다. 구현 배포 뒤 Railway 재시작 정책을 `On Failure`로 명시한다. 환경 변수, 외부 알림, WSL bridge, 실행 모드는 바꾸지 않는다. |
 | 21 | 2026-09-30 mposition | 버전 20 절 5의 데이터 도메인 레지스트리 문장 개정. 사람의 id를 가진 `AmuxOrchestratorHalt`만 레지스트리에 운영 기록으로 등록하고, 사용자 데이터가 없는 `AmuxOrchestratorWrite`와 `AmuxOrchestratorWriteReceipt`는 레지스트리 대상이 아니다. 세 테이블 모두 고객 export에 넣지 않는다. 동작, 테이블, 보존 규칙, 해제 조건은 바꾸지 않는다. |
+| 22 | 2026-09-30 mposition | 전략적 계층·점수와 자동 실행 풀 편입, 별도 Task DAG·실행 등급, 병행/SEV1 예약, develop과 main의 PR·배포 권한 분리, 운영자 최종 완료, 실패 복구·결과 환류, 전 worker CLI 토큰 계측, Admin Kanban·계층 목록을 승인한다. 기존 v16 단계 순환은 새 카드에 적용하지 않는다. 이 승인 자체로 migration·flag·Publisher 권한·자동 병합/배포를 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -60,7 +65,7 @@ Tomverse의 개발 Agent 팀은 `tomverse-orchestrator`를 통해 실행한다. 
 **개별 Agent의 권한은 여기 적지 않는다.** 어떤 입력을 작업으로 인정하는지,
 그 결과물이 공개 저장소와 쓰기 가능 자격증명에 어디까지 닿는지는 그 Agent의
 정책 문서가 정한다. engineering Agent는 `docs/policy/engineering-agent.md`다.
-intake Agent의 승인된 v1 설계는 `docs/policy/amux-intake.md`다.
+intake Agent의 승인된 설계와 v4 신규 경로는 `docs/policy/amux-intake.md`다.
 한 Agent의 규칙을 여기 올리면 다른 팀의 worker가 그 규칙에 묶인다.
 
 두 문서가 충돌하면 적용 범위가 좁은 쪽이 이긴다.
@@ -226,10 +231,12 @@ status와 dispatch readiness가 모두 변하지 않을 때만 telemetry 예외�
 
 ## Workboard catalog import
 
-Catalog import는 Agent 실행 권한을 부여하지 않는 별도 Admin 동작이다. source
-board가 제품 작업의 Outstanding 여부와 투자·배정 우선순위의 정본이다. AMUX
-카드는 그 현황판의 실행 projection이며 제품 우선순위의 정본이 아니다. 정본을
-AMUX로 옮기는 cutover는 이 정책의 범위가 아니다.
+Catalog import는 Agent 실행 권한을 부여하지 않는 별도 Admin 동작이다. 아래
+정본 설명은 **최초 import 당시의 역사적 상태**다: source board가 제품 작업의
+Outstanding 여부와 투자·배정 우선순위의 정본이고, AMUX 카드는 실행
+projection이었다. 이후 2026-09-24 별도 운영자 승인과 reconciliation 소비로
+`amux_authority` 전환이 이뤄져 현재 상태·우선순위의 정본은 AMUX다. 이 문서의
+v22 승인이나 최초 catalog import가 그 cutover를 수행한 것은 아니다.
 
 ### Initial population
 
@@ -1090,3 +1097,61 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 ### 이 버전이 하지 않는 것
 
 환경 변수를 설정하거나 바꾸지 않는다. Railway 재시작 정책을 바꾸지 않는다(9는 구현 배포 뒤의 운영자 단계). 외부 알림을 만들지 않는다. 영수증이 있는 결과 불명의 확정을 자동화하지 않는다. WSL bridge, 실행 모드, worker catalog, 자동 승격, 단계 사이클, engineering adapter의 래치와 동작을 바꾸지 않는다. 새 시스템 audit actor를 만들지 않는다.
+
+## 버전 22 — 전략적 포트폴리오에서 운영자 완료 판정까지
+
+승인자 `mposition`, 승인일 2026-09-30. 이는 앞으로 구현할 **v22 경로의 정책 계약**이며 v7~v21의 이력·현재 코드 상태를 소급 변경하지 않는다. 새 schema, scoring, UI, CLI telemetry, Publisher, worker 라우팅과 모든 활성화 스위치는 별도 착수 지시·구현·독립 검토·검증 대상이다. 기존 `AmuxWorkItem`을 자동 변환하거나 기존 승인·attempt를 지우지 않는다. 2026-09-24 별도 승인된 `amux_authority`를 전제로 읽으며, **이 버전 자체가 정본 cutover를 승인하거나 수행하지 않는다.**
+
+### 1. 전략 계층·점수·실행 풀
+
+- Initiative(Project)→Epic→Feature는 영구 저장하는 **비실행 계층**이고, User Story는 범위·진행률 집계 카드, Task는 worker 실행 카드다. Bug는 문제 해결 Story의 subtype, Error는 그 근거 기록이다. Task는 Story의 하위 또는 `parentStoryCardId = null`인 Feature 직속일 수 있다. 부모·자식·의존성은 서로 다른 관계다. 부모가 같다는 이유로 실행 선후를 추정하지 않는다.
+- 점수는 카드 한 장만 보지 않는다. 모델이 상위 Initiative/Epic의 플랫폼 전략 가치, Story의 효과, Task의 기여·위험·노력·의존성·worker 용량을 근거와 함께 제안하고, 버전 있는 결정적 계산이 최종 실행 추천 점수와 그 사유를 남긴다. 모델 제안은 승인, SEV1 판정 또는 전이 권한이 아니다. 운영자 override는 이유·이전값·새값을 감사한다. 활성 포트폴리오는 7일, 전체 기준선은 28일마다 재평가하며 중대 사건은 조건부 조기 재평가한다. 재평가 실패 또는 근거 만료는 새 자동 승격을 보류하지만 진행 중 실행을 삭제하지 않는다.
+- `ready`는 새 lifecycle status가 아니라 계산된 자격이다: 운영자가 등록할 때 **실행 brief 원문·digest·Task 역할·실행 등급·예상 경로·비용 상한까지 확인한 Task**가 허용 scope와 완료 조건, 승인된 부모 경로, 명시적 dependency, 비용·권한·worker 조건을 갖추고 정지 상태가 아니다. Story는 승인된 backlog 카드로 남아 점수·진행률을 집계하지만 직접 worker가 claim하지 않으며, 실행하려면 독립 Task로 분해한다. 이 판정은 승격 직전 DB 현재값에서 다시 계산한다. 승인 뒤 brief 또는 그 결속 필드가 달라지면 `ready`가 풀리고 운영자가 새 digest를 확인해야 한다.
+- 운영자가 아이디어·계층·카드의 `backlog` 등록을 승인한 뒤에는 **카드별 backlog→todo 승격 승인 요구를 제거한다.** `ready`이고 최신 점수가 높은 카드부터 현재 용량에서 자동으로 실행 풀(`todo`, worker 미배정)에 편입한다. 모델의 점수만으로 밀어 넣지 않고 결정적 Guard, CAS, 감사와 kill switch를 통과한다. 운영자가 앞서 승인한 한 아이디어 전체를 한번에 `todo`로 보내지 않는다. 작업 풀은 검증된 worker 수의 최대 3배라는 운영 상한을 넘지 않게 설계하고, 정확한 분모·예약 슬롯과 경합 계산은 구현 전 테스트로 고정한다. 기존 v7/v8의 추천 풀·사전 승인 subset·래치는 이 새 경로의 암묵적 허가가 아니며 별도 전환 전까지 현행 규칙대로 남는다.
+- **새 자동 편입의 졸업과 상한.** v22 경로를 켜기 전에도 v8의 측정된 사람 결정 **20건/14일**과 운영자 활성화 판정을 요구한다. 자동 편입 판단의 Agent 원가 상한은 v8보다 넓지 않게 **1회 US$5·24시간 US$15·30일 US$100**이다. 새 `todo` 대기열은 설정된 `wipLimit`과 `검증된 worker 수 × 3`을 모두 넘지 않는다. 동시 실행은 **전역 3, worker당 1**을 넘지 않고, 대기열 수와 동시 실행 수를 혼동하지 않는다. 중대 위반 1건 또는 15분 내 결과 불명 2건은 기존 v8의 자동 승격 정지보다 약하게 만들지 않는다. 수치·분모·병행/SEV1 예약의 원자적 합산 테스트와 새 경로 전용 off switch가 없으면 v22 자동 편입은 닫혀 있다. v2가 자동 등록한 카드와 v1~v3의 과거 카드는 운영자의 새 hierarchy·brief 확인과 명시적 opt-in 전에는 v22 `ready`가 아니다. 이 재확인은 **현재 카드와 결속한 새로운 사람 source 승인 ID**를 만들며, 과거 자동 등록 기록을 사람 승인으로 바꿔 해석하지 않는다. 이 조건은 평상시 카드별 승격 승인을 부활시키지 않고 **활성화 전 졸업과 source 자격**을 정한다.
+- **승인 없는 `todo`의 정의.** v8 grant 소비는 v22 경로의 증거가 아니다. 새 경로는 카드마다 `source 승인 ID + 승인된 hierarchy/brief digest + scoring snapshot/version + capacity 판단 + policy version`에 묶인 **자동 편입 영수증**을 `backlog→todo`·canonical system audit과 같은 트랜잭션에 기록한다. 이 영수증이 없거나, source 승인/brief가 현재 카드와 다르거나, 졸업·용량·스위치가 닫혔는데 `todo`가 된 카드가 v22의 `unapproved_todo`다. 기존 v8 카드에는 기존 grant 증거를 계속 적용한다. 한쪽 경로의 영수증을 다른 쪽에 요구하거나 면제하지 않는다. 새 테이블·DB 불변식·fault injection으로 두 경로를 분리하기 전에는 v22 편입을 활성화하지 않는다.
+
+### 2. Task DAG, 배정, 긴급·병행 용량
+
+- 새 v22 카드는 한 카드 안에서 `design → develop → test → review`를 순환하지 않는다. **Story의 설계·구현·테스트·독립 리뷰·검증은 각각 독립 Task**로 제안·저장하고, 선행 edge를 명시한다. v16의 `stageCycle`과 stage round는 과거 카드에만 적용하며, v22 Task 생성 시 사용하지 않는다. 기존 stage 카드의 미완료 이행 방법과 중복 실행 방지는 migration 전에 승인·검증한다.
+- Task별로 작업 역할과 **실행 등급**을 미리 triage한다. 등급은 능력·위험·맥락 크기 요구를 뜻하며 Luna/Sol/Astra나 Fable/Opus 같은 모델 이름이 아니다. claim 시점의 검증된 worker catalog가 공급자·모델·도구 능력과 현재 quota를 대조한다. 구현 작성자와 독립 리뷰 작성자는 달라야 하며, 실제 확인된 provider가 다를 수 있으면 다른 provider를 우선한다. 실행 등급 미기록·worker 미준비·선행 미완료면 claim하지 않는다.
+- **병행 슬롯 하나와 SEV1 슬롯 하나**를 별도 예약한다. 병행 슬롯은 핵심 Initiative에 모든 자원이 묶여도 승인된 다른 플랫폼 개선이 계속 진행될 자리를 지킨다. 실제 운영 장애인 `AMUX SEV1`은 일반 `p1`과 다른 명시적 표시이며 운영자 선언·감사·해제가 필요하다. SEV1은 적합한 worker가 사용 가능해지는 즉시 일반 후보보다 먼저 claim한다. 실행 중인 worker를 강제 선점하지 않고, worker가 없으면 대기한다. 두 예약은 존재하지 않는 worker를 만들거나 전역 WIP·비용·권한·kill switch를 우회하지 않는다. worker 수가 모자랄 때의 정확한 점유·대여 계산은 활성화 전 별도 용량 계약으로 고정한다.
+
+### 3. Git 충돌, PR, 배포, 완료
+
+이 절은 **공통 실행 제어의 최대 허용 범위**다. 개별 Agent의 더 좁은 승인 정책이 권한을 실제로 부여해야 한다. 특히 현재 `engineering-agent.md`는 미승인 초안이며 무인 병합과 main PR 생성을 금지한다. 그 Agent 정책의 별도 개정·운영자 승인, Publisher와 저장소 보호 설정의 검증 전에는 아래 develop 자동 병합·staging 배포·worker 작성 main PR이 **허용되지 않는다**. 이 문서 하나로 그 금지를 우회하지 않는다.
+
+- 각 Task는 고정한 base SHA에서 별도 브랜치·worktree로 작업하고, 파일 범위와 변경 목적을 기록한다. 첫 원격 push 전 최신 원격·base/head/diff digest·허용 경로·크기·secret scan을 다시 확인한다. 병합 직전 base가 움직이면 검증과 독립 리뷰의 결속을 다시 만든다. 비겹침 변경은 갱신 후 재검증할 수 있지만, 같은 계약·정책·데이터 의미를 다르게 바꾸는 충돌은 자동 덮어쓰기·force push 대신 통합 Task 또는 운영자 주의로 보낸다. 원래 변경과 검토 이력은 보존한다.
+- worker는 `develop` PR을 작성할 수 있다. **졸업된 정확한 파일 허용 목록**, base 커밋의 정책 테스트, CI·독립 리뷰, push 결과의 digest 일치, off switch, 저장소 ruleset과 별도 최소 권한 Publisher가 모두 준비된 경로만 Publisher를 통해 **develop 병합과 staging 배포**까지 자동 진행할 수 있다. worker 생성 프로세스에는 GitHub write·배포 자격증명을 주지 않는다. 게이트 파일(`docs/policy/**`, workflow, 규칙·정책 테스트 등)은 자동 허용 목록에 들어가지 않는다. Railway IaC 설정 적용은 기존대로 운영자만 한다.
+- `main` PR은 worker가 검증·게시할 수 있지만 **main 병합과 production 배포는 운영자만** 한다. PR 생성 능력은 main merge 권한이 아니다. PR의 review/검사 승인과 제품 작업의 완료 판정도 다른 행위다. GitHub PR은 허용된 코드 변경 초안의 예외일 뿐, AMUX 카드 상태·승인·감사의 정본이 아니다.
+- 최종 `review → done`은 **운영자 판정만** 허용한다. 운영자는 완료 조건, PR head/base/diff, 독립 리뷰, 테스트, staging 또는 production의 해당 완료 단위 증거를 보고 `완료 / 재작업 / 중단`을 결정한다. 개발·병합·배포 성공이나 worker의 자체 검토가 `done`을 자동 생성하지 않는다. 거절·재작업 시 어떤 완료 조건이 부족한지 기록한다.
+
+### 4. 실패 복구와 결과 환류
+
+- **새 실행 전 read-back.** claim 응답 유실, worker heartbeat 중단, PR push/병합·배포 응답 유실을 같은 `failed`로 뭉개지 않는다. 각 쓰기는 요청 id, 대상 id, base/head SHA 또는 배포 id와 digest를 가진다. 실제 결과를 DB·GitHub·배포 기록에서 확인하기 전에는 재claim·재push·재병합·재배포하지 않는다. 판정할 수 없으면 `outcome_unknown`으로 기존 v20 orchestrator 정지 계약에 넘긴다. 사람 해제는 원래 작업의 재실행이 아니다.
+- **worker 중단.** lease·heartbeat·fencing으로 이전 worker의 늦은 쓰기를 막고, 브랜치·산출물·완료된 Task와 부분 증거를 보존한다. 이전 시도가 멈췄고 중복 외부 행위가 없음을 확인한 뒤 제한된 새 attempt를 만든다. 테스트 실패는 정해진 횟수 안에서 수정·재검증한다. 시도·비용·시간 상한이나 독립 리뷰의 의미상 충돌을 넘으면 운영자 주의로 보낸다.
+- **PR·배포 결과 불명 예.** PR 작성 직후 통신이 끊기면 같은 브랜치/head SHA의 PR을 먼저 조회한다. 이미 있으면 그 PR을 이어 관측하고 두 번째 PR을 만들지 않는다. 배포도 대상 commit과 deployment id를 대조하며, 단순한 HTTP timeout을 미배포로 단정하지 않는다. 이미 승인·완료한 Task를 재실행해 이중 작업·이중 원가로 세지 않는다.
+- **환류.** 운영자 완료·재작업·중단 때마다 예상과 실제의 기간, 시도 수, CLI 토큰/캐시 토큰, API 환산 비용, 검사·독립 리뷰 발견 사항, 배포 뒤 회귀와 사용자 결과를 Task에 결속한다. Task→Story→Feature→Epic→Initiative 또는 **Feature 직속 Task→Feature→Epic→Initiative**로 합산해 이후 분해·실행 등급·점수·자원 배분을 조정한다. Story의 진행률은 하위 Task에서 계산하지만 Story 자체의 `done` 판정은 운영자에게 남긴다. 수정된 추정과 그 이유를 버전·근거로 남기며, 빠른 완료만 보상해 품질을 낮추지 않는다. 운영자 결정의 축적은 제안 정확도를 높이는 자료이지 모델이 새 정책·승인 권한을 얻는 학습이 아니다.
+
+### 5. 모든 worker의 CLI 토큰 원장
+
+- 아이디어 분석 Agent뿐 아니라 **모든 로컬 Ubuntu worker의 Codex/Claude CLI 호출**을 공통 실행 래퍼에서 계측한다. 정규화된 사용량 사건에는 card/Task/run/attempt/worker, 공급자·실제 모델·CLI 버전·인증 방식, 호출 시작/종료, 상태, 보고된 입력·출력·캐시 읽기·캐시 쓰기 토큰과 사용량 출처/완전성, 멱등 turn id를 둔다. 프롬프트 원문·비밀값은 사용량 원장과 감사에 넣지 않는다. 누락·크래시·도구가 보고하지 않는 필드는 **0이 아니라 unknown**이다. 재개된 세션의 누적 사용량은 turn별 delta/고유 id로 중복 합산하지 않는다.
+- 버전 있는 공급자별 API 가격표로 계산한 숫자는 **향후 API 키 전환 시 예상액**이며 현재 구독료·실제 API 청구액·사용자 credit와 분리해 표시한다. 보고된 캐시·reasoning 토큰의 가격 구분을 지원하고, 가격 미확인 모델은 금액을 임의 계산하지 않는다. 실제 provider/API 호출이 생기면 그 실제 원가도 별도 칸에 기록한다. 실패 호출의 토큰도 비용 예측에서 제외하지 않는다.
+- 사용량 수집 실패가 실행 성공이나 0원임을 뜻하지 않는다. 회차·worker·모델별 누락률을 Admin에서 볼 수 있어야 한다. Task의 승인된 비용 상한이나 API 실제 예산을 사용량으로 판정하는 경우 `unknown`이 생기면 read-back으로 복구하기 전까지 해당 비용 범위의 새 attempt·claim을 보류한다. 읽어도 복구되지 않아 운영자가 해제하면 호출 전 예약한 최악의 상한을 예산에서 계속 점유한 채 재개하며, 이를 실제 청구액으로 표시하지 않는다. 강제 가능한 호출 전 상한이나 예약액이 없으면 운영자 해제로도 자동 실행하지 않는다. 장차 API로 전환할 때는 CLI 예상액과 실제 청구액을 비교·보정하고, 개별 Agent 예산과 전체 worker 예산을 혼합하지 않는다.
+
+### 6. Admin의 한 장부, 두 작업 보기
+
+| Kanban 열 | 같은 AMUX 장부에서의 의미 |
+|---|---|
+| Tomverse Backlog | 승인·등록됐으나 실행 풀에 들지 않은 `backlog` |
+| AMUX Backlog | `todo`이며 worker 미배정. `Todo without worker`라는 설명을 함께 표시 |
+| Todo | `todo`이며 worker가 배정·claim했지만 실행 시작 전 |
+| In Progress | 실행 중인 `doing` |
+| In Review | 독립 검증 근거가 모여 운영자 완료 판정을 기다리는 `review` |
+| Need owner's attention | 결과 불명·열린 escalation·충돌·정지·운영자 선택이 필요한 카드의 **projection**. 원래 lifecycle을 덮어쓰는 새 status가 아님 |
+
+`done`·`blocked`·`cancelled`는 숨겨진 손실이 되지 않도록 이력/보관 필터에서 조회한다. Kanban 열 이동은 단순 드래그가 DB 전이 권한을 주지 않는다. 모든 쓰기는 해당 Guard·승인·감사를 지나야 한다. DevOps형 계층 목록은 Initiative/Epic/Feature/User Story(Task 직속 포함)/Bug/Error/Task를 펼쳐 보이고, 점수·근거·dependency·실행 등급·worker·SEV1 표시·완료율을 같은 원장에서 읽는다. 단순 `owner` 문자열 하나를 worker 배정 증거로 추정하지 않고 claim/assignment 계약을 명시적으로 둔다. 큰 backlog는 서버 페이지네이션과 계층별 지연 로딩으로 읽으며 현재 목록의 고정 개수만으로 전체라고 표시하지 않는다.
+
+### 7. 도입 경계
+
+순서는 공통 기반과 intake v4의 실행 위치·CLI 계약 정합성, hierarchy/Task DAG·점수·capacity·usage schema와 정책 테스트, 합성 데이터·동시성/결과 불명 검증, Admin preview, staging 비실행 관측, staging 제한 실행, 별도 production 승인이다. 기존 v16 단계 카드의 전환/종료 계획 없이는 v22 Task를 같은 카드에 중복 부착하지 않는다. source 유출, 무승인 카드·노드 write, 무승인 실행·PR push/병합·배포, provider 비용 폭주, 사용자 데이터·승인 이력 소실, 감사 누락은 차단한다. UI 문구·정렬은 복구 가능한 비차단 항목이다. 이 버전은 flag·환경 값·계정/Publisher 권한·Railway 설정을 변경하지 않는다.
