@@ -1037,9 +1037,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
   계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에
   발송 계정 분리를 결정합니다(§5.3.1, A18).
-- **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
-  직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
-  보류하고 확인을 요청합니다(docs/policy/email-notifications.md §6).
+- **IP로 추정한 국가는 기록하고 판정에 쓰되, 더 강한 신호가 이깁니다**(소유자 승인
+  2026-09-29, S0). 신호 우선순위는 결제 국가·자기 신고 → 직전 동의 시점의 관할권 →
+  **IP 추정 국가**이고, 사용자는 설정에서 언제든 국가를 정정합니다(자기 신고가 추정을
+  덮습니다). 추정이 언어·시간대가 가리키는 나라와 다르면 두 후보를 모두 통과해야
+  보내며, 한 후보씩만 판정하는 동안에는 그 경우를 충돌로 보고 보류합니다. 추정조차
+  없으면 `ZZ`이고 marketing은 보내지 않습니다(docs/policy/email-notifications.md §6).
 - **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
   `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
   행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).

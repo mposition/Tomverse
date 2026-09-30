@@ -21,6 +21,12 @@ import {
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
 import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
+import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
+import {
+    readStoredSignupConsentChoice,
+    storeSignupConsentChoice,
+    withSignupConsentMarker,
+} from "@/components/auth/signupConsentClient";
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -67,7 +73,13 @@ const emailLoginErrorMessage = (
     }
 };
 
-function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
+function SignInButtons({
+    turnstileSiteKey,
+    signupConsentEnabled = false,
+}: {
+    turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
+}) {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { data: session, status } = useSession();
@@ -106,6 +118,32 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
             router.replace(callbackUrl);
         }
     }, [callbackUrl, hasAuthenticatedUser, router]);
+
+    // The sign-up consent devices (S4). Both start unset: an opt-in is never
+    // pre-ticked, and not ticking it is not a refusal.
+    const [consentChoice, setConsentChoice] = useState({ optIn: false, objected: false });
+    // After a reload the screen shows the choice this tab actually stored, not
+    // the unticked defaults: sending again then keeps that attempt instead of
+    // replacing it with an empty one.
+    useEffect(() => {
+        // Read after hydration (storage is the browser's), applied as the
+        // effect's callback rather than synchronously in its body.
+        const stored = readStoredSignupConsentChoice();
+        if (stored) queueMicrotask(() => setConsentChoice(stored));
+    }, []);
+    // The attempt the code request stored, so the verify step's landing carries
+    // its marker.
+    const [consentAttemptId, setConsentAttemptId] = useState<string | null>(null);
+    const storeConsent = (channel: "oauth" | "email_code", extra: { provider?: string; email?: string }) =>
+        signupConsentEnabled
+            ? storeSignupConsentChoice({
+                  channel,
+                  ...extra,
+                  expressOptInRequested: consentChoice.optIn,
+                  objected: consentChoice.objected,
+                  language: lang,
+              })
+            : Promise.resolve(null);
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -189,6 +227,14 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
         setFormError(null);
         setIsMinuteRateLimited(false);
         try {
+            // Stored at the first request only. A resend on the code step keeps
+            // the pending attempt: the choice is locked there, and superseding
+            // it before a request that then fails would leave the still-valid
+            // earlier code bound to nothing.
+            // The store keeps the pending attempt when the choice and address
+            // are unchanged (always so on the code step, where the devices are
+            // locked), and replaces it only when the person changed the choice.
+            setConsentAttemptId(await storeConsent("email_code", { email: email.trim() }));
             let response = await requestCode();
             let data: { code?: string } | null = null;
             if (response.status === 403) {
@@ -243,7 +289,7 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 redirect: false,
                 email: email.trim(),
                 code: code.trim(),
-                callbackUrl,
+                callbackUrl: withSignupConsentMarker(callbackUrl, consentAttemptId),
             });
             // next-auth v4 collapses every authorize() rejection into the
             // generic "CredentialsSignin" code, so a specific "locked" vs
@@ -253,7 +299,8 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 setFormError(t("auth.emailLoginInvalidCode"));
                 return;
             }
-            window.location.href = result?.url || callbackUrl;
+            window.location.href =
+                result?.url || withSignupConsentMarker(callbackUrl, consentAttemptId);
         } catch {
             setFormError(t("auth.emailLoginInvalidCode"));
         } finally {
@@ -324,13 +371,28 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                     {t("auth.privacyPolicyLink")}
                 </Link>
             </p>
+            {signupConsentEnabled ? (
+                <SignupConsentDevices
+                    disabled={step === "code"}
+                    language={lang}
+                    optIn={consentChoice.optIn}
+                    objected={consentChoice.objected}
+                    onChange={setConsentChoice}
+                />
+            ) : null}
 
             {/* Google */}
             <button
                 type="button"
                 onClick={() => {
                     markSignupStarted("google");
-                    void signIn("google", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "google" }).then((attemptId) =>
+                        signIn(
+                            "google",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -344,7 +406,13 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
                 type="button"
                 onClick={() => {
                     markSignupStarted("azure-ad");
-                    void signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams);
+                    void storeConsent("oauth", { provider: "azure-ad" }).then((attemptId) =>
+                        signIn(
+                            "azure-ad",
+                            { callbackUrl: withSignupConsentMarker(callbackUrl, attemptId) },
+                            oauthAuthorizationParams
+                        )
+                    );
                 }}
                 className={providerButtonClass}
             >
@@ -505,8 +573,10 @@ function SignInButtons({ turnstileSiteKey }: { turnstileSiteKey?: string }) {
 
 export function SignInPageContent({
     turnstileSiteKey,
+    signupConsentEnabled = false,
 }: {
     turnstileSiteKey?: string;
+    signupConsentEnabled?: boolean;
 }) {
     const { t } = useLanguage();
     // The analytics consent notice used to render as a viewport-fixed bar
@@ -546,7 +616,10 @@ export function SignInPageContent({
 
                 <div className="px-8 py-7">
                     <Suspense fallback={<div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">{t("auth.loading")}</div>}>
-                        <SignInButtons turnstileSiteKey={turnstileSiteKey} />
+                        <SignInButtons
+                            turnstileSiteKey={turnstileSiteKey}
+                            signupConsentEnabled={signupConsentEnabled}
+                        />
                     </Suspense>
                 </div>
             </div>

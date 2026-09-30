@@ -103,6 +103,7 @@ model User {
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
   emailPermissionEvents                EmailPermissionEvent[]
+  signupConsentAttempt                 SignupConsentAttempt?
   emailPermissionDecisions             EmailPermissionDecision[]
   campaignRecipients                   EmailCampaignRecipient[]
   modelMigrationRecords                ModelMigrationRecord[]
@@ -8191,4 +8192,48 @@ model EngineeringAgentRequest {
   updatedAt     DateTime @updatedAt
 
   @@index([state, createdAt])
+}
+
+/// What the person chose on the sign-up screen, held until the account exists.
+///
+/// Contract: docs/policy/email-product-news-redesign-draft.md section 5.2 (S4).
+///
+/// OAuth creates the account inside the provider callback and the email code
+/// creates it in the verification step; neither carries a screen's choices. So
+/// the choices are stored first, keyed by a nonce only the tab holds (its hash
+/// here, never the value), and consumed once, after sign-in, by the account this
+/// flow just created -- never by an existing account's sign-in.
+///
+/// The three states are independent (section 5.1): `expressOptInRequested` is
+/// the unticked opt-in box, `noticeShown` the notice beside it, `objected` the
+/// separate refusal. None is inferred from another.
+model SignupConsentAttempt {
+  id                         String    @id @default(cuid())
+  nonceHash                  String    @unique
+  /// oauth | email_code
+  channel                    String
+  /// The provider an OAuth attempt is bound to.
+  bindingProvider            String?
+  /// The normalised address an email-code attempt is bound to.
+  bindingEmail               String?
+  /// The email login attempt that proved the address, written at consumption.
+  bindingEmailLoginAttemptId String?
+  expressOptInRequested      Boolean
+  noticeShown                Boolean
+  objected                   Boolean
+  /// The consent copy version the screen rendered.
+  copyVersion                String
+  language                   String
+  /// What was applied when the choice was made: one entry per candidate,
+  /// `{country, signal, ruleVersion, copyHash}` (section 5.3). Empty when the
+  /// request carried no usable country.
+  countryCandidates          Json
+  createdAt                  DateTime  @default(now())
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  supersededAt               DateTime?
+  userId                     String?   @unique
+  user                       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([expiresAt])
 }

@@ -303,17 +303,31 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory remains 9aa7ec49..., so the digest below is a repin
 // over the merged tree.
 //
+// 2026-09-29, sign-up consent (S0, S4): `lib/emailJurisdictionCore.ts` gains
+// the IP-estimate signal and `isDeterminativeConfidence()`, `lib/appSettings.ts`
+// the sign-up collection reader and `lib/emailFeatureFlags.ts` its key. None
+// adds an element access -- the resolver reads named fields and the conflict
+// pair is an array literal -- so the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., and this repins positions only. The watched-
+// schema note in `lib/marketingAutomationAccess.ts` for the same model is
+// comment only and moves the positions below it.
+//
 // 2026-09-29, Prompt Refiner v4/v6 successor: schema comment provenance in
 // `lib/marketingAutomationAccess.ts` moved source positions without changing
 // computed accesses. On this merged tree, the canonical builder still reports
 // 228 accesses, the same position-free inventory and the ordered 190-file
 // closure. The digest below binds their merged source positions.
+//
+// 2026-09-30, sign-up consent branch (S4) takes develop: the S4 note and the
+// Prompt Refiner successor note above stand together. No computed element
+// access is added; the count and the position-free inventory are unchanged,
+// and the digest below is a repin over the merged tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5f4037c7f404a877bc88cc83f907e6d4",
-  "9b694ac34fcf50333543d3b630e3c4a0",
+  "805d1894d94194389b4a6031c7ca8459",
+  "062e06eb35924a11516f4b2af47b1d86",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

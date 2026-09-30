@@ -2152,6 +2152,22 @@ domains:
       widened past one column name. Every axis is unverified: nobody has
       decided this one yet, and that is what the state means.
 
+  - domain: signupConsentAttempt
+    prismaModel: SignupConsentAttempt
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+    note: >-
+      The choice a person made on the sign-up screen, held for up to an hour
+      until the account exists, then bound to it (S4). Carries the address an
+      email-code sign-up was started for and the IP-estimated country. The
+      evidence it produces is written to EmailPermissionEvent and ConsentRecord;
+      this row is the carrier. Registered on 2026-09-29 with every axis
+      unverified: its deletion and retention have not been decided yet.
+
   - domain: emailPolicyVersion
     prismaModel: EmailPolicyVersion
     userLinkageRole: actor

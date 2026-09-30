@@ -58,6 +58,7 @@ import {
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
   EMAIL_RELEASE_NOTES_FLAG_KEY,
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY,
   emailFeatureEnabledFromValue,
 } from "@/lib/emailFeatureFlags";
 import {
@@ -681,6 +682,16 @@ export async function isEmailConsentConfirmationEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
     where: { key: EMAIL_CONSENT_CONFIRMATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
+/** The sign-up screen's consent devices (S4). Default off. */
+export async function isEmailSignupConsentEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_SIGNUP_CONSENT_FLAG_KEY },
     select: { value: true },
   });
   return emailFeatureEnabledFromValue(row?.value);

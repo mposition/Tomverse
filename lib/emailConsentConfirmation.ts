@@ -2,6 +2,8 @@ import "server-only";
 
 import { createHmac, randomUUID } from "node:crypto";
 
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import {
@@ -10,7 +12,7 @@ import {
   readConsentToken,
   type ConsentTokenResult,
 } from "@/lib/emailConsentToken";
-import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import { jurisdictionForUser, recordEstimatedCountry } from "@/lib/emailJurisdiction";
 import {
   marketingJurisdictionVerdict,
   normalizeCountry,
@@ -112,6 +114,24 @@ export async function requestConsentConfirmation(input: {
   ip?: string | null;
   userAgent?: string | null;
   now?: Date;
+  /**
+   * Where the country came from. `self_declared` (the default) is the settings
+   * screen, where the person picks it. `ip_estimated` is the sign-up screen
+   * (S4), where the country is the IP estimate the screen rendered under: it is
+   * recorded as an estimate, never as something the person said, and never over
+   * a stronger source.
+   */
+  countrySource?: "self_declared" | "ip_estimated";
+  /** The screen, for the consent record's evidence. Defaults to the settings screen. */
+  evidenceVia?: "preference_center" | "signup_form";
+  /**
+   * The caller's transaction, when this request has to commit with the caller's
+   * own writes -- the sign-up consumption records the choice, the notice and
+   * this request as one fact (draft section 5.2). A refusal found inside it
+   * (already confirmed, address moved) is then thrown rather than returned, so
+   * the caller's transaction does not commit half of it.
+   */
+  client?: Prisma.TransactionClient;
 }): Promise<ConsentConfirmationRequestResult> {
   if (!isEmailPurpose(input.purpose) || !CONSENT_REQUIRED_PURPOSES.has(input.purpose)) {
     return { requested: false, reason: "not_consent_purpose" };
@@ -166,8 +186,8 @@ export async function requestConsentConfirmation(input: {
     language,
   });
 
-  try {
-    await prisma.$transaction(async (tx) => {
+  const countrySource = input.countrySource ?? "self_declared";
+  const write = async (tx: Prisma.TransactionClient) => {
       // Same lock order as setPreference(): user, then preference. The address
       // the mail goes to is the one read under the lock.
       const lockedEmail = await lockUserEmail(tx, input.userId);
@@ -181,20 +201,24 @@ export async function requestConsentConfirmation(input: {
       });
       if (existing?.enabled && existing.confirmedAt) throw ALREADY_CONFIRMED;
 
-      await tx.userSettings.upsert({
-        where: { userId: input.userId },
-        create: {
-          userId: input.userId,
-          country,
-          countrySource: "self_declared",
-          countryUpdatedAt: now,
-        },
-        update: {
-          country,
-          countrySource: "self_declared",
-          countryUpdatedAt: now,
-        },
-      });
+      if (countrySource === "self_declared") {
+        await tx.userSettings.upsert({
+          where: { userId: input.userId },
+          create: {
+            userId: input.userId,
+            country,
+            countrySource: "self_declared",
+            countryUpdatedAt: now,
+          },
+          update: {
+            country,
+            countrySource: "self_declared",
+            countryUpdatedAt: now,
+          },
+        });
+      } else {
+        await recordEstimatedCountry({ userId: input.userId, ipCountry: country, now, client: tx });
+      }
 
       // enabled is left exactly as it is: false for an ordinary request, and
       // true only for a row switched on before this step existed, which the send
@@ -219,7 +243,7 @@ export async function requestConsentConfirmation(input: {
           jurisdictionSource: input.jurisdictionSource,
           policyVersionId,
           capturedVia: input.capturedVia,
-          evidence: { via: "preference_center", requestId },
+          evidence: { via: input.evidenceVia ?? "preference_center", requestId },
           ipHash: evidenceHash("ip", input.ip),
           userAgentHash: evidenceHash("ua", input.userAgent),
         },
@@ -240,7 +264,15 @@ export async function requestConsentConfirmation(input: {
         jurisdictionCountry: country,
         jurisdictionProfileKey: profileForCountry(country),
       });
-    });
+  };
+
+  if (input.client) {
+    await write(input.client);
+    return { requested: true, purpose, requestedAt: now };
+  }
+
+  try {
+    await prisma.$transaction(write);
   } catch (error) {
     if (error === ALREADY_CONFIRMED) return { requested: false, reason: "already_confirmed" };
     // The address changed between the read and the lock; nothing was written.

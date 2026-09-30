@@ -211,6 +211,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "signupConsentAttempt",
+    publicName: "signup_consent_attempt",
+    prismaModel: "SignupConsentAttempt",
+    state: "unverified",
+  },
+  {
     domain: "emailPolicyVersion",
     publicName: "email_policy_version",
     prismaModel: "EmailPolicyVersion",

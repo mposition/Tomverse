@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { isDeterminativeConfidence } from "@/lib/emailJurisdictionCore";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
 import { isEmailReleaseNotesLive } from "@/lib/emailPolicyPublication";
 import {
@@ -166,7 +167,9 @@ export const candidateCountries = (jurisdiction: {
   confidence: string;
   conflicts: string[];
 }): string[] => {
-  if (jurisdiction.confidence !== "high") return [];
+  // A settled country, or the recorded IP estimate with nothing contradicting
+  // it (docs/policy/email-notifications.md §6.2 step 4, 2026-09-29).
+  if (!isDeterminativeConfidence(jurisdiction.confidence)) return [];
   if (jurisdiction.countryCode === "ZZ") return [];
   // A country with no profile of its own resolves to `profileKey: "ZZ"` while
   // keeping its country code -- Japan today. The marketing gate refuses that as

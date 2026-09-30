@@ -358,6 +358,10 @@ run(
     // all, counted as a set in one statement. The first version counted only
     // `sent` and compared sizes, and both mistakes are about rows.
     "tests/integration/email-policy-publication.db.test.ts",
+    // The sign-up screen's consent choice (S4): only the database shows that an
+    // existing account never consumes one, that consumption and its evidence
+    // commit together, and that an estimate never replaces a declaration.
+    "tests/integration/signup-consent.db.test.ts",
     // The two statutory display checks, whose question is which (policy version,
     // profile) a message could still be composed under. Both earlier readings of
     // that were wrong in ways only rows show: the active version alone, and a
