@@ -14,10 +14,13 @@ import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
+  admitAmuxOrchestratorRequest,
   amuxInternalErrorResponse,
+  amuxInvalidOrchestratorIdentityResponse,
   amuxJsonNoStore,
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
+import { readAmuxOrchestratorWriteIdentity } from "@/lib/amux/orchestratorHaltCore";
 
 /**
  * The system actor `amux-auto-promoter` consumes at most one bound grant.
@@ -46,9 +49,18 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return Response.json({ error: "Unauthorized" }, { status: 401, headers: noStore });
   }
+  // Orchestration policy version 20, section 4. Without the identity headers
+  // (an orchestrator built before version 20) the tick is served exactly as
+  // before, with no admission.
+  const identity = readAmuxOrchestratorWriteIdentity(request.headers);
+  if (identity.kind === "invalid") {
+    return amuxInvalidOrchestratorIdentityResponse();
+  }
 
   return withAmuxRouteBudget(async () => {
     try {
+      const refused = await admitAmuxOrchestratorRequest(identity, "auto_promotion_tick");
+      if (refused) return refused;
       await readLimitedJson(request, 1_024, requestSchema);
     } catch (error) {
       if (isAmuxInputError(error)) {

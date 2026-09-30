@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 
-use crate::tomverse_api::{ExecutionStartResponse, OwnedTodoTask, TomverseApi};
+use crate::tomverse_api::{
+    is_database_busy, ExecutionStartResponse, OwnedTodoTask, SelectionRead, TomverseApi,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeIdentity {
@@ -33,6 +35,14 @@ pub enum DriveOutcome {
         worker: String,
         reason: Option<String>,
     },
+    /// execution_start answered the exact database-busy body: its transaction
+    /// never started, so no attempt exists and the task is still an owned
+    /// Todo. The next tick reads it again and starts it with the same
+    /// revision and runtime.
+    ExecutionStartDeferred {
+        task_id: String,
+        worker: String,
+    },
     ExecutionStarted {
         task_id: String,
         worker: String,
@@ -43,7 +53,10 @@ pub enum DriveOutcome {
 
 #[allow(async_fn_in_trait)]
 pub trait BoardControlPlane: Send + Sync {
-    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>>;
+    /// The owned queue, the app's board-capacity refusal
+    /// (`board_capacity_exceeded`) or its database-busy answer
+    /// (`amux_database_busy`). Neither of the last two wrote anything.
+    async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>>;
 
     async fn execution_start(
         &self,
@@ -68,7 +81,7 @@ pub trait WorkerAdapter: Send + Sync {
 }
 
 impl BoardControlPlane for TomverseApi {
-    async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
+    async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
         TomverseApi::owned_queue(self).await
     }
 
@@ -110,7 +123,18 @@ where
      * not become concurrent execution attempts.
      */
     pub async fn tick(&self) -> Result<Vec<DriveOutcome>> {
-        let tasks = self.control.owned_queue().await?;
+        // The WSL bridge reads the owned queue itself and skips a tick on a
+        // capacity refusal or a busy database; this driver (execute mode)
+        // keeps failing the tick on both, as it did on every 409 and 503.
+        let tasks = match self.control.owned_queue().await? {
+            SelectionRead::Ready(tasks) => tasks,
+            SelectionRead::BoardCapacityExceeded => {
+                anyhow::bail!("Tomverse AMUX owned queue exceeds one complete response")
+            }
+            SelectionRead::DatabaseBusy => {
+                anyhow::bail!("unsupported Tomverse internal response status")
+            }
+        };
 
         let mut workers = HashSet::new();
         let mut outcomes = Vec::new();
@@ -178,6 +202,12 @@ where
          */
         let start = match self.control.execution_start(task, &runtime).await {
             Ok(start) => start,
+            Err(error) if is_database_busy(&error) => {
+                return Ok(DriveOutcome::ExecutionStartDeferred {
+                    task_id: task.id.clone(),
+                    worker: task.owner.clone(),
+                });
+            }
             Err(_) => {
                 tracing::warn!(
                     task_id = %task.id,
@@ -236,6 +266,7 @@ mod tests {
             id: "TASK-1".into(),
             owner: "worker-a".into(),
             revision: 7,
+            ..Default::default()
         }
     }
 
@@ -243,6 +274,7 @@ mod tests {
         tasks: Vec<OwnedTodoTask>,
         start: ExecutionStartResponse,
         start_error: bool,
+        start_busy: bool,
         start_calls: Arc<AtomicUsize>,
     }
 
@@ -258,14 +290,15 @@ mod tests {
                     reason: None,
                 },
                 start_error: false,
+                start_busy: false,
                 start_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
 
     impl BoardControlPlane for FakeControl {
-        async fn owned_queue(&self) -> Result<Vec<OwnedTodoTask>> {
-            Ok(self.tasks.clone())
+        async fn owned_queue(&self) -> Result<SelectionRead<Vec<OwnedTodoTask>>> {
+            Ok(SelectionRead::Ready(self.tasks.clone()))
         }
 
         async fn execution_start(
@@ -276,6 +309,10 @@ mod tests {
             self.start_calls.fetch_add(1, Ordering::SeqCst);
             if self.start_error {
                 return Err(anyhow::anyhow!("unverified execution-start response"));
+            }
+            if self.start_busy {
+                return Err(anyhow::Error::new(crate::tomverse_api::DatabaseBusy)
+                    .context("execution start"));
             }
             Ok(self.start.clone())
         }
@@ -421,6 +458,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_busy_start_is_deferred_not_unknown() {
+        // The exact busy answer: the start transaction never ran, no attempt
+        // exists. The task is deferred to the next tick; the tick does not fail.
+        let mut control = FakeControl::successful();
+        control.start_busy = true;
+        let calls = control.start_calls.clone();
+        let driver = BoardDriver::new(control, FakeAdapter::idle_running());
+        let outcomes = driver.tick().await.expect("a busy start is not an unknown outcome");
+        assert_eq!(
+            outcomes,
+            vec![DriveOutcome::ExecutionStartDeferred {
+                task_id: "TASK-1".into(),
+                worker: "worker-a".into(),
+            }]
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn lost_start_response_stops_before_another_task() {
         let mut control = FakeControl::successful();
         control.start_error = true;
@@ -428,6 +484,7 @@ mod tests {
             id: "TASK-2".into(),
             owner: "worker-b".into(),
             revision: 2,
+            ..Default::default()
         });
         let calls = control.start_calls.clone();
         let driver = BoardDriver::new(control, FakeAdapter::idle_running());

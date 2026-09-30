@@ -7,6 +7,7 @@ import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import { AUTOFIX_OPERATOR_ACTION_STATES } from "@/lib/feedbackAutoFixCore";
 import { FEEDBACK_AWAITING_OPERATOR_STATUSES } from "@/lib/feedbackLifecycleCore";
 import { AMUX_ESCALATION_AWAITING_STATUSES } from "@/lib/amux/humanReviewCore";
+import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -64,6 +65,7 @@ export async function getAdminNavigationCounts(): Promise<{
     overdueCampaignWaves,
     pendingMarketingApprovals,
     openAmuxEscalations,
+    openAmuxOrchestratorHalts,
   ] = await Promise.allSettled([
     prisma.feedback.count({
       where: { status: { in: [...FEEDBACK_AWAITING_OPERATOR_STATUSES] } },
@@ -98,6 +100,8 @@ export async function getAdminNavigationCounts(): Promise<{
     overdueCampaignWaveCount({ now }),
     prisma.marketingPost.count({ where: { status: "pending_approval" } }),
     countAwaitingAmuxEscalations(),
+    // Orchestration policy version 20: halts no person has cleared.
+    countOpenAmuxOrchestratorHalts(),
   ]);
 
   const jobsValue = settled(jobs);
@@ -119,6 +123,7 @@ export async function getAdminNavigationCounts(): Promise<{
     overdueCampaignWaves: settled(overdueCampaignWaves),
     pendingMarketingApprovals: settled(pendingMarketingApprovals),
     openAmuxEscalations: settled(openAmuxEscalations),
+    openAmuxOrchestratorHalts: settled(openAmuxOrchestratorHalts),
   };
 
   return {

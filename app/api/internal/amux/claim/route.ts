@@ -33,7 +33,12 @@ import {
   getAuthoritativeSchedulerFacts,
   recordAmuxClaimRefusal,
 } from "@/lib/amux/store";
-import { amuxInternalErrorResponse } from "@/lib/amux/internalRoute";
+import {
+  admitAmuxOrchestratorRequest,
+  amuxInternalErrorResponse,
+  amuxInvalidOrchestratorIdentityResponse,
+} from "@/lib/amux/internalRoute";
+import { readAmuxOrchestratorWriteIdentity } from "@/lib/amux/orchestratorHaltCore";
 
 const noStoreHeaders = { "Cache-Control": "no-store" } as const;
 
@@ -240,9 +245,18 @@ export async function POST(request: Request) {
   if (!isAmuxSyncAuthorized(request)) {
     return jsonNoStore({ error: "Unauthorized" }, 401);
   }
+  // Orchestration policy version 20, section 4. Without the identity headers
+  // (an orchestrator built before version 20) the claim is served exactly as
+  // before, with no admission.
+  const identity = readAmuxOrchestratorWriteIdentity(request.headers);
+  if (identity.kind === "invalid") {
+    return amuxInvalidOrchestratorIdentityResponse();
+  }
 
   return withAmuxRouteBudget(async () => {
     try {
+      const refused = await admitAmuxOrchestratorRequest(identity, "claim");
+      if (refused) return refused;
       await anchorAmuxClaimDeadline();
       if (!isAmuxExecutionApiEnabled()) {
         await recordAmuxClaimRefusal("execution_api_disabled");

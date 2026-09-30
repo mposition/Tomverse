@@ -47,7 +47,14 @@ const filesUnder = (directory) =>
 const migration = read(AMUX_COMMIT_DEADLINE_MIGRATION);
 const boundary = read("lib/amux/dbBoundary.ts");
 
-test("the migration is additive, later than every other AMUX migration, and holds one table, one function and one trigger", () => {
+// Migrations written after this one, each named here on purpose, so a new
+// migration cannot slip in ahead of it by a mistyped timestamp.
+const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
+  // Orchestration policy version 20: the orchestrator halt tables.
+  "20260930120000_amux_orchestrator_halt",
+]);
+
+test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
   const directory = AMUX_COMMIT_DEADLINE_MIGRATION.split("/")[2];
   // Ordered after the AMUX migrations whose tables its trigger guards. It was
   // written as "later than every other migration", which held only until the
@@ -56,7 +63,13 @@ test("the migration is additive, later than every other AMUX migration, and hold
     .filter((entry) => entry.isDirectory() && entry.name !== directory && /amux/i.test(entry.name))
     .map((entry) => entry.name);
   assert.ok(others.length > 0);
-  for (const name of others) assert.ok(name < directory, `${name} sorts after ${directory}`);
+  for (const name of others) {
+    if (MIGRATIONS_AFTER_COMMIT_DEADLINE.has(name)) {
+      assert.ok(name > directory, `${name} was written after ${directory}`);
+      continue;
+    }
+    assert.ok(name < directory, `${name} sorts after ${directory}`);
+  }
 
   const statements = migration
     .split("\n")
@@ -149,15 +162,47 @@ test("both fences insert the marker, check the trigger, and compare the clock wi
 test("the committing phase starts only after the fence, and AX001 is read before it in both classifiers", () => {
   const code = withoutComments(boundary);
   const body = between(code, "export async function withAmuxDbBoundary<T>(", "\n}\n");
-  assert.match(body, /let phase: AmuxDbBoundaryPhase = "running";/);
+  // `starting` until Prisma runs the callback, then `running` as the
+  // callback's first statement, then `committing` after the fence.
+  assert.match(body, /let phase: AmuxDbBoundaryPhase = "starting";\s*const transaction = prisma\.\$transaction\(\s*async \(rawTx\) => \{\s*phase = "running";/);
   assert.match(body, /requireAmuxCommitFence\(fence, boundary\.operation\);\s*\}\s*phase = "committing";\s*return result;\s*\}/);
-  assert.match(body, /return transaction\.catch\(\(error: unknown\): never => \{\s*throw amuxDbBoundaryFailure\(boundary, phase, error\);/);
+  assert.match(
+    body,
+    /return transaction\.catch\(\(error: unknown\): never => \{\s*const failure = amuxDbBoundaryFailure\(\s*boundary,\s*phase,\s*error,\s*amuxRouteWriteState\(routeDeadline\),?\s*\);/,
+  );
+  // A mutation marks its route when its callback begins -- after `running`
+  // and before its first statement -- so a later failure of the route cannot
+  // be answered as "nothing was written". A mutation that never got its
+  // connection ran nothing and does not mark it.
+  const marker = body.indexOf("routeDeadline.mutationStarted = true;");
+  assert.ok(marker > body.indexOf('phase = "running";'));
+  assert.ok(marker < body.indexOf("rawTx.$queryRaw"));
+  assert.equal(body.indexOf("routeDeadline.mutationStarted = true;", marker + 1), -1);
+  // The connection wait is the route-capped one.
+  assert.match(body, /maxWait: connectionWaitMs,/);
 
   const failure = between(code, "export const amuxDbBoundaryFailure = (", "\n};\n");
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") > 0);
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") < failure.indexOf('phase === "committing"'));
   assert.match(failure, /isAmuxLateCommitError\(error\)\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_DEADLINE_EXCEEDED"/);
   assert.match(failure, /phase === "committing" && boundary\.isolation === "mutation"\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_OUTCOME_UNKNOWN"/);
+  // The busy answers are decided after both, only in a route that started
+  // nothing that can write: a start refusal only while `starting`, the read
+  // rule only for a read.
+  assert.ok(failure.indexOf('"AMUX_DB_OUTCOME_UNKNOWN"') < failure.indexOf('"AMUX_DB_NOT_STARTED"'));
+  assert.ok(failure.indexOf('"AMUX_DB_NOT_STARTED"') < failure.indexOf('"AMUX_DB_READ_BUSY"'));
+  assert.match(
+    failure,
+    /routeWrites !== "no_mutation_started" \|\|\s*error instanceof AmuxDbBoundaryError\s*\) \{\s*return error;\s*\}/,
+  );
+  assert.match(
+    failure,
+    /phase === "starting" && amuxTransactionNotStartedCode\(error\) !== null\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_NOT_STARTED"/,
+  );
+  assert.match(
+    failure,
+    /boundary\.isolation === "read" &&\s*amuxTransientDatabaseCode\(error\) !== null\s*\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_READ_BUSY"/,
+  );
 
   const core = withoutComments(read("lib/amux/autoPromotionCore.ts"));
   const auto = between(core, "export const autoTransactionFailure = (", "\n};\n");

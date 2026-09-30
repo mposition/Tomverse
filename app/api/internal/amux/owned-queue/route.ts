@@ -12,7 +12,10 @@ import {
   isAmuxInputError,
 } from "@/lib/amux/internalRoute";
 import { AmuxQueueCapacityError, listOwnedTodos } from "@/lib/amux/store";
-import { amuxOwnedQueueResponseSchema } from "@/lib/amux/wireContract";
+import {
+  amuxOwnedQueueResponseSchema,
+  keepCanonicalAmuxQueueRows,
+} from "@/lib/amux/wireContract";
 import { z } from "zod";
 
 const requestSchema = z.object({}).strict();
@@ -33,7 +36,10 @@ export async function POST(request: Request) {
     try {
       await readLimitedJson(request, 1_024, requestSchema);
       return amuxBoundedJsonNoStore(
-        await listOwnedTodos(),
+        keepCanonicalAmuxQueueRows("owned", await listOwnedTodos(), (row) => [
+          row.id,
+          row.owner,
+        ]),
         200,
         amuxOwnedQueueResponseSchema,
       );

@@ -22,7 +22,12 @@ import {
   amuxRouteHasBudgetForMs,
   anchorAmuxRouteDeadline,
   fenceAmuxRouteDeadline,
+  lockAmuxRouteOrchestratorAdmission,
+  markAmuxRouteOrchestratorReceiptsCommitting,
+  type AmuxOrchestratorReceipt,
+  type AmuxOrchestratorReceiptRecorder,
 } from "@/lib/amux/dbBoundary";
+import { isAmuxLateCommitError } from "@/lib/amux/commitDeadlineCore";
 import {
   boardPromotionCardWrite,
   boardPromotionExecutionBriefDigest,
@@ -212,7 +217,11 @@ const tickHasRoomFor = (transactions: number): boolean =>
 const withAutoTransaction = async <T>(
   targetId: string | null,
   limits: AutoTransactionLimits,
-  run: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
+  run: (
+    tx: Prisma.TransactionClient,
+    now: Date,
+    recordReceipt: AmuxOrchestratorReceiptRecorder,
+  ) => Promise<T>,
 ): Promise<T> => {
   if (!boardImportAuditKeysPresent(adminAuditIntegrityKeys(process.env).length)) {
     throw new BoardImportError("audit_key_missing", 503, targetId);
@@ -222,15 +231,28 @@ const withAutoTransaction = async <T>(
     throw new AmuxDbBoundaryError("AMUX_DB_DEADLINE_EXCEEDED", AUTO_PROMOTION_DB_OPERATION);
   }
   let phase: AutoTransactionPhase = "starting";
+  let forgetReceiptCommit: () => void = () => {};
   try {
     return await prisma.$transaction(
       async (tx) => {
         phase = "running";
         await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(limits.statementTimeoutMs)}, true)`;
         const routeDeadlineAt = await anchorAmuxRouteDeadline(tx, maxMs, AUTO_PROMOTION_DB_OPERATION);
+        // Orchestration policy version 20, section 4: inside the admitted
+        // tick every transaction locks the admission row before it changes
+        // anything, and refuses if the admission is already closed. The
+        // owner's routes have no admission and lock nothing here.
+        const admitted = await lockAmuxRouteOrchestratorAdmission(tx, AUTO_PROMOTION_DB_OPERATION);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${RECOMMENDATION_LOCK_NAME}))`;
-        const result = await run(tx, await databaseNow(tx));
-        await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION);
+        const receipts: AmuxOrchestratorReceipt[] = [];
+        const recordReceipt: AmuxOrchestratorReceiptRecorder = (targetKind, targetId, rowCount) => {
+          if (admitted) receipts.push({ targetKind, targetId, rowCount });
+        };
+        const result = await run(tx, await databaseNow(tx), recordReceipt);
+        // From the fence on, the receipts may reach COMMIT; the catch below
+        // takes the mark back for every failure that proves they did not.
+        if (receipts.length > 0) forgetReceiptCommit = markAmuxRouteOrchestratorReceiptsCommitting();
+        await fenceAmuxRouteDeadline(tx, routeDeadlineAt, AUTO_PROMOTION_DB_OPERATION, receipts);
         // Nothing may run after this line inside the callback: from here on a
         // failure can only come from the COMMIT itself.
         phase = "committing";
@@ -239,6 +261,14 @@ const withAutoTransaction = async <T>(
       { maxWait: limits.maxWaitMs, timeout: limits.timeoutMs },
     );
   } catch (error) {
+    // Receipts of a transaction that failed before COMMIT, or whose COMMIT the
+    // commit deadline trigger refused, rolled back with the rest; any other
+    // COMMIT failure may have committed them.
+    // (`phase` is set inside the callback, which control-flow narrowing here
+    // does not see.)
+    if ((phase as AutoTransactionPhase) !== "committing" || isAmuxLateCommitError(error)) {
+      forgetReceiptCommit();
+    }
     // Refusals are thrown by the callback, so the transaction rolled back.
     if (error instanceof BoardImportError || error instanceof AmuxDbBoundaryError) throw error;
     switch (autoTransactionFailure(phase, error)) {
@@ -835,7 +865,7 @@ export async function commitSystemAutoPromotion(input: {
   | { promoted: true; consumptionId: string; grantId: string; snapshotId: string }
   | { promoted: false; reason: "no_grant" }
 > {
-  return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now) => {
+  return withAutoTransaction(input.consumptionId, TICK_TRANSACTION_LIMITS, async (tx, now, recordReceipt) => {
     await requireAutoOpen(tx, input.consumptionId);
     const grant = await tx.amuxRecommendationAutoGrant.findFirst({
       where: {
@@ -872,6 +902,12 @@ export async function commitSystemAutoPromotion(input: {
       requestDigest,
       snapshot: { kind: "system", snapshotId: input.snapshotId },
     });
+    // Policy version 20, section 4: the card, the grant and the consumption
+    // (its snapshot and cost entry commit with it), as receipts of an
+    // admitted tick.
+    recordReceipt("work_item", bound.item.cardId, 1);
+    recordReceipt("auto_promotion_grant", grant.id, 1);
+    recordReceipt("auto_promotion_consumption", value.consumptionId, 1);
     return { promoted: true as const, consumptionId: value.consumptionId, grantId: grant.id, snapshotId: value.snapshotId };
   });
 }
@@ -898,14 +934,18 @@ const expireDueGrantsOneByOne = async (
 ): Promise<void> => {
   for (let index = 0; index < AUTO_EXPIRE_BATCH; index += 1) {
     if (!hasRoom()) return;
-    const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now) => {
+    const moved = await withAutoTransaction(null, limitsFor(actor), async (tx, now, recordReceipt) => {
       const due = await tx.amuxRecommendationAutoGrant.findFirst({
         where: { status: "active", expiresAt: { lte: now } },
         orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
         select: { id: true },
       });
       if (!due) return false;
-      return expireGrantLocked(tx, now, actor, due.id);
+      const expired = await expireGrantLocked(tx, now, actor, due.id);
+      // Policy version 20, section 4: the grant's status, as a receipt of an
+      // admitted tick.
+      if (expired) recordReceipt("auto_promotion_grant", due.id, 1);
+      return expired;
     });
     if (!moved) return;
     counter.expired += 1;
@@ -1230,7 +1270,7 @@ export async function recordAutoOutcomeUnknown(input: {
   haltId?: string;
 }) {
   const haltId = input.haltId ?? randomUUID();
-  return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now) => {
+  return withAutoTransaction(input.consumptionId, limitsFor(input.actor), async (tx, now, recordReceipt) => {
     const mark = await readAutoOutcomeUnknownLocked(tx, input);
     const halt = await readAutoHaltLocked(
       tx,
@@ -1239,6 +1279,13 @@ export async function recordAutoOutcomeUnknown(input: {
     );
     const marked = await writeAutoOutcomeUnknownLocked(tx, now, input.actor, input.consumptionId, mark);
     const opened = await writeAutoHaltLocked(tx, now, input.actor, haltId, halt);
+    // Policy version 20, section 4: the record of a lost consume (and a
+    // version 8 halt it opens) changes the automatic promotion state of that
+    // consumption attempt, so an admitted tick keeps a receipt of it under
+    // the attempted consumption id. A record already written changes nothing.
+    if (marked.recorded || (opened.halted && !opened.replayed)) {
+      recordReceipt("auto_promotion_consumption", input.consumptionId, 1);
+    }
     return { ...marked, haltId: opened.haltId, halted: opened.halted };
   });
 }

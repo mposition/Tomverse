@@ -57,6 +57,13 @@ export type AdminNavigationCounts = {
    */
   openAmuxEscalations: number | null;
   /**
+   * AMUX orchestrator halts no person has cleared yet (orchestration policy
+   * version 20, section 7). While one is open the orchestrator claims,
+   * recovers and promotes nothing, and only a person clears it, so it is work
+   * by definition.
+   */
+  openAmuxOrchestratorHalts: number | null;
+  /**
    * Reports that have not closed -- `open` and `reviewing` both, as named by
    * FEEDBACK_AWAITING_OPERATOR_STATUSES. Not `status: "open"`: a
    * verified-trace report arrives as `reviewing`, and counting only `open`
@@ -90,6 +97,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   overdueCampaignWaves: null,
   pendingMarketingApprovals: null,
   openAmuxEscalations: null,
+  openAmuxOrchestratorHalts: null,
   openFeedback: null,
   supportFeedback: null,
   autoFixActionCases: null,
@@ -157,6 +165,19 @@ export const adminNavigationBadge = (
       return counts.pendingMarketingApprovals;
     case "amuxEscalations":
       return counts.openAmuxEscalations;
+    case "amuxOrchestratorHalts":
+      return counts.openAmuxOrchestratorHalts;
+    case "amuxExecution":
+      // The Execution entry: escalations plus open orchestrator halts. Unlike
+      // the partial sums above, both must be known. A halt stops the
+      // orchestrator, so a figure that silently left out an unreadable halt
+      // count would read as "no halt"; the policy asks for no badge when the
+      // count is unknown (development-agent-orchestration.md, version 20,
+      // section 7).
+      return counts.openAmuxEscalations === null ||
+        counts.openAmuxOrchestratorHalts === null
+        ? null
+        : counts.openAmuxEscalations + counts.openAmuxOrchestratorHalts;
     default:
       return null;
   }
