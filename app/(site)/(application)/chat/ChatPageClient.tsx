@@ -7515,6 +7515,7 @@ export function ChatPageClient({
       selectedModelIds: selectedModels,
       disabledModelIds: effectiveDisabledPanels,
       searchBackendReadiness: webSearchBackendReadiness,
+      resolveModel: getModel,
     })
       ? "available"
       : "unsupported";
@@ -7531,6 +7532,7 @@ export function ChatPageClient({
       (modelId) => !effectiveDisabledPanels.includes(modelId)
     ),
     backendReadiness: webSearchBackendReadiness,
+    resolveModel: getModel,
   }).estimatedSurchargeCredits;
   const webSearchResolvedTopicKeys = useMemo(
     () =>
