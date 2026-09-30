@@ -363,6 +363,7 @@ run(
     // commit together, and that an estimate never replaces a declaration.
     "tests/integration/signup-consent.db.test.ts",
     "tests/integration/au-relationship.db.test.ts",
+    "tests/integration/in-product-consent-notice.db.test.ts",
     // The two statutory display checks, whose question is which (policy version,
     // profile) a message could still be composed under. Both earlier readings of
     // that were wrong in ways only rows show: the active version alone, and a

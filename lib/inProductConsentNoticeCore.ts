@@ -274,6 +274,46 @@ export const noticeJurisdictionColumns = (resolved: {
       };
 
 /**
+ * The candidates a notice rendered under a resolution names, in the shape the
+ * ledger requires (`recordNoticeShown()`): exactly the countries the resolution
+ * involved, each with the signal that named it.
+ *
+ * - A conflict names its two countries, each as `conflict` -- the resolver says
+ *   which values disagreed, not which source gave which.
+ * - `ZZ` names none.
+ * - Anything else names its one country with its own source as the signal,
+ *   including a `low` inference: the row has to say what the screen was
+ *   rendered under even when that was a guess.
+ *
+ * `ruleVersionOf` answers the active rule version for a country, or 0 where the
+ * country has none -- the value the sign-up screen records (S4).
+ */
+export const noticeCandidatesFor = (input: {
+  resolved: {
+    countryCode: string;
+    confidence: string;
+    source: string;
+    conflicts?: readonly string[];
+  };
+  ruleVersionOf: (country: string) => number;
+  copyHash: string;
+}): Array<{ country: string; signal: string; ruleVersion: number; copyHash: string }> => {
+  const candidate = (country: string, signal: string) => ({
+    country,
+    signal,
+    ruleVersion: input.ruleVersionOf(country),
+    copyHash: input.copyHash,
+  });
+  if (input.resolved.confidence === "conflict") {
+    return [...new Set(input.resolved.conflicts ?? [])].map((country) =>
+      candidate(country, "conflict")
+    );
+  }
+  if (input.resolved.countryCode === "ZZ") return [];
+  return [candidate(input.resolved.countryCode, input.resolved.source)];
+};
+
+/**
  * The bytes two recorded facts are compared by.
  *
  * Keys sorted, because the stored copy comes back from `jsonb` and PostgreSQL
