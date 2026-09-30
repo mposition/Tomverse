@@ -416,6 +416,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The local-intake read-back selects the audit row that writeAdminAuditLog already wrote. The two INSERT statements write AmuxLocalIntakeNormalized and AmuxLocalIntakeApproval only. This file never writes AdminAuditLog.",
   },
   {
+    path: "lib/amux/orchestratorHaltStore.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 12,
+    reason:
+      "The orchestrator halt store (orchestration policy version 20). Its one mention is the LEFT JOIN in the halt read, which counts a halt as cleared only when the audit row the clear wrote is there. The halt clear writes its audit row through writeAdminAuditLog and the halt system audits go through writeSystemAuditLog in orchestratorHaltSystemAudit.ts; the INSERT, UPDATE and FOR UPDATE statements touch AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt only. This file never writes AdminAuditLog.",
+  },
+  {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -780,6 +788,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The migration creates EngineeringAgentRequest and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
+  {
+    path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 20,
+    reason:
+      "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
@@ -795,6 +811,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "The AMUX commit deadline trigger deletes its own AmuxCommitDeadline row during COMMIT with EXECUTE over TG_TABLE_SCHEMA and TG_TABLE_NAME -- the table the trigger is attached to -- because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. Both names are the trigger's own, never input, quoted with %I; the transaction id is bound with USING. It touches no protected table.",
+  },
+  {
+    path: "prisma/migrations/20260930120000_amux_orchestrator_halt/migration.sql",
+    count: 7,
+    reason:
+      "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
@@ -834,10 +856,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "lib/prisma.ts",
-    sha256: "c3245196e95f7c9198b0d6834f221969eeede43b9bf59bf01c8d77000056bedc",
+    sha256: "9baae0af58f21d2abfa8d95af49a84e793969b3ee9f679c2add623c96d3c0cf6",
     count: 2,
     reason:
-      "The application's Prisma client, constructed over a pg Pool through @prisma/adapter-pg. It exports the client; it runs no SQL of its own. The pool is module-private and not exported (reviewed 2026-09-17).",
+      "The application's Prisma client, constructed over a pg Pool through @prisma/adapter-pg. It exports the client; it runs no SQL of its own. The pool is module-private and not exported (reviewed 2026-09-17). prismaPoolUsage() returns only the pool's totalCount, idleCount and waitingCount for AMUX busy diagnostics; it runs no SQL and does not expose the pool (reviewed 2026-09-30).",
   },
   {
     path: "lib/accountDataAnonymisation.ts",
