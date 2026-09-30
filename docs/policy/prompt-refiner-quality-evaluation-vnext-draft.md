@@ -1,19 +1,25 @@
 ---
-status: draft
+status: approved
+policyVersion: 1
 implementationBlockedUntilApproved: true
-approvedScopes: []
-approvedBy: null
-approvedAt: null
-approvalTicket: null
+approvedScopes:
+  - OFFLINE_SCHEMA_PARSER_VALIDATOR_TESTS
+approvedBy: mposition
+approvedAt: 2026-10-01T08:31:06+10:00
+approvalTicket: N/A
+approvedDraftCommit: 167a87404355ba63cb1c8aa99f94e101f8ec9a19
 ---
 
-# Prompt Refiner vNext 합성 품질 평가 정책 초안
+# Prompt Refiner vNext 합성 품질 평가 정책 v1
 
-이 문서는 CHAT-01의 **새 평가 버전**에 관한 운영 정책 초안이다. 위 승인 필드가
-채워지기 전에는 새 runtime schema·parser·평가기 구현의 근거가 아니다. 별도의
-수치 spec이 승인되기 전에는 holdout 작성·provider dispatch의 근거가 아니며,
-두 승인 모두 제품 노출을 허가하지 않는다. 일반적인 자동 개발 지시, 코드 리뷰
-승인, CI 통과 또는 이 문서의 병합은 운영자 정책 승인을 대신하지 않는다.
+이 문서는 CHAT-01의 **새 평가 버전**에 관한 운영 정책 v1이다. 운영자 mposition의
+승인은 PR #1796의 정확한 초안 커밋 `167a87404355ba63cb1c8aa99f94e101f8ec9a19`에
+결속되며, `OFFLINE_SCHEMA_PARSER_VALIDATOR_TESTS` 범위의 무과금·오프라인 schema,
+parser, validator와 테스트 구현만 허용한다. `implementationBlockedUntilApproved: true`는
+나머지 구현 범위가 여전히 차단됨을 뜻한다. 특히 수치 spec·holdout 작성,
+runtime provider 연결, 비용·stage/run 승인, 유료 호출, flag 전환, PR 병합·배포,
+실제 사용자 traffic 또는 제품 노출은 승인하지 않는다. 일반적인 자동 개발 지시,
+코드 리뷰·CI 통과나 이 문서의 병합도 남은 범위의 운영자 승인을 대신하지 않는다.
 
 기존 [관측 계약](prompt-refiner-observability.md),
 [제안 UI 계약](../ui-contracts/prompt-refiner-suggestion.md),
