@@ -351,26 +351,6 @@ function SignInButtons({
                     {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
                 </div>
             ) : null}
-            <p className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950/60 dark:text-zinc-300">
-                {t("auth.privacy")}{" "}
-                <Link
-                    href="/terms"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                >
-                    {t("auth.termsLink")}
-                </Link>
-                {" / "}
-                <Link
-                    href="/privacy"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
-                >
-                    {t("auth.privacyPolicyLink")}
-                </Link>
-            </p>
             {signupConsentEnabled ? (
                 <SignupConsentDevices
                     disabled={step === "code"}
@@ -567,6 +547,30 @@ function SignInButtons({
                     ) : null}
                 </>
             ) : null}
+            {/* Below the sign-in buttons, as one line rather than a card, so
+                the page fits a screen with the consent devices shown. Those
+                devices stay above the buttons: a provider click stores the
+                choice and records that the notice was shown. */}
+            <p data-testid="signin-terms-notice" className="px-1 text-center text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                {t("auth.privacy")}{" "}
+                <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.termsLink")}
+                </Link>
+                {" / "}
+                <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+                >
+                    {t("auth.privacyPolicyLink")}
+                </Link>
+            </p>
         </div>
     );
 }
