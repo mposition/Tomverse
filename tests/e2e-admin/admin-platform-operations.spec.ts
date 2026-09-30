@@ -116,6 +116,73 @@ test.describe("platform operations", () => {
     ).toBeVisible();
   });
 
+  test("a web search override is persisted, audited with its previous value, and published", async ({
+    page,
+  }) => {
+    const editModel = async () => {
+      await page
+        .getByRole("button", { name: `Edit ${FIXTURE_MODEL.enabled.name}` })
+        .click();
+      const dialog = page.getByRole("dialog", {
+        name: `Edit ${FIXTURE_MODEL.enabled.name}`,
+      });
+      await expect(dialog).toBeVisible();
+      return dialog;
+    };
+    const stored = () =>
+      adminFixtureDatabase().modelRegistryEntry.findUniqueOrThrow({
+        where: { id: FIXTURE_MODEL.enabled.id },
+        select: { webSearchOverride: true },
+      });
+    const published = async () => {
+      const response = await page.request.get("/api/models/catalog");
+      expect(response.ok()).toBe(true);
+      const body = (await response.json()) as {
+        models: { id: string; webSearchOverride?: string }[];
+      };
+      return body.models.find((model) => model.id === FIXTURE_MODEL.enabled.id);
+    };
+
+    await page.goto("/admin/models");
+    let dialog = await editModel();
+    const field = dialog.getByTestId("model-web-search-override");
+    // A seeded row follows the code, and the form says which route that is.
+    await expect(field).toHaveValue("");
+    await expect(field.locator('option[value=""]')).toContainText("Automatic");
+    // There is no option for a provider's own search tool.
+    await expect(field.locator("option")).toHaveCount(3);
+
+    await field.selectOption("off");
+    await dialog.getByRole("button", { name: "Save model" }).click();
+    await expect(dialog).toBeHidden();
+
+    expect((await stored()).webSearchOverride).toBe("off");
+    const audit = await adminFixtureDatabase().adminAuditLog.findFirst({
+      where: {
+        action: "model.registry.updated",
+        targetId: FIXTURE_MODEL.enabled.id,
+      },
+      orderBy: { createdAt: "desc" },
+      select: { metadata: true },
+    });
+    expect(
+      (audit?.metadata as { webSearchOverride?: unknown } | null)?.webSearchOverride
+    ).toEqual({ from: null, to: "off" });
+    expect((await published())?.webSearchOverride).toBe("off");
+
+    // Back to "follow the code": the column returns to NULL, and the public
+    // catalogue stops naming an override at all.
+    await page.reload();
+    dialog = await editModel();
+    await expect(dialog.getByTestId("model-web-search-override")).toHaveValue("off");
+    await dialog.getByTestId("model-web-search-override").selectOption("");
+    await dialog.getByRole("button", { name: "Save model" }).click();
+    await expect(dialog).toBeHidden();
+
+    expect((await stored()).webSearchOverride).toBeNull();
+    expect((await published())?.webSearchOverride).toBeUndefined();
+  });
+
   test("a save built on a row that has since moved is refused rather than applied", async ({
     page,
   }) => {

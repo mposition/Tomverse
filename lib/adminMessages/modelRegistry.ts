@@ -229,6 +229,22 @@ export const adminModelRegistryMessages = defineAdminMessages({
       contextWindow: "Context window",
       maxImages: "Max images",
       maxBase64ImageBytes: "Max base64 image bytes",
+      webSearch: "Web search",
+      webSearchModes: {
+        auto: (codeRoute: string) => `Automatic (code: ${codeRoute})`,
+        off: "Off",
+        appManaged: "Application search (Brave)",
+      },
+      webSearchRoutes: {
+        native: "provider's own search",
+        appManaged: "application search (Brave)",
+        searchModel: "searches inside every answer",
+        unsupported: "no search",
+      },
+      webSearchHelp:
+        "Automatic follows the code. A provider's own search tool is enabled in code only, because its per-query cost and ceiling are verified per model.",
+      webSearchRefused:
+        "Perplexity models search inside every answer, so this cannot be changed.",
     },
     tokens: {
       legend: "Token limits and cost snapshot (USD per 1M tokens)",
@@ -477,6 +493,22 @@ export const adminModelRegistryMessages = defineAdminMessages({
       contextWindow: "컨텍스트 윈도",
       maxImages: "최대 이미지 수",
       maxBase64ImageBytes: "최대 base64 이미지 바이트",
+      webSearch: "웹 검색",
+      webSearchModes: {
+        auto: (codeRoute: string) => `자동 (코드 기준: ${codeRoute})`,
+        off: "끄기",
+        appManaged: "앱 검색 (Brave)",
+      },
+      webSearchRoutes: {
+        native: "제공사 자체 검색",
+        appManaged: "앱 검색 (Brave)",
+        searchModel: "모든 답변에서 자체 검색",
+        unsupported: "검색 안 함",
+      },
+      webSearchHelp:
+        "자동은 코드 규칙을 따릅니다. 제공사 자체 검색은 모델별로 질의당 비용과 상한을 확인해야 해서 코드에서만 켤 수 있습니다.",
+      webSearchRefused:
+        "Perplexity 모델은 모든 답변에서 자체 검색을 하므로 바꿀 수 없습니다.",
     },
     tokens: {
       legend: "토큰 한도와 비용 snapshot (1M 토큰당 USD)",

@@ -375,9 +375,18 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-30: the sign-in / sign-up split (v25, section 5.2a) adds two
  * nullable sign-up hold columns to `EmailLoginAttempt`. Not a marketing model or
  * a webhook input; the digest moves because the whole schema is watched.
+ *
+ * 2026-09-30: `ModelRegistryEntry` gains the nullable `webSearchOverride`
+ * column (an administrator's per-model web search route). Not a marketing
+ * model or a webhook input; the digest moves because the whole Prisma schema
+ * is deliberately watched. Descriptor and admission decisions are unchanged.
+ *
+ * 2026-09-30: the sign-in / sign-up split takes develop with the web search
+ * override; both notes above stand, and the value below is computed over the
+ * merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "535917616e4f386958e12d95aa2b3468e5626ee215ba6accd687ddfafcbe6ca6";
+  "e370d1c92bcae6b9af90c513405567bc5549f2c90f8a3af9e19c4bfbfeb6adf7";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
