@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth/next";
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
+import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -16,6 +17,12 @@ import {
   countAwaitingAmuxEscalations,
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
+import {
+  AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
+  AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
+  countOpenAmuxOrchestratorHalts,
+  readAmuxOrchestratorHaltsForAdmin,
+} from "@/lib/amux/orchestratorHaltStore";
 import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("amux-execution");
@@ -43,11 +50,13 @@ export default async function AdminAmuxExecutionPage({
   if (!resolved) notFound();
   const { tab } = resolved;
 
-  const [m, openAmuxEscalations] = await Promise.all([
+  const [m, openAmuxEscalations, openAmuxOrchestratorHalts] = await Promise.all([
     getAdminMessages(adminAmuxWorkspaceMessages),
-    // The tab's badge. A failed count shows no badge rather than a zero.
+    // The tabs' badges. A failed count shows no badge rather than a zero.
     countAwaitingAmuxEscalations().catch(() => null),
+    countOpenAmuxOrchestratorHalts().catch(() => null),
   ]);
+  const isOwner = Boolean(session?.user?.id) && role === "owner";
   const statuses: Record<string, AmuxTabStatus | undefined> = {
     // The card list issues no request and writes nothing
     // (tests/amuxAdminCardList.test.mjs pins both), so there is no switch for
@@ -55,6 +64,10 @@ export default async function AdminAmuxExecutionPage({
     cards: "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
+    // Clearing an orchestrator halt takes the owner role, and a recent
+    // step-up that the clear route checks and the panel offers the way back
+    // to (orchestration policy version 20, section 7).
+    halts: isOwner ? undefined : "read_only",
   };
 
   const tabs = (
@@ -65,7 +78,7 @@ export default async function AdminAmuxExecutionPage({
       label="Execution sections"
       query={query}
       role={role}
-      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations }}
+      counts={{ ...EMPTY_ADMIN_NAVIGATION_COUNTS, openAmuxEscalations, openAmuxOrchestratorHalts }}
       chips={amuxTabChips(statuses, m.status)}
     />
   );
@@ -79,6 +92,27 @@ export default async function AdminAmuxExecutionPage({
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+      </div>
+    );
+  }
+
+  if (tab.id === "halts") {
+    // Every admin role reads the halts, as the Execution entry's badge counts
+    // them for every role; only the owner is offered the clear, and the clear
+    // route decides that again on its own.
+    const view = await readAmuxOrchestratorHaltsForAdmin();
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AmuxOrchestratorHaltsPanel
+          view={view}
+          canClear={isOwner}
+          limits={{
+            open: AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
+            cleared: AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
+            human: AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
+          }}
+        />
       </div>
     );
   }
