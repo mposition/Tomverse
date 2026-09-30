@@ -2007,6 +2007,9 @@ model ModelRegistryEntry {
   contextWindowTokens        Int?
   supportsImage              Boolean  @default(false)
   supportsNativePdf          Boolean  @default(false)
+  // NULL follows the code (lib/webSearchCapability.ts); 'off' | 'app-managed'
+  // is an administrator's override (lib/webSearchOverride.ts).
+  webSearchOverride          String?
   maxImages                  Int?
   maxBase64ImagePayloadBytes Int?
   maxOutputTokens            Int?
