@@ -1,6 +1,6 @@
 # Development Agent Orchestration
 
-상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 같은 운영자가 2026-09-29에 버전 19로 버전 18의 활성화 증거 절을 갱신했다. late COMMIT을 DB가 COMMIT 시점에 거부하는 장치와 그 테스트가 `develop`에서 `routing` 레인을 통과했다는 사실을 run 링크와 head SHA로 기록하고, 남는 구간을 적는다. 그 승인은 `main` 이식 조건의 2와 3을 면제하지 않고, 환경 변수를 바꾸지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
+상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 같은 운영자가 2026-09-29에 버전 19로 버전 18의 활성화 증거 절을 갱신했다. late COMMIT을 DB가 COMMIT 시점에 거부하는 장치와 그 테스트가 `develop`에서 `routing` 레인을 통과했다는 사실을 run 링크와 head SHA로 기록하고, 남는 구간을 적는다. 그 승인은 `main` 이식 조건의 2와 3을 면제하지 않고, 환경 변수를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 20으로 orchestrator 정지와 재시작을 승인했다. 알려진 답만 지금처럼 처리하고, 결과 불명 쓰기와 그 밖의 응답에서는 프로세스를 끝내지 않고 앱 DB에 기록하는 정지로 들어가며, 쓰기 접수와 영수증으로 기록 전 종료도 잡는다. 해제는 owner와 최근 step-up의 사람 조작뿐이다. 그 승인은 환경 변수와 Railway 재시작 정책을 바꾸지 않고, 외부 알림을 만들지 않으며, WSL bridge와 실행 모드를 바꾸지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -41,6 +41,7 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 19
 | 17 | 2026-09-29 mposition | 버전 7의 추천 풀 Admin 화면 문장 개정. 화면은 owner 전용 `/admin/amux-promotion?tab=recommendation`이고 owner에게만 내비게이션에 나타난다. owner가 아닌 역할의 내비게이션, 검색, 탭에는 나타나지 않는다. 옛 경로는 redirect로 유지한다. 권한, 래치, 환경 변수는 바꾸지 않는다. |
 | 18 | 2026-09-29 mposition | 실행 API 게이트. 코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`(true로 출고)와 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`(trim 후 `1`)가 모두 참일 때만 실행 API가 열리며 `NODE_ENV`와 무관하다. Phase A 절의 비활성 문장을 이 조건으로 개정한다. local process executor 금지와 engineering adapter 래치는 그대로다. late COMMIT 성공 기록 방지 테스트가 아직 없음을 기록하고, `develop` AMUX의 `main` 병합은 그 테스트가 `routing` 레인에서 head SHA 녹색일 때만 한다. 환경 변수는 바꾸지 않는다. |
 | 19 | 2026-09-29 mposition | 버전 18의 활성화 증거 절 갱신. late COMMIT을 deferred constraint trigger가 COMMIT 시점에 `AX001`로 거부하는 장치(migration `20260929200000_amux_commit_deadline_check`)와 그 DB 테스트가 #1765 head `4339769bf`에서 `routing` 레인을 통과했음을 run 링크와 함께 기록한다. 남는 구간을 적는다. `main` 이식 PR은 자기 head SHA에서 같은 레인을 다시 통과해야 한다. 환경 변수는 바꾸지 않는다. |
+| 20 | 2026-09-30 mposition | orchestrator 정지와 재시작. 알려진 답만 지금처럼 처리하고, 그 밖의 응답·무응답과 선택 읽기 61번째 연속 실패에서 프로세스를 끝내지 않고 앱 DB `AmuxOrchestratorHalt`에 기록하는 정지로 들어간다. 쓰기 호출은 처리 전에 접수를 커밋하고 쓰기와 같은 트랜잭션에 영수증을 남겨, 기한이 지난 뒤 영수증이 없으면 롤백 확정, 있으면 사람 확인으로 가른다. 해제는 owner와 최근 step-up의 Admin 조작과 사람 감사로만 하며 원래 작업을 다시 하지 않는다. 구현 배포 뒤 Railway 재시작 정책을 `On Failure`로 명시한다. 환경 변수, 외부 알림, WSL bridge, 실행 모드는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -966,3 +967,123 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 ### 이 버전이 하지 않는 것
 
 환경 변수를 설정하거나 바꾸지 않는다. 운영 중인 루프의 동작을 바꾸지 않는다. `main`의 현재 조건 "환경 변수 `1`"에 "래치 true"가 더해질 뿐이다. worker catalog, WSL 세션, 자동 승격, engineering adapter 래치, 단계 사이클 래치를 바꾸지 않는다.
+
+## 버전 20 — orchestrator 정지(halt)와 재시작
+
+승인자 mposition, 승인일 2026-09-30. 버전 13~19는 유지한다.
+
+### 무엇이 문제였나
+
+- AMUX Orchestrator(`apps/tomverse-orchestrator`, Railway 서비스)는 결과 불명 claim(`AMUX_CLAIM_OUTCOME_UNKNOWN`), 결과 불명 recover(`AMUX_RECOVERY_OUTCOME_UNKNOWN`), 그 밖의 내부 API 실패(`AMUX_INTERNAL_API_UNVERIFIED`)에서 모두 종료 코드 1로 끝난다.
+- Railway 재시작 정책은 종료 코드를 가르지 못한다. 서비스에 정책이 명시돼 있지 않아 기본값 `On Failure`(최대 10회)가 적용되고, 결과 불명 쓰기 뒤에도 사람의 확인 없이 다시 시작한다. 공통 기반의 결과 불명 규칙(재시도하지 않고, 대상을 멈추고, 확인하고, 사람에게 넘긴다)과 "사람의 정지는 사람이 푼다"에 어긋난다.
+- `Never`로 두면 일시적인 종료도 사람을 기다린다. 2026-09-30 05:51Z와 05:58Z의 종료(웹 배포 중 routing snapshot의 전송 실패와 500)가 그랬고, 두 번째 뒤에는 다시 시작되지 않았다.
+- 멈춘 사실은 Railway의 CRASHED 표시와 로그로만 드러난다. 서버가 결과 불명 응답에 싣는 `incident_id`는 로그의 상관 id이고 DB 행이 아니다. 프로세스가 죽으면 결과 불명이었다는 사실도 함께 사라진다.
+
+### 용어
+
+- **쓰기 호출**: orchestrator의 claim, recover, 자동 승격 tick. 셋 다 route 기한 안에서 버전 19의 commit fence를 지난다. fence는 기한 뒤의 COMMIT을 `AX001`로 거부하지만, 버전 19가 남긴 구간(trigger 통과 뒤의 commit record flush)의 실패는 롤백 확정이 아니며 서버는 503 `amux_outcome_unknown`으로 답한다. 그 답은 ack하지 않는다. 이 구간은 4의 접수 행 잠금이 덮는다.
+- **알려진 답**: 아래 1의 목록. 쓰기가 일어나지 않았거나, 일어난 쓰기를 응답이 확정하는 답이다.
+
+### 개정
+
+**1. 알려진 답은 지금처럼 처리한다.** 다음만 알려진 답이다. 그 밖의 모든 응답과 무응답은 2에 따라 정지한다.
+
+- claim: 본문이 계약과 맞는 2xx(CAS 패배의 200 `{claimed:false}` 포함), 닫힌 거절의 409(현재 파서가 인정하는 reason).
+- recover: 본문이 계약과 맞는 2xx, 409 `execution_api_disabled`(현재 파서가 `Ok`로 받는 형태).
+- 자동 승격 tick: 본문이 계약과 맞는 200(reason과 무관하다. 현재 `autoTickHttpStatus`가 결정적 거절, `no_grant`, `route_budget_exhausted`, `auto_halted`를 모두 200으로 준다), 409 `apply_disabled`. 409 `outcome_unknown`·`expiry_outcome_unknown`은 알려진 답이 아니다.
+- 모든 내부 호출: 503 가운데 와이어 reason이 정확히 `amux_database_busy`, `amux_database_deadline_exceeded`, `amux_database_call_ceiling_exceeded`인 것. 서버는 **그 요청에서 영수증(4)이 하나라도 커밋된 뒤에는 이 셋을 보내지 않고** 503 `amux_outcome_unknown`으로 답한다. 따라서 이 셋은 "이 요청은 아무것도 커밋하지 않았다"는 답이다. orchestrator가 이 답으로 ack할 때 서버는 영수증 수를 다시 세고, 영수증이 있으면 ack를 거절한다. 거절된 ack는 `unacked_write_receipt` 정지다.
+- 선택 읽기(queue, routing snapshot): `board_capacity_exceeded`와 위 503 셋. 이것들은 그 tick을 claim 없이 끝내고, 실패로 세지 않으며, 횟수를 되돌리지도 않는다. 그리고 전송 실패, 404, 위 503 셋이 아닌 5xx, 429. 뒤의 것들은 실패로 센다. 단위는 실패한 queue 또는 routing snapshot 응답 하나이고, 그 실패에서 tick을 끝낸다. 60번째 연속 실패까지 tick만 건너뛰고 61번째에 2의 `selection_read_failures`로 정지한다. 횟수는 tick이 끝난 뒤 그 tick의 선택 읽기가 모두 성공했을 때, 그리고 정지가 풀려 재개할 때 0이 된다.
+
+**2. 정지 사유는 닫힌 목록이다.** 다음에서 orchestrator는 **정지(halt)** 한다. 프로세스는 끝내지 않는다. 정지는 응답을 처리하는 그 자리에서, 다음 쓰기 호출 전에 일어난다.
+
+| 사유 코드 | 조건 | 접수(4)가 있는가 |
+|---|---|---|
+| `claim_outcome_unknown` | claim이 1에 없는 응답을 받았거나 응답을 받지 못했다 | 있다(서버에 닿았다면) |
+| `recovery_outcome_unknown` | recover가 위와 같다 | 있다(서버에 닿았다면) |
+| `promotion_outcome_unknown` | 자동 승격 tick이 위와 같다. 409 `outcome_unknown`·`expiry_outcome_unknown`은 여기다 | 있다(서버에 닿았다면) |
+| `unacked_write_receipt` | 4의 판정에서 사람 확인이 필요하거나, 1의 503 셋에 대한 ack가 거절됐다 | 있다 |
+| `contract_violation` | 쓰기가 아닌 호출(선택 읽기, ack, 정지 기록·상태 읽기)이 본문이 계약과 다른 2xx·400·409를 받았거나, 401·403을 받았다 | 없다 |
+| `selection_read_failures` | 1의 선택 읽기 연속 실패가 61번째에 이르렀다 | 없다 |
+
+저장되지 않는 대기 상태가 셋 있다. `ack_pending`(4, ack가 아직 성공하지 않음), `halt_unreadable`(6), `awaiting_deadline`(6). 이 셋 동안에도 쓰기 호출과 선택 읽기를 하지 않는다. 정지 상태의 orchestrator는 쓰기 호출과 선택 읽기를 하지 않는다. 30초마다 정지 상태 읽기(5) 하나만 하고, 5분마다 ERROR 한 줄(사유 코드 또는 대기 상태 이름, 정지 id)을 남긴다. 자격증명, URL, 응답 본문은 남기지 않는다.
+
+**3. 종료는 다음에만 남는다.** 시작 설정 오류(필수 환경 변수 부재·형식 오류, `TOMVERSE_AMUX_EXECUTE`와 `TOMVERSE_AMUX_CLAIM`이 함께 켜진 충돌, 시작 시 정지 상태 읽기의 401·403), panic, 그리고 `TOMVERSE_AMUX_EXECUTE`가 켜진 실행 모드의 `AMUX_WORKER_POLL_UNVERIFIED`·`AMUX_BOARD_TICK_UNVERIFIED`다. 실행 모드는 production에서 쓰지 않으며 이 버전이 바꾸지 않는다. `TOMVERSE_AMUX_ENABLED`가 꺼져 끝나는 경우는 지금처럼 0이다. 어느 종료든 재시작은 6을 먼저 지난다.
+
+**4. 쓰기 접수와 영수증.** 쓰기 호출의 결과 불명이 프로세스와 함께 사라지지 않게 한다.
+
+- orchestrator는 프로세스 시작마다 새 인스턴스 id(UUID)를 만들고, 쓰기 호출마다 새 요청 id(UUID)를 보낸다.
+- **접수.** 서버는 쓰기 호출을 처리하기 전에 짧은 별도 트랜잭션으로 `AmuxOrchestratorWrite`(요청 id PK, 인스턴스 id, 호출 종류, `admittedAt`, `deadlineAt`, `ackedAt`, `resolvedAt`, `resolution`)를 커밋한다. `admittedAt`은 그 트랜잭션의 `clock_timestamp()`이고 `deadlineAt`은 거기에 그 route의 예산을 더한 값이다(Node 시계를 쓰지 않는다). 접수를 커밋하지 못하면 쓰기를 시작하지 않고 503 `amux_database_busy`로 답한다. 같은 요청 id의 두 번째 접수는 409 `duplicate_request`로 거절한다. 이 답은 알려진 답이 아니다.
+- **영수증과 잠금.** 그 요청에서 상태를 바꾸는 모든 트랜잭션(카드의 owner·revision·status, claim 결정, attempt, 자동 승격 grant·소비, quota 관측 삭제)은 변이 전에 자기 접수 행을 `FOR UPDATE`로 잡고 커밋까지 유지한다. 접수가 이미 해결됐으면(`resolvedAt`이 있으면) 변이 없이 롤백한다. 같은 트랜잭션에서 `AmuxOrchestratorWriteReceipt`(요청 id, 대상 종류, 대상 id 또는 null, 행 수, `committedAt` DB 시계)를 남긴다. 대상 종류는 닫힌 목록(작업 카드, claim 결정, attempt, 자동 승격 grant, 자동 승격 소비, quota 관측 묶음)이다. 제목, brief, 본문은 넣지 않는다. 쓰기가 롤백되면 영수증도 없다. 거절 감사만 남기는 트랜잭션(예: `amux.claim.refused`, CAS 패배의 거절 감사)은 영수증을 남기지 않는다. 그 트랜잭션은 소유권과 상태를 바꾸지 않으므로, 응답 전에 죽은 보통 거절은 4의 판정에서 롤백 확정과 같이 `no_commit`으로 닫힌다. 이때 `no_commit`은 "상태 변경 없음"이며 감사 행의 부재를 뜻하지 않는다.
+- **ack.** orchestrator는 1의 알려진 답을 받으면 그 요청 id를 ack한다. ack의 종류는 둘이다. `definite`는 2xx와 409 거절에 대한 것이며 영수증이 있어도 성공한다(응답이 그 커밋을 확정했다). `no_commit`은 503 셋에 대한 것뿐이며, 서버는 접수 행을 `FOR UPDATE`로 잡은 뒤 영수증을 세어 1 이상이면 거절한다. 거절된 ack는 그 자리에서 `unacked_write_receipt` 정지다. ack는 멱등이다.
+- **ack가 끝나기 전에는 다음 쓰기를 하지 않는다.** 이번 요청의 ack가 성공하거나, 그 요청의 정지 행이 커밋되기 전에는 orchestrator는 다음 쓰기 호출을 하지 않는다. ack가 무응답·전송 실패·5xx이면 ack만 30초마다 다시 보낸다(쓰기의 재시도가 아니다). 그 사이 프로세스가 죽으면 4의 판정이 그 접수를 찾는다. 결과 불명이면 ack하지 않는다.
+- **판정(서버, DB 시계).** ack되지 않고 해결되지 않은 접수 각각에 대해 그 접수 행을 `FOR UPDATE`로 잡은 뒤 영수증을 센다. 잠금이 진행 중인 쓰기 트랜잭션과 판정을 직렬화한다.
+  - `deadlineAt` + 5초 이전이면 **미정**이다.
+  - 그 뒤이고 영수증이 0이면 **롤백 확정**이다. 잠금을 잡은 시점에 진행 중인 쓰기 트랜잭션은 없고, 이후의 쓰기 트랜잭션은 해결된 접수를 보고 롤백하며, 버전 19의 fence가 `D` 뒤의 커밋을 거부한다. 서버는 `resolution = no_commit`, `resolvedAt`을 쓰고 시스템 감사 `amux.orchestrator.write_resolved`를 같은 트랜잭션에서 남긴다. 결과 불명을 DB의 증거로 확정한 것이며 쓰기의 재시도가 아니다.
+  - 그 뒤이고 영수증이 1 이상이면 **사람 확인 필요**다.
+- 판정은 인스턴스 id와 무관하다. 단 이 프로세스가 지금 응답을 기다리는 요청은 판정 밖이다.
+
+**5. 정지 기록과 정지 상태 읽기.**
+
+- 새 테이블 `AmuxOrchestratorHalt`: `id`, `haltKey`(unique), `reasonCode`(2의 닫힌 목록, DB CHECK), 관련 요청 id(있으면), `openedAt`(DB 시계), `clearedAt`, `clearedByUserId`, `clearAuditLogId`(unique). 행은 삭제하지 않는다. DB trigger가 `clearedAt`·`clearedByUserId`·`clearAuditLogId`를 한 번만 쓸 수 있게 하고 다른 갱신을 거절한다.
+- `haltKey`는 요청 id가 있는 사유면 그 요청 id, 그 밖은 orchestrator가 만든 UUID다.
+- 여는 쓰기는 내부 route `POST /api/internal/amux/orchestrator/halt`(기존 내부 route 인증) 하나다. 같은 `haltKey`의 재전송은 기존 행을 돌려준다. 이 route는 insert만 하고 해제를 받지 않는다. 시스템 감사 `amux.orchestrator.halted`를 같은 트랜잭션에서 `writeSystemAuditLog`로 남긴다. actor는 기존 `tomverse-amux-orchestrator`다.
+- 기록이 실패하면 orchestrator는 메모리의 정지를 유지하고 30초마다 같은 `haltKey`로 다시 기록한다.
+- **기록 전에 프로세스가 죽으면**: 접수가 있는 사유(표의 앞 네 줄)는 접수가 남아 있으므로 6의 시작 판정이 그 요청을 다시 찾는다. 접수가 없는 사유(`contract_violation`, `selection_read_failures`)는 사라진다. 이 둘은 쓰기의 결과 불명이 아니며, 새 프로세스는 같은 조건을 다시 만나면 다시 정지한다(선택 읽기 횟수는 0부터 다시 센다). 이것을 이 버전의 알려진 한계로 둔다.
+- 정지 상태 읽기 `GET /api/internal/amux/orchestrator/halt`는 판정을 먼저 적용한 뒤 열린 정지 목록, 미정 접수 수와 가장 늦은 `deadlineAt`, 사람 확인이 필요한 요청 목록을 돌려준다.
+- 감사 metadata 허용 값: `systemActor`, 정지 id, `haltKey`, 요청 id, 사유 코드, 호출 종류, resolution. 카드 제목, brief, source key, 자유 텍스트, 오류 본문은 넣지 않는다.
+- 세 테이블은 데이터 도메인 레지스트리에 운영 기록으로 등록하고 고객 export에 넣지 않는다(버전 8 halt와 같다). ack되거나 해결된 접수와 그 영수증은 90일 보존 뒤 지울 수 있다. 그렇지 않은 것은 지우지 않는다.
+
+**6. 시작과 재개.**
+
+- 시작 직후, 다른 어떤 호출보다 먼저 정지 상태 읽기를 한다.
+  - 읽기가 전송 실패, 5xx, busy, 404(웹이 아직 이 버전을 배포하지 않음)이면 `halt_unreadable`로 기다리며 30초마다 다시 읽는다. 401·403은 종료다(3).
+  - 미정 접수가 있으면 `awaiting_deadline`으로 기다린다. 가장 늦은 `deadlineAt` + 5초 뒤에 다시 읽는다.
+  - 사람 확인이 필요한 요청이 있으면 각각에 대해 `unacked_write_receipt` 정지를 기록하고 정지 상태로 들어간다.
+  - 열린 정지가 있으면 정지 상태로 들어간다.
+- `halt_unreadable`과 `awaiting_deadline`은 저장된 정지가 아니며 메모리 정지나 저장된 정지를 덮어쓰지 않는다. 로그로만 드러나고 badge에는 나오지 않는다.
+- **스케줄 시작·재개 조건(한 문장):** 메모리의 정지가 없고, 성공한 정지 상태 읽기에서 열린 정지가 0, 미정 접수가 0, 사람 확인이 필요한 요청이 0이며, 이 프로세스가 기록한 모든 정지 행에 사람 감사 `amux.orchestrator.halt_cleared`가 있을 때만 스케줄을 시작하거나 다시 시작한다. 다른 프로세스가 연 열린 정지는 그 읽기가 막는다.
+- 메모리의 정지는 그 정지가 기록되고 사람이 해제한 것을 읽었을 때만 사라진다. 빈 목록을 읽었다는 사실만으로는 사라지지 않는다.
+- 재배포, 재시작, Railway의 자동 재시작은 **저장된** 정지와 해결되지 않은 접수를 풀지 않는다. 기록되지 않은 비쓰기 정지는 5의 한계대로 사라질 수 있다.
+
+
+**7. 해제는 사람이 한다.**
+
+- 화면은 `/admin/amux-execution?tab=halts`다. 열린 정지와 해제된 정지, 사람 확인이 필요한 요청과 그 영수증의 대상(종류와 id, 카드·attempt·grant·소비 행으로 가는 링크)을 보여 준다. 탭과 Execution 항목에 열린 정지 개수 badge(`amuxOrchestratorHalts`)를 단다. 개수를 모르면 badge를 그리지 않는다. 항목의 badge는 기존 escalation 수와 이 수의 합이다.
+- 해제는 owner 역할과 최근 step-up이 필요하다. step-up이 오래됐으면 `adminRecentAuthenticationHref()` 링크를 보여 준다. 해제 요청은 정지 id와, 사람이 입력한 `haltKey`의 앞 8자를 받는다. 틀리면 거절한다.
+- 해제는 사람 감사 `amux.orchestrator.halt_cleared`를 `writeAdminAuditLog`로 같은 트랜잭션에서 남기고, 관련 요청 id가 있으면 그 접수를 `resolution = human_confirmed`로 닫는다(그 요청의 모든 영수증이 함께 닫힌다).
+- 해제는 원래 작업을 다시 하지 않는다. 결과 불명의 확정은 사람이 영수증의 대상을 읽고 한다.
+
+**8. 알림은 이 버전에서 정하지 않는다.** 정지를 사람이 알아채는 경로는 Admin badge와 로그다. 외부 알림은 별도 결정이며, 두게 되면 링크만 싣는다.
+
+**9. Railway 재시작 정책.** 이 버전의 구현이 웹과 orchestrator 양쪽에 배포된 뒤, 운영자가 대시보드(Tomverse → production → AMUX Orchestrator → Settings → Restart Policy)에서 `On Failure`를 명시한다. 최대 횟수는 운영자가 정한다. staging도 같다. 구현 전에는 바꾸지 않는다.
+
+**10. 배포 순서.** 웹(migration과 route)이 먼저, orchestrator가 나중이다. 운영 기록: 2026-09-30에 Railway 서비스 설정을 읽은 값으로 AMUX Orchestrator는 `checkSuites: false`여서 CI를 기다리지 않고 병합 즉시 배포된다(이 값은 저장소에 없다). orchestrator가 먼저 떠도 6의 `halt_unreadable`로 기다리므로 claim하지 않는다. 옛 웹은 접수를 쓰지 않으므로, 새 orchestrator는 정지 상태 읽기가 성공하기 전에는 쓰기 호출을 하지 않는다. orchestrator 서비스를 CI 대기 배포로 바꾸는 것은 운영자의 별도 결정이다.
+
+**11. WSL bridge는 바꾸지 않는다.** bridge는 지금처럼 종료 코드 3과 `RestartPreventExitStatus=3`으로 사람을 기다린다. orchestrator 정지 동안 claim이 없으므로 새 배정은 오지 않고, 진행 중인 attempt의 heartbeat와 정산은 계속된다. recover도 멈추므로 lease가 끝난 attempt의 회수는 해제 뒤로 미뤄진다.
+
+### 이 버전과 버전 8·19
+
+- 버전 8의 `AmuxRecommendationAutoHalt`는 자동 승격 경로의 정지이고, 이 버전의 정지는 orchestrator의 정지다. 서로를 열거나 닫지 않는다. 자동 승격의 결과 불명은 버전 8의 조건(15분 안 2건)을 그대로 따르고, 그와 별개로 orchestrator를 `promotion_outcome_unknown`으로 멈춘다. 버전 8 halt가 열려 tick이 `auto_halted`를 답하는 것은 1의 알려진 답이다.
+- 4의 롤백 확정은 접수 행 잠금과 버전 19의 commit fence에 기댄다. 버전 19가 남긴 구간(trigger 검사 뒤의 commit record 기록과 flush)은 잠금이 덮는다. 쓰기 트랜잭션이 커밋을 끝내기 전에는 판정이 접수 행을 잡지 못하기 때문이다. 5초 유예는 시계 오차의 여유이며 정확성을 그것에 기대지 않는다. 기한이 없는 트랜잭션(owner 자동 승격, catalog `tasks` upsert)은 orchestrator의 쓰기 호출이 아니므로 이 판정에 들어오지 않는다.
+
+### 완료 조건 (구현이 테스트로 보여야 하는 것)
+
+- 1의 답 각각에서 정지하지 않는다. 특히 tick의 409 `apply_disabled`와 200 거절 reason, recover의 409 `execution_api_disabled`, claim 409, 503 세 reason. 선택 읽기의 전송 실패·404·5xx·429는 60번째 연속까지 건너뛰고 61번째는 정지, busy는 세지 않음, 전부 성공한 tick과 재개가 횟수를 0으로.
+- 1에 없는 응답(예: claim의 500 `incident_id`, 503 `amux_commit_check_missing`, tick의 500 `audit_unbound`, 쓰기의 429, 무응답)이 다음 쓰기 호출 전에 정지를 연다.
+- 접수가 쓰기보다 먼저 별도 트랜잭션으로 커밋되고, 접수 실패면 쓰기가 0이다. 영수증은 쓰기와 같은 트랜잭션에만 있고 롤백된 쓰기에는 없다.
+- ack: 2xx·409 거절의 `definite` ack는 영수증이 있어도 성공(recover의 409 `execution_api_disabled`가 quota 삭제 뒤에 와도, claim 거절 감사 뒤에도 정지하지 않음). `no_commit` ack는 503 셋에만, 영수증이 있으면 거절과 정지. ack가 성공하거나 정지 행이 커밋되기 전에는 다음 쓰기 호출이 0이며, ack 실패는 ack만 다시 보낸다. 거절 감사만 있는 트랜잭션은 영수증을 남기지 않는다.
+- 선택 읽기의 503 `amux_database_deadline_exceeded`·`amux_database_call_ceiling_exceeded`가 busy와 같이 tick을 claim 없이 끝내고 세지 않는다.
+- 서버는 한 요청에서 영수증이 커밋된 뒤 503 세 reason을 보내지 않는다(recover의 sweep 뒤 기한 초과, tick의 grant 만료 뒤 기한 초과가 `amux_outcome_unknown`이 된다). 영수증이 있는 요청에 "커밋 없음" 종류의 ack가 오면 거절되고 정지가 열린다.
+- 판정: `deadlineAt`은 접수 트랜잭션의 `clock_timestamp()` 기준. 기한 전 미정, 기한+5초 뒤 영수증 0은 롤백 확정과 시스템 감사, 영수증 1 이상은 사람 확인 필요. 인스턴스 id와 무관. 접수 행을 잡은 채 커밋 중인 쓰기 트랜잭션이 있으면 판정은 그 커밋 뒤에 영수증을 센다. 해결된 접수에 영수증을 넣으려는 쓰기는 롤백된다.
+- 프로세스가 요청 후 응답 전에 죽은 경우: 재시작한 프로세스가 `awaiting_deadline`으로 기다린 뒤, 커밋이 없었으면 스케줄을 시작하고 커밋이 있었으면 정지한다. 이 사이에 쓰기 호출과 선택 읽기가 0이다.
+- 정지 기록: `haltKey` 멱등, 사유 코드 CHECK, 해제 외 갱신 거절 trigger, 시스템 감사 같은 트랜잭션, 내부 route가 해제를 받지 않는다.
+- 기록 실패와 404에서 메모리 정지 유지와 재기록. 빈 목록 읽기가 메모리 정지를 풀지 않는다.
+- 6의 시작·재개 조건 문장의 각 항이 거짓일 때 스케줄이 시작하지 않는다. 다른 프로세스가 연 정지를 사람이 닫은 뒤에는 시작한다.
+- 해제: owner가 아니면 거절, step-up이 오래되면 거절과 링크, `haltKey` 앞 8자가 틀리면 거절, 사람 감사 같은 트랜잭션, 관련 접수를 닫음, 원래 작업을 호출하지 않는다.
+- 3의 목록 밖에서는 0이 아닌 종료가 없다.
+- 접수가 없는 정지(`contract_violation`, `selection_read_failures`)가 기록 전 종료로 사라지는 것은 알려진 한계이며, 새 프로세스가 같은 조건에서 다시 정지함을 보인다.
+- 세 테이블과 감사 metadata에 사용자 콘텐츠·자유 텍스트가 없다. 데이터 도메인 레지스트리 등록.
+
+### 이 버전이 하지 않는 것
+
+환경 변수를 설정하거나 바꾸지 않는다. Railway 재시작 정책을 바꾸지 않는다(9는 구현 배포 뒤의 운영자 단계). 외부 알림을 만들지 않는다. 영수증이 있는 결과 불명의 확정을 자동화하지 않는다. WSL bridge, 실행 모드, worker catalog, 자동 승격, 단계 사이클, engineering adapter의 래치와 동작을 바꾸지 않는다. 새 시스템 audit actor를 만들지 않는다.
