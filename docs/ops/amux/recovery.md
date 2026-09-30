@@ -81,7 +81,8 @@ COMMIT이 됐든 안 됐든 DB 상태는 같다. 결과 불명 규칙(정책 Pha
   `AX001`은 `amux_database_deadline_exceeded`다.
 - orchestrator는 queue와 routing snapshot의 이 답에 WARN(`verdict =
   "selection_skipped"`)을 남기고 그 tick을 건너뛴다. WSL bridge는 owned queue의 이 답에
-  halt하지 않는다. claim, recover, 그 밖의 상태 코드와 body는 전처럼 멈춘다.
+  halt하지 않는다. claim, recover, 그 밖의 상태 코드와 body는 전처럼 멈춘다. (claim과
+  recover는 아래 2026-09-30 메모에서 바뀌었다.)
 
 **#1773 뒤에 처음 보인 이유.** 코드에서 확인한 사실과 확인하지 못한 가설을 나눈다.
 
@@ -99,6 +100,84 @@ COMMIT이 됐든 안 됐든 DB 상태는 같다. 결과 불명 규칙(정책 Pha
 
 이 메모는 위 "Incident record"의 완결 기록이 아니다. serving SHA, 당시 flag 상태, 판정과
 승인자는 운영자가 따로 남긴다.
+
+### 2026-09-30 시작하지 못한 트랜잭션 메모
+
+아래 관측은 운영 로그에서 보고된 것이고, 이 메모를 쓴 사람이 직접 본 것이 아니다.
+
+- #1777(merge `38434294a`)은 약 02:22 UTC에 web에 올라갔다. orchestrator는 그보다 앞선
+  약 01:44 UTC에 배포됐다.
+- 01:50–02:03 UTC, #1777 이전 빌드 `9fb376b3`이 서빙한 web HTTP 로그에서 AMUX 실패는 모두
+  총 소요 264–267 ms의 503이었다. queue 3건, 이어 execution/recover 3건이다. 709 ms의
+  queue 500이 한 건 더 있었다.
+- 264 ms는 250 ms `maxWait`이 끝난 시점이다. 트랜잭션이 pool 연결을 얻지 못했다. 거의 모든
+  orchestrator 실행이 몇 분 안에 끝났다.
+- orchestrator는 recover의 결과 불명 종료가 반복돼 재시작 한도에 닿은 뒤 다시 CRASHED가 됐다.
+
+**원인 둘.**
+
+1. 시작하지 못한 쓰기도 결과 불명으로 답했다. recover의 첫 트랜잭션은 quota sweep(쓰기)이다.
+   그 트랜잭션이 `maxWait` 안에 연결을 얻지 못하면 Prisma가 콜백을 실행하기 전에 `P2028`을
+   던진다. SQL은 하나도 실행되지 않았는데 route는 `amux_outcome_unknown`으로 답했다.
+2. 250 ms는 web 요청과 함께 쓰는 프로세스당 10개 pool(pg-pool 기본값)에 너무 짧다.
+
+**시작하지 못한 트랜잭션이 결과 불명이 아닌 이유.** Prisma는 pool 연결을 잡고 `BEGIN`을 보낸
+뒤에만 콜백을 실행한다. `maxWait`이 먼저 끝나면 늦게 도착한 연결은 콜백 없이 롤백된다. 경계는
+콜백의 첫 줄에서 phase를 `starting`에서 `running`으로 바꾼다. 그래서 `starting`에서 난
+`P2024`·`P2028`은 경계의 SQL을 하나도 실행하지 않은 트랜잭션이다. 실제 Prisma 7과
+adapter-pg로 돌린 테스트(`tests/server-contract/amux-commit-deadline-boundary.test.ts`)가
+setup·콜백·fence SQL이 하나도 나가지 않았음을 확인한다. 같은 `P2028`이라도 콜백이 시작된
+뒤(트랜잭션 자체의 timeout)는 전처럼 결과 불명이다.
+
+**지금의 동작.** 판정표는 `amuxDbBoundaryFailure`의 주석에 있다.
+
+| phase | 경계 | 오류 | route가 이미 썼나 | 답 |
+|---|---|---|---|---|
+| 어디서든 | 모두 | `AX001` | 상관없음 | `amux_database_deadline_exceeded` |
+| committing | 쓰기 | 그 밖의 모두 | 상관없음 | `amux_outcome_unknown` |
+| starting | 모두 | `P2024`, `P2028` | 아니오 | `amux_database_busy` (`AMUX_DB_NOT_STARTED`) |
+| 어디서든 | 읽기 | transient | 아니오 | `amux_database_busy` (`AMUX_DB_READ_BUSY`) |
+| 그 밖 | | | | 전과 같음 (쓰기의 running `P2028`은 `amux_outcome_unknown`) |
+
+- route 밖의 호출은 "이미 썼다"로 본다.
+- 쓰기의 route 표시는 그 콜백이 시작될 때 한다(#1777은 `BEGIN` 전에 했다). 시작하지 못한
+  쓰기는 route를 표시하지 않는다.
+- route별로 확인한 것: lifecycle route(register, worker heartbeat, pull, ack, start,
+  execution heartbeat, settle)는 경계 하나만 쓰고 경계 밖 쓰기가 없다. 그래서 busy는 그 경계가
+  시작하지 못했을 때뿐이다. claim은 읽기 다음에 claim 쓰기이고, 거절을 기록하는 쓰기는 기록한 뒤
+  바로 답한다. 그래서 busy는 claim이 쓰기 전이다. recover는 quota sweep이 첫 트랜잭션이라 busy는
+  sweep이 시작하지 못했을 때뿐이다. sweep이 시작된 뒤의 실패는 전처럼 결과 불명이다.
+- WARN `internal_route_database_busy`에 `path`(`read` 또는 `not_started`),
+  `connection_wait_ms`, 그 순간 pool의 `pool_total`·`pool_idle`·`pool_waiting`이 남는다.
+  연결 문자열이나 호스트는 남기지 않는다. pool 포화 여부는 이 값으로 판단한다.
+- orchestrator: claim busy는 WARN(`claim_skipped`) 후 tick을 건너뛰고, recover busy는
+  WARN(`recovery_skipped`) 후 다음 30초 주기에 다시 부른다. 그 밖은 전처럼 끝난다.
+- WSL bridge의 lifecycle 호출은 `wsl-execution-bridge.md`의 해당 절을 본다.
+
+**maxWait.** `AMUX_DB_MAX_WAIT_MS`를 250에서 2,000으로 올렸다. route 안에서는
+`amuxDbConnectionWaitMs`가 그 값을 "route의 남은 시간 − 이 트랜잭션의 예산"으로 줄인다.
+대기는 route의 여유에서만 쓰이므로 route가 예산보다 늦게 답하지 않는다.
+
+- 트랜잭션은 route 기한 − 예산보다 늦게 시작하지 않는다. Prisma는 시작 뒤 예산 + 300 ms에서
+  트랜잭션을 닫는다. 그래서 서버의 답은 route 예산 + 300 ms 안에 나온다.
+- 클라이언트 기한은 그대로 맞는다. lifecycle 15 s ≥ 12 + 1(연결) + 1(전송, 300 ms 포함),
+  claim 18 s ≥ 12 + 1 + 1, 선택 읽기 5 s ≥ 2.8 + 1 + 1이다.
+- 첫 트랜잭션이 기다릴 수 있는 시간: lifecycle 경계는 모두 2,000 ms다(가장 큰 execution
+  start도 9,200 + 2,000 ≤ 12,000). claim의 clock 읽기는 2,000 ms다. queue는 800 ms, routing
+  snapshot은 500 ms, owned queue는 1,700 ms다.
+- 상한 없이 2,000을 쓰면 맞지 않는다. queue는 2,000 + 2,000 > 2,800, claim은 8,700 +
+  3 × 2,000 > 12,000이다. 선택 읽기는 2.8 + 2.0 + 0.3 + 1(연결) = 6.1 s > 5 s여서 Rust가
+  먼저 timeout한다.
+- 자동 승격 tick은 자기 값(`AUTO_TICK_TRANSACTION_MAX_WAIT_MS` 1,000)을 쓰므로 바뀌지
+  않았다. pool 크기는 바꾸지 않았다.
+
+**남는 것.**
+
+- recover가 sweep 뒤의 트랜잭션에서 연결을 얻지 못하면 여전히 결과 불명으로 끝난다. route가
+  이미 썼기 때문이다. 대기 상향으로 드물어질 뿐 없어지지는 않는다.
+- 쓰기가 `starting`에서 `P2024`·`P2028`이 아닌 연결 오류로 실패하면 전과 같은 답이다.
+- 선택 읽기의 첫 트랜잭션 대기는 Rust의 5초 기한 때문에 800 ms와 500 ms로 제한된다.
+- DB 통합 테스트(routing 레인)는 이 PC에서 돌리지 못했다. CI의 Linux Rust job이 기준이다.
 
 ### 재시작 정책
 

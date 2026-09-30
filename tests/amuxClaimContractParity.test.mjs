@@ -150,13 +150,16 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
     dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
     dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS");
   const reserve = dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
+  const budget = (profile) =>
+    profileCallCeiling(profile) * perCallPlanningFactor + reserve;
   const threeTransactions = ["claimRouteClock", "routingSnapshot", "claim"];
+  // The route was sized with a 250 ms connection wait per transaction (the
+  // maxWait until 2026-09-30). The wait is now capped by the route's slack
+  // (amuxDbConnectionWaitMs), so a longer one comes out of that slack and can
+  // never make the route answer later; the sizing still has to hold.
+  const sizingWaitMs = 250;
   const plannedDbCallBudgetMs = threeTransactions.reduce(
-    (sum, profile) =>
-      sum +
-      profileCallCeiling(profile) * perCallPlanningFactor +
-      reserve +
-      maxWait,
+    (sum, profile) => sum + budget(profile) + sizingWaitMs,
     0,
   );
 
@@ -165,6 +168,13 @@ test("the claim HTTP deadline outlives one anchored DB-clock route budget", () =
     plannedDbCallBudgetMs <= routeMs,
     "the anchored route must fit its three planned Prisma-call budgets",
   );
+  // 8,700 ms of budgets: the first transaction may wait the whole maximum.
+  assert.equal(maxWait, 2_000);
+  assert.ok(
+    Math.min(maxWait, routeMs - budget("claimRouteClock")) === maxWait,
+    "the claim route's first transaction gets the full connection wait",
+  );
+  assert.match(dbBoundarySource, /maxWait: connectionWaitMs,/);
   assert.ok(
     claimSeconds * 1_000 >= routeMs + connectSeconds * 1_000 + 1_000,
     "claim HTTP must reserve a second for response transport beyond route and connect",
@@ -201,6 +211,19 @@ test("future lifecycle client deadlines cover the DB-clock route and transport r
       )?.[1],
     ) * 1_000;
   assert.ok(clientMs >= routeMs + connectMs + 1_000);
+  // A transaction never starts later than its route's deadline less its
+  // budget (the capped connection wait), and Prisma closes it at most the
+  // slack after that budget: the server answers within the route budget plus
+  // the slack, which the one-second transport reserve above covers.
+  assert.equal(value("AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS"), 300);
+  assert.ok(value("AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS") < 1_000);
+  assert.match(
+    dbBoundarySource,
+    /timeout: transactionBudgetMs \+ AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS,/,
+  );
+  // Every lifecycle boundary fits its budget and the full 2,000 ms wait in
+  // the 12 s route (the largest, execution start, is 9,200 + 2,000).
+  assert.equal(value("AMUX_DB_MAX_WAIT_MS"), 2_000);
 
   const endpoints = [
     ["workers/register", ["workerRegister"], "worker_register"],
@@ -304,17 +327,24 @@ test("selection reads reserve connect and response time beyond both route budget
         new RegExp(`${boundary}: \\{[^}]*prismaCallCeiling: (\\d+)`, "s"),
       )?.[1],
     );
-    const plannedBudget =
+    const transactionBudget =
       ceiling *
         (dbNumber("AMUX_DB_STATEMENT_TIMEOUT_MS") +
           dbNumber("AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS")) +
-      dbNumber("AMUX_DB_COMMIT_RESERVE_MS") +
-      dbNumber("AMUX_DB_MAX_WAIT_MS");
+      dbNumber("AMUX_DB_COMMIT_RESERVE_MS");
     assert.ok(Number.isInteger(ceiling), boundary);
     assert.ok(Number.isInteger(routeMs), route);
+    // The 2,000 ms maximum does not fit a 2.8 s selection route: the wait is
+    // capped by the route's slack (amuxDbConnectionWaitMs), 800 ms for the
+    // queue and 500 ms for the routing snapshot, still at least twice the
+    // 250 ms that failed in production.
+    const connectionWaitMs = Math.min(
+      dbNumber("AMUX_DB_MAX_WAIT_MS"),
+      routeMs - transactionBudget,
+    );
     assert.ok(
-      plannedBudget <= routeMs,
-      `${route} planned DB-call budget exceeds route budget`,
+      connectionWaitMs >= 500,
+      `${route} leaves ${connectionWaitMs} ms to wait for a connection`,
     );
     assert.ok(
       clientMs >= routeMs + connectMs + 1_000,
@@ -455,13 +485,24 @@ test("TypeScript and Rust share the database-busy reason and its exact body", as
     );
     assert.ok(source.includes(`r#"${body}"#`), file);
   }
-  // Only the selection reads skip a tick on it; the claim is a write.
+  // The selection reads skip a tick on it. So do the claim and the recovery
+  // sweep since 2026-09-30: for a write the server sends it only when the
+  // transaction never started and the route had written nothing
+  // (AMUX_DB_NOT_STARTED). Anything else from them still stops the run.
   assert.match(schedulerSource, /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("queue"\);/);
   assert.match(
     schedulerSource,
     /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("routing_snapshot"\);/,
   );
-  assert.match(schedulerSource, /fn a_database_busy_answer_to_a_claim_still_stops_the_run\(/);
+  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Ok\(\(\)\);/);
+  assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => warn!\([\s\S]*?verdict = "recovery_skipped"/);
+  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_CLAIM_OUTCOME_UNKNOWN"\)\)/);
+  assert.match(schedulerSource, /return Err\(anyhow::anyhow!\("AMUX_RECOVERY_OUTCOME_UNKNOWN"\)\)/);
+  assert.match(schedulerSource, /fn any_other_claim_failure_still_stops_the_run\(/);
+  // Only the exact body at 503 is the busy answer, a typed error a caller
+  // must ask for: a caller that does not still stops.
+  assert.match(rustSource, /pub fn is_database_busy\(error: &anyhow::Error\) -> bool/);
+  assert.match(rustSource, /if is_database_busy_body\(&body\) \{\s*anyhow::Error::new\(DatabaseBusy\)/);
 });
 
 test("unknown future-lifecycle outcomes stop the whole runtime run", () => {

@@ -31,6 +31,8 @@ type Script = {
   callbackError: Error | null;
   /** How long the pool takes to hand out a connection; 0 is at once. */
   connectDelayMs: number;
+  /** How long the callback's own statement takes; 0 is at once. */
+  callbackDelayMs: number;
 };
 let script: Script;
 let sent: Array<{ text: string; values: unknown[] }> = [];
@@ -80,9 +82,14 @@ const answer = (text: string) => {
     );
   }
   if (text.includes("callback_statement")) {
-    return script.callbackError
-      ? Promise.reject(script.callbackError)
-      : Promise.resolve(result([["callback_statement", 23]], [1]));
+    const { callbackError, callbackDelayMs } = script;
+    const outcome = () =>
+      callbackError
+        ? Promise.reject(callbackError)
+        : Promise.resolve(result([["callback_statement", 23]], [1]));
+    return callbackDelayMs > 0
+      ? new Promise((resolve) => setTimeout(resolve, callbackDelayMs)).then(outcome)
+      : outcome();
   }
   return Promise.resolve({ fields: [], rows: [], rowCount: 0 });
 };
@@ -108,7 +115,11 @@ const connection = {
 };
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-mock.module(moduleUrl("lib/prisma.ts"), { namedExports: { prisma } });
+// The pool's counts as a busy answer logs them; fixed, so the log line is checked.
+const POOL_USAGE = { total: 10, idle: 0, waiting: 3 };
+mock.module(moduleUrl("lib/prisma.ts"), {
+  namedExports: { prisma, prismaPoolUsage: () => POOL_USAGE },
+});
 
 const load = async () => ({
   ...(await import(moduleUrl("lib/amux/dbBoundary.ts"))),
@@ -129,12 +140,16 @@ const reset = (overrides: Partial<Script> = {}) => {
     commitError: null,
     callbackError: null,
     connectDelayMs: 0,
+    callbackDelayMs: 0,
     ...overrides,
   };
   sent = [];
 };
 
-const run = async (boundary: typeof MUTATION | typeof READ) => {
+// Setup, the callback's statement and the fence: three calls, a 1,100 ms budget.
+const READ_SMALL = { operation: "commit_contract_read_small", prismaCallCeiling: 3, isolation: "read" } as const;
+
+const run = async (boundary: typeof MUTATION | typeof READ | typeof READ_SMALL) => {
   const { withAmuxDbBoundary } = await modules();
   return withAmuxDbBoundary(boundary, async (tx: PrismaClient) => {
     await tx.$queryRaw`SELECT 1 AS callback_statement`;
@@ -143,7 +158,7 @@ const run = async (boundary: typeof MUTATION | typeof READ) => {
 };
 
 const texts = () => sent.map((entry) => entry.text);
-type Failure = Error & { code?: unknown; cause?: unknown };
+type Failure = Error & { code?: unknown; cause?: unknown; connectionWaitMs?: unknown };
 const caught = async (promise: Promise<unknown>): Promise<Failure> => {
   try {
     await promise;
@@ -383,19 +398,26 @@ test("the internal route answers AX001 as a deadline and a missing trigger as an
   }
 });
 
-// A read boundary writes nothing, so its failure is never an unknown outcome.
-// When the database could not take it just then, and its route had started no
-// transaction that can write, it is answered 503 `amux_database_busy`
-// (lib/amux/readFailureCore.ts). The 2026-09-29 production incident was the
-// first of these: the queue read could not start its transaction within
-// maxWait (P2028) and was answered as an unknown outcome, which stopped the
-// orchestrator.
+// Busy: a failure that wrote nothing, answered 503 `amux_database_busy` so the
+// caller asks again next tick (lib/amux/readFailureCore.ts, and the phase table
+// on amuxDbBoundaryFailure in lib/amux/dbBoundary.ts).
+//
+// 2026-09-29: the queue read could not start its transaction within the 250 ms
+// maxWait (P2028) and was answered as an unknown outcome. 2026-09-30: the same
+// happened to the recovery sweep, a mutation, over and over. A transaction
+// whose callback never ran wrote nothing, read or mutation.
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-// The late connection of a transaction that gave up at maxWait still arrives
-// and is rolled back; wait for it so the next test starts from a quiet script.
-const SLOW_POOL_EXTRA_MS = 150;
 const busyBody = '{"error":"AMUX database is busy.","reason":"amux_database_busy"}';
+
+// Both test boundaries have a 1,400 ms budget (4 calls x 300 ms + 200 ms). A
+// 1,700 ms route therefore leaves them a connection wait of about 300 ms
+// (amuxDbConnectionWaitMs), and a pool that answers after 450 ms is too slow.
+const SHORT_ROUTE_MS = 1_700;
+const SLOW_POOL_MS = 450;
+// The late connection of a transaction that gave up still arrives, and Prisma
+// rolls it back; wait for that so the next test starts from a quiet script.
+const LATE_CONNECTION_SETTLE_MS = 500;
 
 type ConsoleMock = ReturnType<typeof mock.method>;
 const quietly = async <T>(
@@ -414,40 +436,185 @@ const lastWarning = (warnings: ConsoleMock) =>
   JSON.parse(String(warnings.mock.calls.at(-1)?.arguments[0])) as Record<string, unknown>;
 const reasonOf = async (response: Response) =>
   ((await response.json()) as Record<string, unknown>).reason;
+/** None of the boundary's own SQL: no setup, no callback statement, no fence. */
+const boundarySqlSent = () =>
+  texts().some(
+    (text) =>
+      text.includes("tomverse.amux_deadline") ||
+      text.includes("callback_statement") ||
+      text.includes('AS "withinDeadline"'),
+  );
 
-test("a read that cannot start within maxWait, in a route that wrote nothing, is busy and never unknown", async () => {
-  const { AmuxDbBoundaryError, AMUX_DB_MAX_WAIT_MS, amuxInternalErrorResponse, withAmuxRouteBudget } =
-    await modules();
-  reset({ connectDelayMs: AMUX_DB_MAX_WAIT_MS + SLOW_POOL_EXTRA_MS });
+test("the connection wait is the maximum outside a route and the route's slack inside one", async () => {
+  const { AMUX_DB_MAX_WAIT_MS, amuxDbConnectionWaitMs } = await modules();
+  assert.equal(AMUX_DB_MAX_WAIT_MS, 2_000);
+  assert.equal(amuxDbConnectionWaitMs(null, 1_400), 2_000);
+  assert.equal(amuxDbConnectionWaitMs(15_000, 1_400), 2_000);
+  assert.equal(amuxDbConnectionWaitMs(2_800, 2_000), 800);
+  assert.equal(amuxDbConnectionWaitMs(1_700, 1_400), 300);
+  assert.equal(amuxDbConnectionWaitMs(1_700.9, 1_400), 300);
+  // Prisma refuses a zero maxWait; the admission has already refused less.
+  assert.equal(amuxDbConnectionWaitMs(1_400, 1_400), 1);
+});
+
+test("a mutation that cannot start within its connection wait wrote nothing and is busy", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  reset({ connectDelayMs: SLOW_POOL_MS });
   await quietly(async ({ warnings, errors }) => {
-    const error = await caught(withAmuxRouteBudget(() => run(READ)));
+    const startedAt = Date.now();
+    const error = await caught(withAmuxRouteBudget(() => run(MUTATION), SHORT_ROUTE_MS));
+    const elapsedMs = Date.now() - startedAt;
     assert.ok(error instanceof AmuxDbBoundaryError);
-    assert.equal(error.code, "AMUX_DB_READ_BUSY");
-    // The raw error is Prisma's own, as production logged it.
+    assert.equal(error.code, "AMUX_DB_NOT_STARTED");
+    // Prisma's own maxWait refusal, from the capped wait, not the 2 s maximum.
     const cause = error.cause as { code?: unknown; message?: unknown };
     assert.equal(cause.code, "P2028");
     assert.match(String(cause.message), /Unable to start a transaction in the given time/);
+    assert.ok(elapsedMs < SLOW_POOL_MS, `gave up after ${elapsedMs} ms`);
+    assert.ok(
+      typeof error.connectionWaitMs === "number" &&
+        error.connectionWaitMs > 250 &&
+        error.connectionWaitMs <= 300,
+      String(error.connectionWaitMs),
+    );
+    assert.equal(boundarySqlSent(), false, "the callback never ran");
 
-    const response = amuxInternalErrorResponse("queue", error);
+    const response = amuxInternalErrorResponse("execution_recover", error);
     assert.equal(response.status, 503);
     assert.equal(response.headers.get("Retry-After"), "5");
-    assert.equal(response.headers.get("Cache-Control"), "no-store");
     assert.equal(response.headers.get("X-AMUX-Incident-ID"), null);
-    // Byte for byte the body the Rust client matches (DATABASE_BUSY_BODY in
-    // tomverse_api.rs, scheduler.rs and wsl_bridge.rs).
     assert.equal(await response.text(), busyBody);
-    assert.equal(errors.mock.callCount(), 0, "a busy read opens no incident");
+    assert.equal(errors.mock.callCount(), 0, "a busy answer opens no incident");
     assert.deepEqual(lastWarning(warnings), {
       subsystem: "amux",
       event: "internal_route_database_busy",
-      operation: "queue",
+      operation: "execution_recover",
+      path: "not_started",
       error_code: "P2028",
+      connection_wait_ms: error.connectionWaitMs,
+      pool_total: 10,
+      pool_idle: 0,
+      pool_waiting: 3,
     });
   });
-  await settle(SLOW_POOL_EXTRA_MS * 2);
+  await settle(LATE_CONNECTION_SETTLE_MS);
+  // The late connection was rolled back without running the callback.
+  assert.equal(boundarySqlSent(), false);
+  assert.ok(texts().includes("ROLLBACK"));
 });
 
-test("a statement timeout or a lost connection in such a read is busy too", async () => {
+test("a read that cannot start is the same not-started answer", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  reset({ connectDelayMs: SLOW_POOL_MS });
+  await quietly(async ({ warnings }) => {
+    const error = await caught(withAmuxRouteBudget(() => run(READ), SHORT_ROUTE_MS));
+    assert.ok(error instanceof AmuxDbBoundaryError);
+    assert.equal(error.code, "AMUX_DB_NOT_STARTED");
+    const response = amuxInternalErrorResponse("queue", error);
+    assert.equal(await response.text(), busyBody);
+    assert.equal(lastWarning(warnings).path, "not_started");
+  });
+  await settle(LATE_CONNECTION_SETTLE_MS);
+});
+
+test("a mutation whose own transaction timeout fires while running is not busy", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  // The budget is 1,400 ms and Prisma's timeout 1,700 ms: the callback's
+  // statement outlasts it.
+  reset({ callbackDelayMs: 1_900 });
+  await quietly(async () => {
+    const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.notEqual((error as { code?: unknown }).code, "AMUX_DB_NOT_STARTED");
+    assert.notEqual((error as { code?: unknown }).code, "AMUX_DB_READ_BUSY");
+    assert.equal(error instanceof AmuxDbBoundaryError, false, "passed on from the running phase");
+    assert.equal(error.code, "P2028");
+    assert.doesNotMatch(String(error.message), /Unable to start a transaction/);
+    assert.ok(texts().some((text) => text.includes("callback_statement")), "the callback ran");
+    assert.equal(texts().includes("COMMIT"), false);
+    // Answered as today: the interactive transaction's timeout is an unknown outcome.
+    const response = amuxInternalErrorResponse("execution_settle", error);
+    assert.equal(response.status, 503);
+    assert.equal(await reasonOf(response), "amux_outcome_unknown");
+  });
+  await settle(300);
+});
+
+test("a read whose own transaction timeout fires while running is a busy read, not a start refusal", async () => {
+  const { AmuxDbBoundaryError, withAmuxRouteBudget } = await modules();
+  reset({ callbackDelayMs: 1_900 });
+  await quietly(async () => {
+    const error = await caught(withAmuxRouteBudget(() => run(READ)));
+    assert.ok(error instanceof AmuxDbBoundaryError);
+    // The read rule, from the running phase: the transaction had started.
+    assert.equal(error.code, "AMUX_DB_READ_BUSY");
+    assert.equal((error.cause as { code?: unknown }).code, "P2028");
+  });
+  await settle(300);
+});
+
+test("the phase table: the same P2028 is not-started only before the callback ran", async () => {
+  const { AmuxDbBoundaryError, amuxDbBoundaryFailure } = await modules();
+  const p2028 = Object.assign(new Error("Transaction API error"), { code: "P2028" });
+  const p2024 = Object.assign(new Error("Timed out fetching a new connection"), { code: "P2024" });
+  const codeOf = (value: unknown) =>
+    value instanceof AmuxDbBoundaryError
+      ? (value as { code?: unknown }).code
+      : value === p2028 || value === p2024
+        ? "unchanged"
+        : "other";
+  const cases: Array<[typeof MUTATION | typeof READ, string, Error, string, string]> = [
+    [MUTATION, "starting", p2028, "no_mutation_started", "AMUX_DB_NOT_STARTED"],
+    [MUTATION, "starting", p2024, "no_mutation_started", "AMUX_DB_NOT_STARTED"],
+    [READ, "starting", p2028, "no_mutation_started", "AMUX_DB_NOT_STARTED"],
+    // The interactive transaction's own timeout, once its callback began.
+    [MUTATION, "running", p2028, "no_mutation_started", "unchanged"],
+    [MUTATION, "committing", p2028, "no_mutation_started", "AMUX_DB_OUTCOME_UNKNOWN"],
+    [READ, "running", p2028, "no_mutation_started", "AMUX_DB_READ_BUSY"],
+    [READ, "committing", p2028, "no_mutation_started", "AMUX_DB_READ_BUSY"],
+    // After a mutation of the route, or outside any route: as before.
+    [MUTATION, "starting", p2028, "mutation_started", "unchanged"],
+    [READ, "starting", p2028, "mutation_started", "unchanged"],
+    [MUTATION, "starting", p2028, "outside_route", "unchanged"],
+    [READ, "running", p2028, "outside_route", "unchanged"],
+  ];
+  for (const [boundary, phase, error, routeWrites, expected] of cases) {
+    assert.equal(
+      codeOf(amuxDbBoundaryFailure(boundary, phase, error, routeWrites)),
+      expected,
+      `${boundary.isolation} ${phase} ${error.message} ${routeWrites}`,
+    );
+  }
+  // Only P2024 and P2028 are a start refusal: a mutation's lost connection
+  // while starting keeps its old answer.
+  const reset_ = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+  assert.equal(amuxDbBoundaryFailure(MUTATION, "starting", reset_, "no_mutation_started"), reset_);
+});
+
+test("a COMMIT-phase failure of a mutation stays unknown in a route that wrote nothing", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  await quietly(async () => {
+    for (const commitError of [
+      databaseError("57014", "canceling statement due to statement timeout"),
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET", syscall: "read", errno: -104 }),
+      Object.assign(new Error("Transaction API error: pool"), { code: "P2028" }),
+    ]) {
+      reset({ commitError });
+      const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+      assert.ok(error instanceof AmuxDbBoundaryError, commitError.message);
+      assert.equal(error.code, "AMUX_DB_OUTCOME_UNKNOWN", commitError.message);
+      assert.equal(texts().at(-1), "COMMIT");
+      assert.equal(await reasonOf(amuxInternalErrorResponse("execution_settle", error)), "amux_outcome_unknown");
+    }
+
+    reset({ commitError: databaseError("AX001", "AMUX_LATE_COMMIT") });
+    const late = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.ok(late instanceof AmuxDbBoundaryError);
+    assert.equal(late.code, "AMUX_DB_DEADLINE_EXCEEDED");
+    assert.equal(await reasonOf(amuxInternalErrorResponse("claim", late)), "amux_database_deadline_exceeded");
+  });
+});
+
+test("a statement timeout or a lost connection in a read of a route that wrote nothing is busy", async () => {
   const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
   const socketError = Object.assign(new Error("read ECONNRESET"), {
     code: "ECONNRESET",
@@ -469,90 +636,55 @@ test("a statement timeout or a lost connection in such a read is busy too", asyn
       const response = amuxInternalErrorResponse("routing_snapshot", error);
       assert.equal(response.status, 503);
       assert.equal(await response.text(), busyBody);
-      assert.equal(lastWarning(warnings).error_code, logged);
+      const warning = lastWarning(warnings);
+      assert.equal(warning.path, "read");
+      assert.equal(warning.error_code, logged);
+      assert.equal(warning.pool_waiting, 3);
     });
   }
 });
 
-test("a mutation keeps today's answers: a P2028 and a failed COMMIT are unknown, AX001 is a deadline", async () => {
-  const { AmuxDbBoundaryError, AMUX_DB_MAX_WAIT_MS, amuxInternalErrorResponse, withAmuxRouteBudget } =
+test("once its route has started a mutation, a transaction that cannot start keeps the unknown outcome", async () => {
+  const { AmuxDbBoundaryError, amuxInternalErrorResponse, anchorAmuxRouteDeadline, withAmuxRouteBudget } =
     await modules();
   await quietly(async () => {
-    reset({ connectDelayMs: AMUX_DB_MAX_WAIT_MS + SLOW_POOL_EXTRA_MS });
-    const notStarted = await caught(withAmuxRouteBudget(() => run(MUTATION)));
-    assert.equal(notStarted instanceof AmuxDbBoundaryError, false);
-    assert.equal(notStarted.code, "P2028");
-    const unknown = amuxInternalErrorResponse("claim", notStarted);
-    assert.equal(unknown.status, 503);
-    assert.equal(unknown.headers.get("Retry-After"), null);
-    const body = (await unknown.json()) as Record<string, unknown>;
-    assert.equal(body.reason, "amux_outcome_unknown");
-    assert.equal(typeof body.incident_id, "string");
-    await settle(SLOW_POOL_EXTRA_MS * 2);
-
-    for (const commitError of [
-      databaseError("57014", "canceling statement due to statement timeout"),
-      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET", syscall: "read", errno: -104 }),
-    ]) {
-      reset({ commitError });
-      const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
-      assert.ok(error instanceof AmuxDbBoundaryError, commitError.message);
-      assert.equal(error.code, "AMUX_DB_OUTCOME_UNKNOWN", commitError.message);
-      assert.equal(await reasonOf(amuxInternalErrorResponse("claim", error)), "amux_outcome_unknown");
+    // A committed mutation, then a mutation and a read that cannot start.
+    for (const next of [MUTATION, READ]) {
+      const afterCommit = await caught(
+        withAmuxRouteBudget(async () => {
+          reset();
+          assert.equal(await run(MUTATION), "result");
+          reset({ connectDelayMs: SLOW_POOL_MS });
+          return run(next);
+        }, SHORT_ROUTE_MS),
+      );
+      assert.equal(afterCommit instanceof AmuxDbBoundaryError, false, next.isolation);
+      assert.equal(afterCommit.code, "P2028", next.isolation);
+      assert.equal(
+        await reasonOf(amuxInternalErrorResponse("execution_recover", afterCommit)),
+        "amux_outcome_unknown",
+      );
+      await settle(LATE_CONNECTION_SETTLE_MS);
     }
 
-    reset({ commitError: databaseError("AX001", "AMUX_LATE_COMMIT") });
-    const late = await caught(withAmuxRouteBudget(() => run(MUTATION)));
-    assert.ok(late instanceof AmuxDbBoundaryError);
-    assert.equal(late.code, "AMUX_DB_DEADLINE_EXCEEDED");
-    assert.equal(await reasonOf(amuxInternalErrorResponse("claim", late)), "amux_database_deadline_exceeded");
-  });
-});
-
-test("a read that fails after its route started a transaction that can write keeps the unknown outcome", async () => {
-  const {
-    AmuxDbBoundaryError,
-    AMUX_DB_MAX_WAIT_MS,
-    amuxInternalErrorResponse,
-    anchorAmuxRouteDeadline,
-    withAmuxRouteBudget,
-  } = await modules();
-  const slow = AMUX_DB_MAX_WAIT_MS + SLOW_POOL_EXTRA_MS;
-  await quietly(async () => {
-    // A committed mutation, then a read that cannot start.
-    const afterCommit = await caught(
+    // A mutation whose callback began marks the route even when it then fails.
+    const afterRunning = await caught(
       withAmuxRouteBudget(async () => {
-        reset();
-        assert.equal(await run(MUTATION), "result");
-        reset({ connectDelayMs: slow });
-        return run(READ);
-      }),
-    );
-    assert.equal(afterCommit instanceof AmuxDbBoundaryError, false);
-    assert.equal(afterCommit.code, "P2028");
-    assert.equal(
-      await reasonOf(amuxInternalErrorResponse("execution_recover", afterCommit)),
-      "amux_outcome_unknown",
-    );
-    await settle(SLOW_POOL_EXTRA_MS * 2);
-
-    // A mutation that never started still marks the route: it is marked before BEGIN.
-    reset({ connectDelayMs: slow });
-    const afterNotStarted = await caught(
-      withAmuxRouteBudget(async () => {
+        reset({ callbackError: databaseError("57014", "canceling statement due to statement timeout") });
         await caught(run(MUTATION));
+        reset({ connectDelayMs: SLOW_POOL_MS });
         return run(READ);
-      }),
+      }, SHORT_ROUTE_MS),
     );
-    assert.equal(afterNotStarted instanceof AmuxDbBoundaryError, false);
-    assert.equal(afterNotStarted.code, "P2028");
-    await settle(SLOW_POOL_EXTRA_MS * 2);
+    assert.equal(afterRunning instanceof AmuxDbBoundaryError, false);
+    assert.equal(afterRunning.code, "P2028");
+    await settle(LATE_CONNECTION_SETTLE_MS);
 
     // A transaction that anchors the route deadline itself (the automatic
     // promotion writers) marks the route as well, even when it is refused.
-    reset();
     const afterAnchor = await caught(
       withAmuxRouteBudget(async () => {
+        reset();
         await caught(
           prisma.$transaction(async (tx) => {
             await anchorAmuxRouteDeadline(tx, 1_000, "auto_promotion");
@@ -567,16 +699,41 @@ test("a read that fails after its route started a transaction that can write kee
   });
 });
 
-test("outside a route, and for any other failure, a read keeps its old answer", async () => {
-  const { AmuxDbBoundaryError, AMUX_DB_MAX_WAIT_MS, amuxInternalErrorResponse, withAmuxRouteBudget } =
+test("a mutation that never started does not mark its route", async () => {
+  const { AmuxDbBoundaryError, withAmuxRouteBudget } = await modules();
+  await quietly(async () => {
+    // Its callback never ran, so a read after it in the same route is still
+    // one of a route that wrote nothing. The mutation's wait is about 300 ms;
+    // the read's 1,100 ms budget still fits in what is left.
+    const error = await caught(
+      withAmuxRouteBudget(async () => {
+        reset({ connectDelayMs: SLOW_POOL_MS });
+        const notStarted = await caught(run(MUTATION));
+        assert.ok(notStarted instanceof AmuxDbBoundaryError);
+        assert.equal(notStarted.code, "AMUX_DB_NOT_STARTED");
+        reset({ callbackError: databaseError("57014", "canceling statement due to statement timeout") });
+        return run(READ_SMALL);
+      }, SHORT_ROUTE_MS),
+    );
+    assert.ok(error instanceof AmuxDbBoundaryError);
+    assert.equal(error.code, "AMUX_DB_READ_BUSY");
+  });
+  await settle(LATE_CONNECTION_SETTLE_MS);
+});
+
+test("outside a route, and for any other failure, a transaction keeps its old answer", async () => {
+  const { AMUX_DB_MAX_WAIT_MS, AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } =
     await modules();
   await quietly(async () => {
-    // No route: nothing is known about the caller's earlier writes.
-    reset({ connectDelayMs: AMUX_DB_MAX_WAIT_MS + SLOW_POOL_EXTRA_MS });
-    const outside = await caught(run(READ));
-    assert.equal(outside instanceof AmuxDbBoundaryError, false);
-    assert.equal(outside.code, "P2028");
-    await settle(SLOW_POOL_EXTRA_MS * 2);
+    // No route: nothing is known about the caller's earlier writes, and the
+    // wait is the whole maximum.
+    for (const boundary of [READ, MUTATION]) {
+      reset({ connectDelayMs: AMUX_DB_MAX_WAIT_MS + 150 });
+      const outside = await caught(run(boundary));
+      assert.equal(outside instanceof AmuxDbBoundaryError, false, boundary.isolation);
+      assert.equal(outside.code, "P2028", boundary.isolation);
+      await settle(400);
+    }
 
     // Not a transient failure: a missing table is a defect, not a busy database.
     reset({ callbackError: databaseError("42P01", "relation does not exist") });

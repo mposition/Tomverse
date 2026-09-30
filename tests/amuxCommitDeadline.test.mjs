@@ -146,30 +146,46 @@ test("both fences insert the marker, check the trigger, and compare the clock wi
 test("the committing phase starts only after the fence, and AX001 is read before it in both classifiers", () => {
   const code = withoutComments(boundary);
   const body = between(code, "export async function withAmuxDbBoundary<T>(", "\n}\n");
-  assert.match(body, /let phase: AmuxDbBoundaryPhase = "running";/);
+  // `starting` until Prisma runs the callback, then `running` as the
+  // callback's first statement, then `committing` after the fence.
+  assert.match(body, /let phase: AmuxDbBoundaryPhase = "starting";\s*const transaction = prisma\.\$transaction\(\s*async \(rawTx\) => \{\s*phase = "running";/);
   assert.match(body, /requireAmuxCommitFence\(fence, boundary\.operation\);\s*\}\s*phase = "committing";\s*return result;\s*\}/);
   assert.match(
     body,
-    /return transaction\.catch\(\(error: unknown\): never => \{\s*throw amuxDbBoundaryFailure\(\s*boundary,\s*phase,\s*error,\s*amuxRouteWriteState\(routeDeadline\),?\s*\);/,
+    /return transaction\.catch\(\(error: unknown\): never => \{\s*const failure = amuxDbBoundaryFailure\(\s*boundary,\s*phase,\s*error,\s*amuxRouteWriteState\(routeDeadline\),?\s*\);/,
   );
-  // A mutation marks its route before BEGIN, so a later read of the route
-  // cannot be answered as "nothing was written".
-  assert.ok(
-    body.indexOf("routeDeadline.mutationStarted = true;") > 0 &&
-      body.indexOf("routeDeadline.mutationStarted = true;") < body.indexOf("prisma.$transaction("),
-  );
+  // A mutation marks its route when its callback begins -- after `running`
+  // and before its first statement -- so a later failure of the route cannot
+  // be answered as "nothing was written". A mutation that never got its
+  // connection ran nothing and does not mark it.
+  const marker = body.indexOf("routeDeadline.mutationStarted = true;");
+  assert.ok(marker > body.indexOf('phase = "running";'));
+  assert.ok(marker < body.indexOf("rawTx.$queryRaw"));
+  assert.equal(body.indexOf("routeDeadline.mutationStarted = true;", marker + 1), -1);
+  // The connection wait is the route-capped one.
+  assert.match(body, /maxWait: connectionWaitMs,/);
 
   const failure = between(code, "export const amuxDbBoundaryFailure = (", "\n};\n");
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") > 0);
   assert.ok(failure.indexOf("isAmuxLateCommitError(error)") < failure.indexOf('phase === "committing"'));
   assert.match(failure, /isAmuxLateCommitError\(error\)\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_DEADLINE_EXCEEDED"/);
   assert.match(failure, /phase === "committing" && boundary\.isolation === "mutation"\) \{\s*return new AmuxDbBoundaryError\(\s*"AMUX_DB_OUTCOME_UNKNOWN"/);
-  // The busy answer is decided after both, only for a read, only in a route
-  // that started nothing that can write.
-  assert.ok(failure.indexOf('"AMUX_DB_OUTCOME_UNKNOWN"') < failure.indexOf('"AMUX_DB_READ_BUSY"'));
+  // The busy answers are decided after both, only in a route that started
+  // nothing that can write: a start refusal only while `starting`, the read
+  // rule only for a read.
+  assert.ok(failure.indexOf('"AMUX_DB_OUTCOME_UNKNOWN"') < failure.indexOf('"AMUX_DB_NOT_STARTED"'));
+  assert.ok(failure.indexOf('"AMUX_DB_NOT_STARTED"') < failure.indexOf('"AMUX_DB_READ_BUSY"'));
   assert.match(
     failure,
-    /boundary\.isolation === "read" &&\s*routeWrites === "no_mutation_started" &&\s*!\(error instanceof AmuxDbBoundaryError\) &&\s*amuxTransientDatabaseCode\(error\) !== null\s*\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_READ_BUSY"/,
+    /routeWrites !== "no_mutation_started" \|\|\s*error instanceof AmuxDbBoundaryError\s*\) \{\s*return error;\s*\}/,
+  );
+  assert.match(
+    failure,
+    /phase === "starting" && amuxTransactionNotStartedCode\(error\) !== null\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_NOT_STARTED"/,
+  );
+  assert.match(
+    failure,
+    /boundary\.isolation === "read" &&\s*amuxTransientDatabaseCode\(error\) !== null\s*\) \{\s*return new AmuxDbBoundaryError\("AMUX_DB_READ_BUSY"/,
   );
 
   const core = withoutComments(read("lib/amux/autoPromotionCore.ts"));

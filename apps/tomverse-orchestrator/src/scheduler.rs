@@ -7,7 +7,8 @@ use tokio::time::Instant;
 use tracing::{info, warn};
 
 use crate::tomverse_api::{
-    ClaimResponse, QueueTask, SelectionRead, TomverseApi, BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
+    is_database_busy, ClaimResponse, QueueTask, SelectionRead, TomverseApi,
+    BOARD_CAPACITY_EXCEEDED, DATABASE_BUSY,
 };
 
 const SCORING_VERSION: &str = "amux-global-priority-v2";
@@ -156,34 +157,7 @@ impl Scheduler {
             }
 
             if Instant::now() >= next_recovery {
-                match self.api.execution_recover().await {
-                    Ok(outcome) if outcome.recovered => info!(
-                        reclaimed_executions = outcome.reclaimed.unwrap_or(0),
-                        reclaimed_claims = outcome.reclaimed_claims.unwrap_or(0),
-                        quota_observations_deleted =
-                            outcome.quota_observations_deleted.unwrap_or(0),
-                        more = outcome.more.unwrap_or(false),
-                        "AMUX recovery sweep completed"
-                    ),
-                    Ok(outcome) => info!(
-                        reason = ?outcome.reason,
-                        quota_observations_deleted =
-                            outcome.quota_observations_deleted.unwrap_or(0),
-                        "AMUX execution recovery is disabled; quota evidence swept"
-                    ),
-                    Err(error) => {
-                        warn!(
-                            %error,
-                            incident_id = %uuid::Uuid::new_v4(),
-                            endpoint = "execution_recover",
-                            error_code = "AMUX_RECOVERY_OUTCOME_UNKNOWN",
-                            measured = false,
-                            verdict = "recovery_outcome_unknown_dormant",
-                            "AMUX recovery sweep outcome is unknown; stopping this process run"
-                        );
-                        return Err(anyhow::anyhow!("AMUX_RECOVERY_OUTCOME_UNKNOWN"));
-                    }
-                }
+                self.recovery_pass().await?;
                 next_recovery = Instant::now() + RECOVERY_INTERVAL;
             }
 
@@ -202,6 +176,48 @@ impl Scheduler {
 
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
+    }
+
+    /// One recovery sweep. The route is a series of writes; only the exact
+    /// database-busy answer says the sweep did not start (its first
+    /// transaction, before the route wrote anything, could not get a
+    /// connection), so only that is a skipped pass. Every other failure is an
+    /// unknown outcome and stops the run, as before.
+    async fn recovery_pass(&self) -> Result<()> {
+        match self.api.execution_recover().await {
+            Ok(outcome) if outcome.recovered => info!(
+                reclaimed_executions = outcome.reclaimed.unwrap_or(0),
+                reclaimed_claims = outcome.reclaimed_claims.unwrap_or(0),
+                quota_observations_deleted = outcome.quota_observations_deleted.unwrap_or(0),
+                more = outcome.more.unwrap_or(false),
+                "AMUX recovery sweep completed"
+            ),
+            Ok(outcome) => info!(
+                reason = ?outcome.reason,
+                quota_observations_deleted = outcome.quota_observations_deleted.unwrap_or(0),
+                "AMUX execution recovery is disabled; quota evidence swept"
+            ),
+            Err(error) if is_database_busy(&error) => warn!(
+                endpoint = "execution_recover",
+                reason = DATABASE_BUSY,
+                measured = true,
+                verdict = "recovery_skipped",
+                "Tomverse AMUX database was busy before the recovery sweep started; nothing was written; retrying next interval"
+            ),
+            Err(error) => {
+                warn!(
+                    %error,
+                    incident_id = %uuid::Uuid::new_v4(),
+                    endpoint = "execution_recover",
+                    error_code = "AMUX_RECOVERY_OUTCOME_UNKNOWN",
+                    measured = false,
+                    verdict = "recovery_outcome_unknown_dormant",
+                    "AMUX recovery sweep outcome is unknown; stopping this process run"
+                );
+                return Err(anyhow::anyhow!("AMUX_RECOVERY_OUTCOME_UNKNOWN"));
+            }
+        }
+        Ok(())
     }
 
     async fn tick(&mut self) -> Result<()> {
@@ -393,6 +409,22 @@ impl Scheduler {
                 .await;
             let outcome = match claim_result {
                 Ok(outcome) => outcome,
+                // The claim transaction never started, and nothing before it
+                // in the route wrote: ownership did not change. Skip the tick;
+                // the next one reads the queue again.
+                Err(error) if is_database_busy(&error) => {
+                    warn!(
+                        task_id = %task.id,
+                        task_revision = task.revision,
+                        worker = %worker,
+                        endpoint = "claim",
+                        reason = DATABASE_BUSY,
+                        measured = true,
+                        verdict = "claim_skipped",
+                        "Tomverse AMUX database was busy before the claim started; nothing was written; skipping this tick"
+                    );
+                    return Ok(());
+                }
                 Err(error) => {
                     warn!(
                         %error,
@@ -961,35 +993,123 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_database_busy_answer_to_a_claim_still_stops_the_run() {
-        // The claim is a write: whatever it answers besides its own closed
-        // refusals is an unknown outcome, the busy body included.
+    async fn a_database_busy_answer_to_a_claim_skips_the_tick() {
+        // The claim did not start and the route wrote nothing before it: no
+        // ownership changed, so this is a skipped tick, not an unknown outcome.
+        let (base_url, seen) = serve_selection(claim_answers(
+            "503 Service Unavailable",
+            DATABASE_BUSY_BODY,
+        ))
+        .await;
+        let mut scheduler = scheduler_for(base_url);
+
+        scheduler.tick().await.expect("a busy claim is a skipped tick, not an exit");
+        assert_eq!(
+            seen.lock().unwrap().last().map(String::as_str),
+            Some("/api/internal/amux/claim")
+        );
+        // One claim, no second candidate in the same tick.
+        assert_eq!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .filter(|path| path.ends_with("/claim"))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn any_other_claim_failure_still_stops_the_run() {
+        for (status, body) in [
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database deadline exceeded.","reason":"amux_database_deadline_exceeded"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database is busy.","reason":"amux_database_busy","extra":1}"#,
+            ),
+            ("500 Internal Server Error", DATABASE_BUSY_BODY),
+            ("502 Bad Gateway", DATABASE_BUSY_BODY),
+        ] {
+            let (base_url, _) = serve_selection(claim_answers(status, body)).await;
+            let mut scheduler = scheduler_for(base_url);
+            let error = scheduler
+                .tick()
+                .await
+                .expect_err("a claim answer outside its contract stops");
+            assert_eq!(error.to_string(), "AMUX_CLAIM_OUTCOME_UNKNOWN", "{status} {body}");
+        }
+    }
+
+    /// Queue and snapshot answer so the tick reaches the claim, which answers
+    /// `status` and `body`.
+    fn claim_answers(
+        status: &'static str,
+        body: &str,
+    ) -> Vec<(&'static str, &'static str, String)> {
         let routing: serde_json::Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/amux-routing-snapshot-v1.json"
         ))
         .unwrap();
-        let (base_url, seen) = serve_selection(vec![
+        vec![
             ("/api/internal/amux/queue", "200 OK", queue_row()),
             (
                 "/api/internal/amux/routing-snapshot",
                 "200 OK",
                 routing["eligible"].to_string(),
             ),
-            (
-                "/api/internal/amux/claim",
-                "503 Service Unavailable",
-                DATABASE_BUSY_BODY.to_owned(),
-            ),
-        ])
-        .await;
-        let mut scheduler = scheduler_for(base_url);
+            ("/api/internal/amux/claim", status, body.to_owned()),
+        ]
+    }
 
-        let error = scheduler.tick().await.expect_err("a claim answer outside its contract stops");
-        assert_eq!(error.to_string(), "AMUX_CLAIM_OUTCOME_UNKNOWN");
+    #[tokio::test]
+    async fn a_database_busy_answer_to_recovery_skips_the_pass_and_anything_else_stops() {
+        let (base_url, seen) = serve_selection(vec![(
+            "/api/internal/amux/execution/recover",
+            "503 Service Unavailable",
+            DATABASE_BUSY_BODY.to_owned(),
+        )])
+        .await;
+        let scheduler = scheduler_for(base_url);
+        scheduler
+            .recovery_pass()
+            .await
+            .expect("a busy recovery sweep did not start; the pass is skipped");
         assert_eq!(
-            seen.lock().unwrap().last().map(String::as_str),
-            Some("/api/internal/amux/claim")
+            *seen.lock().unwrap(),
+            vec!["/api/internal/amux/execution/recover".to_owned()]
         );
+
+        for (status, body) in [
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database outcome is unknown.","reason":"amux_outcome_unknown","incident_id":"0b8e9a52-6d8c-4f0e-9b1a-2c3d4e5f6a7b"}"#,
+            ),
+            (
+                "503 Service Unavailable",
+                r#"{"error":"AMUX database is busy.","reason":"amux_database_busy","extra":1}"#,
+            ),
+            ("500 Internal Server Error", DATABASE_BUSY_BODY),
+            ("500 Internal Server Error", r#"{"error":"Internal server error."}"#),
+        ] {
+            let (base_url, _) = serve_selection(vec![(
+                "/api/internal/amux/execution/recover",
+                status,
+                body.to_owned(),
+            )])
+            .await;
+            let error = scheduler_for(base_url)
+                .recovery_pass()
+                .await
+                .expect_err("any other recovery answer is an unknown outcome");
+            assert_eq!(error.to_string(), "AMUX_RECOVERY_OUTCOME_UNKNOWN", "{status} {body}");
+        }
     }
 
     #[tokio::test]

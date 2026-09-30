@@ -2,17 +2,31 @@ import "server-only";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaPoolUsage, type PrismaPoolUsage } from "@/lib/prisma";
 import {
   AMUX_COMMIT_DEADLINE_TRIGGER,
   isAmuxLateCommitError,
 } from "@/lib/amux/commitDeadlineCore";
-import { amuxTransientDatabaseCode } from "@/lib/amux/readFailureCore";
+import {
+  amuxTransactionNotStartedCode,
+  amuxTransientDatabaseCode,
+  isAmuxDbBusyCode,
+} from "@/lib/amux/readFailureCore";
 
 export const AMUX_DB_STATEMENT_TIMEOUT_MS = 200;
 export const AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS = 100;
 export const AMUX_DB_COMMIT_RESERVE_MS = 200;
-export const AMUX_DB_MAX_WAIT_MS = 250;
+/**
+ * The longest a transaction waits for a pool connection and its BEGIN
+ * (Prisma's `maxWait`). Inside a route it is further capped by
+ * `amuxDbConnectionWaitMs`: a transaction waits only out of the time its route
+ * has left beyond the transaction's own budget, so a longer wait never makes a
+ * route answer later than its budget. 250 ms (until 2026-09-30) failed most
+ * orchestrator runs against a 10-connection pool shared with web traffic.
+ */
+export const AMUX_DB_MAX_WAIT_MS = 2_000;
+/** Prisma's interactive-transaction timeout is the budget plus this. */
+export const AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS = 300;
 // This is an application-level Prisma API-call ceiling, not a PostgreSQL
 // statement counter. A single Prisma call can emit more than one SQL statement.
 // PostgreSQL enforces the statement and idle-in-transaction timeouts below,
@@ -170,16 +184,34 @@ export const AMUX_DB_BOUNDARIES = {
  * - `AMUX_DB_READ_BUSY`: a read transaction failed because the database could
  *   not take it just then (lib/amux/readFailureCore.ts), inside a route that
  *   had not started a mutation. Nothing was written; the caller may ask again.
+ * - `AMUX_DB_NOT_STARTED`: a transaction, read or mutation, could not get its
+ *   connection or start within its connection wait (P2024/P2028 before its
+ *   callback ran), inside a route that had not started a mutation. None of its
+ *   SQL ran, so nothing was written; the caller may ask again.
  */
 export type AmuxDbBoundaryErrorCode =
   | "AMUX_DB_DEADLINE_EXCEEDED"
   | "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED"
   | "AMUX_DB_COMMIT_CHECK_MISSING"
   | "AMUX_DB_OUTCOME_UNKNOWN"
-  | "AMUX_DB_READ_BUSY";
+  | "AMUX_DB_READ_BUSY"
+  | "AMUX_DB_NOT_STARTED";
+
+/** The two codes answered 503 `amux_database_busy`: nothing was written. */
+export const isAmuxDbBusyError = (
+  error: unknown,
+): error is AmuxDbBoundaryError =>
+  error instanceof AmuxDbBoundaryError && isAmuxDbBusyCode(error.code);
 
 export class AmuxDbBoundaryError extends Error {
   readonly code: AmuxDbBoundaryErrorCode;
+  /**
+   * Diagnostics on a busy failure only, for the operator's log line: the
+   * connection wait this transaction was given and the pool's connection
+   * counts when it failed. Never a connection string.
+   */
+  connectionWaitMs?: number;
+  poolUsage?: PrismaPoolUsage | null;
 
   constructor(
     code: AmuxDbBoundaryErrorCode,
@@ -197,10 +229,11 @@ type AmuxRouteDeadline = {
   maxMs: number;
   databaseDeadlineAt?: Date;
   /**
-   * Set before the first transaction of this route that can write: a mutation
-   * boundary, or a transaction that anchors the route deadline itself
-   * (`anchorAmuxRouteDeadline`). Once set, a later read failure of the route
-   * can no longer say that nothing was written.
+   * Set when the first transaction of this route that can write has started:
+   * a mutation boundary's callback began, or a transaction anchored the route
+   * deadline itself (`anchorAmuxRouteDeadline`). Once set, a later failure of
+   * the route can no longer say that nothing was written. A mutation that
+   * never got its connection does not set it: none of its SQL ran.
    */
   mutationStarted: boolean;
 };
@@ -233,6 +266,31 @@ export const amuxDbTransactionBudgetMs = (boundary: AmuxDbBoundary) =>
   boundary.prismaCallCeiling * AMUX_DB_STATEMENT_TIMEOUT_MS +
   boundary.prismaCallCeiling * AMUX_DB_IDLE_TRANSACTION_TIMEOUT_MS +
   AMUX_DB_COMMIT_RESERVE_MS;
+
+/**
+ * Prisma's `maxWait` for one transaction.
+ *
+ * Outside a route it is `AMUX_DB_MAX_WAIT_MS`. Inside one it is also capped by
+ * what the route has left beyond this transaction's budget, so the
+ * transaction, if it starts at all, starts no later than its route's deadline
+ * less its budget: the wait comes out of the route's slack and never extends
+ * the route. The route budgets and the Rust client deadlines sized on them
+ * therefore hold whatever this maximum is. At least 1 ms (Prisma refuses 0);
+ * the coarse admission has already refused a transaction without its budget.
+ */
+export const amuxDbConnectionWaitMs = (
+  routeRemainingMs: number | null,
+  transactionBudgetMs: number,
+): number =>
+  routeRemainingMs === null
+    ? AMUX_DB_MAX_WAIT_MS
+    : Math.max(
+        1,
+        Math.min(
+          AMUX_DB_MAX_WAIT_MS,
+          Math.floor(routeRemainingMs - transactionBudgetMs),
+        ),
+      );
 
 /**
  * Coarse admission for a transaction whose application per-transaction
@@ -375,11 +433,31 @@ const requireAmuxCommitFence = (
   }
 };
 
-/** Where a bounded transaction was when it failed. */
-export type AmuxDbBoundaryPhase = "running" | "committing";
+/**
+ * Where a bounded transaction was when it failed.
+ *
+ * - `starting`: its callback has not begun. Prisma was still getting a pool
+ *   connection and sending BEGIN within `maxWait`; a transaction that starts
+ *   late is rolled back by Prisma without running the callback. None of the
+ *   boundary's SQL has run.
+ * - `running`: the callback began and has not returned.
+ * - `committing`: the callback returned; only the COMMIT is left.
+ */
+export type AmuxDbBoundaryPhase = "starting" | "running" | "committing";
 
 /**
  * What a failed bounded transaction is reported as.
+ *
+ * | phase      | isolation | error                         | route wrote before | reported as              |
+ * |------------|-----------|-------------------------------|--------------------|--------------------------|
+ * | any        | any       | AX001                         | any                | AMUX_DB_DEADLINE_EXCEEDED |
+ * | committing | mutation  | anything else                 | any                | AMUX_DB_OUTCOME_UNKNOWN  |
+ * | starting   | any       | P2024, P2028                  | no                 | AMUX_DB_NOT_STARTED      |
+ * | any        | read      | transient (readFailureCore)   | no                 | AMUX_DB_READ_BUSY        |
+ * | otherwise  |           |                               |                    | the error, unchanged     |
+ *
+ * "Route wrote before" is `mutation_started`; outside a route it counts as yes,
+ * because nothing is known about what the caller did before.
  *
  * SQLSTATE AX001 is read first, before the phase: it arrives while committing,
  * but it is the commit deadline trigger's refusal and PostgreSQL has rolled the
@@ -402,6 +480,13 @@ export type AmuxDbBoundaryPhase = "running" | "committing";
  * other read failure, the error is passed on unchanged, and so answered as it
  * was before. This is the only place the read/mutation decision is made; it
  * reads the boundary's `isolation`, never the route's name.
+ *
+ * A transaction that never started wrote nothing either, mutation or not: a
+ * P2024 or P2028 while `starting` is the pool or `maxWait` refusing it before
+ * its callback ran. The same P2028 once the callback has begun is the
+ * interactive transaction's own timeout, and keeps its old answer: passed on
+ * while running (a known rollback, still answered as an unknown outcome by the
+ * internal route) and an unknown outcome while committing.
  */
 export const amuxDbBoundaryFailure = (
   boundary: AmuxDbBoundary,
@@ -424,9 +509,18 @@ export const amuxDbBoundaryFailure = (
     );
   }
   if (
+    routeWrites !== "no_mutation_started" ||
+    error instanceof AmuxDbBoundaryError
+  ) {
+    return error;
+  }
+  if (phase === "starting" && amuxTransactionNotStartedCode(error) !== null) {
+    return new AmuxDbBoundaryError("AMUX_DB_NOT_STARTED", boundary.operation, {
+      cause: error,
+    });
+  }
+  if (
     boundary.isolation === "read" &&
-    routeWrites === "no_mutation_started" &&
-    !(error instanceof AmuxDbBoundaryError) &&
     amuxTransientDatabaseCode(error) !== null
   ) {
     return new AmuxDbBoundaryError("AMUX_DB_READ_BUSY", boundary.operation, {
@@ -434,6 +528,14 @@ export const amuxDbBoundaryFailure = (
     });
   }
   return error;
+};
+
+const safePoolUsage = (): PrismaPoolUsage | null => {
+  try {
+    return prismaPoolUsage();
+  } catch {
+    return null;
+  }
 };
 
 export const withAmuxRouteBudget = <T>(
@@ -623,25 +725,32 @@ export async function withAmuxDbBoundary<T>(
 
   const routeDeadline = amuxRouteDeadline.getStore();
   const transactionBudgetMs = amuxDbTransactionBudgetMs(boundary);
-  if (
-    routeDeadline !== undefined &&
-    routeDeadline.localDeadlineMs - Date.now() < transactionBudgetMs
-  ) {
+  const routeRemainingMs =
+    routeDeadline === undefined
+      ? null
+      : routeDeadline.localDeadlineMs - Date.now();
+  if (routeRemainingMs !== null && routeRemainingMs < transactionBudgetMs) {
     throw new AmuxDbBoundaryError(
       "AMUX_DB_DEADLINE_EXCEEDED",
       boundary.operation,
     );
   }
+  const connectionWaitMs = amuxDbConnectionWaitMs(
+    routeRemainingMs,
+    transactionBudgetMs,
+  );
 
-  // Marked before BEGIN: from here on this route may have written, whatever
-  // becomes of this transaction.
-  if (boundary.isolation === "mutation" && routeDeadline !== undefined) {
-    routeDeadline.mutationStarted = true;
-  }
-
-  let phase: AmuxDbBoundaryPhase = "running";
+  let phase: AmuxDbBoundaryPhase = "starting";
   const transaction = prisma.$transaction(
     async (rawTx) => {
+      // Prisma runs this callback only once the connection is held and BEGIN
+      // has been sent. Until this line nothing of this boundary has run.
+      phase = "running";
+      // From here on this route may have written, whatever becomes of this
+      // transaction.
+      if (boundary.isolation === "mutation" && routeDeadline !== undefined) {
+        routeDeadline.mutationStarted = true;
+      }
       const setup = await rawTx.$queryRaw<
         Array<{ dbNowEpochMs: bigint; deadlineAtEpochMs: bigint }>
       >`
@@ -816,8 +925,8 @@ export async function withAmuxDbBoundary<T>(
       return result;
     },
     {
-      maxWait: AMUX_DB_MAX_WAIT_MS,
-      timeout: transactionBudgetMs + 300,
+      maxWait: connectionWaitMs,
+      timeout: transactionBudgetMs + AMUX_DB_TRANSACTION_TIMEOUT_SLACK_MS,
       isolationLevel:
         boundary.isolation === "read"
           ? Prisma.TransactionIsolationLevel.RepeatableRead
@@ -826,12 +935,18 @@ export async function withAmuxDbBoundary<T>(
   );
   return transaction.catch((error: unknown): never => {
     // The route's write state when this transaction failed, not when it began:
-    // a mutation of the same route that started meanwhile counts.
-    throw amuxDbBoundaryFailure(
+    // a mutation of the same route that started meanwhile counts, this one
+    // included once its callback began.
+    const failure = amuxDbBoundaryFailure(
       boundary,
       phase,
       error,
       amuxRouteWriteState(routeDeadline),
     );
+    if (isAmuxDbBusyError(failure)) {
+      failure.connectionWaitMs = connectionWaitMs;
+      failure.poolUsage = safePoolUsage();
+    }
+    throw failure;
   });
 }
