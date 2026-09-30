@@ -211,8 +211,15 @@ test("turning off switches that were on without a confirmation is reported once,
   assert.equal((await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE)).length, 1);
   await turnOffAll();
   assert.equal((await noticesFor(user.id, UNSUBSCRIBE_RESULT_NOTICE_TEMPLATE)).length, 1);
+  // The marketing switches; security, billing and service notices stay on.
   assert.equal(
-    await prisma.emailPreference.count({ where: { userId: user.id, enabled: true } }),
+    await prisma.emailPreference.count({
+      where: {
+        userId: user.id,
+        enabled: true,
+        purpose: { in: ["product_updates", "newsletter", "promotions"] },
+      },
+    }),
     0
   );
 });
