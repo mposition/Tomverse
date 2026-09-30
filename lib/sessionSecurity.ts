@@ -1,10 +1,18 @@
 import "server-only";
 
+import { cookies } from "next/headers";
+
 import { prisma } from "@/lib/prisma";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { revokeAllMobileSessions } from "@/lib/mobileAuthService";
 import type {
     SessionSecuritySnapshotResult,
+} from "@/lib/sessionRevocationCore";
+import {
+    SIGNUP_INTENT_COOKIE,
+    isSessionCookieName,
+    oauthSignupGate,
+    type OAuthSignupGate,
 } from "@/lib/sessionRevocationCore";
 
 /**
@@ -105,3 +113,48 @@ export const readSessionSecuritySnapshot = async (
     });
     return snapshot;
 };
+
+/**
+ * The facts `oauthSignupGate()` needs, read inside NextAuth's `signIn`
+ * callback (docs/policy/email-product-news-redesign-draft.md section 5.2a).
+ *
+ * The callback is not given the request, so the two cookies are read through
+ * `next/headers` -- the NextAuth route is an App Router handler. The address
+ * lookup is the adapter's own (`getUserByEmail` is an exact `findUnique`), so
+ * "a user owns this address" means what NextAuth will conclude a moment later.
+ */
+export async function readOAuthSignupGate(input: {
+    provider: string;
+    providerAccountId: string;
+    email: string | null | undefined;
+}): Promise<OAuthSignupGate & { linkedUserId: string | null }> {
+    const linked = await prisma.account.findUnique({
+        where: {
+            provider_providerAccountId: {
+                provider: input.provider,
+                providerAccountId: input.providerAccountId,
+            },
+        },
+        select: { userId: true },
+    });
+    if (linked) return { allow: true, reason: "existing_account", linkedUserId: linked.userId };
+
+    const addressHasUser = input.email
+        ? (await prisma.user.findUnique({ where: { email: input.email }, select: { id: true } })) !== null
+        : false;
+
+    const jar = await cookies();
+    const hasSession = jar.getAll().some((cookie) => isSessionCookieName(cookie.name));
+    const intentProvider = jar.get(SIGNUP_INTENT_COOKIE)?.value ?? null;
+
+    return {
+        ...oauthSignupGate({
+            provider: input.provider,
+            accountExists: false,
+            addressHasUser,
+            hasSession,
+            intentProvider,
+        }),
+        linkedUserId: null,
+    };
+}

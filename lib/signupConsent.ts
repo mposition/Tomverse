@@ -245,6 +245,8 @@ export async function finalizeSignupConsentAttempt(input: {
   userId: string;
   /** The asking session's sign-in created the account (`accountCreatedBySignIn`). */
   createdBySignIn: boolean;
+  /** The login row that sign-in spent, from its token (`signupEmailLoginAttemptId`). */
+  emailLoginAttemptId?: string | null;
   attemptId: string;
   nonce: string;
   now?: Date;
@@ -276,18 +278,16 @@ export async function finalizeSignupConsentAttempt(input: {
   if (!user) return { ok: false, reason: "not_found" };
 
   const email = user.email ? normalizeEmailLoginAddress(user.email) : null;
-  const emailLoginSince =
-    attempt.channel === "email_code" && attempt.bindingEmail
-      ? await prisma.emailLoginAttempt.findFirst({
-          where: {
-            email: attempt.bindingEmail,
-            createdAt: { gte: attempt.createdAt },
-            consumedAt: { not: null },
-          },
-          orderBy: { consumedAt: "desc" },
-          select: { id: true },
+  // The row the session named, and no other (section 5.2a).
+  const spentRow =
+    attempt.channel === "email_code" && input.emailLoginAttemptId
+      ? await prisma.emailLoginAttempt.findUnique({
+          where: { id: input.emailLoginAttemptId },
+          select: { email: true, consumedAt: true, signupHoldUsedAt: true },
         })
       : null;
+  const spentAt = spentRow ? (spentRow.signupHoldUsedAt ?? spentRow.consumedAt) : null;
+  const emailLoginSpent = spentRow && spentAt ? { email: spentRow.email, spentAt } : null;
 
   const refusal = signupConsentRefusal({
     attempt,
@@ -298,7 +298,7 @@ export async function finalizeSignupConsentAttempt(input: {
       alreadyConsumed: user.signupConsentAttempt !== null,
       createdBySignIn: input.createdBySignIn,
     },
-    emailLoginSince,
+    emailLoginSpent,
     now,
   });
   if (refusal) return { ok: false, reason: refusal };
@@ -351,7 +351,7 @@ export async function finalizeSignupConsentAttempt(input: {
         data: {
           consumedAt: now,
           userId: input.userId,
-          bindingEmailLoginAttemptId: emailLoginSince?.id ?? null,
+          bindingEmailLoginAttemptId: emailLoginSpent ? (input.emailLoginAttemptId ?? null) : null,
         },
       });
       if (consumed.count !== 1) throw RACED;

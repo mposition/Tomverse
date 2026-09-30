@@ -10,6 +10,8 @@ declare module "next-auth" {
             authenticatedAt?: string;
             /** This session's sign-in created the account (sign-up consent, S4). */
             accountCreatedBySignIn?: boolean;
+            /** The login row an email sign-up spent; the consent choice binds to it. */
+            signupEmailLoginAttemptId?: string;
         } & DefaultSession["user"];
     }
 }
@@ -31,5 +33,12 @@ declare module "next-auth/jwt" {
          * account another tab created is signed into here with this false.
          */
         accountCreatedBySignIn?: boolean;
+        /**
+         * The `EmailLoginAttempt` an email sign-up spent, on the token of the
+         * sign-in that created the account only. Finalize binds the sign-up
+         * choice to this row and no other
+         * (docs/policy/email-product-news-redesign-draft.md section 5.2a).
+         */
+        signupEmailLoginAttemptId?: string;
     }
 }

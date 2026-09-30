@@ -330,12 +330,20 @@ const compilerOptions = parsedConfig.options;
 // `lib/emailPreferenceCore.ts` -- both already listed, so the file set is
 // unchanged. None of it is an element access; the count remains 228 and the
 // position-free inventory remains 9aa7ec49..., so this repins positions only.
+//
+// 2026-09-30, sign-in / sign-up split (v25, policy section 5.2a): the OAuth
+// sign-up gate is appended to `lib/sessionRevocationCore.ts` and
+// `lib/sessionSecurity.ts`, the email sign-up hold to `lib/emailLogin.ts`,
+// and `lib/auth.ts` calls them -- all already listed, so the file set stays
+// 190. A dated note in `lib/marketingAutomationAccess.ts` moves positions.
+// No element access is added; the count remains 228 and the position-free
+// inventory remains 9aa7ec49..., so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "41d2f3422e7ab7884739d488a41ca53c",
-  "a8bcee9534f75b4e2176ff9cfcbb584e",
+  "14b574d3bec309641df177645fd265e1",
+  "5cec5912fa43c39f7bc503f3a42381c5",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

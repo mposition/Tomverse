@@ -84,12 +84,19 @@ export const signupConsentRefusal = (input: {
     createdBySignIn: boolean;
   };
   /**
-   * An email login for this address that was **requested** after the choice
-   * was made and has been consumed, if any. Requested after, not merely
-   * consumed after: a code asked for before the choice existed -- another
-   * sign-in, a reactivation -- is not this flow.
+   * The one email login row the sign-in that created this account spent, as
+   * that sign-in named it (docs/policy/email-product-news-redesign-draft.md
+   * section 5.2a, v25), or null. `spentAt` is when it was spent for this
+   * sign-up: the use of its hold when a sign-in proved the address first,
+   * otherwise its consumption.
+   *
+   * v24 required the row to be **requested** after the choice. Since v25 a code
+   * can be requested on the sign-in screen, find no account and finish on the
+   * sign-up screen, so it may predate the choice; its use cannot. Any other row
+   * for the address -- another sign-in, a reactivation -- is not this row,
+   * whatever its times.
    */
-  emailLoginSince: { id: string } | null;
+  emailLoginSpent: { email: string; spentAt: Date } | null;
   now: Date;
 }): SignupConsentRefusal | null => {
   if (signupConsentAttemptState(input.attempt, input.now) !== "pending") return "not_pending";
@@ -108,7 +115,9 @@ export const signupConsentRefusal = (input: {
   if (input.attempt.channel === "email_code") {
     return input.account.email !== null &&
       input.account.email === input.attempt.bindingEmail &&
-      input.emailLoginSince !== null &&
+      input.emailLoginSpent !== null &&
+      input.emailLoginSpent.email === input.attempt.bindingEmail &&
+      input.emailLoginSpent.spentAt.getTime() >= input.attempt.createdAt.getTime() &&
       // An email-code account has no OAuth sign-in yet; one that does was
       // created by the other channel.
       input.account.providers.length === 0

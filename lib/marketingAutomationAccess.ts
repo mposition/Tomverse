@@ -371,9 +371,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  *
  * 2026-09-30: the sign-up consent branch (S4) merges develop; both notes above
  * stand, and the value below is computed over the merged schema.
+ *
+ * 2026-09-30: the sign-in / sign-up split (v25, section 5.2a) adds two
+ * nullable sign-up hold columns to `EmailLoginAttempt`. Not a marketing model or
+ * a webhook input; the digest moves because the whole schema is watched.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6fed753b220165264ed42249f81d6d18d07d0388e2717104e2feb28ae6b310ca";
+  "535917616e4f386958e12d95aa2b3468e5626ee215ba6accd687ddfafcbe6ca6";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

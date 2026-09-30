@@ -195,6 +195,7 @@ test("an email-code sign-up is bound to its address and the code it consumed", a
   const result = await finalizeSignupConsentAttempt({
     userId: user.id,
     createdBySignIn: true,
+    emailLoginAttemptId: login.id,
     attemptId: issued.attemptId,
     nonce: issued.nonce,
   });
@@ -313,9 +314,11 @@ test("an opt-in whose confirmation cannot be requested rolls back, and can be fi
   );
 });
 
-test("a code requested before the choice is not this flow's code", async () => {
-  // A reactivation or an earlier sign-in's code, consumed after the choice,
-  // used to satisfy "consumed since"; it has to have been asked for after it.
+test("only the row the sign-up spent binds, not any row for the address (v25)", async () => {
+  // docs/policy/email-product-news-redesign-draft.md section 5.2a. A
+  // reactivation or an earlier sign-in's code, consumed after the choice, used
+  // to satisfy "consumed since". The binding is now the one row the sign-in
+  // that created the account names in its token.
   const issuedAt = new Date();
   const email = `${randomUUID()}@example.test`;
   const issued = await issueSignupConsentAttempt({
@@ -328,23 +331,100 @@ test("a code requested before the choice is not this flow's code", async () => {
     now: issuedAt,
   });
   assert.ok(issued.ok);
-  await prisma.emailLoginAttempt.create({
+  const other = await prisma.emailLoginAttempt.create({
     data: {
       email,
       codeHash: "hash",
       linkTokenHash: randomUUID(),
       expiresAt: later(issuedAt, 600_000),
       createdAt: new Date(issuedAt.getTime() - 1_000),
-      consumedAt: later(issuedAt),
+      consumedAt: new Date(issuedAt.getTime() - 500),
     },
   });
   const user = await prisma.user.create({
     data: { email, createdAt: later(issuedAt, 2_000) },
     select: { id: true },
   });
+  // The session named no row.
   assert.deepEqual(
     await finalizeSignupConsentAttempt({ userId: user.id, createdBySignIn: true, attemptId: issued.attemptId, nonce: issued.nonce }),
     { ok: false, reason: "binding_mismatch" }
+  );
+  // The row it names was spent before the choice.
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: true,
+      emailLoginAttemptId: other.id,
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    }),
+    { ok: false, reason: "binding_mismatch" }
+  );
+});
+
+test("a code proved on the sign-in screen binds when its hold is spent after the choice (v25)", async () => {
+  // Requested and proved before the choice existed; the row is consumed and
+  // held. The sign-up step stores the choice, then spends the hold.
+  const email = `${randomUUID()}@example.test`;
+  const requestedAt = new Date(Date.now() - 60_000);
+  const held = await prisma.emailLoginAttempt.create({
+    data: {
+      email,
+      codeHash: "hash",
+      linkTokenHash: randomUUID(),
+      createdAt: requestedAt,
+      expiresAt: later(requestedAt, 600_000),
+      consumedAt: later(requestedAt, 1_000),
+      signupHoldUntil: later(requestedAt, 600_000),
+    },
+  });
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "email_code",
+    email,
+    expressOptInRequested: false,
+    objected: false,
+    language: "en",
+    ipCountry: "US",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  await prisma.emailLoginAttempt.update({
+    where: { id: held.id },
+    data: { signupHoldUsedAt: later(issuedAt, 1_000) },
+  });
+  const user = await prisma.user.create({
+    data: { email, createdAt: later(issuedAt, 2_000) },
+    select: { id: true },
+  });
+  assert.deepEqual(
+    await finalizeSignupConsentAttempt({
+      userId: user.id,
+      createdBySignIn: true,
+      emailLoginAttemptId: held.id,
+      attemptId: issued.attemptId,
+      nonce: issued.nonce,
+    }),
+    { ok: true, confirmationRequested: false }
+  );
+});
+
+test("the database refuses a hold on an unconsumed row and a use without a hold", async () => {
+  const base = {
+    email: `${randomUUID()}@example.test`,
+    codeHash: "hash",
+    expiresAt: later(new Date(), 600_000),
+  };
+  await assert.rejects(
+    prisma.emailLoginAttempt.create({
+      data: { ...base, linkTokenHash: randomUUID(), signupHoldUntil: later(new Date(), 600_000) },
+    })
+  );
+  await assert.rejects(
+    prisma.emailLoginAttempt.create({
+      data: { ...base, linkTokenHash: randomUUID(), consumedAt: new Date(), signupHoldUsedAt: new Date() },
+    })
   );
 });
 
