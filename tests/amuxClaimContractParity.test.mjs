@@ -489,10 +489,19 @@ test("TypeScript and Rust share the database-busy reason and its exact body", as
   // sweep since 2026-09-30: for a write the server sends it only when the
   // transaction never started and the route had written nothing
   // (AMUX_DB_NOT_STARTED). Anything else from them still stops the run.
-  assert.match(schedulerSource, /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("queue"\);/);
+  //
+  // Since 2026-09-30 (selection-read 5xx/transport skip), both selection
+  // reads share one handler, `handle_selection_read`, so the busy skip's
+  // `"queue"`/`"routing_snapshot"` label is passed in as `endpoint` at each
+  // call site rather than inlined next to `skip_tick_for_database_busy`.
   assert.match(
     schedulerSource,
-    /SelectionRead::DatabaseBusy => \{\s*skip_tick_for_database_busy\("routing_snapshot"\);/,
+    /Ok\(SelectionRead::DatabaseBusy\) => \{\s*skip_tick_for_database_busy\(endpoint\);/,
+  );
+  assert.match(schedulerSource, /self\.handle_selection_read\("queue", queue_result\)/);
+  assert.match(
+    schedulerSource,
+    /self\.handle_selection_read\("routing_snapshot", snapshot_result\)/,
   );
   assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => \{[\s\S]*?verdict = "claim_skipped"[\s\S]*?return Ok\(\(\)\);/);
   assert.match(schedulerSource, /Err\(error\) if is_database_busy\(&error\) => warn!\([\s\S]*?verdict = "recovery_skipped"/);
