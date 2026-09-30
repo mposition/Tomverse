@@ -155,6 +155,12 @@ export const signupRedirectPath = (provider: string) => {
   return `/auth/signup?${params.toString()}`;
 };
 
+/** NextAuth's session cookie names, secure prefix first; a large token is chunked as `.0`, `.1`, ... */
+export const SESSION_COOKIE_NAMES = [
+  "__Secure-next-auth.session-token",
+  "next-auth.session-token",
+] as const;
+
 /** NextAuth's session cookie, possibly chunked, with or without the secure prefix. */
 export const isSessionCookieName = (name: string) =>
   /^(__Secure-)?next-auth\.session-token(\.\d+)?$/.test(name);

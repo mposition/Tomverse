@@ -28,6 +28,7 @@ import {
     readStoredSignupConsentChoice,
     rememberAuthCallbackUrl,
     storeSignupConsentChoice,
+    withdrawSignupIntent,
     withSignupConsentMarker,
 } from "@/components/auth/signupConsentClient";
 
@@ -399,6 +400,8 @@ function SignInButtons({
         if (isSignup) {
             attemptId = await storeConsent("oauth", { provider });
             await declareSignupIntent(provider);
+        } else {
+            await withdrawSignupIntent();
         }
         await signIn(
             provider,

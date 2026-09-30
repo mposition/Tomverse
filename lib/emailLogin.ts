@@ -333,52 +333,32 @@ export type EmailLoginVerifyResult =
     }
   | { ok: false; reason: "invalid_or_expired" | "locked" | "account_not_found" };
 
-type ResolveUserResult =
-  | { ok: true; userId: string; isNewUser: boolean }
-  | { ok: false; reason: "disabled" | "not_found" };
-
-// Existing accounts that have explicitly disabled the email login method
-// (see DELETE /api/user/login-methods) must not be signable-in via a fresh
-// code/link even if one was somehow generated for their address -- otherwise
-// "remove email login" wouldn't actually remove it as a working credential.
-//
-// An address with no account is created only for a sign-up; a sign-in answers
-// `not_found` and the caller turns the row into a hold.
-async function resolveUserForVerifiedEmail(
-  email: string,
-  intent: EmailLoginIntent
-): Promise<ResolveUserResult> {
-  const existing = await prisma.user.findUnique({
-    where: { email },
-    select: { id: true, emailVerified: true, emailLoginEnabled: true },
-  });
-  if (existing) {
-    if (!existing.emailLoginEnabled) {
-      return { ok: false, reason: "disabled" };
-    }
-    if (!existing.emailVerified) {
-      await prisma.user.update({ where: { id: existing.id }, data: { emailVerified: new Date() } });
-    }
-    return { ok: true, userId: existing.id, isNewUser: false };
-  }
-  if (intent !== "signup") return { ok: false, reason: "not_found" };
-  const created = await prisma.user.create({
-    data: { email, emailVerified: new Date() },
-    select: { id: true },
-  });
-  logSecurityAuditEvent("auth.create_user", { userId: created.id });
-  return { ok: true, userId: created.id, isNewUser: true };
-}
-
-type SpentAttempt = {
-  ok: true;
-  attemptId: string;
-  expiresAt: Date;
-  /** The row was already consumed and this spent its sign-up hold. */
-  viaHold: boolean;
+/**
+ * The database's clock, in the naive-UTC form the timestamp columns store.
+ *
+ * A sign-up's consent attempt is stamped with `LOCALTIMESTAMP(3)`
+ * (lib/signupConsent.ts), and finalize compares it with the moment this row was
+ * spent for that sign-up. Stamping the row with this process's clock would
+ * compare two clocks, and an instance running behind would refuse the very
+ * sign-up it just completed.
+ */
+const databaseNow = async (): Promise<Date> => {
+  const [row] = await prisma.$queryRaw<{ now: Date }[]>`SELECT LOCALTIMESTAMP(3) AS "now"`;
+  if (!row) throw new Error("The database did not report its clock.");
+  return row.now;
 };
 
-type CodeConsumeResult = SpentAttempt | { ok: false; reason: "invalid_or_expired" | "locked" };
+/** A row whose code or link matched, before anything is written. */
+type MatchedAttempt = { id: string; expiresAt: Date; consumedAt: Date | null };
+
+type MatchResult =
+  | {
+      ok: true;
+      attempt: MatchedAttempt;
+      /** Clears what a successful proof clears: the lockout and the request quota. */
+      settle: () => Promise<void>;
+    }
+  | { ok: false; reason: "invalid_or_expired" | "locked" };
 
 /** A consumed row whose one sign-up has not happened yet and has not expired. */
 const liveHoldWhere = (now: Date) => ({
@@ -388,59 +368,49 @@ const liveHoldWhere = (now: Date) => ({
 });
 
 /**
- * Spends one row: an unconsumed one by consuming it, or a held one by using
- * its hold. Both are single compare-and-set updates, so two requests with the
- * same code cannot both succeed.
+ * Spends a matched row in one compare-and-set UPDATE: an unconsumed row by
+ * consuming it -- and, with `holdUntil`, turning it into a sign-up hold in the
+ * same statement -- or a held row by using its hold. Two requests with the
+ * same code cannot both succeed, and a sign-in that found no account can never
+ * leave the code consumed without its hold.
  */
 async function spendAttempt(
-  attempt: { id: string; expiresAt: Date; consumedAt: Date | null },
-  now: Date
-): Promise<CodeConsumeResult> {
+  attempt: MatchedAttempt,
+  now: Date,
+  options: { holdUntil?: Date } = {}
+): Promise<boolean> {
   if (attempt.consumedAt === null) {
     const consumed = await prisma.emailLoginAttempt.updateMany({
       where: { id: attempt.id, consumedAt: null },
-      data: { consumedAt: now },
+      data: {
+        consumedAt: now,
+        ...(options.holdUntil ? { signupHoldUntil: options.holdUntil } : {}),
+      },
     });
-    if (consumed.count !== 1) return { ok: false, reason: "invalid_or_expired" };
-    return { ok: true, attemptId: attempt.id, expiresAt: attempt.expiresAt, viaHold: false };
+    return consumed.count === 1;
   }
+  if (options.holdUntil) return false;
   const used = await prisma.emailLoginAttempt.updateMany({
     where: { id: attempt.id, ...liveHoldWhere(now) },
     data: { signupHoldUsedAt: now },
   });
-  if (used.count !== 1) return { ok: false, reason: "invalid_or_expired" };
-  return { ok: true, attemptId: attempt.id, expiresAt: attempt.expiresAt, viaHold: true };
+  return used.count === 1;
 }
 
-/**
- * Turns a row this request just consumed into a sign-up hold that lasts as
- * long as the code would have.
- */
-async function placeSignupHold(attemptId: string, expiresAt: Date, now: Date) {
-  await prisma.emailLoginAttempt.updateMany({
-    where: { id: attemptId, consumedAt: { not: null }, signupHoldUntil: null },
-    data: { signupHoldUntil: expiresAt > now ? expiresAt : now },
-  });
-}
-
-// Just proves control of `email` via the 6-digit code -- rate limiting,
-// persistent lockout, hash comparison, single-use consumption. Does NOT look
-// up or create a User and does NOT care whether email login is currently
-// enabled for that address: callers that are signing someone in (where the
-// email may or may not already own an account) layer resolveUserForVerifiedEmail
-// on top; callers that are re-enabling email login for an already-authenticated
-// user (who by definition owns the account, and is proving mailbox control
-// specifically to flip emailLoginEnabled back on) call this directly instead.
+// Proves control of `email` via the 6-digit code -- rate limiting, persistent
+// lockout, hash comparison -- and writes nothing to the row: the caller decides
+// how it is spent, once it knows whether the address has an account.
 //
-// `allowHold` lets a sign-up spend a code that a sign-in already proved and
-// held (section 5.2a). Nothing else passes it, so a held code never signs in
-// and never re-enables email login.
-async function consumeCodeForEmail(
+// `allowHold` lets a sign-up match a code that a sign-in already proved and
+// held (docs/policy/email-product-news-redesign-draft.md section 5.2a). Nothing
+// else passes it, so a held code never signs in and never re-enables email
+// login.
+async function matchCodeForEmail(
   request: Request,
   email: string,
   code: string,
   options: { allowHold?: boolean } = {}
-): Promise<CodeConsumeResult> {
+): Promise<MatchResult> {
   await consumeApiRateLimit(request, `email-otp-verify:${email}`, "email-otp-verify", {
     minute: 10,
     day: 40,
@@ -499,60 +469,106 @@ async function consumeCodeForEmail(
     return { ok: false, reason: "invalid_or_expired" };
   }
 
-  const spent = await spendAttempt(attempt, now);
-  if (!spent.ok) return spent;
-
-  await clearLockoutBucket(lockoutKey, windowStart);
-  await releaseEmailRequestQuota(email);
-  return spent;
+  return {
+    ok: true,
+    attempt: { id: attempt.id, expiresAt: attempt.expiresAt, consumedAt: attempt.consumedAt },
+    settle: async () => {
+      await clearLockoutBucket(lockoutKey, windowStart);
+      await releaseEmailRequestQuota(email);
+    },
+  };
 }
 
 /**
- * The account half of a verified code or link: sign in, create for a sign-up,
- * or turn the row into a sign-up hold for a sign-in that found no account.
+ * The account half of a matched code or link
+ * (docs/policy/email-product-news-redesign-draft.md section 5.2a):
+ *
+ * - an existing account signs in -- never through a held row, which exists
+ *   only for a sign-up;
+ * - a sign-up with no account creates one;
+ * - a sign-in with no account consumes the row into a one-time sign-up hold
+ *   in one UPDATE and answers `account_not_found`.
+ *
+ * Accounts that have explicitly disabled the email login method (see DELETE
+ * /api/user/login-methods) must not be signable-in via a fresh code/link even
+ * if one was somehow generated for their address -- otherwise "remove email
+ * login" wouldn't actually remove it as a working credential. Their row is
+ * consumed, as it always was, and the answer is `invalid_or_expired`.
  */
 async function completeVerifiedEmail(
   request: Request,
   email: string,
-  spent: SpentAttempt,
+  matched: Extract<MatchResult, { ok: true }>,
   intent: EmailLoginIntent
 ): Promise<EmailLoginVerifyResult> {
-  const resolved = await resolveUserForVerifiedEmail(email, intent);
-  if (!resolved.ok) {
-    if (resolved.reason === "not_found") {
-      // Proven, and no account: the only person told is the one who just
-      // proved the address (section 5.2a). The row stays consumed for sign-in.
-      await placeSignupHold(spent.attemptId, spent.expiresAt, new Date());
-      logSecurityAuditEvent("auth.email_code.verify", {
-        request,
-        resourceId: email,
-        outcome: "denied",
-        reason: "EMAIL_ACCOUNT_NOT_FOUND",
-      });
-      return { ok: false, reason: "account_not_found" };
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, emailVerified: true, emailLoginEnabled: true },
+  });
+  const viaHold = matched.attempt.consumedAt !== null;
+  const now = await databaseNow();
+
+  if (!existing && intent !== "signup") {
+    const holdUntil = matched.attempt.expiresAt > now ? matched.attempt.expiresAt : now;
+    if (!(await spendAttempt(matched.attempt, now, { holdUntil }))) {
+      return { ok: false, reason: "invalid_or_expired" };
     }
+    await matched.settle();
+    // Proven, and no account: the only person told is the one who just proved
+    // the address. The row is consumed for sign-in and held for one sign-up.
     logSecurityAuditEvent("auth.email_code.verify", {
       request,
       resourceId: email,
       outcome: "denied",
-      reason: "EMAIL_LOGIN_DISABLED",
+      reason: "EMAIL_ACCOUNT_NOT_FOUND",
     });
+    return { ok: false, reason: "account_not_found" };
+  }
+
+  // A hold completes a sign-up and nothing else. If an account has appeared
+  // at the address since, it is signed into by a fresh code, not by this row.
+  if (existing && viaHold) return { ok: false, reason: "invalid_or_expired" };
+
+  if (!(await spendAttempt(matched.attempt, now))) {
     return { ok: false, reason: "invalid_or_expired" };
   }
+  await matched.settle();
+
+  let userId: string;
+  let isNewUser: boolean;
+  if (existing) {
+    if (!existing.emailLoginEnabled) {
+      logSecurityAuditEvent("auth.email_code.verify", {
+        request,
+        resourceId: email,
+        outcome: "denied",
+        reason: "EMAIL_LOGIN_DISABLED",
+      });
+      return { ok: false, reason: "invalid_or_expired" };
+    }
+    if (!existing.emailVerified) {
+      await prisma.user.update({ where: { id: existing.id }, data: { emailVerified: new Date() } });
+    }
+    userId = existing.id;
+    isNewUser = false;
+  } else {
+    const created = await prisma.user.create({
+      data: { email, emailVerified: new Date() },
+      select: { id: true },
+    });
+    logSecurityAuditEvent("auth.create_user", { userId: created.id });
+    userId = created.id;
+    isNewUser = true;
+  }
+
   logSecurityAuditEvent("auth.email_code.verify", {
     request,
-    userId: resolved.userId,
+    userId,
     resourceId: email,
     outcome: "success",
-    isNewUser: resolved.isNewUser,
+    isNewUser,
   });
-  return {
-    ok: true,
-    userId: resolved.userId,
-    email,
-    isNewUser: resolved.isNewUser,
-    emailLoginAttemptId: spent.attemptId,
-  };
+  return { ok: true, userId, email, isNewUser, emailLoginAttemptId: matched.attempt.id };
 }
 
 export async function verifyEmailLoginCode(
@@ -562,26 +578,32 @@ export async function verifyEmailLoginCode(
   intent: EmailLoginIntent = "signin"
 ): Promise<EmailLoginVerifyResult> {
   const email = normalizeEmailLoginAddress(rawEmail);
-  const consumeResult = await consumeCodeForEmail(request, email, code, {
+  const matched = await matchCodeForEmail(request, email, code, {
     allowHold: intent === "signup",
   });
-  if (!consumeResult.ok) return consumeResult;
-  return completeVerifiedEmail(request, email, consumeResult, intent);
+  if (!matched.ok) return matched;
+  return completeVerifiedEmail(request, email, matched, intent);
 }
 
 // Used by the authenticated "(re-)enable email login for my own account"
 // flow (POST /api/user/login-methods/email/verify): the caller already knows
 // the userId from its own session and only needs proof of mailbox control,
 // not account lookup/creation or an emailLoginEnabled gate (flipping that
-// flag back on is the entire point of this call).
+// flag back on is the entire point of this call). A held row is never
+// matched here.
 export async function verifyEmailLoginCodeForOwnAccount(
   request: Request,
   rawEmail: string,
   code: string
 ): Promise<{ ok: true } | { ok: false; reason: "invalid_or_expired" | "locked" }> {
   const email = normalizeEmailLoginAddress(rawEmail);
-  const result = await consumeCodeForEmail(request, email, code);
-  return result.ok ? { ok: true } : result;
+  const matched = await matchCodeForEmail(request, email, code);
+  if (!matched.ok) return matched;
+  if (!(await spendAttempt(matched.attempt, new Date()))) {
+    return { ok: false, reason: "invalid_or_expired" };
+  }
+  await matched.settle();
+  return { ok: true };
 }
 
 export async function verifyEmailLoginLink(
@@ -619,11 +641,17 @@ export async function verifyEmailLoginLink(
     return { ok: false, reason: "invalid_or_expired" };
   }
 
-  const spent = await spendAttempt(attempt, now);
-  if (!spent.ok) return spent;
-
-  await releaseEmailRequestQuota(attempt.email);
-  return completeVerifiedEmail(request, attempt.email, spent, intent);
+  return completeVerifiedEmail(
+    request,
+    attempt.email,
+    {
+      ok: true,
+      attempt: { id: attempt.id, expiresAt: attempt.expiresAt, consumedAt: attempt.consumedAt },
+      // A link never counted toward the code lockout, so there is none to clear.
+      settle: () => releaseEmailRequestQuota(attempt.email),
+    },
+    intent
+  );
 }
 
 /**

@@ -24,6 +24,13 @@ import {
 
 const bodySchema = z.object({ provider: z.enum(SIGNUP_INTENT_PROVIDERS) }).strict();
 
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/api/auth",
+};
+
 export async function POST(req: Request) {
   try {
     await consumeApiRateLimit(
@@ -35,10 +42,7 @@ export async function POST(req: Request) {
     const body = await readLimitedJson(req, 256, bodySchema);
     const response = NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
     response.cookies.set(SIGNUP_INTENT_COOKIE, body.provider, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/api/auth",
+      ...cookieOptions,
       maxAge: SIGNUP_INTENT_MAX_AGE_SECONDS,
     });
     return response;
@@ -46,6 +50,30 @@ export async function POST(req: Request) {
     const secured = apiSecurityResponse(error);
     if (secured) return secured;
     console.error("Signup intent failed:", error);
+    return NextResponse.json({ ok: false }, { status: 500 });
+  }
+}
+
+/**
+ * Withdraws the intent. The sign-in screen calls this before a provider click,
+ * so an intent the sign-up screen set a few minutes ago cannot turn that
+ * sign-in into an account.
+ */
+export async function DELETE(req: Request) {
+  try {
+    await consumeApiRateLimit(
+      req,
+      `signup-intent:${getAnonymousClientKey(req)}`,
+      "signup-intent",
+      { minute: 20, day: 200 }
+    );
+    const response = NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    response.cookies.set(SIGNUP_INTENT_COOKIE, "", { ...cookieOptions, maxAge: 0 });
+    return response;
+  } catch (error) {
+    const secured = apiSecurityResponse(error);
+    if (secured) return secured;
+    console.error("Signup intent withdrawal failed:", error);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }

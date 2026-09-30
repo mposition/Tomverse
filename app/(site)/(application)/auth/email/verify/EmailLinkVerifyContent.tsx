@@ -8,6 +8,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { SignupConsentDevices } from "@/components/auth/SignupConsentDevices";
 import {
+    readStoredSignupConsentChoice,
     storedEmailAttemptId,
     storeSignupConsentChoice,
     withSignupConsentMarker,
@@ -38,17 +39,18 @@ function EmailLinkVerifier({ signupConsentEnabled }: { signupConsentEnabled: boo
 
         void (async () => {
             try {
-                // Opened in the tab that made the sign-up choice, the link was
-                // asked for from the sign-up screen: it signs up, and the
-                // landing carries the choice's marker like the code form's.
-                // Anywhere else it signs in, and never creates an account
-                // (docs/policy/email-product-news-redesign-draft.md section 5.2a).
-                const attemptId = storedEmailAttemptId();
-                const landing = withSignupConsentMarker(callbackUrl, attemptId);
+                // Opening a link only ever signs in: an account is created by
+                // the sign-up button below and nothing else, even in the tab
+                // that made a sign-up choice -- that choice may name another
+                // address (docs/policy/email-product-news-redesign-draft.md
+                // section 5.2a). An existing account's landing still carries
+                // this tab's marker, so finalize can say the choice was not
+                // applied.
+                const landing = withSignupConsentMarker(callbackUrl, storedEmailAttemptId());
                 const result = await signIn("email-code", {
                     redirect: false,
                     linkToken: token,
-                    intent: attemptId ? "signup" : "signin",
+                    intent: "signin",
                     callbackUrl: landing,
                 });
                 if (result?.error === "EMAIL_ACCOUNT_NOT_FOUND") {
@@ -64,6 +66,10 @@ function EmailLinkVerifier({ signupConsentEnabled }: { signupConsentEnabled: boo
                         | { ok?: unknown; email?: unknown }
                         | null;
                     if (response.ok && data?.ok === true && typeof data.email === "string") {
+                        // A choice this tab already stored is shown again, not
+                        // reset: the button stores what is on screen.
+                        const stored = readStoredSignupConsentChoice();
+                        if (stored) setConsentChoice(stored);
                         setHeldEmail(data.email);
                         setStatus("no_account");
                     } else {
