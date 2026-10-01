@@ -177,7 +177,7 @@ ALTER TABLE "AmuxIdeaUnitDecision"
     ADD CONSTRAINT "AmuxIdeaUnitDecision_ideaId_actorUserId_fkey"
     FOREIGN KEY ("ideaId", "actorUserId") REFERENCES "AmuxIdeaSubmission"("id", "actorUserId")
     ON DELETE RESTRICT ON UPDATE RESTRICT,
-    ADD CONSTRAINT "AmuxIdeaUnitDecision_draftUnitId_ideaId_actorUserId_chunkIndex_fkey"
+    ADD CONSTRAINT "AmuxIdeaUnitDecision_draftUnitId_ideaId_actorUserId_chunkI_fkey"
     FOREIGN KEY ("draftUnitId", "ideaId", "actorUserId", "chunkIndex")
     REFERENCES "AmuxIdeaDraftUnit"("id", "ideaId", "actorUserId", "chunkIndex")
     ON DELETE RESTRICT ON UPDATE RESTRICT,

@@ -6959,7 +6959,7 @@ model AmuxIdeaUnitDecision {
   updatedAt                  DateTime  @updatedAt
 
   idea AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
-  draftUnit AmuxIdeaDraftUnit @relation(fields: [draftUnitId, ideaId, actorUserId, chunkIndex], references: [id, ideaId, actorUserId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  draftUnit AmuxIdeaDraftUnit @relation(fields: [draftUnitId, ideaId, actorUserId, chunkIndex], references: [id, ideaId, actorUserId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaUnitDecision_draftUnitId_ideaId_actorUserId_chunkI_fkey")
   sourcePreview AmuxIdeaTransferPreview @relation(fields: [sourcePreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   baseNode AmuxPortfolioNode? @relation("AmuxV4DecisionBaseNode", fields: [baseNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   resolvedNode AmuxPortfolioNode? @relation("AmuxV4DecisionResolvedNode", fields: [resolvedNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
