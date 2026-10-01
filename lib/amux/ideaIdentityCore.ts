@@ -3,5 +3,6 @@
 export const AMUX_V4_IDEA_SOURCE_SYSTEM = "admin-idea-v4" as const;
 // The analysis agent family is shared with earlier intake, not a system audit actor.
 export const AMUX_V4_IDEA_AGENT_ID = "amux-intake" as const;
-// Reserved only for v4 analysis-state and expiry events, not worker promotion.
+// Reserved for v4 intake analysis state (including source-plan creation) and
+// expiry events, never worker promotion.
 export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
