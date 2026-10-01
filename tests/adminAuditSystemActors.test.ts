@@ -4,12 +4,22 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+  AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
+  AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
   SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   auditRowActorKind,
   isSystemAuditActor,
   metadataClaimsSystemActor,
+  systemAuditActionAllowed,
 } from "../lib/adminAuditSystemActors.ts";
+import {
+  AMUX_V4_IDEA_AGENT_ID,
+  AMUX_V4_IDEA_SOURCE_SYSTEM,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+} from "../lib/amux/ideaIdentityCore.ts";
 
 // The closed list of system actors and the reserved metadata key.
 //
@@ -32,6 +42,7 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-shadow-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
+    "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
@@ -43,6 +54,39 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
+  // Only the initial source-plan writer uses the v4 intake identity. The
+  // remaining candidate actors have no audit-writer authority.
+  assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
+    "amux-intake-supervisor",
+    "amux-intake-retention",
+    "amux-portfolio-scorer",
+    "amux-v22-auto-admit",
+  ]);
+  assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
+  assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
+  assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+    targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE },
+  })), "system");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_INITIAL_SOURCE_PLAN_ACTION, AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    "AMUX_V4_CARD_REGISTERED", AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), false);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_INITIAL_SOURCE_PLAN_ACTION, "AmuxWorkItem"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+    targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR },
+  })), "unknown", "legacy marker-only rows must not be retroactively classified");
+  for (const proposed of AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS) {
+    assert.equal(new Set<string>(SYSTEM_AUDIT_ACTORS).has(proposed), false);
+    assert.equal(isSystemAuditActor(proposed), false);
+    assert.equal(auditRowActorKind(row({ metadata: { systemActor: proposed } })), "unknown");
+  }
   assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
   // The column marker is not an audit actor name.
   assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);

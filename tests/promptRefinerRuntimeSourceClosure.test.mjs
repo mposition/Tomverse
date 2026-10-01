@@ -356,12 +356,21 @@ const compilerOptions = parsedConfig.options;
 // confirmation to `lib/emailPreferences.ts`, and `lib/auth.ts` writes the
 // proof into the token -- all already listed, so the file set stays 190. No
 // element access is added; this repins positions only.
+//
+// 2026-10-02, AMUX v4 integration: the scoped system-audit actor changes
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts`, both already in the
+// 190-file closure. The count remains 228 and the position-free inventory
+// retains digest 9aa7ec49...; only source positions moved. The actor identity
+// is defined in the existing audit module to avoid adding an AMUX module to
+// the fixed runtime import closure. Repinning the marketing pipeline over the
+// merged Prisma schema also moved positions in its already-listed module;
+// the final position-free inventory is still unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "f53dabacb0732a88f681597b097812b7",
-  "5253c18da6cbc591d022ae0809155a4a",
+  "a47388874493d0d9d704160572084dc3",
+  "c9cc5d7708e47ad1b61e09c3db84e827",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

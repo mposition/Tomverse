@@ -61,6 +61,7 @@ const routeFiles = (dir) => {
 const reachPrefix = (path) => {
   const segments = path
     .slice(ROUTE_DIR.length)
+    .replaceAll("\\", "/")
     .replace(/\/route\.ts$/, "")
     .split("/");
   const literal = [];

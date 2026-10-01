@@ -52,6 +52,24 @@ const boundary = read("lib/amux/dbBoundary.ts");
 const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy version 20: the orchestrator halt tables.
   "20260930120000_amux_orchestrator_halt",
+  // Owner-approved AMUX intake v4 and orchestration v22: inert additive
+  // schema. This set orders migrations; it does not exempt their own guards.
+  "20261001102000_amux_v4_idea_schema",
+  "20261001102100_amux_v4_portfolio_schema",
+  // AMUX intake v4: additive request identity fence for dark idea submission.
+  "20261001102200_amux_v4_idea_submission_request_id",
+  // AMUX intake v7: separately purgeable normalized draft units, still dark.
+  "20261001102300_amux_v4_draft_units",
+  // AMUX intake v4: canonical references for cross-chunk draft units, still dark.
+  "20261001102400_amux_v4_draft_local_ref",
+  // AMUX intake v4 (policy v8): database-owned node archive clock, still dark.
+  "20261001102500_amux_v4_node_retention_clock",
+  // AMUX intake v4: owner decision receipt ledger, still dark.
+  "20261001102600_amux_v4_unit_decisions",
+  // AMUX intake v4: operator-controlled Frontier eligibility, still dark.
+  "20261001111800_amux_v4_frontier_model_catalog",
+  // AMUX intake v4: immutable source-plan revision and per-revision cursor.
+  "20261002100000_amux_v4_source_plan_revision",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

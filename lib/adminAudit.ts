@@ -9,9 +9,12 @@ import {
   computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
 import {
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+  AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   isSystemAuditActor,
   metadataClaimsSystemActor,
+  systemAuditActionAllowed,
   type SystemAuditActor,
 } from "@/lib/adminAuditSystemActors";
 
@@ -265,6 +268,11 @@ export async function writeSystemAuditLog({
       "writeSystemAuditLog was given a system actor that is not listed."
     );
   }
+  if (!systemAuditActionAllowed(systemActor, action, targetType)) {
+    throw new AuditWriteRefusedError(
+      "writeSystemAuditLog was given an action or target outside the actor's scope."
+    );
+  }
   if (
     metadata !== undefined &&
     metadata !== null &&
@@ -283,7 +291,11 @@ export async function writeSystemAuditLog({
     targetType,
     targetId: targetId || null,
     summary: safeSummary(summary),
-    metadata: { ...(metadata || {}), [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor },
+    metadata: {
+      ...(metadata || {}),
+      [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor,
+      ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR ? { actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE } : {}),
+    },
     ipAddress: null,
     userAgent: null,
   };

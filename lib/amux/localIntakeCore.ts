@@ -33,6 +33,7 @@ export const LOCAL_INTAKE_APPLY_ENV = "TOMVERSE_AMUX_INTAKE_LOCAL_APPLY";
 export const LOCAL_INTAKE_SOURCE_KEY_SECRET_ENV = "AMUX_INTAKE_LOCAL_SOURCE_KEY_SECRET";
 export const LOCAL_INTAKE_APPLY_CODE_LATCH = true;
 export const LOCAL_INTAKE_SCANNER_VERSION = "local-amux-intake-scan-v1";
+export const AMUX_V4_INPUT_SCANNER_VERSION = "amux-v4-intake-scan-v1";
 export const LOCAL_INTAKE_PROMPT_VERSION = "local-amux-intake-prompt-v1";
 export const LOCAL_INTAKE_CANONICALIZATION_VERSION = "amux-json-v1";
 
@@ -199,6 +200,20 @@ const secretPattern = (value: string): boolean =>
   /DATABASE_URL\s*=/.test(value) ||
   /(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S{8,}/i.test(value);
 
+/** v4 is a separate, dark gate. The live v3 scanner above is unchanged. */
+const v4SecretPattern = (value: string): boolean =>
+  /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{1,}/.test(value) ||
+  /sk_(?:test|live)_[A-Za-z0-9]{12,}/i.test(value) ||
+  /rk_(?:test|live)_[A-Za-z0-9]{12,}/i.test(value) ||
+  /whsec_[A-Za-z0-9]{12,}/i.test(value) ||
+  /ghp_/.test(value) ||
+  /github_pat_/.test(value) ||
+  /AKIA[0-9A-Z]{16}/.test(value) ||
+  /xox[baprs]-/.test(value) ||
+  /-----BEGIN /.test(value) ||
+  /DATABASE_URL\s*=/.test(value) ||
+  /(?:api[\s_-]*key|secret|password|token)\s*[:=]\s*\S{8,}/i.test(value);
+
 const emailPattern = (value: string): boolean => /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value);
 
 const phonePattern = (value: string): boolean => /\b\d{3}[-. ]\d{3}[-. ]\d{4}\b/.test(value);
@@ -219,20 +234,28 @@ const privateUrl = (value: string): boolean => {
   return false;
 };
 
-/** Operator text, before any model process starts. */
-export const scanLocalIntakeInput = (
+const scanIntakeInputWithSecret = (
   value: string,
+  hasSecret: (value: string) => boolean,
 ): { ok: true } | { ok: false; code: string } => {
   if (typeof value !== "string") return { ok: false, code: "schema_rejected" };
   if (bytes(value) < 1) return { ok: false, code: "metadata_incomplete" };
   if (bytes(value) > LOCAL_INTAKE_INPUT_MAX_BYTES) return { ok: false, code: "too_large" };
   if (controlChar(value)) return { ok: false, code: "control_character" };
-  if (secretPattern(value)) return { ok: false, code: "secret" };
+  if (hasSecret(value)) return { ok: false, code: "secret" };
   if (emailPattern(value) || phonePattern(value)) return { ok: false, code: "personal_data" };
   if (absolutePath(value)) return { ok: false, code: "absolute_path" };
   if (privateUrl(value)) return { ok: false, code: "private_url" };
   return { ok: true };
 };
+
+/** Operator text, before any v3 model process starts. */
+export const scanLocalIntakeInput = (value: string): { ok: true } | { ok: false; code: string } =>
+  scanIntakeInputWithSecret(value, secretPattern);
+
+/** Separate v4 input gate; this does not change the already enabled v3 path. */
+export const scanAmuxV4Input = (value: string): { ok: true } | { ok: false; code: string } =>
+  scanIntakeInputWithSecret(value, v4SecretPattern);
 
 const proseRefused = (value: string): string | null => {
   if (controlChar(value)) return "control_character";

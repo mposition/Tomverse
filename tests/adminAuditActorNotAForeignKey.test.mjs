@@ -25,17 +25,28 @@ const model = schema.slice(
     schema.indexOf("model AdminAuditLog {"),
     schema.indexOf("}", schema.indexOf("model AdminAuditLog {"))
 );
+const ownsForeignKey = (source) => /@relation\([^)]*\bfields\s*:/s.test(source);
 
 test("the audit row's actor is a plain column, not a relation", () => {
     assert.ok(model.includes("actorUserId"), "the column itself stays: it records who acted");
     assert.ok(
-        !/@relation/.test(model),
-        "a relation on this table gives the database a way to rewrite a signed row"
+        !ownsForeignKey(model),
+        "a foreign key owned by this table could rewrite a signed audit row"
+    );
+    assert.ok(
+        !/fields\s*:\s*\[[^\]]*\bactorUserId\b/s.test(model),
+        "actorUserId must not appear in any composite relation fields"
     );
     assert.ok(
         !/adminAuditLogs\s+AdminAuditLog\[\]/.test(schema),
         "the back-relation would restore the foreign key"
     );
+});
+
+test("the actor guard catches multiline and composite foreign keys", () => {
+    assert.equal(ownsForeignKey('some User? @relation("Actor",\n fields: [id, actorUserId], references: [id, id])'), true);
+    assert.equal(ownsForeignKey('some User? @relation(fields: [actorUserId, id], references: [id, id])'), true);
+    assert.equal(ownsForeignKey('backrefs Decision[] @relation("DecisionAudit")'), false);
 });
 
 test("no referential action may touch a hashed column", () => {

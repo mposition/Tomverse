@@ -384,9 +384,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-30: the sign-in / sign-up split takes develop with the web search
  * override; both notes above stand, and the value below is computed over the
  * merged schema.
+ *
+ * 2026-10-02: the AMUX v4 integration adds only nullable AMUX card fields,
+ * AMUX analysis tables and their relations to the watched Prisma schema.
+ * No marketing model, webhook input, descriptor or admission decision changes.
+ * The closed digest is repinned over this merged schema, not either parent.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "fbc35d40815628a62017fc714ea36932812a930785d70189833bf8f9be31f646";
+  "3911aa6e0c8b1d7df3b89081b421979d3027f161a46dafb11aa7856a7a9eb6a7";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
