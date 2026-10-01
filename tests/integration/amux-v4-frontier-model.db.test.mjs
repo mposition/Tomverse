@@ -70,9 +70,11 @@ test("Frontier catalog requires human audit and enforces one-way versioned appro
 
     await client.query("BEGIN");
     await client.query("SET LOCAL statement_timeout = '10s'");
-    // Finance fixtures CASCADE through AdminAuditLog into this dark table.
-    // Empty history may be cleared; populated history below may not.
-    await client.query(`TRUNCATE public."AmuxIdeaFrontierModelApproval"`);
+    // Other suites may leave committed rows (including through finance
+    // fixtures), so this READ COMMITTED probe cannot assume an empty catalog.
+    // Its model ID is random and its writes roll back. Stronger-isolation and
+    // populated-catalog TRUNCATE refusals are tested above and below; the
+    // empty-catalog allowance needs an isolated DB and is not tested here.
     const wrongActorAudit = await audit(firstId, "amux.idea.frontier_model.approved", "another-owner");
     await rejected(insert, [firstId, modelId, ["high"], 1, actor, wrongActorAudit],
       /amux_v4_frontier_approval_audit_refused/);
