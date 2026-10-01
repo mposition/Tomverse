@@ -58,6 +58,9 @@ import type {
  */
 
 /** What the constructing service supplies. Nothing here is read from the process. */
+/** Zernio's API origin, from the S0 record (OpenAPI `info.version` 1.5.0). */
+export const ZERNIO_API_BASE_URL = "https://zernio.com/api";
+
 export type ZernioAdapterPorts = {
   /** `sk_` + 64 hex, or a restricted `zrk_` key. Never logged, never returned. */
   readonly apiKey: string;
@@ -339,11 +342,25 @@ export const zernioPublishAdapter = (
         method: "GET",
       });
       if (result.kind === "unreachable") return { state: "unknown" };
-      if (result.status === 404) return { state: "removed" };
+      // **Neither a 404 nor `cancelled` says the platform removed anything,**
+      // and `removed` here is what the publisher records as
+      // `poll_removed_by_platform`. The S0 record is specific about both:
+      //
+      //   - `cancelled` is what Zernio's own row becomes after
+      //     `POST /v1/posts/{id}/unpublish` -- a retraction made through Zernio,
+      //     by us or by an operator in its dashboard. Reporting it as removal by
+      //     the platform would write our own act into the record as the
+      //     platform's.
+      //   - A 404 is Zernio no longer having its row, which says nothing about
+      //     the platform's copy.
+      //
+      // The platform's own deletion reaches Zernio as the
+      // `post.platform.deleted` webhook, on an hourly poll of its own -- the
+      // webhook slices' evidence, not a status query's. So a status query
+      // answers `live` or `unknown`, and never guesses the third.
       if (result.status !== 200) return { state: "unknown" };
       const post = (result.body as { post?: ZernioPost } | null)?.post ?? (result.body as ZernioPost | null);
       const status = post?.status;
-      if (status === "cancelled") return { state: "removed" };
       if (status !== "published") return { state: "unknown" };
       const entry = post?.platforms?.[0];
       const externalUrl = httpsUrl(entry?.platformPostUrl ?? entry?.publishedUrl);

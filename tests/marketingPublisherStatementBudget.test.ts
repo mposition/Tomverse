@@ -23,7 +23,7 @@ import test from "node:test";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { resolveAutonomousAdmission } from "@/lib/marketingAutonomousAdmission";
+import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
 import { runBoundedMarketingTransaction } from "@/lib/marketingPublisherRun";
 import { MARKETING_PUBLISHER_MAX_STATEMENTS } from "@/lib/marketingPublisherRunCore";
 import {
@@ -187,7 +187,9 @@ const realResolverAdmitting = async (
   database: MarketingTransaction,
   channel: MarketingAdmissionChannel,
 ) => {
-  await resolveAutonomousAdmission(database, channel, null, NOW);
+  // The resolver the publisher's claim and dispatch actually use, including its
+  // own read of the database clock.
+  await resolvePublishAdmission(database, channel, null);
   return { publish: true };
 };
 
@@ -220,7 +222,7 @@ const OPERATIONS: ReadonlyArray<{
 }> = [
   {
     name: "claim",
-    expected: 11,
+    expected: 12,
     postStatus: "scheduled",
     run: (tx) =>
       claimDueMarketingPost(tx, {
@@ -244,7 +246,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "dispatch",
-    expected: 10,
+    expected: 11,
     postStatus: "scheduled",
     run: (tx) =>
       startMarketingPostDispatch(tx, {

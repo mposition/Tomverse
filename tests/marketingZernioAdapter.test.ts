@@ -258,11 +258,16 @@ test("TikTok can be published to and cannot be retracted", async () => {
 // lookupStatus — the question Zernio *can* answer
 // ---------------------------------------------------------------------------
 
-test("a status query distinguishes live, removed and unknown", async () => {
+test("a status query answers live or unknown, and never guesses removal", async () => {
+  // The earlier version of this test pinned 404 and `cancelled` as "removed" --
+  // the adapter and its test agreeing with each other and not with the provider.
+  // `cancelled` is Zernio's row after an unpublish made through Zernio, and a
+  // 404 is Zernio's row being gone; neither is the platform removing the post,
+  // which is what the publisher would have recorded.
   const cases: Array<[{ status: number; body?: unknown }, string]> = [
     [{ status: 200, body: created() }, "live"],
-    [{ status: 404, body: null }, "removed"],
-    [{ status: 200, body: created({ status: "cancelled" }) }, "removed"],
+    [{ status: 404, body: null }, "unknown"],
+    [{ status: 200, body: created({ status: "cancelled" }) }, "unknown"],
     [{ status: 200, body: created({ status: "publishing" }) }, "unknown"],
     [{ status: 500, body: null }, "unknown"],
   ];

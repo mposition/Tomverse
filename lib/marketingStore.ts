@@ -629,6 +629,21 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   claim_release_reason_unknown: 500,
   claim_release_lease_unreadable: 500,
   transaction_not_serializable: 500,
+  // S2d2's, for the same reason: the publisher is the only caller, and each of
+  // these is the publisher describing itself wrongly -- an empty token or key,
+  // an unreadable deadline, a URL that is not HTTPS, an evidence or method code
+  // off its closed list. Nothing a person could change in a request fixes them.
+  dispatch_token_empty: 500,
+  dispatch_lease_unreadable: 500,
+  dispatch_deadline_unreadable: 500,
+  dispatch_call_budget_not_positive: 500,
+  outcome_request_key_empty: 500,
+  outcome_error_code_empty: 500,
+  published_external_id_empty: 500,
+  published_url_unreadable: 500,
+  published_url_not_https: 500,
+  verification_method_unknown: 500,
+  removal_evidence_unknown: 500,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -2791,6 +2806,101 @@ async function lockDueMarketingPost(
     FOR UPDATE OF p SKIP LOCKED
   `);
   return rows[0] ?? null;
+}
+
+/**
+ * The accounts a publisher run may try, in a stable order.
+ *
+ * A read, not a lock: each channel is locked again, `FOR UPDATE`, inside the
+ * claim that acts on it, and everything decided here is decided again there.
+ * What this list settles is only which channels are worth asking about -- one in
+ * a publishing mode and with an account the platform knows. A channel without
+ * `externalAccountRef` has no account to post from, and asking it for a claim
+ * would spend a slot the adapter cannot fill.
+ */
+export async function listPublishingMarketingChannels(
+  database: MarketingTransaction,
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly connectionGeneration: number;
+    readonly externalAccountRef: string;
+  }>
+> {
+  const rows = await database.marketingChannel.findMany({
+    where: {
+      status: { in: ["autonomous_mode", "approval_mode"] },
+      externalAccountRef: { not: null },
+    },
+    select: { id: true, connectionGeneration: true, externalAccountRef: true },
+    orderBy: { id: "asc" },
+  });
+  return rows.flatMap((row) =>
+    typeof row.externalAccountRef === "string" && row.externalAccountRef.trim() !== ""
+      ? [
+          {
+            id: row.id,
+            connectionGeneration: Number(row.connectionGeneration),
+            externalAccountRef: row.externalAccountRef,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * Published posts a status query may confirm, oldest first.
+ *
+ * A read for the same reason as the channel list: `recordMarketingPostPollVerified`
+ * locks the row and checks its status and version again before it writes. The
+ * stored `externalUrl` comes back so the caller can require the live object to
+ * be the one that was published -- the plan's "matches expected published
+ * object" -- rather than any object under that id.
+ */
+export async function listMarketingPostsAwaitingVerification(
+  database: MarketingTransaction,
+  limit: number,
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly historyVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+    readonly externalAccountRef: string;
+  }>
+> {
+  const take = Math.max(0, Math.min(Math.floor(Number(limit) || 0), 50));
+  if (take === 0) return [];
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: "published",
+      externalPostId: { not: null },
+      externalUrl: { not: null },
+      channel: { externalAccountRef: { not: null } },
+    },
+    select: {
+      id: true,
+      historyVersion: true,
+      externalPostId: true,
+      externalUrl: true,
+      channel: { select: { externalAccountRef: true } },
+    },
+    orderBy: [{ publishedAt: "asc" }, { id: "asc" }],
+    take,
+  });
+  return rows.flatMap((row) =>
+    row.externalPostId && row.externalUrl && row.channel.externalAccountRef
+      ? [
+          {
+            id: row.id,
+            historyVersion: Number(row.historyVersion),
+            externalPostId: row.externalPostId,
+            externalUrl: row.externalUrl,
+            externalAccountRef: row.channel.externalAccountRef,
+          },
+        ]
+      : [],
+  );
 }
 
 /**

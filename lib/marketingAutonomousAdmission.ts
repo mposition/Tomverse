@@ -147,12 +147,12 @@ export type AutonomousAdmissionResolution = MarketingAutonomousAdmission & {
  * transaction owns could only differ by a bug, and a caller's copy could differ
  * by being older than the lock.
  */
-export const resolveAutonomousAdmission = async (
+const readAdmissionDecisions = async (
   database: MarketingTransaction,
   subject: MarketingAdmissionChannel,
-  health: MarketingHealthObservation | null = null,
-  now: Date = new Date(),
-): Promise<AutonomousAdmissionResolution> => {
+  health: MarketingHealthObservation | null,
+  now: Date,
+) => {
   const settings = await readMarketingAdmissionSettings(database);
   const generation = marketingConfigGeneration(
     settings.get(MARKETING_CONFIG_GENERATION_KEY),
@@ -233,6 +233,22 @@ export const resolveAutonomousAdmission = async (
     webhookEvent: unreadable,
   });
 
+  const deploymentId = String(process.env.RAILWAY_DEPLOYMENT_ID ?? "").trim();
+  return { decisions, generation, deploymentId };
+};
+
+export const resolveAutonomousAdmission = async (
+  database: MarketingTransaction,
+  subject: MarketingAdmissionChannel,
+  health: MarketingHealthObservation | null = null,
+  now: Date = new Date(),
+): Promise<AutonomousAdmissionResolution> => {
+  const { decisions, generation, deploymentId } = await readAdmissionDecisions(
+    database,
+    subject,
+    health,
+    now,
+  );
   const autonomous = decisions.autonomousPublish;
   const reasons: (
     | MarketingAutomationAccessReason
@@ -248,7 +264,6 @@ export const resolveAutonomousAdmission = async (
   // would refuse them as a mismatch, and "mismatch" sends an operator looking
   // for a change that never happened.
   if (generation === null) reasons.push("config_generation_unreadable");
-  const deploymentId = String(process.env.RAILWAY_DEPLOYMENT_ID ?? "").trim();
   if (deploymentId === "") reasons.push("deployment_unknown");
 
   return {
@@ -310,4 +325,71 @@ export const scheduleAutonomousMarketingPost = async (
     }
   }
   throw lastSerializationFailure;
+};
+
+/**
+ * Whether the publisher may send this channel's post, asked immediately before
+ * it does (S2 plan, S2d2: "rerun the entire resolver ... immediately before every
+ * vendor call").
+ *
+ * **The decision follows the channel's mode, and never relaxes it.** An
+ * `approval_mode` channel publishes what a person approved, so it needs the
+ * shared resolver's `approvalPublish`. An `autonomous_mode` channel needs
+ * `autonomousPublish` -- which already contains every `approvalPublish` reason
+ * -- plus the two answers only this module gives. Asking the weaker question of
+ * an autonomous channel would let it publish while the conditions for autonomy
+ * are false, and the channel row does not say which of its posts a person
+ * approved.
+ *
+ * **Health is judged at the database's clock**, read here inside the same
+ * transaction, because the plan says freshness is measured "at DB clock" and the
+ * caller stamps `observedAt` from that clock too. A process clock on one side
+ * and a database clock on the other is a freshness window that drifts with the
+ * skew between them.
+ *
+ * In this build both decisions are false: the recovery contract and the platform
+ * budget are unreadable until a person decides what makes them ready, and an
+ * unreadable input is a refusal. That is the state the plan requires before an
+ * operator activates anything.
+ */
+export const resolvePublishAdmission = async (
+  database: MarketingTransaction,
+  subject: MarketingAdmissionChannel,
+  health: MarketingHealthObservation | null,
+): Promise<{
+  readonly publish: boolean;
+  readonly reasons: readonly (
+    | MarketingAutomationAccessReason
+    | MarketingAutonomousAdmissionReason
+  )[];
+}> => {
+  const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `);
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) {
+    // Without the clock there is no freshness to judge, and a health
+    // observation of unknown age is not one the resolver may count.
+    return { publish: false, reasons: ["input_unreadable:adapterHealthy"] };
+  }
+  const { decisions, generation, deploymentId } = await readAdmissionDecisions(
+    database,
+    subject,
+    health,
+    now,
+  );
+  if (subject.status === "autonomous_mode") {
+    const reasons: (
+      | MarketingAutomationAccessReason
+      | MarketingAutonomousAdmissionReason
+    )[] = [...decisions.autonomousPublish.reasons];
+    if (generation === null) reasons.push("config_generation_unreadable");
+    if (deploymentId === "") reasons.push("deployment_unknown");
+    return { publish: reasons.length === 0, reasons };
+  }
+  if (subject.status === "approval_mode") {
+    const reasons = [...decisions.approvalPublish.reasons];
+    return { publish: reasons.length === 0, reasons };
+  }
+  return { publish: false, reasons: ["input_invalid:channelMode"] };
 };
