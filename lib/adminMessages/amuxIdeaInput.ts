@@ -27,6 +27,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `Save outcome is unknown. Request ID: ${requestId}. Do not submit this idea again; ask an operator to verify the record.`,
     checkSubmissionStatus: "Check this request again",
+    recoveryUnavailable: "This browser cannot safely keep the request receipt. Saving is disabled here; use a browser session with storage available.",
     transfer: "Review exact external transfer",
     transferUnavailable: "External transfer stays unavailable until the approved model, complete payload and source scope can be shown for this run.",
     noWrite: "No draft was saved. No GitHub content was collected and no model was called.",
@@ -84,6 +85,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     outcomeUnknown: (requestId: string) =>
       `저장 결과를 확인할 수 없습니다. 요청 ID: ${requestId}. 다시 제출하지 말고 운영 기록을 확인해 주세요.`,
     checkSubmissionStatus: "같은 요청 상태 다시 확인",
+    recoveryUnavailable: "이 브라우저가 요청 확인 ID를 안전하게 보존하지 못합니다. 여기서는 저장할 수 없습니다. 브라우저 세션 저장소를 사용할 수 있는 환경에서 다시 진행해 주세요.",
     transfer: "정확한 외부 전송 범위 검토",
     transferUnavailable: "이번 회차의 승인 모델·전체 전송 payload·자료 범위를 표시할 수 있을 때까지 외부 전송은 열지 않습니다.",
     noWrite: "초안은 저장되지 않았고, GitHub 자료 수집이나 모델 호출도 하지 않았습니다.",

@@ -77,7 +77,7 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
     keyVersion: stored.rawKeyVersion ?? 0,
   }, "idea_raw", ideaId, keys);
   assert.equal(JSON.parse(opened.toString("utf8")).idea, ideaText);
-  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId), { status: "committed", ideaId });
+  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId), { requestId, status: "committed", ideaId });
   const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditId } });
   assert.equal(audit.actorUserId, actorUserId);
   assert.equal(audit.action, "AMUX_V4_IDEA_SUBMITTED");

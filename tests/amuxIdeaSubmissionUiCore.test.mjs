@@ -28,26 +28,30 @@ test("only an exact successful submission response confirms the idea", () => {
 });
 
 test("only documented pre-transaction refusals permit a fresh submission", () => {
-  for (const code of ["submission_disabled", "schema_rejected", "content_refused",
-    "ADMIN_REAUTHENTICATION_REQUIRED", "audit_unavailable"]) {
-    assert.deepEqual(classifyIdeaSubmissionPost({ status: 503, body: { error: code } }, requestId),
+  for (const [code, status] of [["submission_disabled", 503], ["schema_rejected", 400],
+    ["content_refused", 400], ["ADMIN_REAUTHENTICATION_REQUIRED", 428],
+    ["audit_unavailable", 503]]) {
+    assert.deepEqual(classifyIdeaSubmissionPost({ status, body: { error: code } }, requestId),
       { kind: "refused", code });
   }
   assert.deepEqual(classifyIdeaSubmissionPost({ status: 503, body: { error: "unexpected" } }, requestId),
+    { kind: "verify" });
+  assert.deepEqual(classifyIdeaSubmissionPost({ status: 200, body: { error: "audit_unavailable" } }, requestId),
     { kind: "verify" });
 });
 
 test("absent, partial, malformed and failed read-back all remain unknown", () => {
   assert.deepEqual(classifyIdeaSubmissionReadBack({
-    status: 200, body: { status: "committed", ideaId: "idea-1" },
-  }), { kind: "submitted", ideaId: "idea-1" });
+    status: 200, body: { requestId, status: "committed", ideaId: "idea-1" },
+  }, requestId), { kind: "submitted", ideaId: "idea-1" });
   for (const reply of [
-    { status: 200, body: { status: "absent" } },
-    { status: 200, body: { status: "partial", ideaId: "idea-1" } },
-    { status: 200, body: { status: "committed" } },
+    { status: 200, body: { requestId, status: "absent" } },
+    { status: 200, body: { requestId, status: "partial", ideaId: "idea-1" } },
+    { status: 200, body: { requestId, status: "committed" } },
+    { status: 200, body: { requestId: "different", status: "committed", ideaId: "idea-1" } },
     { status: 428, body: { error: "ADMIN_REAUTHENTICATION_REQUIRED" } },
   ]) {
-    assert.deepEqual(classifyIdeaSubmissionReadBack(reply), { kind: "outcome_unknown" });
+    assert.deepEqual(classifyIdeaSubmissionReadBack(reply, requestId), { kind: "outcome_unknown" });
   }
 });
 

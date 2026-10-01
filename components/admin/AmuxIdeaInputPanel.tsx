@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -10,8 +10,16 @@ import {
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
 } from "@/lib/amux/ideaSubmissionUiCore";
+import {
+  clearPendingIdeaRequest,
+  readPendingIdeaRequest,
+  reservePendingIdeaRequest,
+} from "@/lib/amux/ideaSubmissionRecoveryCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
+const receiptStore = (): Storage | null => {
+  try { return window.sessionStorage; } catch { return null; }
+};
 
 type InputPreviewResult = {
   outcome?: "input_checked";
@@ -28,6 +36,7 @@ type SubmissionState =
   | { kind: "pending"; requestId: string }
   | { kind: "submitted"; requestId: string; ideaId: string }
   | { kind: "outcome_unknown"; requestId: string }
+  | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
 
 const lines = (value: string) => value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -44,16 +53,20 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
   return result;
 }
 
-export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailable: boolean }) {
+export function AmuxIdeaInputPanel({ submissionAvailable, operatorId }: {
+  submissionAvailable: boolean; operatorId: string;
+}) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
   const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
   const [pending, setPending] = useState(false);
   const [readBackPending, setReadBackPending] = useState(false);
+  const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
   const inputRevision = useRef(0);
+  const inFlight = useRef(false);
 
   const invalidateResult = () => {
     inputRevision.current += 1;
@@ -61,7 +74,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
     setSubmission({ kind: "idle" });
   };
 
-  const readBack = async (requestId: string) => {
+  const readBack = useCallback(async (requestId: string) => {
     setReadBackPending(true);
     try {
       const response = await adminFetch(
@@ -71,24 +84,50 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
       const decision = classifyIdeaSubmissionReadBack({
         status: response.status,
         body: await response.json(),
-      });
-      setSubmission(decision.kind === "submitted"
-        ? { kind: "submitted", requestId, ideaId: decision.ideaId }
-        : { kind: "outcome_unknown", requestId });
+      }, requestId);
+      if (decision.kind === "submitted") {
+        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+      } else {
+        setSubmission({ kind: "outcome_unknown", requestId });
+      }
     } catch {
       setSubmission({ kind: "outcome_unknown", requestId });
     } finally {
       setReadBackPending(false);
     }
-  };
+  }, [operatorId]);
+
+  useEffect(() => {
+    let active = true;
+    const recovered = readPendingIdeaRequest(receiptStore(), operatorId);
+    queueMicrotask(() => {
+      if (!active) return;
+      if (recovered.kind === "unavailable") {
+        setSubmission({ kind: "recovery_unavailable" });
+      } else if (recovered.kind === "pending") {
+        inFlight.current = true;
+        setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
+        void readBack(recovered.requestId);
+      }
+      setRecoveryChecked(true);
+    });
+    return () => { active = false; };
+  }, [operatorId, readBack]);
 
   const submit = async () => {
-    if (!submissionAvailable || result?.outcome !== "input_checked" ||
+    if (!submissionAvailable || !recoveryChecked || inFlight.current ||
+        result?.outcome !== "input_checked" ||
         submission.kind === "pending" || submission.kind === "outcome_unknown" ||
         submission.kind === "submitted") return;
     const refs = parsePullRequests(pullRequests);
     if (!refs) return;
     const requestId = crypto.randomUUID();
+    if (!reservePendingIdeaRequest(receiptStore(), operatorId, requestId)) {
+      setSubmission({ kind: "recovery_unavailable" });
+      return;
+    }
+    inFlight.current = true;
     setSubmission({ kind: "pending", requestId });
     try {
       const response = await adminFetch("/api/admin/amux/ideas/submissions", {
@@ -104,8 +143,11 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
         body: await response.json(),
       }, requestId);
       if (decision.kind === "submitted") {
+        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
       } else if (decision.kind === "refused") {
+        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
+        inFlight.current = false;
         setSubmission({ kind: "refused", code: decision.code });
       } else {
         await readBack(requestId);
@@ -141,7 +183,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
   const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
-    submission.kind === "submitted";
+    submission.kind === "submitted" || submission.kind === "recovery_unavailable";
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
     (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED");
   const errorMessage = result?.error
@@ -228,7 +270,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
         <button
           type="button"
           onClick={submit}
-          disabled={!submissionAvailable || result?.outcome !== "input_checked" || frozen}
+          disabled={!submissionAvailable || !recoveryChecked || result?.outcome !== "input_checked" || frozen}
           className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200"
         >
           {submission.kind === "pending" ? messages.submitting : messages.submit}
@@ -273,6 +315,11 @@ export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailabl
           </button>
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
         </div>
+      ) : null}
+      {submission.kind === "recovery_unavailable" ? (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+          {messages.recoveryUnavailable}
+        </p>
       ) : null}
       {result ? (
         <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">

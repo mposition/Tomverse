@@ -125,13 +125,13 @@ export async function commitIdeaSubmission(
 export async function readIdeaSubmissionRequest(
   session: Session,
   requestId: string,
-): Promise<{ status: "committed" | "absent" | "partial"; ideaId?: string }> {
+): Promise<{ requestId: string; status: "committed" | "absent" | "partial"; ideaId?: string }> {
   const actorUserId = actorId(session);
   const row = await prisma.amuxIdeaSubmission.findUnique({
     where: { requestId },
     select: { id: true, actorUserId: true },
   });
-  if (!row || row.actorUserId !== actorUserId) return { status: "absent" };
+  if (!row || row.actorUserId !== actorUserId) return { requestId, status: "absent" };
   const audit = await prisma.adminAuditLog.findFirst({
     where: {
       action: AUDIT_ACTION,
@@ -141,7 +141,7 @@ export async function readIdeaSubmissionRequest(
     },
     select: { id: true },
   });
-  return { status: audit ? "committed" : "partial", ideaId: row.id };
+  return { requestId, status: audit ? "committed" : "partial", ideaId: row.id };
 }
 
 /** New v4 submission path. The hard code latch ships false. */

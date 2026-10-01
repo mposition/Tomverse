@@ -74,7 +74,7 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "ideas" ? (
-        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable} />
+        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable} operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (
