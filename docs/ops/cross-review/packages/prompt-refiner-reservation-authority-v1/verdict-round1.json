@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-reservation-authority-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-reservation-authority-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-reservation-authority-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-16T10:37:31.241Z",
+  "durationMs": 362837,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 14,
+    "cachedInputTokens": 556470,
+    "outputTokens": 27290,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.142918,
+    "raw": {
+      "input_tokens": 14,
+      "cache_creation_input_tokens": 113952,
+      "cache_read_input_tokens": 556470,
+      "output_tokens": 27290,
+      "output_tokens_details": {
+        "thinking_tokens": 25078
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 113952,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1689,
+          "cache_read_input_tokens": 113448,
+          "cache_creation_input_tokens": 5246,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 5246
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-16T10:43:34.162Z",
+  "verdict": {
+    "taskId": "prompt-refiner-reservation-authority-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "docs/ops/tomverse-chat-progress.md:1025",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The finance-lane row still reports \"전용 15개 suite를 fresh DB에서 통과시켰으며\", which contradicts line 1024 of the same table (\"신규 DB integration 17/17\") and the 17 cases actually shipped in the new suite, leaving a self-contradicting verification record in the change.",
+        "reproduction": "Read docs/ops/tomverse-chat-progress.md lines 1024-1025 (one row says 17/17, the next says 15), then count the suite: `Select-String -Path tests/integration/prompt-refiner-reservation.db.test.ts -Pattern '^test\\(' | Measure-Object` → 17. Expected: both rows state the same, actual, count."
+      },
+      {
+        "location": "lib/promptRefinerReservationAuthority.ts:328-337 vs. the author's round-1 account",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The author's account states the sweep applies \"FOR UPDATE SKIP LOCKED·LIMIT\", but the shipped SQL uses plain `FOR UPDATE` with no `SKIP LOCKED`, so the audit record overstates the implemented locking clause (the LIMIT placement itself is correct and no code change is required).",
+        "reproduction": "`Select-String -Path lib/promptRefinerReservationAuthority.ts -Pattern 'SKIP LOCKED'` returns nothing; lines 335-336 read `LIMIT ${limit}` then `FOR UPDATE`. Expected: the round-1 summary/package text matches the shipped clause."
+      }
+    ],
+    "nextAction": "Both round-0 findings are fixed and verified — every authority DB-clock comparison and terminal timestamp now uses `clock_timestamp() AT TIME ZONE 'UTC'` (migration.sql:169-171, 226, 271-283) with a dedicated non-UTC-session integration test, and the sweep applies the expiry predicate, `ORDER BY \"expiresAt\", \"id\"` and the caller `LIMIT` in SQL before `FOR UPDATE` so at most `limit` rows are locked (authority:328-337, asserted by tests/promptRefinerReservationCore.test.mjs); correct the stale \"15개\" verification count (and the SKIP LOCKED wording in the round-1 record) and this can be approved in round 2 with no code change."
+  }
+}

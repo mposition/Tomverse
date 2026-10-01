@@ -232,10 +232,13 @@ async function buildSkillReview(input: {
             // directory entry is not a file anyone shipped as content.
             // Counting either here would report the same files twice under
             // two different headings.
-            skippedCount: plan.skips.filter(
-                (skip) =>
-                    skip.reason !== "executable_script" && skip.reason !== "directory"
-            ).length,
+            skippedPaths: plan.skips
+                .filter(
+                    (skip) =>
+                        skip.reason !== "executable_script" &&
+                        skip.reason !== "directory"
+                )
+                .map((skip) => skip.path),
         },
     });
 
@@ -428,7 +431,11 @@ async function buildNativeReview(input: {
         // Not a refusal: an extra document in the container is not a lie about
         // the profile. It is reported because the owner would otherwise see a
         // file count that does not match the archive they built.
-        losses.push({ kind: "skipped_entries", count: unlisted.length });
+        losses.push({
+            kind: "skipped_entries",
+            count: unlisted.length,
+            items: unlisted.map((entry) => entry.path),
+        });
     }
 
     return {

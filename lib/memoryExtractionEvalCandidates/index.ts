@@ -17,9 +17,33 @@
  */
 
 import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
+import type { MemoryEvalCaseV2 } from "@/lib/memoryEvalDatasetSchema";
 import type { EvalBatch } from "@/lib/memoryEvalBatchRecord";
 
-export type CandidateBatch = EvalBatch & { cases: readonly MemoryEvalCase[] };
+/**
+ * Either schema. The successor batches are schema 2 and the frozen set's are
+ * schema 1, and both pass through the same barrier on the way in: what makes
+ * a case a candidate is that nothing scores it, which does not depend on
+ * which shape it has.
+ */
+export type CandidateBatch = EvalBatch & {
+    cases: readonly (MemoryEvalCase | MemoryEvalCaseV2)[];
+    /**
+     * The dataset version this batch's cases are meant to *replace*, when it
+     * is a rework rather than an addition.
+     *
+     * A batch drafted for the current dataset blocks that dataset's freeze:
+     * a frozen set with an unreviewed batch waiting for it is a set that is
+     * not finished. A successor batch is the opposite — it exists because
+     * the current set is finished and its scoring contract was superseded,
+     * and it will never join it. Counting one as the other made the freeze
+     * check report `mem-eval-seed-11` as unfrozen the moment the first
+     * successor batch was drafted.
+     *
+     * Declared here rather than inferred from the cases' schema, so that the
+     * claim is a claim somebody wrote.
+     */
+    successorTo?: string;
+};
 
-export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [
-];
+export const CANDIDATE_BATCHES: readonly CandidateBatch[] = [];

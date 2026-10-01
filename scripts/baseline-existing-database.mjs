@@ -3,6 +3,11 @@ import { readdirSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import pg from "pg";
 
+import {
+  CONNECT_RETRY_COUNT,
+  connectWithRetry,
+} from "./direct-database-connect-core.mjs";
+
 /**
  * Reconciles a database that already holds the schema with a migration history
  * that does not say so, before `prisma migrate deploy` runs.
@@ -125,17 +130,29 @@ const schemaMatchesPrisma = () => {
   return result.status === 0;
 };
 
-const client = new Client({
-  connectionString: normalizeConnectionString(directUrl),
-  connectionTimeoutMillis: 10_000,
-  query_timeout: 10_000,
-  application_name: "tomverse-prisma-baseline-check",
-});
+const newClient = () =>
+  new Client({
+    connectionString: normalizeConnectionString(directUrl),
+    connectionTimeoutMillis: 10_000,
+    query_timeout: 10_000,
+    application_name: "tomverse-prisma-baseline-check",
+  });
 
+let client;
 let shouldResolve = false;
 
 try {
-  await client.connect();
+  // The same bounded retry the probe before this one uses. This connect is the
+  // second of the three `db:migrate` opens, and a momentary upstream blip here
+  // fails a deploy exactly as it does there.
+  client = await connectWithRetry(newClient, {
+    onRetry: (attempt, delayMs) =>
+      log(
+        `Could not reach the database; retrying in ${
+          delayMs / 1_000
+        }s (${attempt}/${CONNECT_RETRY_COUNT}).`
+      ),
+  });
 
   // The schema decides, not the history. A `db push` database has every table
   // and an empty history; reading the history first would call it fresh.
@@ -190,7 +207,9 @@ try {
     errorMessage: message.slice(0, 500),
   });
 } finally {
-  await client.end().catch(() => undefined);
+  // `client` is unset when every connect attempt failed; those clients were
+  // already closed inside the retry loop.
+  await client?.end().catch(() => undefined);
 }
 
 if (shouldResolve) {

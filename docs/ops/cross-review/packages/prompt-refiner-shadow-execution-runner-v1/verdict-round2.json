@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-execution-runner-v1",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T11:20:24.635Z",
+  "durationMs": 474836,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 60,
+    "cachedInputTokens": 3757455,
+    "outputTokens": 37391,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 4.15207425,
+    "raw": {
+      "input_tokens": 60,
+      "cache_creation_input_tokens": 165783,
+      "cache_read_input_tokens": 3757455,
+      "output_tokens": 37391,
+      "output_tokens_details": {
+        "thinking_tokens": 29508
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 67284,
+        "ephemeral_5m_input_tokens": 98499
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3673,
+          "cache_read_input_tokens": 167139,
+          "cache_creation_input_tokens": 3479,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 3479,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T11:28:19.523Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-execution-runner-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:4c06d3cc46da2bb5d92bf4077b4c10fd973f06c7f5fed71ff8066ede673b8858",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:215, 259 (bare `catch {`)",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "Every failure path in the one-run runner discards the causal error without binding it, logging it, or reporting an incident, so a halted paid shadow leaves only a generic code (`PROMPT_REFINER_SHADOW_PRE_DISPATCH_FAILED` / `OUTCOME_UNKNOWN` / `TERMINAL_WRITE_UNKNOWN`) and no record of why, in a system that forbids retrying to find out.",
+        "reproduction": "`rg -n 'console\\.|reportOperationalIncident' lib/promptRefinerShadowRunner.ts` returns nothing, and both catch clauses bind no error variable. The route cannot compensate: app/api/admin/prompt-refiner/shadow-run/execute/route.ts:152-153 returns `promptRefinerShadowRunnerErrorResponse(error)` before ever reaching its `console.error` at line 160. Concretely, tests/promptRefinerShadowRunner.test.mjs `failAfterIntentAt` throws `new Error(\"after intent\")` and the only observable output is the 503 code — the message reaches no sink. lib/maintenance.ts:26 shows the project's existing `reportOperationalIncident` channel for exactly this class of event."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:237-251 vs lib/promptRefinerShadowRunStore.ts:781-787",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "When `recordPromptRefinerShadowDispatchIntent` returns `reservation_expired` it has already transitioned the row to `expired`, so the runner's subsequent release necessarily fails and the operator is told `PROMPT_REFINER_SHADOW_PRE_DISPATCH_RELEASE_FAILED` (\"could not close its reservation\") about a reservation that is in fact correctly closed.",
+        "reproduction": "lib/promptRefinerShadowRunStore.ts:782-786 sets `status: \"expired\"` and returns `{ok:false, reason:\"reservation_expired\"}`; that `!intent.ok` branch (runner line 205-211) throws inside `onDispatch`, so the runner's catch at line 215 sees `attemptId === null` and calls `dependencies.release(reservation)`. lib/promptRefinerReservationAuthority.ts:316 refuses any non-`reserved` row with `reservation_not_active`, so `released.ok` is false and the runner refuses with the release-failure code instead of the real `reservation_expired` cause. No test covers this path: tests/promptRefinerShadowRunner.test.mjs has no fixture where `recordIntent` returns `ok:false`."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunContract.ts:221-228 (`invocation_budget_mismatch`)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The budget guard compares against the literal `300_000` rather than the route's declared `maxDuration`, so lowering `export const maxDuration` would leave a 240 s admission budget that exceeds the platform cap with no gate failing.",
+        "reproduction": "Change `export const maxDuration = 300;` to `60` in app/api/admin/prompt-refiner/shadow-run/execute/route.ts and run `npm run test:prompt-refiner-shadow-live-adapter`; it stays green, and `promptRefinerShadowRunContractProblems()` still returns `[]`. tests/cronClientTimeouts.test.mjs:52 shows the project's existing idiom for parsing `export const maxDuration` out of a route and binding it to an in-code budget."
+      }
+    ],
+    "nextAction": "All three round-1 findings are addressed (rate limit moved after strict-body validation and raised to 2/min·8/day, the sweep fixture now matches `sweepPromptRefinerShadowUnknowns`'s real shape, and the `INTENT_MISSING` path releases its reservation once); merge as-is and optionally fold the three recorded items into a follow-up."
+  }
+}

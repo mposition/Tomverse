@@ -12,7 +12,11 @@ export type AiProvider =
     | "minimax"
     | "qwen"
     | "zhipu"
-    | "perplexity";
+    | "perplexity"
+    | "deepinfra"
+    | "together"
+    | "openrouter"
+    | "sail";
 
 export type ModelTier = "Free" | "Pro" | "Max";
 export type ModelStatus = "enabled" | "limited" | "disabled" | "coming-soon";

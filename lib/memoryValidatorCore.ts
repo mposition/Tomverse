@@ -23,6 +23,11 @@
  * is a policy change, not a refactor.
  */
 
+import {
+    MEMORY_SENSITIVE_HEALTH,
+    carriesHealthSignal,
+} from "@/lib/memoryHealthSignals";
+
 export const FACTUAL_MEMORY_KINDS = [
     "identity",
     "preference",
@@ -66,6 +71,31 @@ export const MEMORY_STATUSES = [
 ] as const;
 
 export const MEMORY_SENSITIVITIES = ["standard", "sensitive"] as const;
+
+/**
+ * Whether a candidate asserts its fact of the user, or denies it of them.
+ *
+ * Added for `mem-extract-v6`. Until v5 a candidate carried no polarity at all
+ * and the statement had to carry it in prose, which meant "the user does not
+ * drive" and "the user drives" differed only by a word a substring match does
+ * not see. Schema 3 scoring compares this field to the gold's, so a v5
+ * candidate cannot be scored against a schema-3 dataset -- that, and not a
+ * wording change, is why v6 exists.
+ *
+ * These two values must stay identical to the eval contract's
+ * `MEMORY_EVAL_POLARITIES`, which is frozen inside the `mem-score-v3.3`
+ * descriptor digest. They are declared here rather than imported from the eval
+ * module because production must not depend on the eval tree, and
+ * `tests/memoryExtractionPolarity.test.mjs` fails if the two lists ever differ.
+ *
+ * Meaning, from .github/audits/memory-eval-gold-contract-2026-08-27.md §10.1:
+ * `affirmed` says the statement holds of the user, `negated` says it does not.
+ * Neither is a judgement about sentiment, and neither is decided by whether a
+ * negation word appears -- see `MEMORY_EXTRACTION_POLARITY_RULE`.
+ */
+export const MEMORY_POLARITIES = ["affirmed", "negated"] as const;
+
+export type MemoryPolarity = (typeof MEMORY_POLARITIES)[number];
 
 export const MEMORY_EVIDENCE_SOURCE_TYPES = [
     "external_message",
@@ -382,6 +412,17 @@ export function validateMemoryCandidate(
     // 승인만 가능).
     if (matchesAny(SENSITIVE_PII_PATTERNS, statement)) {
         violations.push("MEMORY_SENSITIVE_PII_PATTERN");
+        sensitiveReview = true;
+        sensitivity = "sensitive";
+    }
+    // Health information is extractable and never auto-approved. This runs on
+    // the candidate's own statement, not on the message it came from: a
+    // message carrying an allergy and an answer-style preference must not drag
+    // the style memory into review with it. A statement minimised from a
+    // health fact is still health information, so the check is on the stored
+    // sentence rather than on where it came from.
+    if (carriesHealthSignal(statement)) {
+        violations.push(MEMORY_SENSITIVE_HEALTH);
         sensitiveReview = true;
         sensitivity = "sensitive";
     }

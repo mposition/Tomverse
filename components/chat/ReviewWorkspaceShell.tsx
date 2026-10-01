@@ -27,6 +27,7 @@ import {
   isExternalContinuationEnabledCached,
   isExternalImportEnabled,
   isImageGenerationEnabled,
+  isPromptRefinerEnabled,
   isVoiceInputEnabled,
 } from "@/lib/appSettings";
 import { IMAGE_GENERATION_FLAG_KEY } from "@/lib/imageGenerationAccess";
@@ -38,12 +39,18 @@ import { chatStarterEnabledWithFixtureOverride } from "@/lib/chatStarterAccess";
 import { CHAT_STARTER_FLAG_KEYS } from "@/lib/chatStarterCatalog";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import {
+  promptRefinerAvailable,
+  promptRefinerOfferDecision,
+  promptRefinerProductAdapterReady,
+} from "@/lib/promptRefinerAccess";
+import {
   imageGroupMaxModels,
   resolveImageGroupMaxModels,
 } from "@/lib/imageGroupLimits";
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
@@ -92,6 +99,14 @@ export async function ReviewWorkspaceShell({
     pulled it. A read failure leaves it false, exactly like a missing flag row.
   */
   let voiceInputEnabled = false;
+  // Availability and the final offer are deliberately separate. The stored
+  // flag may authorize a rollout only after an adapter exists; until then the
+  // final server-owned decision remains false and the composer renders no
+  // inert promise. The only adapter in this change is the loopback fixture
+  // below, so production cannot offer or call a Refiner yet.
+  let promptRefinerAvailableToDeployment = false;
+  let promptRefinerFixtureAdapterEnabled = false;
+  let promptRefinerFixtureModeRefreshEnabled = false;
   /*
     Whether the welcome screen offers the starter catalogue at all
     (docs/ui-contracts/chat-starter-catalog.md section 5).
@@ -128,6 +143,12 @@ export async function ReviewWorkspaceShell({
     // serve -- a composer that offered it to a caller the route refuses is the
     // mismatch this prop exists to prevent.
     voiceInputEnabled = await isVoiceInputEnabled();
+    // There is deliberately no product adapter in this slice. The conditional
+    // caller keeps the AppSetting reader wired to the one readiness boundary
+    // that may use it later while making today's zero-query behavior explicit.
+    if (promptRefinerProductAdapterReady()) {
+      promptRefinerAvailableToDeployment = await isPromptRefinerEnabled();
+    }
     chatStarterEnabled = await isChatStarterEnabled();
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
@@ -182,6 +203,19 @@ export async function ReviewWorkspaceShell({
     if (!voiceInputEnabled && !voiceInputKillSwitchEngaged(process.env)) {
       voiceInputEnabled = jar.get("__tomverse_e2e_voice_input")?.value === "1";
     }
+    // A deterministic, no-cost adapter for actual ChatInput browser coverage.
+    // Its cookie is accepted only inside full fixture mode. The pure rollout
+    // helper is still used so PROMPT_REFINER_KILL_SWITCH wins even in tests.
+    promptRefinerFixtureAdapterEnabled =
+      jar.get("__tomverse_e2e_prompt_refiner")?.value === "1";
+    promptRefinerFixtureModeRefreshEnabled =
+      jar.get("__tomverse_e2e_prompt_refiner_mode_refresh")?.value === "1";
+    if (promptRefinerFixtureAdapterEnabled) {
+      promptRefinerAvailableToDeployment = promptRefinerAvailable({
+        storedFlagValue: "true",
+        env: process.env,
+      });
+    }
     // The limit comes from an environment variable read at boot, and the e2e
     // suite runs one server for every test, so a spec cannot restart it to
     // exercise both sides of the limit. The override goes through the same
@@ -212,6 +246,12 @@ export async function ReviewWorkspaceShell({
       env: process.env,
     });
   }
+
+  const promptRefinerOffered = promptRefinerOfferDecision({
+    available: promptRefinerAvailableToDeployment,
+    adapterReady: promptRefinerFixtureAdapterEnabled,
+  });
+  const promptRefinerMode = promptRefinerOffered ? "e2e_fixture" : "off";
 
   /*
     What the starter catalogue is allowed to promise on this request.
@@ -246,10 +286,14 @@ export async function ReviewWorkspaceShell({
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     >
       <HelpGuideAccessProvider enabledFlagKeys={helpGuideEnabledFlagKeys}>
+      {promptRefinerFixtureModeRefreshEnabled ? (
+        <PromptRefinerFixtureRefreshLoader mode={promptRefinerMode} />
+      ) : null}
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
+        promptRefinerMode={promptRefinerMode}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This

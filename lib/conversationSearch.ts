@@ -119,6 +119,7 @@ export type ConversationSearchAnswer = {
 const TARGET_SELECT = {
     id: true,
     title: true,
+    productKey: true,
     continuationBridge: {
         select: {
             ...CONTINUATION_NAMING_BRIDGE_SELECT,
@@ -508,6 +509,7 @@ function toResult(
         ...continuationRowNaming(target.continuationBridge, displayTimeZone),
         surface: conversationSurface({
             hasContinuationBridge: target.continuationBridge !== null,
+            productKey: target.productKey,
         }),
         snippet: snippet.text,
         snippetHighlight: snippet.highlight,

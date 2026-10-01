@@ -1,0 +1,49 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+  "round": 2,
+  "baseCommit": "03a4c708e405cb76272f8a69d51c651167e0a1a4",
+  "lineage": [],
+  "inheritedFindings": [],
+  "changeDigest": "sha256:9be5f283a7c1973de8b63a863615635ef789851304c6b0044535a1933631d14e",
+  "commit": "a2c5960aad6548aa886486721a2ffdaa0ffc72bf",
+  "headCommit": "a2c5960aad6548aa886486721a2ffdaa0ffc72bf",
+  "worktreeDirty": false,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "filesChanged": [
+    "tests/memoryReleaseContracts.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "tests/memoryReleaseContracts.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 297.4224",
+      "durationMs": 373
+    }
+  ],
+  "guardCommands": [
+    "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+    "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD"
+  ],
+  "guardRuns": [
+    {
+      "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2674
+    },
+    {
+      "rule": "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 46
+    }
+  ],
+  "producedAt": "2026-09-14T09:03:00.925Z",
+  "diff": "diff --git a/tests/memoryReleaseContracts.test.mjs b/tests/memoryReleaseContracts.test.mjs\nindex 145c9e49..46138835 100644\n--- a/tests/memoryReleaseContracts.test.mjs\n+++ b/tests/memoryReleaseContracts.test.mjs\n@@ -278,13 +278,18 @@ test(\"the memory count is selected for the owner's read and for no one else\", ()\n         readFileSync(new URL(path, import.meta.url), \"utf8\");\n \n     const ownerRead = read(\"../app/api/conversations/[conversationId]/route.ts\");\n+    const publicChatMessage = read(\"../lib/publicChatMessage.ts\");\n     assert.ok(\n-        ownerRead.includes(\"memoryUsedCount: true\"),\n-        \"the owner's conversation read must select memoryUsedCount (§13.4)\"\n+        ownerRead.includes(\"select: PUBLIC_CHAT_MESSAGE_SELECT\"),\n+        \"the owner's conversation read must use the shared public-message allowlist\"\n     );\n     assert.ok(\n-        ownerRead.includes(\"knowledgeChunkCount: true\"),\n-        \"the owner's conversation read must select knowledgeChunkCount \" +\n+        publicChatMessage.includes(\"memoryUsedCount: true\"),\n+        \"the owner's public-message allowlist must select memoryUsedCount (§13.4)\"\n+    );\n+    assert.ok(\n+        publicChatMessage.includes(\"knowledgeChunkCount: true\"),\n+        \"the owner's public-message allowlist must select knowledgeChunkCount \" +\n             \"(docs/policy/external-conversation-import-and-memory.md §14.3)\"\n     );\n \n@@ -295,6 +300,8 @@ test(\"the memory count is selected for the owner's read and for no one else\", ()\n     ]) {\n         const source = read(path);\n         for (const column of [\n+            \"PUBLIC_CHAT_MESSAGE_SELECT\",\n+            \"toPublicChatMessage\",\n             \"memoryUsedCount\",\n             \"memoryTokens\",\n             \"knowledgeChunkCount\",\n"
+}

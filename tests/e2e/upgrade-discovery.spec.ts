@@ -5,7 +5,39 @@ import {
   openModelPickerCatalogue,
   openRecentConversation,
   prepareGuestPage,
+  qaPersistedMessageId,
 } from "./support/app-fixtures";
+
+async function fulfillMessageSave(
+  route: Parameters<Parameters<Page["route"]>[1]>[0],
+  conversationId: string
+) {
+  if (route.request().method() !== "POST") {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    return;
+  }
+  const body = route.request().postDataJSON() as {
+    messages?: Array<{ clientRequestId?: string }>;
+  };
+  const messageMappings = (body.messages ?? []).map((message) => {
+    const requestId = String(message.clientRequestId ?? "");
+    return {
+      requestId,
+      messageId: qaPersistedMessageId(conversationId, requestId),
+    };
+  });
+  await route.fulfill({
+    status: 201,
+    contentType: "application/json",
+    body: JSON.stringify({
+      success: true,
+      created: messageMappings.length,
+      messageMappings,
+      attachments: [],
+      draftConsumed: false,
+    }),
+  });
+}
 
 const modelMenuTrigger = (page: Page) =>
   page.locator('button[aria-controls="chat-input-popover"]').nth(1);
@@ -405,11 +437,7 @@ test.describe("value-moment upgrade prompt", () => {
       "**/api/conversations/qa-conversation/messages**",
       async (route) => {
         if (route.request().method() === "POST") messagePostCount += 1;
-        await route.fulfill({
-          status: route.request().method() === "POST" ? 201 : 200,
-          contentType: "application/json",
-          body: "{}",
-        });
+        await fulfillMessageSave(route, "qa-conversation");
       }
     );
 
@@ -488,11 +516,7 @@ test.describe("value-moment upgrade prompt", () => {
         if (route.request().method() === "POST") {
           messageSavedAfterPatch = modelPatchCompleted;
         }
-        await route.fulfill({
-          status: route.request().method() === "POST" ? 201 : 200,
-          contentType: "application/json",
-          body: "{}",
-        });
+        await fulfillMessageSave(route, "qa-conversation");
       }
     );
 
@@ -888,11 +912,7 @@ test.describe("value-moment upgrade prompt", () => {
     await page.route(
       "**/api/conversations/qa-conversation-b/messages**",
       async (route) => {
-        await route.fulfill({
-          status: route.request().method() === "POST" ? 201 : 200,
-          contentType: "application/json",
-          body: "{}",
-        });
+        await fulfillMessageSave(route, "qa-conversation-b");
       }
     );
     let preflightCount = 0;

@@ -408,3 +408,35 @@ test("the sweep closes abandoned rows and never resends", async () => {
   });
   assert.equal(untouched.status, "pending");
 });
+
+test("an attempt whose budget is gone submits nothing", async () => {
+  // The lock is taken inside the three-second request budget, so the wait for
+  // it can be what ends the budget. This drives the guard with a clock rather
+  // than a real lock wait -- what it fixes is that the attempt is refused
+  // instead of sent with a one-millisecond timeout, which would put a login
+  // code on the wire after the person was told the sign-in failed.
+  const attempt = await liveAttempt();
+  const { deliveryId, idempotencyKey } = await enqueue(attempt.id, attempt.email);
+  const fetches = stubFetch([accepted()]);
+
+  // A clock that spends more than the whole budget between reads.
+  let tick = Date.now();
+  const result = await sendCredentialEmailNow({
+    deliveryId,
+    attemptId: attempt.id,
+    to: attempt.email,
+    subject: "Your Tomverse login code",
+    html: "<p>418293</p>",
+    text: "418293",
+    idempotencyKey,
+    now: () => (tick += 1_500),
+  });
+
+  assert.equal(result.sent, false);
+  assert.equal(fetches.count(), 0, "nothing reached the provider");
+  const row = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: deliveryId },
+  });
+  assert.equal(row.status, "failed");
+  assert.equal(row.lastErrorKind, "budget_exhausted");
+});

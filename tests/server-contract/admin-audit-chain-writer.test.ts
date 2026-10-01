@@ -16,11 +16,10 @@ import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore.ts
  * the chain still looks fine until two writers race.
  *
  * So these tests pin the sequence against a recording client rather than
- * describing it. The AMUX policy
- * (docs/policy/development-agent-orchestration.md) requires a system-actor
- * writer that shares this lock and hash path, and that writer is added by
- * moving this code, not copying it; these assertions are what has to stay
- * green across the move.
+ * describing it. The marketing policy (docs/policy/marketing-automation.md §6)
+ * requires a system-actor writer that shares this lock and hash path, and that
+ * writer is added by moving this code, not copying it; these assertions are
+ * what has to stay green across the move.
  */
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -37,6 +36,7 @@ type World = {
   calls: Call[];
   databaseNow: Date | null;
   previousHash: string | null;
+  previousCreatedAt: Date;
   clientIp: string | null;
   ipRequests: Request[];
 };
@@ -61,7 +61,9 @@ const recordingClient = (label: string) => ({
   adminAuditLog: {
     findFirst: async (args: unknown) => {
       world.calls.push({ kind: "findFirst", args });
-      return world.previousHash ? { entryHash: world.previousHash } : null;
+      return world.previousHash
+        ? { entryHash: world.previousHash, createdAt: world.previousCreatedAt }
+        : null;
     },
     create: async (args: {
       data: Record<string, unknown>;
@@ -89,12 +91,18 @@ let writer: typeof import("../../lib/adminAudit.ts").writeAdminAuditLog;
 
 const SECRET = "admin-audit-chain-writer-test-secret-32";
 const DATABASE_NOW = new Date("2026-09-17T01:02:03.456Z");
+const DATABASE_CLOCK_SQL =
+  "-- AdminAuditLog.createdAt is a naive timestamp. Always materialize the " +
+  "-- UTC wall clock explicitly so a non-UTC database session cannot shift " +
+  "-- the stored instant or the HMAC payload derived from it. " +
+  `SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "createdAt"`;
 
 beforeEach(async () => {
   world = {
     calls: [],
     databaseNow: DATABASE_NOW,
     previousHash: "previous-entry-hash",
+    previousCreatedAt: new Date("2026-09-17T01:00:00.000Z"),
     clientIp: "203.0.113.7",
     ipRequests: [],
   };
@@ -163,12 +171,12 @@ test("inside a caller's transaction: lock, database clock, previous hash, insert
   assert.deepEqual(lock.kind === "executeRaw" && lock.values, []);
   assert.equal(
     clock.kind === "queryRaw" && clock.sql,
-    'SELECT clock_timestamp() AS "createdAt"'
+    DATABASE_CLOCK_SQL
   );
   assert.deepEqual(previous.kind === "findFirst" && previous.args, {
     where: { entryHash: { not: null } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { entryHash: true },
+    select: { entryHash: true, createdAt: true },
   });
 });
 
@@ -425,11 +433,10 @@ test("a database clock read that returns no row falls back to a Date rather than
 
 // --- The system-actor writer -------------------------------------------------
 //
-// docs/policy/development-agent-orchestration.md: system actions share this
-// chain. The system writer reaches the same append function, so the sequence
-// above holds for it too; what these add is what differs -- no session fields,
-// the actor marker, the required transaction -- and the reserved key both
-// writers guard.
+// docs/policy/marketing-automation.md §6: system actions share this chain. The
+// system writer reaches the same append function, so the sequence above holds
+// for it too; what these add is what differs -- no session fields, the actor
+// marker, the required transaction -- and the reserved key both writers guard.
 
 let systemWriter: typeof import("../../lib/adminAudit.ts").writeSystemAuditLog;
 let RefusedError: typeof import("../../lib/adminAudit.ts").AuditWriteRefusedError;
@@ -445,12 +452,12 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
   await loadSystemWriter();
   const id = await systemWriter({
     tx: recordingClient("caller-tx") as never,
-    systemActor: "tomverse-amux-orchestrator",
-    action: "amux.execution.expired",
-    targetType: "AmuxWorkItem",
-    targetId: "task-1",
-    summary: "  Expired an execution lease.  ",
-    metadata: { attemptCount: 1 },
+    systemActor: "marketing-retention",
+    action: "marketing_post.content_purged",
+    targetType: "MarketingPost",
+    targetId: "post-1",
+    summary: "  Purged content past its retention.  ",
+    metadata: { purgedCount: 1 },
   });
 
   assert.equal(id, "created-by-caller-tx");
@@ -462,22 +469,19 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
   );
   assert.equal(
     clock.kind === "queryRaw" && clock.sql,
-    'SELECT clock_timestamp() AS "createdAt"'
+    DATABASE_CLOCK_SQL
   );
 
-  const metadata = {
-    attemptCount: 1,
-    systemActor: "tomverse-amux-orchestrator",
-  };
+  const metadata = { purgedCount: 1, systemActor: "marketing-retention" };
   assert.deepEqual(createCall(), {
     select: { id: true },
     data: {
       actorUserId: null,
       actorEmail: null,
-      action: "amux.execution.expired",
-      targetType: "AmuxWorkItem",
-      targetId: "task-1",
-      summary: "Expired an execution lease.",
+      action: "marketing_post.content_purged",
+      targetType: "MarketingPost",
+      targetId: "post-1",
+      summary: "Purged content past its retention.",
       metadata,
       ipAddress: null,
       userAgent: null,
@@ -487,10 +491,10 @@ test("a system entry takes the same lock, clock and previous hash on the caller'
           previousHash: "previous-entry-hash",
           actorUserId: null,
           actorEmail: null,
-          action: "amux.execution.expired",
-          targetType: "AmuxWorkItem",
-          targetId: "task-1",
-          summary: "Expired an execution lease.",
+          action: "marketing_post.content_purged",
+          targetType: "MarketingPost",
+          targetId: "post-1",
+          summary: "Purged content past its retention.",
           metadata,
           ipAddress: null,
           userAgent: null,
@@ -508,14 +512,12 @@ test("a system entry without metadata still carries its actor", async () => {
   await loadSystemWriter();
   await systemWriter({
     tx: recordingClient("caller-tx") as never,
-    systemActor: "tomverse-amux-orchestrator",
-    action: "amux.execution.started",
-    targetType: "AmuxWorkItem",
+    systemActor: "marketing-guard",
+    action: "marketing_post.guard_evaluated",
+    targetType: "MarketingPost",
     summary: "Evaluated.",
   });
-  assert.deepEqual(createCall().data.metadata, {
-    systemActor: "tomverse-amux-orchestrator",
-  });
+  assert.deepEqual(createCall().data.metadata, { systemActor: "marketing-guard" });
 });
 
 const refusedBeforeAnyStatement = async (write: () => Promise<unknown>) => {
@@ -527,7 +529,7 @@ test("the system writer refuses to run without the caller's transaction", async 
   await loadSystemWriter();
   await refusedBeforeAnyStatement(() =>
     systemWriter({
-      systemActor: "tomverse-amux-orchestrator",
+      systemActor: "marketing-guard",
       action: "x",
       targetType: "X",
       summary: "x",
@@ -540,7 +542,7 @@ test("the system writer refuses an actor that is not listed", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "unlisted-worker" as never,
+      systemActor: "marketing-intern" as never,
       action: "x",
       targetType: "X",
       summary: "x",
@@ -553,7 +555,7 @@ test("the system writer refuses metadata that is not an object", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "tomverse-amux-orchestrator",
+      systemActor: "marketing-guard",
       action: "x",
       targetType: "X",
       summary: "x",
@@ -567,11 +569,11 @@ test("neither writer lets a caller set the actor marker itself", async () => {
   await refusedBeforeAnyStatement(() =>
     systemWriter({
       tx: recordingClient("caller-tx") as never,
-      systemActor: "tomverse-amux-orchestrator",
+      systemActor: "marketing-guard",
       action: "x",
       targetType: "X",
       summary: "x",
-      metadata: { systemActor: "caller-supplied" },
+      metadata: { systemActor: "marketing-publisher" },
     })
   );
   await refusedBeforeAnyStatement(() =>
@@ -580,7 +582,7 @@ test("neither writer lets a caller set the actor marker itself", async () => {
       action: "x",
       targetType: "X",
       summary: "x",
-      metadata: { systemActor: "caller-supplied" },
+      metadata: { systemActor: "marketing-publisher" },
       tx: recordingClient("caller-tx") as never,
     })
   );
@@ -598,4 +600,39 @@ test("a nested key of the same name is ordinary metadata for the administrator w
   assert.deepEqual(createCall().data.metadata, {
     detail: { systemActor: "free text" },
   });
+});
+
+test("an entry stamped at or before the chain head lands one millisecond after it", async () => {
+  // Ids are random, so a same-millisecond entry could sort before the head and
+  // fork the chain for the next writer; the database now refuses it too.
+  world.previousCreatedAt = new Date(DATABASE_NOW.getTime());
+  await writer({
+    session,
+    action: "example.updated",
+    targetType: "Example",
+    summary: "Same millisecond.",
+    tx: recordingClient("caller-tx") as never,
+  });
+  const bumped = new Date(DATABASE_NOW.getTime() + 1);
+  const { data } = createCall();
+  assert.deepEqual(data.createdAt, bumped);
+  assert.equal(
+    data.entryHash,
+    computeAdminAuditEntryHash(
+      {
+        previousHash: "previous-entry-hash",
+        actorUserId: "admin-1",
+        actorEmail: "owner@example.test",
+        action: "example.updated",
+        targetType: "Example",
+        targetId: null,
+        summary: "Same millisecond.",
+        metadata: null,
+        ipAddress: null,
+        userAgent: null,
+        createdAt: bumped.toISOString(),
+      },
+      SECRET
+    )
+  );
 });

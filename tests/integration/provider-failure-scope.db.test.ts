@@ -42,7 +42,31 @@ const resetHealthData = async () => {
   `);
 };
 
-beforeEach(resetHealthData);
+// The failure counters are keyed by wall-clock five-minute windows
+// (lib/providerMonitoring.ts `periodStart`), and the dashboard reads the newest
+// bucket row rather than summing them. A scenario that records five failures
+// and then reads them back therefore has to do both inside one window: if the
+// clock crosses a boundary partway through, four failures stay in the old
+// bucket, the read sees a bucket holding one, and a model that has just failed
+// five times reads as healthy. That is what the counters do, not something
+// these scenarios are asserting about, so they start with enough of the window
+// left to finish inside it.
+//
+// Ten seconds against a slowest-observed 1.2s test. The wait costs nothing in
+// the 96.7% of runs that start clear of a boundary.
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
+const WINDOW_HEADROOM_MS = 10_000;
+
+const awaitFiveMinuteWindowHeadroom = async () => {
+  const remaining = FIVE_MINUTES_MS - (Date.now() % FIVE_MINUTES_MS);
+  if (remaining >= WINDOW_HEADROOM_MS) return;
+  await new Promise((resolve) => setTimeout(resolve, remaining + 50));
+};
+
+beforeEach(async () => {
+  await resetHealthData();
+  await awaitFiveMinuteWindowHeadroom();
+});
 after(async () => {
   if (previousPerplexityKey === undefined) delete process.env.PERPLEXITY_API_KEY;
   else process.env.PERPLEXITY_API_KEY = previousPerplexityKey;

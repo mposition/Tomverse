@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { sendLockPrismaStubs } from "../support/sendLockPrisma";
 
 /**
  * Server-side contract for PATCH /api/admin/feedback/[feedbackId].
@@ -160,6 +161,23 @@ async function loadRoute(): Promise<{
           world.emails.push(input);
           return { sent: true, skipped: false, id: "qa-email" };
         },
+        // The customer-facing half goes through `sendWithAddressLock()`, which
+        // submits with `deliverEmailOnce` and reads the provider's result
+        // rather than parsing a thrown string
+        // (docs/policy/email-notifications.md section 9.8).
+        deliverEmailOnce: async (input: {
+          to: string;
+          subject: string;
+          text: string;
+          html: string;
+          idempotencyKey?: string;
+        }) => {
+          // The same failure, in the shape the helper reads: a 502 is what
+          // "mailbox unavailable" was standing for.
+          if (world.emailShouldFail) return { ok: false, status: 502 };
+          world.emails.push(input);
+          return { ok: true, providerMessageId: "qa-email", from: "support@tomverse.app", senderRole: "support" };
+        },
       },
     });
 
@@ -237,12 +255,14 @@ async function loadRoute(): Promise<{
         },
       },
       // The send path asks whether the address is suppressed before every
-      // attempt (docs/policy/email-notifications.md §13.3).
-      suppressionEntry: {
+      // attempt (docs/policy/email-notifications.md §13.3). It asks the causes:
+      // nothing writes `SuppressionEntry` after deploy C-2, so a stub offering
+      // that table answers a question the send no longer puts.
+      suppressionCause: {
         findMany: async () => world.suppressions,
       },
-      // The suppression read authority: absent, so entries decide.
-      appSetting: { findUnique: async () => null },
+      // The address lock the send takes before it submits.
+      ...sendLockPrismaStubs(),
       feedbackAutoFixCase: {
         updateMany: async ({
           where,

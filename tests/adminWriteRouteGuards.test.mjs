@@ -169,12 +169,13 @@ test("the sweep sees the admin API, so a silent pass is impossible", () => {
 test("every admin route decides whether the caller is an administrator", () => {
   // The guard itself, not the role: `isAdminSession` answers the first
   // question and `hasAdminPermission` the second, but a route that asks
-  // neither is open to any signed-in account.
+  // neither is open to any signed-in account. Shared mutation services count
+  // only through the same one-level call boundary used for the write guards.
   const unguarded = routes
     .filter(
       (route) =>
-        !route.source.includes("isAdminSession") &&
-        !route.source.includes("hasAdminPermission")
+        !route.reaches("isAdminSession") &&
+        !route.reaches("hasAdminPermission")
     )
     .map((route) => route.name);
 

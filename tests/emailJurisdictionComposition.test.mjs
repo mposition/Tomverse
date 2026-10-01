@@ -29,6 +29,7 @@ const IDENTITY = {
   legalName: "Tomverse Pty Ltd",
   postalAddress: "1 Example Street, Brisbane QLD 4000, Australia",
   contactEmail: "support@tomverse.app",
+  contactPhone: "+61 2 0000 0000",
   businessRegistrationNumber: "000-00-00000",
   mailOrderRegistrationNumber: "2026-Seoul-00000",
   abn: "00 000 000 000",

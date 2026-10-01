@@ -1,0 +1,78 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-v1",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T08:35:05.061Z",
+  "durationMs": 313542,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 62,
+    "cachedInputTokens": 2326126,
+    "outputTokens": 21835,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.853839,
+    "raw": {
+      "input_tokens": 62,
+      "cache_creation_input_tokens": 111746,
+      "cache_read_input_tokens": 2326126,
+      "output_tokens": 21835,
+      "output_tokens_details": {
+        "thinking_tokens": 15771
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 111746,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1311,
+          "cache_read_input_tokens": 114066,
+          "cache_creation_input_tokens": 2422,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2422
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T08:40:18.659Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "Both round-1 nits are closed and I found no new actionable defect: lib/publicChatMessage.ts:75-84 restores the §13.3 caller bound (owner-authorized read only; share snapshot and export keep their own selects that omit memoryUsedCount/knowledgeChunkCount), and components/chat/ChatApp.tsx:1092-1107 now reports the validated canonical body and searchMetadata from the polling path with the preserved page-local analyticsPromptId (null after a reload, per ChatApp.tsx:874-877), matching the POST path at 1797-1804. Verified against the requirement: PUBLIC_CHAT_MESSAGE_SELECT/toPublicChatMessage reproduce the prior conversation-GET output field-for-field (same 8 scalars, same attachmentId duplication, same artifacts allowlist without objectKey, same >0-only disclosure counts), readPublicCompletedChatMessage re-asserts id+conversationId+role+modelId+conversation.userId and both routes fail closed when it returns null while active/failed/cancelled attempts carry no message; the client parser's expectedStatus mapping is sound because app/api/chat/route.ts:5510 writes Message.status from completionOutcome and 5554-5562 sets the attempt finishReason to \"length\" on exactly that same outcome, so a raw MAX_TOKENS reason cannot desync them; malformed or missing completed envelopes take scheduleTransientRetry before transientFailures.delete (bounded exponential backoff, terminating at CHAT_ATTEMPT_POLL_EXPIRED) or throw on the POST without a second dispatch; Deep Research stays out via the usageClass predicate at route.ts:2104-2110. Ready to proceed to PR and Linux CI; no provider call, push, merge or deploy was performed or authorized here."
+  }
+}

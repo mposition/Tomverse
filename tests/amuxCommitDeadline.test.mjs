@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -54,10 +54,13 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20260930120000_amux_orchestrator_halt",
 ]);
 
-test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {
+test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
   const directory = AMUX_COMMIT_DEADLINE_MIGRATION.split("/")[2];
+  // Ordered after the AMUX migrations whose tables its trigger guards. It was
+  // written as "later than every other migration", which held only until the
+  // next migration of any feature landed after it.
   const others = readdirSync(join(root, "prisma", "migrations"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== directory)
+    .filter((entry) => entry.isDirectory() && entry.name !== directory && /amux/i.test(entry.name))
     .map((entry) => entry.name);
   assert.ok(others.length > 0);
   for (const name of others) {
@@ -283,11 +286,7 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
     ),
   ];
   assert.ok(scanned.includes("lib/amux/dbBoundary.ts"));
-  // main has no engineering adapter yet; it arrives with the engineering
-  // agent, and this scan picks it up by its dbBoundary import when it does.
-  if (existsSync("lib/engineeringAgentAmuxAdapter.ts")) {
-    assert.ok(scanned.includes("lib/engineeringAgentAmuxAdapter.ts"));
-  }
+  assert.ok(scanned.includes("lib/engineeringAgentAmuxAdapter.ts"));
   assert.ok(scanned.includes("app/api/internal/amux/tasks/route.ts"));
   const offenders = scanned.filter((path) => /SET\s+CONSTRAINTS/i.test(read(path)));
   assert.deepEqual(offenders, []);

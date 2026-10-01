@@ -44,7 +44,11 @@ jobs:
   # and main, so removing this would take secret scanning off the
   # merge-blocking path entirely. Remove it only after
   # "Scan repository history for secrets" is itself made a required check.
-  # `fetch-depth: 0` exists for this job, and only for this job.
+  # `fetch-depth: 0` here is for gitleaks, which scans base..head and needs
+  # both ends. Every job in this workflow now checks out full history, each
+  # for its own reason stated at its own checkout, so no comment here claims
+  # anything about the others: the line this replaces said the depth existed
+  # "for this job, and only for this job", and three other jobs had it.
   secret-scan:
     name: Secret scan (PR commits)
     runs-on: ubuntu-latest
@@ -70,12 +74,24 @@ jobs:
   static-and-unit:
     name: Security, lint, encoding, and unit tests
     runs-on: ubuntu-latest
-    # Measured 83s of work (run #130 step timings); 15 minutes covers a cold
-    # npm cache with room to spare.
-    timeout-minutes: 15
+    # Recent to-develop runs measured 559-576s in the unit step and 782-822s
+    # for this job. The continuation contract suite added ~31s, and run
+    # 34695229219 then hit the old 10-minute step ceiling while still passing
+    # tests. Keep the unit deadline below the job deadline so an actual hang
+    # identifies its stage; the remaining job budget covers the static checks
+    # below on a slow but passing run.
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # `check:memory-eval-succ7` asks whether the commit an eval dataset's
+          # signature names is an ancestor of HEAD. At the default depth of 1
+          # that question is unanswerable, and the check used to answer it with
+          # an OK -- so in CI, the one place it runs, any 40-character string
+          # would have passed as a signing commit. The check now fails when the
+          # commit is absent, which needs the history to be here.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -98,7 +114,7 @@ jobs:
         run: npm run security:regression
 
       - name: Unit and API policy tests
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: npm run test:unit
 
       # Its own process, not part of test:unit, because it needs
@@ -162,6 +178,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:policy-section-references
 
+      # The approved consent wording is pinned three ways inside the tree, and a
+      # commit that edits the document and its pins together passes all three.
+      # This one reads the base revision, which is the only place an approved
+      # record can be compared with what it was. It needs the base branch, which
+      # is why the checkout above is at full depth.
+      - name: Approved consent records are unchanged
+        timeout-minutes: 5
+        run: npm run check:consent-copy-immutability
+
       # The staging checklist holds items and never results, and a signed run
       # record is not edited afterwards. The previous shape put an approval
       # table inside the checklist, where it could not say which commit it
@@ -180,6 +205,23 @@ jobs:
       - name: Release records
         timeout-minutes: 5
         run: npm run check:release-records
+
+      # The AI Review evaluation dataset and the reviewer-pair register.
+      #
+      # A dataset with a malformed case, an unstated `goldCompleteness`, or a
+      # prompt_injection case carrying no marker produces numbers rather than
+      # an error -- the wrong numbers, computed over the wrong denominators.
+      # And an `approved` register entry whose evidence is incomplete is the
+      # one thing in this feature that could turn "we measured it" into a
+      # claim nobody can follow, so the check refuses it here rather than at
+      # the moment somebody quotes it.
+      #
+      # It passes today with nothing approved and no decision dataset. That is
+      # the honest state, not a failure: the check exists to catch a broken
+      # dataset or an unsupported approval, not to demand either.
+      - name: AI Review evaluation dataset and register
+        timeout-minutes: 5
+        run: npm run check:ai-review-eval
 
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
@@ -239,6 +281,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:sending-identity
 
+      # Every customer-facing send takes the address lock and asks suppression
+      # again inside it. A send made anywhere else skips all three, and the
+      # failure is silent -- the message goes out, the recipient is somebody who
+      # had withdrawn, and the record says the check was made.
+      - name: Only the allowed files can reach the mail provider
+        timeout-minutes: 5
+        run: npm run check:send-entry-points
+
       - name: Email provider port stays two methods over one provider
         timeout-minutes: 5
         run: npm run check:email-provider-port
@@ -265,6 +315,39 @@ jobs:
       - name: Memory eval freeze conditions
         timeout-minutes: 5
         run: npm run check:memory-eval-freeze
+
+      # succ-6 is the frozen decision set and its structural check was not in
+      # any required gate either -- the dataset a verdict is cited against was
+      # the one nothing guarded. `check:memory-eval-freeze` reads freeze
+      # *conditions*; this reads the sample, the manifest and the signature.
+      - name: Memory eval succ-6 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ6
+
+      # The successor's own invariants, which `check:memory-eval-freeze` does
+      # not cover: it reads the harness target, and succ-7 is not the target.
+      # Without this step succ-7 could lose a case, gain a same-cell mismatch,
+      # break its subtype composition, intersect the regression corpus, drop
+      # `frozen` into the manifest identity, or start claiming adoption -- and
+      # every required check would still be green.
+      - name: Memory eval succ-7 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ7
+
+      # succ-8 is the harness target and the dataset a signature is pending on,
+      # and until this step existed its verifiers ran nowhere. Both are
+      # reachable only from `resolveArtifactDataset()`, which runs when someone
+      # reads an old artifact -- not on a commit, and not before a signature.
+      # So succ-8 could have lost its pinned manifest and gone back to
+      # recomputing it, carried a half-filled approval, or been frozen with
+      # nobody's name on it, and every required check would still be green.
+      - name: Memory eval succ-8 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ8
+
+      - name: Memory eval succ-9 structural checks
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ9
 
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
@@ -325,6 +408,22 @@ jobs:
       - name: Router quality evaluation evidence
         timeout-minutes: 5
         run: npm run check:router-quality-eval
+      # The human review sample calibrates the model judges, so its shape has
+      # to survive contact with a text editor. A cell quietly short of four, a
+      # reserve that is also a primary, a diagnostic pair that has wandered
+      # into the sixty, or a substitution recorded against a verdict all leave
+      # a file that still looks like a draw. This reads the committed ones.
+      - name: Router human review draws
+        timeout-minutes: 5
+        run: npm run check:router-human-review
+      # `n` is fixed before the decision run and conditional on the judge
+      # calibration. The failure this catches is the one nobody does on
+      # purpose: a borderline result, a true observation that the pilot's
+      # discordance estimate was noisy, and `n` revised in place. The file
+      # still reads as a pre-registration afterwards.
+      - name: Router decision pre-registration
+        timeout-minutes: 5
+        run: npm run check:router-decision-preregistration
       # PACKAGE-01. The shared packages are the mechanism that stops the web
       # app and the native shell from becoming two products; that only holds
       # while the shared half runs unchanged in all three environments. The
@@ -348,12 +447,35 @@ jobs:
         timeout-minutes: 10
         run: npm run verify:package-build-matrix
 
-      # PLANNER-03. Memory, imported content and uploaded documents already
-      # reach the prompt, and the defences that keep them data -- fences,
-      # rules stated first, inerting -- had nothing measuring them. This runs
-      # an adversarial corpus through each builder and fails on a payload that
-      # escapes its region, forges a boundary, gets ahead of the rules, or
-      # smuggles a control character through.
+      # The locally bundled app is a release requirement in two documents
+      # (delivery plan section 2, mobile authentication policy "Deliberately
+      # excluded"), and until now nothing measured it. A `server.url` added to
+      # a Capacitor config for a debugging session builds, runs and looks
+      # right; what it changes is the origin every request comes from, which
+      # is the one thing the bearer-token boundary is defined against. The
+      # check reads the config as text so a URL arriving through an
+      # environment variable is a finding rather than an empty string.
+      - name: Capacitor shell stays a local bundle
+        timeout-minutes: 5
+        run: npm run check:capacitor-local-bundle
+
+      # D19. The refresh token belongs to the native layer and the platform
+      # secure store; what the WebView receives across the bridge is an access
+      # token and an expiry. That rule is an absence, and nobody breaks it on
+      # purpose -- what happens is that somebody wants a signed-in browser for
+      # local work, writes a web fallback that calls the refresh endpoint
+      # directly, and the policy sentence quietly stops being true in the build
+      # a developer looks at most. Textual, for the same reason as the check
+      # above: a URL assembled from a constant would evaluate to nothing.
+      - name: Mobile JS cannot hold a refresh token
+        timeout-minutes: 5
+        run: npm run check:native-token-boundary
+
+      # PLANNER-03. Memory, imported content, uploaded documents and the
+      # Prompt Refiner's current-turn input cross prompt trust boundaries.
+      # This runs one adversarial corpus through every builder and checks both
+      # fenced-text containment and the Refiner's system-first, canonical JSON
+      # role boundary.
       - name: Prompt-injection containment
         timeout-minutes: 5
         run: npm run check:prompt-injection
@@ -388,6 +510,19 @@ jobs:
       - name: Conversation writer coverage
         timeout-minutes: 5
         run: npm run check:conversation-writers
+
+      # The audit chain proves nothing about a row that reached the table some
+      # other way, so a protected table has one writer module
+      # (docs/policy/marketing-automation.md §6). Direct delegate writes, raw SQL
+      # naming a protected table beside a write verb, and the runtime-SQL
+      # spellings the check lists fail here. Separately, the database refuses
+      # UPDATE and DELETE on the audit log and checks that a hashed insert links
+      # to the chain head and is dated after it
+      # (prisma/migrations/20260918090000_admin_audit_log_append_only). Neither
+      # rules out a deliberately obfuscated write; that is a review finding.
+      - name: Protected table writers
+        timeout-minutes: 5
+        run: npm run check:protected-table-writers
 
       # The readiness register is the only thing standing between "Auto works
       # in shadow" and "Auto answers a real person", which makes it worth
@@ -576,9 +711,11 @@ jobs:
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
+          # Linux-next-admin-e2e- from another workflow. That cache was built
+          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
           restore-keys: |
             ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'
@@ -778,9 +915,11 @@ jobs:
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
+          # Linux-next-admin-e2e- from another workflow. That cache was built
+          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
           restore-keys: |
             ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'

@@ -86,3 +86,112 @@ export function nextConnectRetryDelayMs(attempt, total = CONNECT_RETRY_COUNT) {
   if (attempt >= total) return null;
   return CONNECT_RETRY_DELAY_MS;
 }
+
+/**
+ * Opens a direct connection, retrying a failure that could clear on its own,
+ * and returns the connected client.
+ *
+ * `createClient` builds a fresh client per attempt because `pg` does not allow
+ * reconnecting one that failed to connect -- reusing it would turn the second
+ * attempt into a different, misleading error. A client that got partway is
+ * closed before the next try so a retry cannot leak a socket.
+ *
+ * Throws the last error once every attempt is spent, leaving each caller's own
+ * catch as the single place that redacts and reports a connection failure.
+ */
+export async function connectWithRetry(createClient, { onRetry } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= CONNECT_RETRY_COUNT; attempt += 1) {
+    const candidate = createClient();
+    try {
+      await candidate.connect();
+      await candidate.query("SELECT 1");
+      return candidate;
+    } catch (error) {
+      lastError = error;
+      await candidate.end().catch(() => undefined);
+
+      const delayMs = isRetryablePostgresConnectionError(error)
+        ? nextConnectRetryDelayMs(attempt)
+        : null;
+      if (delayMs === null) break;
+
+      onRetry?.(attempt, delayMs);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+// ---------------------------------------------------------------------------
+// The same condition, one command later.
+//
+// The 2026-09-13 deploy of e7e2795 failed with the probe above reporting the
+// database healthy:
+//
+//     [migration-check 3/3] Testing PostgreSQL advisory locks
+//     Direct PostgreSQL connection and advisory locks are available.
+//     Datasource "db": PostgreSQL database "postgres" at "db.prisma.io:5432"
+//     Error: P1001: Can't reach database server at `db.prisma.io:5432`
+//
+// Eight seconds separate those lines. The build had succeeded and the image was
+// pushed; the five sibling services deploying from the same commit were
+// unaffected, and the previous release kept serving requests against that same
+// database minutes later. Nothing was wrong with the database for longer than
+// the five seconds Prisma waits to connect.
+//
+// `db:migrate` is three commands. The retry added on 2026-08-24 covers the
+// first one, and the comment above says it was "the one thing here with no
+// second attempt" -- which was not true when it was written. The connect in
+// `baseline-existing-database.mjs` and the connect `prisma migrate deploy`
+// makes are the same one-shot, and this deploy lost on the third.
+//
+// The CLI is not `pg`: there is no error object to read, only what it printed.
+// So the decision inverts. `pg` treats an error with no SQLSTATE as retryable,
+// because a connection that never reached the server carries no code. Here an
+// unrecognised failure is far more likely to be a migration that will not
+// apply, and retrying schema changes on a guess is worse than stopping. Only
+// the codes named below are tried again.
+// ---------------------------------------------------------------------------
+
+/**
+ * Prisma CLI error codes for a database that was not reached, or that dropped
+ * the connection before the command could do anything.
+ *
+ * Deliberately excludes the connection errors that cannot change between
+ * attempts: P1000 (authentication failed), P1003 (the database named in the URL
+ * does not exist) and P1010 (access denied) fail identically every time.
+ */
+export const RETRYABLE_PRISMA_CONNECT_CODES = Object.freeze([
+  // P1001 can't reach the database server.
+  "P1001",
+  // P1002 the server was reached but timed out.
+  "P1002",
+  // P1017 the server closed the connection.
+  "P1017",
+]);
+
+/** Any `P3xxx`: the migration engine ran and something about the schema failed. */
+const PRISMA_MIGRATION_ERROR_PATTERN = /\bP3\d{3}\b/;
+
+/**
+ * Whether `output` -- everything `prisma migrate deploy` wrote before exiting
+ * non-zero -- describes a database that was not reached, and nothing else.
+ *
+ * A migration error anywhere in the output vetoes the retry even when a
+ * connection code is also present. `migrate deploy` records a failed migration
+ * in `_prisma_migrations`, and every later attempt fails on that row (P3009)
+ * rather than on the connection; retrying would bury the reason under
+ * "retrying..." lines and delay a failure that needs a person.
+ *
+ * Retrying the connection case is safe because `migrate deploy` is resumable:
+ * it applies what is pending and skips what is recorded, so a second attempt
+ * after a lost connection is the same attempt, not a repeated one.
+ */
+export function isRetryablePrismaMigrateFailure(output) {
+  if (typeof output !== "string" || output === "") return false;
+  if (PRISMA_MIGRATION_ERROR_PATTERN.test(output)) return false;
+  return RETRYABLE_PRISMA_CONNECT_CODES.some((code) =>
+    new RegExp(`\\b${code}\\b`).test(output)
+  );
+}

@@ -1,0 +1,5 @@
+
+> ai-chat-hub@0.1.0 check:policy-section-references
+> node scripts/check-policy-section-references.mjs --since ea9c802d4c96cb0e320e9681bd7476495840a314
+
+Policy section reference check passed: 4142 citation(s) against 30 policy document(s). 2491 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 230 predate this change).

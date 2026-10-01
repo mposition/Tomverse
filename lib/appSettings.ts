@@ -1,5 +1,15 @@
 import "server-only";
 
+import type { PrismaClient } from "@prisma/client";
+import type { Session } from "next-auth";
+
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import {
+  getAdminSessionAccessState,
+  hasAdminPermission,
+} from "@/lib/adminAuth";
+import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
+
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
 import {
   ASSISTANT_KNOWLEDGE_FLAG_KEY,
@@ -34,6 +44,10 @@ import {
   voiceInputKillSwitchEngaged,
 } from "@/lib/voiceInputAccess";
 import {
+  PROMPT_REFINER_FLAG_KEY,
+  readPromptRefinerAvailability,
+} from "@/lib/promptRefinerAccess";
+import {
   CHAT_STARTER_FLAG_KEY,
   chatStarterAvailable,
   chatStarterKillSwitchEngaged,
@@ -43,8 +57,20 @@ import {
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY,
   emailFeatureEnabledFromValue,
 } from "@/lib/emailFeatureFlags";
+import {
+  MARKETING_AUTO_PUBLISH_KEY,
+  MARKETING_DRAFTS_KEY,
+  MARKETING_EXPERIMENTS_KEY,
+  MARKETING_PUBLISH_KEY,
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  marketingAutomationEnabledFromValue,
+  type ReadResult,
+} from "@/lib/marketingAutomationAccess";
 import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
@@ -359,6 +385,28 @@ export async function isVoiceInputEnabled(): Promise<boolean> {
 }
 
 /**
+ * Prompt Refiner's default-off rollout flag plus environment kill switch.
+ *
+ * There is intentionally no application writer yet. Enabling the flag would
+ * authorize a paid model call whose fixed model/cap/timeout and PLANNER-03
+ * evidence are not approved. The server shell also requires adapter readiness
+ * before it turns this availability into an offered UI decision.
+ */
+export async function isPromptRefinerEnabled(): Promise<boolean> {
+  return readPromptRefinerAvailability({
+    env: process.env,
+    databaseEnabled: !e2eDatabaseDisabled(),
+    readStoredFlag: async () => {
+      const row = await prisma.appSetting.findUnique({
+        where: { key: PROMPT_REFINER_FLAG_KEY },
+        select: { value: true },
+      });
+      return row?.value;
+    },
+  });
+}
+
+/**
  * `feature.chatStarterEnabled` (docs/ui-contracts/chat-starter-catalog.md).
  *
  * Same shape as `isVoiceInputEnabled` above and for the same reasons: the kill
@@ -370,6 +418,32 @@ export async function isVoiceInputEnabled(): Promise<boolean> {
  * the starter gallery is a welcome-screen surface, resolved once per page
  * render, and it dispatches nothing of its own for a route to have to refuse.
  */
+/**
+ * Auto's session-seeded tie exploration.
+ *
+ * The predicates live in `lib/autoExplorationAccess.ts` and are repeated here
+ * on purpose. This module is inside the prompt-refiner runtime source
+ * closure, and importing that file would add it to a path list a database
+ * check is bound to. The repeated literals are locked by
+ * `tests/autoExploration.test.mjs`.
+ *
+ * No setter. Turning it on changes which model answers a tied Auto turn, and
+ * that stays an operator write of the AppSetting row after staging has shown
+ * the same conversation staying on one model and a different credit price
+ * staying out of the spread. Stopping is `AUTO_EXPLORATION_KILL_SWITCH`.
+ */
+const AUTO_EXPLORATION_FLAG_KEY = "feature.autoExplorationEnabled";
+
+export async function isAutoExplorationEnabled(): Promise<boolean> {
+  if ((process.env.AUTO_EXPLORATION_KILL_SWITCH ?? "").trim()) return false;
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: AUTO_EXPLORATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return row?.value === "true";
+}
+
 export async function isChatStarterEnabled(): Promise<boolean> {
   if (chatStarterKillSwitchEngaged(process.env)) return false;
   if (e2eDatabaseDisabled()) return false;
@@ -569,6 +643,22 @@ export async function isEmailMarketingEnabled(): Promise<boolean> {
   return emailFeatureEnabledFromValue(row?.value);
 }
 
+/**
+ * Release notes, the last switch in the activation order.
+ *
+ * Off for the same reasons as the others when the database cannot be read: a
+ * harness with no database must not be able to send, and off is the answer that
+ * fails safely.
+ */
+export async function isEmailReleaseNotesEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_RELEASE_NOTES_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
 export async function isEmailCampaignsEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
@@ -597,6 +687,16 @@ export async function isEmailConsentConfirmationEnabled(): Promise<boolean> {
   return emailFeatureEnabledFromValue(row?.value);
 }
 
+/** The sign-up screen's consent devices (S4). Default off. */
+export async function isEmailSignupConsentEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_SIGNUP_CONSENT_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
 export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
@@ -605,6 +705,146 @@ export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
   });
   return emailFeatureEnabledFromValue(row?.value);
 }
+
+/**
+ * S1d marketing switches are default-off and deliberately have no writer yet.
+ * S2 adds the permission-checked, step-up-protected and audit-logged routes.
+ * Until then these readers expose failure separately from a stored `false`, so
+ * the access resolver can record `input_unreadable:<name>` while denying both.
+ */
+export type MarketingAutomationSettingsRead = {
+  draftsEnabled: ReadResult<boolean>;
+  publishEnabled: ReadResult<boolean>;
+  autoPublishEnabled: ReadResult<boolean>;
+  experimentsEnabled: ReadResult<boolean>;
+  webhookShadowEnabled: ReadResult<boolean>;
+  webhookShadowStoredValue: ReadResult<string | null>;
+  webhookApplyScopeValue: ReadResult<string | null>;
+  /**
+   * The version token a switch change has to send back.
+   *
+   * Read here rather than in its own query so the console shows a generation
+   * from the same snapshot as the values it read: two queries can straddle a
+   * change, and a screen that showed the old values with the new generation
+   * would save against a state nobody saw.
+   */
+  configGenerationValue: ReadResult<string | null>;
+};
+
+export async function readMarketingAutomationSettingsFrom(
+  client: Pick<PrismaClient, "appSetting">,
+  databaseEnabled: boolean,
+): Promise<MarketingAutomationSettingsRead> {
+  const fromValues = (values: ReadonlyMap<string, string>) => ({
+    draftsEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(values.get(MARKETING_DRAFTS_KEY)),
+    },
+    publishEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(values.get(MARKETING_PUBLISH_KEY)),
+    },
+    autoPublishEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_AUTO_PUBLISH_KEY),
+      ),
+    },
+    experimentsEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_EXPERIMENTS_KEY),
+      ),
+    },
+    webhookShadowEnabled: {
+      ok: true as const,
+      value: marketingAutomationEnabledFromValue(
+        values.get(MARKETING_WEBHOOK_SHADOW_KEY),
+      ),
+    },
+    webhookShadowStoredValue: {
+      ok: true as const,
+      value: values.get(MARKETING_WEBHOOK_SHADOW_KEY) ?? null,
+    },
+    webhookApplyScopeValue: {
+      ok: true as const,
+      value: values.get(MARKETING_WEBHOOK_APPLY_SCOPE_KEY) ?? null,
+    },
+    configGenerationValue: {
+      ok: true as const,
+      value: values.get(MARKETING_CONFIG_GENERATION_KEY) ?? null,
+    },
+  });
+
+  if (!databaseEnabled) return fromValues(new Map());
+
+  try {
+    const rows = await client.appSetting.findMany({
+      where: {
+        key: {
+          in: [
+            MARKETING_DRAFTS_KEY,
+            MARKETING_PUBLISH_KEY,
+            MARKETING_AUTO_PUBLISH_KEY,
+            MARKETING_EXPERIMENTS_KEY,
+            MARKETING_WEBHOOK_SHADOW_KEY,
+            MARKETING_WEBHOOK_APPLY_SCOPE_KEY,
+            MARKETING_CONFIG_GENERATION_KEY,
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    return fromValues(new Map(rows.map((row) => [row.key, row.value])));
+  } catch {
+    const unreadable: ReadResult<never> = { ok: false };
+    return {
+      draftsEnabled: unreadable,
+      publishEnabled: unreadable,
+      autoPublishEnabled: unreadable,
+      experimentsEnabled: unreadable,
+      webhookShadowEnabled: unreadable,
+      webhookShadowStoredValue: unreadable,
+      configGenerationValue: unreadable,
+      webhookApplyScopeValue: unreadable,
+    };
+  }
+}
+
+export async function readMarketingAutomationSettings(): Promise<
+  MarketingAutomationSettingsRead
+> {
+  return readMarketingAutomationSettingsFrom(prisma, !e2eDatabaseDisabled());
+}
+
+/**
+ * The three marketing switches an operator may change from the console.
+ *
+ * Drafts, publishing and autonomous publishing. The webhook shadow switch
+ * belongs to S2e and the apply scope to S2f: both carry evidence this slice
+ * has no way to check, and a writer for them here would be a way to skip that
+ * evidence (docs/policy/marketing-automation.md §6.1, §8.1.1).
+ *
+ * The write takes the caller's transaction so it commits with the audit entry
+ * the route wrote -- that pairing is the only thing that makes the change
+ * answerable afterwards.
+ */
+
+/**
+ * The generation number every admission-affecting setting change moves by one.
+ *
+ * S2b2's autonomous insert binds it, so a setting that changed between a
+ * decision and the write it authorised is something the insert can see rather
+ * than something it has to re-read and hope about (S2 plan, the admission
+ * AppSettings row).
+ *
+ * The key lives here because the combined reader below reads it. Everything
+ * that *writes* it lives in `lib/marketingSwitchWriter.ts`: this module is
+ * inside the Prompt Refiner runtime source closure, so an import of the
+ * marketing store from here would change a sealed file count that a database
+ * CHECK is bound to.
+ */
+export const MARKETING_CONFIG_GENERATION_KEY = "marketingAutomation.configGeneration";
 
 export class MemoryFeatureDisabledError extends Error {
   constructor() {
@@ -780,4 +1020,109 @@ export async function isAssistantPackageImportEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return assistantPackageImportEnabledFromValue(row?.value);
+}
+
+/** Why a change to the import flag was refused, when it was. */
+export type AssistantPackageImportFlagRefusal =
+  | "reauthentication-required"
+  | "not-authorized"
+  | "rationale-required";
+
+export type AssistantPackageImportFlagOutcome =
+  | { outcome: "refused"; reason: AssistantPackageImportFlagRefusal }
+  | {
+      outcome: "changed" | "unchanged";
+      /** The stored value before this call. `null` when there was no row. */
+      before: string | null;
+      after: string;
+    };
+
+/**
+ * The only way the import flag changes
+ * (docs/policy/assistant-package-import.md §12.2.1).
+ *
+ * Turning it on and rolling it back are the same call with a different
+ * argument, deliberately. A control that only switches on leaves the reverse
+ * to a hand-typed `UPDATE`, and then the record says a feature was released
+ * and never says it was withdrawn -- which is the half anyone reading later
+ * actually needs.
+ *
+ * `ops:write` and a session that has not aged out, because this is the release
+ * of a feature that reads the owner's files. The rationale is required for the
+ * same reason the audit row exists at all: "who and when" without "why" does
+ * not answer the question the row is kept for.
+ *
+ * Not a field on the bulk settings PATCH. That request carries whatever the
+ * panel is holding and rewrites all of it, so an audit row from it can say
+ * that settings were saved and cannot say that this flag moved.
+ *
+ * The write and the audit row share one transaction: an enabled feature with
+ * no record of who enabled it is exactly the state this exists to prevent, and
+ * a failed audit write has to take the change with it.
+ */
+export async function setAssistantPackageImportEnabled(input: {
+  session: Session | null | undefined;
+  request?: Request;
+  enabled: boolean;
+  /** What this change is for. Stored on the audit row, never elsewhere. */
+  rationale: string;
+}): Promise<AssistantPackageImportFlagOutcome> {
+  const session = input.session;
+  // Age first, because `hasAdminPermission()` reads through `isAdminSession()`
+  // and an aged-out session has no role at all there. Asked in the other
+  // order, an operator whose session had simply gone stale would be told they
+  // are not allowed to do this -- which is both wrong and unactionable.
+  if (getAdminSessionAccessState(session) === "reauthentication-required") {
+    return { outcome: "refused", reason: "reauthentication-required" };
+  }
+  if (!session || !hasAdminPermission(session, "ops:write")) {
+    return { outcome: "refused", reason: "not-authorized" };
+  }
+  // The narrower step-up window, on top of the session's own lifetime: the
+  // same one `/api/admin/**` uses for its other high-risk actions, read
+  // through the same helper so this surface and the reauthentication page
+  // cannot reach different conclusions about one session.
+  if (!hasRecentAdminAuthentication(session)) {
+    return { outcome: "refused", reason: "reauthentication-required" };
+  }
+  const rationale = input.rationale.trim();
+  if (!rationale) {
+    return { outcome: "refused", reason: "rationale-required" };
+  }
+
+  const after = input.enabled ? "true" : "false";
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.appSetting.findUnique({
+      where: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY },
+      select: { value: true },
+    });
+    const before = existing?.value ?? null;
+    await tx.appSetting.upsert({
+      where: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY },
+      update: { value: after },
+      create: { key: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY, value: after },
+    });
+    await writeAdminAuditLog({
+      session,
+      request: input.request,
+      action: input.enabled
+        ? "assistantPackageImport.enabled"
+        : "assistantPackageImport.disabled",
+      targetType: "appSetting",
+      targetId: ASSISTANT_PACKAGE_IMPORT_FLAG_KEY,
+      summary: rationale,
+      // Both values, because "it is on now" does not say whether this call is
+      // what turned it on. A rollback of a flag that was already off is a
+      // different fact from a rollback of a live one.
+      metadata: { before, after },
+      tx,
+    });
+    // Reported apart from `changed` so a no-op is legible as one: the audit
+    // row is written either way, since deciding to press it is the event.
+    return {
+      outcome: before === after ? ("unchanged" as const) : ("changed" as const),
+      before,
+      after,
+    };
+  });
 }

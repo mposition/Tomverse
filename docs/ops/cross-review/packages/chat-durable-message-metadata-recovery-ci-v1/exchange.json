@@ -1,0 +1,214 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+  "requirement": "PR #1410의 Linux CI에서 발견된 메모리 공개 정책 source-contract 테스트를 현재 구현 경계에 맞게 바로잡는다. 소유자 대화 조회는 공유 PUBLIC_CHAT_MESSAGE_SELECT를 사용하고, 그 allowlist는 memoryUsedCount와 knowledgeChunkCount를 선택해야 한다. 공유·내보내기·공개 링크 경로에는 해당 필드가 계속 없어야 한다. 제품 코드·정책·API 동작은 변경하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "테스트가 소유자 대화 라우트의 공유 public-message allowlist 사용과 allowlist 안의 두 카운트 선택을 각각 검증한다.",
+    "공유·내보내기·공개 링크 경로에서 Memory 및 knowledge count를 금지하는 기존 검사는 그대로 유지된다.",
+    "memoryReleaseContracts 테스트와 수정 파일 lint가 통과한다.",
+    "Claude는 읽기 전용으로 diff와 요구사항을 검토하며 실제 provider 호출·과금·push·merge·deploy는 하지 않는다. 이번 task는 승인된 skip-preflight 예외를 기록한다."
+  ],
+  "baseCommit": "03a4c708e405cb76272f8a69d51c651167e0a1a4",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:26b5c8db0d1e73536ec0d9e663e9b85140e1429cde3fe7e46392a2c86bcad369",
+      "commit": "0beab239f687f16cae3d89821d38b86777f95dec",
+      "filesChanged": [
+        "tests/memoryReleaseContracts.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 333.2285",
+          "durationMs": 414
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3080
+        },
+        {
+          "rule": "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 51
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/memoryReleaseContracts.test.mjs:296-312",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The forbidden-path loop only greps for literal column names, so a share/export/public route that adopted the shared allowlist would leak memoryUsedCount and knowledgeChunkCount while the test still passed — the exact 'copy a select for consistency' mistake the test comment names, now reachable through an import instead of a column name.",
+          "reproduction": "In app/api/conversations/[conversationId]/share/route.ts add `import { PUBLIC_CHAT_MESSAGE_SELECT } from \"@/lib/publicChatMessage\";` and replace the inline `select: { id, role, content, modelId, createdAt }` at line 202 with `select: PUBLIC_CHAT_MESSAGE_SELECT`; run `node --conditions=react-server --import tsx --test tests/memoryReleaseContracts.test.mjs` — it still reports fail 0, although the share snapshot query now reads both §13.3 columns. Fix: add `PUBLIC_CHAT_MESSAGE_SELECT` to the forbidden-token list in the same loop.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/memoryReleaseContracts.test.mjs:292",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The third assertion now reads lib/publicChatMessage.ts but its message still says \"the owner's conversation read must select knowledgeChunkCount\", so a failure points at the wrong file while the parallel memoryUsedCount message was updated to say \"allowlist\".",
+          "reproduction": "Delete `knowledgeChunkCount: true` from lib/publicChatMessage.ts:29 and rerun the test; the failure text names the owner conversation route, not the allowlist file that actually lost the field.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/memoryReleaseContracts.test.mjs:296-312; open finding: tests/memoryReleaseContracts.test.mjs:292); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:f807ea0c36528e515d067c6b78e40453c29a1dd9f7608cc8b1f533d15e90589f",
+      "commit": "d378d12b5a0b6ee5ef9ff1281c910f103ac6fe2a",
+      "filesChanged": [
+        "tests/memoryReleaseContracts.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 321.3611",
+          "durationMs": 399
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2719
+        },
+        {
+          "rule": "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 45
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/memoryReleaseContracts.test.mjs:302-307",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The forbidden token list now blocks PUBLIC_CHAT_MESSAGE_SELECT but not toPublicChatMessage, which is the other half of the shared boundary and is the thing that actually emits memoryUsedCount/knowledgeChunkCount onto the wire.",
+          "reproduction": "Add `import { toPublicChatMessage } from \"@/lib/publicChatMessage\";` to app/api/public/shares/[shareToken]/route.ts and map its message rows through it while replacing that route's explicit `select` with `include: { artifacts: true, attachments: true }` (Prisma then returns all scalars, so the serializer sees non-null counts). Run `node --conditions=react-server --import tsx --test tests/memoryReleaseContracts.test.mjs` — it still passes, though the public share response now carries both counts. Adding \"toPublicChatMessage\" to the loop's column list makes it fail. Reachability is low because all three forbidden routes currently use explicit column selects, which is why this is a nit.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/memoryReleaseContracts.test.mjs:302-307); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:9be5f283a7c1973de8b63a863615635ef789851304c6b0044535a1933631d14e",
+      "commit": "a2c5960aad6548aa886486721a2ffdaa0ffc72bf",
+      "filesChanged": [
+        "tests/memoryReleaseContracts.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 297.4224",
+          "durationMs": 373
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2674
+        },
+        {
+          "rule": "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 46
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/memoryReleaseContracts.test.mjs:286-294",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The two count assertions are whole-file `includes` on lib/publicChatMessage.ts, so they do not actually pin the counts to PUBLIC_CHAT_MESSAGE_SELECT — any occurrence of the literal elsewhere in that file satisfies them.",
+          "reproduction": "In lib/publicChatMessage.ts delete `memoryUsedCount: true` (line 28) from PUBLIC_CHAT_MESSAGE_SELECT and add anywhere else in the file a line such as `// historical: memoryUsedCount: true`, then run `node --conditions=react-server --import tsx --test --test-concurrency=1 tests/memoryReleaseContracts.test.mjs`. Expected for a tight guard: failure, because the owner allowlist no longer selects the column. Actual: the test passes. Slicing the select literal out of the source (e.g. the text between `PUBLIC_CHAT_MESSAGE_SELECT = {` and the `artifacts:` key) before the `includes` would close this.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/memoryReleaseContracts.test.mjs:286-294) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:9be5f283a7c1973de8b63a863615635ef789851304c6b0044535a1933631d14e",
+  "commit": "a2c5960aad6548aa886486721a2ffdaa0ffc72bf",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 297.4224",
+      "durationMs": 373
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2674
+    },
+    {
+      "rule": "git diff --check 03a4c708e405cb76272f8a69d51c651167e0a1a4...HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 46
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "tests/memoryReleaseContracts.test.mjs:286-294",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The two count assertions are whole-file `includes` on lib/publicChatMessage.ts, so they do not actually pin the counts to PUBLIC_CHAT_MESSAGE_SELECT — any occurrence of the literal elsewhere in that file satisfies them.",
+      "reproduction": "In lib/publicChatMessage.ts delete `memoryUsedCount: true` (line 28) from PUBLIC_CHAT_MESSAGE_SELECT and add anywhere else in the file a line such as `// historical: memoryUsedCount: true`, then run `node --conditions=react-server --import tsx --test --test-concurrency=1 tests/memoryReleaseContracts.test.mjs`. Expected for a tight guard: failure, because the owner allowlist no longer selects the column. Actual: the test passes. Slicing the select literal out of the source (e.g. the text between `PUBLIC_CHAT_MESSAGE_SELECT = {` and the `artifacts:` key) before the `includes` would close this.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 1 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-14T09:03:53.466Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "a2c5960aad6548aa886486721a2ffdaa0ffc72bf",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "tests/memoryReleaseContracts.test.mjs"
+  ]
+}

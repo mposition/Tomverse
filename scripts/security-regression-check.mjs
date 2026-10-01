@@ -1799,14 +1799,17 @@ const checks = [
       source.includes('help_source: "sidebar_header"'),
   },
   {
-    name: "Chat sidebar separates status, labels, and projects with contextual help",
+    // Labels were removed on 2026-09-16: three fixed values stored in one
+    // browser, duplicating server-side projects and absent on a second device.
+    // What this pin still holds is the separation that mattered -- status is
+    // not filed under organisation -- and that each surface explains itself.
+    name: "Chat sidebar separates status from projects with contextual help",
     file: "components/chat/ChatSidebar.tsx",
     test: (source) =>
       source.includes('data-testid="sidebar-status-filters"') &&
-      source.includes('data-testid="sidebar-label-filters"') &&
       source.includes('data-testid="sidebar-projects"') &&
+      !source.includes('data-testid="sidebar-label-filters"') &&
       source.includes('topic="locked"') &&
-      source.includes('topic="label"') &&
       source.includes('topic="project"') &&
       source.includes("SIDEBAR_TOUR_STORAGE_KEY") &&
       source.includes('trackProductEvent("sidebar_tour_completed")'),
@@ -2582,14 +2585,30 @@ const checks = [
     file: "components/marketing/LandingPageContent.tsx",
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
+      const continuity = read(
+        "components/marketing/WorkflowContinuitySection.tsx"
+      );
       return (
-        copy.includes('primaryCta: "Start chatting free"') &&
-        copy.includes('primaryCta: "무료로 채팅 시작하기"') &&
+        // The CTA names the action it starts. It used to read "Start chatting
+        // free", which names Tomverse Chat -- a product in the brand tree that
+        // is not released -- so a visitor could not tell what the button
+        // opened. The old wording is banned rather than merely replaced.
+        copy.includes('primaryCta: "Start comparing free"') &&
+        copy.includes('primaryCta: "무료로 비교 시작하기"') &&
+        !copy.includes('primaryCta: "Start chatting free"') &&
+        !copy.includes('primaryCta: "무료로 채팅 시작하기"') &&
+        // The no-sign-up promise renders in the hero, once. The page used to
+        // carry it twice, in `heroSignupNote` and again in `guestNote`, in
+        // near-identical words; `guestNote` is gone and this is the survivor.
         copy.includes(
-          'guestNote: "No sign-up required—compare GPT, Claude, and Gemini side by side."'
+          'heroSignupNote: "No sign-up required. Start with three models."'
         ) &&
-        copy.includes("Get a one-minute recommendation after sign-up") &&
-        source.includes('data-testid="landing-guest-note"') &&
+        source.includes('data-testid="landing-hero-signup-note"') &&
+        // Model Finder still reaches the page, and still states that it needs
+        // an account. It moved out of the catalogue copy into the continuity
+        // section's secondary list, where its condition renders with it.
+        continuity.includes("copy.secondary.map") &&
+        copy.includes("Model Finder") &&
         !source.includes('data-testid="landing-guest-cta"') &&
         // The account CTA belongs to the post-comparison section, never the
         // hero: signup is still offered only after the page has shown what an
@@ -2609,12 +2628,17 @@ const checks = [
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
       return (
-        copy.includes('badge: "Tomverse Review · Multi-AI Comparison & Review"') &&
+        // The badge is the product name and nothing else. It used to read
+        // "Tomverse Review · Multi-AI Comparison & Review", which restated the
+        // H1 sitting directly beneath it; the qualifier lives in `brandNote`,
+        // which is the line that explains the brand-to-product relationship.
+        copy.includes('badge: "Tomverse Review"') &&
         copy.includes(
           'brandNote: "Tomverse Review is the multi-AI comparison and review experience from Tomverse."'
         ) &&
+        // No em dash: customer-facing landing copy uses a full stop here.
         copy.includes(
-          'heroSignupNote: "No sign-up required—start with three models."'
+          'heroSignupNote: "No sign-up required. Start with three models."'
         ) &&
         source.includes('data-testid="landing-brand-note"') &&
         source.includes('data-testid="landing-hero-signup-note"') &&
@@ -2677,20 +2701,30 @@ const checks = [
   },
   {
     name: "Landing product proof covers comparison, AI Review, and permission-safe evidence",
-    file: "components/marketing/ProductProofSection.tsx",
+    // Was `ProductProofSection.tsx`. The landing redesign merged the loop and
+    // the AI Review detail into one section, because the page told the same
+    // "one question, three answers, one review" story four separate times.
+    // What this rule protects is unchanged: every promised section renders,
+    // the public counts keep their threshold disclosure, the review boundary
+    // survives, the evidence features are named with their real conditions,
+    // and no superseded capture comes back.
+    file: "components/marketing/AiReviewLoopSection.tsx",
     test: (source) => {
       const copy = read("components/marketing/landingContent.ts");
       const landing = read("components/marketing/LandingPageContent.tsx");
       const trust = read("components/marketing/TrustSection.tsx");
       const evidence = read("components/marketing/EvidenceSection.tsx");
       return (
-        // Every section the page promises actually gets rendered.
-        landing.includes("<ComparisonBasicsSection />") &&
+        // Every section the page promises actually gets rendered. Five now:
+        // `ai-review` folded into `how-it-works` and `model-catalogue` into
+        // `trust`, each pair having answered one question in two scroll stops.
+        landing.includes("<AiReviewLoopSection />") &&
         landing.includes("<EvidenceSection />") &&
-        landing.includes("<ProductProofSection />") &&
         landing.includes("<WorkflowContinuitySection />") &&
-        landing.includes("<ModelCatalogueSection />") &&
         landing.includes("<TrustSection />") &&
+        // The catalogue is a block inside the trust section rather than a
+        // section of its own, so it is asserted where it now lives.
+        trust.includes("<ModelCatalogueBlock />") &&
         // The public usage counts keep their threshold-and-rounding
         // disclosure, and still come from the permission-safe endpoint.
         trust.includes('fetch("/api/public/proof-metrics"') &&
@@ -2708,17 +2742,26 @@ const checks = [
         evidence.includes('"landing-item-verification-card"') &&
         copy.includes("Pro plan and above. Uses credits.") &&
         copy.includes("It measures quote matching") &&
-        // The walkthrough is an illustration, not a stale capture: the
-        // 2026-07-27 recording showed a superseded credit figure and the
-        // pre-rename "Review confidence" label, so the landing page must not
-        // embed it and must not claim to be a product recording.
+        // The 2026-07-27 recording showed a superseded credit figure and the
+        // pre-rename "Review confidence" label, so no landing surface may
+        // embed it.
         !source.includes('src="/marketing-proof/') &&
         !source.includes('poster="/marketing-proof/') &&
         !source.includes("<video") &&
         !copy.includes("Real product UI") &&
         !copy.includes("Review confidence") &&
         !copy.includes("4 credits used") &&
-        copy.includes("Illustrative diagram, not a product recording") &&
+        // The page's visuals are real screenshots of the current interface
+        // now, generated by tests/e2e/marketing-capture.spec.ts. The
+        // disclosure previously had to say the opposite ("Illustrative
+        // diagram, not a product recording") because they were drawings;
+        // asserting that sentence today would be pinning a false disclosure
+        // in place. What has to hold instead is that the capture declares its
+        // demonstration data and refuses the endorsement reading, and that no
+        // server-derived figure is claimed in copy.
+        copy.includes("demonstration data") &&
+        copy.includes("Not a provider endorsement") &&
+        !copy.includes("Illustrative diagram, not a product recording") &&
         // Claims the product does not make: no source-linked extraction
         // guarantee on the file case.
         !copy.includes("source-linked")
@@ -2729,7 +2772,10 @@ const checks = [
     name: "No customer surface embeds the superseded walkthrough capture",
     file: "components/marketing/ChatWorkspaceGuide.tsx",
     test: (source) => {
-      const landing = read("components/marketing/ProductProofSection.tsx");
+      // Reads the landing shell rather than the retired `ProductProofSection`:
+      // the workflow diagram that file owned is gone, and the hero is where
+      // the landing page's product evidence and its disclosure now live.
+      const landing = read("components/marketing/LandingPageContent.tsx");
       // The 2026-07-27 recording showed "4 credits used" (a cost corrected two
       // days later, because two independent reviewers run) and "Review
       // confidence" (renamed to source grounding). Both are server-side, so no
@@ -2746,7 +2792,10 @@ const checks = [
         source.includes('data-testid="guide-review-workflow"') &&
         source.includes("workflowStages.map") &&
         source.includes("workflowDisclosure") &&
-        landing.includes('data-testid="landing-workflow-diagram"')
+        // The landing page still discloses what its visual is. The testid
+        // outlived the diagram it was named for and now labels the caption
+        // under the hero capture, which is the element carrying that duty.
+        landing.includes('data-testid="landing-workflow-disclosure"')
       );
     },
   },
@@ -3643,8 +3692,21 @@ const checks = [
     // and the module without the glob would run the job on every push.
     name: "Auto PR to Develop opens a PR only for branches that name develop as their target",
     file: ".github/workflows/auto-pr-to-develop.yml",
-    test: (source) => {
+    test: (raw) => {
+      // Newlines normalised first. On Windows this file is checked out with
+      // CRLF, and the branch-list parse below anchors with `^\s*` under `m`
+      // -- `\r` is a line terminator to that regex, so the match starts one
+      // character early and the list reads as empty. The rule then fails for
+      // a reason that has nothing to do with what it guards, which is the
+      // worst state for a check to be in: red for a non-defect, so a real
+      // drift underneath it goes unread.
+      const source = raw.replace(/\r\n/g, "\n");
       const policy = read("scripts/auto-pr-branch-policy.mjs");
+      // The arming step's own block, so what is asserted about it does not
+      // depend on where it sits in the file.
+      const armStep = source
+        .split(/\r?\n {6}- name: /)
+        .find((block) => /^[^\r\n]*auto-merge/i.test(block));
       // The whole list, not a match inside it. A pattern that only asserted
       // the two entries were present would pass with `- "claude/**"` appended
       // underneath them, which is the opt-out rule restored one line at a
@@ -3667,10 +3729,27 @@ const checks = [
         listed[0] === "to-develop/**" &&
         listed[1] === "**/to-develop/**" &&
         source.includes('node scripts/auto-pr-branch-policy.mjs "$BRANCH"') &&
-        // Every step that creates a pull request or arranges its merge, plus
-        // the diff check they both read. A step left ungated would run on a
-        // widened glob alone.
-        (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 3 &&
+        // The diff check and the step that creates the pull request. Two,
+        // not three: the arming step used to carry this same condition and
+        // now reads the create step's output instead, which is a stricter
+        // gate rather than a missing one -- `created` can only be `true` on
+        // a run where the create step ran, and that step is gated on the
+        // module. The chain is asserted rather than assumed, because an
+        // arming step that went back to consulting the glob directly would
+        // restore the count and lose the property.
+        (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 2 &&
+        // Armed once, by the run that opened the pull request. This step
+        // used to run on every push: it looked up whatever PR was open for
+        // the branch and called `gh pr merge --auto` on it, so auto-merge
+        // turned off by a person came back on at the next commit -- on
+        // 2026-09-05 #1256 merged into develop that way, under an
+        // instruction to hold it.
+        Boolean(armStep) &&
+        source.includes("if: steps.create-pr.outputs.created == 'true'") &&
+        // And it is handed the number rather than searching for one. A
+        // lookup here reaches an already-open pull request whatever the
+        // create step decided, which is the same defect by another route.
+        !armStep.includes("gh pr list") &&
         // The namespaces that open their own PRs are still refused, and still
         // refused ahead of the marker -- `feedback-autofix` records the number
         // of the PR its own workflow created, so a second one is not a
@@ -3921,6 +4000,54 @@ const checks = [
     // decision -- 2,000 microUSD of a 87,000 worst case and a floor of 97 --
     // and nothing but a check keeps them saying the same thing.
     test: (source) => source.includes('thinking_level: "high"'),
+  },
+  {
+    // docs/policy/engineering-agent.md §8: each service holds exactly its own
+    // table row -- no database, AMUX, platform or other service's credential.
+    name: "Engineering agent services declare only the variables their policy row names",
+    file: ".railway/scheduled-jobs.ts",
+    test: (source) => {
+      const start = source.indexOf("export const RAILWAY_AGENT_SERVICES");
+      const stop = source.indexOf("];", start);
+      if (start < 0 || stop < 0) return false;
+      const block = source.slice(start, stop);
+      const declared = [...block.matchAll(/"([A-Z][A-Z0-9_]+)"/g)].map((match) => match[1]).sort();
+      const allowed = [
+        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
+        "ENGINEERING_AGENT_PUBLISHER_APP_ID",
+        "ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL",
+        "ENGINEERING_AGENT_PUBLISHER_INSTALLATION_ID",
+        "ENGINEERING_AGENT_PUBLISHER_PRIVATE_KEY",
+        "ENGINEERING_AGENT_PUBLISHER_SECRET",
+        "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
+        "ENGINEERING_AGENT_RUNNER_SECRET",
+      ];
+      return JSON.stringify(declared) === JSON.stringify(allowed) && !/staging:/.test(block);
+    },
+  },
+  {
+    // docs/policy/engineering-agent.md §8, §9-2: the publisher's App token is contents/pull_requests write and
+    // metadata read, and a token carrying anything else -- workflows above all
+    // -- is refused before use.
+    name: "Engineering agent publisher refuses an App token with any permission beyond its three",
+    file: "scripts/engineering-agent-publisher.mjs",
+    test: (source) =>
+      source.includes('contents: "write",\n  pull_requests: "write",\n  metadata: "read",\n});') &&
+      source.includes("if (!tokenPermissionsAllowed(body.permissions))") &&
+      !/workflows:\s*"(read|write)"/.test(source),
+  },
+  {
+    // docs/policy/engineering-agent.md §8: the agent image is built on main only, with no repository secret
+    // and no cache, and never on the deployment platform.
+    name: "Engineering agent image builds on main without a repository secret or cache",
+    file: ".github/workflows/engineering-agent-image.yml",
+    test: (source) =>
+      /on:\n {2}push:\n {4}branches: \[main\]\n/.test(source) &&
+      !/pull_request|workflow_dispatch|secrets\.|actions\/cache|cache-from|cache-to/.test(source) &&
+      source.includes("--no-cache"),
   },
 ];
 

@@ -1,0 +1,94 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-reservation-authority-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-reservation-authority-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-reservation-authority-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-16T09:59:37.266Z",
+  "durationMs": 321467,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 10,
+    "cachedInputTokens": 305894,
+    "outputTokens": 24829,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.7602119999999999,
+    "raw": {
+      "input_tokens": 10,
+      "cache_creation_input_tokens": 94680,
+      "cache_read_input_tokens": 305894,
+      "output_tokens": 24829,
+      "output_tokens_details": {
+        "thinking_tokens": 22140
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 94680,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 8038,
+          "cache_read_input_tokens": 92862,
+          "cache_creation_input_tokens": 4618,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4618
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-16T10:04:58.801Z",
+  "verdict": {
+    "taskId": "prompt-refiner-reservation-authority-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "Every DB-clock comparison mixes `clock_timestamp()` (timestamptz) with `TIMESTAMP(3)` (without time zone) columns/variables, so the whole TTL, expiry-ownership and late-consume-becomes-expired contract silently depends on the server's `TimeZone` GUC being UTC: on a non-UTC database inserts always fail closed, and if the GUC has a negative offset the guard accepts a post-deadline consume for |offset| hours instead of writing the required expired tombstone.",
+        "reproduction": "On a database migrated with this change, in psql: (a) `SET TIME ZONE 'America/New_York'; INSERT INTO \"PromptRefinerReservation\"(\"id\",\"stageId\",\"requestId\",\"contractDigest\",\"status\",\"reservedCostMicroUsd\",\"createdAt\",\"expiresAt\",\"updatedAt\") VALUES ('tz_probe','prompt-refiner-shadow-v1','tz_probe','sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f','reserved',24916,(clock_timestamp() AT TIME ZONE 'UTC'),(clock_timestamp() AT TIME ZONE 'UTC')+INTERVAL '5 minutes',(clock_timestamp() AT TIME ZONE 'UTC'));` — these are exactly the naive-UTC values Prisma writes for `timestamp` columns, yet it raises `PromptRefinerReservation contract binding is invalid`; repeating it after `SET TIME ZONE 'UTC'` succeeds. (b) With a row inserted under UTC whose `expiresAt` is one hour in the past, run `SET TIME ZONE 'America/New_York'; UPDATE \"PromptRefinerReservation\" SET \"status\"='consumed' WHERE \"id\"='tz_probe';` and observe `status='consumed'` with a shifted `consumedAt` instead of the expired tombstone the same statement produces under `SET TIME ZONE 'UTC'`. Fix: write `clock_timestamp() AT TIME ZONE 'UTC'` at those five sites. Non-blocking because the repo already assumes a UTC server everywhere (Prisma's own `DEFAULT CURRENT_TIMESTAMP` on `TIMESTAMP(3)` columns has the identical dependence), and on the reviewed UTC configuration every criterion holds.",
+        "note": "Recorded as hardening; no completion criterion is violated on a UTC database."
+      },
+      {
+        "location": "lib/promptRefinerReservationAuthority.ts:328-339",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The doc comment says \"Expires active rows in bounded batches\", but the `SELECT ... FOR UPDATE` has no `LIMIT`: it locks every `reserved` row for the stage and `limit` is only applied by `.slice()` after the client-side filter, so `limit` bounds the writes but not the lock footprint.",
+        "reproduction": "Call `expirePromptRefinerReservations({ limit: 1 })` with 100 reserved rows present and observe in `pg_locks` that 100 tuple locks are held, not 1. Harmless here because the table is capped at 100 rows; either push `LIMIT`/`expiresAt <= clock_timestamp()` into the SQL or soften the comment."
+      }
+    ],
+    "nextAction": "Approve as-is for the reviewed UTC deployment; optionally apply the `AT TIME ZONE 'UTC'` hardening to the five clock sites in a follow-up before any stage seed exists."
+  }
+}

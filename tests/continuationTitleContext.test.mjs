@@ -218,13 +218,12 @@ test("every request whose response names a continuation sends the zone hint", ()
     for (const [path, needle, headers] of [
         ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations`, {", /headers: displayTimeZoneHeaders\(\)/],
         ["components/chat/ChatSidebar.tsx", "fetch(`/api/conversations/search?q=", /headers: displayTimeZoneHeaders\(\)/],
+        ["components/imports/ExternalImportManagement.tsx", "`/api/external-conversations?offset=", /headers: displayTimeZoneHeaders\(\)/],
         // A file is worded by the server, so exports also send the language.
         // Both modes are the same request with one query away
         // (docs/policy/external-conversation-continuation.md §9.1).
         ["app/(site)/(application)/chat/ChatPageClient.tsx", "`/api/conversations/${convId}/export${options.includeSource", /headers: exportNamingHeaders\(lang\)/],
         ["components/auth/AuthButton.tsx", 'fetch("/api/conversations/export-all", {', /headers: exportNamingHeaders\(globalLang\)/],
-        // main has no imports-page continuation menu, so the imports list names
-        // no continuation and does not send the hint.
     ]) {
         const source = code(path);
         const at = source.indexOf(needle);
@@ -273,6 +272,7 @@ test("every route that names a continuation validates the hint before using it",
     for (const path of [
         "app/api/conversations/route.ts",
         "app/api/conversations/search/route.ts",
+        "app/api/external-conversations/route.ts",
         "app/api/conversations/[conversationId]/export/route.ts",
         "app/api/conversations/export-all/route.ts",
     ]) {
@@ -287,15 +287,30 @@ test("every route that names a continuation validates the hint before using it",
     }
 });
 
-test("search hits use the list's resolver", () => {
+test("search hits and the import page menu use the list's resolver", () => {
     const sidebar = code("components/chat/ChatSidebar.tsx");
     assert.match(sidebar, /storedTitle: result\.conversationTitle,/);
     assert.doesNotMatch(sidebar, /\{result\.conversationTitle\}/);
+
+    const menu = code("components/imports/ContinuationQuickAction.tsx");
+    assert.match(menu, /continuationRowTitle\(/);
+    assert.doesNotMatch(menu, /entry\.title\?\.trim\(\)\s*\?\s*entry\.title/);
 });
 
-test("the deleted label appears only for the deleted state", () => {
+test("the deleted source is said once, and only for the deleted state", () => {
+    // It used to be a chip under the title, which made imported rows 79px
+    // against 57px for everything else. It is now the provider mark drawn
+    // muted, with the fact in the row's accessible name: the same statement,
+    // no extra line, and still nothing for a row whose source is merely locked
+    // or untitled.
     const sidebar = code("components/chat/ChatSidebar.tsx");
-    assert.match(sidebar, /conv\.sourceState === "deleted" && \(/);
-    assert.match(sidebar, /t\("continuation\.sourceDeletedBadge"\)/);
-    assert.equal(sidebar.split("sourceDeletedBadge").length - 1, 1);
+    assert.match(sidebar, /const sourceDeleted = conv\.sourceState === "deleted";/);
+    assert.match(sidebar, /sourceDeleted \? "opacity-40" : ""/);
+    // Twice, and only twice: the imported row that draws the provider mark, and
+    // the locked row that draws a padlock instead and would otherwise lose the
+    // provenance a reader who cannot see the mark was relying on. Both are
+    // guarded by the same `deleted` state; neither is a line of its own.
+    assert.equal(sidebar.split("sourceDeletedBadge").length - 1, 2);
+    assert.match(sidebar, /conv\.isLocked && conv\.surface === "continuation"/);
+    assert.doesNotMatch(sidebar, /data-testid="conversation-source-deleted"\s*\n\s*className/);
 });

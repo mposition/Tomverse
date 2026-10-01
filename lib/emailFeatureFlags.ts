@@ -61,11 +61,52 @@ export const EMAIL_CONSENT_RECONFIRM_FLAG_KEY =
 export const EMAIL_CONSENT_CONFIRMATION_FLAG_KEY =
   "feature.emailConsentConfirmationEnabled";
 
+/**
+ * Release notes, which is its own switch and not the marketing one.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md section 7.6 and the
+ * S9 row of section 12; docs/policy/email-notifications.md section 15.2.
+ *
+ * Two flags because they answer different questions and are turned on at
+ * different times. `emailMarketingEnabled` says this deployment may send
+ * marketing at all -- it gates the classification, and a campaign or a promotion
+ * is behind it too. This one says the release-notes product may send, and it is
+ * the last switch in section 12's activation order: document in force, policy
+ * version active, readiness confirmed, *then* this.
+ *
+ * Folding them together would mean either that turning marketing on turns
+ * release notes on with it, before its own duties and display contract have been
+ * confirmed, or that release notes cannot be turned on without every other
+ * marketing path. Both are decisions nobody made.
+ *
+ * Checked in three places, which is not redundancy: `createStandardDeliveryRows`
+ * and `expandEmailEvent` stop a row being written, and the send verdict stops a
+ * row that already exists from going out. A message queued while the flag was on
+ * must not be sent after somebody turns it off, and a flag checked only at
+ * enqueue cannot say that.
+ */
+export const EMAIL_RELEASE_NOTES_FLAG_KEY = "feature.emailReleaseNotesEnabled";
+
+/**
+ * The consent devices on the sign-up screen (S4).
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md sections 5.1, 5.2
+ * and the S4 row of section 12 ("별도 `collectionEnabled` 게이트").
+ *
+ * Off means the screen shows no devices, and the two routes that store and
+ * consume a choice refuse. Its own switch because turning it on starts writing
+ * permanent evidence (`notice_shown`, `objected`) about new accounts, which is
+ * a different decision from any sending switch.
+ */
+export const EMAIL_SIGNUP_CONSENT_FLAG_KEY = "feature.emailSignupConsentEnabled";
+
 export const EMAIL_FEATURE_FLAG_KEYS = [
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY,
 ] as const;
 
 export type EmailFeatureFlagKey = (typeof EMAIL_FEATURE_FLAG_KEYS)[number];
@@ -92,6 +133,7 @@ export const emailFeatureEnabledFromValue = (
 export const ENQUEUE_REFUSALS = [
   "no_address",
   "marketing_disabled",
+  "release_notes_disabled",
 ] as const;
 
 export type EnqueueRefusal = (typeof ENQUEUE_REFUSALS)[number];
@@ -100,6 +142,8 @@ export const ENQUEUE_REFUSAL_MESSAGE: Record<EnqueueRefusal, string> = {
   no_address: "The account has no email address to write to.",
   marketing_disabled:
     "Marketing sending is switched off. Nothing was queued: a message written now would sit in the outbox waiting for a decision that has not been made.",
+  release_notes_disabled:
+    "Release notes are not live. Nothing was queued: either the switch is off, or it is on and the policy amendment it depends on is not yet published -- the switch is the last step of the activation order and does nothing until the documents and the change notice are done (lib/emailPolicyPublication.ts lists what is missing).",
 };
 
 /**
@@ -111,6 +155,26 @@ export const ENQUEUE_REFUSAL_MESSAGE: Record<EnqueueRefusal, string> = {
  */
 export const marketingFlagApplies = (classification: string): boolean =>
   classification === "marketing";
+
+/**
+ * The purposes the release-notes flag gates.
+ *
+ * By purpose rather than by classification, because the classification is
+ * `marketing` and the marketing flag already answers for that. This one answers
+ * for the product, and a purpose is what a delivery carries that says which
+ * product it belongs to.
+ *
+ * The string is the one `EmailTemplate.purpose` and `CONSENT_REQUIRED_PURPOSES`
+ * already use. The first draft of this list wrote the redesign document own
+ * name for the product instead, which matches no template -- so the gate would
+ * have been dead code and both enqueue paths ungated. A flag that switches
+ * nothing teaches an operator that flags switch nothing.
+ */
+export const RELEASE_NOTES_PURPOSES = ["product_updates"] as const;
+
+export const releaseNotesFlagApplies = (purpose: string | null | undefined): boolean =>
+  typeof purpose === "string" &&
+  (RELEASE_NOTES_PURPOSES as readonly string[]).includes(purpose);
 
 export type CampaignActionRefusal = {
   refusal: "campaigns_disabled";

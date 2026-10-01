@@ -1,0 +1,318 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
+import test from "node:test";
+
+/**
+ * The pre-deploy check, run as an operator runs it.
+ *
+ * `lib/mobileAuthKeyring.ts` makes an undeclared key verify nothing, which is
+ * the safe default and is *silent*: a mistyped retirement looks like a healthy
+ * deployment until somebody notices the previous key stopped working. This
+ * script is the loud half, so it is the half most worth testing -- and until
+ * now nothing ran it at all, which is how it shipped exiting 0 on a deployment
+ * with no variables loaded.
+ *
+ * Every case goes through a subprocess, because the exit code is the contract.
+ */
+
+const ed25519 = () =>
+  generateKeyPairSync("ed25519")
+    .privateKey.export({ format: "der", type: "pkcs8" })
+    .toString("base64");
+
+const SIGN_1 = ed25519();
+const SIGN_2 = ed25519();
+const PEPPER_1 = "p".repeat(48);
+const PEPPER_2 = "q".repeat(48);
+/** Comfortably past every grace this file exercises. */
+const LONG_RETIRED = "2020-01-01T00:00:00.000Z";
+/** Retired just now, so it is inside its grace. */
+const justRetired = () => new Date().toISOString();
+
+/** Only the variables a case names; nothing inherited from this process. */
+const run = (variables = {}, args = []) => {
+  const inherited = { ...process.env };
+  for (const key of Object.keys(inherited)) {
+    if (key.startsWith("MOBILE_AUTH_")) delete inherited[key];
+  }
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "scripts/check-mobile-auth-keyring.mjs", ...args],
+    { encoding: "utf8", env: { ...inherited, ...variables } }
+  );
+  return { code: result.status, out: `${result.stdout}${result.stderr}` };
+};
+
+const healthy = {
+  MOBILE_AUTH_SIGNING_KEYS: `sign-2:${SIGN_2}`,
+  MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
+  MOBILE_AUTH_REFRESH_PEPPERS: `pep-2:${PEPPER_2}`,
+  MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-2",
+  MOBILE_AUTH_TOKEN_ISSUER: "https://tomverse.app",
+  MOBILE_AUTH_TOKEN_AUDIENCE: "tomverse-mobile-api",
+};
+
+test("a healthy configuration passes and names every key's state", () => {
+  const { code, out } = run(healthy);
+  assert.equal(code, 0, out);
+  assert.match(out, /sign-2\s+ACTIVE \(signs\)/);
+  assert.match(out, /pep-2\s+ACTIVE/);
+});
+
+test("nothing configured passes by default and fails when the caller demands it", () => {
+  // The hole the first version had, from the other side: an operator who loads
+  // no variables at all must not get a green release check.
+  assert.equal(run().code, 0);
+  assert.equal(run({}, ["--require-configured"]).code, 1);
+  assert.match(run({}, ["--require-configured"]).out, /nothing is configured/);
+});
+
+test("a partly configured deployment fails in both modes, and says what is missing", () => {
+  // Every one of these would answer 503 to every request, and the endpoints
+  // deliberately do not say which variable is absent.
+  const partials = [
+    { MOBILE_AUTH_TOKEN_ISSUER: healthy.MOBILE_AUTH_TOKEN_ISSUER },
+    { MOBILE_AUTH_SIGNING_KEYS: healthy.MOBILE_AUTH_SIGNING_KEYS },
+    { ...healthy, MOBILE_AUTH_TOKEN_AUDIENCE: "" },
+    { ...healthy, MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "" },
+    { ...healthy, MOBILE_AUTH_REFRESH_PEPPERS: "" },
+  ];
+  for (const variables of partials) {
+    for (const args of [[], ["--require-configured"]]) {
+      const { code, out } = run(variables, args);
+      assert.equal(code, 1, `${JSON.stringify(Object.keys(variables))}: ${out}`);
+      assert.match(out, /partly configured/);
+      assert.match(out, /Missing: MOBILE_AUTH_/);
+    }
+  }
+});
+
+test("a retirement list alone is still a partial configuration", () => {
+  // It names keys that are not there. Passing this would be the first
+  // version's failure with an extra step.
+  const { code, out } = run({
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${LONG_RETIRED}`,
+  });
+  assert.equal(code, 1);
+  assert.match(out, /partly configured/);
+});
+
+test("an undeclared ring key fails, which is the case the runtime is silent about", () => {
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+  });
+  assert.equal(code, 1, out);
+  assert.match(out, /sign-1\s+UNDECLARED -- verifies nothing/);
+  assert.match(out, /neither active nor retired/);
+});
+
+test("the reviewer's mistyped retirement fails, naming both halves of it", () => {
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-l@${LONG_RETIRED}`,
+  });
+  assert.equal(code, 1, out);
+  // The key that is now silently inert...
+  assert.match(out, /"sign-1" is in the ring but is neither active nor retired/);
+  // ...and the line that was meant to cover it.
+  assert.match(out, /a retirement names "sign-l", which is not in the ring/);
+});
+
+test("a correctly retired key passes and reports when it stops verifying", () => {
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(code, 0, out);
+  assert.match(out, /sign-1\s+RETIRED, verifies until/);
+});
+
+test("a key whose grace has passed is a note, not a failure", () => {
+  // It already verifies nothing, so it endangers nothing. Tidying is optional
+  // and the check says so rather than blocking a deploy on housekeeping.
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${LONG_RETIRED}`,
+  });
+  assert.equal(code, 0, out);
+  assert.match(out, /sign-1\s+RETIRED, grace over/);
+  assert.match(out, /NOTE/);
+});
+
+test("whitespace around an active id is read the way the runtime reads it", () => {
+  // The two used to disagree: the check trimmed, `activeMobileSigningKey` did
+  // not, so a padded value passed here and answered 503 in production. One
+  // normalisation now, shared.
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "  sign-2  ",
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: " pep-2 ",
+  });
+  assert.equal(code, 0, out);
+  assert.match(out, /sign-2\s+ACTIVE/);
+});
+
+test("an active id that names nothing fails", () => {
+  const { code, out } = run({ ...healthy, MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-9" });
+  assert.equal(code, 1, out);
+  assert.match(out, /active id "sign-9" is not in the ring/);
+});
+
+test("a key that cannot sign fails, and says so as the reason", () => {
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${Buffer.from("x".repeat(64), "utf8").toString("base64")}`,
+  });
+  assert.equal(code, 1, out);
+  assert.match(out, /cannot sign/i);
+});
+
+test("an active key that is also retired fails", () => {
+  const { code, out } = run({
+    ...healthy,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-2@${LONG_RETIRED}`,
+  });
+  assert.equal(code, 1, out);
+  assert.match(out, /is the active key and is also retired/);
+});
+
+test("a malformed or duplicated retirement line fails, and says which variable", () => {
+  // The parser refuses these outright, so the check's job is to surface the
+  // refusal as a failed exit rather than a stack trace. Listed separately from
+  // the parser's own unit tests because the exit code is what an operator acts
+  // on, and it was claimed as covered here before it was.
+  for (const value of [
+    `sign-1@${LONG_RETIRED},sign-1@${justRetired()}`,
+    "sign-1",
+    "sign-1@",
+    "sign-1@not-a-date",
+    `@${LONG_RETIRED}`,
+  ]) {
+    const { code, out } = run({
+      ...healthy,
+      MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+      MOBILE_AUTH_RETIRED_SIGNING_KEYS: value,
+    });
+    assert.equal(code, 1, `${value}: ${out}`);
+    assert.match(out, /MOBILE_AUTH_RETIRED_SIGNING_KEYS/);
+  }
+});
+
+test("a retirement dated in the future fails, on either ring", () => {
+  // A syntactically fine line that means seventy years of trust. Nothing else
+  // in this check sees it: the id is in the ring, the date parses, and the
+  // report used to read "RETIRED, verifies until 2099-01-01" as though that
+  // were a healthy deployment.
+  const rotated = {
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${justRetired()}`,
+  };
+  for (const variable of [
+    "MOBILE_AUTH_RETIRED_SIGNING_KEYS",
+    "MOBILE_AUTH_RETIRED_REFRESH_PEPPERS",
+  ]) {
+    const keyId = variable.includes("PEPPER") ? "pep-1" : "sign-1";
+    const { code, out } = run({
+      ...rotated,
+      [variable]: `${keyId}@2099-01-01T00:00:00.000Z`,
+    });
+    assert.equal(code, 1, `${variable}: ${out}`);
+    assert.match(out, /which is in the future/);
+    assert.match(out, /RETIREMENT IN THE FUTURE/);
+  }
+});
+
+test("two ids holding the same material fail, on either ring", () => {
+  // The leak-response failure. Every other check here reads this as a finished
+  // rotation: the ids differ, one is active, the other is retired inside its
+  // grace, and the active key signs. Only the material says the leaked key is
+  // still the one signing.
+  const sameKey = ed25519();
+  const samePepper = "s".repeat(48);
+
+  const renamedSigningKey = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-old:${sameKey},sign-new:${sameKey}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-new",
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-old@${justRetired()}`,
+  });
+  assert.equal(renamedSigningKey.code, 1, renamedSigningKey.out);
+  assert.match(renamedSigningKey.out, /different ids holding the same material/);
+  assert.match(renamedSigningKey.out, /Renaming a key is not rotating it/);
+
+  const renamedPepper = run({
+    ...healthy,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-old:${samePepper},pep-new:${samePepper}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-new",
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-old@${justRetired()}`,
+  });
+  assert.equal(renamedPepper.code, 1, renamedPepper.out);
+  assert.match(renamedPepper.out, /different ids holding the same material/);
+
+  // And a genuine rotation still passes: the check is about material, not
+  // about having more than one entry.
+  const genuine = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(genuine.code, 0, genuine.out);
+});
+
+test("the remaining grace is reported, and nothing is advised about it", () => {
+  // The grace runs from the retirement instant, which is written before the
+  // deploy -- so preparing and deploying spends it. Printing only the end
+  // instant left that arithmetic to the operator, and being two minutes early
+  // with an eight-minute deploy leaves five of the approved fifteen.
+  const justNow = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(justNow.code, 0, justNow.out);
+  assert.match(justNow.out, /\d+s left of 900s, as of this check/);
+  assert.equal(/has \d+s of its 900s window left/.test(justNow.out), false);
+
+  // And no advice attached to it. Advising a re-date when less than half the
+  // window is left reads as sound until the entry is one that was deployed
+  // days ago: re-dating that one extends the trust it already spent, and the
+  // check exits 0 either way. It cannot tell the two apart -- it sees one set
+  // of variables -- so it reports the number and stops.
+  const mostlySpent = new Date(Date.now() - 600_000).toISOString();
+  const late = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${mostlySpent}`,
+  });
+  assert.equal(late.code, 0, late.out);
+  assert.match(late.out, /\d+s left of 900s, as of this check/);
+  assert.equal(/[Rr]e-date/.test(late.out), false, late.out);
+
+  // The same for a pepper long past most of its thirty days.
+  const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+  const oldPepper = run({
+    ...healthy,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${twentyDaysAgo}`,
+  });
+  assert.equal(oldPepper.code, 0, oldPepper.out);
+  assert.equal(/[Rr]e-date/.test(oldPepper.out), false, oldPepper.out);
+});
+
+test("no output carries key material", () => {
+  const { out } = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+  });
+  for (const secret of [SIGN_1, SIGN_2, PEPPER_1, PEPPER_2]) {
+    assert.ok(!out.includes(secret), "the report printed a secret");
+  }
+});

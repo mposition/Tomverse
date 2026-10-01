@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-18T06:04:39.484Z",
+  "durationMs": 434849,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 22,
+    "cachedInputTokens": 1651141,
+    "outputTokens": 33048,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.6225674999999997,
+    "raw": {
+      "input_tokens": 22,
+      "cache_creation_input_tokens": 187021,
+      "cache_read_input_tokens": 1651141,
+      "output_tokens": 33048,
+      "output_tokens_details": {
+        "thinking_tokens": 28241
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 187021,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3506,
+          "cache_read_input_tokens": 186428,
+          "cache_creation_input_tokens": 3393,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 3393
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-18T06:11:54.405Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "docs/ops/tomverse-chat-progress.md:1198",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The only committed record of this round's fresh-database verification states \"전체 121 migration\" and \"관련 DB 31/31\", but the submitted source contains 124 migrations and 35 prompt-refiner DB integration tests, so the recorded run either misreports its numbers or was executed against an earlier source than 738e029e (which added the monotonic-audit-liveness tests), leaving the submitted source without a matching recorded PostgreSQL 17 verification.",
+        "reproduction": "Grep '121 migration' in docs/ops/tomverse-chat-progress.md -> line 1198 reads 'PostgreSQL **17.10** fresh DB에서 전체 **121 migration**, Prisma diff **0**, 관련 DB **31/31**'. Then Glob 'prisma/migrations/*/migration.sql' -> 124 files, and Grep '^test\\(' in tests/integration/prompt-refiner-reservation.db.test.ts (20) and tests/integration/prompt-refiner-reservation-admission.db.test.ts (15) -> 35. Expected: the line records 124 migrations and 35/35 DB integration tests, from a run whose source is the submitted commit."
+      },
+      {
+        "location": "docs/ops/tomverse-chat-progress.md:1200 and docs/ops/prompt-refiner-durable-stage-writer-contract.md §9",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "Three committed documents state the independent review package has not been created yet, while the same delivery commits that package.",
+        "reproduction": "Grep 'review package는 아직 만들지 않았다' in docs/ops/tomverse-chat-progress.md and '독립 Claude 검토 package는 내부 검증 완료 뒤 별도 cycle에서 생성한다' in docs/ops/prompt-refiner-durable-stage-writer-contract.md (and item 10 of docs/ops/prompt-refiner-durable-stage-writer-task.md); then Glob 'docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-v1.*' -> task.json and authorization.md both present in this change. Expected: the sentences reflect that the package now exists."
+      },
+      {
+        "location": "prisma/migrations/20260917190000_prompt_refiner_stage_admission/migration.sql",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The new migration's timestamp sorts before three migrations already present on the base commit, so the fresh-database order that was verified is not the order an already-deployed database will apply it in.",
+        "reproduction": "Glob 'prisma/migrations/*/migration.sql' and sort by directory name: 20260917190000_prompt_refiner_stage_admission sorts before 20260918090000_admin_audit_log_append_only, 20260918090000_email_delivery_not_submitted_defer and 20260918120000_marketing_automation_tables, all of which exist at base c49d5a3606f259356612ddc5872f29f5fe465158. A fresh DB applies it fourth-from-last; `prisma migrate deploy` on an existing DB applies it last. I read 20260918090000_admin_audit_log_append_only and it only adds triggers to AdminAuditLog while this migration only alters PromptRefinerReservationStage and adds an FK to AdminAuditLog(id), so the final schema is identical in either order and the impact is naming hygiene; renaming the directory to sort after 20260918120000 removes the divergence."
+      }
+    ],
+    "nextAction": "Correct the recorded verification numbers (or re-run and record the fresh PostgreSQL 17 pass against the submitted source) and refresh the three stale package-not-yet-created sentences; the code, route, closure (186 = 177 reachable TS/JS + 9 fixed metadata), CSRF coverage, audit-chain (19) and route-contract (6) test counts, absence of any product caller, provider/network/credential/Railway call, and the executionAdmitted=false / productAdapterReady=false default-off posture all held up under Read/Grep/Glob inspection, while the DB-level criteria could only be confirmed structurally because this package did not execute the database suites."
+  }
+}

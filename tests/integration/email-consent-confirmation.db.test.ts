@@ -40,7 +40,7 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
-      "ConsentRecord", "EmailPreference", "SuppressionEntry",
+      "ConsentRecord", "EmailPreference", "SuppressionCause", "SuppressionEntry",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion",
       "AppSetting", "UserSettings", "User"
     RESTART IDENTITY CASCADE
@@ -250,7 +250,7 @@ test("a withdrawal right after a confirmation leaves the purpose off and suppres
   });
   assert.equal((await preference(user.id)).enabled, false);
   assert.equal(
-    await prisma.suppressionEntry.count({
+    await prisma.suppressionCause.count({
       where: { scope: "purpose", purposeKey: "product_updates", reason: "unsubscribe" },
     }),
     1

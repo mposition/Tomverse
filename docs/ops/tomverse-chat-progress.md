@@ -1,0 +1,1567 @@
+# Tomverse Chat 진행 현황
+
+## 기준과 읽는 방법
+
+이 문서는 사용자에게 전체 Chat의 진행 상황과 다음 작업을 일관되게 설명하기
+위한 **진행 현황표**다. 구현 완료율, 품질 판정, 출시 승인 또는 현재 production
+상태를 자동 산출하는 registry가 아니다.
+
+- 작성 기준일: 2026-09-20. 아래 선행 benchmark의 고정 기록은 2026-09-11
+  당시 관측을 보존하며, 새 Chat 사용자 흐름의 상태는 별도 갱신 구획에서 구분한다.
+- 최신 갱신은 Prompt Refiner durable run writer PR #1567의 `develop` 병합
+  `0cdd26bd53efad5d67f13e6d9618f591a6ad040a`까지 반영한다. staging 배포는
+  `ed5d8f53-fb43-42cc-b59f-e6a240f2fc24`가 같은 merge SHA와 image digest
+  `sha256:a13caf841c18466673db72f37b27e2e2c18a912bc679ae4e4a9a48abfcd6515f`로
+  `SUCCESS`, migration 125개와 `/api/health` 200임을 확인했다. 이는 실행 entry
+  point·stage 생성·provider 호출·제품 공개를 뜻하지 않는다.
+- 이번 배포 후 기존 기능 영속 복구 연결 작업의 base는
+  `ec043cf79e3a044973e5f6466483710ef4969ea2`다. 같은 commit의 Railway staging
+  deployment `9f231d3b-84cd-4afe-ad2b-db80d49a513c`가 `SUCCESS`, migration 104개와
+  pending 0, Railway 직접 `/api/health` 200임을 확인했다. 아래 새 연결 변경은
+  이 배포된 base 위의 로컬 작업이며 아직 Claude 승인·PR·배포를 뜻하지 않는다.
+- 이번 영속 초안·응답 복구 작업의 base는
+  `c91a7c74a8e00e54fb8aeb73901116604f950cc5`, 로컬 기반 커밋은
+  `021cd04a04223a6b137959ab532a0d012a692d75`다. 아래 새 구획은 이 base 이후의
+  로컬 구현을 설명하며, 아직 Claude 승인·PR 병합·staging 배포를 뜻하지 않는다.
+- 이번 Chat 진입·단일 transcript·복구 작업의 base는
+  `14997bcfbfa90c9bc431efcbba7b0a9ae3490859`다. PR #1367 merge
+  `409cf20d1225b33958a051d21ea938cb6b62ac6e`와 해당 staging deployment
+  `1a875926-ec67-41b9-9a98-56edbd596cac`의 `SUCCESS`를 확인했다.
+  이 선행 배포 확인은 이번 새 변경의 배포나 flag 활성화를 뜻하지 않는다.
+- 게시된 offline bridge PR #1366의 base: `8646fcb50f868268bc90bf47fe0032c171251b45`.
+  선행 corpus PR #1359의 merge `8d86bd45efba789a058496128ecdd47b2033a9dd`를
+  포함한다. merge와 배포·flag 활성화는 별도 상태로 기록한다.
+- 2026-09-11 당시 식별자 테스트·진행 기록 후속의 base는 PR #1366의 동결 source
+  `d84c90035582638ffd77f2d07677aa0aefa2c248`다. 원래 검토 기록과 별도 변경이며
+  **그 당시 고정 기록에서는** 이 후속 source의 독립 검토 전이었다. 아래
+  2026-09-12 Chat 사용자 흐름의 검토 상태와 혼합하지 않는다.
+- 기능 목록의 출처: 별도 worktree
+  `H:/Project/tomverse-chat-mobile-web-plan-20260911/docs/policy/tomverse-chat-delivery-plan.md`의
+  **미커밋 계획 업데이트**. 해당 worktree HEAD는
+  `66932b07e44f565eb9e91bea5cd0daf8bc3e9eba`, 문서 SHA-256은
+  `522702adc9114afaa853f54080fc56ac4512959a79d655d8235d53a66fbe810d`다.
+  아래 C01–C21은 그 문서 14.2의 21개 요구사항 행, F01–F08은 14.4의
+  8개 local-foundation 종료 산출물을 각각 고정한 것이다.
+- 외부 계획의 구현 inventory는 `66932b07` 소스 조사 기준이다. 현재 저장소의
+  [기존 개발 계획](../policy/tomverse-chat-delivery-plan.md)에 그 미커밋 업데이트가
+  병합되어 있다고 주장하지 않는다. 로컬 경로는 외부 영구 보관의 보장도 아니다.
+- 별도 표시가 없는 기능 행은 **그 계획이 기록한 기준 현황을 옮긴 것**이며,
+  게시된 bridge 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
+  새 source, 환경, 실행 관측으로 갱신할 때는 그 근거와 범위도 함께 기록한다.
+
+## 전체 웹 Chat 계획 추정 — planning-estimate-v2
+
+**현재 약 68%, 주관적 계획 범위 58–78%. 직전 회차 대비 0%p.**
+사용자가 요청한 대략적인 구현 진척 설명이며, 정식 완료율·품질 인증·출시
+준비도는 아니다. v2는 C19–C20의 제품 연결 진척과 검증·운영 기반 진척을 분리해,
+실행 불가능한 인프라가 사용자 기능 완료율을 과도하게 올리지 않도록 했다.
+대상은 모바일 화면을 포함한 현재 **웹 Chat**의 C01–C20과 C21의 필요한 공용
+연결부다. C21의 PWA·native·store는 별도 미래 milestone으로 계속 추적하며,
+완료로 간주하거나 이 웹 범위의 백분율을 전체 크로스플랫폼에 적용하지 않는다.
+
+| 중복 없는 기능 그룹 | 계획 가중치 | 주관적 진척 추정 | 근거와 남은 불확실성 |
+| --- | --- | --- | --- |
+| C08–C18 기존 플랫폼 기능 | 40% | 약 80% | 재사용할 구현 기반이 다수 있으나 새 Chat 통합·mode별 회귀·기기 검증 완료율은 아님 |
+| C01–C07 + C21의 웹 공용 연결부 | 40% | 약 75% | gated entry·모델 변경 transcript에 영속 초안, 메시지 저장 확인, 부분 응답 checkpoint와 GET-only 재연결을 로컬 연결; 공개 전환·운영 복구·전체 기기 검증은 남음 |
+| C19–C20 Refiner·Planner·품질 평가의 제품 연결 | 20% | 약 30% | strict parser·제안 계약과 실행 어댑터는 있으나 제품 caller·실제 shadow·제안 UI·Router 결합은 아직 없음. 검증·운영 기반 성숙도는 별도로 약 70% |
+
+계산은 `0.40 × 80 + 0.40 × 75 + 0.20 × 30 = 68%`다. durable run writer가
+승인→dispatch intent→terminal receipt와 unknown 복구 경계를 닫아 C19–C20의
+검증·운영 기반은 약 60%에서 약 70%로 전진했다. 그러나 제품 caller·실행 entry
+point가 없고 유료 shadow도 실행하지 않았으므로 제품 연결 30%와 전체 68%에는
+아직 가산하지 않는다.
+가중치와 그룹 추정은 inventory와 이번 구현 근거를 바탕으로 한 계획 판단이지
+새 전체 코드 감사나 측정값이 아니다. 58–78%는 오래된 inventory와 미확인 통합
+작업량의 불확실성을 드러내는 주관적
+범위이며 통계적 신뢰구간이 아니다. 21행은 같은 작업량의 완료 조건이 아니므로
+행 수·테스트 수·release gate 수를 단순 비율로 바꾸지 않는다. 선행 corpus의
+48문항·8개 cell·별도 기반 산출물 8개도 전체 Chat의 분모가 아니다.
+
+구현 · 제품 연결 · 실행 검증 · 병합 · 배포/공개 · 품질/출시 승인은 구분한다.
+이전 회차의 역사적 추정은 아래 기록에 그대로 보존한다. 이후 의미 있는
+작업 회차마다 전체 추정·불확실성 범위, 변경 이유
+(변화가 없으면 0%p와 이유, 기준 변경이면 새 기준임을 명시), 순서가 있는 다음
+작업과 필요한 승인을 함께 보고한다. 정밀 측정이 없다는 이유로 대략적 설명을
+보류하지 않고 범위와 근거의 한계를 제시한다. 범위·가중치를 바꿀 때는 방법
+버전을 올려 이전 수치와의 직접 비교 가능 여부를 기록한다.
+
+## 이번 영속 초안·응답 복구 — 로컬 구현 상태
+
+범위와 경계는
+[영속 복구 정책](../policy/chat-durable-draft-and-attempt-recovery.md)에 있다.
+
+| 축 | 이번 로컬 변경 | 아직 뜻하지 않는 것 |
+| --- | --- | --- |
+| C06 영속 초안 | 계정·대화 scope별 revision CAS, 순서가 있는 불투명 첨부 참조, 전송 Message와 원자적 consume, 다른 탭 충돌 선택 UI | 익명 guest 초안의 서버 저장, 여러 기기의 자동 병합 또는 마지막 쓰기 우선 |
+| C05 응답 attempt | 인증된 Chat의 source Message를 먼저 확인하고 attempt를 claim; lease·소유자 CAS, 최대 100,000자 prefix checkpoint, terminal 상태·정산과 GET-only 재연결 | 중단된 provider 연결 자체의 재개, 서버 측 사용자 cancel, 5분을 넘는 무제한 polling |
+| 메시지 신원·멱등성 | client request UUID를 conversation namespace의 결정적 내부 UUID로 변환; exact text/model/ordered attachment replay만 허용하고 새 행에만 첨부 bind | 임의 client UUID를 DB Message ID로 신뢰하거나 변경된 재전송을 성공으로 간주 |
+| reload·실패 UX | 저장 응답이 불명확하면 민감한 비교 값을 URL에 넣지 않는 read-only receipt POST로 확인; active attempt를 원 질문 바로 뒤에 합성하고 canonical Message가 오면 교체; 저장 준비 중 중복 클릭 직렬화 | 실패를 성공으로 추정, reload가 새 provider 요청을 발생시키는 동작 |
+| 개인정보·수명주기 | draft·attempt를 계정 export/delete와 대화·모델 이력 삭제 경계에 포함; private no-store 응답과 소유권 query 사용 | 운영 retention 정책 변경 또는 저장된 prompt/답변의 분석·학습 목적 확대 |
+| 검증 상태 | production build, typecheck, 관련 lint, 전체 server contract 591건, 격리 PostgreSQL 102개 migration·drift 0, 영속 복구 23건·첨부 재전송 15건, 관련 desktop/mobile 브라우저 235건 통과. 의도된 project skip 9건은 통과에 넣지 않음 | Claude 독립 승인, Linux CI, 운영 DB·실제 R2/provider 검증, 병합·배포·공개 |
+
+이 구현으로 연결부 추정을 60%에서 75%로 올렸지만, 전체 Chat 추정은 가중 합산과
+5%p 반올림 때문에 약 60%에서 **약 65%**로만 이동한다. 구현·내부 검증·Claude
+검토·병합·배포·공개 승인을 서로 다른 상태로 유지한다. 같은 결함을 수정한 횟수나
+테스트 개수만으로 완료율을 추가 상승시키지 않는다.
+
+### 2026-09-13 내부 안정화 회차 기록
+
+최종 내부 검증 중 발견한 결함도 이번 기능 범위에서 닫았다. attempt polling과
+draft GET·PUT·DELETE의 사용하지 않는 응답 body를 모든 분기에서 소비하여 브라우저
+요청 완료 계약을 복구했다. late hydrate 첨부 회귀의 fixture는 production 공개
+계약과 달리 `uploadId`가 아닌 임의 id를 반환하고 있었으므로, 실제 서버와 같이
+불투명 upload 참조를 공개 id로 사용하도록 바로잡았다. 로컬 client-only id가 다른
+조건은 유지되어 원래 경합 검사의 목적을 약화하지 않는다.
+
+이 문구를 쓰기 전 관측은 전체 unit의 server test file 677개와 client 49건,
+server contract 591건, 격리 PostgreSQL 영속 복구 23건·첨부 재전송 15건,
+관련 desktop/mobile 브라우저 235건 통과와 의도된 project skip 9건·실패 0이다.
+production build·typecheck·lint·Prisma validate·migration status·schema drift 0과
+응답 body gate도 통과했다. 이 문서 갱신 뒤의 최종 source manifest 검사는 별도로
+다시 수행한다. 따라서 이 문단은 자기 자신까지 이미 검증됐다고 주장하거나 Claude
+독립 승인·Linux CI·실제 provider/R2·운영 DB·병합·배포를 앞당겨 선언하지 않는다.
+
+이번 회차는 같은 영속 복구 기능의 정확성·회귀 보완이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 최종 manifest 내부 검증과 Claude 읽기 전용 독립 검토, ② PR·통합 CI,
+③ 승인된 gate 안의 무과금 staging DB·복구 흐름 확인, ④ 기존 기능의 Chat 연결
+회귀, ⑤ Refiner·Planner 제안형 UI와 별도 승인된 실제 모델 품질 평가다.
+
+### 2026-09-14 Claude round 0 대응 기록
+
+동결 source `a6ea0837a13e1ea52ce1164792a8beaebb2c2cc3`에 대한 Claude 읽기 전용
+round 0은 `request_changes`와 지적 4건을 반환했다. Review·continuation까지
+전송 중 편집 가능해진 회귀, terminal 전환 뒤 증가한 checkpoint revision 때문에
+빈 사전-dispatch 실패가 보이던 조건, 사라진 첨부를 가진 서버 draft의 무한 GET
+실패, 실제 modal 동작이 없는 `alertdialog`가 각각 지적됐다. 검토 기록은 수정하지
+않고 보존하며, 아래 대응은 새 source로 별도 재검토한다.
+
+수정본은 전송 중 후속 draft 편집을 인증된 durable Chat에만 한정하고 기존 surface의
+single-flight 계약을 복구했다. 빈 사전-dispatch 실패 판정은 terminal transition의
+revision과 분리했다. 사라진 첨부가 있는 draft는 서버가 저장 행을 읽기에서 바꾸지
+않고 text와 CAS revision을 포함한 명시적 409로 돌려주며, 사용자가 어느 초안을
+유지할지 선택한 뒤에만 dangling reference를 제거하는 PUT을 수행한다. 하단 알림은
+focus trap이 없는 실제 동작에 맞춰 비모달 `alert`로 표현했다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 관련 단위·계약 묶음 **83/83**, draft route
+단독 **14/14**, desktop·compact·mobile Safari·mobile Chromium의 위험 시나리오
+**20/20** 통과다. production build·typecheck·수정 10파일 lint와 diff whitespace도
+통과했다. route 14건은 83건 묶음에 포함되므로 별도 합산하지 않는다. 첫 브라우저
+시도는 source 수정 뒤 build 전의 오래된 `.next`를 읽어 실패했고, 새 production
+build 뒤 같은 네 project를 재실행해 20/20을 확인했다. 이 기록은 아직 Claude
+round 1 승인, Linux CI, PR 병합, staging·production 배포 또는 실제 provider/R2
+검증을 뜻하지 않는다.
+
+같은 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude 재검토와
+기록 봉인, ② PR·통합 CI, ③ 승인된 범위의 무과금 staging DB 복구 흐름 확인,
+④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀, ⑤ Prompt Refiner
+제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 Claude round 1 대응 기록
+
+round 0 대응 source `6c950c2308f6a3577fc3b4421583ab037077f639`과 변경
+digest `sha256:d3dab6e90a1aacbf17d51994a97bb37288ff430e853082fe596cddeb09d71d84`에
+대한 Claude 읽기 전용 round 1은 `request_changes`와 지적 5건을 반환했다.
+비영속 경로의 assistant 저장이 source id 부재 때 임의 user Message를 고를 수 있던
+점, 복구 polling과 live stream 중 후속 draft의 Enter 전송이 parent guard에 닿기 전
+소비될 수 있던 점, context bundle 충돌에 기존 정책 밖 오류 코드를 추가한 점,
+rolling deploy 중 구 browser bundle이 새 필수 source id를 보내지 못하는 점이
+핵심이었다. 원본 verdict와 exchange 상태는 수정하지 않고 보존한다.
+
+수정본은 source id가 없는 비영속 저장에서 `createdAt`, `id` 내림차순으로 최신 user
+Message를 결정한다. 영속 Chat의 후속 draft는 응답 중에도 편집할 수 있지만 Enter와
+Send는 차단하며, live stream과 GET-only 복구 polling 모두 같은 UI 경계를 쓴다.
+context bundle 중복 소비는 기존 `CHAT_CONTEXT_BUNDLE_STALE`와
+`requiresPreflight: true`를 유지하고 세부 사유만 추가해 재시도 분기를 구분한다.
+배포 전에 열려 있던 browser의 `id`는 외부 request id로만 받아 conversation-scoped
+Message id를 서버에서 파생하고, owner·본문·순서가 있는 첨부 검증과 동일 rate limit을
+거친 뒤에만 durable attempt를 claim한다. client가 보낸 값을 DB primary key로 직접
+신뢰하지 않으며 두 request-id 표기를 함께 보내는 요청은 거부한다.
+
+이 문구를 쓰기 전 집중 관측은 관련 단위·서버 계약 **91/91**, desktop Chromium·
+compact·mobile Safari·mobile Chromium 위험 시나리오 **16/16** 통과다. production
+build 88개 route, typecheck, 수정 source·test lint와 diff whitespace도 통과했다.
+아직 최종 round 2의 Claude 판정, Linux 통합 CI, PR 병합, staging·production 배포,
+실제 provider·R2 호출을 뜻하지 않는다.
+
+이번 회차도 동일 기능의 검토 결함을 닫는 안정화 작업이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 마지막 Claude round 2와 검토 기록 봉인, ② PR·통합 CI, ③ 승인된 무과금 staging
+DB 복구 흐름, ④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀,
+⑤ Prompt Refiner 제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 최종 Claude 판정과 종료 후 보완 기록
+
+round 2는 commit `3defa1a9f6972a193bef5a44ccff1572a45b6230`, digest
+`sha256:6b7f8382f7e39f14c39d0f6804abe3e8d1bc6d12b6a0f2e4d9cbb2ce04bc9a0a`를
+검토해 `approve`를 반환했다. round 1의 5건은 모두 닫혔고 새 finding 3건은
+warning 1건·nit 2건으로 비차단 판정됐다. 다만 재현 가능한 finding이 수정 라운드
+상한에서 남았으므로 제어 프로그램은 규칙대로 `on_hold / revisions_exhausted`로
+종결됐다. 이 상태를 `passed`로 바꾸거나 같은 exchange를 다시 열지 않는다.
+
+종결 후에는 별도 Claude 호출 없이 실제 동작 결함 두 건을 보완했다. GET-only 복구
+polling에는 서버 취소 계약이 없으므로 아무 일도 하지 못하는 전역 Stop을 숨기고,
+live stream은 transcript 안의 실제 중지 동작만 유지한다. Message exact replay가
+더 새로운 서버 draft를 보존한 경우에는 `draftConsumed: true`를 반환하지 않고 실제
+삭제가 발생한 트랜잭션에만 그 증거를 싣는다. 세 번째 nit인 receipt HTTP method는
+정확한 draft text와 첨부 provenance를 URL에 넣지 않기 위해 read-only POST를
+유지하며, write·provider 호출이 없다는 의미와 이 설계 편차를 정책에 명시했다.
+**이 종결 후 보완 commit은 Claude가 읽은 digest에 포함되지 않는다.**
+
+종결 후 보완의 로컬 관측은 관련 단위·서버 계약 **91/91**, desktop Chromium·
+compact·mobile Safari·mobile Chromium의 recovery/live-stream 시나리오 **12/12**,
+production build 88개 route, typecheck, 수정 파일 lint와 diff whitespace 통과다.
+이는 Linux 통합 CI·병합·staging/production 배포 또는 실제 provider·R2 호출을
+대신하지 않는다.
+
+동일 기능의 안정화이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 이 회차 뒤 권장 순서는 ① PR·Linux 통합 CI,
+② 승인된 무과금 staging DB의 draft CAS·receipt·attempt readback smoke, ③ 첨부·검색·
+Deep Research·artifact·profile의 Chat 연결 회귀, ④ Prompt Refiner 제안형 UI,
+⑤ 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 배포 확인 후 기존 기능 영속 복구 연결 회차
+
+선행 영속 초안·응답 복구 변경의 staging 배포 상태와 migration·health를 위 기준에
+적은 범위로 확인한 뒤, 완료 attempt가 본문과 상태만 복구하던 연결 공백을 닫았다.
+완료 POST 재연결과 GET polling은 대화 조회와 같은 공개 allowlist로 정확한 canonical
+assistant Message를 묶어 반환한다. 브라우저는 attempt의 id·모델·완료 상태와 결속한
+뒤 검색 출처, 생성 파일, 양수인 Memory·profile knowledge 사용 횟수를 복원한다.
+저장소 object key·provider 내부 상태·lease 같은 비공개 필드는 서버 select와 client
+parser 양쪽에서 허용하지 않는다. canonical Message가 없거나 잘못 결속되면 완료로
+추정하지 않고 polling을 재시도하며 provider를 다시 호출하지 않는다.
+
+Deep Research는 기존 영속 async-job 계약을 유지한다. 일반 Chat attempt로 편입하지
+않고 별도 polling·재진입·정산 경계를 그대로 검사했다. 첨부 입력은 이미 Message
+transaction과 대화 재조회에 영속되므로 이번 회차에서 별도 저장 경로를 만들지 않았다.
+
+로컬 관측은 관련 client·서버 순서 단위 **22/22**, attempt route **16/16**,
+durable POST liveness **18/18**과 전체 server contract **609/609**, system Chrome을
+사용한 핵심 desktop 브라우저 **4/4**, typecheck·수정 파일 lint·production build·
+diff whitespace 통과다.
+Playwright 번들 Chromium이 설치되지 않아 최초 canonical 브라우저 실행은 시작 전에
+실패했고, 설치된 system Chrome 관측은 기능 회귀 근거이지만 Linux canonical/golden을
+대신하지 않는다. 전체 unit 명령에 전달한 이름 필터는 runner가 무시해 범위 밖 기존
+benchmark 실패 1건에서 수동 중단했으며 이를 이번 기능 실패나 전체 통과로 세지 않는다.
+실제 provider·R2 호출과 새 과금은 없고, 새 변경 자체의 staging·production 배포도
+아직 아니다.
+
+이번 회차는 C11·C13·C15의 reload 연결 정확성을 올렸지만 이미 존재하던 기능을 새로
+완성한 것으로 중복 계산하지 않는다. 따라서 전체 웹 Chat 추정은 **약 65%, 주관적
+범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 한 Cycle의 다음 권장 순서는
+① 최종 로컬 회귀와 Claude 읽기 전용 독립 검토, ② PR·Linux 통합 CI, ③ 병합·배포 후
+무과금 staging에서 canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의
+원문 보존·주입 방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router
+품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 0 대응
+
+commit `3dce702c855bda776336ddb523859b97f88b5e08`, 변경 digest
+`sha256:3834f50363476b45c8b674bdb52ce04e1854bafa86e33a789be0532a8f29fb50`에
+대한 Claude 읽기 전용 round 0은 `approve`와 finding 4건을 반환했다. 제어
+프로그램은 증거·판단 지적을 모두 `fix_requested`로 기록해
+`awaiting_revision` 상태이며, 원본 verdict와 exchange 기록은 그대로 보존한다.
+
+수정본은 malformed 완료 Message가 반복될 때마다 transient backoff를 초기화하던
+순서를 고쳐 bounded exponential retry를 유지한다. 검색 citation 원소는 object만
+허용해 `null` 같은 값이 sanitizer에서 예외를 일으키지 않게 했다. 완료 POST 재연결의
+분석 콜백은 checkpoint 일부 본문 대신 검증된 canonical Message의 전체 본문과 검색
+metadata를 사용한다. attachment 공개 id 중복과 양수인 Memory·knowledge count만
+노출하는 기존 정책 근거도 공용 serializer에 남겼다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 client·서버 순서·attempt route·durable POST
+liveness **57/57**, system Chrome의 완료 metadata 복구와 malformed polling
+backoff **2/2**, typecheck·수정 파일 lint·production build 통과다. build에는 로컬
+NextAuth secret 부재 로그만 있었고 종료 코드는 0이었다. 이 기록은 아직 Claude
+round 1 승인, Linux 통합 CI, PR 병합, staging·production 배포 또는 실제
+provider·R2 호출을 뜻하지 않는다.
+
+동일 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude round 1과
+검토 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging canonical
+Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인 뒤 전체 모델
+Router 품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 1 대응
+
+commit `9e29305ca4f443b7d5406ffe46c0ed06fc75e38a`, 변경 digest
+`sha256:d4c5e3d2218c84f81cf7e1fbb58fc1273f7cfdd4146467b4312712377f3babad`에
+대한 Claude round 1은 `approve`와 judgement nit 2건을 반환했다. round 0의 네
+지적은 모두 닫혔지만 열린 지적이 있으므로 제어 프로그램은 이를 통과로 승격하지
+않고 `awaiting_revision`을 유지했다. 원본 verdict와 exchange는 보존한다.
+
+수정본은 공용 Message serializer를 사용할 수 있는 경계를 소유자 인증이 끝난 Chat
+조회로 명시하고, share snapshot·conversation export는 Memory·profile knowledge
+count를 select하지 않는
+`docs/policy/external-conversation-import-and-memory.md` §13.3 계약을 enforcement
+위치에 복구했다. 같은 탭에서
+진행 중 attempt를 polling으로 완료할 때도 page-local prompt id를 보존해 검증된
+canonical Message의 전체 본문·검색 metadata를 완료 콜백에 정확히 한 번 전달한다.
+새로고침 뒤에는 사라진 page-local id를 만들어내지 않고 `null`로 보고하되, 답변과
+검색 실행 사실은 복원한다.
+
+이 문구를 쓰기 전 마지막 수정본은 집중 단위·서버 계약 **57/57**, 전체 server
+contract **609/609**, system Chrome 핵심 시나리오 **2/2**, typecheck·수정 파일
+lint·production build를 통과했다. 실패·취소·skip·todo는 0이며, system Chrome은
+설치된 대체 browser 관측이라 Linux canonical/golden을 대신하지 않는다. 실제
+provider·R2 호출과 새 과금은 없었다. 이 기록은 아직 마지막 Claude round 2,
+PR·Linux CI, 병합 또는 새 변경의 배포를 뜻하지 않는다.
+
+동일 기능의 마지막 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위
+55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 마지막 Claude
+round 2와 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging
+canonical Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인
+뒤 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 최종 독립 판정
+
+Claude는 commit `46bbc98dd0cff006c01db209fe9d3afb38ad9499`, digest
+`sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5`를
+round 2에서 읽기 전용으로 검토해 `approve`, finding 0건을 반환했다. round 1의
+두 nit가 닫혔고 새 actionable defect가 없으므로 제어 프로그램은 `passed`로
+종결했다. `--skip-preflight`는 사용자가 이 작업에 한해 승인한 예외로 verdict에
+기록됐으며, Read·Grep·Glob 이외 도구와 API key fallback·web search/fetch는
+사용하지 않았다.
+
+영구 검토 기록은
+`docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1/`에
+한국어 인계 설명과 함께 보존한다. 이 문단과 기록 사본은 검토 완료 뒤 추가한
+provenance이므로 위 검토 digest의 source에 포함됐다고 주장하지 않는다. 새 변경은
+아직 PR·Linux CI·병합·배포 전이며 실제 provider·R2 호출도 수행하지 않았다.
+
+전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**다.
+이번 사이클의 다음 권장 순서는 ① PR·Linux 통합 CI, ② 병합·배포 뒤 무과금
+staging canonical Message readback, ③ Prompt Refiner 제안형 UI 계약, ④ 별도
+비용 승인 뒤 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 PR #1410 Linux CI 후속
+
+PR #1410의 최초 Linux 실행에서 빌드·Admin E2E·고위험 UI 4개 project·계정·
+assistant·email·finance·import·memory·routing PostgreSQL 시나리오와 secret scan은
+모두 통과했다. 통합 unit은 9,033개 중 9,031개 통과, 의도된 skip 1개, 실패
+1개였다. 실패는 제품 동작이 아니라 `memoryReleaseContracts`가 owner 대화
+라우트 안의 `memoryUsedCount: true` 직접 선언을 요구해, 이번에 도입한 공유
+`PUBLIC_CHAT_MESSAGE_SELECT`를 인식하지 못한 source-contract 불일치였다.
+
+수정본은 owner 라우트가 공유 allowlist를 실제 select로 쓰는지와 allowlist가 두
+공개 카운트를 직접 `true`로 선택하는지를 나눠 검사한다. share·export·public
+share 경로는 필드명뿐 아니라 공유 select와 serializer도 가져올 수 없게 고정했다.
+whole-file 문자열 오탐을 피하려고 TypeScript AST에서 정확한 `as const` object
+literal과 identifier/string-literal 직접 property만 읽는다.
+
+첫 후속 exchange v1은 세 라운드 모두 Claude `approve`였지만 마지막 source 검사
+정밀도 finding 1건이 남아 규칙대로 `on_hold / revisions_exhausted`로 보존했다.
+그 finding을 계승한 v2는 commit `ab3b35eb`, digest
+`sha256:bf2f781c0b46030ddc1eb5c081a84dff5323eed552af9f684c7fc75bb9175e33`에서
+Claude `approve`, finding 0건, controller `passed`로 끝났다. 각 package는
+정책 테스트 12/12, 수정 파일 ESLint와 diff whitespace를 통과했다. 두 exchange의
+원본 기록은 각각 `docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-ci-v1/`과
+`-ci-v2/`에 보존한다. 이 기록 문구와 사본은 검토 뒤 추가한 provenance이며
+검토 digest에 포함됐다고 주장하지 않는다.
+
+이번 후속은 같은 기능의 통합 검사 정합성 보완이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 수정 commit push와 PR #1410 Linux CI 재확인, ② 병합·배포, ③ 무과금 staging
+canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의 원문 보존·주입
+방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 PR #1410 배포 확인과 Prompt Refiner 제안형 계약 회차
+
+PR #1410은 merge commit `480a3305dc5da4835c15a46625066ba243af13b9`로
+병합됐고, Railway staging deployment
+`f4cccb28-d5cb-4603-a84f-5a6b16752789`가 같은 commit에서 `SUCCESS`임을
+확인했다. predeploy는 migration 104개·pending 0으로 끝났고 Railway 직접
+도메인의 `/api/health`는 200과 `{"ok":true}`를 반환했다. custom staging
+도메인의 302는 Cloudflare Access 경계다.
+
+완료 attempt와 canonical assistant Message의 exact id·conversation·owner·model·
+content 결속을 staging DB에서 읽기 전용으로 집계했으나 완료 attempt가 **0건**이었다.
+따라서 불일치는 0건이지만 실제 readback 성공 표본도 0건이며, 이를 staging 기능
+통과로 승격하지 않는다. 인증을 우회하거나 provider 호출로 표본을 만들지 않았고
+검증용 임시 파일은 실행 뒤 삭제했다.
+
+그 다음 C19의 첫 구현 단위로
+[Prompt Refiner 제안형 UI 계약](../ui-contracts/prompt-refiner-suggestion.md)을
+추가했다. 현재 사용자 턴 텍스트만 받는 strict request, 응답 requestId 결속,
+draft exact snapshot이 달라지면 stale 폐기, 채택 후에도 사용자 Message에는 원문을
+남기고 Router/provider 실행 입력만 제안문으로 분리하는 resolution, 7개 언어의
+채택·원문 유지 UI를 구현했다. Refiner provider/model identity는 브라우저와 답변
+badge에 싣지 않고 내부 receipt 책임으로 남긴다. system instruction은 원문을
+비신뢰 JSON 자료로 감싸며 history·첨부·Memory·profile·도구를 입력으로 받을 수
+없다.
+
+이 회차는 실제 caller가 `promptRefinerOffered=true`를 넘기지 않으므로 UI가 사용자에게
+노출되지 않는다. provider 호출·과금·자동 요청·Router 입력 변경·Message schema·
+flag 활성화는 하지 않았다. 따라서 C19 기반은 전진했지만 제품 사용 가능 단계는
+아니며 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를
+유지한다. C19 기반 코드의 완성도는 높아졌지만 실제 caller·server-owned gate·
+provider 관측이 모두 없으므로 C19–C20의 제품 준비도 추정은 약 25%로 유지한다.
+이는 source 구현 후 잠정 계획 판단이며 독립 검토·CI·병합·배포를 미리 주장하지
+않는다.
+
+이 회차를 마치는 권장 순서는 다음과 같다.
+
+1. 신규 core·UI·composer seam과 문서의 전체 로컬 gate를 통과시킨다.
+2. source를 동결하고 Claude 읽기 전용 독립 검토로 원문 보존·주입 방어·stale·
+   개인정보·모바일 경계를 확인한다.
+3. 승인된 source만 PR과 Linux CI로 통합한다.
+4. 다음 회차에서 server-owned offered/kill switch와 무과금 fixture adapter를
+   연결해 실제 composer 상태 전이를 검증한다.
+5. 그 뒤 Refiner 모델·cap·timeout·최대 비용·중단 규칙을 새 승인으로 동결하고,
+   소액 shadow/제안형 관측 뒤에만 Router 입력 결합을 검토한다.
+
+## 이번 Chat 사용자 흐름 — 로컬 구현 상태
+
+범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.
+
+| 축 | 이번 변경 | 아직 뜻하지 않는 것 |
+| --- | --- | --- |
+| C01 진입·새 대화 | `/chat/workspace`에 서버 gate·owned read·Chat 전용 생성 연결; 기존 `/chat`은 Review 유지 | 공개 cutover, flag 활성화, 기존 데이터 일괄 변경 |
+| C02·C04 단일 흐름·저자 | 모델과 무관한 대화 runtime·전체 모델 history; fallback/routed/requested 순서로 답변 저자 표시 | 모든 모델의 일반적인 최적성 또는 새로운 Router 품질 증거 |
+| C05·C06 중단·초안 | partial과 오류 안내 분리; 선택한 실패 질문·첨부를 명시적으로 복원하고 새 질문에 저장; 준비 중 계정·대화·모델·새 Chat 의도 변경과 수정한 초안 보호 | 새로고침 뒤 미저장 partial 복구, 서버 attempt 재개, draft 디스크 저장 |
+| C07 모바일·기존 기능 | 기존 composer·drawer·Review·Studio 경로를 재사용하고 mock 브라우저 회귀 검증 | 실제 OS/키보드·native 앱 검증 또는 모든 기능 조합의 운영 검증 |
+| 검증 | 마지막 수정본 build·typecheck·42파일 lint 통과; 브라우저 328개와 격리 PostgreSQL 42개 통과, 기존 project skip 85개는 별도 집계 | Linux golden·실기기·운영 DB·실제 R2/provider 검증 또는 아직 실행하지 않은 동결 패키지 체크의 통과 |
+| 독립 검토 | 실제 Claude round 0의 7건 수정 후 round 1은 approve + nit 2건; controller는 awaiting_revision. 두 항목 보완·검증 후 마지막 round 2 검토 대기 | controller 통과, 기존 작업의 승인 상속, 사람의 출시 승인 |
+| 병합·배포 | 이번 변경은 로컬 작업이며 미병합·미배포 | 선행 #1367 배포를 이번 코드의 배포로 해석 |
+
+Windows conversation-writer 검사기의 경로 정규화도 포함한다. 기존 검사 규칙과
+허용 목록은 유지하며, 실제 CLI가 허용 writer를 통과시키고 비허용 production
+writer를 거부하는 회귀 테스트를 추가했다. 테스트 실패를 면제한 것이 아니다.
+
+### 마지막 round 2 수정본의 로컬 근거
+
+round 1의 source `43fc1a36d7f0104975391a8645e0f53d74a94170`와
+digest `sha256:c902e6ba41ad3c0577cb0271c31c40c2b6251106feecb550e58b345bc372cf10`에
+대한 실제 Claude 판정은 approve였지만, 지적 2건이 남아 제어 프로그램은
+통과로 처리하지 않았다. Chat의 오류 복구 버튼이 기존 모델 선택기를 열도록
+연결하고, 모델 제거 핸들러는 확인창·설정 변경·DELETE 전에 Chat을 거부하도록
+보완했다. Review 동작은 유지했다. 현재 UI에서 삭제에 도달할 수 있었다는
+주장은 아니며, 이 항목은 핸들러 자체의 방어 보강이다.
+
+새 round2 기록은 브라우저 **328건 통과**(Chat 34+34, 주변 회귀 150+82,
+첨부 28), 기존 skip 85건·실패 0건이다. 같은 Linux golden 2건은 미실행으로
+남겼고 gate를 완화하지 않았다. 격리 PostgreSQL 42건, build·typecheck·42파일
+lint도 새로 통과했다. 실제 공급자·R2·운영 DB 호출은 없다.
+
+최종 검사들은 `2026-09-12T07:33:18.716Z`까지 완료했다. UI·정적 검사 47경로
+scope SHA는 `f664738db1f702778d4f3497bb1a05ec7fba8968cc044a01cbe54954e14c7df2`로
+전후 동일했다. DB와 UI를 포함한 열 개 receipt의 파일별 해시를 실제 소스와
+대조해 차이 0을 확인했다. 두 운영 문서만 이후 갱신하며, 나머지 45경로는
+유지한다. 새 동결 패키지가 문서와 소스를 결속하고 자체 검사를 실행해야 한다.
+마지막 허용 round 2의 독립 판정은 이 소스 기록 시점에 아직 대기 중이다.
+
+동일 기능 사이클의 수정이므로 전체 웹 Chat 추정은 **약 60%**, 작업 시작 전
+약 55% 대비 **+5%p**를 유지한다. 이번 nit 보완에 추가 진척을 더하지 않는다.
+권장 순서는 마지막 독립 검토·PR 통합 CI → 승인 범위의 staging 흐름 확인 →
+영속 중단 복구 계약·구현 → Refiner/Planner 및 별도 승인된 모델 품질 평가다.
+병합·배포·flag 활성화·새 과금은 이 기록이 승인하지 않는다.
+
+### 이전 round 1 수정 검토에서 보존한 로컬 근거
+
+같은 작업의 round 0 커밋 `af298c77b034e1eee894bc5103f8dafe65ac7a6b`와
+실제 Claude 지적 7건은 보존했다. 새 초안의 단일 모델 초기화, 정확한 실패 안내,
+빈 실패 메시지의 요청 문맥 제외, 복원 첨부의 새 메시지 영속화, 정책 정합성,
+선형 복원 대상 계산, 오류 분류를 보완했다. 같은 null ID를 유지한 New Chat이
+이전 요청을 무효화하지 못하던 경합도 실제 재현 후 intent ticket으로 막았다.
+
+`round1-*` 최종 기록의 브라우저 324건은 새 Chat 32+32, 인접 회귀 150+82,
+기존 첨부 회귀 28건이다. 기존 조건부 skip 85건과 Linux golden 미실행 2건은
+통과에 넣지 않았다. build·typecheck·42개 코드 파일 lint도 통과했으며 UI·정적
+검사 동안 47개 파일의 scope SHA-256은
+`50a82d41ee070d90384f76c66a40233ad4246612ce1be2cfc5f5606647634911`로
+전후 동일했다. DB와 UI 기록은 manifest 형식이 달라 aggregate hash가 다르지만
+47개 파일별 해시를 대조한 차이는 0이다.
+
+격리 PostgreSQL은 기존 migration 99개와 drift 검사를 통과했고, 기존 첨부
+28개·새 재전송 14개 테스트가 통과했다. 실제 행·동시성·트랜잭션 timeout
+`P2028`은 관측했지만 객체 저장소는 stub이다. 원본과 새 첨부의 수명주기를
+분리하고, 파일 복사는 DB 트랜잭션 밖에서 끝낸다. 강제 종료·불명확한 원격
+쓰기 결과·cleanup DB 불능까지 원자적 정리를 보장하는 것은 아니다.
+
+이 두 운영 문서는 최종 실행 후 기록을 갱신했다. 나머지 45개 파일은 동일하며
+precommit·검토 패키지가 최종 문서와 소스 해시를 새로 결속해야 한다. 이 기록은
+아직 실행하지 않은 round 1 독립 승인을 앞당겨 주장하지 않는다. 같은 개발
+사이클 안의 수정 검토이므로 전체 계획 추정은 **약 60%, 이전 회차 대비 +5%p**로
+유지하고, 검토 지적을 고친 횟수만큼 진척률을 다시 더하지 않는다.
+
+다음 권장 순서는 ① 수정본 Claude 검토·PR 통합 CI, ② 승인된 gate 범위의 staging
+사용자 흐름 확인, ③ 영속 중단 복구 계약·구현, ④ Refiner/Planner 연결과 별도 승인된
+실제 모델 품질 평가다. 새 과금·flag 활성화·병합·배포 승인을 포함하지 않는다.
+
+### 이전 round 0에서 보존한 로컬 실행 근거
+
+보관 위치는 `H:/Project/chat-entry-transcript-recovery-evidence-20260912/`다.
+아래 여섯 디렉터리의 `command.json`, `output.log`, `result.json`,
+`source-before.json`, `source-after.json`을 대조했다. 각 실행은 exit 0,
+`sourceUnchanged: true`이며 39개 scope 파일 목록과 전후 SHA-256이 모두
+`e9e55ef3b7e96e22f25816943e1e3724e8c1b804b3e4dd097841b0bb2fcf409d`로 같았다.
+당시 구현은 미커밋 상태여서 receipt의 HEAD는 base다. HEAD만이 아니라 개별
+파일 해시와 scope 해시가 실제 실행 바이트를 식별한다.
+
+| 실행 | 등록 | 통과 | 기존 project skip | 실패 |
+| --- | --- | --- | --- | --- |
+| `final-chat-e2e` | 20 | 20 | 0 | 0 |
+| `affected-desktop-e2e` | 187 | 150 | 37 | 0 |
+| `affected-mobile-e2e` | 130 | 82 | 48 | 0 |
+
+`final-build`는 로컬 production build, `final-typecheck`는 `next typegen`과
+`tsc --noEmit --incremental false`, `final-scoped-lint`는 변경 JS/TS 37파일의
+`eslint --max-warnings=0` 통과를 기록한다. 브라우저 통과는 합계 **252개**이며,
+skip 85개를 성공에 더하지 않는다. Windows에서 Linux 기준 composer golden
+2개는 `--grep-invert=golden`으로 해당 실행 대상에서 제외했다. 위 등록 수에는
+이 제외분이 없으며, golden·검증 gate를 수정하거나 면제하지 않았다.
+따라서 Linux canonical golden 확인은 여전히 남아 있다.
+
+새 Chat에는 A→B 모델 변경 후 이력·context, stop/re-entry·partial, GET-only
+reload·정확한 질문 복원, 준비 중 모델 변경·초안 편집, 늦은 create/미분류 대화
+조회, 계정 변경, 320/390px·200% text·조합 입력의 mock 관측이 있다. 영향 회귀는
+기존 composer·drawer·picker·comparison rail·image workspace·대화 전환을
+검사한 것이다. 실기기 OS/키보드·Safari, 실제 DB 영속화·운영 계정·공급자 호출의
+증거는 아니며 실제 provider 호출은 없었다. 기존 영향 회귀 로그의 dummy
+loopback DB·verification 거부도 실제 backend 성공으로 해석하지 않는다.
+
+개발 중 관측한 focused runtime 54·SSR 4·server 19·pure 24·writer/CLI 17개의
+통과는 **중간/개발 관측**이다. 동결 패키지에서는 그 source에 대해 재실행하여
+기록할 예정이며, 위 scope 해시의 최종 패키지 통과로 미리 승격하지 않는다.
+초기 fixture 오류와 중간 build/browser 결과는 같은 보관 루트의
+`pre-archive-observations.md`에 별도로 남겼다.
+
+이 완료 기록과 구현 계획의 결과 문구는 위 실행 뒤에 작성했다. 두 Markdown도
+당시 scope에 포함됐으므로 이 문서 수정 후의 aggregate digest는 달라진다.
+receipt는 그대로 보존하며, 미래 commit이나 이 새 문구가 이미 검사·승인됐다고
+주장하지 않는다. 이번 기록 pass는 앱·테스트 소스를 바꾸지 않는다. 실제 Claude
+판정과 최종 패키지 결속은 다음 단계이며, 현재는 여전히 미병합·미배포다.
+
+## 선행 benchmark 상태 — 2026-09-11 고정 기록
+
+| 축 | 현재 기록 상태 | 이 기록이 뜻하지 않는 것 |
+| --- | --- | --- |
+| 공용 Chat 기반 | 기존 플랫폼 기능 다수 존재; 아래 기준 inventory 유지 | 새 Chat end-to-end 또는 모든 mode의 production 검증 완료 |
+| 실행 계약 선행 slice | PR #1356이 base에 병합됨; 동결 코드의 221개 테스트와 6개 guard 기록 존재 | 48문항 v2 기반 전체 완료 또는 model-quality 향상 |
+| 선행 48문항 corpus·oracle | 봉인 후 정답 48/48; 동결 `64c713fe` Claude round 1 approve·controller passed, PR #1359 병합 및 해당 staging 배포 성공 확인 | corpus 일치나 staging 배포가 모델 품질 향상 또는 production 공개라는 해석 |
+| 게시된 48문항 offline bridge | 동결 `d84c900`에서 339/339·guard 7개 통과; Claude 최종 approve·nit 2건, controller on_hold; 기록 기반 PR #1366 게시 | controller passed, 실제 provider 관측, 새 유료 승인 또는 Chat dispatch 검증 완료 |
+| 이번 식별자 검사·진행 기록 후속 | 기존 96행·2모델로 선택 식별자와 거부 검사를 보강; 웹 Chat 계획 추정의 첫 기준 정리 | 원래 검토의 재개·판정 변경 또는 이 후속 source의 독립 검토 완료 |
+| 모바일 Chat entry·단일 transcript | 계획의 후속 사용자 기능; 새 통합 상태는 본 회차에서 미검증 | 기존 Review panel을 숨기면 단일 Chat 구현이 된다는 해석 |
+| Planner·품질 개선 | 계획된 후속 작업; 새 관측과 별도 판정 필요 | 기존 exact-answer fixture로 일반적인 최적 모델을 입증 |
+| PWA·native·Memory Release B | 별도 milestone과 승인 경계 유지 | 모바일 웹 또는 corpus 작업의 자동 완료 범위 |
+
+실행 계약 선행 slice의 실제 Claude 최종 판정은 `approve`와 문서 nit 1건이었고,
+controller는 `on_hold / revisions_exhausted`로 종료했다. 사용자의 별도 문서
+정정·기록 기반 PR 진행 결정 이후 병합된 것이며, controller가 통과로 바뀐
+것이 아니다. 자세한 출처와 제한은
+[선행 검토 기록](router-development-benchmark/execution-contract-v2-review-20260911.md)에 있다.
+
+## 전체 기능 inventory — 고정 21개 영역
+
+아래 행의 존재나 기존 구현은 전체 기능 완료를 뜻하지 않는다.
+아래는 계획의 기준 inventory이며, 이번 작업이 갱신한 영역은 위 구획에 따로
+적는다. 선행 두 파일 후속은 어느 행에도 제품 실행 검증이나 공개 승인을
+부여하지 않았으며, 이번 로컬 구현도 공개 승인을 부여하지 않는다.
+
+| ID | 기능 영역 | 계획이 기록한 기준 현황 | 남은 핵심 확인·작업 |
+| --- | --- | --- | --- |
+| C01 | Chat 제품 진입·새 대화 | 제품별 생성·경계 helper 존재; `/chat` surface는 Review shell 경로 | gated Chat entry 연결, productKey reader/cutover 근거, legacy link 보존 |
+| C02 | 모델 변경을 가로지르는 단일 답변 | runtime/message primitive 존재; 기존 이력은 모델별 panel/filter | 모델과 무관한 timeline, version·attempt 연결, follow-up 보존 |
+| C03 | Auto·수동·명시적 Auto 복귀 | Router/filter/sticky/UI/server 경로 존재 | 새 Chat consumer와 policy·dispatch·manifest 일치, 별도 readiness |
+| C04 | 답변 provenance | badge와 model metadata 렌더 기반 존재 | 최종 응답 provider/model, recovery 표시, Planner와 답변 저자 분리 |
+| C05 | streaming·stop·regenerate·edit/resend | 기존 Review runtime와 관련 E2E 정의 존재 | unified timeline의 partial/reconnect/mutation ownership 회귀 |
+| C06 | draft·계정 격리·reload | identity/conversation scoped in-memory draft 기반 | reload persistence는 별도 정책 결정; 격리와 logout 경계 유지 |
+| C07 | 작은 화면·키보드·접근성 | composer/drawer/scroll 계약과 기존 모바일 surface | 새 Chat의 320px·IME·zoom·safe-area·focus·기기 확인 |
+| C08 | conversation context·긴 대화 | context fit/preflight/attachment resolution 기반 | 모델 변경 follow-up과 실제 포함 context, reserve/dispatch/manifest 일치 |
+| C09 | Voice Input | recorder/transcription/scoped draft append 존재; 계획은 사용자 production 활성 확인을 기록 | 새 composer 재사용·회귀; 이번 회차에서 live flag/기기를 다시 확인한 것은 아님 |
+| C10 | 파일·이미지·문서·Drive | upload/reference와 Drive picker 기반 존재 | 소유권·권한·모델별 지원 조합 및 follow-up context 보존 |
+| C11 | 웹 검색·citation | native/app-managed/search-model 경로 존재 | 실제 backend readiness, search budget, citation provenance 보존 |
+| C12 | Deep Research·장기 작업 재진입 | persisted job/polling/remount recovery 기반 | 새 Chat status/re-entry/settlement 통합; polling 중지와 server 취소 구분 |
+| C13 | Artifacts·생성 파일·다운로드 | tool assembly·artifact·owned download 기반 | reopen과 model/auth/search 조합별 지원·다운로드 회귀 |
+| C14 | 프로젝트·이력·검색 | sidebar assignment와 owned conversation search 기반 | 제품별 destination, legacy link, project와 knowledge/Memory 구분 |
+| C15 | Assistant profile·knowledge | versioned profile/context builder/retrieval 기반 | binding/version/tool intersection·소유권과 현재 flag 확인 |
+| C16 | 공유·export·삭제 | share/export/delete/cleanup와 registry 기반 | 새 Chat 회귀, retry/job 중 삭제, account lifecycle 확인 |
+| C17 | estimate·reserve·settle·refund | 공용 credit와 attempt billing 기반 | 새 경로의 primary/pass-through/fallback·중복·취소 회귀 |
+| C18 | 안전·개인정보·moderation | 소유권·lock·context 정책과 enforcement 기반 | Auto/manual/Planner/pass-through/fallback 전체 mode의 적용 추적 |
+| C19 | Prompt Refiner·Planner | state/version/failure plumbing; 계획은 active normal Planner call을 확인하지 못함 | 책임 경계·same-model pass-through 구현, 품질·지연·비용 별도 측정 |
+| C20 | Benchmark·collector·Replay | v1/collector/Replay·실행 계약·48문항 corpus 병합; v2 plan·96개 mock·journal·Replay의 PR #1366 게시 | 원래 검토는 approve·nit 2건으로 on_hold; 후속 독립 검토·병합은 별도이며 실제 provider 관측·정책 실험·Chat 연결은 남음 |
+| C21 | 공용 package·PWA·native | 기존 `chat-core`·`ui-tokens`; 추가 package/shell은 별도 architecture milestone | 필요한 seam 추출과 플랫폼 회귀; PWA/native/store는 별도 완료·승인 |
+
+## Benchmark v2 개발 기반 — 별도 8개 종료 산출물
+
+이 목록은 전체 v2 기반의 범위다. **게시된 offline bridge의 완료 조건과 같지 않다.**
+선행 8-row mock은 기존 v1 corpus와 실행 계약의 배선 검증이며, 48문항에 대한
+collector/Replay 실행 증거로 승격하지 않는다.
+
+| ID | 종료 산출물 | 선행 근거와 게시된 bridge 범위 |
+| --- | --- | --- |
+| F01 | versioned corpus/schema·coverage·독립 expected derivation | 48문항·8 cell·12 family·24/24 partition 및 oracle 정답 48/48; 선행 동결 source 검토 승인·PR #1359 병합 |
+| F02 | source/prompt/context/model/cap/settings/mode 실행 계약 | 게시된 bridge의 v2 plan/partition 재구성 후 96개 mock contract를 raw journal terminal과 결속; 실제 product dispatch는 미검증 |
+| F03 | refusal·unmeasured·acquisition·response·correctness 분리와 전체 분모 | 게시된 bridge의 full 2,016행 중 계획 가능 720·거절 1,296 유지; 선택 96과 미선택·미관측을 model/cell/partition/family별로 분리 |
+| F04 | correctness/acquisition 및 시간·usage·가격·billed cost 분리 | mock 호출만 96개; token·TTFT·whole-call·end-to-end·billed cost 전부 null, 실제 provider 성능·청구 관측 없음 |
+| F05 | dry-run→mock collection→journal→grading/Replay/report | 게시된 bridge에서 48문항 연결 구현; 2 terminal 뒤 중단→94개 재개→반복 0, intent-only hold·export 거절 및 length hold 검증 경로 |
+| F06 | corpus/plan/result/answer parser bound와 경계 검사 | 기존 200,000 nodes/16 MiB·선택 1,008 상한 유지; full v2 plan/manifest와 실제 저장 JSON 재파싱 및 byte/node 계측 |
+| F07 | 재현 명령·안전 artifact·제안 상태 paid manifest | 별도 v2 mock CLI/새 artifact directory 구현; legacy live 입구 거절, 신규 paid manifest·승인은 후속 결정이며 과거 60회 승인 재사용 금지 |
+| F08 | 동결 commit 테스트·Claude 독립 검토·정직한 잔여 기록 | bridge `d84c900`의 339/339·guard 7개, Claude approve·nit 2건과 on_hold를 보존하고 PR #1366 게시; 후속 source 검토·병합·배포는 별도 |
+
+## 선행 corpus의 고정 범위와 독립성
+
+목표는 두 task × 한국어/영어 × basic/advanced의 **8 cell × 6문항 = 48문항**이다.
+task마다 여섯 template family를 두고 각 family는 네 language/difficulty
+조합에 하나씩 존재한다. task마다 세 family 전체를 tuning, 나머지 세 family
+전체를 development-validation으로 동결하여 총 24/24와 cell별 3/3을 유지한다.
+이는 engineering coverage와 partition 규칙이지 통계적 `n`, 대표 트래픽,
+측정된 난이도 또는 모델별 호출 권한이 아니다.
+
+별도 oracle agent는 `{id, prompt}`만 든 packet으로 규칙을 해석했다. 2026-09-11
+06:48:55 UTC에 oracle source와 48건 도출 결과를 봉인했고, 이후 별도 허용을
+받은 oracle 담당자의 봉인 결과 gold 대조는 06:50:34 UTC에 **48/48 일치**를 기록했다. 이 대조에서
+gold나 oracle source를 수정하지 않았다. 봉인 source SHA-256은
+`e925fcf88db9dc2629079bb190082d4285ed33ef8082e35f2c0c32e40d1939be`,
+결과 파일 SHA-256은
+`d54d9111d6be6451137e3350e229103e0b560d7b6f99d149e6d1a14c740bbe20`다.
+역할 분리는 절차적 독립성이고 ACL에 의한 비밀 분리, 두 사람의 판단 또는
+범용 모호성 검출을 보장하지 않는다. 범위는 주어진 prompt 규칙의 결정적 검증이다.
+
+standalone 구현·봉인 및 검증 절차는
+[corpus v2 guide](router-development-benchmark/corpus-v2.md)에 기록한다.
+봉인 후 CLI 테스트는 10/10 통과했고 실패·취소·skip·todo는 0이었다.
+선행 corpus slice의 precommit 검증은 신규 corpus/oracle/CLI 99개, 기존 실행 계약 26개,
+benchmark 96개, collector 80개, Replay 19개로 **320/320 통과**했다.
+타입·lint·corpus 검사·encoding·문서 참조·정책 절 참조·diff whitespace의
+7개 guard도 통과했고, 검증 전후 12개 scope 파일의 해시는 같았다.
+이는 precommit 관측이며, 결과를 이 문서에 기록한 수정까지 같은 바이트로
+검사했다는 주장은 아니다. 동결 패키지 검사와 Claude 독립 검토 결과는 별도다.
+이 문서를 포함한
+미래 commit의 승인을 이 문서가 먼저 선언하지 않는다. source review 이후의
+결과는 별도 동결 review receipt로 결속할 수 있으며, 그 결과를 적기 위해 이미
+검토한 source를 조용히 바꾸지 않는다.
+
+## 게시된 bridge의 범위와 당시 후속 상태 — 2026-09-11 고정 기록
+
+게시된 bridge 구현은 별도 [offline bridge guide](router-development-benchmark/bridge-v2.md)의
+범위다. full catalogue 2,016행과 48문항·8 cell·12 family·24/24 partition을
+유지하면서 두 모델의 96개 답변을 고정 mock으로 생성한다. 실제 provider 호출과
+발생 비용은 0이고, 모형 실행의 정답 비율은 모델 품질 증거가 아니다.
+v1 corpus·60회 유료 증거·원래 Replay source 허용 규칙은 그대로 보존한다.
+
+선행 corpus 동결 source `64c713fea47d7fa67b237b99ad8b6e928cc61b66`는 Claude
+round 1 `approve`, 지적 0건, controller `passed`로 확인됐다. PR #1359는
+2026-09-11 07:56:17 UTC에 `8d86bd45efba789a058496128ecdd47b2033a9dd`로 병합됐고,
+해당 commit의 Railway staging deployment
+`8969295a-15f4-4726-9096-ad366ea1c183`은 `SUCCESS`로 확인됐다. 이 관측은
+bridge PR #1366의 검토·병합·배포가 아니다.
+
+게시된 bridge의 동결 source는 `d84c90035582638ffd77f2d07677aa0aefa2c248`,
+변경 digest는 `sha256:01cf233f93bc2d5fef0ad16723e93dd68c129ae4c602a662699d5fa46ead4921`이다.
+이 source의 패키지는 bridge 19·corpus 99·실행 계약 26·benchmark 96·collector 80·
+Replay 19로 **339/339**, guard 7개 통과를 기록했다. 실제 Claude 최종 round 2는
+`approve`와 evidence nit 2건이었고, controller는 `on_hold / revisions_exhausted`로
+종료했다. 최초 round 0의 CLI 파싱 실패 원본은 보존했고, 사용자 승인 후 유일한
+JSON 블록을 무변형 등록하여 정상 수정 검토를 진행한 이력도 그대로 유지한다.
+
+사용자의 별도 기록 기반 게시 결정으로 [PR #1366](https://github.com/mposition/Tomverse/pull/1366)을
+공개했다. 2026-09-11 게시 직후 관측은 `OPEN`, base `develop`, 위 동결 head,
+CI 대기, 자동 병합 없음이다. 이는 이후 CI·병합·배포 상태를 미리 판정한 것이
+아니며, 원래 controller가 `passed`로 바뀐 것도 아니다.
+
+2026-09-11 당시 별도 후속은 테스트와 이 진행 문서 두 파일만 보완한다. 기존 fixture에는
+모델 선택이 다른 21쌍·같은 27쌍이 있으므로 새 모델이나 수집 없이 실제 report
+정책의 selector 결과와 modelId·rowId·reason을 결속한다. 같은 검사로 메모리상의
+candidate=baseline 투영을 거부하며, runtime 소스 변조 후 전체 19개 테스트를
+실행했다는 증거로 표현하지 않는다. corrected/regressed가 0인 기존 fixture,
+96개 mock, runtime·정답·모델·유료 실행 범위는 바꾸지 않는다. 그 고정 기록에서
+후속 source는 독립 검토 전이며, 원래 검토 기록·승인·source 바이트를 덮어쓰지
+않는다. 이 문단은 2026-09-12 새 Chat slice의 현재 상태 보고가 아니다.
+
+## 권장 다음 순서와 필요한 결정
+
+1. **영속 초안·응답 복구의 최종 source 검증·Claude 독립 검토를 마친 뒤 통합한다.**
+   중간 트리 실행과 최종 동결 실행을 분리한다. 기존 검토 기록은 재개하지 않으며
+   실패한 체크나 미해결 지적을 면제하지 않는다. 통합 CI, staging 검증, 공개
+   cutover·flag 활성화는 별도 단계다.
+2. **gated staging에서 영속 복구의 무과금 경계를 먼저 확인한다.** draft 저장·
+   reload·다른 탭 충돌·receipt 확인·terminal attempt readback을 실제 staging DB와
+   migration에서 확인하되, provider dispatch·flag 공개는 하지 않는다.
+3. **기존 기능의 Chat 연결 회귀를 위험 순서로 닫는다.** 첨부·웹 검색·Deep
+   Research·생성 파일·profile·공유/삭제를 좁혀 소유권·중복 과금·context 보존을
+   먼저 확인한다. 실 provider turn은 시나리오와 예산을 제시한 뒤 별도 승인받는다.
+4. **그 다음 Refiner·Planner를 제안형 UI부터 연결한다.** 원문 보존·주입 방어·
+   Router 입력 provenance·지연/비용 gate를 계약으로 먼저 고정하고 Claude 검토를
+   거친다. 새 provider 평가는 동결된 row·호출·중단 규칙과 별도 비용 승인 후에만
+   진행하며, 과거 60회 승인을 상속하지 않는다.
+
+이 순서의 추천 자체는 신규 자동 착수·유료 실행·병합·배포 승인이 아니다.
+
+## 2026-09-14 Prompt Refiner 포커스 후속 계약
+
+Prompt Refiner 제안형 UI의 최초 exchange는 Claude 최종 round 2에서 기능 계약
+`approve`를 받았지만, 같은 source bytes로 draft를 되돌리면 기존 ready/requesting
+행이 다시 나타나 textarea caret를 빼앗는 재현 가능한 warning 1건이 남았다.
+controller는 수정 라운드 상한을 그대로 적용해
+`on_hold / revisions_exhausted`로 종결했으며 이 기록은 변경하지 않는다.
+
+후속 구현은 포커스 대상을 단순한 현재 visibility가 아니라 마지막으로 실제 focus를
+넘긴 requestId/suggestionId와 비교한다. 따라서 새 요청·새 제안의 첫 도착에는 focus를
+한 번 넘기되, mount 또는 편집 후 같은 상태가 재등장할 때는 textarea를 건드리지
+않는다. production에서 404인 E2E fixture와 Chromium 검사가 이 경계를 실제 DOM에서
+검사하며 provider·Router·billing·Message schema·제품 caller는 연결하지 않는다.
+
+이 작업은 기존 계약의 결함 수정과 검증 강화이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다.
+
+다음 권장 순서는 ① server-owned offered/kill switch와 무과금 fixture adapter로 실제
+`ChatInput` decision focus·IME·320px·200% 조합을 닫고, ② Prompt Refiner를
+PLANNER-03 adversarial report의 명시적 surface로 등록하며, ③ 내부 receipt와
+지연·실패·stale·선택률 계측을 붙이고, ④ 모델·cap·timeout·비용을 별도 승인한 작은
+shadow를 수행한 뒤, ⑤ Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을
+별도 측정하는 것이다.
+
+## 2026-09-15 Chat 시작 카탈로그 (Starter Catalog) slice 1
+
+### 무엇을 만들었는가
+
+신규 계정이 처음 보는 화면은 최근 대화 목록이었고, 신규 계정에게 그 목록은
+비어 있다. 이 slice는 그 자리에 **"여기서 무엇을 얻을 수 있는가"**를 말하는
+진입점을 넣는다. 산출물의 핵심은 카드가 아니라 **표 하나 + 판정 하나 + gate
+하나**의 구조다.
+
+- `lib/chatStarterCatalog.ts` — 표 하나(9개 항목). `outcomeKey`는 결과 문장,
+  `requires.flagKeys`는 **기존 모듈이 export하는 상수를 import**한 것,
+  `taskProfile`은 `lib/taskProfileCore.ts`의 기존 축, `evidence`는 그 약속을
+  수행하는 모듈 경로다.
+- `lib/chatStarterAvailability.ts` — `available` / `locked` / `hidden` 판정 하나.
+  모르는 flag·해석 안 된 capability·미로드 플랜은 전부 `hidden`(fail-closed).
+  화면 상한(`CHAT_STARTER_MAX_VISIBLE = 6`)과 선택 순서를 이 모듈이 소유한다.
+- `lib/chatStarterAccess.ts` — default-off `feature.chatStarterEnabled` +
+  `CHAT_STARTER_KILL_SWITCH` 하나. 기존 image·voice flag 모듈과 같은 해석.
+- `lib/chatStarterCapabilityResolution.ts` — capability를 **서버에서** 해석해
+  id 목록만 클라이언트로 보낸다.
+- `scripts/check-starter-catalog.mjs` (`npm run check:starter-catalog`,
+  PR Fast Gate static 단계) — **이 회차의 핵심 산출물.** flag 상수 실재 여부,
+  catalog 안의 `"feature.…"` 리터럴 금지, capability 해석기 실재, `evidence`
+  경로 실재, 7개 locale 전수, 우월성 주장·em/en dash 금지, 화면 상한 범위를
+  fail-closed로 검사한다.
+- `components/chat/ChatStarterGallery.tsx` + `ChatWelcomeScreen` 연결 —
+  클릭은 기존 초안 경로(`setInputValue`)로 씨앗만 채우고 전송하지 않는다.
+- `docs/ui-contracts/chat-starter-catalog.md` — 계약.
+
+Prompt Refiner와 Deep Research는 **일부러 카드가 없다.** 이름 댈 flag 상수가
+저장소에 없고, 요구사항을 적을 수 없는 카드는 무조건 제공되는 카드가 된다.
+flag key를 리터럴로 적으면 gate는 통과하고 약속은 거짓이 되므로, gate가 그
+리터럴을 거절한다.
+
+### 상태 구분
+
+이 표는 **지금 이 시점**의 상태이며, 처음 작성 당시의 "병합 없음 · 배포 없음 ·
+어느 환경에서도 켜지지 않았다"를 대체한다. 그 세 줄은 회차가 진행되는 동안
+사실이 아니게 되었는데 갱신되지 않았고, cross review round 1(2026-09-15)이
+요구사항이 이름 댄 staging 배포 SHA와 그 줄들의 모순을 지적했다.
+**한 회차의 기록은 그 회차가 끝날 때까지 살아 있는 문서다.**
+
+| 상태 | 값 |
+| --- | --- |
+| 구현 | 완료. 브랜치 `claude/to-develop/chat-starter-staging-checklist`. 최신은 v1 round 2 finding 2건(F1 씨앗 소유권의 locale 의존, F2 계약 문서 상태 줄)의 수정 commit |
+| 내부 검증 | F1·F2 수정 뒤: `.github/workflows/pr-fast-gate.yml`에서 추출한 `check:*` 47개 중 44개 통과 — 실패 3개(`check:retired-product-name` · `check:staging-verification-records` · `check:tomverse-chat-release-gate-view`)는 이 로컬 Windows clone의 untracked 파일과 CRLF 작업 트리에서 나며 이 변경의 파일을 가리키지 않는다(CI 판독 필요). typecheck, 수정 파일 eslint, unit 48개(`chatStarterCatalog` · `chatStarterSeed`), e2e 24개(`chat-starter-catalog.spec.ts`, desktop·mobile) 통과. F1 회귀 e2e는 수정 전 build에서 desktop·mobile 모두 그 증상으로 실패함을 확인했다. 이전 회차 기록의 "static 50개"는 같은 기준으로 다시 세지 않았으므로 47과 비교하지 않는다 |
+| 독립 검토 | **v2 교환 `passed`** (round 1 `approve`, finding 0, 검토 대상 `39a82c34`, baseCommit `414cea20` 기준 이 작업 전체 43개 파일). 경과: v1 교환(`chat-starter-catalog-v1`): round 0 `request_changes` 1건 → round 1 2건 → round 2 2건, 수정 회차 상한에 닿아 `on_hold (revisions_exhausted)`. round 2의 2건은 이 회차에서 수정. 이어가는 교환은 `docs/ops/cross-review/packages/chat-starter-catalog-v2.task.json`(supersedes v1, baseCommit 동일). v2 round 0 `request_changes` 1건(씨앗 기억이 대화 scope 없이 하나라 다른 대화의 기록을 신뢰함) → 수정 후 round 1 `approve`. 이 줄의 갱신은 검토 뒤의 기록 변경이며 코드 변경이 아니다 |
+| 병합 | **부분.** `bba20780`까지 develop에 병합됨(PR #1433 · #1434 · #1439 · #1441). round 1 수정 `31407335`, round 2 수정 `ef35f86f`, F1·F2 수정은 미병합. **main에는 없다** |
+| 배포 | **staging에 배포됨** — `4f300e21a959`(= PR #1433 병합 commit). 그 배포에는 씨앗 소유권 수정(`8f23694e`, 이후 develop 병합)도 round 1·2 수정도 F1 수정도 **없다**. production 배포 없음 |
+| 공개 | **production 공개 없음.** staging에서는 검증을 위해 운영자가 `feature.chatStarterEnabled`를 켰고, kill switch로 다시 사라지는 것까지 확인했다(A-2). 현재 staging의 flag 상태는 이 저장소가 답할 수 없다 |
+| staging 검증 | 차단 구획 A·B·C 실행됨. **기록의 판정·서명은 미완** — 초안은 실행자에게 전달했고 commit되지 않았다. 비차단 소견 4건 미결 |
+
+배포와 공개를 한 줄로 적지 않는다. 이 표면은 default-off이므로 **병합도 배포도
+공개가 아니고**, staging에서 flag를 켠 것은 검증 행위이지 출시가 아니다. 셋을
+하나로 접으면 "배포됐다"가 "사람들이 보고 있다"로 읽힌다.
+
+### C01–C21 중 어디인가
+
+**C01(Chat 제품 진입·새 대화)에 해당한다.** C01의 "남은 것"으로 적혀 있던
+gated Chat entry의 *진입 화면* 쪽 한 조각이며, productKey reader/cutover와
+legacy link 보존은 이 slice가 건드리지 않았다.
+
+C03(Auto)과는 인접하지만 별개다. Auto가 모델 피커를 걷어낼 때 첫 화면에서
+함께 사라지는 차별점의 자리를 채우는 것이 동기이지만, 이 slice는
+`lib/autoRolloutReadiness.ts`의 어떤 값도 읽거나 바꾸지 않는다.
+
+### 전체 추정
+
+**약 65%, 주관적 범위 55–75%를 유지한다. 직전 회차 대비 0%p.**
+
+진입 화면 한 조각이고 provider를 부르지 않으며 어떤 release gate도 통과시키지
+않는다. C01의 남은 항목(공개 cutover, flag 활성화, 기존 데이터 일괄 변경)은
+그대로 남아 있다.
+
+### 하지 않은 것
+
+provider 호출, 크레딧 예약·정산, 과금 경로 변경, `lib/autoRolloutReadiness.ts`의
+status·attestedBy, release gate registry의 status·approvedBy·approvedAt·
+evidenceRefs, `ARTIFACT_FORMAT_TABLE`·`CHAT_ATTACHMENT_FORMATS`·모델 registry·
+pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProductAdapterReady()`,
+새 accent 역할 추가.
+
+### 다음 권장 순서
+
+1~3은 끝났고 4는 한 번 돌았다.
+
+1. ~~Codex 독립 검토를 받고 지적을 닫는다.~~ v1 교환(on_hold) 뒤 v2 교환이
+   round 1에서 `passed`로 끝났다.
+2. ~~`npm run test:e2e` 전체 재실행을 CI에서 확인한다.~~ 병합된 PR들에서
+   확인됐다.
+3. ~~flag를 켜지 않은 채 병합한다.~~ `bba20780`까지 develop에 들어갔다.
+4. **staging 검증을 마무리한다.** 한 회차가 `4f300e21a959`에서 돌아 차단 구획
+   A·B·C를 닫았으나, 그 회차가 찾아낸 씨앗 소유권 결함의 수정은 그 배포에
+   없었다. 수정이 실린 배포에서 **B·C를 다시 확인**하고 기록의 판정·서명을
+   채운다. 비차단 소견 4건도 이때 판정한다.
+5. main으로의 병합과 production flag 활성화는 그 뒤다. 되돌릴 수 없는 항목은
+   **없는 기능을 약속하는 카드** 하나뿐이고, 그것은 `check:starter-catalog`가
+   이미 막는다.
+
+## 2026-09-15 Prompt Refiner 서버 offer gate·실제 composer 무과금 검증 회차
+
+이번 회차는 위 권장 순서의 1번을 구현한다. 서버가 소유하는
+`feature.promptRefinerEnabled`는 literal `"true"`만 허용하는 default-off rollout이고,
+`PROMPT_REFINER_KILL_SWITCH`의 공백 아닌 값은 데이터베이스 조회 전에 이를 끈다.
+rollout만으로 UI를 노출하지 않고 같은 요청에서 실제 adapter readiness까지 확인한다.
+현재 adapter는 loopback·E2E 환경에서만 선택 가능한 결정적 무과금 fixture뿐이며,
+제품 adapter mode는 타입에 존재하지 않는다. 따라서 AppSetting 행이 생기거나 잘못
+켜져도 production composer는 Refiner를 제안하거나 호출할 수 없다. 애플리케이션 writer,
+provider 호출, billing, Router 입력, Message schema, 제품 flag 활성화는 추가하지 않았다.
+제품 adapter가 없는 동안에는 사용할 수 없는 rollout 값을 얻으려고 화면마다 DB를
+조회하지 않으며, rollout reader는 미래 model-facing adapter readiness 안에서만 쓰인다.
+
+실제 `/chat`의 `ReviewWorkspaceShell` → `ChatPageClient` → mobile shell → `ChatInput`
+경로에서 default-off, 원문 유지·제안 사용 뒤 textarea focus 복귀와 무전송, 요청 중
+편집한 draft의 late result 폐기, 동일 문자열을 가진 두 대화 사이의 scope 격리,
+IME 조합 중 요청 차단, 320px·200% text와 200% zoom 상당 viewport의 overflow 부재 및
+44px action을 검사한다. invalid response 실패·retry, 16,000자 경계, 새 채팅의 pending
+요청 폐기, synthetic 채택문의 submit 거부도 검사한다. POST fixture adapter는 동일한
+production build를 public origin 두 조합과 loopback fixture에서 실행해 각각 404·404·200을
+확인한다. 순수 접근 계약과 writer registry도 함께 검사한다. 이 기록은 로컬 source
+검증의 범위이며 독립 검토, Linux
+통합 CI, 병합, 배포 또는 제품 활성화를 미리 선언하지 않는다.
+
+이번 의미 있는 slice를 반영한 전체 웹 Chat의 대략적 구현 진척은 **약 66%, 주관적
+범위 56–76%, 직전 회차 대비 +1%p**로 본다. C19–C20의 제품 준비도는 약 **30%**다.
+서버 gate와 실제 composer 상태 경로는 생겼지만 실제 Refiner provider, PLANNER-03
+증거, 영속 receipt, 품질·비용·지연 관측 및 Router 결합은 아직 없으므로 이보다 높게
+산정하지 않는다.
+
+이 Cycle 다음 권장 순서는 ① 이 source의 Claude 읽기 전용 검토와 통합 CI,
+② `promptRefinerModelMessages()`를 PLANNER-03 adversarial report의 명시적 surface로
+등록, ③ provider와 분리된 내부 receipt·지연·실패·stale·사용자 선택률 계측 계약,
+④ 모델·output cap·timeout·재시도 0·비용 상한을 사전등록한 소규모 shadow 승인,
+⑤ 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합 및 전체
+카탈로그 선택 품질을 별도 측정하는 것이다.
+
+## 2026-09-15 Prompt Refiner PLANNER-03 명시적 surface 회차
+
+앞 회차의 다음 순서 ②를 구현했다. `promptRefinerModelMessages()`를
+`npm run check:prompt-injection`의 `prompt-refiner` surface로 등록하고, 기존 17개에
+JSON role 위조형 1개를 더한 adversarial payload 18개 전부를 실제 builder에
+통과시킨다. 감사기는 다음 구조를
+deterministic하게 확인한다.
+
+- system 규칙이 첫 메시지이며 원문 payload를 포함하지 않고, 별도 모듈에 고정한
+  보안 규칙 여섯 줄만 정확한 순서로 유지한다.
+- provider 경계로 넘어가는 메시지는 정확히 system + user 두 개다.
+- user 메시지는 `inputScope`와 `sourceText`만 가진 canonical JSON이다.
+- JSON을 다시 읽었을 때 입력 scope와 source text bytes가 정확히 복원된다.
+- plaintext 전달, role 역전, 필수 규칙 삭제, 추가 history field·message, system
+  role로의 원문 누출과 builder 입력 거부를 일부러 만든 회귀 사례에서 감사기가 0이
+  아닌 위반을 낸다.
+
+이 검사는 모델 응답을 생성하지 않고 provider·Router·billing·AppSetting writer를
+건드리지 않는다. 따라서 PLANNER-03의 builder 구조 증거는 채웠지만 실제 모델의
+주입 저항성, 제안문의 의미 보존, 비용·지연·실패·사용자 선택률, receipt 영속화,
+제품 adapter 승인과 gate status 승인은 아직 남는다. release gate의 `pending` 상태와
+기존 default-off·kill-switch 경계도 그대로 유지한다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 66%** (주관적 범위 **56–76%**) |
+| 직전 의미 있는 회차 대비 | **0%p** — 보안 증거를 닫았지만 사용자 기능·배포 범위는 늘지 않음 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 32%** (직전 약 30%) |
+| 공개 상태 | 변화 없음 — 제품 adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 검증한다.
+2. provider와 분리된 내부 Refiner receipt 및 지연·실패·stale·사용자 선택률 계측
+   계약을 구현한다.
+3. 모델·output cap·timeout·재시도 0·per-request/stage 비용 상한을 사전등록한다.
+4. 별도 과금 승인 뒤 작은 shadow 실행으로 의미 보존·주입 저항·비용·지연을
+   측정한다.
+5. 품질 증거가 승인된 뒤에만 제품 adapter와 제안형 rollout을 열고, Refiner 결과의
+   Router 결합 및 전체 카탈로그 선택 품질은 별도 실험으로 판단한다.
+
+## 2026-09-15 Prompt Refiner receipt·계측 계약 회차
+
+앞 회차의 다음 순서 ②를 provider 호출 없이 구현했다. 실행 사실과 사용자 반응을
+하나의 변경 가능한 행에 섞지 않고 `PromptRefinerExecutionReceipt`와
+`PromptRefinerDispositionReceipt`라는 두 immutable record로 분리했다. strict schema와
+bundle 결속 검사는 성공·dispatch 후 실패·dispatch 전 거절, provider/model/adapter,
+contract version, server timestamps, retry count와 token·microUSD의 known-vs-unknown을
+보존한다. prompt·제안문·digest·user/conversation/session identity·provider 오류
+본문을 담을 필드는 없다.
+
+집계는 suggestion yield, dispatched failure, refusal, 성공 preparation latency
+p50/p95, stale/request, explicit choice/suggestion, accepted/choice를 서로 다른 분모로
+계산하고 각 분자·분모를 함께 낸다. 빈 분모와 percentile은 0이 아니라 `null`이다.
+비용·token은 dispatch된 population 중 reported/missing/total을 분리하며,
+provider/model breakdown에서 attribution이 없는 request는 별도로 센다. 중복·orphan,
+request/suggestion 결속 불일치, stale 단계 모순, 시간 역행과 malformed 입력은
+fail-closed한다.
+
+`npm run report:prompt-refiner-receipts -- --input=<bundle.json>`은 자격증명과 과금
+없이 동결 bundle을 읽고 aggregate만 출력한다. 이 회차는 Prisma table·runtime writer,
+browser disposition API, product adapter, provider 호출, billing, Router 입력,
+AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않았다. 따라서 아직
+운영 데이터가 생기는 경로는 없고, 이 report의 수치는 release gate 증거가 아니다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 +1%p** — C19 관측 계약은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 37%** (직전 약 32%) |
+| 구현 | receipt schema·결속·집계·오프라인 report 완료 |
+| 독립 검토·통합 CI | 이 기록 시점에는 대기 |
+| 공개 상태 | 변화 없음 — 제품 adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 검증한다.
+2. Refiner model·output cap·timeout·retry 0·per-request/stage 비용 상한을 동결하는
+   사전등록을 만든다. **Claude 독립 검토 필요, provider 호출 0.**
+3. 동결 corpus와 중단 규칙을 가진 작은 shadow harness를 준비한다.
+   **Claude 독립 검토 필요, 준비 자체는 provider 호출 0.**
+4. 별도 과금 승인 뒤 shadow를 한 번 실행해 의미 보존·주입 저항·비용·지연을
+   측정하고, 통과했을 때만 durable writer·제품 adapter 연결을 제안한다.
+5. 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합과
+   전체 카탈로그 선택 품질을 별도 실험으로 판단한다.
+
+## 2026-09-16 Prompt Refiner 실행 사전등록 계약 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 순수 계약 모듈은 Refiner
+contract/refiner/model/catalog/pricing identity를 정확히 고정하고, 입력 100,000 tokens,
+출력 4,096 tokens, timeout 15초, retry 0을 요구한다. 고정 standard 가격으로 계산한
+요청당 최악 비용은 24,916 microUSD이며, 최대 100 dispatch의 단계 상한은
+2,491,600 microUSD다. 후속 결함 수정은 정적 profile에 더해 실제 비용 경로와 같은
+`resolveModelPricing()` 결과의 input/output rate도 0.2/1.2와 정확히 비교한다. 따라서
+per-model 환경 override나 전달된 runtime registry row가 가격을 바꾸면 계약 drift로
+거절한다. continuation 수정은 effective output cap도 최소 4,096인지 확인한다. 더 큰
+cap은 허용하되 Refiner 요청은 여전히 4,096으로 고정하며, cache disabled와 generic
+reservation cap은 이 계약의 비용·예약량을 바꾸지 않는다. 미래 예약 authority도 이
+gate를 예약·dispatch 전 같은 critical path에서 호출해야 한다. 다만 requestId
+결속·만료·1회 consume을 갖춘 원자 예약
+authority는 아직 없다. caller가 만든 lease/boolean은 받지 않고, eligibility·별도 단계
+승인·adapter readiness·계약이 모두 맞아도 `reservation_authority_unavailable`로
+dispatch 전에 거절한다. 따라서 현재 성공 admission 경로는 구조적으로 없다.
+
+terminal reason은 성공, admission/adapter 거절, dispatch 후 provider/response 검증
+실패와 cancellation을 content-free receipt 사실과 disposition 단계로 한 번만 매핑한다.
+receipt schema의 retry도 literal 0으로 좁혔다. 이 회차는 runtime writer, 비용 예약기,
+provider adapter/API/model 호출, product mode, Router 배선, AppSetting writer, flag
+활성화를 추가하지 않았다. 따라서 실행 계약 구현은 운영 실행이나 공개 진척으로
+계산하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
+| 구현 | 순수 실행 사전등록·effective 가격/output-cap drift·authority 부재 fail-closed·terminal mapping 구현 |
+| 로컬 검증 | env·registry-row 가격/output-cap 격리 테스트 포함 focused 32/32 및 hostile-env 32/32; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
+| 독립 검토·통합 CI | 원 exchange는 round 2 `approve`와 environment pricing finding 1건을 남겨 controller가 `on_hold / revisions_exhausted`로 종결; 새 continuation은 Claude Code Max round 2 `approve`, findings 0, controller `passed`. PR #1466 CI는 success 12개·의도된 skipped 1개, review thread/comment 0개 |
+| 병합·배포·공개 | PR #1466이 develop에 `6df87ee5d7265a2e41bfd772b92e9405708ff6c8`로 병합됨. provider/API 호출 0, runtime adapter 없음, flag default-off이며 production 공개·활성화는 하지 않음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 비용과 stage slot을 원자적으로 예약하고 requestId 결속·만료·1회 consume을
+   강제하는 durable reservation authority를 구현한다. provider 호출은 하지 않고
+   Claude 독립 검토를 받는다.
+2. provider 호출 없이 동결 corpus·output parser·중단 규칙을 갖춘 shadow harness를
+   구현한다.
+3. 별도 유료 승인 뒤 bounded shadow를 정확히 한 번 실행해 의미 보존·주입 저항·
+   비용·지연을 측정한다.
+4. 승인된 증거가 있을 때만 제안형 UI를 연결하고, 그 뒤 Refiner 결과의 Router 결합과
+   전체 카탈로그 선택 품질을 별도 측정한다.
+
+## 2026-09-16 Prompt Refiner durable reservation authority 회차
+
+앞 회차의 다음 순서 ①을 provider 호출 없이 구현했다. append-only migration은 고정
+stage 한 행과 최대 100개의 content-free reservation tombstone만 허용한다. stage는
+요청당 24,916 microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와
+transaction 양쪽에서 강제하며 migration에는 seed가 없다. reservation `BEFORE INSERT`
+trigger는 검증·stage 잠금만 수행하고, 성공한 tombstone이 보이는 `AFTER INSERT` trigger만
+stage counter를 실제 행 집계에 맞춘다. stage는 0/0에서만 생성되며 direct counter UPDATE로
+slot을 만들 수 없다. direct insert도 예산을 쓰고 unique 충돌·위조·101번째 insert는 행과
+accounting을 함께 rollback한다. terminal timestamp도 DB trigger가 소유하고 만료 뒤 direct
+consume/release는 expired tombstone이 된다. authority는 stage row→
+model registry table `SHARE`→reservation row 순서로 잠근 뒤 requestId·stage·canonical
+contract digest·server-minted reservationId를 결속한다. digest에는 stage와 reservation
+lifecycle 상태 집합이 모두 포함된다. naive DB timestamp에는 명시적
+`clock_timestamp() AT TIME ZONE 'UTC'`를 사용하고, expiry sweep은 DB에서 만료 필터·
+정렬·limit을 `FOR UPDATE` 전에 적용해 lock footprint도 limit 이하로 묶는다. 잠금 뒤 DB clock 기반
+5분 만료와 1회 CAS consume을 사용하며
+consumed/released/expired 행을 삭제·환급·재사용하지 않는다.
+
+reserve와 consume의 같은 critical path에서 runtime model registry row와 effective
+pricing을 실행 계약에 다시 대조하므로 환경 가격 override나 registry drift가 있으면
+슬롯 생성 또는 사용 전에 fail-closed한다. existing request는 stage/runtime 재검증보다
+먼저 같은 active fact 또는 terminal non-success fact를 돌려주며 새 슬롯으로 재사용하지
+않는다. 미래 dispatch는 consume이 반환한 exact digest와 checked-in execution/reservation
+contract constants를 쓰고 registry를
+다시 읽지 않는다. authority는 prompt/content/user/
+conversation/provider 오류를 저장하지 않고 reserve/consume/release/expire의 제한된
+사실만 반환한다. 제품/API/script caller, provider adapter/model 호출, stage admin writer,
+flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
+`reservation_authority_unavailable`도 그대로이므로 이 회차만으로 실행 경로가 열리지
+않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 안전한 예약 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
+| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
+| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
+| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 17개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
+| 독립 검토·통합 CI | Claude Code Max Round 2가 digest `sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f`를 `approve`, findings 0으로 판정했다. PR #1494 통합 CI는 20 successful·1 skipped·0 failing이었고, 초기 `assistantProfileImportCore` 전역 `Restrict` 오탐은 model scope로 수정한 뒤 통과했다. |
+| 병합·배포·공개 | PR #1494가 develop에 squash merge되었고 merge SHA는 `cdc55162e35d0f4ee7b1300293fc0bac66b6f1b0`이다. production 배포/공개, provider/API/model 호출, stage seed/writer, v1 admission/flag 변경은 여전히 없음. |
+
+### 이 Cycle 다음 권장 순서
+
+1. Claude 읽기 전용 독립 검토와 Linux 통합 CI에서 transaction/race/rollback 및 migration
+   경계를 다시 검증한다.
+2. provider 호출 없이 동결 corpus·output parser·append-only journal·중단 규칙을 갖춘
+   shadow harness를 구현하되 아직 authority를 dispatch에 연결하지 않는다.
+3. harness와 authority를 잇는 새 admission 계약, stage 생성/admin writer, 비용 승인을
+   별도 설계·검토한다. 기존 v1은 수정하지 않는다.
+4. 그 새 계약이 승인된 뒤 bounded shadow를 정확히 한 번 유료 실행한다.
+5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
+   연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.
+
+## 2026-09-16 Prompt Refiner provider-free shadow harness 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 한국어 8·영어 8의 합성 fixture
+16개를 exact version·digest·배열 순서로 동결하고, 모델 모양의 output을
+`parseBenchmarkJson()` → exact `refinedPrompt` object → 기존 prompt byte/character
+bound 순서로 해석한다. JSON repair·fence 제거·schema coercion·부분 salvage는 없다.
+corpus와 실행 code는 full 40-hex commit SHA의 고정 allowlist bytes와 현재 bytes가
+완전히 같을 때만 CLI에서 실행되며 EOL drift도 거부한다. live/provider/plugin/adapter,
+동적 자격증명 조회와 corpus 교체 인자는 존재하지 않는다.
+
+Prompt Refiner 전용 journal은 `wx` lock, SHA-256 entry chain, 별도 registration witness,
+append `fsync`, 평가 전 durable intent와 strict terminal을 사용한다. terminal 없는 intent는
+unknown이라 다시 평가하지 않고, terminal 뒤의 clean interruption과 의도적인
+`case_limit` stop만 deterministic 순서로 재개한다. 구조·fixture mismatch, truncation,
+rollback, witness 불일치, duplicate/conflicting terminal과 stale lock은 수리하거나
+재시도하지 않는다. 실행은 corpus와 호출별 case 수로만 제한하며 wall-clock에 의존하지
+않고 provider call과 비용은 항상 0이다.
+
+PLANNER-03 구조 검사는 공격 문자열이 data message 밖으로 탈출하지 않았다는 증거일
+뿐이다. 실제 모델 비순응 행동의 증거로 과장하지 않도록 structural boundary population과
+behavioral fixture outcome population을 분리했다. 후자도 로컬 fixture의 parser 회귀일 뿐
+실제 모델의 의미 보존·주입 저항 품질을 측정하지 않는다. journal·report에는 prompt,
+fixture output, proposal bytes나 그 per-item content digest를 남기지 않는다. 재현을 위한
+합성 `corpusDigest`, full sourceRef와 canonical allowlist identity hash는 최초
+journal·witness header와 aggregate에 저장하고 다른 source snapshot의 resume를 거부한다.
+allowlist와 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도
+Git blob과 같은 bytes로 유지한다. 독립 검토 round 0에서 찾은 마지막 terminal 직후
+중단과 마지막 case mismatch 경계를 수정해, 전자는 invalid resume event 없이 complete를
+확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는 caller
+env보다 우선한 `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`과 로컬 객체 선행조건을
+강제하고 `max-cases`는 ASCII 10진 정수만 받는다.
+`package-lock.json`은 전용 4 MiB cap 안에 있는지 현재 크기를 테스트에서 동적으로
+검증하고, 나머지 non-corpus source는 1 MiB cap, Git capture는 8 MiB로 제한했다.
+just-over-cap은 명시적 source-domain 오류다.
+source identity는 pinned repository bytes와 lockfile을 결속하지만 실제 `node_modules`,
+package-manager cache·설치 환경·install attestation은 결속하지 않으므로 설치 provenance
+증거가 아니다.
+
+이 회차는 reservation authority dispatch 연결, stage seed/admin writer, product
+route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 또는
+`admitted: true` 경로를 추가하지 않았다. 따라서 completed local run은 실제 shadow,
+품질 승인, release gate 또는 공개 진척이 아니다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 제품 호출·공개 범위는 그대로이고 재현·중단 복구·source identity 기반이 통합됐다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
+| 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
+| 로컬 검증 | 전용 core/CLI **24/24**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock dynamic within-cap/exact-cap/over-cap·root-only LF attribute·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 **approve**였지만 재현 가능한 nit 2건을 남기고 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종료됐다. 두 nit은 exchange 밖 후속 commit에서 수정했고, 감사 무결성·집중 회귀·전체 회귀의 내부 3중 검증을 모두 PASS했다. PR #1500 Linux CI는 **20 success / 0 fail**이다. |
+| 병합·배포·공개 | PR **#1500**이 `develop`에 merge SHA `ecaad7d9274a4c2be01c9b43b0a612e2383014b4`로 병합됐다. provider/API/model 호출·유료 실행·stage seed/admin writer·제품 caller·flag·`admitted: true`는 없고, 제품 배포·공개 활성화도 없다. |
+
+### 이 Cycle 다음 권장 순서
+
+1. provider-free harness evidence를 reservation authority에 연결하는 **별도 admission/admin
+   writer 계약**을 default-off로 구현한다. stage seed는 생성하지 않고 기존 v1
+   admission도 수정하지 않는다.
+2. 새 계약을 독립 검토한 뒤, **명시적 비용 승인** 하에 bounded paid shadow를
+   정확히 1회만 실행해 의미 보존·행동상 주입 저항·비용·지연 증거를 수집한다.
+3. 승인된 증거가 gate를 통과할 때만 suggestion adapter와 UI를 연결하며, writer·flag·제품
+   활성화는 동일한 evidence gate 밖으로 나가지 않는다.
+4. Refiner 제안형 흐름의 사용자 선택 증거 뒤 Router full-catalog 선택 품질 최적화를
+   별도 실험으로 진행한다.
+
+## 2026-09-17 Prompt Refiner admission-readiness proposal 회차
+
+앞 회차의 다음 순서 ①에서 실행 권한을 만들지 않는 부분만 구현했다. 최신 develop
+source commit `f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`의 exact allowlist bytes로 기존
+provider-free shadow를 다시 실행했고 16/16 completion, structural violation 0,
+behavioral fixture match 16/16, remaining/unknown 0, provider call/cost 0을 content-free
+report·journal·witness로 동결했다. strict manifest는 세 artifact의 exact filename,
+size/SHA-256, source/corpus identity와 journal/witness terminal head를 canonical bundle
+digest에 묶는다.
+
+새 순수 core는 manifest와 네 입력 파일을 모두 불신 입력으로 취급한다. byte/UTF-8/BOM,
+duplicate key, extra/missing field, artifact digest와 **evidence 내부** source/corpus 불일치를
+거부하고 기존 strict journal replay로 tamper·truncate·rollback·A/B snapshot 혼합을 다시
+검사한다. 현재 checkout·environment drift는 이 verifier의 검증 대상이 아니다. 성공 출력은
+content-free `PromptRefinerShadowStageProposal`뿐이다. status는
+`awaiting_explicit_admin_cost_approval`, `executionAdmitted=false`,
+`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`이며 기존 reservation
+stage id·contract digest·비용·slot·TTL을 그대로 반복한다. synthetic evidence가 실제 모델
+품질, paid shadow, PLANNER, release 또는 rollout 승인이 아니라는 acknowledgement도 고정했다.
+
+이번 범위에는 stage seed, migration/admin writer, Prisma mutation, admin route/script caller,
+receipt writer, product import, provider SDK/network/credential lookup, flag 변경과
+`admitted:true`가 없다. 기존 `admitPromptRefinerExecution()`도 변경하지 않았고 모든 caller
+boolean이 true여도 `reservation_authority_unavailable`로 fail-closed한다. 실제 writer는
+승인 직전에 현재 source·manifest·environment를 다시 검증하고, 새 migration이
+evidence/approval/environment/expiry/execution manifest를 한 durable row에
+결속하는 후속 계약으로 미뤘다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**, 공개 기능 분모와 산식은 유지) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 실행 권한은 열지 않고 evidence→proposal 경계를 닫았다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 47%** (직전 약 44%, 동결 evidence 검증·proposal-only 상태 기계 반영) |
+| 구현 | content-free 과거 evidence bundle·strict untrusted verifier·현재 checkout 미검증 및 runtime 재검증 의무·deterministic proposal digest·기존 reservation 계약 provenance 결속 완료 |
+| 검증 | focused admission **19/19**, 기존 shadow **24/24**, Refiner·injection **59/59**, PLANNER-03 위반 0, typecheck·lint·문서/정책/encoding/data-domain·diff 검사를 모두 통과 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 digest `sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a`를 **approve**했다. 재현 가능한 선택적 nit 2건을 남긴 채 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종결했고, 두 nit은 exchange 밖 후속에서 보강한 뒤 내부 감사 무결성·집중 회귀·전체 회귀의 3중 검증을 통과했다. PR #1515 최종 CI는 **12 success / 0 fail**이며 post-merge promotion PR 1건만 의도대로 skip됐다. |
+| 공개 상태 | PR **#1515**가 `develop`에 merge SHA `b7df3d6b9800e75f9dec1ce5bf79abab3458ffcd`로 병합됐지만 제품 활성화는 없다 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
+
+PR #1515는 2026-09-17 03:34:09Z에 자동 병합됐다. 최종 required rollup을 포함한
+12개 검사는 모두 성공했고 실패는 0건이었다. 리뷰·일반 댓글·review thread도 각각
+0건이므로 미해결 검토 항목은 없다. 이 병합은 과거 synthetic evidence를 실행 불가
+proposal로 검증하는 경계만 통합했으며 provider/API 호출, 유료 실행 또는 제품 공개를
+발생시키지 않았다.
+
+최종 검토의 두 nit은 동작 결함이나 승인 차단 finding이 아니었다. 그래도 plain genuine
+Buffer/Uint8Array의 cap+1이 각 raw byte bound에서 먼저 거부됨을 직접 고정하고, focused
+suite 개수가 증가해도 다시 낡지 않는 완료 기준으로 task 문구를 바꿨다. 이 보강은 종료된
+exchange 밖에서 수행했으며 `package-round0..2.json`, `verdict-round0..2.json`, numbered
+events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검토 당시 task bytes는
+`package-round2.json`에 그대로 남는다.
+
+### 이 Cycle 다음 권장 순서
+
+1. exact evidence digest, 명시적 사람 승인·비용, environment, expiry와 실행 manifest를
+   한 행에 결속하는 **durable DB provenance/admin writer 계약**을 새 migration으로
+   설계·구현한다. **Claude 독립 검토 필요, provider 호출 0.**
+2. writer와 proposal 계약을 독립 검토하고 별도 비용 승인을 받은 뒤 bounded paid shadow를
+   **정확히 1회** 실행해 의미 보존·행동상 주입 저항·비용·지연을 측정한다.
+3. 승인된 실제 evidence가 gate를 통과할 때만 suggestion adapter와 UI를 연결한다.
+4. 사용자 선택 증거가 쌓인 뒤 Refiner→Router 결합과 full-catalog 선택 품질 최적화를
+   별도 실험으로 진행한다.
+
+## 2026-09-17 Prompt Refiner durable stage writer 회차 (round 0 request_changes, 수정 검증·round 1 대기)
+
+앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source
+identity와 승인 시점 staging deployment의 full commit, 당시 v1의 exact 187-file runtime import-closure source manifest,
+고정 execution manifest를 하나의 immutable stage에 결속한다. 승인 시각과 60분 expiry는
+DB clock이 소유하며, owner 전용 POST는 advisory lock 아래 tamper-evident success audit과
+stage insert를 한 transaction으로 처리한다. 동일 actor·동일 runtime의 exact replay만
+idempotent하고 다른 facts는 409다. migration은 기존 stage를 backfill/seed하지 않으며
+예상하지 못한 행이 있으면 중단한다.
+
+writer create/replay와 reserve/consume은 같은 helper로 stage-linked audit 행의 HMAC·signed
+metadata 결속, non-null `previousHash`의 실제 선행 행 존재와 현재 runtime source/execution
+manifest, expiry를 DB clock 기준으로 다시 검증한다. global audit chain scan/table SHARE lock은
+하지 않는다. DB trigger는 공개 shape만 검사하고 HMAC 진위를 주장하지 않는다. 직접 SQL 경계에도 만료 검사를 추가했다. 단 이 회차는
+provider/API/Railway 관리 API/credential/receipt/제품 caller/flag를 연결하지 않고,
+execution/product readiness 두 boolean은 계속 false다. 따라서 stage writer가 존재해도 actual
+provider admission은 열리지 않는다.
+
+### 한눈에 보는 전체 Chat 진척 (임시)
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +3%p** — 유료 실행은 열지 않고 승인 provenance와 expiry 경계를 구현했다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 51%** (직전 약 47%, durable 승인/감사/runtime 재검증 반영) |
+| 구현 | additive no-seed migration, content-free exact-byte manifest, owner-only preview/create, 원자 audit+stage, same-runtime idempotency, create/replay/reserve/consume 공용 stage-linked audit HMAC 검증과 runtime source·execution 재검증 |
+| 내부 검증 | 독립 verifier 기준 focused Prompt Refiner **96/96**, admin audit chain **19/19**, shadow-stage route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL **17.10** fresh DB에서 전체 **124 migration**, Prisma diff **0**, 관련 DB **35/35**. typecheck·대상 lint·문서·정책·encoding·data-domain·prompt-injection·DB coverage·API cache·enum 검사 **PASS** |
+| 독립 검토·통합 CI | round 0 package digest는 `sha256:989e42217bfe82d3ff36de280b383d4563f0ab6475ffa2fb51b4b4fae74f5cdc`, 판정은 `request_changes`다. 지적 수정과 검증 뒤 round 1 제출 대기이며 통과·완료로 간주하지 않는다. |
+| 공개 상태 | provider/API/Railway/유료 호출 0, stage seed 0, 제품 caller·flag·성공 admission 없음 |
+
+범위 밖 관찰: 별도 전체 검사에서 확인된 Brisbane chat-concurrency 기존 실패는 이 기능의
+검증 수치에 포함하지 않았으며, 이 회차의 성공 근거나 feature blocker로도 사용하지 않았다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max로 읽기 전용 독립 검토하고 Linux 통합 CI를 통과시킨다.
+2. writer 계약이 승인된 뒤에도 별도 명시적 비용 승인 전에는 stage를 만들거나 paid shadow를
+   실행하지 않는다.
+3. 별도 승인된 bounded shadow를 정확히 1회 실행해 의미 보존·행동상 주입 저항·비용·지연을
+   측정한다.
+4. 실제 evidence가 gate를 통과할 때만 suggestion adapter/UI를 연결하고, 이후
+   Refiner→Router와 full-catalog 선택 품질을 별도 실험한다.
+
+## 2026-09-20 Prompt Refiner durable stage writer 통합 완료 회차
+
+앞 회차의 durable DB provenance/admin writer를 최종 독립 검토와 Linux 통합 CI까지
+마쳤다. 당시 v1 stage는 과거 evidence, 사람 승인·비용 상한, 승인 시점 staging deployment의
+full commit, 187개 고정 runtime import-closure 파일, execution manifest와 60분 DB-clock
+expiry를 한 행에 결속한다. owner 전용 preview/create는 advisory lock 아래 stage와
+tamper-evident audit을 같은 transaction으로 기록하며, exact replay만 idempotent하다.
+reserve/consume도 같은 stage-linked audit HMAC, runtime source와 execution manifest,
+expiry를 다시 검증한다.
+
+rebase 뒤 당시 v1 source closure와 정책 문서의 187개 전체·178개 runtime source·9개 metadata
+설명을 실제 계산값에 다시 결속했다. Linux CI에서만 드러난 관리자 route test loader의
+query-suffix named-export 차이는 제품 route를 바꾸지 않고 direct import와 명시적 auth
+mock으로 닫았다. provider/API/model/Railway/credential/receipt/제품 caller/flag를 연결하지
+않았고 `executionAdmitted`와 `productAdapterReady`는 계속 false다. migration은 stage를
+seed 또는 backfill하지 않으므로 이 병합만으로 유료 실행이나 제품 공개가 시작되지 않는다.
+
+후속 confirmatory v4/v6 현재 계약은 exact 190-file runtime import-closure source manifest를
+사용한다. 178개 runtime source와 12개 metadata/schema/네 migration 파일이며, v1의 187-file
+행과 manifest는 수정하거나 소급 재해석하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) — 검증·운영 기반은 전진했지만 사용자가 접하는 공개 기능 분모는 아직 변하지 않았다. |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +4%p** — 승인 provenance·감사·expiry·runtime 재검증과 Linux 통합 검증을 완료했다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 55%** (직전 약 51%, durable writer의 독립 검토·통합 CI·병합 완료 반영) |
+| 구현 | additive no-seed migration, content-free 187-file manifest, owner-only preview/create, 원자 audit+stage, exact-runtime idempotency, create/replay/reserve/consume 공용 HMAC·expiry·runtime 재검증 완료 |
+| 로컬 검증 | focused Prompt Refiner **96/96**, admin audit chain **19/19**, shadow-stage route·CSRF **6/6**, data/privacy **81/81**, security regression **190/190**. PostgreSQL 17 fresh DB에서 전체 **124 migration**, Prisma drift **0**, 관련 DB **35/35**. 전체 server **9,831 pass·1 skip·0 fail**, client **58/58** |
+| 독립 검토 | Claude Code Max의 최종 policy-doc continuation은 digest `sha256:044952f70518f8217e13e2ec1a702404b1c63718a3ac64cc3298755b3330c4b5`를 **approve, findings 0**으로 종료했다. Linux route test 후속도 digest `sha256:e01bfa7ae5df3b59fe073fc64e2d7b7eff1d09cd4f3071d6f8373f011368dee7`를 **approve, findings 0**으로 종료했다. |
+| 통합 CI·병합 | PR **#1555**는 **20 success·0 fail·2 intentional skip** 뒤 `develop`에 merge SHA `2df3d7abfb731bdd10d11bcce51683453724d060`으로 병합됐다. 최초 Linux loader 실패는 수정 후 같은 `Server contract tests`에서 통과했다. |
+| 공개 상태 | 배포·staging 실행은 이 기록에서 확인하지 않았다. provider/API/Railway/유료 호출 0, stage seed 0, 제품 caller·flag·성공 admission 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 병합된 commit의 staging 배포·migration 상태와 owner-only **preview** 결과를 읽기 전용으로
+   결속해, 예상 provider/model·최대 요청 수·비용 상한·중단 조건을 한 번의 실행 승인안으로
+   만든다. 이 단계에서는 stage를 만들거나 provider를 호출하지 않는다.
+2. 그 preview와 비용표에 대해 별도의 명시적 사람 승인을 받은 뒤에만 60분 이내 stage를
+   생성하고, 승인된 bounded paid shadow를 정확히 1회 실행한다. unknown outcome은 재시도하지
+   않고 확인 대상으로 넘긴다.
+3. 의미 보존·행동상 주입 저항·비용·지연·제외율 evidence를 승인 gate로 판정하고, 실패하면
+   제품 연결 없이 원인별 후속으로 분리한다.
+4. gate를 통과할 때만 제안형 suggestion adapter/UI를 default-off로 연결하고 사용자 채택·거절
+   증거를 수집한다.
+5. 그 사용자 선택 증거 뒤에만 Refiner→Router 결합과 full-catalog 모델 선택 품질 최적화를
+   별도 실험으로 진행한다.
+
+## 2026-09-20 Prompt Refiner shadow live adapter 통합 완료 회차
+
+durable stage writer 다음 단계 중 실제 provider SDK 경계와 고정 16건 실행 계약을
+구현했다. adapter는 `gpt-5-6-luna`, reasoning medium, 출력 4,096 tokens, timeout 15초,
+retry 0, tool 없음과 요청·응답 body 비보존을 고정한다. strict parser와 현재 사용자 턴
+텍스트만 사용하며 timeout, provider error, 불명 결과는 재시도하지 않는 terminal로
+분리한다. 사용량은 input/output/reasoning뿐 아니라 cache read/write도 별도 필드로
+보존하고, 부분 telemetry에서는 비용을 만들어내지 않는다.
+
+이 adapter를 호출하는 제품·관리자·script·cron entry point는 없다. run contract도
+`durableRunWriterReady=false`, `entryPointReady=false`, `executionAdmitted=false`,
+`productAdapterReady=false`를 유지한다. 따라서 이번 병합은 stage 생성, reservation
+소비, credential 조회, provider/API/model 호출, 유료 실행, flag 활성화나 제품 공개를
+발생시키지 않았다. actual tokenizer 요구도 아직 충족하지 않았으며 byte upper bound는
+사전 거부용 보수적 필터일 뿐 실행 승인 증거가 아니다.
+
+Claude Code Max 읽기 전용 검토는 세 라운드 모두 `approve`였고, 마지막 round가 남긴
+nit 2건을 수정 상한 밖에서 보완했다. 원래 package·verdict·`on_hold
+(revisions_exhausted)` 기록은 바꾸지 않고 사람 disposition으로 후속 수정을 결속했다.
+통합 CI 첫 실행에서 저장소 전역 캐시 과금 배선과 runtime dynamic-access snapshot
+두 경계 누락이 드러났다. cache write telemetry를 명시적으로 수집하고 검토된 snapshot을
+갱신한 뒤 관련 회귀 140/140, typecheck와 lint를 통과시켜 재푸시했다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 68%** (주관적 범위 **58–78%**) — 직전 약 67%에서 +1%p |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +5%p / 전체 계획 +1%p** — 실행 어댑터는 생겼지만 caller와 승인된 실제 실행은 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 60%** — 서로 다른 축으로 분리해 infrastructure를 제품 완료로 과장하지 않음 |
+| 구현 | 고정 model/provider 생성 경계, one-run 최대 16건·요청당/전체 비용 ceiling, strict output parsing, no-retry terminal 분류, 완전/부분 usage 처리, shipped entry-point 부재 guard |
+| 로컬 검증 | Prompt Refiner 관련 **140/140**, live adapter/run contract **23/23**, 캐시 과금 배선과 runtime source closure **18/18**, typecheck·대상 lint·diff 검사 통과 |
+| 독립 검토 | Claude Code Max 세 라운드 `approve`; 마지막 nit 2건은 종료된 exchange 밖에서 수정. 감사 기록은 `on_hold (revisions_exhausted)`로 보존 |
+| 통합 CI·병합 | PR **#1565**는 첫 전역 guard 실패 2건을 수정한 뒤 최종 **20 success·0 fail·2 intentional skip**으로 `develop`에 merge SHA `18ceffe5d297c14e3f06037fa0695a8db721e38a`로 병합. 일반 댓글·review 0 |
+| 공개 상태 | 이번 회차에서 배포·stage 생성·provider/API/model/유료 호출 0, 제품 caller·flag·성공 admission 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. durable stage의 reservation 소비 직후부터 모든 terminal을 원자적으로 남기는
+   **run/terminal receipt writer**와 `consumed-without-terminal` unknown 복구 계약을
+   먼저 구현한다. provider 호출은 여전히 연결하지 않는다.
+2. 같은 회차에서 owner-only exact preview에 source/deployment/evidence/model, 16건 상한,
+   요청당·전체 비용 ceiling, timeout·no-retry·중단 조건을 표시하고 실제 실행 endpoint는
+   default-off로 둔다.
+3. 이 새 실행 권한·비용·감사 경계는 **Claude Code Max 독립 검토가 필요**하다. 검토와
+   Linux CI가 통과한 뒤 staging 배포 상태와 preview를 읽기 전용으로 확인한다.
+4. preview 결과에 대한 별도 명시적 비용 승인을 받은 뒤에만 stage를 만들고 bounded paid
+   shadow를 정확히 1회 실행한다. unknown outcome은 확인 전 재실행하지 않는다.
+5. 실제 의미 보존·행동상 주입 저항·비용·지연 evidence가 gate를 통과할 때만 suggestion
+   UI를 default-off로 연결하고, 사용자 선택 증거 뒤 Refiner→Router full-catalog 실험으로
+   진행한다.
+
+## 2026-09-20 Prompt Refiner durable run writer 통합 완료 회차
+
+앞 회차의 다음 순서 ①~③을 구현·독립 검토·통합했다. 새 content-free
+`PromptRefinerShadowRun`/`PromptRefinerShadowAttempt`는 승인된 durable stage와 고정
+16개 합성 case의 실행 계약을 결속한다. 사람 승인 audit과 run 생성, dispatch 직전
+system audit·attempt intent·reservation consume·run accounting, terminal receipt를 각각
+정해진 transaction과 lock 순서로 기록한다. exact replay만 idempotent하며 conflicting
+terminal, 사후 수정·삭제, intent 없는 reservation consume을 application과 DB trigger 양쪽에서
+거부한다.
+
+60초 동안 terminal을 얻지 못한 dispatch intent는 DB clock 기준 sweep에서
+`unknown_after_dispatch`로 닫히고 run은 `stopped_unknown`으로 되돌릴 수 없게 latch된다.
+같은 run의 나머지 stale intent도 누락하지 않고 닫거나 unresolved id로 보고하며, latch 전에
+이미 dispatch된 attempt의 늦은 known receipt와 실제 비용은 기록하되 latch 자체는 유지한다.
+owner-only GET은 no-write exact preview이고 POST는 recent authentication, origin guard,
+DB rate limit, 4 KiB strict body, 고정 확인문과 default-off 승인 flag를 요구한다.
+
+이번 병합에도 실행 entry point와 실제 runner는 없다. `durableRunWriterReady`와
+`runApprovalPreviewReady`는 승인 기록 전용 경로에 한해 true가 됐지만, route는 live adapter를
+import하지 않고 run contract의 실행 3개 flag인 `entryPointReady`, `executionAdmitted`,
+`productAdapterReady`는 모두 false다. 따라서 stage seed·provider credential 조회·
+provider/API/model 호출·유료 실행·제품 Chat 연결·실행 flag 활성화는 0건이다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 68%** (주관적 범위 **58–78%**) — 공개 기능 분모와 planning-estimate-v2 산식 유지 |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +10%p / 전체 계획 +0%p** — durable 실행 기록·unknown 복구는 완성했지만 제품 caller와 실제 실행은 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 70%** (직전 30% / 60%) |
+| 구현 | no-seed migration, one-run unique 계약, DB-clock 승인·expiry·unknown sweep, owner-only preview/approval, dispatch intent·reservation·terminal 원자 기록, content-free export/delete 등록 완료 |
+| 로컬 검증 | 전체 server **9,858 pass·1 intentional skip·0 fail**, client **58/58**, fresh PostgreSQL 전체 migration·drift 0과 Prompt Refiner 관련 DB 3개 파일 **45/45**, typecheck·ESLint·저장소 gate 통과 |
+| 독립 검토 | Claude Code Max round 0 `request_changes` 5건을 수정하고 round 1의 비차단 기록 nit 2건도 닫았다. 최종 round 2는 digest `sha256:53eb076d11c4ba6756aec49a790e5fa9aa936933d7207e89e7b5aecc70f41211`에 **approve, findings 0**. CI DB cleanup 후속은 digest `sha256:53580ed09b6c4242b1070371fdb909162c9972ae096661a2dffc6d2e69c7cde7`, enum registry 후속은 digest `sha256:9e3bfd09f7b6235a63106bb51ee0cf99b1b7f98e4e4a9a3a34d71c13827e872b`의 별도 읽기 전용 검토에서 각각 **approve, findings 0** |
+| 통합 CI·병합 | PR **#1567**은 base 최신화 뒤 최종 **20 success·0 fail·2 intentional skip**으로 `develop`에 merge SHA `0cdd26bd53efad5d67f13e6d9618f591a6ad040a`로 병합. 일반 댓글·review·미해결 thread 모두 0 |
+| staging | 동일 merge SHA의 Railway deployment `ed5d8f53-fb43-42cc-b59f-e6a240f2fc24` **SUCCESS**, image digest `sha256:a13caf841c18466673db72f37b27e2e2c18a912bc679ae4e4a9a48abfcd6515f`, migration **125개 적용 완료**, 직접 `/api/health` **200** |
+| 비용·호출 | 제품 provider/API/model 호출과 유료 shadow **0건**. 독립 검토는 Anthropic API key가 아닌 Claude Code Max 구독 seat를 사용 |
+
+### 이 Cycle 다음 권장 순서
+
+1. default-off **execution runner/caller**를 구현한다. 시작·resume마다 DB-clock unknown sweep과
+   expiry·kill switch를 확인하고, durable writer의 intent→provider 경계→terminal 순서를
+   벗어나지 않게 한다. 자동 retry·redispatch와 제품 Chat 연결은 계속 금지한다.
+2. 실행 권한·비용·unknown 결과를 다루는 변경이므로 Claude Code Max 읽기 전용 독립 검토와
+   Linux 통합 CI를 통과시킨다.
+3. 병합·staging 배포 뒤 owner-only exact preview를 읽기 전용으로 확인한다. 이 단계까지는
+   stage를 만들거나 provider를 호출하지 않는다.
+4. preview의 고정 model, 16건 상한, 요청당·전체 비용 ceiling, timeout·no-retry·중단 조건에
+   대해 별도 명시적 비용 승인을 받은 뒤에만 bounded paid shadow를 정확히 1회 실행한다.
+5. 의미 보존·행동상 주입 저항·비용·지연·제외율 gate를 통과한 경우에만 suggestion UI를
+   default-off로 연결하고, 사용자 채택·거절 증거 뒤 Refiner→Router full-catalog 실험으로
+   진행한다.
+
+## 2026-09-20 Prompt Refiner default-off execution runner 구현 회차
+
+앞 회차가 남긴 실행 경계만 구현했다. owner+recent-auth 전용 execute GET/POST는 고정 run id,
+v3 contract digest와 확인문, 4 KiB strict body, DB rate limit과 no-store를 요구한다. runner는
+호출 첫 동작에서 PostgreSQL clock 기반 unknown sweep을 수행하고, 고정 합성 corpus 16건을
+정확한 순서로 reservation→durable dispatch intent/consume→provider boundary→immutable terminal
+순서로 처리한다. 각 terminal 뒤 다음 case 전에 default-off kill switch를 다시 확인하며,
+provider 경계 뒤에는 terminal 기록을 생략하지 않는다. retry·redispatch·fallback·병렬 dispatch는
+없다.
+
+dispatch 직전에는 `js-tiktoken@1.0.21`의 `o200k_base`로 system/user content를 실제 계수하고
+고정 framing 32 tokens를 더해 100,000-token ceiling을 검사한다. package/version/encoding/count는
+system audit과 DB trigger에 결속된다. maintenance는 durable sweeper만 import하므로 provider
+경계에 도달할 수 없다. migration은 기존 run/attempt가 하나라도 있으면 중단하고 v3 제약만
+교체하며 stage·run·attempt를 seed하지 않는다. 실행 flag는 기본 off이고 제품 Chat caller는
+계속 없으므로 이 구현만으로 provider/API/model 호출이나 지출은 발생하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 69%** (주관적 범위 **59–79%**) — 직전 약 68%에서 검증 가능한 staging 실행 기반만 +1%p |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +10%p / 전체 계획 +1%p** — 실제 shadow와 사용자 UI는 아직 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 80%** (직전 30% / 70%) — runner 완성도를 제품 완료율로 환산하지 않음 |
+| 구현 | owner-only default-off runner, exact 16-case 순차 실행, DB-clock sweep·unknown latch, actual tokenizer admission, content-free result, maintenance recovery, no-seed v3 migration |
+| 로컬 검증 | 집중 unit **36/36**, 관리자·maintenance server contract **25/25**, 전체 server contract **695/695**, 보호 테이블 회귀 **20/20**, typecheck·대상 lint·문서·정책·encoding·DB coverage·cache·enum·data-domain·prompt-injection·security gate 통과. 전체 unit **9,869건** 최초 실행은 새 보호-table allowlist 미갱신 1건만 실패했고 exact migration/store 수치를 고정한 뒤 해당 회귀가 통과함 |
+| DB 검증 | 격리 schema에서 전체 **126 migration**, Prisma drift **0**, 새 shadow-run DB 계약 **10/10** 통과. 같은 원격 DB 합산 실행의 기존 예약 fixture 3건은 5초 transaction 지연 2건과 기존 binding을 쓰는 timezone fixture 1건으로 실패해 별도 관찰로 남김 |
+| 독립 검토·통합 | Claude Code Max 읽기 전용 검토와 Linux 통합 CI 전. `--skip-preflight` 사용자 예외를 쓰되 API key fallback은 금지 |
+| 비용·공개 상태 | stage/run 생성 0, 실행 flag 변경 0, provider/API/model/유료 호출 0, 제품 Chat 연결 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 exact diff를 Claude Code Max로 읽기 전용 독립 검토하고 Linux 통합 CI를 통과시킨다.
+2. 병합·staging 배포와 126번째 migration 적용을 확인한 뒤 owner-only GET preview만 읽는다.
+   stage/run을 만들거나 execute POST를 호출하지 않는다.
+3. preview의 pinned model, 16건, 요청당·전체 비용 ceiling, timeout·retry 0·unknown 중단 조건을
+   별도 사람 비용 승인안으로 제시한다.
+4. 승인 뒤 정확히 한 번만 16-case paid shadow를 실행하고, unknown이면 재실행하지 않고
+   durable receipt를 먼저 조사한다.
+5. 의미 보존·행동상 주입 저항·비용·지연 gate를 통과할 때만 제안형 UI를 default-off로
+   연결하고, 사용자 채택·거절 evidence 뒤 Refiner→Router full-catalog 실험으로 진행한다.
+
+## 2026-09-21 Prompt Refiner shadow v3 one-time staging result
+
+owner가 승인한 고정 합성 corpus 16건의 `prompt-refiner-shadow-run-v3`를 staging에서
+정확히 한 번 실행했다. durable content-free run/attempt receipt가 기록한 결과는
+16/16 dispatch·terminal 완료, `suggested` 16건, failed·unknown·retry 각 0건이다.
+입력 2,927 tokens, 출력 1,909 tokens, reasoning 1,334 tokens였고 총비용은
+2,887 microUSD(US$0.002887)로 동결된 398,656 microUSD ceiling 안이었다.
+지연은 최소 1,964 ms, p50 2,805 ms, p90 4,018 ms, 최대 4,110 ms였다.
+
+이 기록의 source of record는 staging의 owner-only durable run receipt이며 run id가
+위 exact contract를 식별한다. refined prompt bytes는 strict parsing 뒤 폐기됐고 prompt,
+proposal, excerpt, 사용자 identity는 이 progress 기록에도 남기지 않았다. 따라서 이 실행은
+reliability·cost·latency의 탐색 증거일 뿐 의미 보존이나 prompt-injection 저항을 소급 증명하지
+않는다. 실행 뒤 두 shadow execution flag를 제거했고 cleanup deployment
+`65dc3179-16cb-485d-b4a7-af8fbe65e5e4`가 merge SHA
+`ab80900972673eea516c53a0fb260b70b6db893f`로 SUCCESS임을 확인했다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 72%** (주관적 범위 **62–82%**) — 직전 공개 기록 약 69%에서 bounded staging 실행·운영 폐쇄를 +3%p 반영 |
+| 이 회차 증분 | **제품·공개 +0%p / 검증·운영 기반 +15%p / 전체 계획 +3%p** — 제안 UI와 Router 결합은 아직 없음 |
+| C19–C20 제품 연결 / 검증·운영 기반 | **약 30% / 약 95%** — 고정 shadow 실행과 cleanup까지 완료했지만 의미 gate는 후속 |
+| 실행 결과 | 16/16 완료, failed·unknown·retry 0, US$0.002887, p90 4,018 ms, max 4,110 ms |
+| 안전 경계 | prompt/proposal 미보존, execution flags 제거, cleanup deployment SUCCESS, 제품 Chat·Router 연결 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. provider-independent content-free evidence gate를 동결된 16건 corpus에 결속하고
+   의미 anchor·exact literal·언어·두 injection directive·비용·지연을 deterministic하게 판정한다.
+2. Claude Code Max 독립 검토와 전체 Linux CI를 통과시킨다.
+3. 새 confirmatory shadow 계약이 proposal을 메모리에서만 판정하고 content-free evidence만
+   저장하도록 설계한 뒤, exact 비용·운영 승인을 별도로 받는다.
+4. confirmatory pass 뒤에만 suggestion UI를 default-off로 연결하고 사용자 accept/keep
+   evidence를 수집한다.
+5. 그 증거 뒤 Refiner→Router 결합을 ROUTE-03 지연 계약 아래 실험하고 full-catalog
+   모델 선택 개선으로 진행한다.
+
+## 2026-09-25 saved-but-undispatched 경계 배포·staging 확인 회차
+
+PR #1673은 merge commit `79fc743e163101935d7f68695b61628b62e76fb4`로
+병합됐고, 이 변경을 포함한 staging deployment
+`5e3d9861-f1c1-46a3-a6a4-7972bd358c14`는 `SUCCESS`로 종료됐다. 완료 시각은
+`2026-09-24T13:34:34.181Z`다. desktop/mobile의 deterministic focused E2E는
+**38/38** 통과했다. 이 증거는 saved-but-undispatched departure boundary의 구현과
+회귀 검증, 병합 및 staging 배포를 각각 확인한다.
+
+로그인된 staging Chat에서는 기존 전용 test conversation을 열어 확인했다. 화면은
+기존 사용자 질문 1개와 답변 1개를 불러왔고 reload 뒤에도 같은 한 쌍만 유지했다.
+중복 메시지나 recovery 오류는 없었다. 이 확인에서는 새 메시지를 전송하지 않았고
+provider 호출과 credit 사용도 발생시키지 않았다.
+
+saved-but-undispatched 경계를 staging에서 대화형으로 재현하는 시도는 의도적으로
+하지 않았다. 현재 내장된 deterministic gate는 loopback 전용이고, 실제 화면에서
+click race를 만들면 검증하려던 미전송 turn이 provider로 dispatch될 수 있다. 따라서
+이 항목은 통과나 실패가 아니라 **안전한 interactive staging seam 부재**로 분류한다.
+이는 이미 통과한 구현·회귀 증거를 무효화하지 않지만, 실제 staging 상호작용 증거로
+대체해서도 안 된다.
+
+### 한눈에 보는 전체 Chat 진척
+
+이 회차부터 아래 네 축은 **`chat-scope-readiness-v1`** 방법으로 처음 산정한다.
+직전 `planning-estimate-v2`의 전체 웹 Chat 약 72%(주관적 범위 62–82%)와
+C19–C20 제품 연결/검증·운영 기반 약 30%/약 95%는 분모와 증거 분류가 다르다.
+따라서 아래 79/65/40/95는 그 수치의 증분이나 갱신이 아니며 직접 비교하지 않는다.
+향후 변화량은 이 네 축과 아래 정의를 그대로 유지한 기록끼리만 비교한다.
+
+- **전체 기술 구현**은 승인된 CHAT-01 기술 범위에서 source 구현, 회귀 검증,
+  병합과 staging 배포까지 확인된 작업량의 가중 추정이다. 품질·활성화 승인은 세지
+  않으며, 기능별 크기 차이 때문에 불확실성은 약 ±10%p다.
+- **release/activation readiness**는 실제 traffic 전에 필요한 품질·안전 gate,
+  staging 증거, 사람 disposition과 명시적 활성화 승인의 충족도를 추정한다. 코드가
+  존재한다는 사실만으로는 올리지 않으며 불확실성은 약 ±10%p다.
+- **Prompt Refiner 제품 연결**은 제품 execution/disposition receipt, server-owned
+  caller와 offered 결정, 사용자 선택 증거 및 Router/Auto shadow까지를 분모로 한다.
+  fixture-only seam은 인터페이스 증거로만 일부 반영하며 불확실성은 약 ±10%p다.
+- **Prompt Refiner confirmatory infrastructure**는 v4 실행 계약, source 결속,
+  content-free evidence 저장·재구성, 관리자 read-back과 runner를 분모로 한다.
+  별도 승인된 실행과 사람 disposition은 남은 gate로 표시하며 불확실성은 약 ±5%p다.
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 기술 구현 | **약 79%** — saved-but-undispatched 경계 구현·회귀·병합·staging 배포와 기존 대화 reload 보존을 반영한 작업량 추정 |
+| release/activation readiness | **약 65%** — staging 기본 읽기 흐름은 확인했지만 안전한 interactive seam, confirmatory 판정과 후속 활성화 승인이 남음 |
+| Prompt Refiner 제품 연결 | **약 40%** — 제안형 제품 흐름과 사용자 선택 증거, Router/Auto shadow 결합은 아직 후속 |
+| Prompt Refiner confirmatory infrastructure | **약 95%** — v4가 strict case evidence와 token·cost·latency receipt를 이미 저장하고 content-free aggregate를 재구성함. 별도 승인된 실행과 사람 disposition은 후속 |
+| 이번 직접 관측 | signed-in staging의 기존 전용 test conversation에서 질문 1개·답변 1개가 reload 뒤에도 중복·recovery 오류 없이 유지됨. 새 메시지·provider 호출·credit 사용 0 |
+
+남은 retention/privacy 결정과 writer/store/collection은 confirmatory v4 case receipt를
+새로 만드는 일이 아니다. suggestion/product caller가 만들 제품 request/execution
+receipt와 사용자의 disposition receipt에만 적용하며, confirmatory pass와 사람의
+release disposition 뒤에만 진행한다.
+
+위 백분율은 같은 CHAT-01 범위의 대략적인 작업량·준비도 **추정**이다. 품질 gate
+통과, 실제 사용자 traffic 활성화 또는 launch 승인이 아니며 네 축은 서로를 대신하지
+않는다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 별도 비용·stage·run 승인을 받은 뒤에만 bounded v4 confirmatory를 정확히 한 번
+   실행하고, content-free 결과를 동결된 deterministic gate로 판정한다. 불명 결과는
+   확인 전 재실행하지 않는다.
+2. 그 품질·비용·지연 결과를 사람이 release disposition한다.
+3. gate pass와 사람 승인 뒤에만 제품 request/execution receipt와 사용자 disposition
+   receipt의 retention, privacy, 사용자 권리와 audit 결정을 동결한다.
+4. 그 결정에 맞춰 제품 adapter와 server-owned content-free receipt writer/store를
+   구현하되 caller는 default-off로 유지하고 사용자에게 노출하지 않는다.
+5. exact diff를 Cursor 읽기 전용 독립 검토와 Linux 통합 CI에 제출한다.
+6. 통과한 구현에 한해 default-off pre-send suggestion UI와 disposition collection을
+   연결한다.
+7. accept/keep/stale 증거 뒤에만 Router/Auto shadow 결합을 ROUTE-03 아래 별도
+   실험으로 진행한다.
+
+## 2026-09-28 Prompt Refiner confirmatory successor v4/v6 구현 회차
+
+기존 `prompt-refiner-shadow-v3` stage와 `prompt-refiner-shadow-run-v5` 실행 권한은
+이미 소진·만료된 역사 기록이며 재사용하지 않는다. 그 v5 실행의 content-free
+결과는 16건 모두 terminal, deterministic quality 판정 14 pass·2 fail,
+overall gate **FAIL**, 총비용 2,829 microUSD로 그대로 보존한다.
+
+이번 변경은 같은 고정 16건, 최대 398,656 microUSD, retry 0, 동일 quality 기준을
+새 `prompt-refiner-shadow-v4` stage와 `prompt-refiner-shadow-run-v6` source 계약에
+결속하는 후속 구현이다. 새 migration은 기존 v1–v3 stage와 v3–v5 run 기록을
+계속 읽되 새 INSERT만 v4/v6으로 닫는다. 이 회차에서 stage/run 승인, provider 호출,
+새 16건 generation, flag 변경, 제품 traffic 연결은 수행하지 않았다.
+
+### 한눈에 보는 전체 Chat 진척
+
+`chat-scope-readiness-v1`의 **전체 기술 구현**은 현재 **약 83%**
+(주관적 불확실성 **±10%p**)로 추정한다. 이는 9월 25일의 약 79% 이후 완료된
+후속 기능·배포를 누적해 반영한 세션 추정이다. 아직 독립 검토·PR/CI·병합·이번
+successor 배포가 끝나지 않았으므로, 현재 successor 구현·무료 검증 회차 자체의
+증분은 **0%p**로 둔다. 검증 건수나 승인 횟수만으로 진척률을 올리지 않는다.
+
+현재 완료된 무료 검증은 변경 JS/TS 19파일 ESLint exit 0, focused pure/guard
+**68/68**, owner-only stage/run route contract **11/11**이다. 최종 migration에
+결속한 PostgreSQL 4개 suite, 최종 typecheck와 전체 unit은 별도 검증 단계이며,
+새 Claude Code Max 구독 CLI 독립 검토, PR/CI, owner merge·deployment 확인도 아직 완료되지 않았다.
+이 수치는 quality pass, release readiness, 실제 활성화 또는 launch 승인이 아니다.
+
+### 이 Cycle 다음 권장 순서
+
+1. 최종 source에 결속한 나머지 무료 DB·typecheck·전체 unit 검사를 완료한다.
+2. exact diff를 새 Claude Code Max 구독 CLI 읽기 전용 독립 검토에 제출한다.
+3. PR과 Linux CI를 통과시킨 뒤 owner가 merge와 successor deployment를 확인한다.
+4. 배포된 exact source에 대해 새 16건 비용 승인, v4 stage 승인, v6 run 승인을
+   각각 명시적으로 받는다.
+5. 승인된 한 번의 confirmatory 결과를 기존 deterministic quality gate로 판정한다.
+6. gate pass와 사람 disposition 뒤에만 제안형 UI를 default-off로 연결한다.
+7. 사용자 accept/keep/stale 증거 뒤에만 Auto/Router 통합을 별도 실험한다.

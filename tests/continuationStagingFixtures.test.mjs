@@ -37,6 +37,20 @@ const DIR =
 
 const manifest = JSON.parse(readFileSync(`${DIR}/manifest.json`, "utf8"));
 
+/**
+ * The fixture's content, with line endings normalised to LF.
+ *
+ * The manifest's size and digest are claims about *content*, not about how a
+ * particular clone happens to have written it to disk. Git's autocrlf turns
+ * every LF into CRLF on a Windows checkout, which added one byte per line --
+ * 150 for `plain-conversation.json` -- and failed this check on a clone that
+ * was perfectly correct. `.gitattributes` now pins these files to LF so the
+ * bytes an operator uploads match the digest; normalising here as well means
+ * the check still says something true on a working tree that predates it.
+ */
+const contentOf = (file) =>
+    readFileSync(`${DIR}/${file}`, "utf8").replace(/\r\n/g, "\n");
+
 /** The adapter walks `current_node` back to the root; ordinals follow. */
 const parsedMessages = (entry) => {
     const conversation = chatgptAdapter.parseConversation(entry);
@@ -47,7 +61,7 @@ const parsedMessages = (entry) => {
 test("the manifest describes the fixtures that are actually on disk", () => {
     assert.ok(manifest.fixtures.length >= 3);
     for (const row of manifest.fixtures) {
-        const body = readFileSync(`${DIR}/${row.file}`, "utf8");
+        const body = contentOf(row.file);
         assert.equal(Buffer.byteLength(body), row.bytes, row.file);
         assert.equal(
             createHash("sha256").update(body).digest("hex").slice(0, 16),
@@ -59,7 +73,7 @@ test("the manifest describes the fixtures that are actually on disk", () => {
 
 test("every fixture is an export the real importer accepts", () => {
     for (const row of manifest.fixtures) {
-        const parsed = JSON.parse(readFileSync(`${DIR}/${row.file}`, "utf8"));
+        const parsed = JSON.parse(contentOf(row.file));
         assert.ok(
             chatgptAdapter.detect(parsed),
             `${row.file} is not detected as a ChatGPT export`
@@ -82,7 +96,7 @@ test("every fixture is an export the real importer accepts", () => {
 test("the answer key's seed numbers are what the planner produces today", () => {
     assert.equal(manifest.seedVersion, CONTINUATION_SEED_VERSION);
     for (const row of manifest.fixtures) {
-        const parsed = JSON.parse(readFileSync(`${DIR}/${row.file}`, "utf8"));
+        const parsed = JSON.parse(contentOf(row.file));
         const conversation = parsedMessages(parsed[0]);
         const plan = planContinuationSeed({
             messages: conversation.messages.map((message) => ({
@@ -124,8 +138,7 @@ test("the injection fixture really carries all three payloads", () => {
         entry.file.includes("injection")
     );
     assert.ok(row);
-    const body = readFileSync(`${DIR}/${row.file}`, "utf8");
-    const parsed = JSON.parse(body);
+    const parsed = JSON.parse(contentOf(row.file));
     const conversation = parsedMessages(parsed[0]);
     const assistantText = conversation.messages
         .filter((message) => message.role === "assistant")
@@ -156,7 +169,7 @@ test("the fixture the run locks and deletes carries no injection payload", () =>
     // independent evidence.
     const row = manifest.fixtures.find((entry) => entry.file.includes("plain"));
     assert.ok(row);
-    const body = readFileSync(`${DIR}/${row.file}`, "utf8");
+    const body = contentOf(row.file);
     for (const payload of Object.values(manifest.injectionStrings)) {
         assert.ok(!body.includes(payload));
     }

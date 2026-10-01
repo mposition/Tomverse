@@ -23,6 +23,7 @@ import {
   sweepStaleRoutingAttempts,
 } from "@/lib/routingAttemptSweep";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { sweepPromptRefinerShadowUnknowns } from "@/lib/promptRefinerShadowRunStore";
 
 /**
  * How long an unapplied cost correction may sit before it is an incident.
@@ -42,6 +43,7 @@ const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
  */
 const STALE_ATTEMPT_BACKLOG_AFTER_MS = 60 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredComparisonReviewRuns } from "@/lib/comparisonReviewRunTelemetry";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
@@ -547,6 +549,15 @@ export async function cleanupExpiredData() {
     return { ...replayed, ...backlog };
   });
 
+  // This is recovery only. It closes stale Prompt Refiner dispatch intents
+  // using the database clock and the frozen no-redispatch policy. Maintenance
+  // deliberately imports the durable store, not the runner or live adapter,
+  // so this step can never initiate a provider request.
+  const promptRefinerShadowUnknowns = await step(
+    "prompt_refiner_shadow_unknowns",
+    () => sweepPromptRefinerShadowUnknowns()
+  );
+
   const testerPassReminders = await step("tester_pass_reminders", () =>
     sendFoundingTesterPassReminders(now)
   );
@@ -753,6 +764,13 @@ export async function cleanupExpiredData() {
     purgeExpiredChatLimitDecisions(now)
   );
 
+  // The same 90 days, for the same reason: the AI Review operational record is
+  // a reliability instrument, not a billing record. Long enough to compute a
+  // 90-day trend, short enough that the table cannot grow without bound.
+  const comparisonReviewRuns = await step("comparison_review_runs", () =>
+    purgeExpiredComparisonReviewRuns(now)
+  );
+
   const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
     prisma.billingPromotionRedemption.updateMany({
       where: {
@@ -883,6 +901,35 @@ export async function cleanupExpiredData() {
     compactAgedContextManifests(now)
   );
 
+  // --- native mobile sign-in -------------------------------------------------
+  //
+  // Three sweeps, and only two of them are ages.
+  const mobileAuthEvents = await step("mobile_auth_events", () =>
+    prisma.mobileAuthEvent.deleteMany({
+      where: { occurredAt: { lt: retentionCutoff("mobileAuthEvents", now) } },
+    })
+  );
+
+  const mobileLoginGrants = await step("mobile_login_grants", () =>
+    prisma.mobileLoginGrant.deleteMany({ where: { expiresAt: { lt: now } } })
+  );
+
+  // Not an age. A consumed rotation row is the only thing that turns a replayed
+  // refresh token into `reuse_detected` rather than `unknown_record`, so
+  // deleting rows because they are old would convert the detection into a shrug
+  // for precisely the tokens an attacker has had longest. What is safe to take
+  // is a row under a family that can never rotate again: revoking a dead family
+  // a second time is not a security outcome.
+  const mobileRefreshRotations = await step("mobile_refresh_rotations", () =>
+    prisma.mobileRefreshRotation.deleteMany({
+      where: {
+        family: {
+          OR: [{ revokedAt: { not: null } }, { absoluteExpiresAt: { lt: now } }],
+        },
+      },
+    })
+  );
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
@@ -894,6 +941,9 @@ export async function cleanupExpiredData() {
     // small for the volume, and it is only visible if the step reports it.
     contextManifestsAwaitingCompaction: contextManifests?.remaining ?? null,
     contextBundleConsumptions,
+    mobileAuthEvents: mobileAuthEvents?.count ?? null,
+    mobileLoginGrants: mobileLoginGrants?.count ?? null,
+    mobileRefreshRotations: mobileRefreshRotations?.count ?? null,
     memoryExtractionRuns: memoryExtraction?.reclaimedRuns ?? null,
     memoryExtractionDispatched: memoryExtraction?.dispatchedRuns ?? null,
     memoryExtractionChunks: memoryExtraction?.chunksProcessed ?? null,
@@ -924,6 +974,7 @@ export async function cleanupExpiredData() {
     autoFixCases,
     productAnalyticsEvents: productAnalyticsEvents?.count ?? null,
     limitDecisions: limitDecisions?.deleted ?? null,
+    comparisonReviewRuns: comparisonReviewRuns?.deleted ?? null,
     promotionRiskIdentifiers: promotionRiskIdentifiers?.count ?? null,
     notificationDeliveries: notificationDeliveries?.count ?? null,
     shareSnapshots: shareSnapshots === null ? null : Number(shareSnapshots),
@@ -932,6 +983,7 @@ export async function cleanupExpiredData() {
     creditReservations,
     staleRoutingAttempts,
     costAdjustments,
+    promptRefinerShadowUnknowns,
     testerPassReminders,
     testerPassExpirations,
     testerPassEndedNotices,

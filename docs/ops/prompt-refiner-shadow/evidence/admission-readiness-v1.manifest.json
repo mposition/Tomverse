@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "prompt-refiner-shadow-admission-evidence-v1",
+  "harnessVersion": "prompt-refiner-shadow-harness-v1",
+  "journalSchemaVersion": "prompt-refiner-shadow-journal-v1",
+  "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
+  "sourceIdentityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
+  "corpusDigest": "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958",
+  "files": [
+    {
+      "name": "admission-readiness-v1.report.json",
+      "sizeBytes": 2345,
+      "sha256": "686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d"
+    },
+    {
+      "name": "admission-readiness-v1.journal.jsonl",
+      "sizeBytes": 11168,
+      "sha256": "dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f"
+    },
+    {
+      "name": "admission-readiness-v1.journal.jsonl.witness.jsonl",
+      "sizeBytes": 3450,
+      "sha256": "9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e"
+    }
+  ],
+  "journalTerminal": {
+    "seq": 33,
+    "entryDigest": "e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992"
+  },
+  "witnessTerminal": {
+    "seq": 33,
+    "entryDigest": "e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992"
+  },
+  "bundleDigest": "sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159"
+}

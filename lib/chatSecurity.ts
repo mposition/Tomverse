@@ -8,6 +8,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
+import { findDeepResearchHandoff } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
@@ -437,6 +438,14 @@ const durableReservationPayloadSchema = z
                             })
                             .strict()
                             .optional(),
+                        // Optional so every reservation written before prompt
+                        // caching still deserializes; absent means the attempt
+                        // authorized no premium, which is what those turns did.
+                        promptCacheWriteReservedPremiumMicroUsd: z
+                            .number()
+                            .int()
+                            .nonnegative()
+                            .optional(),
                         // The same authorization for a search vendor this
                         // application pays directly. Separate, because it names
                         // a vendor and settles into a different bucket -- and
@@ -452,14 +461,6 @@ const durableReservationPayloadSchema = z
                                 pricingVersion: z.string().min(1).max(120),
                             })
                             .strict()
-                            .optional(),
-                        // Optional so every reservation written before prompt
-                        // caching still deserializes; absent means the attempt
-                        // authorized no premium, which is what those turns did.
-                        promptCacheWriteReservedPremiumMicroUsd: z
-                            .number()
-                            .int()
-                            .nonnegative()
                             .optional(),
                     })
                     .strict()
@@ -830,18 +831,6 @@ export const createChatBudget = (
             maxQueries: number;
         };
         /**
-         * The same, for a search vendor this application pays directly, from
-         * `reserveTurnSearchCost`. Carried on its own field all the way to its
-         * own budget bucket.
-         */
-        searchBackend?: {
-            backend: string;
-            reservedCostMicroUsd: number;
-            costPerQueryMicroUsd: number;
-            maxQueries: number;
-            pricingVersion: string;
-        } | null;
-        /**
          * Which call path this turn is, when it may carry an Anthropic prompt
          * cache marker.
          *
@@ -854,6 +843,18 @@ export const createChatBudget = (
          * direction of the two.
          */
         promptCachePath?: AnthropicPromptCachePath;
+        /**
+         * The same, for a search vendor this application pays directly, from
+         * `reserveTurnSearchCost`. Carried on its own field all the way to its
+         * own budget bucket.
+         */
+        searchBackend?: {
+            backend: string;
+            reservedCostMicroUsd: number;
+            costPerQueryMicroUsd: number;
+            maxQueries: number;
+            pricingVersion: string;
+        } | null;
         /**
          * Tokens this turn reserves and is charged for but that do not count
          * towards the input limit.
@@ -3660,7 +3661,7 @@ export const acquireChatAccess = async (
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
-    turnUsage: {
+    callerTurnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
         /**
@@ -3730,6 +3731,39 @@ export const settleChatUsage = async (
          * not one number.
          */
         attempts?: readonly AttemptUsage[];
+        /**
+         * Decides what this reservation owes, after the lock is held.
+         *
+         * The expiry reconciliation needs it. It settles an expired
+         * reservation as a full refund unless a deep research job left a
+         * handoff saying the work really ran -- and reading that handoff
+         * before calling this function put the *decision* outside the lock
+         * that serialises the settlement. A terminal poll committing its
+         * handoff in that window produced a refund for a job that really cost
+         * money, with the poll's own settlement arriving afterwards to find a
+         * reservation already terminal (issue #1285).
+         *
+         * Called inside the transaction, after `pg_advisory_xact_lock` and
+         * after the row is confirmed still `reserved`, with that transaction's
+         * client. Returning `null` keeps the caller's `turnUsage` and
+         * `providerUsageSnapshot`; returning a value replaces both. Nothing
+         * can settle between the read and the write, because this call holds
+         * the only lock that lets anything settle.
+         *
+         * It carries the snapshot as well as the tokens because dropping it
+         * silently re-prices the turn: a recovered deep research settlement
+         * without the provider's own reported cost falls back to token
+         * pricing, which booked a 30,000 microUSD job at 8,000 the first time
+         * this code was written.
+         *
+         * It must not write, and it must not take another lock: it runs with
+         * the credit account lock and the reservation lock already held, and
+         * anything else acquired here becomes part of that order.
+         */
+        resolveTurnUsage?: (tx: Prisma.TransactionClient) => Promise<{
+            turnUsage: typeof callerTurnUsage;
+            providerUsageSnapshot?: PerplexityUsageCostSnapshot | null;
+        } | null>;
     }
 ) => {
     // Validated before it is interpreted. A malformed attempt set settles
@@ -3872,6 +3906,12 @@ export const settleChatUsage = async (
                 actualOutput: 0,
                 actualCachedInput: 0,
                 actualCost: 0,
+                // Nothing was applied by THIS call, so it settled nothing.
+                // Null rather than 0: a reservation that some earlier call
+                // already settled did charge credits, and reporting 0 here
+                // would let a reconciliation read it as a refund.
+                settledCredits: null,
+                reservedCredits: durable.reservedCredits,
                 provider: durable.provider as AiModel["provider"],
                 modelId: durable.modelId,
             };
@@ -3882,6 +3922,17 @@ export const settleChatUsage = async (
         ) {
             throw new Error("Chat credit reservation idempotency key mismatch.");
         }
+
+        // Inside the lock, on purpose. See `resolveTurnUsage` above: the
+        // question "does this reservation owe a real cost or a refund" has to
+        // be answered where nothing else can settle it in between.
+        const resolved = options?.resolveTurnUsage
+            ? await options.resolveTurnUsage(tx)
+            : null;
+        const turnUsage = resolved?.turnUsage ?? callerTurnUsage;
+        const resolvedProviderUsageSnapshot = resolved
+            ? (resolved.providerUsageSnapshot ?? null)
+            : (options?.providerUsageSnapshot ?? null);
 
         const canonical = deserializeReservation(durable.reservationPayload);
         // The user's half of §7's split. With one dispatched attempt this *is*
@@ -3961,9 +4012,9 @@ export const settleChatUsage = async (
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
-            options?.providerUsageSnapshot?.source ===
+            resolvedProviderUsageSnapshot?.source ===
                 "perplexity_response_usage"
-                ? options.providerUsageSnapshot
+                ? resolvedProviderUsageSnapshot
                 : null;
         const baseCostBreakdown = providerUsageSnapshot
             ? {
@@ -4539,6 +4590,17 @@ export const settleChatUsage = async (
             actualOutput,
             actualCachedInput,
             actualCost,
+            // What the caller was actually charged, and what it had held.
+            //
+            // Read-only additions: nothing about the transaction, its
+            // arguments or its lock order changes. They exist because
+            // `status` alone cannot answer "did the reservation and the
+            // settlement agree" -- "settled" says credits were taken, not how
+            // many, so a reservation of 8 settling at 3 and one settling at 8
+            // are indistinguishable, and reconciliation is exactly that
+            // comparison (docs/policy/credit-and-cost-limits.md §9).
+            settledCredits: actualCredits,
+            reservedCredits: canonical.usageCredits,
             costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
@@ -4636,7 +4698,16 @@ export const settleChatUsage = async (
             );
         }
     }
-    return { applied: settlement.applied, status: settlement.status };
+    return {
+        applied: settlement.applied,
+        status: settlement.status,
+        // Passed through so a caller can reconcile what it held against what
+        // it was charged. `status` alone cannot: "settled" says credits were
+        // taken and not how many. Read-only -- nothing about the transaction
+        // above changes.
+        reservedCredits: settlement.reservedCredits,
+        settledCredits: settlement.settledCredits,
+    };
 };
 
 // Heartbeat for a reservation backing a long-running async job (Perplexity
@@ -5071,6 +5142,23 @@ export const linkChatReservationProviderRequest = async (
     return updated.count === 1;
 };
 
+/**
+ * Whether a reservation could possibly carry a deep research handoff.
+ *
+ * A cheap gate on the sweep's per-row lookup: only this usage class submits
+ * work that finishes after its request returns, so only this class can have a
+ * `PerplexityAsyncJob`. Read from the catalogue rather than a model id literal
+ * so a second deep research model does not silently fall out of the recovery.
+ *
+ * An unknown id -- a model retired since the reservation was written -- keeps
+ * the lookup rather than skipping it. The lookup is an indexed read that finds
+ * nothing; a skipped one is a refund for work that may really have run.
+ */
+const isDeepResearchReservation = (modelId: string) => {
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    return !model || model.usageClass === "deep-research";
+};
+
 export const reconcileExpiredChatCreditReservations = async (
     now = new Date(),
     maximum = 500
@@ -5082,21 +5170,72 @@ export const reconcileExpiredChatCreditReservations = async (
         take: limit,
         select: {
             id: true,
+            modelId: true,
             reservationPayload: true,
         },
     });
     let refunded = 0;
     let alreadyFinalized = 0;
     let failed = 0;
+    /** Expired reservations settled at a real cost instead of being refunded. */
+    let settledFromHandoff = 0;
     for (const row of rows) {
         try {
             const reservation = deserializeReservation(row.reservationPayload);
+            // A deep research job that reached a terminal state left what it
+            // owes on its own row, and an expired reservation carrying one
+            // must NOT be refunded: the work really ran at the provider and
+            // really cost money (issue #1285).
+            //
+            // The decision is made inside the settlement's own lock, not
+            // here. Reading the handoff first and passing the conclusion in
+            // left a window: a terminal poll committing its handoff between
+            // that read and the lock produced a refund for a job that really
+            // ran, and the poll's own settlement then arrived to find the
+            // reservation already terminal. Running order cannot close that --
+            // `lib/maintenance.ts` calls this function on its own and
+            // `startScheduledJob` records a run rather than holding a lock --
+            // so the read moves to where nothing can settle around it.
+            //
+            // Only deep research reservations pay for the lookup. Nothing else
+            // can have a PerplexityAsyncJob, and the sweep's page is up to a
+            // thousand rows of which almost none are this model.
+            let handoff: Awaited<
+                ReturnType<typeof findDeepResearchHandoff>
+            > = null;
             const result = await settleChatUsage(
                 reservation,
                 { inputTokens: 0, outputTokens: 0, outcome: "failed" },
-                { reconciled: true, reason: "reservation_expired" }
+                {
+                    reconciled: true,
+                    reason: "reservation_expired",
+                    resolveTurnUsage: isDeepResearchReservation(row.modelId)
+                        ? async (tx) => {
+                              handoff = await findDeepResearchHandoff(
+                                  reservation.reservationId,
+                                  tx
+                              );
+                              if (!handoff) return null;
+                              return {
+                                  turnUsage: {
+                                      inputTokens: handoff.usage.inputTokens,
+                                      outputTokens: handoff.usage.outputTokens,
+                                      outcome: handoff.usage.outcome,
+                                  },
+                                  // Carried, not dropped: without the
+                                  // provider's own reported cost the recovery
+                                  // prices the turn from tokens alone.
+                                  providerUsageSnapshot:
+                                      (handoff.usage
+                                          .providerUsageSnapshot as never) ??
+                                      null,
+                              };
+                          }
+                        : undefined,
+                }
             );
-            if (result.applied && result.status === "refunded") refunded += 1;
+            if (result.applied && handoff) settledFromHandoff += 1;
+            else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;
         } catch (error) {
             failed += 1;
@@ -5113,6 +5252,10 @@ export const reconcileExpiredChatCreditReservations = async (
         refunded,
         alreadyFinalized,
         failed,
+        // Its own count, never folded into `refunded`: these are the opposite
+        // of a refund, and a pass that recovered real charges must not read as
+        // one that gave money back.
+        settledFromHandoff,
     };
 };
 
@@ -5212,6 +5355,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: unknown;
         conversationId?: unknown;
         assistantMessageId?: unknown;
+        sourceUserMessageId?: unknown;
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
@@ -5260,6 +5404,29 @@ export const validateChatPayload = (body: unknown) => {
             400,
             "INVALID_MESSAGE_ID",
             "Invalid message ID."
+        );
+    }
+    if (
+        payload.sourceUserMessageId !== undefined &&
+        (typeof payload.sourceUserMessageId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                payload.sourceUserMessageId
+            ))
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_MESSAGE_ID",
+            "Invalid source message ID."
+        );
+    }
+    if (
+        payload.sourceUserMessageId !== undefined &&
+        (!payload.conversationId || !payload.assistantMessageId)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_PERSISTENCE_TARGET",
+            "Incomplete persistence target."
         );
     }
     if (
@@ -5374,10 +5541,24 @@ export const validateChatPayload = (body: unknown) => {
             throw new ChatAccessError(400, "INVALID_CHAT_MESSAGE", "Invalid message.");
         }
         const candidate = message as {
+            id?: unknown;
             role?: unknown;
             content?: unknown;
             attachments?: unknown;
         };
+        if (
+            candidate.id !== undefined &&
+            (typeof candidate.id !== "string" ||
+                candidate.id.length < 1 ||
+                candidate.id.length > 64 ||
+                !/^[A-Za-z0-9_-]+$/.test(candidate.id))
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_MESSAGE_ID",
+                "Invalid message ID."
+            );
+        }
         if (
             candidate.role !== "user" &&
             candidate.role !== "assistant"
@@ -5416,6 +5597,7 @@ export const validateChatPayload = (body: unknown) => {
 
     return payload as {
         messages: Array<{
+            id?: string;
             role: "user" | "assistant";
             content: string;
             attachments?: unknown[];
@@ -5423,6 +5605,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: string;
         conversationId?: string;
         assistantMessageId?: string;
+        sourceUserMessageId?: string;
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;

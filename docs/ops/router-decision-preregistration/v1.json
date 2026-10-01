@@ -1,0 +1,24 @@
+{
+  "preRegistrationVersion": "route01-decision-prereg-v1",
+  "preRegisteredAt": "2026-08-27",
+  "preRegisteredBy": "mposition",
+  "n": 3345,
+  "perCell": 223,
+  "cells": 15,
+  "targetPrecisionPp": 3,
+  "rationale": "mposition's decision. The 2026-08-27 pilot measured 78.1% discordance over 210 pairs, which sizes a decision set at roughly 7,500 for +/-2pp, 3,334 for +/-3pp and 1,875 for +/-4pp. +/-2pp is more than this stage needs and +/-4pp leaves a borderline result undecidable, so +/-3pp. 223 per cell across the 15 cells is 3,345 rather than 3,334: the same precision, and a balanced draw with no cell carrying a remainder.",
+  "activation": {
+    "state": "pending",
+    "condition": "the judge calibration is accepted. Until then no decision run may cite this registration and no decision corpus should be collected against it.",
+    "acceptedAt": null,
+    "acceptedBy": null,
+    "calibrationArtefactDigest": null,
+    "voidedReason": null
+  },
+  "frozen": {
+    "routerVersions": null,
+    "selectionPolicyVersion": null,
+    "corpusDigest": null
+  },
+  "supersededBy": null
+}

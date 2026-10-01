@@ -1,0 +1,25 @@
+{
+  "taskId": "chat-artifact-format-rejection-diagnostic-v1",
+  "requirement": "Chat의 생성 파일 도구 호출이 파일 생성 전에 거절될 때 원문을 기록하지 않고 도구명, 허용 목록에 있는 요청 형식, 고정 거절 코드만 턴당 최대 16건 기록한다. 설치된 AI SDK가 실행하지 않은 invalid tool call과 실행기 내부의 잘못된 형식 거절을 모두 관측하되 중복 기록하지 않는다. 기존 artifact 턴 추적기는 예외를 던지는 청크도 무시해 대화 응답에 영향을 주지 않아야 한다. 실제 .txt→.docx 원인은 아직 미확인으로 두고 형식 정책이나 사용자 출력 동작을 바꾸지 않는다. author는 Codex, 독립 reviewer는 Claude Code Max 구독 CLI다.",
+  "completionCriteria": [
+    "거절 로그에는 파일명, 프롬프트, 답변, 호출 ID, 원시 입력 또는 예외 메시지가 없고 등록된 도구명·허용 형식·정적 코드만 나온다. traceId·conversationId·modelId도 턴·사용자·모델 연결 가능성을 줄이기 위해 이번 최소 진단에서 의도적으로 제외하며, 상관분석 정밀도가 낮아지는 대신 추가 수집은 별도 개인정보 검토와 승인을 기다린다.",
+    "SDK가 실행 전에 거절한 호출과 도구 실행기의 거절을 각각 한 번만 기록하며 유효 호출에는 새 로그를 남기지 않는다.",
+    "로그와 중복 제거 상태의 턴당 상한이 16이고 예상 밖 청크가 대화 라우트를 실패시키지 않는다.",
+    "관련 단위·Chat 라우트 계약 테스트, 타입 검사, 변경 파일 lint가 통과한다.",
+    "독립 검토는 읽기 전용이며 승인된 skip-preflight 예외만 기록한다. 실제 provider 호출, 유료 실행, stage/run 승인, flag 변경, merge 또는 deploy는 범위 밖이다."
+  ],
+  "baseCommit": "847c0222189550277d07d7e37ec8d2b49292bfa6",
+  "writableScope": [
+    "app/api/chat/route.ts",
+    "lib/generatedArtifactRejectionLog.ts",
+    "lib/generatedArtifactTool.ts",
+    "lib/generatedArtifactTurnTracker.ts",
+    "tests/generatedArtifactBatchTool.test.mjs",
+    "tests/generatedArtifactRejectionLog.test.mjs",
+    "tests/generatedArtifactTurnTracker.test.mjs",
+    "tests/server-contract/chat-route-incomplete-artifact.test.ts",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v1.task.json",
+    "docs/ops/cross-review/packages/chat-artifact-format-rejection-diagnostic-v1.authorization.md"
+  ],
+  "generatedPaths": []
+}

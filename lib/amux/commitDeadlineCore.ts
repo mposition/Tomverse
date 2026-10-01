@@ -29,9 +29,8 @@ const MAX_ERROR_NODES = 16;
  * passed. An `AX001` is a rollback the database has already made, so it is a
  * known outcome even though it arrives while committing.
  *
- * The code is found wherever it was put, walked structurally (develop's
- * marketing publisher reads its SQLSTATE with the same `hasSqlstate` walk;
- * that module is not on main yet):
+ * The code is found wherever it was put, walked structurally the way
+ * `hasSqlstate` in lib/marketingPublisherRun.ts does:
  *
  * - at COMMIT, `prisma.$transaction` rejects with the pg adapter's own
  *   `DriverAdapterError`, whose `cause` is `{ kind: "postgres", code: "AX001",

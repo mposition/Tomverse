@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4-integration-v4",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-21T04:51:02.281Z",
+  "durationMs": 341986,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 54,
+    "cachedInputTokens": 3764618,
+    "outputTokens": 26086,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 4.286249000000001,
+    "raw": {
+      "input_tokens": 54,
+      "cache_creation_input_tokens": 175152,
+      "cache_read_input_tokens": 3764618,
+      "output_tokens": 26086,
+      "output_tokens_details": {
+        "thinking_tokens": 19822
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 175152,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4076,
+          "cache_read_input_tokens": 176575,
+          "cache_creation_input_tokens": 1470,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1470
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-21T04:56:44.318Z",
+  "verdict": {
+    "taskId": "prompt-refiner-confirmatory-shadow-v4-integration-v4",
+    "round": 0,
+    "reviewedDigest": "sha256:24d3ba847ba9bdd78ef53e059030f4ce3bdba1b053e9c30bb9861d4e7e229e54",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": ".gitleaksignore:126-137 (new PR #1584 fingerprint block)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The block pins ~100 allowances to seven branch commit SHAs but nowhere records the condition that this PR must be merged preserving those commits (no squash, no rebase), which completion criterion 4 requires; a squash merge silently invalidates every pinned fingerprint and re-fails the scheduled full-history secret scan.",
+        "reproduction": "grep -rn \"squash\\|rebase\" .gitleaksignore docs/ops/*.md docs/policy/*.md -> the condition appears in no operator-facing record; it exists only as the criterion text in docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-integration-v4/task.json:8 and its copies under that package's records/. That the omission is load-bearing is shown by the repository itself: .gitleaksignore:27-28 records that the scheduled scan failed precisely because a pinned introducing commit was outside the scanned range; .github/workflows/daily-security-audit.yml:49-57 checks out with fetch-depth: 0 and scans full history, and lines 405-430 fail the job on that outcome; docs/ops/tomverse-chat-progress.md:1034 records a prior PR to develop being squash merged. Fix: add one line to the block, e.g. \"Valid only while commits 26aeecb..cb53fd0 remain in history -- merge this PR with a merge commit; never squash or rebase it.\", then re-run `node --conditions=react-server --import tsx --test tests/gitleaksAllowlist.test.mjs` (comment lines are skipped, so the format test still passes)."
+      }
+    ],
+    "nextAction": "Add the merge-preservation condition to the .gitleaksignore block (a single comment line) and re-submit; every other criterion is satisfied by the reviewed bytes: schema.prisma carries both develop's SuppressionCause/SuppressionEntry state and the nullable v4 evidence columns with no conflict markers anywhere; lib/marketingAutomationAccess.ts records both the email-suppression and Prompt Refiner non-impact judgements and its fingerprint is recomputed from the real watched files by a passing test; the closure test binds 228 accesses and the 188-file manifest with the v4 migration at index 6, matching the SQL wrapper's files->6 / ordinal<>7 delegation; the terminal writer validates strict content-free case evidence inside the same transaction as the audit and attempt update, replays only on exact equality, the DB CHECK and trigger re-derive the same 15-key shape and audit binding, the durable reader rebuilds the aggregate from content-free facts and fails closed otherwise, the route projects only gateOutcome/gateReasons/summary, and productAdapterReady/suggestionUiAuthorized/routerCouplingAuthorized/paidRunAuthorized remain false."
+  }
+}

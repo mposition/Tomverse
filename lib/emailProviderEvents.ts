@@ -10,10 +10,7 @@ import {
 } from "@/lib/emailProviderEventOrderCore";
 import { normalizeSuppressionAddress, recordSuppression } from "@/lib/emailSuppression";
 import { markCauseWriter } from "@/lib/emailSuppressionCauses";
-import {
-  holdSuppressionFence,
-  lockSuppressionAddress,
-} from "@/lib/emailSuppressionAuthority";
+import { lockSuppressionAddress } from "@/lib/emailSuppressionAuthority";
 import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
 import {
   SOFT_BOUNCE_SUPPRESSION_MS,
@@ -38,7 +35,7 @@ type Tx = Prisma.TransactionClient;
 const TRANSACTION_TIMEOUT_MS = 20_000;
 
 /**
- * Opens the fence and the address lock, in the order every writer takes them.
+ * Opens the address lock, which is the one every writer takes.
  * `budgetMs` covers both waiting for a connection and running: the wait gets at
  * most a quarter of it and the run the rest.
  */
@@ -50,7 +47,6 @@ const underAddress = <T>(
   const maxWait = Math.max(250, Math.floor(budgetMs / 4));
   return prisma.$transaction(
     async (tx) => {
-      await holdSuppressionFence(tx);
       await lockSuppressionAddress(tx, normalizeSuppressionAddress(emailAddress));
       return work(tx);
     },
@@ -113,90 +109,6 @@ const applyToDelivery = async (
     },
   });
   return advances;
-};
-
-/**
- * Rebuilds the global entry from the active causes when it holds a soft bounce.
- *
- * An entry is what an older build reads, and the cutover compares it with the
- * causes. After causes are released or replaced it must describe what is left:
- * the latest-expiring active soft bounce, or nothing when no active cause
- * remains. An entry holding a permanent reason is left alone -- a soft bounce
- * never outranks it.
- */
-const syncSoftBounceEntry = async (tx: Tx, emailAddress: string, now: Date) => {
-  const entry = await tx.suppressionEntry.findUnique({
-    where: { emailAddress_scope_purposeKey: { emailAddress, scope: "global", purposeKey: "*" } },
-    select: {
-      id: true,
-      reason: true,
-      source: true,
-      expiresAt: true,
-      occurredAt: true,
-      sourceStream: true,
-      sourceDomain: true,
-      sourceClassification: true,
-      sourceDeliveryId: true,
-      sourceMessageId: true,
-    },
-  });
-  if (!entry || entry.reason !== "soft_bounce") return;
-
-  const active = (
-    await tx.suppressionCause.findMany({
-      where: { emailAddress, scope: "global", purposeKey: "*", releasedAt: null },
-      select: {
-        id: true,
-        reason: true,
-        source: true,
-        expiresAt: true,
-        releasedAt: true,
-        occurredAt: true,
-        sourceStream: true,
-        sourceDomain: true,
-        sourceClassification: true,
-        sourceDeliveryId: true,
-        sourceMessageId: true,
-      },
-    })
-  ).filter((cause) => isActiveCause(cause, now));
-
-  await markCauseWriter(tx);
-  if (active.length === 0) {
-    await tx.suppressionEntry.delete({ where: { id: entry.id } });
-    return;
-  }
-  // The latest-expiring soft bounce; at the same expiry the latest to occur,
-  // then the cause id, so the choice never rests on the order rows come back in.
-  const soft = active
-    .filter((cause) => cause.reason === "soft_bounce")
-    .sort(
-      (a, b) =>
-        (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0) ||
-        b.occurredAt.getTime() - a.occurredAt.getTime() ||
-        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-    )[0];
-  // Another reason is active but the entry still reads soft bounce: left for
-  // the merge that wrote that reason, which never downgrades to soft bounce.
-  if (!soft) return;
-  const data = {
-    source: soft.source,
-    expiresAt: soft.expiresAt,
-    occurredAt: soft.occurredAt,
-    sourceStream: soft.sourceStream,
-    sourceDomain: soft.sourceDomain,
-    sourceClassification: soft.sourceClassification,
-    sourceDeliveryId: soft.sourceDeliveryId,
-    sourceMessageId: soft.sourceMessageId,
-  };
-  const same = (a: Date | string | null, b: Date | string | null) =>
-    a instanceof Date || b instanceof Date
-      ? (a as Date | null)?.getTime() === (b as Date | null)?.getTime()
-      : a === b;
-  if ((Object.keys(data) as Array<keyof typeof data>).every((key) => same(entry[key], data[key]))) {
-    return;
-  }
-  await tx.suppressionEntry.update({ where: { id: entry.id }, data });
 };
 
 /**
@@ -310,7 +222,6 @@ const reconcileSoftBounceCause = async (
     );
   }
 
-  await syncSoftBounceEntry(tx, emailAddress, now);
   return { suppressed: desired !== null };
 };
 
@@ -395,7 +306,7 @@ export async function recordSoftBounceEvent(input: {
  * The send check already ignores an expired cause, so nothing waits on this;
  * it keeps an address that is never mailed again from holding causes that read
  * as active. At most `limit` causes a pass, oldest expiry first, each address
- * under the fence and its lock, and no transaction outliving the time budget.
+ * under its own lock, and no transaction outliving the time budget.
  *
  * Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
  * (recording expiry, C66).
@@ -414,7 +325,7 @@ export async function releaseExpiredSuppressionCauses(options?: {
   // selection needs.
   const budget = Number(options?.timeBudgetMs ?? 20_000);
   const deadline = Date.now() + (Number.isFinite(budget) ? Math.min(Math.max(budget, 0), 20_000) : 20_000);
-  const nothing = { released: 0, entriesRemoved: 0, addresses: 0, exhausted: false };
+  const nothing = { released: 0, addresses: 0, exhausted: false };
   if (deadline - Date.now() < 1_000) return nothing;
 
   // The selection is inside the budget too: the connection wait and the query
@@ -442,7 +353,6 @@ export async function releaseExpiredSuppressionCauses(options?: {
   }
 
   let released = 0;
-  let entriesRemoved = 0;
   let addressesDone = 0;
   for (const [emailAddress, ids] of byAddress) {
     const remainingMs = deadline - Date.now();
@@ -459,22 +369,15 @@ export async function releaseExpiredSuppressionCauses(options?: {
             releaseEvidence: { kind: "expiry" },
           },
         });
-        // The entry follows the causes left, as after any reconciliation.
-        const before = await tx.suppressionEntry.count({ where: { emailAddress, scope: "global", purposeKey: "*" } });
-        await syncSoftBounceEntry(tx, emailAddress, now);
-        const after = await tx.suppressionEntry.count({ where: { emailAddress, scope: "global", purposeKey: "*" } });
-        const removed = before - after;
-        return { released: result.count, removed };
+        return { released: result.count };
       },
       Math.min(TRANSACTION_TIMEOUT_MS, remainingMs)
     );
     released += outcome.released;
-    entriesRemoved += outcome.removed;
     addressesDone += 1;
   }
   return {
     released,
-    entriesRemoved,
     addresses: addressesDone,
     exhausted: addressesDone === byAddress.size && due.length < limit,
   };

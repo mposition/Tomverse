@@ -80,7 +80,7 @@ jobs:
           '
 
       - name: Download the artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.artifact_name }}
           run-id: ${{ inputs.run_id }}
@@ -131,7 +131,7 @@ jobs:
 
       - name: Preserve the blind review sheet
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.artifact_name }}-blind-review
           path: artifacts/blind-review.md

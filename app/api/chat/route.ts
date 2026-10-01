@@ -72,11 +72,13 @@ import {
 } from "@/lib/routingDispatchInstrumentation";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
 import type {
+    RoutingAttemptErrorClass,
     RoutingAttemptOutcome,
     RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { catalogueHostRefusalCode } from "@/lib/modelRegistryShared";
 import {
     getModelGenerationSettings,
     hasUnsupportedGeminiPrefill,
@@ -124,8 +126,10 @@ import {
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
+import { ArtifactToolRejectionLog } from "@/lib/generatedArtifactRejectionLog";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
@@ -203,10 +207,17 @@ import {
     type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
 import {
+    routingFailureLayerForSettlement,
+    routingOutcomeForSettlement,
+} from "@/lib/chatSettlementOutcome";
+import {
     decideFallback,
     recoveryAfterFallback,
 } from "@/lib/routingFallbackPolicy";
-import { classifyStreamFailure } from "@/lib/routingStreamFailure";
+import {
+    classifyStreamFailure,
+    type StreamFailureClassification,
+} from "@/lib/routingStreamFailure";
 import {
     FAULT_INJECTION_HEADER,
     decideFaultInjection,
@@ -245,6 +256,7 @@ import {
 } from "@/lib/billingEntitlements";
 import {
     getOperationalFeatureFlags,
+    isAutoExplorationEnabled,
     isExternalContinuationEnabledCached,
     isImageGenerationEnabledCached,
 } from "@/lib/appSettings";
@@ -320,6 +332,27 @@ import {
     consumeContextBundle,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
+import {
+    chatResponseAttemptRequestPayloadDigest,
+    publicChatResponseAttempt,
+} from "@/lib/chatResponseAttemptCore";
+import {
+    ChatAttemptCapacityError,
+    ChatAttemptCasError,
+    ChatAttemptIdentityConflictError,
+    ChatAttemptScopeError,
+    claimChatResponseAttempt,
+    terminalChatResponseAttempt,
+} from "@/lib/chatResponseAttemptPersistence";
+import {
+    createChatResponseAttemptCheckpointWriter,
+    type ChatResponseAttemptCheckpointWriter,
+} from "@/lib/chatDurableAttemptStream";
+import {
+    ChatSourceMessageMismatchError,
+    verifyDurableChatSourceMessage,
+} from "@/lib/chatDurableSourceMessage";
+import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
@@ -453,6 +486,7 @@ const tracedJsonError = (
         status,
         headers: {
             "Content-Type": "application/json",
+            "Cache-Control": "private, no-store",
             "X-Request-ID": traceId,
             ...(grant.errorReportToken
                 ? { [ERROR_REPORT_TOKEN_HEADER]: grant.errorReportToken }
@@ -1009,6 +1043,19 @@ async function handleChatPost(
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
+    let durableAttempt:
+        | {
+              userId: string;
+              assistantMessageId: string;
+              sourceUserMessageId: string;
+              ownerId: string;
+              revision: number;
+              partialContent: string;
+          }
+        | null = null;
+    let durableCheckpointWriter: ChatResponseAttemptCheckpointWriter | null = null;
+    let durableAttemptAdmissionConsumed = false;
+    let persistenceSourceUserMessageId: string | undefined;
     // Hoisted so the outer catch can close the attempt. A provider that
     // refuses the call leaves an attempt that was prepared and never
     // dispatched, and an attempt stuck at `pending` is one the reliability
@@ -1071,6 +1118,7 @@ async function handleChatPost(
             modelId,
             conversationId,
             assistantMessageId,
+            sourceUserMessageId,
             turnstileToken,
             deepResearchDepth,
             webSearchMode,
@@ -1078,6 +1126,7 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        persistenceSourceUserMessageId = sourceUserMessageId;
         {
             const attachments = messages.flatMap((message) =>
                 Array.isArray(message.attachments) ? message.attachments : []
@@ -1095,6 +1144,10 @@ async function handleChatPost(
                 }).length,
             };
         }
+        // A pinned internal account either finishes on this path or, when the
+        // flag is off or the account is not the configured one, falls through
+        // to the ordinary handler. A refusal is not that fall-through: the
+        // experiment budget would not cover a second call.
         const pinnedDeployment = await enterPinnedDeploymentChat({
             authenticatedAccountId: session?.user?.id ?? null,
             traceId,
@@ -1110,6 +1163,26 @@ async function handleChatPost(
             if (pinnedDeployment.response instanceof Response) return pinnedDeployment.response;
             const http = pinnedRefusalHttp("provider_error");
             return tracedJsonError(http.message, http.code, http.status, traceId);
+        }
+        // Durable idempotency has to claim before credit reservation, but it
+        // must not be a way around request admission. This cheap account+IP
+        // bucket runs before source lookup, advisory locks and attempt row
+        // creation, and therefore counts both fresh claims and POST reattach
+        // probes. The ordinary Chat limiter still applies later; this scope
+        // protects only the durable-recovery database boundary.
+        if (
+            session?.user?.id &&
+            conversationId &&
+            assistantMessageId &&
+            sourceUserMessageId
+        ) {
+            await consumeApiRateLimit(
+                req,
+                session.user.id,
+                "chat-durable-attempt",
+                { minute: 60, day: 5_000 }
+            );
+            durableAttemptAdmissionConsumed = true;
         }
         /*
           Files this request has been told are gone and may proceed without.
@@ -1138,6 +1211,7 @@ async function handleChatPost(
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
         let conversationProductKey: string | null = null;
+        let conversationRecoveryEpoch: number | null = null;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
@@ -1385,6 +1459,8 @@ async function handleChatPost(
             searchBackendReadiness: resolveWebSearchBackendReadiness(),
         };
         const autoSelection = selectAutoModel({
+            explorationEnabled: await isAutoExplorationEnabled(),
+            conversationId: conversationId ?? null,
             requestedModelId,
             conversation: conversationRouting,
             // The stored product, never the surface the request came from:
@@ -1762,6 +1838,7 @@ async function handleChatPost(
                     kind: true,
                     memoryMode: true,
                     productKey: true,
+                    chatRecoveryEpoch: true,
                     assistantProfileVersionId: true,
                 },
             });
@@ -1771,6 +1848,7 @@ async function handleChatPost(
             // once the row exists, its own productKey is the only source --
             // never the surface the request came from.
             conversationProductKey = conversation?.productKey ?? null;
+            conversationRecoveryEpoch = conversation?.chatRecoveryEpoch ?? null;
             conversationProfileVersionId =
                 conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
@@ -1857,7 +1935,19 @@ async function handleChatPost(
                   )
                 : null;
 
-        const activeModel = getActiveAiModel(modelConfig);
+        let activeModel;
+        try {
+            activeModel = getActiveAiModel(modelConfig);
+        } catch (error) {
+            const code = catalogueHostRefusalCode(error);
+            if (!code) throw error;
+            return tracedJsonError(
+                "이 모델은 카탈로그 경로로 보낼 수 없습니다.",
+                code,
+                409,
+                traceId
+            );
+        }
         let estimatedInputTokens = 0;
         let totalAttachmentBytes = 0;
         let totalExtractedCharacters = 0;
@@ -1991,6 +2081,24 @@ async function handleChatPost(
             memoryTokens: number;
             knowledgeChunkCount: number;
         } | null = null;
+        let verifiedContext:
+            | {
+                  bundleId: string;
+                  expiresAt: Date;
+                  systemPrompt: string | null;
+                  memoryText: string;
+                  memoryUsedCount: number;
+                  memoryTokens: number;
+                  profileTokens: number;
+                  knowledgeChunkCount: number;
+                  memoryTruncatedByBudget: boolean;
+                  requestIdentity: {
+                      contextFingerprint: string;
+                      memoryTokens: number;
+                      profileTokens: number;
+                  };
+              }
+            | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
@@ -2063,73 +2171,192 @@ async function handleChatPost(
                           traceId
                       );
             }
-            const consumption = await consumeContextBundle({
+            verifiedContext = {
                 bundleId: verification.payload.bundleId,
+                expiresAt: new Date(verification.payload.expiresAtMs),
+                systemPrompt: turnContext.systemPrompt,
+                memoryText: turnContext.memory.prompt.text ?? "",
+                memoryUsedCount: turnContext.memory.prompt.usedCount,
+                memoryTokens: verification.payload.memoryTokens,
+                profileTokens: verification.payload.profileTokens,
+                knowledgeChunkCount: turnContext.profile.knowledgeChunkCount,
+                memoryTruncatedByBudget: turnContext.memory.truncatedByBudget,
+                // The retry identity binds what the signed bundle proved, not
+                // the opaque one-time bearer token or bundle id. A refreshed
+                // token for the same verified context is the same request.
+                requestIdentity: {
+                    contextFingerprint: turnContext.fingerprint,
+                    memoryTokens: verification.payload.memoryTokens,
+                    profileTokens: verification.payload.profileTokens,
+                },
+            };
+        }
+
+        const isDurableStoredChat = Boolean(
+            session?.user?.id &&
+                conversationId &&
+                assistantMessageId &&
+                conversationProductKey === "chat" &&
+                modelConfig.usageClass !== "deep-research"
+        );
+        if (isDurableStoredChat) {
+            if (!persistenceSourceUserMessageId) {
+                // A browser tab left open across the durable-recovery deploy
+                // still names its freshly saved user turn with the old
+                // client request id. Derive the same conversation-scoped id
+                // as the Message endpoint, then make the ordinary owner/text/
+                // ordered-attachment verification prove that row exists.
+                // Missing or malformed legacy identity remains fail-closed.
+                const legacyRequestId = [...messages]
+                    .reverse()
+                    .find((message) => message.role === "user")?.id;
+                if (!legacyRequestId) {
+                    return tracedJsonError(
+                        "Incomplete persistence target.",
+                        "INVALID_PERSISTENCE_TARGET",
+                        400,
+                        traceId
+                    );
+                }
+                persistenceSourceUserMessageId = scopedMessageId(
+                    conversationId!,
+                    legacyRequestId
+                );
+            }
+            if (!durableAttemptAdmissionConsumed) {
+                await consumeApiRateLimit(
+                    req,
+                    session!.user!.id,
+                    "chat-durable-attempt",
+                    { minute: 60, day: 5_000 }
+                );
+                durableAttemptAdmissionConsumed = true;
+            }
+            await verifyDurableChatSourceMessage({
+                userId: session!.user!.id,
+                conversationId: conversationId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                messages,
+            });
+            const ownerId = randomUUID();
+            const requestPayloadDigest = chatResponseAttemptRequestPayloadDigest({
+                messages,
+                requestedModelId,
+                webSearchMode: webSearchMode ?? "off",
+                context: verifiedContext?.requestIdentity ?? null,
+                acknowledgedUnavailableAttachmentIds:
+                    acknowledgedUnavailableAttachmentIds ?? [],
+            });
+            const claim = await claimChatResponseAttempt({
+                userId: session!.user!.id,
+                assistantMessageId: assistantMessageId!,
+                conversationId: conversationId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                requestedModelId,
+                requestPayloadDigest,
+                expectedRecoveryEpoch: conversationRecoveryEpoch!,
+                ownerId,
+                leaseExpiresAt: new Date(Date.now() + 4 * 60 * 1_000),
+            });
+            if (claim.disposition === "reattach") {
+                const message = claim.attempt.status === "completed"
+                    ? await readPublicCompletedChatMessage(
+                          session!.user!.id,
+                          claim.attempt
+                      )
+                    : null;
+                if (claim.attempt.status === "completed" && !message) {
+                    return tracedJsonError(
+                        "The completed response could not be recovered.",
+                        "CHAT_ATTEMPT_READ_FAILED",
+                        500,
+                        traceId
+                    );
+                }
+                return Response.json(
+                    {
+                        attempt: publicChatResponseAttempt(claim.attempt),
+                        ...(message ? { message } : {}),
+                    },
+                    {
+                        headers: {
+                            "Cache-Control": "private, no-store",
+                            "X-Request-ID": traceId,
+                            "X-Chat-Response-Mode": "durable-attempt",
+                        },
+                    }
+                );
+            }
+            durableAttempt = {
+                userId: session!.user!.id,
+                assistantMessageId: assistantMessageId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                ownerId,
+                revision: claim.attempt.checkpointRevision,
+                partialContent: claim.attempt.partialContent,
+            };
+            durableCheckpointWriter = createChatResponseAttemptCheckpointWriter({
+                userId: durableAttempt.userId,
+                assistantMessageId: durableAttempt.assistantMessageId,
+                ownerId,
+                initialRevision: durableAttempt.revision,
+                requestedModelId,
+            });
+        }
+
+        if (verifiedContext && session?.user?.id) {
+            const consumption = await consumeContextBundle({
+                bundleId: verifiedContext.bundleId,
                 modelId: requestedModelId,
                 userId: session.user.id,
-                expiresAt: new Date(verification.payload.expiresAtMs),
+                expiresAt: verifiedContext.expiresAt,
             });
             if (!consumption.consumed) {
-                // A replay, not drift — but the recovery is the same one, and
-                // §18's code table is settled: this request cannot establish
-                // that its context was priced, and a fresh preparation is what
-                // fixes it. Reusing the code keeps one client path instead of
-                // adding a second that would do the same thing.
-                //
-                // Counted apart from staleness even so: the user-facing code
-                // is shared, but "the context drifted" and "this bundle was
-                // presented twice" are different operational facts, and only
-                // the first belongs in the stale ratio.
                 await recordMemoryCounter("context_bundle_replayed");
+                if (durableAttempt) {
+                    await terminalChatResponseAttempt({
+                        userId: durableAttempt.userId,
+                        assistantMessageId: durableAttempt.assistantMessageId,
+                        ownerId: durableAttempt.ownerId,
+                        expectedRevision: durableAttempt.revision,
+                        status: "failed",
+                        finalContent: durableAttempt.partialContent,
+                        finishReason: "error",
+                        failureCode: "request_refused",
+                    });
+                    durableAttempt = null;
+                    durableCheckpointWriter = null;
+                }
                 return tracedJsonError(
-                    "The conversation context changed while this message was being sent.",
+                    "This prepared conversation context has already been used.",
                     "CHAT_CONTEXT_BUNDLE_STALE",
                     409,
                     traceId,
-                    { requiresPreflight: true }
+                    {
+                        requiresPreflight: true,
+                        refusalReason: "already_consumed",
+                    }
                 );
             }
-            // Policy: docs/policy/external-conversation-import-and-memory.md.
-            // The whole §9.1 block -- profile instructions, then memory, then
-            // profile knowledge -- assembled as one system message by the
-            // builder that priced it.
-            contextSystemPrompt = turnContext.systemPrompt;
-            memoryUsedCount = turnContext.memory.prompt.usedCount;
-            // §14.3. The builder has always produced this; until now nothing
-            // read it, so an answer assembled from the user's own uploaded
-            // files said nothing about where it came from.
-            knowledgeChunkCount = turnContext.profile.knowledgeChunkCount;
+            contextSystemPrompt = verifiedContext.systemPrompt;
+            memoryUsedCount = verifiedContext.memoryUsedCount;
+            knowledgeChunkCount = verifiedContext.knowledgeChunkCount;
             contextAttribution = {
                 memoryUsedCount,
-                memoryTokens: verification.payload.memoryTokens,
+                memoryTokens: verifiedContext.memoryTokens,
                 knowledgeChunkCount,
             };
-            // Memory's own presence, not the block's: a turn whose system
-            // message carries only a profile's instructions has no memory in
-            // it, and counting it as an injection would report memory as used
-            // on a request the model never saw it in.
-            if (turnContext.memory.prompt.text) {
+            if (verifiedContext.memoryText) {
                 void recordMemoryCounter("chat_memory_injected");
-                if (turnContext.memory.truncatedByBudget) {
+                if (verifiedContext.memoryTruncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
                 }
-                // The priced figure, not a fresh estimate, so the bucket
-                // describes the same block the reservation was taken against.
-                const bucket = injectedTokenBucket(
-                    verification.payload.memoryTokens
-                );
+                const bucket = injectedTokenBucket(verifiedContext.memoryTokens);
                 if (bucket) void recordMemoryCounter(bucket);
             }
-            // The figures that were reserved against, not fresh estimates: the
-            // two agree here by construction, and if they ever stop agreeing
-            // the user should be billed the numbers they were quoted. The
-            // profile's blocks are counted apart from memory's because they
-            // are a different context, priced by the same builder.
             const quotedContextTokens =
-                verification.payload.memoryTokens +
-                verification.payload.profileTokens;
+                verifiedContext.memoryTokens + verifiedContext.profileTokens;
             estimatedInputTokens += quotedContextTokens;
-            // Quoted, not re-estimated -- so it enters as an opaque count.
             inputEstimate.addTokens(quotedContextTokens);
         }
 
@@ -3214,6 +3441,10 @@ async function handleChatPost(
                 traceId,
                 userId: access.userId ?? null,
                 subjectKey: access.subjectKey,
+                // The same two the dispatch row carries. A shadow decision is
+                // about this turn, so it belongs to this turn's conversation.
+                conversationId: conversationId ?? null,
+                productKey: conversationProductKey,
                 // A signed-in account with no resolved plan reads as Guest
                 // rather than as a paid one: the filters use this to decide
                 // what the account may reach, and guessing upwards would let a
@@ -3569,6 +3800,7 @@ async function handleChatPost(
         */
         let streamController: ReadableStreamDefaultController<string> | null =
             null;
+        let artifactToolRejectionLog: ArtifactToolRejectionLog | null = null;
         const artifactCollector =
             artifactToolPlan && artifactToolPlan.registerTool
                 ? new GeneratedArtifactCollector({
@@ -3577,6 +3809,13 @@ async function handleChatPost(
                       conversationId: conversationId ?? null,
                       modelId: modelConfig.id,
                       traceId,
+                      noteRejection: (toolCallId, toolName, input, rejectionCode) =>
+                          artifactToolRejectionLog?.record(
+                              toolCallId,
+                              toolName,
+                              input,
+                              rejectionCode
+                          ),
                       emitProgress: (format) => {
                           if (!streamController) return;
                           enqueueSafely(
@@ -3623,6 +3862,9 @@ async function handleChatPost(
             // what keeps a truncated native search from being reported as a
             // file the user never got.
             artifactToolCallTracker = new ArtifactToolCallTracker(
+                Object.keys(artifactToolConfig.tools)
+            );
+            artifactToolRejectionLog = new ArtifactToolRejectionLog(
                 Object.keys(artifactToolConfig.tools)
             );
         }
@@ -3699,15 +3941,25 @@ async function handleChatPost(
                                   which is what keeps a second card off a file
                                   that already failed on its own terms.
                                 */
-                                onChunk: ({ chunk }: { chunk: unknown }) => {
-                                    artifactToolCallTracker?.noteChunk(chunk);
+                                onChunk: (event: { chunk: unknown }) => {
+                                    try {
+                                        const chunk = event.chunk;
+                                        artifactToolCallTracker?.noteChunk(chunk);
+                                        artifactToolRejectionLog?.noteChunk(chunk);
+                                    } catch {
+                                        // A malformed SDK callback must not abort the turn.
+                                    }
                                 },
                                 onToolExecutionStart: (event: {
                                     toolCall?: { toolCallId?: string };
                                 }) => {
-                                    artifactToolCallTracker?.noteExecutionStarted(
-                                        event.toolCall?.toolCallId
-                                    );
+                                    try {
+                                        artifactToolCallTracker?.noteExecutionStarted(
+                                            event.toolCall?.toolCallId
+                                        );
+                                    } catch {
+                                        // The tool's execute reports its own start independently.
+                                    }
                                 },
                             }
                           : {}),
@@ -3947,6 +4199,10 @@ async function handleChatPost(
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
+        durableCheckpointWriter?.setAttribution(
+            dispatched.modelId,
+            dispatched.provider
+        );
         /**
          * Attempts that have already ended, oldest first.
          *
@@ -4128,7 +4384,7 @@ async function handleChatPost(
             instrumentation?: {
                 outcome?: RoutingAttemptOutcome;
                 failureLayer?: RoutingFailureLayer;
-                errorClass?: string | null;
+                errorClass?: RoutingAttemptErrorClass | null;
             }
         ) => {
             // Before the reservation guard: a turn without a reservation still
@@ -4150,6 +4406,49 @@ async function handleChatPost(
             if (!reservation) return Promise.resolve();
             usageSettlement = (async () => {
                 try {
+                    if (durableAttempt && outcome !== "completed") {
+                        try {
+                            const checkpoint = durableCheckpointWriter
+                                ? await durableCheckpointWriter.flush(generatedText)
+                                : {
+                                      revision: durableAttempt.revision,
+                                      partialContent: durableAttempt.partialContent,
+                                  };
+                            await terminalChatResponseAttempt({
+                                userId: durableAttempt.userId,
+                                assistantMessageId: durableAttempt.assistantMessageId,
+                                ownerId: durableAttempt.ownerId,
+                                expectedRevision: checkpoint.revision,
+                                status:
+                                    outcome === "cancelled" ? "cancelled" : "failed",
+                                finalContent: checkpoint.partialContent,
+                                actualModelId: dispatched.modelId,
+                                provider: dispatched.provider,
+                                finishReason:
+                                    outcome === "cancelled" ? "cancelled" : "error",
+                                failureCode:
+                                    outcome === "cancelled"
+                                        ? null
+                                        : outcome === "empty"
+                                          ? "internal_error"
+                                          : "stream_interrupted",
+                            });
+                            durableAttempt = null;
+                            durableCheckpointWriter = null;
+                        } catch (attemptError) {
+                            // Attempt durability and financial settlement are
+                            // independent obligations. A failed checkpoint or
+                            // terminal CAS is reconciled by the lease expiry;
+                            // it must never skip charging/refunding the provider
+                            // request which already ran.
+                            logRequestError(
+                                "chat_durable_attempt_terminal_failed",
+                                traceId,
+                                attemptError,
+                                dispatched.modelId
+                            );
+                        }
+                    }
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
                     const settledInputTokens =
@@ -4222,16 +4521,10 @@ async function handleChatPost(
                     await completeInstrumentedDispatch(dispatchRecord, {
                         outcome:
                             instrumentation?.outcome ??
-                            (outcome === "completed"
-                                ? "succeeded"
-                                : outcome === "cancelled"
-                                  ? "cancelled"
-                                  : "failed_post_token"),
+                            routingOutcomeForSettlement(outcome),
                         failureLayer:
                             instrumentation?.failureLayer ??
-                            (outcome === "completed" || outcome === "cancelled"
-                                ? "none"
-                                : "stream"),
+                            routingFailureLayerForSettlement(outcome),
                         actualInputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
                         actualOutputTokens:
@@ -4278,13 +4571,16 @@ async function handleChatPost(
                                     id: conversationId,
                                     selectionMode: "auto",
                                 },
-                                // §8: the sticky model becomes the one that
-                                // worked. On a turn that fell back that is not
-                                // the model the Router chose, and writing the
-                                // Router's choice would put the conversation
-                                // back on a model that had just failed.
+                                // The model the next turn remembers. A fallback remembers
+                                // the model that answered. A session-hash dispatch
+                                // remembers the deterministic selection, so turning
+                                // exploration off returns to it without rewriting
+                                // a past row.
                                 data: stickyStateAfterRoutedTurn(
-                                    dispatched.modelId,
+                                    displacedModelId
+                                        ? dispatched.modelId
+                                        : (autoSelection.stickyMemoryModelId ??
+                                            dispatched.modelId),
                                     // A fallback is not evidence about a
                                     // challenger, so the hysteresis streak
                                     // starts again rather than carrying a
@@ -4602,6 +4898,36 @@ async function handleChatPost(
          * nothing gets one refusal for every turn and never a second provider
          * call.
          */
+        /**
+         * The last classification this turn produced, for the settlement.
+         *
+         * `attemptFallback` computes one for every stream failure and, until
+         * this was kept, threw it away unless a fallback actually happened --
+         * and fallback is off by default, so on almost every failed turn the
+         * attempt row recorded no class at all. The classifier's verdict is
+         * the only place a rate limit is told apart from an outage, and a row
+         * written without it cannot be reanalysed later.
+         *
+         * What is recorded is `observedOutcome`, the layer and the class --
+         * what happened -- and not `outcome`, which is the fallback verdict.
+         *
+         * The two were one value, and that was the defect. The verdict is
+         * conservative on purpose: a lost connection is called `cancelled` so
+         * that no second model is tried. Recording the verdict as the
+         * observation then told `lib/routerSignalCore.ts` that the person had
+         * changed their mind, which drops the turn from the success rate --
+         * true of an abort, false of a dropped connection. Recording the
+         * generic mapping instead was wrong the other way: it filed a genuine
+         * cancellation as `failed_post_token` and counted it against the
+         * model.
+         *
+         * The layer has to travel too, or the row contradicts itself: a rate
+         * limit would carry `errorClass: "provider_rate_limited"` beside the
+         * generic mapping's `failureLayer: "stream"`, which says the failure
+         * was this process or this connection.
+         */
+        let lastStreamFailure: StreamFailureClassification | null = null;
+
         const attemptFallback = async (
             controller: ReadableStreamDefaultController<string>,
             error: unknown
@@ -4612,6 +4938,7 @@ async function handleChatPost(
                 visibleTokenEmitted: generatedText.length > 0,
                 downstreamOpen: streamState === "open",
             });
+            lastStreamFailure = classified;
             const scope = autoFallbackScope({
                 routed: autoSelection.routed,
                 isGuest: access.kind === "guest",
@@ -4640,6 +4967,7 @@ async function handleChatPost(
                 attempt: {
                     modelId: dispatched.modelId,
                     outcome: classified.outcome,
+                    observedOutcome: classified.observedOutcome,
                     failureLayer: classified.failureLayer,
                     providerRefusal: classified.providerRefusal,
                 },
@@ -4898,7 +5226,13 @@ async function handleChatPost(
                     failureLayer: classified.failureLayer,
                     actualInputTokens: budget.inputTokens,
                     actualOutputTokens: 0,
-                    errorClass: "provider_pre_token_failure",
+                    // The classifier's own category, rather than one word for
+                    // every provider failure there is. It changes nothing
+                    // about this attempt -- the layer and the outcome above
+                    // are what decide -- and it is the only place the
+                    // difference between a rate limit and an outage can be
+                    // kept for later.
+                    errorClass: classified.errorClass,
                     settlementOutcome: "failed",
                     cost: usageReservation
                         ? {
@@ -4996,6 +5330,10 @@ async function handleChatPost(
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
+            durableCheckpointWriter?.setAttribution(
+                dispatched.modelId,
+                dispatched.provider
+            );
             // The next attempt captures under its own key, so the memo from
             // the one it replaced must not answer for it.
             perplexityCapture = null;
@@ -5223,6 +5561,15 @@ async function handleChatPost(
                             searchQueriesObserved: true,
                         };
 
+                        const durableFinalCheckpoint = durableCheckpointWriter
+                            ? await durableCheckpointWriter.flush(generatedText)
+                            : null;
+                        if (durableAttempt && durableFinalCheckpoint) {
+                            durableAttempt.revision = durableFinalCheckpoint.revision;
+                            durableAttempt.partialContent =
+                                durableFinalCheckpoint.partialContent;
+                        }
+
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
                             await settleSafely(
@@ -5321,13 +5668,20 @@ async function handleChatPost(
                                     );
                                     const sourcePrompt = await tx.message.findFirst({
                                         where: {
+                                            ...(persistenceSourceUserMessageId
+                                                ? { id: persistenceSourceUserMessageId }
+                                                : {}),
                                             conversationId,
                                             role: "user",
                                         },
-                                        orderBy: [
-                                            { createdAt: "desc" },
-                                            { id: "desc" },
-                                        ],
+                                        ...(persistenceSourceUserMessageId
+                                            ? {}
+                                            : {
+                                                  orderBy: [
+                                                      { createdAt: "desc" as const },
+                                                      { id: "desc" as const },
+                                                  ],
+                                              }),
                                         select: { id: true },
                                     });
                                     if (sourcePrompt) {
@@ -5390,7 +5744,36 @@ async function handleChatPost(
                                             failed: artifactCollector.failed,
                                         });
                                     }
+                                    if (durableAttempt && durableFinalCheckpoint) {
+                                        const normalizedFinishReason =
+                                            completionOutcome.status === "incomplete"
+                                                ? "length"
+                                                : finishReason === "content-filter"
+                                                  ? "content_filter"
+                                                  : finishReason === "tool-calls"
+                                                    ? "tool_call"
+                                                    : "stop";
+                                        await terminalChatResponseAttempt(
+                                            {
+                                                userId: durableAttempt.userId,
+                                                assistantMessageId:
+                                                    durableAttempt.assistantMessageId,
+                                                ownerId: durableAttempt.ownerId,
+                                                expectedRevision:
+                                                    durableFinalCheckpoint.revision,
+                                                status: "completed",
+                                                finalContent:
+                                                    durableFinalCheckpoint.partialContent,
+                                                actualModelId: dispatched.modelId,
+                                                provider: dispatched.provider,
+                                                finishReason: normalizedFinishReason,
+                                            },
+                                            tx
+                                        );
+                                    }
                                 });
+                                durableAttempt = null;
+                                durableCheckpointWriter = null;
                                 if (artifactCollector && !artifactCollector.isEmpty) {
                                     // Read back rather than assumed: the
                                     // failed rows were created without
@@ -5429,6 +5812,32 @@ async function handleChatPost(
                                 */
                                 await artifactCollector?.discard();
                                 artifactsForTrailer = [];
+                                if (durableAttempt && durableFinalCheckpoint) {
+                                    // Billing has already settled above and is
+                                    // intentionally not rolled back with the
+                                    // local Message transaction. Persist the
+                                    // failure immediately outside that aborted
+                                    // transaction so recovery never advertises
+                                    // an active attempt until lease expiry.
+                                    await terminalChatResponseAttempt({
+                                        userId: durableAttempt.userId,
+                                        assistantMessageId:
+                                            durableAttempt.assistantMessageId,
+                                        ownerId: durableAttempt.ownerId,
+                                        expectedRevision:
+                                            durableFinalCheckpoint.revision,
+                                        status: "failed",
+                                        finalContent:
+                                            durableFinalCheckpoint.partialContent,
+                                        actualModelId: dispatched.modelId,
+                                        provider: dispatched.provider,
+                                        finishReason: "error",
+                                        failureCode: "internal_error",
+                                    });
+                                    durableAttempt = null;
+                                    durableCheckpointWriter = null;
+                                    throw error;
+                                }
                             }
                         } else if (artifactCollector?.stored.length) {
                             /*
@@ -5460,6 +5869,29 @@ async function handleChatPost(
                             artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
+                        if (
+                            isEmptyResponse &&
+                            durableAttempt &&
+                            durableFinalCheckpoint
+                        ) {
+                            await terminalChatResponseAttempt({
+                                userId: durableAttempt.userId,
+                                assistantMessageId:
+                                    durableAttempt.assistantMessageId,
+                                ownerId: durableAttempt.ownerId,
+                                expectedRevision: durableFinalCheckpoint.revision,
+                                status: "failed",
+                                finalContent: durableFinalCheckpoint.partialContent,
+                                actualModelId: dispatched.modelId,
+                                provider: dispatched.provider,
+                                finishReason: "error",
+                                failureCode: completionError
+                                    ? "provider_unavailable"
+                                    : "internal_error",
+                            });
+                            durableAttempt = null;
+                            durableCheckpointWriter = null;
+                        }
                         if (isEmptyResponse) {
                             const completionMetadata = safeErrorMetadata(
                                 completionError
@@ -5571,6 +6003,10 @@ async function handleChatPost(
                     // token recorded for it would feed the Router's TTFT
                     // signal a time for an answer nobody was sent.
                     firstVisibleTokenAt ??= new Date();
+                    // Checkpoint only bytes the browser was successfully
+                    // offered. The writer coalesces chunks and applies owner,
+                    // revision and database-clock lease CAS.
+                    durableCheckpointWriter?.observe(generatedText);
                 } catch (error) {
                     const wasAlreadyCancelled = streamState !== "open";
                     if (
@@ -5676,7 +6112,19 @@ async function handleChatPost(
                     // user-ledger fields are left alone -- only the provider
                     // ledger is told that the count is unknown rather than
                     // zero.
-                    await settleSafely("failed", { searchQueriesObserved: false });
+                    await settleSafely(
+                        "failed",
+                        { searchQueriesObserved: false },
+                        // What was observed, not what was decided. See
+                        // `lastStreamFailure`.
+                        lastStreamFailure
+                            ? {
+                                  outcome: lastStreamFailure.observedOutcome,
+                                  failureLayer: lastStreamFailure.failureLayer,
+                                  errorClass: lastStreamFailure.errorClass,
+                              }
+                            : undefined
+                    );
                     errorSafely(controller, error);
                     await releaseSafely();
                 }
@@ -5692,9 +6140,17 @@ async function handleChatPost(
 
         const headers = new Headers({
             "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
+            // Keep both policy branches literal. The repository cache audit
+            // deliberately reads route source without executing it, so a
+            // conditional expression here hid both declarations from the
+            // guard even though runtime behavior was correct.
+            "Cache-Control": "private, no-store, no-transform",
             "X-Request-ID": traceId,
+            ...(durableAttempt ? { "X-Chat-Response-Mode": "stream" } : {}),
         });
+        if (!durableAttempt) {
+            headers.set("Cache-Control", "no-cache, no-transform");
+        }
         // §13.4: how many memories this answer was given, counted by the
         // server. A header rather than something in the stream, because the
         // stream is the answer itself and the count has to be available
@@ -5789,6 +6245,40 @@ async function handleChatPost(
                 reason: orphanedLease.reason,
             });
         }
+        if (durableAttempt) {
+            try {
+                const checkpoint = durableCheckpointWriter
+                    ? await durableCheckpointWriter.flush("")
+                    : {
+                          revision: durableAttempt.revision,
+                          partialContent: durableAttempt.partialContent,
+                      };
+                await terminalChatResponseAttempt({
+                    userId: durableAttempt.userId,
+                    assistantMessageId: durableAttempt.assistantMessageId,
+                    ownerId: durableAttempt.ownerId,
+                    expectedRevision: checkpoint.revision,
+                    status: "failed",
+                    finalContent: checkpoint.partialContent,
+                    actualModelId: dispatchModelIdForLog ?? null,
+                    provider: dispatchProviderForLog ?? null,
+                    finishReason: "error",
+                    failureCode: providerCall
+                        ? "provider_unavailable"
+                        : "request_refused",
+                });
+            } catch (attemptError) {
+                logRequestError(
+                    "chat_durable_attempt_terminal_failed",
+                    traceId,
+                    attemptError,
+                    dispatchModelIdForLog
+                );
+            } finally {
+                durableAttempt = null;
+                durableCheckpointWriter = null;
+            }
+        }
         // The request failed before the stream owned it, so the attempt was
         // prepared and never produced an answer. `failed_pre_token` rather
         // than `not_dispatched`: this path is reached both before and after
@@ -5860,6 +6350,52 @@ async function handleChatPost(
         if (dispatchProviderForLog === "perplexity") {
             discardPerplexityUsage(traceId);
         }
+        if (error instanceof ChatAttemptIdentityConflictError) {
+            return tracedJsonError(
+                "This response identity is already bound to another request.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptCapacityError) {
+            return tracedJsonError(
+                error.message,
+                error.code,
+                error.status,
+                traceId
+            );
+        }
+        if (error instanceof ChatSourceMessageMismatchError) {
+            return tracedJsonError(
+                "The persisted source message does not match this Chat request.",
+                error.code,
+                error.status,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptScopeError) {
+            return tracedJsonError(
+                "The persisted Chat turn could not be found.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptCasError) {
+            return tracedJsonError(
+                "The response attempt changed before dispatch.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) {
+            securityResponse.headers.set("X-Request-ID", traceId);
+            securityResponse.headers.set("Cache-Control", "private, no-store");
+            return securityResponse;
+        }
         const accessError = chatErrorResponse(error);
         if (accessError) {
             // Its own record, because it qualifies for neither of the two this
@@ -5924,6 +6460,9 @@ async function handleChatPost(
                 );
             }
             accessError.headers.set("X-Request-ID", traceId);
+            // Chat errors can contain account-scoped quota and recovery
+            // state. They are never reusable by a shared cache.
+            accessError.headers.set("Cache-Control", "private, no-store");
             if (error instanceof ChatAccessError) {
                 // Limit/entitlement rejections are reportable too; the grant
                 // signs the trace but records no new evidence row -- the

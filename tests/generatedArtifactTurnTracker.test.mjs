@@ -173,6 +173,25 @@ test("a malformed chunk is ignored rather than thrown on", () => {
   assert.equal(seen.startedAnyCall, false);
 });
 
+test("hostile chunk getters fail closed without losing later calls", () => {
+  const seen = tracker();
+  const hostile = new Proxy(inputStart("hostile", "create_text_file"), {
+    get(target, key) {
+      if (key === "toolCallId") throw new Error("hostile getter");
+      return Reflect.get(target, key);
+    },
+  });
+
+  assert.doesNotThrow(() => seen.noteChunk(hostile));
+  assert.equal(seen.startedAnyCall, false);
+  assert.deepEqual(seen.abandonedCalls(), []);
+
+  seen.noteChunk(inputStart("later", "create_text_file"));
+  assert.deepEqual(seen.abandonedCalls(), [
+    { toolCallId: "later", toolName: "create_text_file" },
+  ]);
+});
+
 test("a repeated start frame describes one call, not two", () => {
   const seen = tracker();
   seen.noteChunk(inputStart("call_1", "create_text_file"));

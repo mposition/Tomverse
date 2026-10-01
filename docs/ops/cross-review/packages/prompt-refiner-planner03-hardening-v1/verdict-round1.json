@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-planner03-hardening-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-prompt-refiner-planner03-20260915 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-prompt-refiner-planner03-20260915 shell:default)"
+  ],
+  "startedAt": "2026-09-15T10:15:55.432Z",
+  "durationMs": 113492,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 14,
+    "cachedInputTokens": 192125,
+    "outputTokens": 8197,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.7208165000000001,
+    "raw": {
+      "input_tokens": 14,
+      "cache_creation_input_tokens": 41031,
+      "cache_read_input_tokens": 192125,
+      "output_tokens": 8197,
+      "output_tokens_details": {
+        "thinking_tokens": 5647
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 41031,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2265,
+          "cache_read_input_tokens": 42758,
+          "cache_creation_input_tokens": 3015,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 3015
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T10:17:48.980Z",
+  "verdict": {
+    "taskId": "prompt-refiner-planner03-hardening-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:8ccc299b114a2315a37a5a2089bc5c5bfd73aca45ad4a56ff989048fe9d8ed43",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptInjectionAudit.ts:386 (rulesMessage.content !== input.rules)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "With the exact-instruction pin added at :387, the clause that compares the emitted system message against the builder's own exported constant is no longer covered by any test, so it can be deleted with the whole suite and the report still green — the one drift it catches (builder emits the pinned text while PROMPT_REFINER_SYSTEM_INSTRUCTION is weakened) is unpinned.",
+        "reproduction": "Delete line 386 (`rulesMessage.content !== input.rules ||`), then run `node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs` and `npm run check:prompt-injection`: both still pass, because the only two tests overriding `rules` (:262-271, :276-288) also set the message content to the same weakened/contradictory string, so clause :387 alone accounts for every expected violation. A case with `rules: weakenedRules` but `messages: [{ role: 'system', content: PROMPT_REFINER_SYSTEM_INSTRUCTION }, messages[1]]` expecting `rules_after_content` would pin it."
+      },
+      {
+        "location": "lib/promptInjectionAudit.ts:348-354",
+        "severity": "nit",
+        "basis": "preference",
+        "claim": "The rewritten doc comment leaves a ragged half-filled line (\"Exactly two messages make that boundary reviewable. The system\" / \"message states the rules first\"), unlike every other comment block in the file, which is filled to the column.",
+        "reproduction": "Read lib/promptInjectionAudit.ts:348-354 and compare the wrap with :344-347 or :153-160; reflowing the paragraph fixes it."
+      }
+    ],
+    "nextAction": "Approve: all three round-0 findings are closed — the header (:29-31) and the pinned-lines comment (:153-160) now state the exact-block rule the code enforces, null/undefined are pinned at both message positions (tests :323-359), and the auditor plus its two input types are renamed to Prompt Refiner-specific names with no stale references left; the corpus notation at tests/fixtures/promptInjectionCorpus.mjs:96 now escapes correctly while emitting byte-identical payload, and the two nits above can be folded into a later change."
+  }
+}

@@ -16,15 +16,19 @@
 //   - the provider refuses without naming a number ("input too long"), in
 //     which case the technique is dead and this script should be deleted
 //     rather than left around looking useful;
-//   - the provider accepts, meaning the input did not actually exceed the
-//     window, and the next attempt needs a larger one;
+//   - the provider answers 200, which is not the same as the input having
+//     fitted: a provider that truncates an over-long input answers 200 too.
+//     `usage.prompt_tokens` is what separates the two, and it is read rather
+//     than assumed. Neither reading names a window;
 //   - the provider refuses the *request* rather than the input -- a cap below
 //     its floor, a bad key, an unknown model -- in which case nothing was
 //     tested and the run is repeated once the request is right.
 //
 // Only the first of those says anything about the technique, so the script
 // classifies the answer before drawing any conclusion from it. It did not, on
-// its first outing, and reported the third case as the first: see
+// its first outing, and reported the third case as the first; the run after
+// that printed "the input fitted" over a 200 from a model whose published
+// window is smaller than what was sent. Both corrections live in
 // ./report-model-window-probe-trial-core.mjs.
 //
 // If it does name a window, this graduates into a probe over all the remaining
@@ -53,8 +57,11 @@ import {
   probeRequestFor,
 } from "./report-model-max-output-probe-core.mjs";
 import {
+  COUNTED_INPUT_TOLERANCE,
   DEFAULT_COMPLETION_CAP,
+  classifyCountedInput,
   classifyTrialAnswer,
+  readSuccessTelemetry,
 } from "./report-model-window-probe-trial-core.mjs";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { PROVIDER_API_CONFIGURATION } from "../lib/modelRegistryShared.ts";
@@ -163,6 +170,7 @@ if (!apiKey) {
 
 let status = null;
 let message = null;
+let parsedBody = null;
 try {
   const response = await fetch(request.url, {
     method: "POST",
@@ -179,6 +187,7 @@ try {
     // A provider answering with HTML or a bare string is still telling us
     // something.
   }
+  parsedBody = parsed;
   message = errorMessageFrom(parsed) ?? text.slice(0, 600);
 } catch (error) {
   console.error(`\nNo answer: ${error instanceof Error ? error.message : String(error)}`);
@@ -189,11 +198,53 @@ console.log(`\n  -> HTTP ${status}`);
 
 const outcome = classifyTrialAnswer({ status, message });
 
-if (outcome === "accepted") {
+if (outcome === "answered") {
+  // Not "accepted", and above all not "the input fitted". A provider that
+  // truncates an over-long input answers 200 too, and the only thing that
+  // separates the two cases is the count it reports for what it received.
+  const { promptTokens, requestId } = readSuccessTelemetry(parsedBody);
+  const verdict = classifyCountedInput({
+    promptTokens,
+    approxRequestedTokens: approxTokens,
+  });
+
+  console.log(`\n  request id: ${requestId ?? "(not reported)"}`);
   console.log(
-    "\n  ACCEPTED. The input fitted, so the window is larger than this request.\n" +
-      "  Re-run with a bigger --approx-input-tokens, or stop: each attempt is billed.\n" +
-      "  The technique is not disproved by this, only undersized."
+    `  usage.prompt_tokens: ${promptTokens?.toLocaleString("en-US") ?? "(not reported)"}` +
+      `  vs ~${approxTokens.toLocaleString("en-US")} sent` +
+      (promptTokens ? `  (${Math.round((promptTokens / approxTokens) * 100)}%)` : "")
+  );
+  console.log(`\n  ${verdict}\n`);
+
+  if (verdict === "INCONCLUSIVE") {
+    console.log(
+      "  The provider reported no usable input count, so this run measured nothing.\n" +
+        "  A 200 on its own does not distinguish an input that was carried from one\n" +
+        "  that was truncated, and without the count there is no way to tell."
+    );
+  } else if (verdict === "POSSIBLE_TRUNCATION") {
+    console.log(
+      `  The provider counted materially less than was sent (under ${Math.round(
+        COUNTED_INPUT_TOLERANCE * 100
+      )}%).\n` +
+        "  Truncation, some pre-processing step, or filler that tokenised shorter than\n" +
+        "  one token a word -- this cannot tell which. What it does mean is that a\n" +
+        "  larger --approx-input-tokens would not probe a larger window, because this\n" +
+        "  one never reached the window either."
+    );
+  } else {
+    console.log(
+      "  The provider counted, and billed, about what was sent. That is all it means.\n" +
+        "  It is not evidence that the model attended to every position, and it names\n" +
+        "  no window: a request under the limit and a request the provider chose to\n" +
+        "  carry look identical from here."
+    );
+  }
+
+  console.log(
+    "\n  Nothing was written. docs/policy/tomverse-chat-context-window-register.yaml\n" +
+      "  wants sourceUrl, sourceTitle, verifiedAt and verifiedBy before a row may carry\n" +
+      "  a number, and none of the three readings above is one."
   );
   process.exit(0);
 }

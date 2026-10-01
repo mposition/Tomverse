@@ -46,11 +46,19 @@ export type SuppressionCauseInput = {
   expiresAt?: Date | null;
 };
 
-/** Records one cause, once. Returns whether a row was written. */
+/**
+ * Records one cause, once.
+ *
+ * Returns the row's id and whether this call is the one that wrote it. The id
+ * is what identifies a suppression now that the mirrored entry is gone: an
+ * audit entry for an operator adding one by hand has to name something, and
+ * `createMany` with `skipDuplicates` reports a count rather than a row, so the
+ * row is read back by the key that made the write idempotent.
+ */
 export async function recordSuppressionCause(
   tx: Prisma.TransactionClient,
   input: SuppressionCauseInput
-): Promise<boolean> {
+): Promise<{ id: string; recorded: boolean }> {
   const result = await tx.suppressionCause.createMany({
     data: [
       {
@@ -74,7 +82,19 @@ export async function recordSuppressionCause(
     ],
     skipDuplicates: true,
   });
-  return result.count > 0;
+  const row = await tx.suppressionCause.findUniqueOrThrow({
+    where: {
+      emailAddress_scope_purposeKey_reason_sourceEventKey: {
+        emailAddress: input.emailAddress,
+        scope: input.scope,
+        purposeKey: input.purposeKey,
+        reason: input.reason,
+        sourceEventKey: input.sourceEventKey,
+      },
+    },
+    select: { id: true },
+  });
+  return { id: row.id, recorded: result.count > 0 };
 }
 
 /**

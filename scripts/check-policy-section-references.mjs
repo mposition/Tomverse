@@ -41,6 +41,8 @@
 //     change a file the database has already checksummed.
 //   * `.github/audits/**` and the remediation reports — past records. They say
 //     what was believed at the time, which is their whole value.
+//   * `docs/ops/cross-review/packages/**` — the records of author–reviewer
+//     exchanges: diffs, prompts and verdicts captured verbatim. Same class.
 //   * Anything citing a standard rather than a policy: `RFC 9111 §5.2.2.5` is
 //     a real reference to a document this check does not own. A line naming a
 //     non-policy `.md` file is skipped for the same reason.
@@ -54,7 +56,7 @@
 // of every comment that predates the check.
 
 import { readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   classifyFile,
   sectionsFromMarkdown,
@@ -65,6 +67,11 @@ const EXCLUDED_PREFIXES = [
   "prisma/migrations/",
   // Past records, preserved as written.
   ".github/audits/",
+  // Cross-review exchange records: packaged diffs, reviewer prompts and
+  // verdicts captured verbatim (scripts/cross-review.mjs). A citation inside
+  // one is what the reviewed tree said at the time, not a reference the
+  // record makes, and a record is not edited to satisfy a later rule.
+  "docs/ops/cross-review/packages/",
 ];
 
 const EXCLUDED_FILES = new Set([
@@ -176,14 +183,36 @@ const addedLines = (ref) => {
 
 const SCANNED_EXTENSIONS = ["*.ts", "*.tsx", "*.mjs", "*.prisma", "*.md"];
 
+// `execFileSync` with an argv array, not a shell string. The previous version
+// wrapped each pattern in Unix single quotes, which `cmd` does not strip, so on
+// Windows git looked for a file literally named `'docs/policy/*.md'` and matched
+// nothing. The check then passed by finding no citations at all — a gate that
+// reports "0 against 0" is not passing, it is not running, and that is how three
+// bare section references reached CI on 2026-09-04.
 const tracked = (patterns) =>
-  execSync(`git ls-files ${patterns.map((p) => `'${p}'`).join(" ")}`)
+  execFileSync("git", ["ls-files", ...patterns])
     .toString()
     .trim()
     .split("\n")
     .filter(Boolean);
 
 const policyDocuments = tracked(["docs/policy/*.md"]);
+
+// Fail-closed on an empty corpus. This check reported
+// `0 citation(s) against 0 policy document(s)` on Windows for as long as it
+// built its file list with a shell string, and that line read as a pass while
+// the check was not running at all -- three bare citations went to CI under it.
+// A gate that finds nothing has not verified anything, so it says so and exits.
+if (policyDocuments.length === 0) {
+  console.error("Policy section reference check failed: no policy documents were found.");
+  console.error("");
+  console.error("  git ls-files docs/policy/*.md returned nothing.");
+  console.error("");
+  console.error("This is refused rather than passed. Every earlier run resolved 30");
+  console.error("documents, so an empty list means file discovery broke, not that the");
+  console.error("citations are clean.");
+  process.exit(1);
+}
 const sections = new Map(
   policyDocuments.map((path) => [
     path,
@@ -266,6 +295,22 @@ if (failures.length > 0 || newUnscoped.length > 0 || newAmbiguous.length > 0) {
     "Write the document beside the number — `docs/policy/external-conversation-import-and-memory.md §14` —\n" +
       "or correct the number. A citation nobody can follow is worse than none."
   );
+  process.exit(1);
+}
+
+// The second half of the same guard. Documents can resolve while the scan
+// itself reaches no file -- a broken exclusion list, a pattern that stops
+// matching -- and the summary would again read as a pass.
+if (checked === 0) {
+  console.error("Policy section reference check failed: no citations were scanned.");
+  console.error("");
+  console.error(
+    `  ${policyDocuments.length} policy document(s) resolved, but no scanned source`
+  );
+  console.error("  file contained a section citation.");
+  console.error("");
+  console.error("This repository has thousands. An empty scan means the file list or");
+  console.error("the exclusions broke, and a clean result cannot be claimed from it.");
   process.exit(1);
 }
 

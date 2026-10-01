@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
@@ -15,6 +16,13 @@ import {
 
 // The seeded jurisdiction profiles.
 // Contract: docs/policy/email-notifications.md §5.2, §8.7, §12.5.
+
+/**
+ * The seeded profiles as they stood when JURISDICTION_POLICY_SEED_VERSION was
+ * last moved. Recorded, not computed: a digest the test derives from whatever
+ * it is handed proves only that sha256 is deterministic.
+ */
+const SEEDED_BEHAVIOUR_DIGEST = "983eedc319aae927";
 
 test("the seed is usable as written", () => {
   assert.deepEqual(jurisdictionSeedProblems(), []);
@@ -100,13 +108,22 @@ test("only Korea carries a consent notice interval, and it is a notice", () => {
   assert.equal(intervals[0].consentNoticeIntervalMonths, 24);
 });
 
-test("only Korea suppresses at night, and the window names its own zone", () => {
-  const quiet = JURISDICTION_PROFILE_SEED.filter((profile) => profile.quietHours);
-  assert.equal(quiet.length, 1);
-  assert.equal(quiet[0].profileKey, "KR");
-  // Without a zone the window would be evaluated in whatever the server
-  // happens to be set to, which is nobody's night.
-  assert.equal(quiet[0].quietHours.tz, "Asia/Seoul");
+test("no profile suppresses at night, because no profile's law asks email to", () => {
+  // Q4, resolved 2026-09-16: the Network Act's night-time restriction (제50조
+  // 제3항) applies to media prescribed by decree, and 시행령 제61조제2항
+  // excludes electronic mail. Korea carried the window while that was
+  // unconfirmed; it does not carry it now.
+  //
+  // The lane keeps the mechanism, so a profile that ever needs a window sets
+  // one and a new policy version carries it. What this asserts is that no
+  // window is claimed without a rule behind it: a held message nobody can
+  // explain is the failure this replaces.
+  assert.deepEqual(
+    JURISDICTION_PROFILE_SEED.filter((profile) => profile.quietHours).map(
+      (profile) => profile.profileKey
+    ),
+    []
+  );
 });
 
 test("Canada records the implied-consent windows it does not use", () => {
@@ -140,7 +157,7 @@ test("the American and Australian footers carry what their statutes require", ()
   // 제거된 것은 E3의 값 집합뿐입니다. 제50조가 요구하는 나머지는 그대로입니다.
   assert.equal(kr.subjectPrefix, "(광고)");
   assert.equal(kr.consentNoticeIntervalMonths, 24);
-  assert.ok(kr.quietHours);
+  assert.equal(kr.quietHours, null);
 });
 
 test("every footer block named is one the renderer knows", () => {
@@ -163,4 +180,43 @@ test("the seed version is a fixed string", () => {
   // It is the idempotency key of the draft: two calls must not produce two
   // versions, and a version derived from the clock would.
   assert.match(JURISDICTION_POLICY_SEED_VERSION, /^\d{4}-\d{2}-\d{2}\./);
+});
+
+test("a profile change moves the seed version with it", () => {
+  // The defect this fixes, found 2026-09-15: KR's footerBlocks and the new CH
+  // profile were edited and deployed while the version string stayed at
+  // 2026-08-21.jurisdictions.1. ensureJurisdictionPolicyDraft() is idempotent
+  // by that string, so the row the send path reads never learned about either
+  // change -- the tree said one thing and the mailbox got another.
+  //
+  // notes are excluded on purpose. They are stored on the row and §12.5 wants
+  // them there, but they change nothing a recipient receives, and a guard that
+  // fires on a typo fix is one people learn to bump past without reading.
+  const behaviour = JURISDICTION_PROFILE_SEED.map((profile) => [
+    profile.profileKey,
+    profile.marketingBasis,
+    profile.subjectPrefix,
+    profile.footerBlocks,
+    profile.unsubscribeSlaBusinessDays,
+    profile.consentNoticeIntervalMonths,
+    profile.quietHours ?? null,
+    profile.impliedConsentDays ?? null,
+  ]);
+  const countries = jurisdictionCountryMapSeed().map((row) => [
+    row.countryCode,
+    row.profileKey,
+  ]);
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ behaviour, countries }))
+    .digest("hex")
+    .slice(0, 16);
+
+  assert.equal(
+    digest,
+    SEEDED_BEHAVIOUR_DIGEST,
+    "The seeded profiles changed. Bump JURISDICTION_POLICY_SEED_VERSION, say " +
+      "what moved in JURISDICTION_POLICY_SEED_SUMMARY, and record the new " +
+      `digest here as "${digest}". Without the bump the change reaches no ` +
+      "delivery, because the policy version row is never edited in place."
+  );
 });

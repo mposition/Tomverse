@@ -8,8 +8,10 @@ import { prisma } from "@/lib/prisma";
 import { encryptOAuthAccountTokens } from "@/lib/oauthTokenCrypto";
 import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
-import { verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
+import { parseEmailLoginIntent, verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
 import { appUrl } from "@/lib/accountEmails";
+import { endDormantEmailRelationshipAtSignIn } from "@/lib/emailPreferences";
+import { addressProofForSignIn } from "@/lib/emailPreferenceCore";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -31,8 +33,8 @@ const toRequestLike = (headers: Record<string, unknown> | undefined): Request =>
         return new Request("http://internal.invalid/auth/email-code");
     }
 };
-import { sessionRevocationReason } from "@/lib/sessionRevocationCore";
-import { readSessionSecuritySnapshot } from "@/lib/sessionSecurity";
+import { sessionRevocationReason, signupRedirectPath } from "@/lib/sessionRevocationCore";
+import { readOAuthSignupGate, readSessionSecuritySnapshot } from "@/lib/sessionSecurity";
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_UPDATE_AGE_SECONDS = 24 * 60 * 60;
@@ -84,21 +86,31 @@ export const authOptions: NextAuthOptions = {
                 email: { label: "Email", type: "email" },
                 code: { label: "Code", type: "text" },
                 linkToken: { label: "Link token", type: "text" },
+                // "signin" never creates an account; "signup" does
+                // (docs/policy/email-product-news-redesign-draft.md section 5.2a).
+                intent: { label: "Intent", type: "text" },
             },
             async authorize(credentials, req) {
                 const request = toRequestLike(req?.headers);
+                const intent = parseEmailLoginIntent(credentials?.intent);
                 const result = credentials?.linkToken
-                    ? await verifyEmailLoginLink(request, credentials.linkToken)
+                    ? await verifyEmailLoginLink(request, credentials.linkToken, intent)
                     : credentials?.email && credentials?.code
-                        ? await verifyEmailLoginCode(request, credentials.email, credentials.code)
+                        ? await verifyEmailLoginCode(request, credentials.email, credentials.code, intent)
                         : null;
                 if (!result) throw new Error("EMAIL_CODE_INVALID");
                 if (!result.ok) {
+                    // Only reachable after the code or link matched, so the
+                    // person told there is no account is the one who proved
+                    // the address. The row is now a one-time sign-up hold.
+                    if (result.reason === "account_not_found") {
+                        throw new Error("EMAIL_ACCOUNT_NOT_FOUND");
+                    }
                     throw new Error(
                         result.reason === "locked" ? "EMAIL_CODE_LOCKED" : "EMAIL_CODE_INVALID"
                     );
                 }
-                return prisma.user.findUniqueOrThrow({
+                const signedIn = await prisma.user.findUniqueOrThrow({
                     where: { id: result.userId },
                     select: {
                         id: true,
@@ -111,6 +123,13 @@ export const authOptions: NextAuthOptions = {
                         subscriptionCurrentPeriodEnd: true,
                     },
                 });
+                // Carried to the token: whether this sign-in created the
+                // account, which the sign-up consent choice depends on.
+                return {
+                    ...signedIn,
+                    isNewUser: result.isNewUser,
+                    emailLoginAttemptId: result.emailLoginAttemptId,
+                };
             },
         }),
     ],
@@ -124,11 +143,32 @@ export const authOptions: NextAuthOptions = {
         updateAge: SESSION_UPDATE_AGE_SECONDS,
     },
     callbacks: {
-        async signIn({ user }) {
+        async signIn({ user, account }) {
             if (!user.id) return false;
             try {
+                // A provider account never seen here is a new account. From
+                // the sign-in screen it goes to sign-up instead, after the
+                // provider proved who it is (section 5.2a). On a first visit
+                // `user.id` is the provider subject, not a User id, so the
+                // account status below is read for the linked user only.
+                let userId: string | null = user.id;
+                if (account?.type === "oauth") {
+                    const gate = await readOAuthSignupGate({
+                        provider: account.provider,
+                        providerAccountId: account.providerAccountId,
+                        email: user.email,
+                    });
+                    if (!gate.allow) {
+                        logAuthAuditEvent("auth.sign_in_redirected_to_signup", {
+                            provider: account.provider,
+                        });
+                        return `${appUrl()}${signupRedirectPath(account.provider)}`;
+                    }
+                    userId = gate.linkedUserId;
+                    if (!userId) return true;
+                }
                 const security = await prisma.user.findUnique({
-                    where: { id: user.id },
+                    where: { id: userId },
                     select: {
                         accountStatus: true,
                         accountSuspendedUntil: true,
@@ -143,7 +183,7 @@ export const authOptions: NextAuthOptions = {
                     security.accountSuspendedUntil <= new Date()
                 ) {
                     await prisma.user.update({
-                        where: { id: user.id },
+                        where: { id: userId },
                         data: {
                             accountStatus: "active",
                             accountSuspendedAt: null,
@@ -175,9 +215,35 @@ export const authOptions: NextAuthOptions = {
                 return false;
             }
         },
-        async jwt({ token, user }) {
+        async jwt({ token, user, account, profile, isNewUser }) {
             if (user) {
                 token.id = user.id;
+                // What this sign-in proved about the account's address, from
+                // the sign-in itself only: the email-code authorize() result or
+                // Google's raw profile with email_verified, and only for this
+                // user's own address. Written here and nowhere else -- not on a
+                // session update -- and not carried over from an earlier
+                // sign-in (docs/policy/email-double-opt-in.md §14.1).
+                token.addressProof =
+                    addressProofForSignIn({
+                        provider: account?.provider,
+                        profile,
+                        userEmail: user.email,
+                        now: new Date(),
+                    }) ?? undefined;
+                // OAuth reports it through the adapter; the email code through
+                // authorize(). Set on every sign-in, so a later sign-in into an
+                // existing account clears it.
+                token.accountCreatedBySignIn =
+                    isNewUser === true ||
+                    (user as typeof user & { isNewUser?: unknown }).isNewUser === true;
+                // The login row an email sign-up spent: its consent choice binds
+                // to that row and no other (section 5.2a). Only on the token of
+                // the sign-in that created the account.
+                const spentRow = (user as typeof user & { emailLoginAttemptId?: unknown })
+                    .emailLoginAttemptId;
+                token.signupEmailLoginAttemptId =
+                    token.accountCreatedBySignIn && typeof spentRow === "string" ? spentRow : undefined;
                 const analyticsUser = user as typeof user & {
                     plan?: unknown;
                     createdAt?: unknown;
@@ -230,6 +296,9 @@ export const authOptions: NextAuthOptions = {
             session.user.plan = token.plan;
             session.user.createdAt = token.createdAt;
             session.user.authenticatedAt = token.authenticatedAt;
+            session.user.accountCreatedBySignIn = token.accountCreatedBySignIn === true;
+            session.user.signupEmailLoginAttemptId = token.signupEmailLoginAttemptId;
+            session.user.addressProof = token.addressProof;
             return session;
         },
     },
@@ -240,10 +309,25 @@ export const authOptions: NextAuthOptions = {
             });
         },
         async signIn({ user, account, isNewUser }) {
-            await prisma.user
-                .update({
-                    where: { id: user.id },
-                    data: { lastLoginAt: new Date() },
+            // One transaction: an Australian relationship that went dormant is
+            // ended before `lastLoginAt` moves, or neither happens and it stays
+            // dormant (docs/policy/email-product-news-redesign-draft.md 4.4).
+            await prisma
+                .$transaction(async (tx) => {
+                    const now = new Date();
+                    const previous = await tx.user.findUnique({
+                        where: { id: user.id },
+                        select: { lastLoginAt: true },
+                    });
+                    await endDormantEmailRelationshipAtSignIn(tx, {
+                        userId: user.id,
+                        previousLastLoginAt: previous?.lastLoginAt ?? null,
+                        now,
+                    });
+                    await tx.user.update({
+                        where: { id: user.id },
+                        data: { lastLoginAt: now },
+                    });
                 })
                 .catch((error) => {
                     console.error("Failed to record last login time:", error);

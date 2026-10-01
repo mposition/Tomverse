@@ -55,6 +55,7 @@ import {
   type WebSearchTopicSignal,
 } from "@/lib/webSearchRetrySuggestion";
 import { WebSearchSuggestionCard } from "@/components/chat/WebSearchSuggestionCard";
+import { arbitrateWebSearchOffer } from "@/lib/answerSuggestionArbitration";
 import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggestionCopy";
 import {
   chatContentStateKey,
@@ -85,6 +86,10 @@ import type {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import type {
+  PromptRefinerResolution,
+  PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 import {
   Check,
   ChevronDown,
@@ -102,6 +107,9 @@ type PromptPayload = {
   text: string;
   chatId: string;
   userMessageId: string;
+  messageWasDurablySaved: boolean;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
@@ -136,6 +144,8 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  transcriptScope?: "model" | "conversation";
+  onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -154,6 +164,11 @@ type MobileChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  /** Server-owned final offer, passed unchanged to the composer. */
+  promptRefinerOffered?: boolean;
+  promptRefinerState?: PromptRefinerUiState;
+  onPromptRefinerRequest?: (sourcePrompt: string) => void;
+  onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -176,6 +191,12 @@ type MobileChatShellProps = {
    * it; it decides nothing about credits, preflight or admission.
    */
   pendingSubmission: { originConversationId: string | null } | null;
+  /** Locks durable Chat draft bytes until its Message transaction accepts. */
+  durableDraftLocked: boolean;
+  /** Refuses submit while a durable Chat voice transcript is unfinished. */
+  blockSubmitWhileVoiceBusy: boolean;
+  /** Authenticated durable Chat may compose its next turn during a response. */
+  allowEditingWhileSending: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -355,6 +376,29 @@ type MobileChatShellProps = {
   onRequestUndoToast: (message: string, undo: () => void) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
+  onSavedQuestionNotSent: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => void;
+  onDurableUndispatchedAccepted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number
+  ) => boolean;
+  onProviderDispatchStarted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => void;
   onCompareSummary: () => void;
   isCompareSummaryLoading: boolean;
   isQuickSummaryCached?: boolean;
@@ -386,6 +430,8 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  transcriptScope = "model",
+  onRestorePrompt,
   conversations,
   currentChatId,
   selectedModels,
@@ -401,6 +447,10 @@ export function MobileChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  promptRefinerOffered = false,
+  promptRefinerState,
+  onPromptRefinerRequest,
+  onPromptRefinerDecision,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -409,6 +459,9 @@ export function MobileChatShell({
   isModelSelectionReady,
   isConversationSelectionResolved,
   pendingSubmission,
+  durableDraftLocked,
+  blockSubmitWhileVoiceBusy,
+  allowEditingWhileSending,
   onNewChat,
   onNewImage,
   imageLock,
@@ -471,6 +524,11 @@ export function MobileChatShell({
   onRequestUndoToast,
   onSubmit,
   onBeforeModelSend,
+  conversationSelectionTicket,
+  identityEpoch,
+  onSavedQuestionNotSent,
+  onDurableUndispatchedAccepted,
+  onProviderDispatchStarted,
   onCompareSummary,
   isCompareSummaryLoading,
   isQuickSummaryCached = false,
@@ -482,6 +540,9 @@ export function MobileChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: MobileChatShellProps) {
+  const singleTranscript = transcriptScope === "conversation";
+  const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
+  const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const registerChatConsentSlot = useChatConsentSlotRef();
@@ -586,13 +647,19 @@ export function MobileChatShell({
   // What every consumer below reads: this conversation's currently selected
   // models and nothing else.
   const modelStatuses = useMemo(
-    () =>
-      scopeModelStatusesToConversation({
+    () => {
+      const scoped = scopeModelStatusesToConversation({
         statuses: reportedModelStatuses,
         conversationId: currentChatId,
-        selectedModelIds: selectedModels,
-      }),
-    [currentChatId, reportedModelStatuses, selectedModels]
+        selectedModelIds: statusModels,
+      });
+      // Consumers that label a model still use its id; busy ownership stays
+      // on the conversation key even while the next model is being selected.
+      return singleTranscript
+        ? { ...scoped, ...Object.fromEntries(selectedModels.map((id) => [id, scoped["@conversation"]])) }
+        : scoped;
+    },
+    [currentChatId, reportedModelStatuses, selectedModels, singleTranscript, statusModels]
   );
   // Only a run this conversation's own, un-paused panels are performing may
   // hold this composer, and only those panels are what the stop button then
@@ -600,8 +667,8 @@ export function MobileChatShell({
   // and has no say here.
   const isAnyModelResponding = isConversationResponding({
     statuses: modelStatuses,
-    selectedModelIds: selectedModels,
-    disabledModelIds: disabledPanels,
+    selectedModelIds: statusModels,
+    disabledModelIds: singleTranscript ? [] : disabledPanels,
   });
 
   const handleModelStatusChange = useCallback(
@@ -610,22 +677,22 @@ export function MobileChatShell({
       nextStatus: ModelRuntimeStatus,
       conversationId: string | null
     ) => {
-      const key = chatModelStatusKey(conversationId, modelId);
+      const key = chatModelStatusKey(conversationId, singleTranscript ? "@conversation" : modelId);
       setReportedModelStatuses((current) =>
         current[key] === nextStatus ? current : { ...current, [key]: nextStatus }
       );
     },
-    []
+    [singleTranscript]
   );
 
   const handleContentStateChange = useCallback(
     (modelId: string, state: ChatContentState) => {
-      const key = chatContentStateKey(currentChatId, modelId);
+      const key = chatContentStateKey(currentChatId, singleTranscript ? "@conversation" : modelId);
       setModelContentStates((current) =>
         current[key] === state ? current : { ...current, [key]: state }
       );
     },
-    [currentChatId]
+    [currentChatId, singleTranscript]
   );
 
   const activeModelIndex = resolvedActiveModelId
@@ -829,7 +896,7 @@ export function MobileChatShell({
     resolveChatContentState({
       isConversationSelectionResolved,
       conversationId: currentChatId,
-      selectedModelIds: modelIds,
+      selectedModelIds: singleTranscript ? statusModels : modelIds,
       reported: modelContentStates,
       hasAcceptedSubmission,
       storedSeed: guestContentSeed,
@@ -941,7 +1008,7 @@ export function MobileChatShell({
     The web-search offer, decided from the same status map the rail and the
     expansion offer read.
   */
-  const webSearchSuggestion = deriveWebSearchSuggestion({
+  const webSearchSuggestionForTurn = deriveWebSearchSuggestion({
     conversationId: currentChatId,
     turn: webSearchSuggestionTurn,
     selectedModelIds: selectedModels,
@@ -951,6 +1018,21 @@ export function MobileChatShell({
     retryFailure: webSearchRetryFailure,
     resolvedTopicKeys: webSearchResolvedTopicKeys,
     offeredTopics: webSearchOfferedTopics,
+  });
+  /*
+    A question can satisfy both offers -- recency and a depth signal together --
+    and Deep Research outranks this one when it does
+    (lib/answerSuggestionArbitration.ts).
+
+    Applied here and not at the render site: the impression effect below writes
+    `offeredTopics`, and a card that was never drawn must not be recorded as
+    having been offered, or a later turn refuses the offer for a question nobody
+    was asked about.
+  */
+  const webSearchSuggestion = arbitrateWebSearchOffer({
+    webSearch: webSearchSuggestionForTurn,
+    deepResearch: deepResearchSuggestion,
+    retryFailure: webSearchRetryFailure,
   });
   /*
     The strongest signal, and only that one. The classifier reports every
@@ -994,7 +1076,7 @@ export function MobileChatShell({
   const showWelcomeSurface = showsWelcomeSurface && selectedModels.length > 0;
   // UX-026. The single condition the tab strip and its panels both read, so a
   // tab can never be rendered without the panel its `aria-controls` names.
-  const showModelTabs = !showsWelcomeSurface && selectedModels.length > 1;
+  const showModelTabs = !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1;
   const isCompactBottomDock = useCompactBottomDock();
   // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
   // layout viewport keeps its full height while the keyboard is up, so a
@@ -1496,14 +1578,14 @@ export function MobileChatShell({
           />
         )}
         {selectedModels.length > 0 ? (
-          selectedModels.map((modelId, panelIndex) => {
+          panelModels.map((modelId, panelIndex) => {
             // The panels stay mounted while the welcome surface is up -- they
             // are what reports the conversation empty in the first place -- but
             // they render no transcript in that state (ChatApp's
             // `useCenteredWelcome` branch), so they are laid out only when they
             // have something to lay out.
             const isPanelVisible =
-              resolvedActiveModelId === modelId && !showWelcomeSurface;
+              (singleTranscript || resolvedActiveModelId === modelId) && !showWelcomeSurface;
 
             return (
               <div
@@ -1527,17 +1609,24 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
+                  onRestorePrompt={onRestorePrompt}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
                   promptPayload={promptPayload}
-                  isPanelDisabled={disabledPanels.includes(modelId)}
+                  isPanelDisabled={!singleTranscript && disabledPanels.includes(modelId)}
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
+                  conversationSelectionTicket={conversationSelectionTicket}
+                  identityEpoch={identityEpoch}
+                  onSavedQuestionNotSent={onSavedQuestionNotSent}
+                  onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
+                  onProviderDispatchStarted={onProviderDispatchStarted}
                   hideModelOnlyInput
                   useCenteredWelcome
                   onContentStateChange={handleContentStateChange}
@@ -1546,8 +1635,10 @@ export function MobileChatShell({
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
-                  onRequestCloseModel={() => onToggleModel(modelId)}
-                  hasMultipleActiveModels={selectedModels.length > 1}
+                  onRequestCloseModel={(event) => singleTranscript
+                    ? openChatModelPicker(event.currentTarget)
+                    : onToggleModel(modelId)}
+                  hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />
               </div>
@@ -1606,11 +1697,14 @@ export function MobileChatShell({
         for the same reason the expansion is: the dock exists once however
         many panels are on screen.
 
-        The two can never be on screen together. This one is made about a
-        question whose only signal is that it needs current information, and
-        `classifyDeepResearchTopic` refuses exactly that case -- recency alone
-        is the one thing it will not offer a report for. A question with both
-        goes to Deep Research, which is the deeper of the two answers.
+        The two are never on screen together, and `arbitrateWebSearchOffer`
+        above is what makes that true. It used to be argued from the rules --
+        this offer needs only recency and `classifyDeepResearchTopic` refuses
+        recency alone -- but needing only recency is not firing only on it: a
+        question carrying recency *and* a depth signal satisfied both, and drew
+        both cards. Deep Research wins that question, as the deeper of the two
+        answers; a failed re-run's own report is the one thing the arbitration
+        does not take away.
       */}
       {webSearchSuggestion.offered &&
         webSearchSuggestion.state &&
@@ -1655,7 +1749,7 @@ export function MobileChatShell({
           }
         />
       )}
-      <ComparisonActionRail
+      {!singleTranscript && <ComparisonActionRail
         layout="mobile"
         readiness={comparisonReadiness}
         aiReviewAccess={aiReviewAccess}
@@ -1666,19 +1760,23 @@ export function MobileChatShell({
         onCompareSummary={onCompareSummary}
         onComparisonReview={onComparisonReview}
         onGuestSignInPrompt={onGuestSignInPrompt}
-      />
+      />}
 
       <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            singleModelSelection={singleTranscript}
             value={inputValue}
             onChange={setInputValue}
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
+            draftLocked={durableDraftLocked}
+            blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
             isSending={isAnyModelResponding}
+            allowEditingWhileSending={allowEditingWhileSending}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             currentChatId={currentChatId}
@@ -1712,6 +1810,10 @@ export function MobileChatShell({
             attachmentCapabilities={attachmentCapabilities}
             voiceInputEnabled={voiceInputEnabled}
             onVoiceTranscript={onVoiceTranscript}
+            promptRefinerOffered={promptRefinerOffered}
+            promptRefinerState={promptRefinerState}
+            onPromptRefinerRequest={onPromptRefinerRequest}
+            onPromptRefinerDecision={onPromptRefinerDecision}
             identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
@@ -1721,7 +1823,7 @@ export function MobileChatShell({
             // One variant in every state: a new chat and an ongoing one share
             // the dock, so the first send must not restyle it.
             variant="bar"
-            hideTopBorder={comparisonReadiness.isVisible}
+            hideTopBorder={!singleTranscript && comparisonReadiness.isVisible}
             hideDisclaimer
             conversationDropSurface={conversationDropSurface}
           />,

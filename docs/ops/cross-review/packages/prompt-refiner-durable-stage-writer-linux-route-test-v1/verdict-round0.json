@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-19T15:11:57.281Z",
+  "durationMs": 86192,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 16,
+    "cachedInputTokens": 147419,
+    "outputTokens": 6231,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.4778195,
+    "raw": {
+      "input_tokens": 16,
+      "cache_creation_input_tokens": 24390,
+      "cache_read_input_tokens": 147419,
+      "output_tokens": 6231,
+      "output_tokens_details": {
+        "thinking_tokens": 3594
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 24390,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 720,
+          "cache_read_input_tokens": 27759,
+          "cache_creation_input_tokens": 1373,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1373
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-19T15:13:23.535Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-linux-route-test-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:e01bfa7ae5df3b59fe073fc64e2d7b7eff1d09cd4f3071d6f8373f011368dee7",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/server-contract/chat-preflight-rate-limit.test.ts:65, chat-attachment-unavailable.test.ts:120, chat-route-turnstile-grant.test.ts:102, chat-native-search-cost-parity.test.ts:189, chat-route-model-selection.test.ts:66, chat-route-safety.test.ts:82",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "Six other server-contract files still import route modules through a query-string cache suffix, the same loader pattern this change identifies as the Linux failure cause, so the same defect may be latent there (out of this task's writable scope, informational only).",
+        "reproduction": "grep -n '?\\w*=\\?cached' tests/server-contract/*.ts lists the remaining suffixed imports; run those files on Linux with the same node --conditions=react-server --experimental-test-module-mocks --import tsx --test command to see whether their route named exports resolve. Not verified here (Windows-only, read-only review), so no change is requested."
+      }
+    ],
+    "nextAction": "Merge as is; the route import now matches the sibling admin-route pattern (admin-memory-revocation-route.test.ts:128, admin-routing-shadow-route.test.ts:90) and the lib/auth.ts authOptions mock matches admin-promotion-diagnostics-route.test.ts:154, lib/auth.ts exports only authOptions so the namedExports-only mock drops nothing, no other test imports this route module, the runner spawns one process per file so the single-import premise holds, and the diff touches only the three paths listed in writableScope."
+  }
+}

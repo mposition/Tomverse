@@ -1,0 +1,114 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-operator-ui-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T14:34:21.799Z",
+  "durationMs": 323389,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 54,
+    "cachedInputTokens": 1724376,
+    "outputTokens": 27260,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.510668,
+    "raw": {
+      "input_tokens": 54,
+      "cache_creation_input_tokens": 96671,
+      "cache_read_input_tokens": 1724376,
+      "output_tokens": 27260,
+      "output_tokens_details": {
+        "thinking_tokens": 18721
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 96671,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2468,
+          "cache_read_input_tokens": 97519,
+          "cache_creation_input_tokens": 2153,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2153
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T14:39:45.240Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-operator-ui-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:5476e2dd49534f294f20b2bb6fc5a0210211aae6f78ba54d5ae919254f340ebf",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:310-323 (refresh)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "\"Refresh status\" never re-reads the step currently on screen: it always GETs the *next* step's endpoint, so at step 1 it calls the run preview and at step 2 it calls the execution preview, both of which the server refuses until the previous step is approved, and the stage preview can never be refreshed at all.",
+        "reproduction": "With no durable stage approved, open /admin/prompt-refiner-shadow. The stage preview renders and `run` is null, so the branch at line 316 runs `readRun(stage)` -> `GET /api/admin/prompt-refiner/shadow-run`. `promptRefinerShadowRunPreview` (lib/promptRefinerShadowRunStore.ts:521-523) refuses 409 `PROMPT_REFINER_SHADOW_RUN_STAGE_REQUIRED`, so the red alert reads \"The durable stage must be approved first.\" and the stage fields are unchanged. Expected: `readStage()` re-runs and the stage preview (including its previewBindingDigest) is refreshed. Note also that line 315 is a dead branch — it performs exactly the same call as line 314."
+      },
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:232 and :448",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The run-approval kill switch (`PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED`) also gates the pure GET transition to step 3, so once the run is approved and that flag is turned back off the operator cannot reach the execution screen from the step-2 button, and is told to re-enable a flag that is no longer needed.",
+        "reproduction": "Approve the run, then unset `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED` (lib/promptRefinerShadowRunContract.ts:34-35) and set `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED=true`. `GET /api/admin/prompt-refiner/shadow-run` then returns `{status:\"already_exists\", approvalEnabled:false}` (lib/promptRefinerShadowRunStore.ts:543-548). The panel renders the \"Load execution status\" button with `disabled` (line 448) and `approveRun` returns immediately at line 232, and the amber banner at line 441 says \"Enable the exact staging flag and redeploy before approving or executing.\" Yet `GET /api/admin/prompt-refiner/shadow-run/execute` has no approval-flag gate (app/api/admin/prompt-refiner/shadow-run/execute/route.ts:93-119). Expected: the flag gates only the POST-approval branch at line 236; when `run.status === \"already_exists\"` the read-only transition stays available."
+      },
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:292",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "`m.postFailureStop` (\"It is not a retry signal; inspect status before any new action.\") is unreachable, so a server refusal of the execution POST never carries the explicit do-not-retry wording.",
+        "reproduction": "`describeAdminApiFailure` always returns a non-empty `message` — `trimmed || \\`${fallback} The server answered ${status}.\\`` with `fallback = m.requestFailed` (lib/adminApiOutcome.ts:96-105). `failResponse` sets that message, and React applies the functional updater at line 292 against the queued value, so `current` is truthy and the fallback is discarded. Observe: with `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED` unset, click \"Execute approved run\"; the POST returns 403 `PROMPT_REFINER_SHADOW_EXECUTION_DISABLED` and the alert shows \"Prompt Refiner shadow execution is disabled.\" only. (The POST lock itself is correctly held, so this is messaging, not a safety gap.)"
+      },
+      {
+        "location": "lib/adminNavigation.ts:602-612",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "`/admin/prompt-refiner-shadow` is a static route registered in `ADMIN_DETAIL_ROUTES`, which only supplies a breadcrumb; it is therefore absent from the sidebar and from the command palette, so the only way to reach the screen is typing the URL.",
+        "reproduction": "`ADMIN_SEARCHABLE_PAGES` is built from `ADMIN_NAVIGATION` + `ADMIN_UNLISTED_PAGES` only (lib/adminNavigation.ts:815-832); `matchAdminPages(\"prompt refiner\")` returns no entry for `/admin/prompt-refiner-shadow`. `ADMIN_UNLISTED_PAGES` (line 569-579) is the table documented as \"routes that exist but are deliberately absent from the sidebar\" and is the one the palette reads. If the screen is meant to stay undiscoverable, say so in a comment; otherwise register it there as well."
+      },
+      {
+        "location": "lib/adminMessages/promptRefinerShadow.ts (flagDisabled) used at AdminPromptRefinerShadowPanel.tsx:441 and :499",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "One `flagDisabled` sentence stands in for two different environment flags, so an operator reading \"Enable the exact staging flag\" is not told which of `PROMPT_REFINER_SHADOW_RUN_APPROVAL_ENABLED` and `PROMPT_REFINER_SHADOW_EXECUTION_ENABLED` to set.",
+        "reproduction": "Render the panel with `approvalEnabled: false` (run step, line 439-442) and again with `enabled: false` on the execution preview (line 497-500); both render the identical string. Expected on an operator screen whose purpose is an unambiguous next action: two messages naming the specific flag."
+      }
+    ],
+    "nextAction": "Fix the refresh step-selection (findings 1) and the approval-flag gate on the read-only step-3 transition (finding 2), then resubmit; the frozen contract constants, fail-closed parsers, exact approval bodies, GET-only mount/refresh, execution POST lock and paused-only unlock, and the owner/recent-auth boundaries all check out against the server routes."
+  }
+}

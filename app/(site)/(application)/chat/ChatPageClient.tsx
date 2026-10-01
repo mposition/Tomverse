@@ -16,6 +16,7 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { saveResponseAsFile, saveVerifiedResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
@@ -58,7 +59,22 @@ import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
+import {
+  parseChatDraftMessageReceipt,
+  parseChatMessageSaveResponse,
+  parseMessageSaveMapping,
+} from "@/components/chat/chatDurableRecoveryClient";
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
+import {
+  bindPromptRefinerSuggestion,
+  promptRefinerResponseSchema,
+  validatePromptRefinerFixtureHandoff,
+  type BoundPromptRefinerSuggestion,
+  type PromptRefinerDraftScope,
+  type PromptRefinerRequest,
+  type PromptRefinerResolution,
+  type PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
@@ -90,7 +106,9 @@ import {
   subscribeContinuationFocus,
 } from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
-import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
+import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
+import { chatRuntimeKey, getChatRuntimeSnapshot, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
+import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -230,6 +248,21 @@ import {
   NO_WEB_SEARCH_BACKENDS,
   type WebSearchBackendReadiness,
 } from "@/lib/webSearchBackends";
+import {
+  SAVED_QUESTION_NOT_SENT_CHANGE_EVENT,
+  addSavedQuestionNotSentKey,
+  addSavedQuestionNotSentKeys,
+  bindSavedQuestionNotSentOwner,
+  clearSavedQuestionNotSentKeys,
+  consumeSavedQuestionNotSentPrefix,
+  removeSavedQuestionNotSentKey,
+  setBoundedMapEntry,
+} from "@/lib/chatSavedQuestionDisposition";
+import {
+  activeChatIdentityIs,
+  adoptActiveChatIdentity,
+  chatIdentityCallbackIsCurrent,
+} from "@/lib/chatIdentityEpoch";
 
 // Persists which conversation is open in *this tab* so an F5 / crash
 // recovery restores it instead of falling back to the welcome screen --
@@ -239,6 +272,31 @@ import {
 // Defined in lib/guestChatInitialModels so the first-render guest model
 // decision reads the same key this file writes.
 const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
+let conversationSelectionTicketSequence = 0;
+const allocateConversationSelectionTicket = (): number => {
+  conversationSelectionTicketSequence += 1;
+  return conversationSelectionTicketSequence;
+};
+let conversationNavigationAttemptSequence = 0;
+const allocateConversationNavigationAttempt = (): number => {
+  conversationNavigationAttemptSequence += 1;
+  return conversationNavigationAttemptSequence;
+};
+/**
+ * Where the draft and message-receipt recovery notices float: under the
+ * header, never at the bottom of the screen.
+ *
+ * They used to sit at `bottom-4`, which is where the composer's dock is. That
+ * covered the composer's action row -- the microphone and send included --
+ * whenever a conversation had answers, and since the composer stays in the
+ * dock on a new chat too (docs/ui-contracts/chat-starter-catalog.md section 6)
+ * it would have covered it on every screen. The mobile composer contract
+ * forbids anything floating over the composer; a notice that needs a decision
+ * can cover conversation text for a moment instead. The height cap keeps a
+ * 200% text notice from running off the screen.
+ */
+const RECOVERY_NOTICE_PLACEMENT =
+  "fixed inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] max-h-[calc(100dvh-6rem)] overflow-y-auto";
 
 // Private Mode has been removed as a product concept. This key is kept only
 // so a one-time effect below can clear it out of any browser that still has
@@ -266,6 +324,49 @@ const uniqueStrings = (values: string[]) => Array.from(new Set(values));
  */
 const sameStringList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((value, index) => value === b[index]);
+
+const CHAT_MESSAGE_SAVE_TIMEOUT_MS = 30_000;
+const CHAT_MESSAGE_RECEIPT_TIMEOUT_MS = 20_000;
+
+declare global {
+  interface Window {
+    /** Loopback E2E-only deadline seam; deployed hosts use the constants. */
+    __tomverseChatMessageDeadlineMs?: number;
+  }
+}
+
+const chatMessageDeadlineMs = (productionMs: number) =>
+  window.location.hostname === "127.0.0.1" &&
+  Number.isFinite(window.__tomverseChatMessageDeadlineMs) &&
+  (window.__tomverseChatMessageDeadlineMs ?? 0) >= 10
+    ? window.__tomverseChatMessageDeadlineMs!
+    : productionMs;
+
+const fetchJsonWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+) => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    try {
+      return {
+        response,
+        body: await response.json() as unknown,
+        bodyValid: true as const,
+      };
+    } catch (error) {
+      // Invalid/empty JSON is a completed but unusable response. A body that
+      // stalls until the shared deadline remains a transport ambiguity.
+      if (controller.signal.aborted || !(error instanceof SyntaxError)) throw error;
+      return { response, body: null, bodyValid: false as const };
+    }
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
 
 /**
  * PATCHes one conversation's model settings and reports the server's
@@ -546,6 +647,18 @@ type GlobalSubmitOptions = {
   deepResearchDepth?: "quick" | "standard" | "deep";
   overrideText?: string;
   /**
+   * Web search for this send only, leaving the conversation's own switch
+   * exactly where the user left it.
+   *
+   * The web-search offer under a finished answer uses it: answering "yes,
+   * check this one" is consent for one question, not a standing instruction to
+   * search everything after it, and `Conversation.webSearchMode` is a stored
+   * setting the user owns. It rides the request instead -- through the
+   * preflight so the surcharge is priced, and through the payload so the
+   * dispatch attaches the tool.
+   */
+  webSearchOverride?: WebSearchToggleMode;
+  /**
    * The models this one send is for, when that is not the whole selection.
    *
    * The expansion offered under a finished answer is the case this exists for:
@@ -559,18 +672,6 @@ type GlobalSubmitOptions = {
    * question, so every selected model answering it is the point.
    */
   overrideModelIds?: readonly string[];
-  /**
-   * Web search for this send only, leaving the conversation's own switch
-   * exactly where the user left it.
-   *
-   * The web-search offer under a finished answer uses it: answering "yes,
-   * check this one" is consent for one question, not a standing instruction to
-   * search everything after it, and `Conversation.webSearchMode` is a stored
-   * setting the user owns. It rides the request instead -- through the
-   * preflight so the surcharge is priced, and through the payload so the
-   * dispatch attaches the tool.
-   */
-  webSearchOverride?: WebSearchToggleMode;
 };
 
 export function ChatPageClient({
@@ -579,6 +680,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
+  promptRefinerMode = "off",
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
   chatStarterEnabled = false,
@@ -600,6 +702,13 @@ export function ChatPageClient({
    * after an operator pulled the kill switch.
    */
   voiceInputEnabled?: boolean;
+  /**
+   * The server's final Prompt Refiner mode. The only active value today is a
+   * deterministic, no-cost loopback fixture; there is no product adapter.
+   * Keeping mode and adapter inseparable makes an offered-but-inert state
+   * unrepresentable at this boundary.
+   */
+  promptRefinerMode?: "off" | "e2e_fixture";
   /**
    * How many models one image comparison may fan out to, read from the running
    * server in page.tsx. Passed rather than resolved here: `process.env` in a
@@ -699,8 +808,47 @@ export function ChatPageClient({
    * re-open the URL's conversation on top of whatever the user had since
    * chosen.
    */
-  const initialConversationAppliedRef = useRef(false);
+  // App Router can preserve this client tree while changing between routed
+  // surfaces. Track the particular URL-named conversation that was applied,
+  // rather than a once-per-component boolean: A -> B -> A must honour the
+  // second A handoff even when the same component instance survives.
+  const initialConversationAppliedRef = useRef<string | null>(null);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  // A server-provided conversation id is a handoff, not a permanent allow
+  // list for which conversation may consume a saved-undispatched notice.
+  // App Router can retain this client tree after the handoff query is removed,
+  // leaving the prop frozen at A while the user later works in B. Suppress a
+  // notice only until this tree has actually reached the requested id; after
+  // that, every committed selection owns its own conversation-scoped notice.
+  const initialConversationHandoffRef = useRef<{
+    requestedId: string | null;
+    settled: boolean;
+  }>({
+    requestedId: initialConversationId ?? null,
+    settled: !initialConversationId,
+  });
+  const [initialConversationHandoffRevision, setInitialConversationHandoffRevision] =
+    useState(0);
+  const settleInitialConversationHandoff = useCallback((requestedId?: string | null) => {
+    const handoff = initialConversationHandoffRef.current;
+    if (handoff.settled ||
+        (requestedId !== undefined && handoff.requestedId !== requestedId)) return false;
+    handoff.settled = true;
+    setInitialConversationHandoffRevision((value) => value + 1);
+    return true;
+  }, []);
+  useLayoutEffect(() => {
+    const requestedId = initialConversationId ?? null;
+    if (initialConversationHandoffRef.current.requestedId !== requestedId) {
+      initialConversationHandoffRef.current = {
+        requestedId,
+        settled: requestedId === null,
+      };
+    }
+    if (requestedId === null || currentChatId === requestedId) {
+      settleInitialConversationHandoff(requestedId);
+    }
+  }, [currentChatId, initialConversationId, settleInitialConversationHandoff]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // True while a "new image" draft is open: the workspace renders with no
   // server row, which is only created by the first successful generation
@@ -816,7 +964,226 @@ export function ChatPageClient({
     hasDraft,
     discardDraft,
     migrateDraft,
-  } = useConversationDrafts(currentChatId, identityKey);
+    draftConflict,
+    resolveDraftConflict,
+    draftSyncFailed,
+    retryDraftSync,
+    captureDraftSend,
+    prepareDraftSend,
+    commitDraftSend,
+    abortDraftSend,
+    reconcileDraftSend,
+  } = useConversationDrafts(
+    currentChatId,
+    identityKey,
+    mountedSurface === "chat" && identityKey?.startsWith("account:") === true
+  );
+  /*
+    The first real ChatInput caller is deliberately fixture-only. It proves
+    state ownership, exact-draft binding and decision focus in the complete
+    composer without creating a provider, billing or Router path. The server
+    can only send `e2e_fixture` mode inside loopback fixture mode, so production
+    keeps rendering no Refiner surface even if a rollout row is accidentally
+    added.
+  */
+  const [promptRefinerState, setPromptRefinerState] =
+    useState<PromptRefinerUiState>({ status: "idle" });
+  const [promptRefinerFixtureSettledSequence, setPromptRefinerFixtureSettledSequence] =
+    useState<number | null>(null);
+  const promptRefinerRequestSequenceRef = useRef(0);
+  const promptRefinerAbortControllerRef = useRef<AbortController | null>(null);
+  const promptRefinerDraftRef = useRef(inputValue);
+  const promptRefinerBoundDraftRef = useRef<string | null>(null);
+  const promptRefinerResolutionRef = useRef<PromptRefinerResolution | null>(null);
+  const promptRefinerReadySuggestionRef = useRef<BoundPromptRefinerSuggestion | null>(null);
+  const promptRefinerReadyScopeRef = useRef<PromptRefinerDraftScope | null>(null);
+  const promptRefinerConsumedKeysRef = useRef(new Set<string>());
+  const promptRefinerOffered = promptRefinerMode === "e2e_fixture";
+  const promptRefinerScopeKey = JSON.stringify([
+    identityKey ?? null,
+    mountedSurface,
+    currentChatId ?? null,
+    promptRefinerMode,
+  ]);
+  const promptRefinerScopeKeyRef = useRef(promptRefinerScopeKey);
+
+  const resetPromptRefinerFixture = useCallback(() => {
+    promptRefinerRequestSequenceRef.current += 1;
+    promptRefinerAbortControllerRef.current?.abort();
+    promptRefinerAbortControllerRef.current = null;
+    promptRefinerBoundDraftRef.current = null;
+    promptRefinerResolutionRef.current = null;
+    promptRefinerReadySuggestionRef.current = null;
+    promptRefinerReadyScopeRef.current = null;
+    setPromptRefinerState({ status: "idle" });
+  }, []);
+
+  useLayoutEffect(() => {
+    promptRefinerDraftRef.current = inputValue;
+    const boundDraft = promptRefinerBoundDraftRef.current;
+    if (boundDraft !== null && boundDraft !== inputValue) {
+      resetPromptRefinerFixture();
+    }
+    const resolution = promptRefinerResolutionRef.current;
+    if (resolution && resolution.displayPrompt !== inputValue) {
+      // The preview belongs only to the exact authored source bytes. An edit
+      // starts a new draft; no old execution prompt may follow it.
+      resetPromptRefinerFixture();
+    }
+  }, [inputValue, resetPromptRefinerFixture]);
+
+  useEffect(
+    () => () => {
+      promptRefinerAbortControllerRef.current?.abort();
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (
+      promptRefinerMode !== "e2e_fixture" ||
+      promptRefinerFixtureSettledSequence === null
+    ) {
+      return;
+    }
+    // Test-only positive synchronization point. This effect runs after React
+    // committed the same fetch continuation's state update, so an absence
+    // assertion made after the event cannot win a race against that update.
+    document.documentElement.dataset.promptRefinerFixtureSettled = String(
+      promptRefinerFixtureSettledSequence
+    );
+  }, [promptRefinerFixtureSettledSequence, promptRefinerMode]);
+
+  useLayoutEffect(() => {
+    if (promptRefinerScopeKeyRef.current === promptRefinerScopeKey) return;
+    promptRefinerScopeKeyRef.current = promptRefinerScopeKey;
+    // Conversation, identity and the server-owned offer mode bind this
+    // fixture epoch. A same-text draft or late response cannot survive a
+    // scope change or an off/on transition.
+    resetPromptRefinerFixture();
+  }, [promptRefinerScopeKey, resetPromptRefinerFixture]);
+
+  const handlePromptRefinerRequest = useCallback(
+    (sourcePrompt: string) => {
+      if (promptRefinerMode !== "e2e_fixture") return;
+      // A validated acceptance is a read-only preview until the authored
+      // draft changes. Do not clear its provenance for a second request.
+      if (promptRefinerResolutionRef.current?.decision === "accepted") return;
+      promptRefinerAbortControllerRef.current?.abort();
+      const requestSequence = ++promptRefinerRequestSequenceRef.current;
+      const request: PromptRefinerRequest = {
+        requestId: `fixture_${requestSequence}`,
+        prompt: sourcePrompt,
+      };
+      const requestScopeKey = promptRefinerScopeKeyRef.current;
+      const requestScope: PromptRefinerDraftScope = {
+        identityKey: identityKey ?? null,
+        mountedSurface,
+        conversationId: currentChatId ?? null,
+      };
+      const controller = new AbortController();
+      promptRefinerAbortControllerRef.current = controller;
+      promptRefinerBoundDraftRef.current = request.prompt;
+      promptRefinerResolutionRef.current = null;
+      promptRefinerReadySuggestionRef.current = null;
+      promptRefinerReadyScopeRef.current = null;
+      setPromptRefinerState({ status: "requesting", request });
+      void fetch("/e2e/prompt-refiner-adapter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("prompt_refiner_fixture_failed");
+          const payload = promptRefinerResponseSchema.parse(await response.json());
+          if (
+            requestSequence !== promptRefinerRequestSequenceRef.current ||
+            requestScopeKey !== promptRefinerScopeKeyRef.current
+          ) {
+            return;
+          }
+          const suggestion = bindPromptRefinerSuggestion({
+            request,
+            currentPrompt: promptRefinerDraftRef.current,
+            response: payload,
+          });
+          promptRefinerReadySuggestionRef.current = suggestion;
+          promptRefinerReadyScopeRef.current = suggestion ? requestScope : null;
+          setPromptRefinerState(
+            suggestion ? { status: "ready", suggestion } : { status: "idle" }
+          );
+        })
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (
+            requestSequence !== promptRefinerRequestSequenceRef.current ||
+            requestScopeKey !== promptRefinerScopeKeyRef.current
+          ) {
+            return;
+          }
+          promptRefinerReadySuggestionRef.current = null;
+          promptRefinerReadyScopeRef.current = null;
+          setPromptRefinerState(
+            promptRefinerDraftRef.current === request.prompt
+              ? { status: "failed", request, failureCode: "fixture_response_invalid" }
+              : { status: "idle" }
+          );
+        })
+        .finally(() => {
+          if (promptRefinerAbortControllerRef.current === controller) {
+            promptRefinerAbortControllerRef.current = null;
+          }
+          setPromptRefinerFixtureSettledSequence(requestSequence);
+        });
+    }, [promptRefinerMode, identityKey, mountedSurface, currentChatId]
+  );
+
+  const handlePromptRefinerDecision = useCallback((resolution: PromptRefinerResolution) => {
+    if (promptRefinerMode !== "e2e_fixture") return;
+    const readySuggestion = promptRefinerReadySuggestionRef.current;
+    const readyScope = promptRefinerReadyScopeRef.current;
+    if (!readySuggestion || !readyScope) {
+      // A second click cannot consume the same fixture suggestion twice.
+      return;
+    }
+    try {
+      const handoff = validatePromptRefinerFixtureHandoff({
+        readySuggestion,
+        resolution,
+        readyScope,
+        currentScope: {
+          identityKey: identityKey ?? null,
+          mountedSurface,
+          conversationId: currentChatId ?? null,
+        },
+        currentDraft: inputValue,
+        consumedKeys: promptRefinerConsumedKeysRef.current,
+      });
+      // Consume before changing React state: two callbacks from the same
+      // rendered button cannot both hand off this suggestion.
+      promptRefinerConsumedKeysRef.current.add(handoff.consumptionKey);
+      promptRefinerBoundDraftRef.current = null;
+      // Retain this consumed pair until the next request or scope reset.
+      // A second callback from the same render then reaches the duplicate
+      // guard instead of consuming the suggestion again.
+      // The accepted proposal stays outside the controlled composer and its
+      // durable draft writer. Product execution needs a separate server handoff.
+      promptRefinerResolutionRef.current =
+        handoff.resolution.decision === "accepted" ? handoff.resolution : null;
+      setPromptRefinerState(handoff.resolution.decision === "accepted"
+        ? { status: "accepted_preview", suggestion: readySuggestion }
+        : { status: "idle" });
+      return;
+    } catch (error) {
+      if (error instanceof Error && error.message === "prompt_refiner_handoff_duplicate") {
+        return;
+      }
+      resetPromptRefinerFixture();
+      return;
+    }
+  }, [promptRefinerMode, identityKey, mountedSurface, currentChatId, inputValue, resetPromptRefinerFixture]);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -831,14 +1198,55 @@ export function ChatPageClient({
    * derivation; it changes nothing about credits, preflight, admission,
    * concurrency or message storage.
    */
-  const [pendingSubmission, setPendingSubmission] = useState<{
+  type PendingSubmissionOwner = {
+    token: string;
+    identityKey: string | null;
+    identityEpoch: number;
     originConversationId: string | null;
-  } | null>(null);
+    recovery?: "message-receipt-unknown";
+  };
+  const pendingSubmissionOwnersRef = useRef(
+    new Map<string, PendingSubmissionOwner>()
+  );
+  const [pendingSubmissionOwners, setPendingSubmissionOwners] = useState(
+    () => new Map<string, PendingSubmissionOwner>()
+  );
+  // Browser-realm monotonic allocation also fences a preserved async closure
+  // when App Router replaces the page tree during A→B→A. A component-local
+  // counter would restart at zero and make the returning A indistinguishable
+  // from the old A epoch that owns the late Message response.
+  // The browser-realm fence is adopted in the layout effect below. Rendering
+  // (including SSR) never reads or mutates module-global identity state.
+  const [identityEpoch, setIdentityEpoch] = useState(0);
+  const submitIdentityFenceRef = useRef({ identityKey, epoch: identityEpoch });
+  useLayoutEffect(() => {
+    const adopted = adoptActiveChatIdentity(identityKey);
+    const nextFence = {
+      identityKey,
+      epoch: adopted.epoch,
+    };
+    const current = submitIdentityFenceRef.current;
+    if (current.identityKey === nextFence.identityKey &&
+        current.epoch === nextFence.epoch) return;
+    submitIdentityFenceRef.current = nextFence;
+    // Publish the ref-owned fence to panels. The ref is the async authority;
+    // state only ensures the committed child tree captures the new epoch.
+    setIdentityEpoch(nextFence.epoch);
+  }, [identityKey]);
+  const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
+  const pendingSubmission =
+    pendingSubmissionOwners.get(pendingSubmissionOwnerKey) ?? null;
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
     chatId: string;
     userMessageId: string;
+    /** True only after an account Message receipt/mapping was accepted. */
+    messageWasDurablySaved: boolean;
+    /** Conversation-selection epoch at acceptance; independent of identity. */
+    conversationSelectionTicket: number;
+    /** Identity/session epoch that originally owned this accepted send. */
+    identityEpoch: number;
     /**
      * The models this send was actually made for -- the set the preflight
      * priced, reserved admission slots for, and the send barrier confirmed
@@ -864,6 +1272,14 @@ export function ChatPageClient({
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
   } | null>(null);
+  const providerDispatchedPromptIdsRef = useRef<Set<string>>(new Set());
+  const pendingDurableUndispatchedTurnsRef = useRef(new Map<string, {
+    identityKey: string;
+    identityEpoch: number;
+    conversationId: string;
+    turnId: string;
+    selectionTicket: number;
+  }>());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
@@ -1507,6 +1923,36 @@ export function ChatPageClient({
   const guestCarryoverAppliedRef = useRef(false);
   const guestBootstrapAppliedRef = useRef(false);
   const currentChatIdRef = useRef(currentChatId);
+  // Only the newest selection intent may apply an asynchronous surface read.
+  // A new blank/image intent also invalidates reads when the id stays null.
+  const conversationSelectionTicketRef = useRef(0);
+  const conversationNavigationAttemptRef = useRef(0);
+  const pendingCreatedChatRef = useRef<{
+    id: string;
+    title: string;
+    identityKey: string;
+    modelIds: string[];
+    disabledIds: string[];
+  } | null>(null);
+  const clearPendingCreatedChatIfOwned = useCallback(
+    (conversationId: string, ownerIdentityKey: string | null) => {
+      const pending = pendingCreatedChatRef.current;
+      if (pending?.id === conversationId &&
+          pending.identityKey === ownerIdentityKey) {
+        pendingCreatedChatRef.current = null;
+      }
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
+    pendingCreatedChatRef.current = null;
+    return () => {
+      conversationNavigationAttemptRef.current = allocateConversationNavigationAttempt();
+      pendingCreatedChatRef.current = null;
+    };
+  }, [identityKey]);
 
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
@@ -1533,6 +1979,13 @@ export function ChatPageClient({
   const showToastRef = useRef<
     ((message: string, tone: AppToast["tone"]) => void) | null
   >(null);
+  // A durable Message can lose dispatch authority after it is saved. Keep
+  // only the opaque (identity, conversation, turn id) disposition here -- never the
+  // prompt, admission token or context bundle -- so returning to that exact
+  // conversation can explain what happened without replaying a provider
+  // request. This state is tab-local and cleared at every identity boundary.
+  const savedQuestionNotSentKeysRef = useRef<Set<string>>(new Set());
+  const [savedQuestionNotSentRevision, setSavedQuestionNotSentRevision] = useState(0);
 
   const belongsToCurrentIdentity = useCallback(
     (id: string | null | undefined) =>
@@ -1582,6 +2035,11 @@ export function ChatPageClient({
     );
     identityNamespaceRef.current = identityNamespace;
     appliedIdentityKeyRef.current = nextKey;
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      nextKey
+    );
     // First resolution of a freshly mounted tab: there is no previous identity
     // to have carried anything over from, and the restore effect below still
     // validates the saved id against this account's own conversation list.
@@ -1596,6 +2054,11 @@ export function ChatPageClient({
     modelSettingsSyncQueueRef.current =
       createConversationModelSettingsSyncQueue();
     staleConversationIdsRef.current.clear();
+    clearSavedQuestionNotSentKeys(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage
+    );
+    pendingDurableUndispatchedTurnsRef.current.clear();
     // Panel transcripts and their in-flight runs are held per (identity,
     // conversation, model) so they survive a conversation switch
     // (lib/chatStreamRuntime.ts). Surviving an *identity* change is a
@@ -1619,6 +2082,7 @@ export function ChatPageClient({
 
     const retainedId = selectionAfterIdentityTransition(carriedId, transition);
     if (retainedId !== carriedId) {
+      conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
       currentChatIdRef.current = retainedId;
       setCurrentChatId(retainedId);
       setPromptPayload(null);
@@ -1668,6 +2132,7 @@ export function ChatPageClient({
         previous.filter((conversation) => conversation.id !== conversationId)
       );
       if (currentChatIdRef.current === conversationId) {
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         // A new chat starts with no assistant. Carrying the last one over
@@ -1898,6 +2363,279 @@ export function ChatPageClient({
   useEffect(() => {
     showToastRef.current = showToast;
   }, [showToast]);
+
+  const signalSavedQuestionNotSentChange = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT));
+  }, []);
+
+  const persistSavedQuestionNotSent = useCallback((dispositionKey: string) => {
+    const ownerIdentityKey = dispositionKey.split("\0", 1)[0] ?? "";
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      ownerIdentityKey
+    );
+    addSavedQuestionNotSentKey(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      dispositionKey
+    );
+    // `storage` is not emitted to the same window. This prompt-free event lets
+    // a newer App Router tree consume a receipt written by an older closure.
+    signalSavedQuestionNotSentChange();
+  }, [signalSavedQuestionNotSentChange]);
+
+  const promoteCurrentUndispatchedTurns = useCallback((
+    selectionIdentityKey: string
+  ) => {
+    const originConversationId = currentChatIdRef.current;
+    if (!originConversationId) return;
+    const dispositions: string[] = [];
+    for (const [promptId, pending] of pendingDurableUndispatchedTurnsRef.current) {
+      if (pending.identityKey !== selectionIdentityKey ||
+          pending.identityEpoch !== submitIdentityFenceRef.current.epoch ||
+          pending.conversationId !== originConversationId ||
+          providerDispatchedPromptIdsRef.current.has(promptId)) continue;
+      dispositions.push(
+        `${pending.identityKey}\0${pending.conversationId}\0${pending.turnId}`
+      );
+      pendingDurableUndispatchedTurnsRef.current.delete(promptId);
+    }
+    if (dispositions.length === 0) return;
+    bindSavedQuestionNotSentOwner(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      selectionIdentityKey
+    );
+    addSavedQuestionNotSentKeys(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      dispositions
+    );
+    signalSavedQuestionNotSentChange();
+  }, [signalSavedQuestionNotSentChange]);
+
+  const handleSavedQuestionNotSent = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    originSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => {
+    const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: currentIdentityKey,
+      submitFence: submitIdentityFenceRef.current,
+    })) return;
+
+    const dispositionKey = `${originIdentityKey}\0${conversationId}\0${turnId}`;
+    pendingDurableUndispatchedTurnsRef.current.delete(turnId);
+    if (providerDispatchedPromptIdsRef.current.has(turnId)) {
+      // Provider-start is monotonic across sibling panels. One panel can cross
+      // the provider boundary while another is still waiting on preparation;
+      // that sibling's later cleanup must not recreate an "undispatched"
+      // receipt for the exact turn the provider has already received.
+      removeSavedQuestionNotSentKey(
+        savedQuestionNotSentKeysRef.current,
+        typeof window === "undefined" ? null : window.sessionStorage,
+        dispositionKey
+      );
+      return;
+    }
+    if (currentChatIdRef.current === conversationId) {
+      if (reason === "conversation-left") {
+        // Conversation cleanup can be a responsive shell remount, a full page
+        // unmount, or an explicit re-click/new-chat departure. Persist first;
+        // the consumer below protects the exact still-mounted payload during
+        // a responsive remount and consumes it once that payload is gone.
+        persistSavedQuestionNotSent(dispositionKey);
+        return;
+      }
+      removeSavedQuestionNotSentKey(
+        savedQuestionNotSentKeysRef.current,
+        typeof window === "undefined" ? null : window.sessionStorage,
+        dispositionKey
+      );
+      // A responsive-shell remount also cleans up an incomplete panel. It is
+      // not abandonment while the originating conversation and selection
+      // epoch are still current. Identity handoff is fenced separately by the
+      // monotonic identity epoch above; this ticket only describes a committed
+      // conversation transition within that identity epoch.
+      if (reason === "terminal" ||
+          conversationSelectionTicketRef.current !== originSelectionTicket) {
+        showToast(t("chat.savedQuestionNotSent"), "info");
+      }
+      return;
+    }
+
+    persistSavedQuestionNotSent(dispositionKey);
+  }, [persistSavedQuestionNotSent, showToast, t]);
+
+  const handleDurableUndispatchedAccepted = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    originSelectionTicket: number
+  ): boolean => {
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: identityNamespaceKey(identityNamespaceRef.current),
+      submitFence: submitIdentityFenceRef.current,
+    })) return false;
+    // Cross-surface navigation unmounts this workspace before a held Message
+    // save can settle.  In that case there will be no later selection cleanup
+    // in this component tree to promote the accepted receipt into a
+    // conversation-scoped disposition.  The accepted receipt is already the
+    // exact durable boundary, and leaving the origin invalidates this panel's
+    // dispatch authority, so persist the opaque key immediately.  The prompt,
+    // admission token and context never cross the surface boundary.
+    if (currentChatIdRef.current !== conversationId ||
+        conversationSelectionTicketRef.current !== originSelectionTicket) {
+      const dispositionKey = `${originIdentityKey}\0${conversationId}\0${turnId}`;
+      persistSavedQuestionNotSent(dispositionKey);
+      return false;
+    }
+    setBoundedMapEntry(pendingDurableUndispatchedTurnsRef.current, turnId, {
+      identityKey: originIdentityKey,
+      identityEpoch: originIdentityEpoch,
+      conversationId,
+      turnId,
+      selectionTicket: originSelectionTicket,
+    });
+    return true;
+  }, [persistSavedQuestionNotSent]);
+
+  const handleProviderDispatchStarted = useCallback((
+    originIdentityKey: string,
+    originIdentityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => {
+    if (!chatIdentityCallbackIsCurrent({
+      originIdentityKey,
+      originIdentityEpoch,
+      currentNamespaceKey: identityNamespaceKey(identityNamespaceRef.current),
+      submitFence: submitIdentityFenceRef.current,
+    })) return;
+    providerDispatchedPromptIdsRef.current.add(promptId);
+    pendingDurableUndispatchedTurnsRef.current.delete(promptId);
+    // A held model-only receipt can settle after a surface switch and record
+    // its opaque disposition before the continuation reaches the exact
+    // provider-fetch boundary. If that boundary is reached, it is not an
+    // undispatched turn: retract both the in-memory and tab-persistent key.
+    // Turn ids are server-issued/UUID opaque ids, so no prompt or execution
+    // authority is needed to cancel the notice.
+    removeSavedQuestionNotSentKey(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      `${originIdentityKey}\0${conversationId}\0${promptId}`
+    );
+    if (providerDispatchedPromptIdsRef.current.size > 64) {
+      const oldest = providerDispatchedPromptIdsRef.current.values().next().value;
+      if (typeof oldest === "string") {
+        providerDispatchedPromptIdsRef.current.delete(oldest);
+      }
+    }
+  }, []);
+
+  const consumeSavedQuestionNotSent = useCallback((
+    targetIdentityKey: string,
+    conversationId: string,
+    preserveKey: string | null = null
+  ) => {
+    const found = consumeSavedQuestionNotSentPrefix(
+      savedQuestionNotSentKeysRef.current,
+      typeof window === "undefined" ? null : window.sessionStorage,
+      targetIdentityKey,
+      conversationId,
+      preserveKey
+    );
+    if (!found) return false;
+    // Consumption runs during surface arrival. Dispatch through the shared
+    // event after the queued effect boundary so the newly mounted workspace's
+    // toast listener owns the notice; setting this mount's local state directly
+    // can be discarded by the App Router handoff that is still settling.
+    dispatchAppToast(t("chat.savedQuestionNotSent"), "info");
+    return true;
+  }, [t]);
+
+  useEffect(() => {
+    const handleChange = () => {
+      setSavedQuestionNotSentRevision((value) => value + 1);
+    };
+    window.addEventListener(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT, handleChange);
+    return () => {
+      window.removeEventListener(SAVED_QUESTION_NOT_SENT_CHANGE_EVENT, handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialConversationResolved || !identityKey || !currentChatId) return;
+    // A committed navigation updates the ref synchronously before React can
+    // commit the next conversation state. A same-window disposition event in
+    // that gap belongs to the destination tree, not the stale origin render.
+    if (currentChatIdRef.current !== currentChatId) return;
+    // A routed surface can mount with the tab's previously active id before
+    // it applies the conversation named by the URL. Do not consume an origin
+    // notice against that transient id: it would render on the wrong surface
+    // and disappear when the route selection finishes.
+    const handoff = initialConversationHandoffRef.current;
+    if (handoff.requestedId === initialConversationId && !handoff.settled) return;
+    const protectedDispositionKey = promptPayload?.messageWasDurablySaved &&
+      promptPayload.chatId === currentChatId &&
+      promptPayload.identityEpoch === submitIdentityFenceRef.current.epoch &&
+      !providerDispatchedPromptIdsRef.current.has(promptPayload.id)
+        ? `${identityKey}\0${currentChatId}\0${promptPayload.id}`
+        : null;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) {
+        consumeSavedQuestionNotSent(
+          identityKey,
+          currentChatId,
+          protectedDispositionKey
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [consumeSavedQuestionNotSent, currentChatId, identityKey, initialConversationId,
+    initialConversationHandoffRevision, isInitialConversationResolved,
+    promptPayload, savedQuestionNotSentRevision]);
+
+  const restoreChatPrompt = useCallback((prompt: {
+    text: string;
+    attachments: ChatAttachment[];
+    targetChatId: string;
+  }) => {
+    if (mountedSurface !== "chat" || !identityKey ||
+        identityKey !== identityNamespaceKey(identityNamespaceRef.current) ||
+        prompt.targetChatId !== currentChatIdRef.current) return;
+    const draft = readDraft(prompt.targetChatId);
+    if (draft.text.length > 0 || draft.attachments.length > 0) {
+      showToast(t("chat.restoreDraftNotEmpty"), "info");
+      return;
+    }
+    setInputValue(prompt.text, prompt.targetChatId);
+    setDraftAttachments(prompt.attachments, prompt.targetChatId);
+    setFocusToken((value) => value + 1);
+  }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
+
+  useEffect(() => {
+    if (mountedSurface !== "chat" || !isInitialConversationResolved || !currentChatId) return;
+    const url = new URL(window.location.href);
+    // A not-yet-resolved owned read must not erase the id needed for reload.
+    // New-chat navigation removes it explicitly by navigating to the bare route.
+    url.searchParams.set(CONVERSATION_HANDOFF_PARAM, currentChatId);
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [currentChatId, isInitialConversationResolved, mountedSurface]);
 
   const runComparisonPreflight = useCallback(
     async ({
@@ -2482,6 +3220,9 @@ export function ChatPageClient({
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
+          // A guest row starts its life as its own last activity, so the
+          // sidebar can date it before any answer arrives.
+          updatedAt: new Date().toISOString(),
         };
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
@@ -2544,7 +3285,13 @@ export function ChatPageClient({
                     ? clampSelectedModels(lastGuestModels.filter((id): id is string => typeof id === "string"))
                     : [];
                 if (carriedOverModels.length > 0) {
-                    queueMicrotask(() => setSelectedModels(carriedOverModels));
+                    queueMicrotask(() => {
+                        if (mountedSurface === "chat" && currentChatIdRef.current) return;
+                        setSelectedModels(newWorkspaceDraftModels({
+                            surface: mountedSurface, models: carriedOverModels,
+                            fallbackModelId: APP_DEFAULTS.defaultModelId,
+                        }));
+                    });
                 }
             } catch (error) {
                 console.error("Failed to read guest model configuration for carryover:", error);
@@ -2558,6 +3305,7 @@ export function ChatPageClient({
         isConversationsLoaded,
         isGuestMode,
         isUserSettingsLoaded,
+        mountedSurface,
     ]);
 
     useEffect(() => {
@@ -2574,7 +3322,10 @@ export function ChatPageClient({
 
             setUserDefaultModelIds(nextDefaultModels);
             if (!currentChatId) {
-                setSelectedModels(nextDefaultModels);
+                setSelectedModels(newWorkspaceDraftModels({
+                    surface: mountedSurface, models: nextDefaultModels,
+                    fallbackModelId: APP_DEFAULTS.defaultModelId,
+                }));
                 setDisabledPanels([]);
             }
         };
@@ -2589,7 +3340,7 @@ export function ChatPageClient({
                 handleSettingsUpdated
             );
         };
-    }, [currentChatId, isEnabledModelId]);
+    }, [currentChatId, isEnabledModelId, mountedSurface]);
 
   const fetchConversations = useCallback(async () => {
     if (!sessionUserId) return;
@@ -2723,11 +3474,13 @@ export function ChatPageClient({
                                 : [data.defaultModel];
                         setUserDefaultModelIds(nextDefaultModels);
                         if (!currentChatIdRef.current) {
-                            setSelectedModels(
-                                data.isNewAccount
+                            setSelectedModels(newWorkspaceDraftModels({
+                                surface: mountedSurface,
+                                models: data.isNewAccount
                                     ? newAccountDefaultSelectedModelsRef.current
-                                    : nextDefaultModels
-                            );
+                                    : nextDefaultModels,
+                                fallbackModelId: APP_DEFAULTS.defaultModelId,
+                            }));
                         }
                     }
 
@@ -2819,9 +3572,18 @@ export function ChatPageClient({
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [fetchConversations, sessionUserId, setLang, status]);
+    }, [fetchConversations, mountedSurface, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
+        resetPromptRefinerFixture();
+        if (mountedSurface === "continuation" && identityKey) {
+            // This route transition unmounts the continuation tree. Promote
+            // accepted turns before changing the selection ticket so their
+            // prompt-free receipt survives into the next mount.
+            promoteCurrentUndispatchedTurns(identityKey);
+        }
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
+        pendingCreatedChatRef.current = null;
         /*
           A new chat on a continuation's URL has to leave that URL.
 
@@ -2833,9 +3595,15 @@ export function ChatPageClient({
           arriving there with no conversation open is exactly its own new-chat
           state.
         */
-        if (mountedSurface !== "workspace") {
+        if (mountedSurface === "continuation") {
+            // A fresh Chat entry re-runs the server's current offered gate.
+            // Existing owned Chat remains readable independently of that gate.
             router.push(LEGACY_REVIEW_PATH);
             return;
+        }
+        if (mountedSurface === "chat") {
+            router.push(CHAT_WORKSPACE_PATH);
+            router.refresh();
         }
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
@@ -2871,6 +3639,9 @@ export function ChatPageClient({
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
+          // A guest row starts its life as its own last activity, so the
+          // sidebar can date it before any answer arrives.
+          updatedAt: new Date().toISOString(),
         };
           setConversations((prev) => [newGuestChat, ...prev]);
         setCurrentChatId(newGuestChat.id);
@@ -2882,7 +3653,11 @@ export function ChatPageClient({
         setCurrentChatId(null);
         // A new chat starts from the saved new-conversation combination, not
         // just the representative model.
-        setSelectedModels(clampSelectedModels(uniqueStrings(userDefaultModelIds)));
+        setSelectedModels(newWorkspaceDraftModels({
+            surface: mountedSurface,
+            models: clampSelectedModels(uniqueStrings(userDefaultModelIds)),
+            fallbackModelId: APP_DEFAULTS.defaultModelId,
+        }));
         blankedDraftScope = null;
     }
 
@@ -2905,6 +3680,13 @@ export function ChatPageClient({
         modelId?: string,
         options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
     ) => {
+        if (promptRefinerMode === "e2e_fixture") {
+            // The no-cost Refiner fixture cannot hand an accepted synthetic
+            // Chat draft to a second provider-facing workspace either.
+            return;
+        }
+        resetPromptRefinerFixture();
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
             /*
@@ -2961,6 +3743,7 @@ export function ChatPageClient({
     // Leaving the image draft without generating: the chat draft comes back
     // exactly as it was, in the conversation it belonged to.
     const handleCancelImageDraft = () => {
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         const restore = chatDraftBeforeImage;
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
@@ -2975,6 +3758,8 @@ export function ChatPageClient({
     };
 
     const handleNewImage = () => {
+        resetPromptRefinerFixture();
+        conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
@@ -3042,6 +3827,17 @@ export function ChatPageClient({
         skipLockCheck = false,
         surfaceHint?: ConversationSurface
     ) => {
+        const outstandingHandoff = initialConversationHandoffRef.current;
+        if (!outstandingHandoff.settled &&
+            outstandingHandoff.requestedId !== id) {
+            // An explicit selection of another conversation replaces the URL
+            // handoff. From this point the frozen server prop is historical,
+            // not a reason to suppress this selection's future notices.
+            settleInitialConversationHandoff();
+        }
+        const navigationAttempt = allocateConversationNavigationAttempt();
+        conversationNavigationAttemptRef.current = navigationAttempt;
+        const selectionIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
         /*
           A continuation opens at its own URL
           (docs/policy/external-conversation-continuation.md §8.2).
@@ -3056,8 +3852,78 @@ export function ChatPageClient({
           already holding answers it. Both come from the server; nothing here
           derives a surface from an id or a kind.
         */
-        const targetSurface =
+        let targetSurface =
             surfaceHint ?? conversations.find((c) => c.id === id)?.surface;
+        if (mountedSurface === "chat" && !targetSurface && !isGuestMode) {
+            // A URL/list miss is not product authority. Resolve the owned row
+            // before mounting a Chat transcript for an unclassified id.
+            const accountId = accountConversationId(id);
+            if (!accountId) {
+                settleInitialConversationHandoff(id);
+                return;
+            }
+            const originConversationId = currentChatIdRef.current;
+            const lookupIsCurrent = () => Boolean(identityKey) &&
+                navigationAttempt === conversationNavigationAttemptRef.current &&
+                identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+                originConversationId === currentChatIdRef.current;
+            if (!lookupIsCurrent()) return;
+            try {
+                const response = await fetch(`/api/conversations/${accountId}`, { cache: "no-store" });
+                if (!lookupIsCurrent()) {
+                    await discardResponseBody(response);
+                    return;
+                }
+                if (!response.ok) {
+                    await discardResponseBody(response);
+                    if (lookupIsCurrent()) {
+                        settleInitialConversationHandoff(id);
+                        showToast(t("chat.conversationOpenFailed"), "info");
+                    }
+                    return;
+                }
+                const detail = await response.json();
+                if (!lookupIsCurrent()) return;
+                if (!["chat", "workspace", "continuation"].includes(detail.surface)) {
+                    settleInitialConversationHandoff(id);
+                    return;
+                }
+                targetSurface = detail.surface;
+            } catch {
+                if (lookupIsCurrent()) {
+                    settleInitialConversationHandoff(id);
+                    showToast(t("chat.conversationOpenFailed"), "info");
+                }
+                return;
+            }
+        }
+
+        // A refused click is not a departure. In particular, opening the lock
+        // prompt must not turn the current conversation's pending receipt into
+        // a saved-but-undispatched disposition. Promote only after all lookup
+        // and lock checks have accepted the target, immediately before the
+        // actual route or selection transition below.
+        if (!isGuestMode && !skipLockCheck) {
+            const targetConv = conversations.find((c) => c.id === id);
+            if (targetConv?.isLocked) {
+                setLockedSelectDialog({ id, password: "", error: "" });
+                return;
+            }
+        }
+        const commitConversationSelection = (forceRouteTransition = false) => {
+            if (!forceRouteTransition && id === currentChatIdRef.current) {
+              settleInitialConversationHandoff();
+              return false;
+            }
+            if (forceRouteTransition || id !== currentChatIdRef.current) {
+              promoteCurrentUndispatchedTurns(selectionIdentityKey);
+            }
+            conversationSelectionTicketRef.current =
+              allocateConversationSelectionTicket();
+            currentChatIdRef.current = id;
+            settleInitialConversationHandoff();
+            return true;
+        };
         /*
           Navigate whenever the target's surface is not the one this mount is.
 
@@ -3068,9 +3934,8 @@ export function ChatPageClient({
           leave the continuation's URL and its imported prelude on screen
           beside a conversation they do not describe.
 
-          `undefined` -- a row the list has not classified -- is left alone
-          rather than guessed at: it takes the in-place path this screen has
-          always taken.
+          Chat resolves unclassified rows through the owned server read above.
+          Legacy Review retains its existing in-place read path.
         */
         if (targetSurface) {
             /*
@@ -3103,6 +3968,11 @@ export function ChatPageClient({
                 // open row): pushing the current path again is a history entry
                 // that goes nowhere.
                 if (pathname !== ownPath) {
+                    // Record the departure before navigation unmounts this
+                    // workspace. A late durable model-only save otherwise sees
+                    // the conversation being left as "current" and emits its
+                    // notice into a component tree that no longer exists.
+                    commitConversationSelection(true);
                     router.push(ownPath);
                     return;
                 }
@@ -3112,6 +3982,7 @@ export function ChatPageClient({
                 // `LEGACY_REVIEW_PATH`, not `PRODUCT_SURFACE_PATH.review`:
                 // this is where the workspace lives *today*, and the two stop
                 // being equal on the day of the cutover.
+                commitConversationSelection(true);
                 router.push(
                     conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)
                 );
@@ -3119,18 +3990,13 @@ export function ChatPageClient({
             }
         }
 
+        // Keep the continuation routing prefix closure-independent: its
+        // contract is executed in isolation by the surface-boundary tests.
+        // Cross-surface navigation unmounts this workspace and the identity
+        // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
+        pendingCreatedChatRef.current = null;
         latestLocalComparisonPromptRef.current = null;
-
-        if (!isGuestMode && !skipLockCheck) {
-            const targetConv = conversations.find((c) => c.id === id);
-
-            if (targetConv && targetConv.isLocked) {
-                setLockedSelectDialog({ id, password: "", error: "" });
-                return;
-
-            }
-        }
 
         // An image conversation swaps the whole surface for the image
         // workspace: no chat drafts, model settings or panels to restore,
@@ -3141,7 +4007,7 @@ export function ChatPageClient({
             // A real switch, so a new workspace instance: the timeline and the
             // poll loop of the conversation being left must not follow.
             setImageWorkspaceKey(id);
-            currentChatIdRef.current = id;
+            commitConversationSelection();
             setCurrentChatId(id);
             setPromptPayload(null);
             setIsDeepResearchPending(false);
@@ -3167,7 +4033,7 @@ export function ChatPageClient({
           }
         }
 
-	  currentChatIdRef.current = id;
+      commitConversationSelection();
       setCurrentChatId(id);
 	  setPromptPayload(null);
       setIsDeepResearchPending(false);
@@ -3245,6 +4111,18 @@ export function ChatPageClient({
 	  const res = await fetch(`/api/conversations/${accountId}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
+        if (navigationAttempt === conversationNavigationAttemptRef.current &&
+            currentChatIdRef.current === id &&
+            ["chat", "workspace", "continuation"].includes(data.surface) &&
+            data.surface !== mountedSurface) {
+          // The in-place selection above already made `id` current, but this
+          // late server-owned surface answer still leaves the mounted tree.
+          // Re-run the departure barrier so durable-but-undispatched turns are
+          // promoted and late receipts cannot disappear with the unmount.
+          commitConversationSelection(true);
+          router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));
+          return;
+        }
         // A detail response that lands late must not clobber newer local
         // state: neither another conversation the user has since switched
         // to, nor a model change made while this request was in flight.
@@ -3356,6 +4234,83 @@ export function ChatPageClient({
         // here instead, because that effect never runs twice.
         if (hasUrlSelectionPreset && !comparisonPresetAppliedRef.current) return;
 
+        /*
+          A URL that names a conversation wins over both the open client state
+          and the tab's last conversation.
+
+          This must run before the `currentChatId` early return below. App
+          Router may retain this client tree when crossing Chat and Review, so
+          the state can still name B while the new URL explicitly hands Review
+          conversation A back to this workspace. Treating B as "already open"
+          would leave the URL handoff unspent and would also prevent A-bound
+          durable dispositions from being consumed.
+
+          The applied value is the id, not a component-lifetime boolean. A ->
+          B -> A is therefore two distinct handoffs even when React preserves
+          the component. Routed through `handleSelectConversation` like any
+          other selection, so ownership, lock and surface checks remain intact.
+        */
+        if (
+            initialConversationId &&
+            initialConversationAppliedRef.current !== initialConversationId &&
+            conversations.some(
+                (conversation) => conversation.id === initialConversationId
+            )
+        ) {
+            initialConversationAppliedRef.current = initialConversationId;
+            /*
+              The handoff parameter is spent the moment it is honoured.
+
+              `/chat?conversation=[id]` is how a click on another surface hands
+              this workspace the conversation it named. Once applied it would
+              only be a claim about which conversation is open, and the
+              workspace changes that in place on every subsequent sidebar
+              click -- so within seconds the address bar would be naming a
+              conversation the user is no longer in, and a reload or a shared
+              link would reopen it.
+
+              `replaceState`, never a pushed entry: Back must return to the
+              screen the user came from, not replay this selection. The
+              continuation's own path carries no parameter and is left alone.
+            */
+            if (mountedSurface !== "chat" && window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
+                const url = new URL(window.location.href);
+                url.searchParams.delete(CONVERSATION_HANDOFF_PARAM);
+                window.history.replaceState(
+                    window.history.state,
+                    "",
+                    `${url.pathname}${url.search}${url.hash}`
+                );
+            }
+            queueMicrotask(() => {
+                void handleSelectConversation(initialConversationId);
+                setIsInitialConversationResolved(true);
+            });
+            return;
+        }
+
+        if (
+            initialConversationId &&
+            initialConversationAppliedRef.current !== initialConversationId &&
+            !conversations.some(
+                (conversation) => conversation.id === initialConversationId
+            )
+        ) {
+            // The owned first-page list is authoritative for this bootstrap.
+            // A missing/unowned URL id cannot remain an eternal in-flight
+            // handoff: remember that it was handled and allow the user's
+            // fallback selection to consume its own future disposition.
+            initialConversationAppliedRef.current = initialConversationId;
+            settleInitialConversationHandoff(initialConversationId);
+        }
+
+        // A route without a named conversation re-arms a future handoff of the
+        // same id. This matters when the URL sequence is A -> unnamed -> A and
+        // the App Router retains the client component throughout.
+        if (!initialConversationId) {
+            initialConversationAppliedRef.current = null;
+        }
+
         if (
             currentChatId ||
             isInitialSelectedRef.current ||
@@ -3379,59 +4334,6 @@ export function ChatPageClient({
         // after a sign-out/sign-in in the same tab, etc. -- and
         // handleSelectConversation itself still re-prompts for a locked
         // conversation's password rather than silently opening it.
-        /*
-          A URL that names a conversation wins over the tab's last one.
-
-          `/continuations/[conversationId]` is the caller: the path already
-          says which row this mount is for, so restoring whatever was open
-          before would show a different conversation at that URL -- with the
-          imported prelude beside it describing neither.
-
-          Routed through `handleSelectConversation` like any other selection,
-          so the lock prompt and the surface check still run. An id that is not
-          in this account's just-loaded list is ignored: that list is what the
-          restore below already matches against, and "not yours" and "deleted"
-          are the same answer here as everywhere else.
-        */
-        if (
-            initialConversationId &&
-            !initialConversationAppliedRef.current &&
-            conversations.some(
-                (conversation) => conversation.id === initialConversationId
-            )
-        ) {
-            initialConversationAppliedRef.current = true;
-            /*
-              The handoff parameter is spent the moment it is honoured.
-
-              `/chat?conversation=[id]` is how a click on another surface hands
-              this workspace the conversation it named. Once applied it would
-              only be a claim about which conversation is open, and the
-              workspace changes that in place on every subsequent sidebar
-              click -- so within seconds the address bar would be naming a
-              conversation the user is no longer in, and a reload or a shared
-              link would reopen it.
-
-              `replaceState`, never a pushed entry: Back must return to the
-              screen the user came from, not replay this selection. The
-              continuation's own path carries no parameter and is left alone.
-            */
-            if (window.location.search.includes(CONVERSATION_HANDOFF_PARAM)) {
-                const url = new URL(window.location.href);
-                url.searchParams.delete(CONVERSATION_HANDOFF_PARAM);
-                window.history.replaceState(
-                    window.history.state,
-                    "",
-                    `${url.pathname}${url.search}${url.hash}`
-                );
-            }
-            queueMicrotask(() => {
-                void handleSelectConversation(initialConversationId);
-                setIsInitialConversationResolved(true);
-            });
-            return;
-        }
-
         const savedChatId = window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
         /*
           A restore reopens what was on screen; it never navigates.
@@ -3478,6 +4380,7 @@ export function ChatPageClient({
         isGuestMode,
         isUserSettingsLoaded,
         mountedSurface,
+        settleInitialConversationHandoff,
     ]);
 
     const handleLock = async (id: string, password: string) => {
@@ -3656,6 +4559,10 @@ export function ChatPageClient({
       nextModels: string[],
       nextDisabled: string[]
     ) => {
+      if (mountedSurface === "chat" && nextModels.length !== 1) {
+        showToast(t("chat.singleModelRequired"), "info");
+        return;
+      }
       const models = uniqueStrings(nextModels);
       const disabled = uniqueStrings(nextDisabled).filter((modelId) =>
         models.includes(modelId)
@@ -3674,7 +4581,7 @@ export function ChatPageClient({
         disabled: disabled.filter((modelId) => syncModels.includes(modelId)),
       });
     },
-    [accountConversationId, clampSelectedModels, sessionUserId]
+    [accountConversationId, clampSelectedModels, mountedSurface, sessionUserId, showToast, t]
   );
 
   // Deliberate user action (picked from the tools sheet), not the frequent
@@ -3719,6 +4626,10 @@ export function ChatPageClient({
    * sent against.
    */
   const ensureModelSettingsReady = async (targetChatId: string) => {
+    if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
+      showToast(t("chat.singleModelRequired"), "info");
+      return false;
+    }
     if (isGuestMode || !sessionUserId) {
       return true;
     }
@@ -3773,6 +4684,31 @@ export function ChatPageClient({
       "error"
     );
     return false;
+  };
+
+  // ChatApp retries, follow-ups and payload sends bypass handleGlobalSubmit,
+  // but each crosses onBeforeModelSend. A fixture must refuse that barrier
+  // before any Message write or provider-facing request can start.
+  const ensureModelSettingsReadyForChatApp = async (targetChatId: string) => {
+    const loopbackGate = window as typeof window & {
+      __tomverseChatBeforeModelSendGate?: Promise<void>;
+      __tomverseChatBeforeModelSendStarted?: boolean;
+      __tomverseChatBeforeModelSendCallCount?: number;
+      __tomverseChatBeforeModelSendHoldOnCall?: number;
+    };
+    if (window.location.hostname === "127.0.0.1" &&
+        loopbackGate.__tomverseChatBeforeModelSendGate) {
+      const callCount = (loopbackGate.__tomverseChatBeforeModelSendCallCount ?? 0) + 1;
+      loopbackGate.__tomverseChatBeforeModelSendCallCount = callCount;
+      if (loopbackGate.__tomverseChatBeforeModelSendHoldOnCall === undefined ||
+          loopbackGate.__tomverseChatBeforeModelSendHoldOnCall === callCount) {
+        loopbackGate.__tomverseChatBeforeModelSendStarted = true;
+        await loopbackGate.__tomverseChatBeforeModelSendGate;
+      }
+    }
+    return promptRefinerMode === "e2e_fixture"
+      ? false
+      : ensureModelSettingsReady(targetChatId);
   };
 
   useEffect(() => {
@@ -3881,10 +4817,38 @@ export function ChatPageClient({
   // two preflights, two saved user messages, two charges for one intent. One
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
-  const submitInFlightRef = useRef(false);
   const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
-    if (submitInFlightRef.current) return;
-    submitInFlightRef.current = true;
+    if (promptRefinerMode === "e2e_fixture") {
+      // This mode only exercises a no-cost pre-send proposal. It cannot
+      // authorize any Chat dispatch, including after conversation switches,
+      // draft restoration or an overrideText caller. A browser-local accepted
+      // marker would not survive every restore/remount path safely.
+      return;
+    }
+    const submitFence = submitIdentityFenceRef.current;
+    const ownerKey = identityKey ?? "unresolved";
+    if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
+    const existingChatRuntimeKey = mountedSurface === "chat" && currentChatIdRef.current
+      ? chatRuntimeKey({
+      identityKey: identityKey ?? "account",
+      conversationId: currentChatIdRef.current,
+      modelId: latestModelSettingsRef.current.models[0] ?? "",
+      transcriptScope: "conversation",
+    }) : null;
+    if (existingChatRuntimeKey && !getChatRuntimeSnapshot(existingChatRuntimeKey).isLoaded) {
+      if (getChatRuntimeSnapshot(existingChatRuntimeKey).loadFailed) {
+        showToast(t("chat.workspaceError.body"), "error");
+      }
+      return;
+    }
+    if (existingChatRuntimeKey && isChatRuntimeStreaming(existingChatRuntimeKey)) return;
+    const owner: PendingSubmissionOwner = {
+      token: crypto.randomUUID(),
+      identityKey,
+      identityEpoch: submitFence.epoch,
+      originConversationId: currentChatIdRef.current,
+    };
+    pendingSubmissionOwnersRef.current.set(ownerKey, owner);
     // Which conversation this send started from, published for the shells.
     // A first send on a brand-new chat creates a conversation and the shell
     // adopts its id mid-flight, so between those two moments the panels'
@@ -3893,25 +4857,57 @@ export function ChatPageClient({
     // panel that then loads the still-empty new conversation reports it empty
     // -- which used to send the user back to the welcome screen they had just
     // left. See lib/chatContentState.ts.
-    setPendingSubmission({ originConversationId: currentChatIdRef.current });
+    setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
     try {
-      await runGlobalSubmit(options);
+      await runGlobalSubmit(options, owner);
     } finally {
-      submitInFlightRef.current = false;
+      // Compare-and-delete, never plain clear: A may finish after B has
+      // acquired its own submit token, and A has no authority to unlock B.
+      const finalOwner = pendingSubmissionOwnersRef.current.get(ownerKey);
+      if (finalOwner?.token === owner.token && !finalOwner.recovery) {
+        pendingSubmissionOwnersRef.current.delete(ownerKey);
+        setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
+      }
       // Whatever this send was, the expansion offer is no longer waiting on
       // it: accepted, refused or thrown, the card's buttons come back. The
       // run's own progress is the deep research chip's to report from here.
-      setIsDeepResearchExpanding(false);
+      const currentFence = submitIdentityFenceRef.current;
+      if (currentFence.identityKey === owner.identityKey &&
+          currentFence.epoch === owner.identityEpoch) {
+        setIsDeepResearchExpanding(false);
+      }
       // Cleared in the same commit as the promptPayload a successful send
       // sets, so there is no frame between "no longer pending" and "accepted".
       // A refused send clears it with no payload, and the conversation goes
       // back to being described by its own panels -- which is correct: it
       // really is still empty.
-      setPendingSubmission(null);
     }
   };
 
-  const runGlobalSubmit = async (options?: GlobalSubmitOptions) => {
+  const runGlobalSubmit = async (
+    options: GlobalSubmitOptions | undefined,
+    submitOwner: PendingSubmissionOwner
+  ) => {
+    const submitOwnerIsCurrent = () => {
+      const current = submitIdentityFenceRef.current;
+      const ownerKey = submitOwner.identityKey ?? "unresolved";
+      return Boolean(submitOwner.identityKey) &&
+        activeChatIdentityIs(submitOwner.identityKey!, submitOwner.identityEpoch) &&
+        current.identityKey === submitOwner.identityKey &&
+        current.epoch === submitOwner.identityEpoch &&
+        pendingSubmissionOwnersRef.current.get(ownerKey)?.token ===
+          submitOwner.token;
+    };
+    const holdSubmitForReceiptRecovery = () => {
+      const ownerKey = submitOwner.identityKey ?? "unresolved";
+      const current = pendingSubmissionOwnersRef.current.get(ownerKey);
+      if (current?.token !== submitOwner.token) return;
+      pendingSubmissionOwnersRef.current.set(ownerKey, {
+        ...current,
+        recovery: "message-receipt-unknown",
+      });
+      setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
+    };
     /*
       `overrideText` is a question this page already has, re-sent on the user's
       behalf -- today, the Deep Research expansion under a finished answer. It
@@ -3925,6 +4921,10 @@ export function ChatPageClient({
     const isOverrideSend = typeof options?.overrideText === "string";
     if (!trimmed && isOverrideSend) return;
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
+    if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
+      showToast(t("chat.singleModelRequired"), "info");
+      return;
+    }
     if (activeModelCount === 0) {
       showToast(t("chat.chooseModel"), "error");
       return;
@@ -3933,9 +4933,25 @@ export function ChatPageClient({
     // user is looking somewhere else, and this draft must only ever be
     // cleared once this send has actually been accepted.
     const originScopeId = currentChatId;
+    const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
+      ? captureDraftSend({ text: trimmed, attachments }, originScopeId)
+      : null;
+    // A new blank draft is a new intent even when its id and model stay equal.
+    const preparedSelectionTicket = conversationSelectionTicketRef.current;
+    const preparedModels = [...latestModelSettingsRef.current.models];
+    const preparedDisabled = [...latestModelSettingsRef.current.disabled];
+    const chatOriginStillCurrent = () => submitOwnerIsCurrent() &&
+      (mountedSurface !== "chat" || (
+      Boolean(identityKey) && identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+      preparedSelectionTicket === conversationSelectionTicketRef.current &&
+      currentChatIdRef.current === originScopeId &&
+      sameStringList(preparedModels, latestModelSettingsRef.current.models) &&
+      sameStringList(preparedDisabled, latestModelSettingsRef.current.disabled)
+    ));
     const promptAttachments = isOverrideSend
       ? []
       : await cloneAttachmentPreviews(attachments);
+	if (!chatOriginStillCurrent()) return;
 	
     if (isGuestMode) {
       const requestCredits = estimateWeightedRequestCredits(trimmed, promptAttachments);
@@ -3946,6 +4962,7 @@ export function ChatPageClient({
     }
 
 	let activeChatId = currentChatId;
+    let pendingCreatedConversationAdoption = false;
     // Captured only when a brand-new conversation is created below, so the
     // first-turn title tracking further down knows the exact interim title
     // string without re-deriving it from state that may not have committed
@@ -3955,12 +4972,32 @@ export function ChatPageClient({
     // create can come back with a different one (see the profile branch
     // below), and the rest of this function runs in the same closure -- a
     // `setState` alone would not reach it.
-    let sendSelectedModels = selectedModels;
-    let sendDisabledPanels = effectiveDisabledPanels;
+    let sendSelectedModels = mountedSurface === "chat"
+      ? preparedModels : selectedModels;
+    let sendDisabledPanels = mountedSurface === "chat"
+      ? preparedDisabled : effectiveDisabledPanels;
     // Set only when a create came back with something else; applied in the
     // same batch as the prompt payload, never before it.
     let pendingScreenModels: string[] | null = null;
     let pendingScreenDisabled: string[] | null = null;
+
+    const pendingCreatedChat = !activeChatId && identityKey
+      ? pendingCreatedChatRef.current
+      : null;
+    if (
+      pendingCreatedChat &&
+      pendingCreatedChat.identityKey === identityKey &&
+      sameStringList(pendingCreatedChat.modelIds, sendSelectedModels) &&
+      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels)
+    ) {
+      // A previous Message transaction may have failed after conversation
+      // creation. Reuse that still-empty conversation while the composer stays
+      // on `new`; creating another row would turn a network retry into a second
+      // conversation for the same draft.
+      activeChatId = pendingCreatedChat.id;
+      justCreatedTitle = pendingCreatedChat.title;
+      pendingCreatedConversationAdoption = true;
+    }
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -3980,6 +5017,9 @@ export function ChatPageClient({
             disabledPanels,
             webSearchMode,
             createdAt: new Date().toISOString(),
+            // A guest row starts its life as its own last activity, so the
+            // sidebar can date it before any answer arrives.
+            updatedAt: new Date().toISOString(),
           };
           justCreatedTitle = initialChat.title;
           setConversations([initialChat]);
@@ -3997,13 +5037,13 @@ export function ChatPageClient({
         const newConversationTitle = (
           trimmed || attachments[0]?.name || t("sidebar.newChat")
         ).slice(0, 30);
-        const res = await fetch("/api/conversations", {
+        const res = await fetch(mountedSurface === "chat" ? "/api/products/chat/conversations" : "/api/conversations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: newConversationTitle,
-            selectedModels,
-            disabledPanels,
+            selectedModels: sendSelectedModels,
+            disabledPanels: sendDisabledPanels,
             webSearchMode,
             // §14. The choice made before this conversation existed. Omitted
             // rather than sent as null when there is none, so a create says
@@ -4014,6 +5054,14 @@ export function ChatPageClient({
 
         if (res.ok) {
           const data = await res.json();
+          // Creation is durable, but its late response has no authority to
+          // take over a different account, conversation or model selection.
+          if (!chatOriginStillCurrent()) {
+            if (identityKey === identityNamespaceKey(identityNamespaceRef.current)) {
+              showToast(t("chat.sendPreparationChanged"), "info");
+            }
+            return;
+          }
           activeChatId = data.id;
           justCreatedTitle = newConversationTitle;
           // The server pinned a revision; the pending choice has become a
@@ -4047,6 +5095,10 @@ export function ChatPageClient({
           const createdDisabled = uniqueStrings(
             Array.isArray(data.disabledPanels) ? data.disabledPanels : disabledPanels
           ).filter((modelId) => createdModels.includes(modelId));
+          if (mountedSurface === "chat" && createdModels.length !== 1) {
+            showToast(t("chat.singleModelRequired"), "error");
+            return;
+          }
           modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
             models: createdModels,
             disabled: createdDisabled,
@@ -4078,15 +5130,34 @@ export function ChatPageClient({
           if (!sameStringList(createdDisabled, disabledPanels)) {
             pendingScreenDisabled = createdDisabled;
           }
-          setCurrentChatId(activeChatId);
-          currentChatIdRef.current = activeChatId;
-          // Same hand-off as the guest branch above: the draft follows the id
-          // the server just issued, so a later abort keeps the question
-          // visible in the conversation it now belongs to.
-          migrateDraft(originScopeId, activeChatId);
+          if (mountedSurface === "chat") {
+            // Keep the composer on its original `new` scope until the Message
+            // transaction consumes that exact server revision. Moving it now
+            // used to copy the draft to the conversation and best-effort
+            // delete the source, allowing a failed delete to resurrect it.
+            pendingCreatedConversationAdoption = true;
+            if (identityKey) {
+              pendingCreatedChatRef.current = {
+                id: data.id,
+                title: newConversationTitle,
+                identityKey,
+                modelIds: [...createdModels],
+                disabledIds: [...createdDisabled],
+              };
+            }
+          } else {
+            setCurrentChatId(activeChatId);
+            currentChatIdRef.current = activeChatId;
+            migrateDraft(originScopeId, activeChatId);
+          }
           fetchConversations();
         } else {
-          await discardResponseBody(res);
+          const refusal = await res.json().catch(() => null);
+          showToast(t(refusal?.code === "CHAT_PROFILE_SINGLE_MODEL_REQUIRED"
+            ? "chat.singleModelProfileRequired"
+            : refusal?.code === "CHAT_SINGLE_MODEL_REQUIRED"
+              ? "chat.singleModelRequired" : "chat.chatCreateFailed"), "error");
+          return;
         }
       } catch (error) {
         console.error("Failed to create conversation:", error);
@@ -4121,10 +5192,68 @@ export function ChatPageClient({
       const activeModelIds = requestedModelIds.filter(
         (modelId) => !sendDisabledPanels.includes(modelId)
       );
+      if (mountedSurface === "chat" && (activeModelIds.length !== 1 ||
+          !sameStringList(sendSelectedModels, latestModelSettingsRef.current.models))) {
+        showToast(t("chat.singleModelRequired"), "info");
+        return;
+      }
       // An override that matched nothing would otherwise send to no model at
       // all: the preflight would price an empty set and the turn would sit
       // unanswered. Abandon instead, leaving the answers already on screen.
       if (!activeModelIds.length) return;
+      const chatSendIsCurrent = (requireLoaded = true, notifyChanged = true) => {
+        if (!submitOwnerIsCurrent()) return false;
+        const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
+        const preparedConversationId = pendingCreatedConversationAdoption
+          ? originScopeId
+          : activeChatId!;
+        const preparedSelectionIsCurrent = Boolean(identityKey) &&
+          identityKey === currentIdentityKey &&
+          preparedSelectionTicket === conversationSelectionTicketRef.current &&
+          preparedConversationId === currentChatIdRef.current;
+        if (!preparedSelectionIsCurrent) {
+          if (notifyChanged && identityKey === currentIdentityKey) {
+            showToast(t("chat.sendPreparationChanged"), "info");
+          }
+          return false;
+        }
+        // Review and every other surface still share the global composer.
+        // They must honour the captured conversation and committed selection
+        // ticket, but their multi-model selection is not Chat's single-model
+        // contract and must not be rejected by the helper below.
+        if (mountedSurface !== "chat") return true;
+        const current = chatPreparedSendIsCurrent({
+          identityKey, currentIdentityKey,
+          conversationId: preparedConversationId,
+          currentConversationId: currentChatIdRef.current,
+          selectionTicket: preparedSelectionTicket,
+          currentSelectionTicket: conversationSelectionTicketRef.current,
+          modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
+          currentDisabledIds: latestModelSettingsRef.current.disabled,
+        });
+        if (!current && identityKey === currentIdentityKey) {
+          showToast(t("chat.sendPreparationChanged"), "info");
+        }
+        if (!current) return false;
+        // A viewport remount can begin a fresh history load without changing
+        // the conversation or selection ticket. The initial submit check is
+        // no longer evidence after an awaited preflight/context/draft step.
+        // Fresh Chat has no origin transcript to reload and keeps its first
+        // send path unchanged.
+        const currentRuntime = requireLoaded && submitOwner.originConversationId
+          ? getChatRuntimeSnapshot(chatRuntimeKey({
+          identityKey: identityKey ?? "account",
+          conversationId: submitOwner.originConversationId,
+          modelId: activeModelIds[0] ?? "",
+          transcriptScope: "conversation",
+        })) : null;
+        if (currentRuntime && !currentRuntime.isLoaded) {
+          if (currentRuntime.loadFailed) showToast(t("chat.workspaceError.body"), "error");
+          return false;
+        }
+        return true;
+      };
+      if (!chatSendIsCurrent()) return;
       const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
@@ -4135,7 +5264,7 @@ export function ChatPageClient({
           ? { webSearchMode: options.webSearchOverride }
           : {}),
       });
-      if (!preflight.allowed) return;
+      if (!preflight.allowed || !chatSendIsCurrent()) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
       // this is where it gets one -- §10 requires the context to be priced
@@ -4152,28 +5281,23 @@ export function ChatPageClient({
               modelIds: activeModelIds,
               prompt: trimmed,
             });
-	  const userMsgId = crypto.randomUUID();
-      const conversation = conversations.find((item) => item.id === activeChatId);
-      const previousCount =
-        promptCountsRef.current.get(activeChatId) ??
-        (conversation?.messageCount ? 1 : 0);
-      trackProductEvent(
-        previousCount === 0 ? "chat_started" : "followup_sent",
-        activeModelIds.length,
-        { conversation_mode: isGuestMode ? "guest" : "account" }
-      );
-      promptCountsRef.current.set(activeChatId, previousCount + 1);
+	  if (!chatSendIsCurrent()) return;
+	  const userRequestId = crypto.randomUUID();
+      let userMsgId = userRequestId;
 
-      if (previousCount === 0 && trimmed) {
-        const interimTitle =
-          justCreatedTitle ??
-          conversation?.title ??
-          t("sidebar.newChat");
-        firstTurnTitleTrackingRef.current.set(comparisonId, {
-          chatId: activeChatId,
-          interimTitle,
-          firstPromptText: trimmed,
-        });
+      let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = null;
+      if (draftSendCapture) {
+        preparedDraft = await prepareDraftSend(draftSendCapture);
+        if (!preparedDraft) {
+          if (chatSendIsCurrent()) {
+            showToast(t("chat.questionSaveFailed"), "info");
+          }
+          return;
+        }
+        if (!chatSendIsCurrent()) {
+          abortDraftSend(preparedDraft);
+          return;
+        }
       }
 
       /*
@@ -4191,55 +5315,333 @@ export function ChatPageClient({
       const promptUploadIds = promptAttachments
         .map((attachment) => attachment.uploadId)
         .filter((uploadId): uploadId is string => Boolean(uploadId));
+      const carriesStoredAttachments = promptAttachments.some((attachment) => Boolean(attachment.attachmentId));
+      const promptAttachmentReferences = promptAttachments.flatMap<{ attachmentId: string } | { uploadId: string }>((attachment) =>
+        attachment.attachmentId ? [{ attachmentId: attachment.attachmentId }]
+          : attachment.uploadId ? [{ uploadId: attachment.uploadId }] : []
+      );
+      if (carriesStoredAttachments && promptAttachmentReferences.length !== promptAttachments.length) {
+        if (preparedDraft) abortDraftSend(preparedDraft);
+        showToast(t("chat.questionSaveFailed"), "info");
+        return;
+      }
       let savedAttachments: ChatAttachment[] = promptAttachments;
+      let sendCurrentAfterMessageSave = true;
+      let messageWasSaved = false;
       if (!isGuestMode) {
-      try {
-        const saveResponse = await fetch(`/api/conversations/${activeChatId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            messages: [{
-              id: userMsgId,
-              role: "user",
-              content: trimmed,
-              ...(promptUploadIds.length
-                ? { attachmentUploadIds: promptUploadIds }
-                : {}),
-            }]
-          }),
-        });
-        if (!saveResponse.ok) {
-          await discardResponseBody(saveResponse);
-          console.error("Failed to pre-save user message:", saveResponse.status);
-        } else {
+        const messageToSave: {
+          clientRequestId: string;
+          role: "user";
+          content: string;
+          attachmentReferences?: Array<{ attachmentId: string } | { uploadId: string }>;
+          attachmentUploadIds?: string[];
+        } = {
+          clientRequestId: userRequestId,
+          role: "user" as const,
+          content: trimmed,
+          ...(carriesStoredAttachments
+            ? { attachmentReferences: promptAttachmentReferences }
+            : promptUploadIds.length
+              ? { attachmentUploadIds: promptUploadIds }
+              : {}),
+        };
+        const draftConsume = preparedDraft
+          ? {
+              scopeKey: preparedDraft.scopeKey,
+              expectedRevision: preparedDraft.revision,
+              requestId: userRequestId,
+            }
+          : null;
+        let saved: Record<string, unknown> | null = null;
+        let deterministicFailure: { code?: string } | null = null;
+        let indeterminate:
+          | "completed-refusal"
+          | "server-5xx"
+          | "invalid-success"
+          | "transport"
+          | null = null;
+        let indeterminateFailureCode: string | undefined;
+        if (!chatSendIsCurrent()) {
+          if (preparedDraft) abortDraftSend(preparedDraft);
+          return;
+        }
+        try {
+          const { response: saveResponse, body: saveBody, bodyValid } =
+            await fetchJsonWithTimeout(
+            `/api/conversations/${activeChatId}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: [messageToSave],
+                ...(draftConsume ? { draftConsume } : {}),
+              }),
+            },
+            chatMessageDeadlineMs(CHAT_MESSAGE_SAVE_TIMEOUT_MS)
+          );
+          const saveRecord = saveBody && typeof saveBody === "object" &&
+            !Array.isArray(saveBody) ? saveBody as Record<string, unknown> : null;
+          if (saveResponse.ok && preparedDraft) {
+            const parsed = bodyValid
+              ? parseChatMessageSaveResponse(saveBody, {
+                  requestId: userRequestId,
+                  expectedAttachmentCount: promptAttachments.length,
+                })
+              : null;
+            if (parsed) {
+              userMsgId = parsed.messageId;
+              saved = parsed as unknown as Record<string, unknown>;
+            }
+            else indeterminate = "invalid-success";
+          } else if (saveResponse.ok) {
+            const mapping = bodyValid
+              ? parseMessageSaveMapping(saveBody, userRequestId)
+              : null;
+            if (mapping && saveRecord) {
+              userMsgId = mapping.messageId;
+              saved = saveRecord;
+            } else {
+              deterministicFailure = {};
+            }
+          } else if (preparedDraft) {
+            // Every prepared non-2xx is reconciled against the fresh server
+            // state. A completed 4xx may prove unchanged; an unmarked 5xx
+            // never may, because a gateway can reply while upstream work is
+            // still waiting to take the advisory lock.
+            indeterminate = saveResponse.status >= 500
+              ? "server-5xx"
+              : "completed-refusal";
+            if (typeof saveRecord?.code === "string") {
+              indeterminateFailureCode = saveRecord.code;
+            }
+          } else {
+            deterministicFailure = saveRecord ?? {};
+            if (!preparedDraft && !carriesStoredAttachments) {
+              // Review and continuation preserve their historical text-only
+              // best-effort behavior.
+              console.error("Failed to pre-save user message:", saveResponse.status);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to pre-save user message:", error);
+          indeterminate = preparedDraft ? "transport" : null;
+          if (!preparedDraft && carriesStoredAttachments) {
+            deterministicFailure = {};
+          }
+        }
+
+        if (indeterminate && preparedDraft && draftConsume) {
+          let receipt: ReturnType<typeof parseChatDraftMessageReceipt> = null;
+          try {
+            const { response, body, bodyValid } = await fetchJsonWithTimeout(
+              `/api/conversations/${activeChatId}/messages/receipt`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  draftConsume,
+                  message: {
+                    clientRequestId: messageToSave.clientRequestId,
+                    content: messageToSave.content,
+                    ...(messageToSave.attachmentReferences
+                      ? { attachmentReferences: messageToSave.attachmentReferences }
+                      : messageToSave.attachmentUploadIds
+                        ? { attachmentUploadIds: messageToSave.attachmentUploadIds }
+                        : {}),
+                  },
+                }),
+              },
+              chatMessageDeadlineMs(CHAT_MESSAGE_RECEIPT_TIMEOUT_MS)
+            );
+            if (response.ok && bodyValid) {
+              receipt = parseChatDraftMessageReceipt(
+                body,
+                {
+                  requestId: userRequestId,
+                  expectedAttachmentCount: promptAttachments.length,
+                }
+              );
+            }
+          } catch (error) {
+            console.error("Failed to reconcile user message receipt:", error);
+          }
+          if (receipt?.outcome === "committed") {
+            userMsgId = receipt.messageId;
+            saved = {
+              draftConsumed: true,
+              attachments: receipt.attachments.map((attachment) => ({
+                ...attachment,
+                messageId: userMsgId,
+              })),
+            };
+          } else if (
+            receipt?.outcome === "unchanged" &&
+            indeterminate === "completed-refusal"
+          ) {
+            reconcileDraftSend(preparedDraft, "unchanged");
+            if (chatSendIsCurrent()) {
+              showToast(
+                t(
+                  chatAttachmentErrorCopyKey(indeterminateFailureCode) ??
+                    "chat.questionSaveFailed"
+                ),
+                "info"
+              );
+            }
+            return;
+          } else {
+            // There is no safe guess. Keep the exact server-backed draft
+            // frozen and retain this identity's submit owner, while allowing
+            // another signed-in identity in the same tab to keep working.
+            reconcileDraftSend(preparedDraft, "ambiguous");
+            holdSubmitForReceiptRecovery();
+            return;
+          }
+        }
+
+        if (deterministicFailure) {
+          if (preparedDraft || carriesStoredAttachments) {
+            if (preparedDraft) abortDraftSend(preparedDraft);
+            if (chatSendIsCurrent()) {
+              showToast(
+                t(
+                  chatAttachmentErrorCopyKey(deterministicFailure.code) ??
+                    "chat.questionSaveFailed"
+                ),
+                "info"
+              );
+            }
+            return;
+          }
+        }
+
+        if (saved) {
+          messageWasSaved = true;
+          // A durable Message may settle after an A→B→A identity cycle.
+          // It remains a server fact, but the detached epoch has no authority
+          // to create a notice or a later provider-dispatch disposition in the
+          // returning A tree.
+          if (submitOwnerIsCurrent()) {
+            // The commit response can arrive after a same-identity navigation.
+            // There is then no pending entry for the departing selection to
+            // promote: record the opaque disposition immediately and wake the
+            // active tree. A newly-created Chat deliberately compares against
+            // its still-current `new` origin until the accepted Message adopts
+            // the server conversation; `chatSendIsCurrent(false)` preserves
+            // that pending-adoption contract.
+            // Bind the durable receipt to exactly one side-effect-free
+            // selection decision. A stale Review/global send must record its
+            // opaque origin disposition and stop without briefly replacing
+            // the saved notice with a preparation-changed toast on the final
+            // provider guard.
+            sendCurrentAfterMessageSave = chatSendIsCurrent(false, false);
+            if (sendCurrentAfterMessageSave) {
+              setBoundedMapEntry(pendingDurableUndispatchedTurnsRef.current, comparisonId, {
+                identityKey: submitOwner.identityKey ?? "unresolved",
+                identityEpoch: submitOwner.identityEpoch,
+                conversationId: activeChatId,
+                turnId: comparisonId,
+                selectionTicket: preparedSelectionTicket,
+              });
+            } else {
+              persistSavedQuestionNotSent(
+                `${submitOwner.identityKey}\0${activeChatId}\0${comparisonId}`
+              );
+            }
+          }
           /*
             Swap the composer's upload ids for the durable attachment ids the
             save just wrote, in place, so the cards already on screen are the
             same cards a reload produces -- and so this turn's own request, and
             every later one, names the row rather than the upload.
           */
-          const saved = await saveResponse.json().catch(() => null);
           const bound: Array<{ ordinal: number; id: string }> = Array.isArray(
-            saved?.attachments
+            saved.attachments
           )
             ? saved.attachments.filter(
                 (item: { messageId?: string }) => item?.messageId === userMsgId
-              )
+              ) as Array<{ ordinal: number; id: string }>
             : [];
+          if (promptAttachments.length > 0 &&
+              (bound.length !== promptAttachments.length ||
+              new Set(bound.map((item) => item.ordinal)).size !== promptAttachments.length ||
+              bound.some((item) => !Number.isInteger(item.ordinal) || item.ordinal < 0 ||
+                item.ordinal >= promptAttachments.length || typeof item.id !== "string" || !item.id))) {
+            if (preparedDraft) {
+              reconcileDraftSend(preparedDraft, "ambiguous");
+              holdSubmitForReceiptRecovery();
+            }
+            if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
+            return;
+          }
           if (bound.length) {
-            const byOrdinal = new Map(
-              bound.map((item) => [item.ordinal, item.id])
-            );
+            const byOrdinal = new Map(bound.map((item) => [item.ordinal, item.id]));
             savedAttachments = promptAttachments.map((attachment, index) => {
               const attachmentId = byOrdinal.get(index);
-              return attachmentId ? { ...attachment, attachmentId } : attachment;
+              return attachmentId ? { ...attachment, attachmentId,
+                ...(carriesStoredAttachments ? { uploadId: undefined } : {}) } : attachment;
             });
           }
+          if (preparedDraft) {
+            // The same transaction wrote the user Message and consumed this
+            // exact revision. Only now may the local snapshot disappear; any
+            // text typed while the request was frozen is retained as a fresh
+            // revision-0 draft by the hook.
+            // The Message is durable. A viewport remount may now refresh its
+            // history, but must not erase the accepted turn merely because
+            // that GET is pending. The panel will wait for a complete view.
+            sendCurrentAfterMessageSave = chatSendIsCurrent(false, false);
+            const submittedDraftStillCurrent = commitDraftSend(
+              preparedDraft,
+              originScopeId,
+              promptAttachments
+            );
+            if (!submittedDraftStillCurrent) {
+              // The user edited the composer while Message persistence was
+              // pending. The saved turn remains durable, but dispatching its
+              // provider request now would make the newer draft look sent.
+              // Keep that draft and require an explicit next click.
+              sendCurrentAfterMessageSave = false;
+              if (chatSendIsCurrent()) {
+                showToast(t("chat.sendPreparationChanged"), "info");
+              }
+            }
+            if (pendingCreatedConversationAdoption && sendCurrentAfterMessageSave) {
+              // The source server draft is gone atomically with the Message.
+              // Only now may unsent edits made during preflight follow the URL
+              // to the created conversation as a fresh revision-0 draft.
+              migrateDraft(originScopeId, activeChatId, preparedDraft);
+              setCurrentChatId(activeChatId);
+              currentChatIdRef.current = activeChatId;
+              pendingCreatedConversationAdoption = false;
+              clearPendingCreatedChatIfOwned(activeChatId, identityKey);
+            } else if (pendingCreatedConversationAdoption) {
+              // The Message belongs to the conversation created by this send,
+              // but a later account/conversation selection owns the screen.
+              // Never navigate it back or reinterpret its `new` draft under
+              // the current cookie. A later explicit send can start cleanly.
+              clearPendingCreatedChatIfOwned(activeChatId, identityKey);
+            }
+          }
         }
-      } catch (e) {
-        console.error("Failed to pre-save user message:", e);
       }
-    }
+
+      // Last await boundary: an intervening model/account/conversation change
+      // must not publish a payload to another panel or discard the draft.
+      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent(!messageWasSaved)) return;
+      const conversation = conversations.find((item) => item.id === activeChatId);
+      const previousCount = promptCountsRef.current.get(activeChatId) ??
+        (conversation?.messageCount ? 1 : 0);
+      trackProductEvent(previousCount === 0 ? "chat_started" : "followup_sent",
+        activeModelIds.length, { conversation_mode: isGuestMode ? "guest" : "account" });
+      promptCountsRef.current.set(activeChatId, previousCount + 1);
+      if (previousCount === 0 && trimmed) {
+        firstTurnTitleTrackingRef.current.set(comparisonId, {
+          chatId: activeChatId,
+          interimTitle: justCreatedTitle ?? conversation?.title ?? t("sidebar.newChat"),
+          firstPromptText: trimmed,
+        });
+      }
 
       // What re-preparing this run would need, kept because the panels that
       // ask have only their own model: the shell is the only place that knows
@@ -4340,6 +5742,9 @@ export function ChatPageClient({
         text: trimmed,
         chatId: activeChatId,
         userMessageId: userMsgId,
+        messageWasDurablySaved: messageWasSaved,
+        conversationSelectionTicket: preparedSelectionTicket,
+        identityEpoch: submitOwner.identityEpoch,
         // Exactly the set this run was prepared for above: priced by the
         // preflight, given admission slots by it, and confirmed by the send
         // barrier. A panel whose model is not in here was not part of this
@@ -4370,7 +5775,15 @@ export function ChatPageClient({
       // other conversation's draft is touched either way.
       // An override send never spent a draft, so it must not clear one: the
       // question it carried came from a finished turn, not from the composer.
-      if (!isOverrideSend) discardDraft(activeChatId, promptAttachments);
+      if (!isOverrideSend && !preparedDraft) {
+        const currentDraft = readDraft(activeChatId);
+        if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
+          submittedText: inputValue,
+          submittedAttachmentIds: attachments.map((attachment) => attachment.id),
+          currentText: currentDraft.text,
+          currentAttachmentIds: currentDraft.attachments.map((attachment) => attachment.id),
+        })) discardDraft(activeChatId, promptAttachments);
+      }
       setConversations((current) =>
         current.map((item) =>
           item.id === activeChatId
@@ -4799,6 +6212,11 @@ export function ChatPageClient({
     ) {
       return false;
     }
+	if (mountedSurface === "chat") {
+      if (committedModels.length === 1 && isSelected && committedDisabled.length === 0) return false;
+      mutateModelSettings(currentChatId, [modelId], []);
+      return true;
+    }
 	let nextModels = [...committedModels];
     let nextDisabled = [...committedDisabled];
 
@@ -4858,6 +6276,10 @@ export function ChatPageClient({
     }
     if (isGuestMode && !clampGuestSelectedModels([addModelId]).includes(addModelId)) {
       return false;
+    }
+    if (mountedSurface === "chat") {
+      mutateModelSettings(currentChatId, [addModelId], []);
+      return true;
     }
     // Same reason as toggleModel above: derived from the latest committed
     // selection so a swap made before the previous change has rendered does
@@ -5389,6 +6811,11 @@ export function ChatPageClient({
       modelIds: string[];
       promptExample?: string;
     }) => {
+      if (mountedSurface === "chat" && modelIds.length !== 1) {
+        showToast(t("chat.singleModelRequired"), "info");
+        return;
+      }
+      conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
       const nextModels = clampSelectedModels(
         modelIds.filter(isEnabledModelId)
       ).slice(0, maxSelectableModels);
@@ -5412,10 +6839,14 @@ export function ChatPageClient({
     };
 
   const handleRemoveModel = async (modelId: string) => {
+    if (mountedSurface === "chat") return;
     setPendingRemoveModelId(modelId);
   };
 
   const executeRemoveModel = async (modelId: string) => {
+    // A unified transcript must not inherit a model-scoped destructive action,
+    // even if a stale confirmation or future caller reaches this handler.
+    if (mountedSurface === "chat") return;
     const nextModels = selectedModels.filter((id) => id !== modelId);
     const nextDisabled = disabledPanels.filter((id) => id !== modelId);
 
@@ -5452,7 +6883,7 @@ export function ChatPageClient({
     // change made before React has committed the previous one) must compose
     // instead of the second one re-saving the array the first one replaced.
     const { models, disabled } = latestModelSettingsRef.current;
-    if (newModelId !== oldModelId && models.includes(newModelId)) {
+    if (mountedSurface !== "chat" && newModelId !== oldModelId && models.includes(newModelId)) {
       return;
     }
     const nextModel = getModel(newModelId);
@@ -5462,6 +6893,10 @@ export function ChatPageClient({
       } else {
         showToast(t("modelStatusReasons.loginRequired"), "info");
       }
+      return;
+    }
+    if (mountedSurface === "chat") {
+      mutateModelSettings(currentChatId, [newModelId], []);
       return;
     }
     const nextModels = clampSelectedModels(
@@ -6343,7 +7778,8 @@ export function ChatPageClient({
   /*
     A click seeds and stops.
 
-    The rule is docs/ui-contracts/chat-starter-catalog.md section 4: a surface that fills the box offers a starting point, and a
+    The rule is the Prompt Refiner's (docs/ui-contracts/prompt-refiner-suggestion.md
+    section 1): a surface that fills the box offers a starting point, and a
     surface that sends spends a credit on a sentence the user has not read yet.
     So this writes a draft, arms the composer controls the card declares, moves
     focus, and does nothing else -- no request, no reservation, no conversation
@@ -6611,6 +8047,8 @@ export function ChatPageClient({
         <ChatShellSkeleton label={t("auth.loading")} />
       ) : isMobileViewport ? (
         <MobileChatShell
+          transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
+          onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={selectedModels}
@@ -6629,6 +8067,11 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          durableDraftLocked={
+            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+          }
+          blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -6716,7 +8159,13 @@ export function ChatPageClient({
             showToast(message, "info", { label: t("chat.undo"), onClick: undo })
           }
           onSubmit={handleGlobalSubmit}
-          onBeforeModelSend={ensureModelSettingsReady}
+          onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
+          conversationSelectionTicket={conversationSelectionTicketRef.current}
+          identityEpoch={identityEpoch}
+          onSavedQuestionNotSent={handleSavedQuestionNotSent}
+          onDurableUndispatchedAccepted={handleDurableUndispatchedAccepted}
+          onProviderDispatchStarted={handleProviderDispatchStarted}
           onCompareSummary={handleCompareSummary}
           isCompareSummaryLoading={isCompareSummaryLoading}
           isQuickSummaryCached={isQuickSummaryCached}
@@ -6725,6 +8174,10 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          promptRefinerOffered={promptRefinerOffered}
+          promptRefinerState={promptRefinerState}
+          onPromptRefinerRequest={handlePromptRefinerRequest}
+          onPromptRefinerDecision={handlePromptRefinerDecision}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -6735,6 +8188,8 @@ export function ChatPageClient({
         />
       ) : (
         <DesktopChatShell
+          transcriptScope={mountedSurface === "chat" ? "conversation" : "model"}
+          onRestorePrompt={restoreChatPrompt}
           conversations={blendedConversations}
           currentChatId={shellConversationId}
           selectedModels={selectedModels}
@@ -6753,6 +8208,11 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          durableDraftLocked={
+            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+          }
+          blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -6837,7 +8297,13 @@ export function ChatPageClient({
           onWebSearchSuggestionConfirm={handleWebSearchSuggestionConfirm}
           onWebSearchSuggestionDismiss={handleWebSearchSuggestionDismiss}
           onSubmit={handleGlobalSubmit}
-          onBeforeModelSend={ensureModelSettingsReady}
+          onBeforeModelSend={ensureModelSettingsReadyForChatApp}
+          // eslint-disable-next-line react-hooks/refs -- synchronous selection epoch snapshot; never rendered.
+          conversationSelectionTicket={conversationSelectionTicketRef.current}
+          identityEpoch={identityEpoch}
+          onSavedQuestionNotSent={handleSavedQuestionNotSent}
+          onDurableUndispatchedAccepted={handleDurableUndispatchedAccepted}
+          onProviderDispatchStarted={handleProviderDispatchStarted}
           onChangePanelModel={changePanelModel}
           onTogglePanelDisable={togglePanelDisable}
           onRemoveModel={handleRemoveModel}
@@ -6849,6 +8315,10 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          promptRefinerOffered={promptRefinerOffered}
+          promptRefinerState={promptRefinerState}
+          onPromptRefinerRequest={handlePromptRefinerRequest}
+          onPromptRefinerDecision={handlePromptRefinerDecision}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -6858,6 +8328,87 @@ export function ChatPageClient({
           onContextBundleStale={handleContextBundleStale}
         />
       )}
+    {pendingSubmission?.recovery === "message-receipt-unknown" && (
+      <section
+        role="alert"
+        aria-labelledby="message-receipt-recovery-title"
+        data-testid="message-receipt-recovery-dialog"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
+      >
+        <h2
+          id="message-receipt-recovery-title"
+          className="text-sm font-semibold text-zinc-950 dark:text-white"
+        >
+          {t("chat.messageReceiptRecoveryTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.messageReceiptRecoveryBody")}
+        </p>
+        <button
+          type="button"
+          data-testid="message-receipt-recovery-reload"
+          onClick={() => window.location.reload()}
+          className="mt-3 min-h-11 w-full rounded-xl bg-amber-600 px-3 text-sm font-bold text-white hover:bg-amber-500"
+        >
+          {t("chat.messageReceiptRecoveryReload")}
+        </button>
+      </section>
+    )}
+    {draftConflict && (
+      <section
+        role="alert"
+        aria-labelledby="draft-conflict-title"
+        data-testid="draft-conflict-dialog"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
+      >
+        <h2 id="draft-conflict-title" className="text-sm font-semibold text-zinc-950 dark:text-white">
+          {t("chat.draftConflictTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.draftConflictBody")}
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            data-testid="draft-conflict-use-server"
+            onClick={() => resolveDraftConflict("use-server")}
+            className="min-h-11 rounded-xl border border-zinc-300 px-3 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {t("chat.draftConflictUseServer")}
+          </button>
+          <button
+            type="button"
+            data-testid="draft-conflict-overwrite-local"
+            onClick={() => resolveDraftConflict("overwrite-local")}
+            className="min-h-11 rounded-xl bg-amber-600 px-3 text-sm font-bold text-white hover:bg-amber-500"
+          >
+            {t("chat.draftConflictOverwriteLocal")}
+          </button>
+        </div>
+      </section>
+    )}
+    {draftSyncFailed && !draftConflict && (
+      <section
+        role="alert"
+        data-testid="draft-sync-failed"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900`}
+      >
+        <h2 className="text-sm font-semibold text-zinc-950 dark:text-white">
+          {t("chat.draftSyncFailedTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.draftSyncFailedBody")}
+        </p>
+        <button
+          type="button"
+          data-testid="draft-sync-retry"
+          onClick={retryDraftSync}
+          className="mt-3 min-h-11 w-full rounded-xl bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-500"
+        >
+          {t("chat.draftSyncRetry")}
+        </button>
+      </section>
+    )}
     {showGuestSignInPrompt && isGuestMode && (
       // Above the model picker (z-[100]) and its catalogue (z-[105]): both
       // prompts open from a click inside them, and the composer -- with its
@@ -7601,7 +9152,10 @@ export function ChatPageClient({
           <div className="mt-5 flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setLockedSelectDialog(null)}
+              onClick={() => {
+                settleInitialConversationHandoff(lockedSelectDialog.id);
+                setLockedSelectDialog(null);
+              }}
               className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               {t("auth.cancel")}

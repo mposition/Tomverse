@@ -33,11 +33,25 @@ production release `16d98af8`에서 로그인 사용자의 첨부 객체가 업�
 
 ## 3. 현재 상태 읽기 (read-only)
 
-```
-export R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... R2_BUCKET_NAME=...
+**어디서**: 로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 `npm ci`가
+끝나 있어야 한다. production 서버에 들어갈 필요는 없다 — R2는 인터넷 API이고,
+필요한 것은 버킷 설정을 읽을 권한이 있는 토큰뿐이다. 환경변수는 그 PowerShell
+창에서만 유효하다.
+
+```powershell
+$env:R2_ACCOUNT_ID        = "..."
+$env:R2_ACCESS_KEY_ID     = "..."
+$env:R2_SECRET_ACCESS_KEY = "..."
+$env:R2_BUCKET_NAME       = "..."
+
 npm run check:r2-lifecycle-policy
 npm run check:r2-lifecycle-policy -- --json > lifecycle-before.json
 ```
+
+규칙을 **보기만** 할 것이라면 clone도 `npm ci`도 필요 없다: Cloudflare
+대시보드의 R2 → 버킷 → Settings → Object lifecycle rules에 prefix와 만료
+일수가 그대로 나온다. 이 스크립트는 그 화면을 판정으로 바꾸고 기록 파일을
+남기기 위한 것이다.
 
 - S3 호출 **한 번**(`GetBucketLifecycleConfiguration`)이고 아무것도 쓰지 않는다.
 - 종료 코드: `0` 문제 없음 · `2` 보호 prefix를 덮는 활성 삭제 규칙 있음 ·
@@ -92,9 +106,48 @@ npm run check:r2-lifecycle-policy -- --json > lifecycle-before.json
 
 ## 5. 전수 감사
 
+**어디서**: 로컬 PC의 PowerShell, Tomverse clone 폴더 안 — 3절과 같은 곳이다.
+R2 환경변수 넷에 더해 **production `DATABASE_URL`**이 필요하다(행을 읽어야
+하므로). Railway 컨테이너 안에서는 돌리지 않는다: `tsx`가 devDependency라
+production 이미지에 없을 수 있다.
+
+**먼저**: 이 clone이 최신인지 확인한다. 운영자의 작업 폴더는 대개 배포된
+schema보다 오래됐고, 그러면 Prisma client가 가용성 컬럼을 모른다.
+
+```powershell
+git pull
+npm ci        # postinstall이 Prisma client를 다시 만든다
 ```
+
+그리고 **migration이 production DB에 적용돼 있어야 한다**
+(`20260828090000_message_attachment_availability`). 적용은 배포가 하는 일이며
+여기서 하지 않는다 — `prisma migrate dev`를 production에 대고 실행하지 않는다.
+읽기 전용 확인만 한다면 `npx prisma migrate status`가 `DIRECT_DATABASE_URL`
+또는 `DATABASE_URL`을 읽어 무엇이 적용됐는지 보고한다.
+
+둘 중 하나가 어긋나면 감사 도구가 Prisma stack trace 대신 어느 쪽 문제인지와
+고치는 방법을 한 문단으로 말하고 멈춘다. 아무것도 읽지 않고 아무것도 쓰지
+않는다.
+
+```powershell
+$env:DATABASE_URL         = "<production Postgres URL>"
+$env:R2_ACCOUNT_ID        = "..."
+$env:R2_ACCESS_KEY_ID     = "..."
+$env:R2_SECRET_ACCESS_KEY = "..."
+$env:R2_BUCKET_NAME       = "..."
+
 npm run audit:message-attachments -- --json > attachment-audit.json
 npm run audit:message-attachments -- --cursor='<이전 실행이 출력한 값>'
+```
+
+**npm script로 부른다.** 이 스크립트는 `--conditions=react-server`가 없으면
+뜨지 않는다 — `lib/r2.ts`가 `server-only`를 import 하는 모듈을 거치고, 그
+조건 없이는 "This module cannot be imported from a Client Component module"로
+죽는다. package.json의 script가 그 플래그를 들고 있으므로, script를 부르면
+플래그를 빠뜨릴 수 없다. 직접 부를 때는 이 형태여야 한다.
+
+```powershell
+node --conditions=react-server --import tsx scripts/audit-message-attachment-objects.mjs --json > attachment-audit.json
 ```
 
 - 기본은 dry run. 아무것도 쓰지 않는다.
@@ -109,7 +162,9 @@ npm run audit:message-attachments -- --cursor='<이전 실행이 출력한 값>'
 
 dry run 결과를 검토한 뒤에만 기록한다.
 
-```
+**어디서**: 위와 같은 PowerShell 창(같은 환경변수). **이 명령만 DB에 쓴다.**
+
+```powershell
 npm run audit:message-attachments -- --apply --ticket=OPS-<번호>
 ```
 

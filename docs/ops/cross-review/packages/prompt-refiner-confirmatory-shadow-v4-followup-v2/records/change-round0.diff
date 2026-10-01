@@ -1,0 +1,106 @@
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md
+new file mode 100644
+index 00000000..8e7e0d0c
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/authorization.md
+@@ -0,0 +1,18 @@
++# Prompt Refiner confirmatory shadow v4 후속 검토 승인 기록
++
++- approvedBy: `mposition`
++- approvedAt: `2026-09-21` (Australia/Brisbane)
++- author: `codex`
++- independentReviewer: `claude-code-max`
++
++사용자는 Tomverse Chat 개발을 완료할 때까지 권장 순서로 자동 진행하고, 필요한
++Claude Code Max 독립 검토와 `--skip-preflight` 예외를 허용했으며 수정 round 상한을
++두지 않았다. 원 exchange는 round 2에서 `approve`와 재현 가능한 finding 1건을 함께
++남겨 `on_hold(revisions_exhausted)`로 닫혔다. 이 successor는 그 finding을 수정하고
++동일한 읽기 전용 reviewer에게 다시 확인받기 위한 기록이다.
++
++승인 범위는 PostgreSQL 함수 속성 parity 수정, 그 회귀 테스트, package·검토 기록,
++로컬 검증, push와 PR 및 CI 확인까지다. provider 호출, stage/run 승인, Railway flag,
++유료 shadow 실행, 제품 Prompt Refiner 노출, Router 결합 또는 rollout 승인이 아니다.
++Claude 호출은 저장된 `claude.ai` Max 구독만 사용하며 API key/token 환경 변수는
++제거하고 `firstParty`·`max` 인증을 확인한다.
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json
+new file mode 100644
+index 00000000..16ace8d6
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2/task.json
+@@ -0,0 +1,23 @@
++{
++  "taskId": "prompt-refiner-confirmatory-shadow-v4-followup-v2",
++  "requirement": "prompt-refiner-confirmatory-shadow-v4 exchange가 round 2에서 approve와 재현 가능한 PostgreSQL 함수 속성 finding 1건을 함께 남기고 on_hold(revisions_exhausted)로 종료됐다. 기존 구현과 검토 기록은 보존한다. 후속 변경은 v4 prompt_refiner_runtime_manifest_valid wrapper가 위임 대상 v2 validator와 동일하게 STRICT 및 PARALLEL SAFE가 되도록 migration을 수정하고, fresh migration DB의 pg_proc에서 두 함수가 모두 proisstrict=true 및 proparallel='s'임을 통합 테스트로 고정한다. 그 밖의 Prompt Refiner 계약, provider 호출, 권한, 비용, flag, stage/run 또는 rollout 동작은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max다.",
++  "completionCriteria": [
++    "원 exchange의 on_hold 상태와 round 2 finding을 supersedes lineage와 inherited finding으로 보존한다.",
++    "v4 migration의 runtime-manifest wrapper가 IMMUTABLE, STRICT, PARALLEL SAFE이고 기존 v2 validator의 반환·위임 의미는 변하지 않는다.",
++    "fresh migration DB에서 v2 validator와 v4 wrapper의 proisstrict=true 및 proparallel='s'를 실제 pg_proc로 검증한다.",
++    "Prompt Refiner DB integration, unit, TypeScript, ESLint, schema·문서·정책·protected-writer 검사가 통과한다.",
++    "검토 record 디렉터리만 reviewed diff에서 제외하고 task, authorization, migration과 테스트는 exact digest에 포함한다.",
++    "Claude verdict는 exact package digest에 결속하고 open finding 없이 approve해야 한다."
++  ],
++  "baseCommit": "bc5a47468b046406ce7631cf2732a26356294352",
++  "writableScope": [
++    "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4-followup-v2",
++    "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql",
++    "tests/integration/prompt-refiner-shadow-run.db.test.ts"
++  ],
++  "generatedPaths": [],
++  "supersedes": {
++    "taskId": "prompt-refiner-confirmatory-shadow-v4",
++    "exchange": "docs/ops/cross-review/packages/prompt-refiner-confirmatory-shadow-v4/exchange.json"
++  }
++}
+diff --git a/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql b/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql
+index a03abb36..88fdf224 100644
+--- a/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql
++++ b/prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql
+@@ -17,6 +17,8 @@ CREATE FUNCTION "prompt_refiner_runtime_manifest_valid"(
+ RETURNS BOOLEAN
+ LANGUAGE plpgsql
+ IMMUTABLE
++STRICT
++PARALLEL SAFE
+ AS $$
+ DECLARE
+     files JSONB;
+diff --git a/tests/integration/prompt-refiner-shadow-run.db.test.ts b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+index 23fd7243..44fae750 100644
+--- a/tests/integration/prompt-refiner-shadow-run.db.test.ts
++++ b/tests/integration/prompt-refiner-shadow-run.db.test.ts
+@@ -463,6 +463,35 @@ test("v4 terminal duration is bounded before an immutable receipt can be stored"
+     );
+ });
+ 
++test("v4 runtime manifest wrapper preserves strict and parallel-safe validator metadata", async () => {
++    const functions = await prisma.$queryRawUnsafe<
++        Array<{ name: string; parallel: string; strict: boolean }>
++    >(`
++        SELECT
++          proname AS name,
++          proparallel::TEXT AS parallel,
++          proisstrict AS strict
++        FROM pg_proc
++        WHERE proname IN (
++          'prompt_refiner_runtime_manifest_valid',
++          'prompt_refiner_runtime_manifest_v2_valid'
++        )
++        ORDER BY proname
++    `);
++    assert.deepEqual(functions, [
++        {
++            name: "prompt_refiner_runtime_manifest_v2_valid",
++            parallel: "s",
++            strict: true,
++        },
++        {
++            name: "prompt_refiner_runtime_manifest_valid",
++            parallel: "s",
++            strict: true,
++        },
++    ]);
++});
++
+ test("completed durable evidence rebuilds a content-free aggregate from all 16 cases", async () => {
+     await approveStage();
+     await approveRun();

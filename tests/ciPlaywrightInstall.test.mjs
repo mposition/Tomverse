@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -223,10 +224,12 @@ test("a retry clears the lock the attempt it retries is still holding", () => {
 test("the wrapper is executable", () => {
     // A workflow `run:` of a non-executable path fails with "Permission
     // denied" on every job at once, which is a worse outage than the flake.
-    assert.ok(
-        (statSync(SCRIPT_PATH).mode & 0o111) !== 0,
-        `${SCRIPT_PATH} is not executable`
-    );
+    // Git's index is authoritative because Windows does not expose the POSIX
+    // executable bits that the Linux runner receives at checkout.
+    const indexEntry = execFileSync("git", ["ls-files", "--stage", "--", SCRIPT_PATH], {
+        encoding: "utf8",
+    });
+    assert.match(indexEntry, /^100755\s/, `${SCRIPT_PATH} is not executable in Git`);
 });
 
 test("the wrapper keeps the system dependencies rather than dropping them", () => {

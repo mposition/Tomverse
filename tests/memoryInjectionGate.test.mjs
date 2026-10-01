@@ -5,7 +5,7 @@ import {
   hasApprovedExtractionPair,
   injectableExtractionPairs,
 } from "../lib/memoryInjectionGate.ts";
-import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 
 const APPROVED = {
   extractionModelId: "qa-approved-model",

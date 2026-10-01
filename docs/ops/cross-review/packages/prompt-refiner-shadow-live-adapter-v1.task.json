@@ -1,0 +1,28 @@
+{
+  "taskId": "prompt-refiner-shadow-live-adapter-v1",
+  "requirement": "Prompt Refiner의 최초 bounded staging shadow를 준비하되 현재 제품·관리자·script·cron에서 호출할 수 없는 격리 OpenAI adapter와 별도 one-run 계약만 구현한다. adapter는 gpt-5-6-luna, reasoning medium, 4096 output tokens, 15000ms timeout, retry 0, tools none, prompt cache attachment none과 보수적 rendered-input upper bound를 강제하고 strict JSON parser 결과 및 content-free usage/cost upper-bound만 반환한다. provider import와 credential resolution은 live adapter 함수가 실제로 호출될 때만 dynamic import로 도달해야 한다. 이번 범위에는 stage 생성, reservation reserve/consume, durable run/receipt writer, admin/product route, script/cron entry point, provider/API 호출, 실제 비용, flag·Router·UI 연결이 없다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.",
+  "completionCriteria": [
+    "one-run 계약은 기존 provider-independent execution/reservation/corpus identity를 결속하고 16개 case, 요청당 24916 microUSD, run ceiling 398656 microUSD, 별도 사람 비용 승인, retry 0과 unknown no-redispatch를 고정한다.",
+    "rendered system/user message의 실제 UTF-8 byte 수와 고정 framing allowance를 합한 보수적 token upper bound가 100000 이하일 때만 dispatch callback에 도달한다. source char/byte 계약과 JSON escaping 최악 경계를 테스트한다.",
+    "adapter는 exact model/catalog/pricing 계약을 다시 검사하고 system/user 메시지를 기존 prompt builder에서만 만들며 maxOutputTokens 4096, maxRetries 0, timeout 15000, request/response body retention false, tools와 prompt-cache marker 없음, reasoning medium을 강제한다.",
+    "dispatch callback은 provider generate 직전에 정확히 한 번 호출되고 callback 거절은 generate를 호출하지 않는다. callback 뒤 timeout·known provider failure·unknown outcome은 각각 닫힌 terminal reason으로 분류하며 자동 재시도하지 않는다.",
+    "모델 출력은 기존 strict parser만 통과하고 repair·fence 제거·schema coercion·부분 salvage가 없다. 결과 object는 transient refinedPrompt 외에 provider 오류 prose·request/response body·credential을 포함하거나 기록하지 않는다.",
+    "usage의 known zero와 unknown을 구분하고 input/output/reasoning/cache-read counts가 안전 정수일 때만 보수적 cost upper-bound를 계산한다. actual billed cost나 품질 승인을 주장하지 않는다.",
+    "live provider 함수는 ai/getActiveAiModel을 dynamic import하지만 저장소의 제품 route, admin route, script, cron과 기존 shadow harness는 이 module을 import하지 않는다. source-import test가 이 unreachable 경계를 고정한다.",
+    "관련 unit, typecheck, 대상 lint, model-pricing, prompt-injection, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다."
+  ],
+  "baseCommit": "820cf5ae1c0042ea6aee62668cd881a2d1606ed6",
+  "writableScope": [
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/",
+    "docs/ops/prompt-refiner-shadow-harness.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/promptRefinerShadowLiveAdapter.ts",
+    "lib/promptRefinerShadowRunContract.ts",
+    "package.json",
+    "tests/promptRefinerShadowLiveAdapter.test.mjs",
+    "tests/promptRefinerShadowRunContract.test.mjs"
+  ],
+  "generatedPaths": []
+}

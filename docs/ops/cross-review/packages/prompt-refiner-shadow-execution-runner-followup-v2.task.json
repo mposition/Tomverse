@@ -1,0 +1,50 @@
+{
+  "taskId": "prompt-refiner-shadow-execution-runner-followup-v2",
+  "requirement": "on_hold(revisions_exhausted)로 종결된 prompt-refiner-shadow-execution-runner-v1의 마지막 세 finding을 사람의 명시적 continuation 결정으로 닫는 successor exchange다. runner의 pre/post-dispatch, intent 누락, reservation release 실패와 terminal-write 불명 경로는 응답 전에 content-free 운영 incident를 보고하되 prompt, refined prompt, model output과 provider 오류 원문을 전달하지 않고 alert 전달 실패가 원래 실행 결과를 바꾸지 않는다. dispatch intent writer가 reservation_expired를 반환하면 DB가 이미 reservation을 expired로 닫았으므로 release를 재시도하지 않고 원래 dispatch refusal을 보존한다. contract의 routeMaxDurationSeconds와 Next route의 정적 maxDuration literal을 회귀 테스트가 직접 비교해 route cap과 240초 invocation admission budget의 분리를 막는다. 기존 owner-only, default-off, exact 16-case, actual tokenizer, no retry/fallback/redispatch, durable intent/terminal, unknown latch, no product Chat 계약은 유지한다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "기존 exchange의 open finding 세 건을 새 digest에서 계승하고 기존 on_hold 기록이나 verdict를 수정하지 않는다.",
+    "모든 caught pre/post-dispatch 및 terminal-write 불명 경로는 runner 응답 전에 운영 incident를 시도하며 incident payload는 고정 코드와 run/case/index/nullable attempt 식별자만 포함하고 prompt, refined prompt, model output, provider 오류 원문을 포함하지 않는다.",
+    "incident delivery 자체가 실패해도 원래 dispatch/terminal 오류 분류와 no-retry 결과를 보존하고 고정 content-free fallback log만 남긴다.",
+    "recordIntent의 reservation_expired는 release를 호출하지 않고 PROMPT_REFINER_SHADOW_DISPATCH_REFUSED를 보존하며 다른 pre-intent refusal은 active reservation을 정확히 한 번 release한다.",
+    "run contract digest는 routeMaxDurationSeconds=300을 포함하고 테스트는 execute route의 정적 maxDuration literal과 계약 상수를 직접 비교하며 invocation budget이 그보다 작은지 검증한다.",
+    "focused runner/adapter/contract tests, 전체 server contract, typecheck, 대상 lint, protected-table, strict encoding, docs/policy references, DB coverage, cache, enum, prompt-injection, security와 diff whitespace 검사가 통과한다.",
+    "변경은 기존 default-off shadow runner와 문서·테스트에 한정되고 stage/run 생성, flag 활성화, provider/API/model 호출, 유료 실행, 제품 Chat 연결, push·merge·deploy를 검토 과정에서 수행하지 않는다.",
+    "Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "af9423311a3cb7726ca92062f89d1e7add9ececf",
+  "writableScope": [
+    "AGENTS.md",
+    "app/api/admin/prompt-refiner/shadow-run/execute/route.ts",
+    "app/api/admin/prompt-refiner/shadow-run/route.ts",
+    "docs/ops/cross-review/packages/",
+    "docs/ops/prompt-refiner-durable-run-writer-contract.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/maintenance.ts",
+    "lib/promptRefinerShadowLiveAdapter.ts",
+    "lib/promptRefinerShadowRunContract.ts",
+    "lib/promptRefinerShadowRunner.ts",
+    "lib/promptRefinerShadowRunStore.ts",
+    "lib/promptRefinerShadowSystemAudit.ts",
+    "lib/promptRefinerShadowTokenizer.ts",
+    "package-lock.json",
+    "package.json",
+    "prisma/migrations/20260920190000_prompt_refiner_shadow_execution_runner/migration.sql",
+    "scripts/check-protected-table-writers-core.mjs",
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/promptRefinerShadowLiveAdapter.test.mjs",
+    "tests/promptRefinerShadowRunContract.test.mjs",
+    "tests/promptRefinerShadowRunner.test.mjs",
+    "tests/promptRefinerShadowTokenizer.test.mjs",
+    "tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts",
+    "tests/server-contract/admin-prompt-refiner-shadow-run-route.test.ts",
+    "tests/server-contract/maintenance-step-isolation.test.ts"
+  ],
+  "generatedPaths": [
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1"
+  ],
+  "supersedes": {
+    "taskId": "prompt-refiner-shadow-execution-runner-v1",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-shadow-execution-runner-v1/exchange.json"
+  }
+}

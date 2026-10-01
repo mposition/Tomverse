@@ -13,14 +13,13 @@
  *
  * ## What is here now, and what is not
  *
- * Twelve rows are `proven`, one for each provider in this branch's
- * catalogue. The owner confirmed them on 2026-09-28, including MiniMax: the
- * account page has no training switch, and the owner accepted the
- * privacy-policy sentence as both the training answer (no) and the ban on
- * sale and advertising. A field the contract does not pin stays
- * `NOT_SPECIFIED`. The Privacy page lists every row, and only while every
- * enrolled row is disclosable. One unproven row takes the whole table off
- * the page.
+ * Sixteen rows are `proven`. The owner confirmed the reviewed rows on
+ * 2026-09-28, including MiniMax: the account page has no training switch,
+ * and the owner accepted the privacy-policy sentence as both the training
+ * answer (no) and the ban on sale and advertising. A field the contract
+ * does not pin stays `NOT_SPECIFIED`. The Privacy page lists every row,
+ * and only while every enrolled row is disclosable. One unproven row
+ * takes the whole table off the page.
  *
  * - **An unproven row still does not render.** A partial table would leave
  *   that provider out of the notice.
@@ -356,10 +355,16 @@ const XAI_DPA = "https://x.ai/legal/data-processing-addendum";
 const XAI_TERMS = "https://x.ai/legal/terms-of-service-enterprise";
 const PERPLEXITY_TERMS = "https://www.perplexity.ai/hub/legal/perplexity-api-terms-of-service";
 const PERPLEXITY_DPA = "https://www.perplexity.ai/hub/legal/dpa";
+const DEEPINFRA_PRIVACY = "https://docs.deepinfra.com/account/data-privacy";
+const DEEPINFRA_TERMS = "https://deepinfra.com/terms";
+const OPENROUTER_PRIVACY = "https://openrouter.ai/privacy/";
+const OPENROUTER_TERMS = "https://openrouter.ai/terms/";
 const QWEN_REGIONS = "https://www.alibabacloud.com/help/en/model-studio/regions";
 const QWEN_MEMBERSHIP =
     "https://www.alibabacloud.com/help/en/legal/latest/alibaba-cloud-international-website-membership-agreement";
 const ZHIPU_PRIVACY = "https://docs.z.ai/legal-agreement/privacy-policy";
+const TOGETHER_PRIVACY = "https://www.together.ai/privacy";
+const TOGETHER_TERMS = "https://www.together.ai/terms-of-service";
 const MISTRAL_TERMS = "https://legal.mistral.ai/terms/commercial-terms-of-service/";
 const MISTRAL_DPA = "https://legal.mistral.ai/terms/data-processing-addendum/";
 const MISTRAL_STORAGE =
@@ -370,6 +375,8 @@ const MISTRAL_ZDR =
     "https://help.mistral.ai/en/articles/347612-can-i-activate-zero-data-retention-zdr";
 const MINIMAX_PRIVACY = "https://platform.minimax.io/protocol/privacy-policy";
 const MINIMAX_PAID = "https://platform.minimax.io/protocol/paid-agreement";
+const SAIL_DPA = "https://docs.sailresearch.com/dpa";
+const SAIL_TERMS = "https://www.sailresearch.com/terms";
 
 /**
  * MiniMax is ready. The account page has no training switch. On 2026-09-28
@@ -638,6 +645,88 @@ export const PROVIDER_DATA_DESTINATIONS: readonly ProviderDataDestination[] = [
         commercialUseProhibited: true,
         commercialEvidenceRef: PERPLEXITY_DPA,
     }),
+    ready({
+        provider: "deepinfra",
+        recipientEntity: "Deep Infra Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: DEEPINFRA_TERMS,
+        storage: unlocated("NO_PERSISTENT_CONTENT_STORAGE", DEEPINFRA_PRIVACY),
+        processing: located("DISCLOSED_POSSIBLE_LOCATIONS", ["US"], "https://deepinfra.com/"),
+        trains: false,
+        trainsEvidenceRef: DEEPINFRA_PRIVACY,
+        retention: {
+            content: kept("NO_PERSISTENT_STORAGE", DEEPINFRA_PRIVACY),
+            safetyLogs: unspecified(DEEPINFRA_TERMS),
+            inMemoryCache: kept("TRANSIENT", DEEPINFRA_PRIVACY),
+            persistentFeatureState: unspecified(DEEPINFRA_TERMS),
+            systemMetadata: unspecified(DEEPINFRA_TERMS),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: DEEPINFRA_TERMS,
+        zeroDataRetention: { mode: "CONTRACTUAL_NO_CONTENT_STORAGE", evidenceRef: DEEPINFRA_TERMS },
+    }),
+    ready({
+        provider: "together",
+        recipientEntity: "Together Computer, Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: TOGETHER_TERMS,
+        storage: unlocated("NOT_SPECIFIED", TOGETHER_PRIVACY),
+        processing: unlocated("NOT_SPECIFIED", TOGETHER_PRIVACY),
+        // 2026-09-28 organization Privacy: prompt storage, third-party
+        // passthrough, and training were each No. The privacy policy calls
+        // that choice zero data retention and bars secondary use.
+        trains: false,
+        trainsEvidenceRef: TOGETHER_PRIVACY,
+        retention: {
+            content: kept("CUSTOMER_CONTROLLED", TOGETHER_PRIVACY),
+            safetyLogs: unspecified(TOGETHER_PRIVACY),
+            inMemoryCache: unspecified(TOGETHER_PRIVACY),
+            persistentFeatureState: kept("CUSTOMER_CONTROLLED", TOGETHER_PRIVACY),
+            systemMetadata: unspecified(TOGETHER_PRIVACY),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: TOGETHER_PRIVACY,
+        zeroDataRetention: { mode: "ZDR", evidenceRef: TOGETHER_PRIVACY },
+    }),
+    ready({
+        provider: "openrouter",
+        recipientEntity: "OpenRouter, Inc.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: OPENROUTER_TERMS,
+        storage: unlocated("NOT_SPECIFIED", OPENROUTER_PRIVACY),
+        processing: unlocated("NOT_SPECIFIED", OPENROUTER_PRIVACY),
+        trains: false,
+        trainsEvidenceRef: OPENROUTER_PRIVACY,
+        retention: {
+            content: kept("CUSTOMER_CONTROLLED", OPENROUTER_TERMS),
+            safetyLogs: unspecified(OPENROUTER_PRIVACY),
+            inMemoryCache: unspecified(OPENROUTER_TERMS),
+            persistentFeatureState: kept("CUSTOMER_CONTROLLED", OPENROUTER_TERMS),
+            systemMetadata: unspecified(OPENROUTER_PRIVACY),
+        },
+        commercialUseProhibited: false,
+        commercialEvidenceRef: OPENROUTER_PRIVACY,
+    }),
+    ready({
+        provider: "sail",
+        recipientEntity: "Sail Research Co.",
+        recipientCountryCodes: ["US"],
+        evidenceRef: SAIL_TERMS,
+        storage: unlocated("NOT_SPECIFIED", SAIL_DPA),
+        processing: unlocated("NOT_SPECIFIED", SAIL_DPA),
+        trains: false,
+        trainsEvidenceRef: SAIL_DPA,
+        retention: {
+            content: kept("BOUNDED", SAIL_DPA, 2),
+            safetyLogs: unspecified(SAIL_DPA),
+            inMemoryCache: kept("TRANSIENT", SAIL_DPA),
+            persistentFeatureState: unspecified(SAIL_DPA),
+            systemMetadata: unspecified(SAIL_DPA),
+        },
+        commercialUseProhibited: true,
+        commercialEvidenceRef: SAIL_DPA,
+        zeroDataRetention: { mode: "NOT_SUPPORTED", evidenceRef: SAIL_TERMS },
+    }),
 ];
 
 export const providerDataDestination = (
@@ -649,8 +738,9 @@ export const providerDataDestination = (
 /**
  * Whether this provider's destination is established at all.
  *
- * **Not a routing permission.** Whether a request may be served is a separate
- * approval, made when the request is served. Two answers to "may this go
+ * **Not a routing permission.** Whether a request may be served is decided by
+ * `endpointMayServeConstrainedTraffic` in `lib/deploymentIdentity.ts`, from an
+ * approval in force at that moment. Two functions answering "may this go
  * here?" from different sources is how a notice and a gate come to disagree,
  * and the disagreement is only discovered after somebody has been told.
  *

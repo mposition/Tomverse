@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "router-development-collector-v1-1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default)"
+  ],
+  "startedAt": "2026-09-10T03:54:33.158Z",
+  "durationMs": 322392,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 34,
+    "cachedInputTokens": 2293113,
+    "outputTokens": 24876,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.4648535000000003,
+    "raw": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 162740,
+      "cache_read_input_tokens": 2293113,
+      "output_tokens": 24876,
+      "output_tokens_details": {
+        "thinking_tokens": 20400
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 162740,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2560,
+          "cache_read_input_tokens": 161355,
+          "cache_creation_input_tokens": 6127,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 6127
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-10T03:59:55.604Z",
+  "verdict": {
+    "taskId": "router-development-collector-v1-1",
+    "round": 1,
+    "reviewedDigest": "sha256:b968bf159f191459ed02e5f4df376829ea5706d580eb91c4f20a7c223e66150b",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/routerDevelopmentCollectorJournal.ts:184 (collectionReport rows[].outcome)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The run report labels a selected-but-unattempted row and a never-selected eligible row identically as \"not_run\", so the report artifact alone does not distinguish a budget/deadline-skipped selected row from a row that was never in the selection; the distinction survives only in the separate manifest.selectedRowIds.",
+        "reproduction": "Run `npm run test:router-development-collector` and read tests/routerDevelopmentCollector.test.mjs, test \"permanent reservations stop a selected population explicitly and completed rows never rerun\": the manifest selects 2 rows with maxCalls=1, one row is dispatched, the run stops with `budget_stopped`, and the assertion `report.rows.filter((row) => row.outcome === \"not_run\").length === 359` holds — that 359 is the one skipped selected row plus the 358 never-selected eligible rows under a single label. Adding `selectedRowIds` (or a per-row `selected` flag) to collectionReport would separate them without changing any journal or manifest binding."
+      }
+    ],
+    "nextAction": "All three round-0 findings are fixed and verified in the tree (scripts/router-development-collect.mjs:67 now rebuilds the checked/written path with basename(); lib/routerDevelopmentCollectorProvider.ts:22 plus lib/routerDevelopmentCollector.ts:99 and supportedCollectionModel refuse unlisted providers at selection, adapter entry and collectFromProvider before any SDK import; docs/ops/router-development-benchmark/collector-v1.1.md now states npm runs the script from the package root) — proceed to the next authorized step, with the reporting nit recorded and the current version standing."
+  }
+}

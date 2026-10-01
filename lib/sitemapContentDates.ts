@@ -21,8 +21,6 @@
  * locales. That date is the chat-provider notice, including the per-provider
  * table of recipient, place, training, retention, and sale or advertising.
  * The table is on the page only while every enrolled row is disclosable.
- * This branch's catalogue enrolls twelve providers, and the table lists
- * those twelve.
  *
  * `contentSha256` is what keeps that true. It is the digest of exactly what
  * the page renders from -- the component (LF line endings), then
@@ -43,6 +41,6 @@ export type SitemapContentEvidence = {
 export const SITEMAP_CONTENT_EVIDENCE: Readonly<Record<string, SitemapContentEvidence>> = {
     "/privacy": {
         date: "2026-09-28",
-        contentSha256: "5976013ed339f98df04370d79773ef416b6d419bb1a2c95adf2114042dc78d70",
+        contentSha256: "c91c1d98f0b7e9c94561fb73f067947ac29b3193e500556b0928968bd9488b64",
     },
 };

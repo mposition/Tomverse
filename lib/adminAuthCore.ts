@@ -3,6 +3,8 @@ export type AdminPermission =
   | "support:write"
   | "billing:write"
   | "ops:write"
+  | "marketing:write"
+  | "engineering-agent:write"
   | "user:delete";
 export type AdminSessionAccessState =
   | "authorized"
@@ -51,6 +53,13 @@ export const roleHasPermission = (
   if (permission === "support:write") return role === "support";
   if (permission === "billing:write") return role === "billing";
   if (permission === "ops:write") return role === "ops";
+  // Marketing approvals, pauses, graduation and switches: owner and ops only
+  // (docs/policy/marketing-automation.md §6). Routes still check step-up
+  // themselves; this decides the role half.
+  if (permission === "marketing:write") return role === "ops";
+  // The engineering agent's T2 decisions, acknowledgements, mode and freeze:
+  // owner and ops (docs/policy/engineering-agent.md §11). Routes check step-up.
+  if (permission === "engineering-agent:write") return role === "ops";
   return false;
 };
 

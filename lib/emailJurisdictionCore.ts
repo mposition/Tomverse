@@ -193,11 +193,27 @@ export type JurisdictionSignals = {
   /** Priority 5, together. Circumstantial, never decisive on its own. */
   language?: string | null;
   timeZone?: string | null;
-  /** Priority 6. Recorded, never used to decide. */
+  /**
+   * Priority 6: the country estimated from the IP address at sign-up or sign-in
+   * and recorded (`UserSettings.countrySource = "ip_estimated"`). Used to decide
+   * since the 2026-09-29 amendment (docs/policy/email-notifications.md §6.2 step
+   * 4), when nothing stronger exists.
+   */
+  estimatedCountry?: string | null;
+  /** The request's own IP country. Observed for measurement, never decides. */
   ipCountry?: string | null;
 };
 
-export type JurisdictionConfidence = "high" | "conflict" | "low" | "unknown";
+export type JurisdictionConfidence = "high" | "estimated" | "conflict" | "low" | "unknown";
+
+/**
+ * The confidences marketing may be decided on: a signal that settles the
+ * country (`high`), or the recorded IP estimate with nothing contradicting it
+ * (`estimated`, docs/policy/email-notifications.md §6.2 step 4). `low` --
+ * language and time zone alone -- is not.
+ */
+export const isDeterminativeConfidence = (confidence: string): boolean =>
+  confidence === "high" || confidence === "estimated";
 
 export type ResolvedJurisdiction = {
   countryCode: string;
@@ -207,6 +223,7 @@ export type ResolvedJurisdiction = {
     | "billing"
     | "self_declared"
     | "consent"
+    | "ip_estimated"
     | "inferred"
     | "conflict"
     | "unresolved";
@@ -314,6 +331,31 @@ export const resolveEmailJurisdiction = (
   }
 
   const inferred = inferCountry(signals.language, signals.timeZone);
+  const estimated = normalizeCountry(signals.estimatedCountry);
+  if (estimated) {
+    // Two candidates, and the verdict takes one country at a time. Section 6.2
+    // step 4 asks both to pass; until the verdict can hold both, disagreement
+    // is a conflict and holds marketing back, which is the stricter reading.
+    if (inferred && inferred !== estimated) {
+      return {
+        countryCode: "ZZ",
+        profileKey: "ZZ",
+        confidence: "conflict",
+        source: "conflict",
+        conflicts: [estimated, inferred],
+        observedIpCountry,
+      };
+    }
+    return {
+      countryCode: estimated,
+      profileKey: profileForCountry(estimated),
+      confidence: "estimated",
+      source: "ip_estimated",
+      conflicts: [],
+      observedIpCountry,
+    };
+  }
+
   if (inferred) {
     return {
       countryCode: inferred,
@@ -348,7 +390,9 @@ export type MarketingJurisdictionVerdict =
 /**
  * Whether marketing may go out under this resolution.
  *
- * Only `high` passes. `low` is deliberately refused even though it produces a
+ * `high` and `estimated` pass (`isDeterminativeConfidence()`; the estimate since
+ * the 2026-09-29 amendment, docs/policy/email-notifications.md §6.2 step 4).
+ * `low` is deliberately refused even though it produces a
  * country: an inferred jurisdiction is a guess, and sending advertising under a
  * guessed set of labelling rules is exactly the thing §6.3 rule 1 declines to
  * do. Transactional and legal mail never consult this at all.
@@ -360,7 +404,7 @@ export type MarketingJurisdictionVerdict =
 export const marketingJurisdictionVerdict = (
   resolved: ResolvedJurisdiction
 ): MarketingJurisdictionVerdict => {
-  if (resolved.confidence === "high" && resolved.profileKey !== "ZZ") {
+  if (isDeterminativeConfidence(resolved.confidence) && resolved.profileKey !== "ZZ") {
     return MARKETING_ALLOWED_COUNTRIES.has(resolved.countryCode)
       ? { allowed: true }
       : { allowed: false, skipReason: "marketing_country_not_allowed" };

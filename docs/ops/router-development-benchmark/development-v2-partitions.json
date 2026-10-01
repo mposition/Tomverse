@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "router-development-partitions-v2",
+  "partitionId": "tomverse-router-development-v2-family-split-v1",
+  "purpose": "development-only",
+  "corpusDigest": "7cb8541f47799b16ca0ce703cfcafc6dca1f576669a2cc1d444335cade1c67e2",
+  "families": [
+    {
+      "familyId": "extract-active-selection",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "extract-revision-resolution",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "extract-keyed-join",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "extract-state-fold",
+      "partition": "development-validation"
+    },
+    {
+      "familyId": "extract-ordered-membership",
+      "partition": "development-validation"
+    },
+    {
+      "familyId": "extract-literal-projection",
+      "partition": "development-validation"
+    },
+    {
+      "familyId": "calc-inventory-ledger",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "calc-invoice-adjustments",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "calc-unit-conversion",
+      "partition": "tuning"
+    },
+    {
+      "familyId": "calc-elapsed-windows",
+      "partition": "development-validation"
+    },
+    {
+      "familyId": "calc-weighted-capacity",
+      "partition": "development-validation"
+    },
+    {
+      "familyId": "calc-tiered-allocation",
+      "partition": "development-validation"
+    }
+  ]
+}

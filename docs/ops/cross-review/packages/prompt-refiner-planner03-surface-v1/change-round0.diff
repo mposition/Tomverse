@@ -1,0 +1,540 @@
+diff --git a/.github/workflows/pr-fast-gate.yml b/.github/workflows/pr-fast-gate.yml
+index 067a0f85..57a22ac6 100644
+--- a/.github/workflows/pr-fast-gate.yml
++++ b/.github/workflows/pr-fast-gate.yml
+@@ -454,12 +454,11 @@ jobs:
+         timeout-minutes: 5
+         run: npm run check:native-token-boundary
+ 
+-      # PLANNER-03. Memory, imported content and uploaded documents already
+-      # reach the prompt, and the defences that keep them data -- fences,
+-      # rules stated first, inerting -- had nothing measuring them. This runs
+-      # an adversarial corpus through each builder and fails on a payload that
+-      # escapes its region, forges a boundary, gets ahead of the rules, or
+-      # smuggles a control character through.
++      # PLANNER-03. Memory, imported content, uploaded documents and the
++      # Prompt Refiner's current-turn input cross prompt trust boundaries.
++      # This runs one adversarial corpus through every builder and checks both
++      # fenced-text containment and the Refiner's system-first, canonical JSON
++      # role boundary.
+       - name: Prompt-injection containment
+         timeout-minutes: 5
+         run: npm run check:prompt-injection
+diff --git a/AGENTS.md b/AGENTS.md
+index dc027bd3..721bf170 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1315,12 +1315,13 @@ Non-negotiable requirements:
+   genuinely new state identity receives focus without scrolling. An initially
+   mounted bound state or the same identity reappearing after a draft edit does
+   not steal focus; a completed decision returns focus to the textarea.
+-- The current PLANNER-03 report does not exercise the Refiner builder. A
+-  model-facing caller or provider adapter that reaches
+-  `promptRefinerModelMessages()` is blocked until `prompt-refiner` is
+-  registered as a report surface and the adversarial corpus runs through it.
+-  The loopback fixture caller reaches only its no-cost E2E route and is not
+-  that model-facing path.
++- `promptRefinerModelMessages()` is the explicit `prompt-refiner` surface in
++  the PLANNER-03 report. Every adversarial corpus item must retain the exact
++  two-message boundary: system rules first, then only the canonical
++  `inputScope + sourceText` JSON user message. A model-facing caller or
++  provider adapter must use this builder and keep that report green. The
++  loopback fixture caller still reaches only its no-cost E2E route and is not
++  a model-facing path.
+ 
+ Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
+ `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-planner03-surface-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-planner03-surface-v1.task.json
+new file mode 100644
+index 00000000..8baad59f
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-planner03-surface-v1.task.json
+@@ -0,0 +1,26 @@
++{
++  "taskId": "prompt-refiner-planner03-surface-v1",
++  "requirement": "Prompt Refiner를 제품에서 활성화하지 않은 채 실제 promptRefinerModelMessages builder를 PLANNER-03 adversarial prompt-injection 보고서의 명시적 surface로 등록한다. 기존 공격 corpus 전부를 builder에 통과시키고, system 규칙 우선·정확히 두 메시지·inputScope와 sourceText만 포함하는 canonical JSON·원문 bytes 복원을 deterministic하게 검사한다. 역할 역전, plaintext 전달, 추가 JSON field, 추가 message와 system role 누출을 일부러 만든 회귀 사례가 감사기에 잡혀야 한다. release-gate evidence와 운영·UI 계약은 이 증거의 범위와 남은 한계를 정확히 설명해야 한다. provider 호출, billing, Router 입력, 제품 adapter, flag 활성화, 모델 행동 인증, 품질 승인, push, merge 또는 deploy는 이 변경에 포함하지 않는다. author는 codex, reviewer는 claude다.",
++  "completionCriteria": [
++    "실제 Prompt Refiner builder가 기존 17개 adversarial payload 모두에 대해 prompt-refiner surface로 실행되고 PLANNER-03 metric은 0이다.",
++    "감사기는 정확한 system-first + canonical two-field JSON user message만 허용하며 추가 role, message, field, plaintext와 원문 누출을 fail-closed한다.",
++    "의도적으로 경계를 깨뜨리는 회귀 테스트가 각 구조 위반을 검출하고 기존 Prompt Refiner 계약과 전체 단위 테스트가 통과한다.",
++    "release-gate evidence, PR gate 주석, AGENTS invariant, UI 계약과 한국어 진행 기록이 새 증거와 그 한계를 서로 일치하게 설명한다.",
++    "제품 adapter·provider·billing·Router·AppSetting writer는 추가되지 않고 rollout은 default-off, kill switch 우선, 공개 상태 변화 없음으로 유지된다.",
++    "관련 test, typecheck, lint, build, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.",
++    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다."
++  ],
++  "baseCommit": "3cd6fc1e823e2ffcae0bc42cebb3f65d671666b6",
++  "writableScope": [
++    ".github/workflows/pr-fast-gate.yml",
++    "AGENTS.md",
++    "docs/ops/cross-review/packages/prompt-refiner-planner03-surface-v1.task.json",
++    "docs/ops/tomverse-chat-progress.md",
++    "docs/ui-contracts/prompt-refiner-suggestion.md",
++    "lib/promptInjectionAudit.ts",
++    "scripts/report-prompt-injection.mjs",
++    "scripts/report-release-gate-evidence-core.mjs",
++    "tests/promptInjectionAudit.test.mjs"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
+index 61a7d852..c2fa33bf 100644
+--- a/docs/ops/tomverse-chat-progress.md
++++ b/docs/ops/tomverse-chat-progress.md
+@@ -823,3 +823,43 @@ production build를 public origin 두 조합과 loopback fixture에서 실행해
+ ④ 모델·output cap·timeout·재시도 0·비용 상한을 사전등록한 소규모 shadow 승인,
+ ⑤ 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합 및 전체
+ 카탈로그 선택 품질을 별도 측정하는 것이다.
++
++## 2026-09-15 Prompt Refiner PLANNER-03 명시적 surface 회차
++
++앞 회차의 다음 순서 ②를 구현했다. `promptRefinerModelMessages()`를
++`npm run check:prompt-injection`의 `prompt-refiner` surface로 등록하고, 기존 17개
++adversarial payload 전부를 실제 builder에 통과시킨다. 감사기는 다음 구조를
++deterministic하게 확인한다.
++
++- system 규칙이 첫 메시지이며 원문 payload를 포함하지 않는다.
++- provider 경계로 넘어가는 메시지는 정확히 system + user 두 개다.
++- user 메시지는 `inputScope`와 `sourceText`만 가진 canonical JSON이다.
++- JSON을 다시 읽었을 때 입력 scope와 source text bytes가 정확히 복원된다.
++- plaintext 전달, role 역전, 추가 history field, system role로의 원문 누출을
++  일부러 만든 회귀 사례에서 감사기가 0이 아닌 위반을 낸다.
++
++이 검사는 모델 응답을 생성하지 않고 provider·Router·billing·AppSetting writer를
++건드리지 않는다. 따라서 PLANNER-03의 builder 구조 증거는 채웠지만 실제 모델의
++주입 저항성, 제안문의 의미 보존, 비용·지연·실패·사용자 선택률, receipt 영속화,
++제품 adapter 승인과 gate status 승인은 아직 남는다. release gate의 `pending` 상태와
++기존 default-off·kill-switch 경계도 그대로 유지한다.
++
++### 한눈에 보는 전체 Chat 진척
++
++| 항목 | 이번 판단 |
++| --- | --- |
++| 전체 웹 Chat | **약 66%** (주관적 범위 **56–76%**) |
++| 직전 의미 있는 회차 대비 | **0%p** — 보안 증거를 닫았지만 사용자 기능·배포 범위는 늘지 않음 |
++| C19–C20 Refiner·Planner·품질 평가 | **약 32%** (직전 약 30%) |
++| 공개 상태 | 변화 없음 — 제품 adapter 없음, flag default-off, provider 호출 0 |
++
++### 이 Cycle 다음 권장 순서
++
++1. 이 source를 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 검증한다.
++2. provider와 분리된 내부 Refiner receipt 및 지연·실패·stale·사용자 선택률 계측
++   계약을 구현한다.
++3. 모델·output cap·timeout·재시도 0·per-request/stage 비용 상한을 사전등록한다.
++4. 별도 과금 승인 뒤 작은 shadow 실행으로 의미 보존·주입 저항·비용·지연을
++   측정한다.
++5. 품질 증거가 승인된 뒤에만 제품 adapter와 제안형 rollout을 열고, Refiner 결과의
++   Router 결합 및 전체 카탈로그 선택 품질은 별도 실험으로 판단한다.
+diff --git a/docs/ui-contracts/prompt-refiner-suggestion.md b/docs/ui-contracts/prompt-refiner-suggestion.md
+index 345d6a7b..fb209edb 100644
+--- a/docs/ui-contracts/prompt-refiner-suggestion.md
++++ b/docs/ui-contracts/prompt-refiner-suggestion.md
+@@ -176,10 +176,14 @@ fixture에서 채택한 resolution은 synthetic 문장을 user Message로 오인
+ submit을 fail-closed한다. 제품 caller는 원문/실행문 분리와 receipt 영속화를 먼저
+ 구현해야 이 guard를 제품 mode로 대체할 수 있다.
+ 
+-현재 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·
+-profile 등의 기존 surface만 실행하며 `promptRefinerModelMessages()`를 아직
+-exercise하지 않는다. 따라서 이 회차의 JSON quoting·system instruction은 구조적
+-방어이지 PLANNER-03 통과 증거가 아니다. 실제 caller/provider adapter를 추가하는
+-다음 회차에서는 `prompt-refiner`를 report의 명시적 surface로 등록하고 adversarial
+-corpus를 이 builder에 통과시켜야 한다. 그 전에는 Refiner 활성화나 Router 결합을
+-허용하지 않는다.
++`npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·profile과
++함께 `promptRefinerModelMessages()`를 `prompt-refiner` 명시적 surface로 실행한다.
++동일 adversarial corpus의 모든 항목에 대해 system 규칙이 먼저인지, 메시지가 정확히
++2개인지, user 메시지가 `inputScope + sourceText`만 가진 canonical JSON인지, 원문
++bytes가 그대로 복원되는지를 검사한다. 역할 순서·JSON 경계·추가 context 채널을
++일부러 깨뜨린 회귀 테스트가 감사기가 실제로 실패하는지도 고정한다.
++
++이는 **builder의 구조적 PLANNER-03 증거**일 뿐 실제 모델이 모든 주입문을 무시한다는
++품질 인증이나 provider adapter 승인, Refiner 활성화 또는 Router 결합 승인이 아니다.
++실제 caller는 이 builder를 단독 입력 경로로 사용해야 하고, 비용·receipt·의미 보존·
++model-output 평가 등 §6의 나머지 조건은 별도로 충족해야 한다.
+diff --git a/lib/promptInjectionAudit.ts b/lib/promptInjectionAudit.ts
+index 853e0c7b..80a90ad5 100644
+--- a/lib/promptInjectionAudit.ts
++++ b/lib/promptInjectionAudit.ts
+@@ -129,6 +129,25 @@ export type AuditInput = {
+     baselineAssembled: string;
+ };
+ 
++export type RoleSeparatedPromptMessage = {
++    role: unknown;
++    content: unknown;
++};
++
++export type RoleSeparatedPromptAuditInput = {
++    /** Which model-message builder produced this prompt. */
++    surface: string;
++    payloadId: string;
++    /** The exact untrusted bytes supplied to the builder. */
++    payload: string;
++    /** The ordered messages that would cross the provider boundary. */
++    messages: readonly RoleSeparatedPromptMessage[];
++    /** The system instruction that must frame the payload before it appears. */
++    rules: string;
++    /** The only lawful scope label in the data message. */
++    inputScope: string;
++};
++
+ /** Every index at which `needle` occurs. */
+ const occurrences = (haystack: string, needle: string): number[] => {
+     const found: number[] = [];
+@@ -289,6 +308,99 @@ export function auditAssembledPrompt(input: AuditInput): InjectionViolation[] {
+     return violations;
+ }
+ 
++/**
++ * Audit a builder whose trust boundary is expressed with chat roles and a
++ * canonical JSON data message rather than textual fences.
++ *
++ * The Prompt Refiner is the first such surface: its source text is already a
++ * user instruction, but to this model it must remain the object being
++ * rewritten. Exactly two messages make that boundary reviewable. The system
++ * message states the rules first, and the user message is exactly the JSON
++ * encoding of `{ inputScope, sourceText }`. Any additional role, field or
++ * serialization is a new input channel and therefore fails closed until the
++ * audit contract is deliberately revised.
++ */
++export function auditRoleSeparatedPrompt(
++    input: RoleSeparatedPromptAuditInput
++): InjectionViolation[] {
++    const violations: InjectionViolation[] = [];
++    const say = (kind: InjectionViolationKind, detail: string) =>
++        violations.push({
++            kind,
++            payloadId: input.payloadId,
++            surface: input.surface,
++            detail,
++        });
++
++    if (input.messages.length !== 2) {
++        say(
++            "structure_injected",
++            `expected exactly 2 messages, found ${input.messages.length}`
++        );
++    }
++
++    const rulesMessage = input.messages[0];
++    if (
++        rulesMessage?.role !== "system" ||
++        rulesMessage.content !== input.rules
++    ) {
++        say(
++            "rules_after_content",
++            "the exact system rules are not the first message"
++        );
++    }
++
++    const dataMessage = input.messages[1];
++    if (dataMessage?.role !== "user" || typeof dataMessage.content !== "string") {
++        say(
++            "structure_injected",
++            "the second message is not the canonical user data message"
++        );
++    } else {
++        const expected = JSON.stringify({
++            inputScope: input.inputScope,
++            sourceText: input.payload,
++        });
++        if (dataMessage.content !== expected) {
++            say(
++                "structure_injected",
++                "the user data message is not the exact two-field JSON encoding"
++            );
++        }
++
++        try {
++            const decoded = JSON.parse(dataMessage.content) as unknown;
++            if (
++                typeof decoded !== "object" ||
++                decoded === null ||
++                Array.isArray(decoded) ||
++                (decoded as { inputScope?: unknown }).inputScope !==
++                    input.inputScope ||
++                (decoded as { sourceText?: unknown }).sourceText !== input.payload
++            ) {
++                say(
++                    "escaped_region",
++                    "the decoded data message does not preserve the scope and source bytes"
++                );
++            }
++        } catch {
++            say("forged_boundary", "the user data message is not valid JSON");
++        }
++    }
++
++    for (const [index, message] of input.messages.entries()) {
++        if (index === 1 || typeof message.content !== "string") continue;
++        if (message.content.includes(input.payload)) {
++            say(
++                "escaped_region",
++                `the source payload appears outside the canonical data message at message ${index}`
++            );
++        }
++    }
++
++    return violations;
++}
++
+ /** The metric PLANNER-03 is measured on. */
+ export const INJECTION_METRIC =
+     "adversarial_retrieved_content_instruction_precedence_violations";
+diff --git a/scripts/report-prompt-injection.mjs b/scripts/report-prompt-injection.mjs
+index 063865fd..401b5e4a 100644
+--- a/scripts/report-prompt-injection.mjs
++++ b/scripts/report-prompt-injection.mjs
+@@ -11,11 +11,11 @@
+ // gate.
+ //
+ // Every payload in tests/fixtures/promptInjectionCorpus.mjs is pushed through
+-// each builder that puts untrusted text into a prompt, and the assembled bytes
+-// are judged by lib/promptInjectionAudit.ts. What that judges is structural --
+-// did the payload escape its region, forge a boundary, get ahead of the rules,
+-// or smuggle invisible structure through -- and deliberately not whether a
+-// model obeys an instruction, which no assertion here could hold.
++// each builder that puts untrusted text into a prompt. Fenced text surfaces
++// are checked for region containment; the Prompt Refiner's role-separated
++// surface is checked for system-first rules and the exact two-field JSON data
++// message. This deliberately does not claim whether a model obeys an
++// instruction, which no repository assertion could hold.
+ //
+ // ## The four sources the gate names, and where each actually is
+ //
+@@ -52,7 +52,15 @@ import {
+ import {
+     INJECTION_METRIC,
+     auditAssembledPrompt,
++    auditRoleSeparatedPrompt,
+ } from "../lib/promptInjectionAudit.ts";
++import {
++    PROMPT_REFINER_SYSTEM_INSTRUCTION,
++    promptRefinerModelMessages,
++} from "../lib/promptRefinerModelPrompt.ts";
++import {
++    PROMPT_REFINER_INPUT_SCOPE,
++} from "../lib/promptRefinerSuggestion.ts";
+ import {
+     ATTACHMENT_MARKERS,
+     MEMORY_MARKERS,
+@@ -125,6 +133,12 @@ const SURFACE_COVERAGE = [
+         exercised: true,
+         note: "assistant profile knowledge excerpts (release C, §14)",
+     },
++    {
++        source: "prompt-refiner-current-turn",
++        surface: "prompt-refiner",
++        exercised: true,
++        note: "current user-turn text is role-separated and encoded as the sole sourceText field",
++    },
+ ];
+ 
+ const memoryCase = (payload) => {
+@@ -212,6 +226,18 @@ const knowledgeCase = (payload) => ({
+     baselineAssembled: BENIGN_KNOWLEDGE_PROMPT,
+ });
+ 
++const promptRefinerCase = (payload) => ({
++    surface: "prompt-refiner",
++    payloadId: payload.id,
++    payload: payload.text,
++    messages: promptRefinerModelMessages({
++        requestId: `planner03_${payload.id}`,
++        prompt: payload.text,
++    }),
++    rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
++    inputScope: PROMPT_REFINER_INPUT_SCOPE,
++});
++
+ const violations = [];
+ const bySurface = new Map();
+ 
+@@ -227,6 +253,13 @@ for (const payload of PROMPT_INJECTION_CORPUS) {
+         bySurface.set(input.surface, (bySurface.get(input.surface) ?? 0) + 1);
+         violations.push(...found);
+     }
++    const refinerInput = promptRefinerCase(payload);
++    const refinerViolations = auditRoleSeparatedPrompt(refinerInput);
++    bySurface.set(
++        refinerInput.surface,
++        (bySurface.get(refinerInput.surface) ?? 0) + 1
++    );
++    violations.push(...refinerViolations);
+ }
+ 
+ const uncoveredSources = SURFACE_COVERAGE.filter(
+diff --git a/scripts/report-release-gate-evidence-core.mjs b/scripts/report-release-gate-evidence-core.mjs
+index 988ffe4e..df625eae 100644
+--- a/scripts/report-release-gate-evidence-core.mjs
++++ b/scripts/report-release-gate-evidence-core.mjs
+@@ -143,9 +143,9 @@ export const GATE_EVIDENCE = {
+         note: "Follows PLANNER-01: a cost-growth gate cannot be measured against a planner that does not exist, and its criterion is stated as cost increase without approved quality evidence, so it also waits on PLANNER-01's evaluation being approved.",
+     },
+     "PLANNER-03": {
+-        capability: ["lib/chatContextBundleCore.ts", "lib/memoryContextPrompt.ts", "lib/attachmentContextPrompt.ts"],
+-        measurement: ["scripts/report-prompt-injection.mjs", "lib/promptInjectionAudit.ts", "tests/promptInjectionAudit.test.mjs", "tests/fixtures/promptInjectionCorpus.mjs"],
+-        note: "The adversarial corpus runs through the memory, attachment-body and filename builders on every PR and reports the gate metric. It judges the structure of the assembled bytes -- escaped region, forged boundary, rules after content, smuggled control characters -- and deliberately not whether a model obeys an injected instruction, which nothing here could assert. Of the four sources the gate names, imported text reaches a prompt only as a validated memory, and project content has no prompt path at all (ConversationProject carries a name and no instruction text); both are stated in the report rather than omitted.",
++        capability: ["lib/chatContextBundleCore.ts", "lib/memoryContextPrompt.ts", "lib/attachmentContextPrompt.ts", "lib/promptRefinerModelPrompt.ts"],
++        measurement: ["scripts/report-prompt-injection.mjs", "lib/promptInjectionAudit.ts", "tests/promptInjectionAudit.test.mjs", "tests/promptRefinerSuggestion.test.mjs", "tests/fixtures/promptInjectionCorpus.mjs"],
++        note: "The adversarial corpus runs through the memory, attachment-body, filename, profile-knowledge and Prompt Refiner builders on every PR and reports the gate metric. Fenced surfaces are checked for escaped regions, forged boundaries, late rules and smuggled controls; the Refiner is checked for system-first rules and the exact two-field JSON data message. This deliberately does not claim whether a model obeys an injected instruction, which nothing here could assert. Imported text reaches a prompt only as a validated memory, and project content has no prompt path at all (ConversationProject carries a name and no instruction text); both are stated in the report rather than omitted.",
+     },
+ 
+     "BILLING-01": {
+diff --git a/tests/promptInjectionAudit.test.mjs b/tests/promptInjectionAudit.test.mjs
+index 75ebf91c..e508a9b8 100644
+--- a/tests/promptInjectionAudit.test.mjs
++++ b/tests/promptInjectionAudit.test.mjs
+@@ -24,7 +24,17 @@ import {
+     MEMORY_MARKERS,
+     buildMemoryContextPrompt,
+ } from "../lib/memoryContextPrompt.ts";
+-import { auditAssembledPrompt } from "../lib/promptInjectionAudit.ts";
++import {
++    auditAssembledPrompt,
++    auditRoleSeparatedPrompt,
++} from "../lib/promptInjectionAudit.ts";
++import {
++    PROMPT_REFINER_SYSTEM_INSTRUCTION,
++    promptRefinerModelMessages,
++} from "../lib/promptRefinerModelPrompt.ts";
++import {
++    PROMPT_REFINER_INPUT_SCOPE,
++} from "../lib/promptRefinerSuggestion.ts";
+ import { PROMPT_INJECTION_CORPUS } from "./fixtures/promptInjectionCorpus.mjs";
+ 
+ 
+@@ -103,6 +113,19 @@ const attachmentInput = (payload, overrides = {}) => ({
+     ...overrides,
+ });
+ 
++const promptRefinerInput = (payload, overrides = {}) => ({
++    surface: "prompt-refiner",
++    payloadId: payload.id,
++    payload: payload.text,
++    messages: promptRefinerModelMessages({
++        requestId: `planner03_${payload.id}`,
++        prompt: payload.text,
++    }),
++    rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
++    inputScope: PROMPT_REFINER_INPUT_SCOPE,
++    ...overrides,
++});
++
+ const kinds = (violations) => [...new Set(violations.map((v) => v.kind))].sort();
+ 
+ /* ---------------------------------------------- the builders as they stand */
+@@ -127,6 +150,16 @@ test("every corpus payload is contained by the real attachment builder", () => {
+     }
+ });
+ 
++test("every corpus payload stays in the Prompt Refiner data message", () => {
++    for (const payload of PROMPT_INJECTION_CORPUS) {
++        assert.deepEqual(
++            auditRoleSeparatedPrompt(promptRefinerInput(payload)),
++            [],
++            `${payload.id} escaped the Prompt Refiner builder`
++        );
++    }
++});
++
+ /* ------------------------------------------- one defence removed at a time */
+ 
+ test("a builder that stops defusing markers is caught", () => {
+@@ -202,6 +235,97 @@ test("a builder that drops the closing fence is caught", () => {
+     assert.ok(found.length > 0, "an unterminated document region went unnoticed");
+ });
+ 
++test("a Prompt Refiner that places source text before its rules is caught", () => {
++    const payload = payloadNamed("priority-claim");
++    const messages = promptRefinerModelMessages({
++        requestId: "planner03_rules_last",
++        prompt: payload.text,
++    });
++    const found = auditRoleSeparatedPrompt(
++        promptRefinerInput(payload, { messages: [messages[1], messages[0]] })
++    );
++    assert.ok(kinds(found).includes("rules_after_content"), kinds(found).join());
++});
++
++test("a Prompt Refiner that uses plaintext, another field or another message is caught", () => {
++    const payload = payloadNamed("system-role-claim");
++    const plaintext = auditRoleSeparatedPrompt(
++        promptRefinerInput(payload, {
++            messages: [
++                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
++                { role: "user", content: payload.text },
++            ],
++        })
++    );
++    assert.ok(kinds(plaintext).includes("forged_boundary"), kinds(plaintext).join());
++
++    const extraContext = auditRoleSeparatedPrompt(
++        promptRefinerInput(payload, {
++            messages: [
++                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
++                {
++                    role: "user",
++                    content: JSON.stringify({
++                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
++                        sourceText: payload.text,
++                        history: ["must not cross this boundary"],
++                    }),
++                },
++            ],
++        })
++    );
++    assert.ok(
++        kinds(extraContext).includes("structure_injected"),
++        kinds(extraContext).join()
++    );
++
++    const extraMessage = auditRoleSeparatedPrompt(
++        promptRefinerInput(payload, {
++            messages: [
++                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
++                {
++                    role: "user",
++                    content: JSON.stringify({
++                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
++                        sourceText: payload.text,
++                    }),
++                },
++                { role: "user", content: payload.text },
++            ],
++        })
++    );
++    assert.ok(
++        kinds(extraMessage).includes("structure_injected"),
++        kinds(extraMessage).join()
++    );
++    assert.ok(
++        kinds(extraMessage).includes("escaped_region"),
++        kinds(extraMessage).join()
++    );
++});
++
++test("a Prompt Refiner that leaks source text into another role is caught", () => {
++    const payload = payloadNamed("identity-claim");
++    const found = auditRoleSeparatedPrompt(
++        promptRefinerInput(payload, {
++            messages: [
++                {
++                    role: "system",
++                    content: `${PROMPT_REFINER_SYSTEM_INSTRUCTION}\n${payload.text}`,
++                },
++                {
++                    role: "user",
++                    content: JSON.stringify({
++                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
++                        sourceText: payload.text,
++                    }),
++                },
++            ],
++        })
++    );
++    assert.ok(kinds(found).includes("escaped_region"), kinds(found).join());
++});
++
+ test("a body that keeps control characters is caught, and bidi is not", () => {
+     // The two halves of the "structural-only" policy, asserted together
+     // because the value of each is that the other does not happen: a NUL is

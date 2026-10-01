@@ -1,14 +1,16 @@
 /**
  * Who, other than an administrator, may write to the audit hash chain.
  *
- * docs/policy/development-agent-orchestration.md requires orchestration audit
- * events. System actions use the same chain as human ones and the same
- * transaction as the change. A system entry has no session, so it carries no
- * `actorUserId`, `actorEmail`, IP or user agent; what it carries instead is
- * `metadata.systemActor`, set by `writeSystemAuditLog()` and by nothing else.
+ * docs/policy/marketing-automation.md §6 records system actions in the same
+ * chain as human ones, in the same transaction as the change. A system entry
+ * has no session, so it carries no `actorUserId`, `actorEmail`, IP or user
+ * agent; what it carries instead is `metadata.systemActor`, set by
+ * `writeSystemAuditLog()` and by nothing else.
  *
- * The list is closed on purpose. An entry's actor is evidence, so a new system
- * actor is a reviewed change to this array, not a string a caller makes up.
+ * The list is closed on purpose. An entry's actor is evidence -- a template
+ * approval, a resume into autonomous mode and a webhook verification each
+ * require a *human* row -- so a new system actor is a reviewed change to this
+ * array, not a string a caller makes up.
  *
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
@@ -22,8 +24,30 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
  */
 export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
 
-export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR, AMUX_AUTO_PROMOTER_AUDIT_ACTOR] as const;
+/**
+ * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
+ * names the service or app path whose action the entry records; none of them
+ * is a person, so none of them is approval evidence.
+ */
+export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
+  "engineering-agent-runner",
+  "engineering-agent-publisher",
+  "engineering-agent-retention",
+  "engineering-agent-observer",
+  "engineering-agent-registrar",
+] as const;
+export type EngineeringAgentSystemAuditActor =
+  (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
 
+export const SYSTEM_AUDIT_ACTORS = [
+  "marketing-publisher",
+  "marketing-retention",
+  "marketing-guard",
+  "prompt-refiner-shadow-runner",
+  AMUX_SYSTEM_AUDIT_ACTOR,
+  AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
+  ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
 /**
@@ -44,7 +68,7 @@ export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
   metadata !== null &&
   typeof metadata === "object" &&
   !Array.isArray(metadata) &&
-  Object.prototype.hasOwnProperty.call(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
+  Object.hasOwn(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
 
 type AuditRowActorFields = {
   actorUserId: string | null;
@@ -65,7 +89,7 @@ type AuditRowActorFields = {
  * chain is the integrity verifier's question.
  */
 export const auditRowActorKind = (
-  row: AuditRowActorFields
+  row: AuditRowActorFields,
 ): "human" | "system" | "unknown" => {
   const claimsSystem = metadataClaimsSystemActor(row.metadata);
   if (!claimsSystem) return row.actorUserId ? "human" : "unknown";

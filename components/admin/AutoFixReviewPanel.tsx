@@ -10,12 +10,12 @@ import {
   ShieldAlert,
   Wrench,
 } from "lucide-react";
-import { adminFetch } from "@/lib/adminFetch";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminAutoFixReviewMessages } from "@/lib/adminMessages/autoFixReview";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useSupportInboxRefresh } from "@/components/admin/useSupportInboxRefresh";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The Support page's auto-fix review section

@@ -3,7 +3,12 @@
 이 문서는 실제 staging verification record가 아니다.
 
 실제 staging 배포 SHA가 생기기 전까지의 preflight evidence만 기록한다.
-아래 flag 상태는 실행 환경 관측이 아니라 코드 기본값이다.
+로컬 evidence는 WSL의 repository root에서
+`npm run report:amux-staging-evidence`로 생성한다. 이 명령은 source HEAD SHA와
+dirty diff/untracked content digest를 묶고 실제 Rust test enumeration을 계산한다.
+dirty source identity는 deploy SHA가 아니며 staging 배포 증거를 대신하지 않는다.
+스크립트의 `runtimeFlagsObserved=false`는 아래 flag 상태가 실행 환경 관측이
+아니라 코드 기본값이라는 뜻이다.
 
 ## Current safety posture
 

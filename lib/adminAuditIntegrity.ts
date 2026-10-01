@@ -98,6 +98,7 @@ export async function verifyAdminAuditIntegrity() {
       keyEntryCounts: [] as number[],
       legacyOrderEntries: 0,
       unverifiedPrefix: 0,
+      unhashedEntriesDatedAfterFirstHash: 0,
       truncated: false,
       lastCheckedId: null as string | null,
       lastCheckedAt: null as string | null,
@@ -109,6 +110,7 @@ export async function verifyAdminAuditIntegrity() {
   let truncated = false;
   let cursorId: string | null = null;
   let firstCheckedId: string | null = null;
+  let firstCheckedAt: Date | null = null;
   let lastCheckedId: string | null = null;
   let lastCheckedAt: string | null = null;
   let checked = 0;
@@ -210,6 +212,7 @@ export async function verifyAdminAuditIntegrity() {
     previousEntryHash = row.entryHash;
     checked += 1;
     if (firstCheckedId === null) firstCheckedId = row.id;
+    if (firstCheckedAt === null) firstCheckedAt = row.createdAt;
     lastCheckedId = row.id;
     lastCheckedAt = row.createdAt.toISOString();
     }
@@ -222,6 +225,22 @@ export async function verifyAdminAuditIntegrity() {
       break;
     }
   }
+
+  // Rows without a hash are outside the chain, so the walk above never sees
+  // them. Before the chain started that is simply history; after it, the
+  // writer hashes every entry whenever a key is configured, so an unhashed row
+  // dated after the first hashed one was written some other way.
+  //
+  // The name says what is measured: rows are selected by `createdAt`, which an
+  // inserter chooses, so a back-dated row is not counted. It is a diagnostic in
+  // this response and nothing renders it yet -- the Admin panel is out of S1's
+  // scope -- so it neither changes `valid` nor raises anything on screen.
+  // docs/policy/marketing-automation.md §6.
+  const unhashedEntriesDatedAfterFirstHash = firstCheckedAt
+    ? await prisma.adminAuditLog.count({
+        where: { entryHash: null, createdAt: { gt: firstCheckedAt } },
+      })
+    : 0;
 
   const firstInvalid = failures[0] ?? null;
   // A walk that ran out of time has not shown the chain to be sound; it has
@@ -267,6 +286,7 @@ export async function verifyAdminAuditIntegrity() {
     keyEntryCounts,
     legacyOrderEntries,
     unverifiedPrefix,
+    unhashedEntriesDatedAfterFirstHash,
     /** True when the deadline stopped the walk before the newest entry. */
     truncated,
     /** The last entry the walk reached, so a resumed reading has a landmark. */

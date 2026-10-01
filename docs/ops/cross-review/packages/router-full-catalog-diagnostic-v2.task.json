@@ -1,0 +1,35 @@
+{
+  "taskId": "router-full-catalog-diagnostic-v2",
+  "requirement": "Continue router-full-catalog-diagnostic-v1, which concluded on hold after its two fix rounds with four findings open, by finishing the foundation so the same reasons do not block the next exchange. (1) Package exclusions: a --diff-exclude path is accepted only when it is exactly one of the task's declared generated paths or the package's own output directory; a parent of the package directory, or any scoped source, is refused, and a regression test holds that a change hidden that way is refused. (2) The Claude Code reviewer invocation loads no user, project or local customisation -- hooks above all -- while keeping the stored login: --safe-mode, not --bare, pinned by test. (3) The Windows failure of tests/automaticFallbackBoundary.test.mjs is fixed by path-separator normalisation only, with its allowlist and assertions unchanged, so the required test set passes on Windows and Linux alike. (4) Before any paid review, a preflight runs the reviewer's own invocation on a prompt that is not a review: it must read something the control program knows to be true (the HEAD commit) and must fail to write a probe file; the call, its command, its usage and its result are recorded, and a review refuses to start on a failing preflight or on a package whose tests or guards failed unless a person overrides explicitly on the command line. An environment failure is recorded as such, apart from the change's own findings. (5) The fallback part of the diagnostic separates three things by name: the offline diagnosis (which candidate is reachable on the given inputs, and each refusal's reason, with the product's own gate and decideFallback), the conditions an offline report cannot verify (credits and budget, the runtime registry row, the provider reservation, the request's search path), and the pre-dispatch check that decides on a real request; a reachable candidate is labelled execution-unverified and never executable. (6) This task names the exchange it continues; round 0's reviewer is shown that exchange's four open findings; and a chain of continuations is capped so that starting a new task is not a way to reset the revision cap. No production routing behaviour, score, flag or pre-registration changes; no model calls except the approved preflight and reviews; no push; no workflow dispatch.",
+  "completionCriteria": [
+    "packageExclusionProblems refuses a parent of the package directory and any path not declared in generatedPaths, and tests/crossReview.test.mjs holds it; a review refuses to run when an excluded generated file changed since packaging.",
+    "CLI_INVOCATIONS.claude.reviewer carries --safe-mode and not --bare, with --tools Read,Grep,Glob, --allowedTools and --strict-mcp-config, pinned by tests/crossReview.test.mjs.",
+    "tests/automaticFallbackBoundary.test.mjs passes on this Windows checkout with its ALLOWED map and assertions unchanged; the required eight-file test set reports 0 failures.",
+    "scripts/cross-review.mjs --mode=preflight records a preflight (command, cwd, sandbox signature, usage, result) and --mode=review refuses without a passing preflight for the same sandbox signature or with failing package checks, unless --skip-preflight or --review-despite-check-failures is given.",
+    "The diagnostic's fallback block carries decision, firstCandidate, reachableAsDeployed and reachableIfFlagOn with execution: \"unverified\" and unverifiedConditions on every reachable answer, and the word executable appears nowhere in it (tests/routerFullCatalogDiagnostic.test.mjs).",
+    "This task's package records lineage [router-full-catalog-diagnostic-v1] and the four inherited findings; supersessionProblems refuses to continue an exchange that is not on hold or failed, and refuses a chain deeper than MAX_SUPERSESSIONS (tests/crossReview.test.mjs).",
+    "Existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified."
+  ],
+  "baseCommit": "787a37c8",
+  "writableScope": [
+    "lib/routerFullCatalogDiagnostic.ts",
+    "lib/crossReviewCore.ts",
+    "lib/crossReviewExecutors.ts",
+    "scripts/report-router-full-catalog.mjs",
+    "scripts/cross-review.mjs",
+    "tests/routerFullCatalogDiagnostic.test.mjs",
+    "tests/crossReview.test.mjs",
+    "tests/automaticFallbackBoundary.test.mjs",
+    "docs/ops/router-full-catalog-diagnostic/",
+    "docs/ops/cross-review/",
+    "package.json"
+  ],
+  "generatedPaths": [
+    "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json"
+  ],
+  "supersedes": {
+    "taskId": "router-full-catalog-diagnostic-v1",
+    "exchange": "docs/ops/cross-review/packages/router-full-catalog-diagnostic/exchange.json"
+  }
+}

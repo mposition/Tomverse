@@ -36,7 +36,11 @@ test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) 
     await organizerToggle.click();
   }
   await expect(page.getByText("Status", { exact: true })).toBeVisible();
-  await expect(page.getByText("Labels", { exact: true })).toBeVisible();
+  // The organizer's second block is the model filter now. "Labels" went with
+  // the labels feature (2026-09-16), and the block that replaced it is the one
+  // worth asserting: it renders only for an account that actually uses more
+  // than one model, so it carries its own visibility rule.
+  await expect(page.getByTestId("sidebar-model-filters")).toBeVisible();
 
   // UI-027. Located by its own test id rather than by `role="tooltip"`. These
   // popovers hold a heading, a paragraph and an external "learn more" link, and
@@ -49,7 +53,11 @@ test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) 
   let popover = page.getByTestId("status-help-content");
   await expect(popover).toContainText("protection and sharing state");
 
-  for (const helpTestId of ["status-help", "labels-help", "projects-help"]) {
+  // "labels-help" went with the labels feature (2026-09-16). The two that
+  // remain still cover what this loop checks -- a disclosure opened from the
+  // organizer stays inside the viewport -- one of them anchored near the
+  // bottom of the panel, which is where an overflow would show.
+  for (const helpTestId of ["status-help", "projects-help"]) {
     if (helpTestId !== "status-help") {
       await page.keyboard.press("Escape");
       await page.getByTestId(helpTestId).click();
@@ -78,7 +86,9 @@ test("chat workspace guide exposes the full help structure", async ({ page }) =>
       name: "Use the Tomverse chat workspace with confidence",
     })
   ).toBeVisible();
-  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(10);
+  // Nine since the labels section went with the labels feature (2026-09-16):
+  // the eight numbered sections plus the tour heading above them.
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(9);
   await expect(page.getByText("AI Review compares only the supplied answers.")).toBeVisible();
 });
 
@@ -144,7 +154,10 @@ test("authenticated users can complete and replay the sidebar tour", async ({ pa
   await page.getByTestId("sidebar-help-button").click();
   await page.getByTestId("sidebar-tour-replay").click();
   await expect(tour).toBeVisible();
-  await page.getByTestId("sidebar-tour-next").click();
+  // Two steps, not three: the labels step went with the labels feature
+  // (2026-09-16). Clicked by count rather than by step name because the last
+  // click is the one that finishes the tour, and a spare click would land on
+  // whatever the tour uncovered instead.
   await page.getByTestId("sidebar-tour-next").click();
   await page.getByTestId("sidebar-tour-next").click();
   await expect(tour).toBeHidden();

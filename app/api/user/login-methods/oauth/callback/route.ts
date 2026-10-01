@@ -9,7 +9,6 @@ import {
   resolveOAuthLinkProviderFromState,
   OAuthLinkError,
 } from "@/lib/oauthLink";
-import { sendLoginMethodChangedEmail } from "@/lib/emailLoginEmails";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
 
 export async function GET(req: Request) {
@@ -44,17 +43,11 @@ export async function GET(req: Request) {
       return respond("loginMethodLinkError=INVALID_STATE");
     }
 
+    // The notice is queued inside the same transaction as the link
+    // (lib/oauthLink.ts), and only when something actually changed -- a
+    // callback replayed for an account that is already linked used to send
+    // "a login method was added" about nothing (section 7.4, C36).
     await completeOAuthLink(req, session.user.id, provider, code, state);
-
-    try {
-      await sendLoginMethodChangedEmail({
-        to: session.user.email,
-        action: "linked",
-        method: provider,
-      });
-    } catch (error) {
-      console.error("Failed to send login-method-linked email:", error);
-    }
 
     return respond(`loginMethodLinked=${provider}`);
   } catch (error) {

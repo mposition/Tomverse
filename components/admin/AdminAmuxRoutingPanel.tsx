@@ -9,10 +9,10 @@ import {
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
 import { adminIntlLocale } from "@/lib/adminLocale";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -353,7 +353,10 @@ export function AdminAmuxRoutingPanel() {
     try {
       const response = await adminFetch(
         `/api/admin/amux/escalations/review?escalation_id=${encodeURIComponent(escalationId)}`,
-        { cache: "no-store", timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS },
+        {
+          cache: "no-store",
+          signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
+        },
       );
       if (requestId !== reviewRequestId.current) return;
       if (!response.ok) {
@@ -396,7 +399,7 @@ export function AdminAmuxRoutingPanel() {
       const response = await adminFetch("/api/admin/amux/escalations/proposals", {
         method: "POST",
         cache: "no-store",
-        timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS,
+        signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           escalation_id: review.escalation.id,
@@ -468,7 +471,7 @@ export function AdminAmuxRoutingPanel() {
       const response = await adminFetch("/api/admin/amux/escalations", {
         method: "PATCH",
         cache: "no-store",
-        timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS,
+        signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "resolve",
@@ -538,7 +541,10 @@ export function AdminAmuxRoutingPanel() {
       });
       const response = await adminFetch(
         `/api/admin/amux/escalations/review/decision-status?${query}`,
-        { cache: "no-store", timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS },
+        {
+          cache: "no-store",
+          signal: AbortSignal.timeout(AMUX_REVIEW_CLIENT_TIMEOUT_MS),
+        },
       );
       if (!response.ok) {
         const code = await responseCode(response);

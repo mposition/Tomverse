@@ -1,0 +1,14 @@
+2026-09-09T12:03:06.723892Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:03:20.497083Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+Set-Content : Access to the path 'H:\Project\tomverse-router-diag-20260909\docs\ops\cross-review\packages\router-full-c
+atalog-diagnostic-v2\preflight-write-probe-2026-09-09T12-03-06-479Z.txt' is denied.
+At line:2 char:1
++ Set-Content -LiteralPath 'docs/ops/cross-review/packages/router-full- ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : PermissionDenied: (H:\Project\tomv...-03-06-479Z.txt:String) [Set-Content], Unauthorized 
+   AccessException
+    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand
+ 
+

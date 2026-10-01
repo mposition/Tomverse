@@ -3,6 +3,16 @@ import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 export type MarketingFeature = {
   title: string;
   body: string;
+  /**
+   * Where this item sends a reader, already resolved to an absolute URL.
+   *
+   * The payload carries a path id and never a URL
+   * (docs/policy/email-product-news-redesign-draft.md section 8); the server
+   * assembles this from the approved table before rendering, so by the time
+   * the layout sees it there is nothing left to validate. Absent when the
+   * item is prose with nowhere to go, which is most of them.
+   */
+  link?: { label: string; url: string } | null;
 };
 
 export type MarketingEmailMedia = {
@@ -78,7 +88,11 @@ export const renderMarketingEmailLayout = (
               </td>
               <td style="padding:17px 18px 17px 12px">
                 <p style="margin:0;color:#18181b;font-size:16px;line-height:1.4;font-weight:800">${escapeEmailHtml(feature.title)}</p>
-                <p style="margin:6px 0 0;color:#52525b;font-size:14px;line-height:1.65">${escapeEmailHtml(feature.body)}</p>
+                <p style="margin:6px 0 0;color:#52525b;font-size:14px;line-height:1.65">${escapeEmailHtml(feature.body)}</p>${
+                  feature.link
+                    ? `<p style="margin:10px 0 0"><a href="${escapeEmailHtml(feature.link.url)}" style="color:#0f766e;font-size:14px;line-height:1.65;font-weight:700;text-decoration:underline">${escapeEmailHtml(feature.link.label)}</a></p>`
+                    : ""
+                }
               </td>
             </tr>
           </table>
@@ -146,6 +160,9 @@ export const renderMarketingEmailLayout = (
     ...input.features.flatMap((feature) => [
       `${feature.title}`,
       feature.body,
+      // A text part that drops the link tells the reader less than the
+      // HTML one did, and some people only ever see this half.
+      ...(feature.link ? [`${feature.link.label}: ${feature.link.url}`] : []),
       "",
     ]),
     ...(input.closing ? [input.closing, ""] : []),

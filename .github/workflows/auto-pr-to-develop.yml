@@ -116,21 +116,54 @@ jobs:
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Two outcomes, and the difference between them is what the next step
+      # reads: `created=true` only when this run's own `gh pr create` opened the
+      # pull request. Finding one already open is not the same event, and the
+      # workflow must not treat it as one.
       - name: Create PR to develop if missing
+        id: create-pr
         if: steps.target.outputs.create == 'true' && steps.diff-check.outputs.has_diff == 'true'
         run: |
+          set -uo pipefail
           existing=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
-          if [ -z "$existing" ]; then
-            gh pr create \
-              --head "$BRANCH" \
-              --base develop \
-              --title "$BRANCH -> develop" \
-              --body "Auto-created by the Auto PR to Develop workflow. Will merge automatically once required checks pass."
-            echo "Created PR for $BRANCH -> develop"
-          else
-            echo "PR #$existing already open for $BRANCH -> develop"
+          if [ -n "$existing" ]; then
+            echo "PR #$existing already open for $BRANCH -> develop; leaving its merge settings alone."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if ! gh pr create \
+            --head "$BRANCH" \
+            --base develop \
+            --title "$BRANCH -> develop" \
+            --body "Auto-created by the Auto PR to Develop workflow. Auto-merge was armed once, at creation; if it is turned off it stays off."; then
+            echo "::error::gh pr create failed for $BRANCH -> develop."
+            exit 1
+          fi
+          number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -z "$number" ]; then
+            echo "::error::gh pr create reported success but no open PR for $BRANCH -> develop can be found."
+            exit 1
+          fi
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Created PR #$number for $BRANCH -> develop"
 
+      # Armed once, at creation, and never again.
+      #
+      # This step used to run on every push to the branch: it looked up the open
+      # PR and called `gh pr merge --auto` on whatever it found. Auto-merge is a
+      # setting a person can turn off, and re-arming it on the next push makes
+      # that decision temporary without saying so. On 2026-09-05 that is what
+      # happened to #1256 -- auto-merge was verified off, a commit was pushed,
+      # this workflow turned it back on, and the pull request squash-merged into
+      # develop while its author was still working on it. Nobody approved that
+      # merge; a workflow re-armed a switch someone had already thrown.
+      #
+      # So the condition is the creation event, not the existence of a PR. The
+      # `if` is the guard -- the step does not look a PR up for itself, it is
+      # handed the number the create step opened. A run that found a PR already
+      # open never reaches here, which is the whole rule: off stays off.
+      #
       # A pull request that touches .github/workflows/** cannot have auto-merge
       # enabled by this token: GitHub refuses the mutation with
       #
@@ -145,25 +178,27 @@ jobs:
       # So the refusal is reported and tolerated; anything else still fails.
       # The pull request is unaffected either way -- only auto-merge is, and
       # such a PR is merged by a human on purpose.
-      - name: Enable auto-merge
-        if: steps.target.outputs.create == 'true' && steps.diff-check.outputs.has_diff == 'true'
+      - name: Arm auto-merge on the pull request this run created
+        if: steps.create-pr.outputs.created == 'true'
+        env:
+          PR_NUMBER: ${{ steps.create-pr.outputs.number }}
         run: |
           set -uo pipefail
-          pr_number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
-          if [ -z "$pr_number" ]; then
+          # `gh pr create` above passes no `--draft`, so this cannot be true
+          # today. It is kept because `gh pr merge --auto` fails on a draft, and
+          # adding `--draft` there should change what this step does rather than
+          # turn the job red.
+          if [ "$(gh pr view "$PR_NUMBER" --json isDraft --jq '.isDraft')" = "true" ]; then
+            echo "Auto-merge not armed: PR #$PR_NUMBER was created as a draft."
             exit 0
           fi
-          if [ "$(gh pr view "$pr_number" --json isDraft --jq '.isDraft')" = "true" ]; then
-            echo "Auto-merge not enabled: PR #$pr_number is still a draft."
-            exit 0
-          fi
-          if output=$(gh pr merge "$pr_number" --squash --auto 2>&1); then
+          if output=$(gh pr merge "$PR_NUMBER" --squash --auto 2>&1); then
             echo "$output"
             exit 0
           fi
           echo "$output"
           if printf '%s' "$output" | grep -q "without \`workflow\` scope"; then
-            echo "Auto-merge not enabled: this PR changes a workflow file, so it must be merged by a human."
+            echo "Auto-merge not armed: this PR changes a workflow file, so it must be merged by a human."
             exit 0
           fi
           exit 1

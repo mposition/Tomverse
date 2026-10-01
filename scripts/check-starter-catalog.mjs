@@ -36,6 +36,10 @@ import {
   STARTER_ACCENT_ROLES,
 } from "../lib/chatStarterCatalog.ts";
 import { CHAT_STARTER_MAX_VISIBLE } from "../lib/chatStarterAvailability.ts";
+import {
+  MARKETING_FORBIDDEN_DASHES,
+  MARKETING_SUPERLATIVE_WORDS,
+} from "../lib/marketingBannedClaims.ts";
 
 const LOCALES = ["en", "ko", "zh", "fr", "de", "es", "pt"];
 
@@ -122,27 +126,12 @@ for (const locale of LOCALES) {
 // The superlative list is `tests/autoRoutingUi.test.mjs`'s, for the same
 // reason: the product measures non-inferiority, which is a far weaker claim
 // than "the best model", and a card is not the place to make the stronger one.
-const FORBIDDEN_CLAIMS = [
-  "best",
-  "optimal",
-  "smartest",
-  "most powerful",
-  "최적",
-  "가장 좋은",
-  "최고",
-  "最佳",
-  "最好",
-  "meilleur",
-  "beste",
-  "mejor",
-  "melhor",
-];
-// components/marketing/landingContent.ts: no customer-facing string in this
-// product uses an em dash or an en dash.
-const FORBIDDEN_DASHES = [
-  ["—", "em dash"],
-  ["–", "en dash"],
-];
+// Both lists now live in lib/marketingBannedClaims.ts, because there were
+// three copies of the first one and they disagreed. The shared list is their
+// union, so this check is stricter than it was by "fastest",
+// "most advanced" and "state of the art" -- none of which any card uses.
+const FORBIDDEN_CLAIMS = MARKETING_SUPERLATIVE_WORDS;
+const FORBIDDEN_DASHES = MARKETING_FORBIDDEN_DASHES;
 
 const checkCopy = (locale, key, value) => {
   const lowered = value.toLowerCase();

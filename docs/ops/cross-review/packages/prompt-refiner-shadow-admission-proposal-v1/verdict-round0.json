@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-16T23:33:50.293Z",
+  "durationMs": 353127,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 34,
+    "cachedInputTokens": 1453139,
+    "outputTokens": 24881,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.4720804999999992,
+    "raw": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 108450,
+      "cache_read_input_tokens": 1453139,
+      "output_tokens": 24881,
+      "output_tokens_details": {
+        "thinking_tokens": 19244
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 108450,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2090,
+          "cache_read_input_tokens": 108667,
+          "cache_creation_input_tokens": 2583,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2583
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-16T23:39:43.474Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": ".gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "Only the four evidence artifacts are LF-pinned; the two new non-evidence paths named by completion criterion 9 (the new TypeScript core and its test) carry no line-ending attribute, so their bytes are not identical in a Windows core.autocrlf=true checkout.",
+        "reproduction": "git check-attr text eol -- lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs → both report \"text: unspecified\" and \"eol: unspecified\", whereas the same command on docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json reports \"text: set\", \"eol: lf\". No digest depends on either new path (neither is in PROMPT_REFINER_SHADOW_SOURCE_PATHS, lib/promptRefinerShadowSource.ts:11-25), and the repo pins only digest-bound paths, so this is a criterion-vs-convention decision for the author rather than a functional break."
+      },
+      {
+        "location": "lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The returned proposal is a plain mutable object — only PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS is frozen — so the \"immutable proposal\" property holds at the TypeScript literal-type level but not at runtime for a JS caller.",
+        "reproduction": "node --import tsx -e \"import{proposePromptRefinerShadowStage as p}from './lib/promptRefinerShadowAdmissionCore.ts';import{readFileSync as r}from 'node:fs';const d='docs/ops/prompt-refiner-shadow/evidence/';const x=p({manifestBytes:r(d+'admission-readiness-v1.manifest.json'),reportBytes:r(d+'admission-readiness-v1.report.json'),journalBytes:r(d+'admission-readiness-v1.journal.jsonl'),witnessBytes:r(d+'admission-readiness-v1.journal.jsonl.witness.jsonl'),corpusBytes:r('docs/ops/prompt-refiner-shadow/corpus-v1.json')});x.executionAdmitted=true;x.provenance.corpusDigest='x';console.log(x.executionAdmitted,x.provenance.corpusDigest)\" prints \"true x\". Object.freeze on the proposal and its two nested objects would close this; note existing peers (admitPromptRefinerExecution in lib/promptRefinerExecutionContract.ts) also return unfrozen decisions, so the current shape is consistent with repo practice."
+      },
+      {
+        "location": "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (\".gitattributes\" digest) with .gitattributes:70-78",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The commit that freezes the bundle also edits .gitattributes, which is a member of the bundle's own source allowlist, so the evidence can never be regenerated from this branch — the disclosure is correct, but the bundle is now verify-only rather than reproducible.",
+        "reproduction": "The report pins .gitattributes → 2638c45e7dcb13e22deb22492f0aa9ad3152c82179b89e2e57ed05819aed843e (the f1e1b0c2 bytes). scripts/prompt-refiner-shadow-harness.mjs:140-148 builds `anchored` from `git show <sourceRef>:path` and `current` from the worktree, and lib/promptRefinerShadowSource.ts:84-89 fails `runtime_source_drift` on any inequality; since HEAD adds 10 lines to .gitattributes, re-running the harness with --source-ref f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830 at HEAD fails source-drift instead of reproducing the four files. Nothing to change in this round — docs/ops/prompt-refiner-shadow/evidence/README.md:16-20, docs/ops/prompt-refiner-shadow-harness.md §8 and docs/policy/prompt-refiner-observability.md §10 already state the snapshot-only limitation, and the verifier hard-codes currentCheckoutValidated=false / runtimeSourceRevalidationRequired=true."
+      }
+    ],
+    "nextAction": "Approve as-is; decide whether criterion 9 requires adding LF pins for the new core and test paths, and optionally freeze the returned proposal before any future writer consumes it."
+  }
+}

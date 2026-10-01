@@ -27,7 +27,8 @@ const sentinel = (label: string) => {
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ChatLimitDecisionEvent", "ChatCreditReservation", "ImageCreditReservation",
+      "ChatLimitDecisionEvent", "ComparisonReviewRunAttempt", "ComparisonReviewRun",
+      "ChatCreditReservation", "ImageCreditReservation",
       "MemoryExtractionCreditReservation", "Feedback", "RefundRequest",
       "AdminNote", "ModelOverride", "User"
     RESTART IDENTITY CASCADE
@@ -57,6 +58,42 @@ const seedUser = async () => {
       phase: "pre",
       decision: "allow",
       models: {},
+    },
+  });
+
+  // The AI Review operational record. Same shape of risk as the limit
+  // decisions above: no relation to User, so nothing clears it on its own, and
+  // the row is meant to survive the deletion without naming anybody.
+  await prisma.comparisonReviewRun.create({
+    data: {
+      userId,
+      subjectKey: sentinel("comparisonReviewRun-subjectKey"),
+      traceId: sentinel("comparisonReviewRun-traceId"),
+      conversationId: sentinel("comparisonReviewRun-conversationId"),
+      subjectKind: "account",
+      reviewMode: "balanced",
+      language: "ko",
+      responseCount: 2,
+      promptVersion: "comparison-review-v3",
+      outcome: "completed_dual",
+      startedAt: new Date(),
+      completedAt: new Date(),
+      durationMs: 1_000,
+      primaryStatus: "completed",
+      secondaryStatus: "completed",
+      attempts: {
+        create: [
+          {
+            ordinal: 1,
+            slot: "primary",
+            reviewerModelId: "mistral-medium-3-1",
+            reviewerProvider: "mistral",
+            status: "completed",
+            reservedCredits: 4,
+            settledCredits: 4,
+          },
+        ],
+      },
     },
   });
 
@@ -187,8 +224,10 @@ const seedUser = async () => {
 
 /** Everything that survived the deletion, as one string. */
 const survivingRows = async () => {
-  const [limitDecisions, chat, image, memory, feedback, refunds] = await Promise.all([
+  const [limitDecisions, reviewRuns, reviewAttempts, chat, image, memory, feedback, refunds] = await Promise.all([
     prisma.chatLimitDecisionEvent.findMany(),
+    prisma.comparisonReviewRun.findMany(),
+    prisma.comparisonReviewRunAttempt.findMany(),
     prisma.chatCreditReservation.findMany(),
     prisma.imageCreditReservation.findMany(),
     prisma.memoryExtractionCreditReservation.findMany(),
@@ -199,7 +238,18 @@ const survivingRows = async () => {
     prisma.adminNote.findMany(),
     prisma.modelOverride.findMany(),
   ]);
-  return { limitDecisions, chat, image, memory, feedback, refunds, adminNotes, modelOverrides };
+  return {
+    limitDecisions,
+    reviewRuns,
+    reviewAttempts,
+    chat,
+    image,
+    memory,
+    feedback,
+    refunds,
+    adminNotes,
+    modelOverrides,
+  };
 };
 
 const serialise = (value: unknown) =>
@@ -207,7 +257,7 @@ const serialise = (value: unknown) =>
 
 test("deleting the account leaves no planted identifier behind", async () => {
   const userId = await seedUser();
-  assert.ok(sentinels.length >= 16, `only ${sentinels.length} sentinels were planted`);
+  assert.ok(sentinels.length >= 20, `only ${sentinels.length} sentinels were planted`);
 
   const result = await deleteTomverseAccount(userId, { cancelSubscription: false });
   assert.equal(result.deleted, true);
@@ -231,6 +281,19 @@ test("the anonymised rows survive, without their identifiers", async () => {
   const remaining = await survivingRows();
 
   assert.equal(remaining.limitDecisions.length, 1);
+  assert.equal(remaining.reviewRuns.length, 1);
+  assert.equal(remaining.reviewRuns[0].userId, null);
+  assert.equal(remaining.reviewRuns[0].conversationId, null);
+  // What the row exists for is untouched: the reliability history stays
+  // computable after the person is gone.
+  assert.equal(remaining.reviewRuns[0].outcome, "completed_dual");
+  assert.equal(remaining.reviewRuns[0].durationMs, 1_000);
+  // The attempt survives with its reliability facts. It carries no identifier
+  // of its own -- an over-settlement is traced through the run's traceId,
+  // which is anonymised above -- so there is nothing here to scrub.
+  assert.equal(remaining.reviewAttempts.length, 1);
+  assert.equal(remaining.reviewAttempts[0].reviewerModelId, "mistral-medium-3-1");
+  assert.equal(remaining.reviewAttempts[0].settledCredits, 4);
   assert.equal(remaining.chat.length, 1);
   assert.equal(remaining.image.length, 1);
   assert.equal(remaining.memory.length, 1);

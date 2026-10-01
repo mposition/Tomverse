@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "router-development-collector-v1-1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default)"
+  ],
+  "startedAt": "2026-09-10T03:21:54.590Z",
+  "durationMs": 413942,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 36,
+    "cachedInputTokens": 2518406,
+    "outputTokens": 31344,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.861649,
+    "raw": {
+      "input_tokens": 36,
+      "cache_creation_input_tokens": 175421,
+      "cache_read_input_tokens": 2518406,
+      "output_tokens": 31344,
+      "output_tokens_details": {
+        "thinking_tokens": 26741
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 175421,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1459,
+          "cache_read_input_tokens": 171723,
+          "cache_creation_input_tokens": 6498,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 6498
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-10T03:28:48.589Z",
+  "verdict": {
+    "taskId": "router-development-collector-v1-1",
+    "round": 0,
+    "reviewedDigest": "sha256:55cb20818f04feabb2ea0af86cb641da5caed13d329ea34d424558ac2b5b3420",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "scripts/router-development-collect.mjs:67",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The output-path guard reconstructs the filename with outputPath.slice(dirname(outputPath).length + 1), which drops the first character of the basename whenever the parent is a filesystem/drive root, so the existence check and the git-common-dir containment check are applied to a different path than the one actually written.",
+        "reproduction": "node -e \"const {resolve,dirname}=require('path');const o=resolve('C:/run.json');console.log(o, dirname(o), o.slice(dirname(o).length+1))\" prints 'C:\\\\run.json C:\\\\ un.json' (POSIX: resolve('/run.json') yields '/run.json' and 'un.json'). Running the CLI with --output=C:/run.json therefore validates C:\\\\un.json and writes C:\\\\run.json. Impact is limited: a git common dir is never a filesystem root, so containment cannot be bypassed, and the 'wx' open flag still refuses to overwrite an existing file; the fix is basename(outputPath)."
+      },
+      {
+        "location": "lib/routerDevelopmentCollectorProvider.ts:85",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "observeCollectionBody only parses openai, deepseek/xai/mistral/moonshot, anthropic/minimax and google bodies and returns early for every other provider, so a reported non-standard served tier or any usage counter on a groq/qwen/zhipu/perplexity model would never be read and unsupportedBilling would stay false, leaving the row exportable as succeeded.",
+        "reproduction": "node --conditions=react-server --import tsx -e \"import('./lib/routerDevelopmentCollectorProvider.ts').then(m=>console.log(m.observeCollectionBody('qwen',{service_tier:'priority',usage:{prompt_tokens:1,completion_tokens:1}}), m.observeCollectionBody('openai',{service_tier:'priority',usage:{input_tokens:1,output_tokens:1}})))\" — the first returns source 'unavailable' with unsupportedBilling false, the second returns servedProcessingTier 'priority' with unsupportedBilling true. Currently unreachable for selection because every model on those providers lacks contextWindowTokens and is refused with benchmark:context_window_undeclared (check:router-context-window reports 16 enabled models without a declared window, leaving exactly the 15 eligible ones), but adding a context window to such a model would silently disable tier/billing detection for it; documenting the covered provider families or refusing selection of an unparsed provider would close it."
+      },
+      {
+        "location": "docs/ops/router-development-benchmark/collector-v1.1.md:299",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "\"Relative input/output paths resolve from the current shell directory\" is inaccurate for the documented `npm run benchmark:router:collect --` invocation, because npm runs package scripts from the package root regardless of the caller's working directory.",
+        "reproduction": "From any subdirectory of the checkout, run `npm run benchmark:router:collect -- --output=x.json`; the file is created at the repository root, not in the subdirectory (npm run-script documentation, already cited in this document's reference list, states scripts run from the root of the package folder). All worked examples in the document use absolute paths, so only the sentence needs correcting."
+      }
+    ],
+    "nextAction": "Record this approval for the reviewed digest; optionally fix the root-directory basename derivation and the relative-path sentence, and decide whether unparsed provider families should be refused at selection, in a later authorized round."
+  }
+}

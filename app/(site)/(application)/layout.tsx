@@ -5,6 +5,10 @@ import { getServerSession } from "next-auth/next";
 import type { Session } from "next-auth";
 import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import SessionProviderWrapper from "@/components/auth/SessionProviderWrapper";
+import { SignupConsentFinalizer } from "@/components/auth/SignupConsentFinalizer";
+import { InProductConsentNotice } from "@/components/email/InProductConsentNotice";
+import { consentNoticeCollectionReady } from "@/lib/inProductConsentNoticeSurface";
+import { isEmailSignupConsentEnabled } from "@/lib/appSettings";
 import { LanguageProvider, type Language } from "@/components/LanguageProvider";
 import {
   DOCUMENT_LANGUAGE_HEADER,
@@ -98,6 +102,17 @@ export default async function ApplicationLayout({
       ? configuredMeasurementId
       : null;
 
+  // The sign-up consent collection gate (S4). Read only for a signed-in page:
+  // the finalizer has nothing to do without a session.
+  const signupConsentEnabled = session?.user?.id
+    ? await isEmailSignupConsentEnabled().catch(() => false)
+    : false;
+  // The in-product consent notice (S8, draft section 5.4): only where it could
+  // be honoured -- the same gate and a confirmation that can be sent.
+  const consentNoticeEnabled = session?.user?.id
+    ? await consentNoticeCollectionReady().catch(() => false)
+    : false;
+
   return (
     <SessionProviderWrapper session={session}>
       <LanguageProvider
@@ -118,6 +133,8 @@ export default async function ApplicationLayout({
           <ModelCatalogProvider initialModels={initialModels}>
             {children}
           </ModelCatalogProvider>
+          <SignupConsentFinalizer enabled={signupConsentEnabled} />
+          <InProductConsentNotice enabled={consentNoticeEnabled} />
         </AnalyticsProvider>
       </LanguageProvider>
     </SessionProviderWrapper>

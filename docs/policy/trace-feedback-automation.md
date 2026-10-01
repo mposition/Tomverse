@@ -314,12 +314,15 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
   Prisma schema/migration·관리자 권한·감사 무결성·개인정보·모델 가격/
   lifecycle·`.github/**`·dependency·config·visual baseline·provider 장애·
   일시 오류, 그리고 자동 수정 파이프라인 자체.
-- **workflow 경합**: `cron-auto-fix.yml`은 `autofix/**` branch를
-  `GH_AUTOMATION_PAT`으로 push하고 `main` PR을 만들며,
-  `auto-pr-to-develop.yml`은 이 namespace를 제외하지 않아 같은 branch에
-  develop PR이 중복 생성될 수 있다. Phase 3 workflow는 `cron-auto-fix.yml`을
-  재사용하지 않고 전용 namespace를 쓰며, 이 경합은 Phase 3 시작 전에 별도
-  소규모 workflow PR로 해결돼야 한다.
+- **workflow 경합** (2026-09-17 사실 정정, 규칙 변경 없음): 이 항목을 쓸 때는
+  `auto-pr-to-develop.yml`이 `autofix/**`를 제외하지 않아, `cron-auto-fix.yml`이
+  `GH_AUTOMATION_PAT`으로 push한 branch에 develop PR이 중복 생성될 수 있었다.
+  지금은 해소됐다 — `Auto PR to Develop`은 `to-develop` 경로 조각이 있는
+  branch에만 PR을 열고, 그보다 먼저 `autofix`·`feedback-autofix`·`dependabot`
+  namespace를 거절한다(`scripts/auto-pr-branch-policy.mjs`의
+  `AUTOMATION_NAMESPACES`, `tests/autoPrBranchPolicy.test.mjs`). Phase 3
+  workflow가 `cron-auto-fix.yml`을 재사용하지 않고 전용 namespace를 쓴다는
+  조건은 그대로다.
 - scheduled workflow는 default branch에 있어야 예약 실행된다. 구현이
   `develop`에만 있는 동안 schedule이 활성화됐다고 보고하지 않는다(N/V).
 

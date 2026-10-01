@@ -182,7 +182,7 @@ provider)입니다.
 |---|---|
 | 하는 일 | marketing 전용 provider 계약 → `EmailProviderPort` 구현체 1개 추가 |
 | 코드 변경 | **있음** — `lib/emailProviderPort.ts`에 두 번째 구현. port가 이미 얇으므로 큰 작업은 아니지만 A보다 큼 |
-| suppression | 완전 분리. 단 **양쪽에 밀어 넣어야 함** — 우리 `SuppressionEntry`가 유일한 판정 근거이고 동기화는 단방향(ADR §8.8) |
+| suppression | 완전 분리. 단 **양쪽에 밀어 넣어야 함** — 우리 `SuppressionCause`가 유일한 판정 근거이고 동기화는 단방향(ADR §8.8) |
 | 언제 이걸 고르는가 | F2에서 team 분리가 불가하거나, 세그먼트·여정 같은 marketing 기능이 실제로 필요해졌을 때(그건 Phase 3 조건이며 지금은 아님) |
 | 되돌릴 수 있는가 | 예, 다만 계약이 걸림 |
 
@@ -290,7 +290,7 @@ suppression 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKET
   갖지 않습니다. 재사용하려면 코드를 고쳐야 하고, 그 수정이 곧 A18을 C로
   바꾸는 결정입니다 — 문서 없이 코드로 내리지 않습니다.
 - **suppression을 Resend 대시보드에서 손으로 지워 로그인을 복구하기.** 증상은
-  사라지고 원인은 남습니다. 우리 `SuppressionEntry`가 판정 근거이므로, 지우는
+  사라지고 원인은 남습니다. 우리 `SuppressionCause`가 판정 근거이므로, 지우는
   행위는 감사 기록 없이 provider 상태만 바꿉니다.
 - **같은 team 안에서 region만 다르게 두고 분리했다고 믿기.** 오늘 문서가 말하는
   경계는 team이며(§1.1), region은 지연과 데이터 소재의 문제입니다. 이 착각은

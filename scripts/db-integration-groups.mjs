@@ -70,7 +70,7 @@ const LANE_RULES = [
   // decide whether a paid turn starts at all.
   [
     "finance",
-    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
+    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
   ],
 ];
 

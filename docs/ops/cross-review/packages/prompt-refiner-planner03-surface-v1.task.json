@@ -1,0 +1,27 @@
+{
+  "taskId": "prompt-refiner-planner03-surface-v1",
+  "requirement": "Prompt Refiner를 제품에서 활성화하지 않은 채 실제 promptRefinerModelMessages builder를 PLANNER-03 adversarial prompt-injection 보고서의 명시적 surface로 등록한다. 기존 공격 corpus 전부를 builder에 통과시키고, system 규칙 우선·정확히 두 메시지·inputScope와 sourceText만 포함하는 canonical JSON·원문 bytes 복원을 deterministic하게 검사한다. 역할 역전, plaintext 전달, 추가 JSON field, 추가 message와 system role 누출을 일부러 만든 회귀 사례가 감사기에 잡혀야 한다. release-gate evidence와 운영·UI 계약은 이 증거의 범위와 남은 한계를 정확히 설명해야 한다. provider 호출, billing, Router 입력, 제품 adapter, flag 활성화, 모델 행동 인증, 품질 승인, push, merge 또는 deploy는 이 변경에 포함하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "실제 Prompt Refiner builder가 기존 17개와 JSON role 위조형 1개를 합친 adversarial payload 18개 모두에 대해 prompt-refiner surface로 실행되고 PLANNER-03 metric은 0이다.",
+    "감사기는 정확한 system-first + canonical two-field JSON user message만 허용하며 추가 role, message, field, plaintext와 원문 누출을 fail-closed한다.",
+    "의도적으로 경계를 깨뜨리는 회귀 테스트가 각 구조 위반을 검출하고 기존 Prompt Refiner 계약과 전체 단위 테스트가 통과한다.",
+    "release-gate evidence, PR gate 주석, AGENTS invariant, UI 계약과 한국어 진행 기록이 새 증거와 그 한계를 서로 일치하게 설명한다.",
+    "제품 adapter·provider·billing·Router·AppSetting writer는 추가되지 않고 rollout은 default-off, kill switch 우선, 공개 상태 변화 없음으로 유지된다.",
+    "관련 test, typecheck, lint, build, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다."
+  ],
+  "baseCommit": "3cd6fc1e823e2ffcae0bc42cebb3f65d671666b6",
+  "writableScope": [
+    ".github/workflows/pr-fast-gate.yml",
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptInjectionAudit.ts",
+    "scripts/report-prompt-injection.mjs",
+    "scripts/report-release-gate-evidence-core.mjs",
+    "tests/promptInjectionAudit.test.mjs",
+    "tests/fixtures/promptInjectionCorpus.mjs"
+  ],
+  "generatedPaths": []
+}

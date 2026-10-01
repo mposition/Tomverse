@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "router-development-replay-policy-v1",
+  "purpose": "development-only",
+  "policyId": "default-model-control-v1",
+  "preferences": {
+    "general": ["gpt-5-6-luna"]
+  },
+  "fallback": "original-router"
+}

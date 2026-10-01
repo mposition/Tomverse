@@ -225,3 +225,342 @@ export const consentActionFor = (input: {
  */
 export const recordsConsent = (purpose: EmailPurpose) =>
   CONSENT_REQUIRED_PURPOSES.has(purpose);
+
+/* ------------------------------------------------------------------ *
+ * Classification: what class of mail a purpose is.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md, section 3 and
+ * section 7.1 (invariants 5 and 7).
+ *
+ * A separate axis from consent, and conflating the two is the defect this
+ * table removes. `classification === "marketing"` alone switches the sending
+ * stream, the kill switch, Korea's `(광고)`, Singapore's `<ADV>`, forced
+ * unsubscribe and the jurisdiction fail-closed; whether consent is required is
+ * a different question the country rule answers. `product_updates` is the case
+ * that proves they differ.
+ *
+ * It lives in this module rather than beside the permission ledger because
+ * lib/emailPreferences.ts reads it, and that file is inside the Prompt Refiner
+ * runtime source closure (lib/promptRefinerStageAdmissionCore.ts). A new
+ * module imported from there would grow a sealed 188-file contract, so the
+ * table goes where the purposes already are.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The three classes, in the order the draft's section 3 names them.
+ *
+ * `transactional` is something the account asked for or the contract owes;
+ * `service` is an operational fact about a service they use; `marketing`
+ * is anything whose recipient set we choose rather than they do.
+ */
+export const EMAIL_CLASSIFICATIONS = [
+  "transactional",
+  "service",
+  "marketing",
+] as const;
+
+export type EmailClassification = (typeof EMAIL_CLASSIFICATIONS)[number];
+
+/**
+ * One purpose's entry.
+ *
+ * `solicitsResubscription` is typed as the literal `false` on purpose.
+ * Invariant 7 forbids asking a withdrawn address to come back, and a boolean
+ * field would let somebody add such a purpose and only then discover the rule.
+ * Widening this type is the change a reviewer has to see.
+ */
+export type EmailPurposeEntry = {
+  readonly purpose: EmailPurpose;
+  readonly classification: EmailClassification;
+  /** Nobody may switch it off (lib/emailPreferenceCore.ts, DB CHECK). */
+  readonly locked: boolean;
+  /** Consent is required before anything is sent under it. */
+  readonly consentRequired: boolean;
+  /**
+   * Whether "unsubscribe from everything" turns this one off.
+   *
+   * Every `marketing` purpose is included and no other purpose is: a bulk
+   * withdrawal that left one marketing purpose on would not be the single
+   * action the Australian rule against extra steps asks for, and one that
+   * silenced an outage notice would take away something the account is owed.
+   */
+  readonly withdrawnByBulkUnsubscribe: boolean;
+  /** Invariant 7. Always false; see the type. */
+  readonly solicitsResubscription: false;
+  /**
+   * What the product news redesign draft calls this purpose, when it uses a
+   * different name. Written down rather than left to a reader to notice.
+   */
+  readonly draftPurposeName?: string;
+};
+
+/**
+ * The table.
+ *
+ * Adding a purpose means adding it here and to EMAIL_PURPOSES, and the tests
+ * fail until both agree.
+ */
+export const EMAIL_PURPOSE_CLASSIFICATION: readonly EmailPurposeEntry[] = [
+  {
+    purpose: "security",
+    classification: "transactional",
+    locked: true,
+    consentRequired: false,
+    withdrawnByBulkUnsubscribe: false,
+    solicitsResubscription: false,
+  },
+  {
+    purpose: "billing",
+    classification: "transactional",
+    locked: true,
+    consentRequired: false,
+    withdrawnByBulkUnsubscribe: false,
+    solicitsResubscription: false,
+  },
+  {
+    purpose: "service_status",
+    classification: "service",
+    locked: false,
+    consentRequired: false,
+    withdrawnByBulkUnsubscribe: false,
+    solicitsResubscription: false,
+  },
+  {
+    purpose: "product_updates",
+    classification: "marketing",
+    locked: false,
+    consentRequired: true,
+    withdrawnByBulkUnsubscribe: true,
+    solicitsResubscription: false,
+    draftPurposeName: "release_notes",
+  },
+  {
+    purpose: "newsletter",
+    classification: "marketing",
+    locked: false,
+    consentRequired: true,
+    withdrawnByBulkUnsubscribe: true,
+    solicitsResubscription: false,
+  },
+  {
+    purpose: "promotions",
+    classification: "marketing",
+    locked: false,
+    consentRequired: true,
+    withdrawnByBulkUnsubscribe: true,
+    solicitsResubscription: false,
+  },
+] as const;
+
+const BY_PURPOSE = new Map<string, EmailPurposeEntry>(
+  EMAIL_PURPOSE_CLASSIFICATION.map((entry) => [entry.purpose, entry])
+);
+
+export const emailPurposeEntry = (purpose: string): EmailPurposeEntry | null =>
+  BY_PURPOSE.get(purpose) ?? null;
+
+/**
+ * The purpose the product news redesign draft means by a given name.
+ *
+ * Draft section 3 says to create a `release_notes` purpose classified
+ * `marketing`. That purpose already exists here under the name
+ * `product_updates` -- same mail, same switch, live rows, locale strings in
+ * seven languages and a database CHECK. Creating a second one would give one
+ * kind of mail two switches and, worse, would not carry anybody's existing
+ * choice across: a person who had turned product news off would start
+ * receiving it again under the new name, which is precisely the failure
+ * invariant 5 is about.
+ *
+ * So the draft's name resolves to the purpose that already does its job, and
+ * the mapping is written here rather than left for the next reader to work out
+ * (docs/policy/email-notifications.md section 10.2.1).
+ */
+export const purposeForDraftName = (name: string): EmailPurpose | null =>
+  EMAIL_PURPOSE_CLASSIFICATION.find(
+    (entry) => entry.purpose === name || entry.draftPurposeName === name
+  )?.purpose ?? null;
+
+/**
+ * The classification of a purpose, or null when we do not recognise it.
+ *
+ * Null rather than a default: a purpose this table does not know is not
+ * "probably transactional", and a caller that treats it as such would send
+ * unclassified mail without the marketing switches.
+ */
+export const emailPurposeClassification = (
+  purpose: string
+): EmailClassification | null => emailPurposeEntry(purpose)?.classification ?? null;
+
+export const isMarketingPurpose = (purpose: string): boolean =>
+  emailPurposeClassification(purpose) === "marketing";
+
+/** Every purpose "unsubscribe from everything" turns off (invariant 5). */
+export const BULK_UNSUBSCRIBE_PURPOSES: readonly EmailPurpose[] =
+  EMAIL_PURPOSE_CLASSIFICATION.filter(
+    (entry) => entry.withdrawnByBulkUnsubscribe
+  ).map((entry) => entry.purpose);
+
+export const MARKETING_PURPOSES: readonly EmailPurpose[] =
+  EMAIL_PURPOSE_CLASSIFICATION.filter(
+    (entry) => entry.classification === "marketing"
+  ).map((entry) => entry.purpose);
+
+/**
+ * Where this table disagrees with the two sets that predate it.
+ *
+ * Returned rather than thrown so a test can name the row; the sets remain the
+ * authority for what a preference write may do, and this is the check that
+ * they and the classification have not drifted apart.
+ */
+export const classificationDisagreements = (): string[] => {
+  const problems: string[] = [];
+  const listed = new Set(EMAIL_PURPOSE_CLASSIFICATION.map((e) => e.purpose));
+  for (const purpose of EMAIL_PURPOSES) {
+    if (!listed.has(purpose)) problems.push(`${purpose}: not in the table`);
+  }
+  for (const entry of EMAIL_PURPOSE_CLASSIFICATION) {
+    if (!(EMAIL_PURPOSES as readonly string[]).includes(entry.purpose)) {
+      problems.push(`${entry.purpose}: not an email purpose`);
+    }
+    if (entry.locked !== LOCKED_EMAIL_PURPOSES.has(entry.purpose)) {
+      problems.push(`${entry.purpose}: locked disagrees with LOCKED_EMAIL_PURPOSES`);
+    }
+    if (entry.consentRequired !== CONSENT_REQUIRED_PURPOSES.has(entry.purpose)) {
+      problems.push(
+        `${entry.purpose}: consentRequired disagrees with CONSENT_REQUIRED_PURPOSES`
+      );
+    }
+    if (entry.locked && entry.classification === "marketing") {
+      problems.push(`${entry.purpose}: a marketing purpose cannot be locked`);
+    }
+    if (entry.withdrawnByBulkUnsubscribe !== (entry.classification === "marketing")) {
+      problems.push(
+        `${entry.purpose}: bulk unsubscribe must cover exactly the marketing purposes`
+      );
+    }
+  }
+  return problems;
+};
+
+/* ------------------------------------------------------------------ *
+ * The Australian relationship's clock and keys
+ * (docs/policy/email-product-news-redesign-draft.md section 4.4, R4).
+ *
+ * Here rather than in lib/auRelationshipCore.ts because the sign-in event in
+ * lib/auth.ts ends a dormant relationship, and lib/auth.ts is in the Prompt
+ * Refiner's sealed runtime source closure (lib/promptRefinerStageAdmissionCore.ts):
+ * it may only reach modules that closure already lists, and this is one.
+ * lib/auRelationshipCore.ts re-exports these.
+ * ------------------------------------------------------------------ */
+
+/** R4: the relationship ends when the last sign-in is this many months old. */
+export const EMAIL_RELATIONSHIP_DORMANCY_MONTHS = 24;
+
+/** The key that makes one start per account, and one end per start. */
+export const relationshipStartedSourceEventKey = (userId: string) =>
+  `relationship:started:${userId}`;
+export const relationshipEndedSourceEventKey = (startedEventId: string) =>
+  `relationship:ended:${startedEventId}`;
+
+/** `from` plus whole calendar months, clamped to the month's last day, in UTC. */
+export const addUtcMonths = (from: Date, months: number): Date => {
+  const target = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)
+  ).getUTCDate();
+  return new Date(
+    Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth(),
+      Math.min(from.getUTCDate(), lastDay),
+      from.getUTCHours(),
+      from.getUTCMinutes(),
+      from.getUTCSeconds(),
+      from.getUTCMilliseconds()
+    )
+  );
+};
+
+/**
+ * When a relationship last seen at `lastSeen` went dormant, or null while it
+ * has not. The moment is the one the end event records.
+ */
+export const relationshipDormantAt = (lastSeen: Date, now: Date): Date | null => {
+  const dormantAt = addUtcMonths(lastSeen, EMAIL_RELATIONSHIP_DORMANCY_MONTHS);
+  return now.getTime() >= dormantAt.getTime() ? dormantAt : null;
+};
+
+/* ------------------------------------------ address proof (DOI section 14) */
+
+/**
+ * What a sign-in proved about the account's address
+ * (docs/policy/email-double-opt-in.md §14.1).
+ *
+ * A consent ticked in a session that proved the address is recorded as
+ * confirmed at once; anything else takes the confirmation mail. Two sources
+ * only: this app's own code or link, and a Google sign-in whose raw profile
+ * says `email_verified`. Microsoft is not a source -- an Entra tenant sets the
+ * email value itself, which proves no mailbox.
+ */
+export const ADDRESS_PROOF_METHODS = ["email_code", "google_verified"] as const;
+export type AddressProofMethod = (typeof ADDRESS_PROOF_METHODS)[number];
+
+export type AddressProof = {
+  method: AddressProofMethod;
+  /** Trimmed and lower-cased, as `consentAddressDigest()` normalises it. */
+  address: string;
+  /** When the sign-in proved it (ISO), written by the server at sign-in. */
+  provenAt: string;
+};
+
+const proofAddress = (value: unknown): string | null =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim().toLowerCase() : null;
+
+/**
+ * The proof a sign-in carries, read on the sign-in branch of the JWT callback
+ * only (docs/policy/email-double-opt-in.md §14.1). The address stored is the one the source proved, and only when
+ * it is the signed-in user's own: with a session present NextAuth links a new
+ * provider to the existing user, and that provider's profile must not prove
+ * this account's address.
+ */
+export const addressProofForSignIn = (input: {
+  provider: string | null | undefined;
+  /** The provider's raw profile (`OAuthProfile`), not the mapped user. */
+  profile: unknown;
+  /** The address of the user the token is for. */
+  userEmail: string | null | undefined;
+  now: Date;
+}): AddressProof | null => {
+  const userAddress = proofAddress(input.userEmail);
+  if (!userAddress) return null;
+  if (input.provider === "email-code") {
+    // authorize() returns a user only after a code or link for this address matched.
+    return { method: "email_code", address: userAddress, provenAt: input.now.toISOString() };
+  }
+  if (input.provider === "google") {
+    const profile = input.profile as { email?: unknown; email_verified?: unknown } | null;
+    if (!profile || profile.email_verified !== true) return null;
+    if (proofAddress(profile.email) !== userAddress) return null;
+    return { method: "google_verified", address: userAddress, provenAt: input.now.toISOString() };
+  }
+  return null;
+};
+
+export const isAddressProof = (value: unknown): value is AddressProof => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.method === "string" &&
+    (ADDRESS_PROOF_METHODS as readonly string[]).includes(candidate.method) &&
+    typeof candidate.address === "string" &&
+    candidate.address.length > 0 &&
+    typeof candidate.provenAt === "string" &&
+    !Number.isNaN(Date.parse(candidate.provenAt))
+  );
+};
+
+/** The proof names this address, after the same normalisation. */
+export const addressProofCovers = (
+  proof: unknown,
+  email: string | null | undefined
+): proof is AddressProof => isAddressProof(proof) && proof.address === proofAddress(email);

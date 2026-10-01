@@ -118,8 +118,13 @@ const MIN_CONTINUE_BUDGET_MS = MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS;
  * Ceiling on what one chunk's answer may cost. The prompt asks for a small
  * JSON array; an answer far past this is a model that has stopped following
  * the format, and paying for the rest of it buys nothing.
+ *
+ * Exported because the eval has to send it too. It is a decision about this
+ * prompt rather than a property of any model, so the harness reading it here
+ * is the difference between measuring the product and measuring something
+ * that resembles it -- and a copy in the harness is a copy that drifts.
  */
-const CHUNK_MAX_OUTPUT_TOKENS = 4_096;
+export const MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS = 4_096;
 
 /**
  * The provider call, as the pipeline sees it.
@@ -140,7 +145,7 @@ const CHUNK_MAX_OUTPUT_TOKENS = 4_096;
 export const extractionModelAdapter: ExtractionAdapterFactory = (input) =>
     createExtractionProviderAdapter({
         model: input.model,
-        maxOutputTokens: CHUNK_MAX_OUTPUT_TOKENS,
+        maxOutputTokens: MEMORY_EXTRACTION_CHUNK_MAX_OUTPUT_TOKENS,
         signal: input.signal,
         onCallIssued: input.onCallIssued,
         onResult: input.onResult,

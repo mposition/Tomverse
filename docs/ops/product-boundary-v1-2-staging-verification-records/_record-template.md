@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/product-boundary-v1-2-staging-checklist.md
-templateRevision: 2026-08-23e
+templateRevision: 2026-08-24a
 environment:
 deploySha:
 startedAtUtc:
@@ -22,7 +22,7 @@ digest:
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
-| template revision | 2026-08-23e |
+| template revision | 2026-08-24a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -79,9 +79,12 @@ B-3의 `productKey`는 backfill 전이므로 `NULL`이 정상입니다.
 
 | 항목 | 관측 | 판정 |
 |---|---|---|
-| C-1 welcome 메일 수신 · 옛 이름 없음 | | |
-| C-2 Checkout line item 이름 | | |
-| C-2 billing welcome 메일 | | |
+| C-1 (a) welcome 메일 수신 · 폐기된 제품명 없음 | | |
+| C-1 (b) 발신자 / 제목 / 본문 헤더 / 본문 CTA 의 브랜드 | | |
+| C-2 (a) Checkout·billing 메일에 폐기된 제품명 없음 | | |
+| C-2 (b) Checkout line item 이름 **과 출처**(코드 / Stripe 카탈로그) | | |
+| C-2 (b) billing 메일의 발신자 / 제목 / 본문 헤더 / 본문 CTA | | |
+| C (b) `docs/ops/tomverse-review-rename.md` §7.6에 없는 새 불일치가 있었는가 | | |
 
 ## D. 선택
 

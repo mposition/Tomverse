@@ -27,11 +27,24 @@ import {
   requiresMutationOriginCheck,
 } from "@/lib/requestOrigin";
 import {
+  isPreflightRequest,
+  nativeAppCorsHeaders,
+  nativeAppPreflightHeaders,
+  varyWithOrigin,
+} from "@/lib/nativeAppCors";
+import {
   DOCUMENT_LANGUAGE_HEADER,
   DOCUMENT_LANGUAGE_SOURCE_HEADER,
   isSupportedDocumentLanguage,
   resolveDocumentLanguage,
 } from "@/lib/documentLanguage";
+import { verifyMobileAccessTokenString } from "@/lib/mobileAccessToken";
+import { MOBILE_AUTH_ERROR_CODES, N1B_BEARER_ROUTES } from "@/lib/mobileAuthContract";
+import {
+  applyMobileIdentityHeaders,
+  nativeBearerVerdict,
+  stripInternalAuthHeaders,
+} from "@/lib/nativeBearerGate";
 
 const blockedOriginResponse = () =>
   new NextResponse("Misdirected Request", {
@@ -92,6 +105,58 @@ const blockedMutationOriginResponse = (request: NextRequest) => {
   );
 };
 
+/**
+ * N1b's refusal. A presented bearer that does not verify.
+ *
+ * 401 and nothing else -- specifically not a fall-through to the cookie path,
+ * which is section 5.1's fourth prohibition: "attach a broken bearer" must not
+ * become "a cookie request with the CSRF check removed".
+ *
+ * One code for every failure. Which check a forged token tripped is a fact
+ * about the token, and telling its holder is telling them which byte to fix.
+ */
+const blockedBearerResponse = () =>
+  NextResponse.json(
+    { ok: false, code: MOBILE_AUTH_ERROR_CODES.tokenInvalid },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }
+  );
+
+/**
+ * N1a. Make an API response readable by the Capacitor shell, and by nothing
+ * else.
+ *
+ * Applied to every `/api/*` response after the host and origin-secret checks
+ * have passed -- including the refusals. A native client that is told `403
+ * INVALID_REQUEST_ORIGIN` can act on it; one that receives an opaque CORS
+ * failure cannot tell a refusal from an outage.
+ *
+ * `Vary: Origin` goes on regardless of whether the origin matched, so a shared
+ * cache cannot replay one origin's allowance to another. Decisions live in
+ * `lib/nativeAppCors.ts`; this only carries them onto a response.
+ */
+const withNativeCors = <T extends NextResponse>(
+  response: T,
+  request: NextRequest
+): T => {
+  if (!request.nextUrl.pathname.startsWith("/api/")) return response;
+  response.headers.set(
+    "Vary",
+    varyWithOrigin(response.headers.get("Vary"))
+  );
+  const cors = nativeAppCorsHeaders(request.headers.get("origin"));
+  if (!cors) return response;
+  for (const [key, value] of Object.entries(cors)) {
+    response.headers.set(key, value);
+  }
+  return response;
+};
+
 export function proxy(request: NextRequest) {
   // Container liveness must remain directly reachable by Railway. Readiness
   // performs database and monitoring work, so it goes through the same host
@@ -119,12 +184,22 @@ export function proxy(request: NextRequest) {
     return blockedOriginResponse();
   }
 
-  if (
-    request.nextUrl.pathname.startsWith("/api/") &&
-    requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
-    !hasValidMutationOrigin(request)
-  ) {
-    return blockedMutationOriginResponse(request);
+  // Section 5.4, step 3 of the order. Unconditional, and before anything is
+  // verified.
+  //
+  // Every downstream `NextResponse.next()` in this function forwards *these*
+  // headers rather than the request's own, which is the point: overwriting the
+  // namespace on success would leave a client's forgery intact on every branch
+  // that writes nothing -- an unregistered route, a refusal, a prefetch.
+  const requestHeaders = new Headers(request.headers);
+  const forgedInternalHeaders = stripInternalAuthHeaders(requestHeaders);
+  if (forgedInternalHeaders.length > 0) {
+    // Names only. The values are attacker-controlled text, and what an operator
+    // needs to know is that somebody tried.
+    console.warn("Client sent internal auth headers", {
+      pathname: request.nextUrl.pathname,
+      headers: forgedInternalHeaders,
+    });
   }
 
   // RFC 8058 one-click unsubscribe. The `List-Unsubscribe` header names
@@ -135,9 +210,10 @@ export function proxy(request: NextRequest) {
   // success, and nobody was unsubscribed. So the POST is handed to the route
   // that does the work. Only the method and path change; the token stays in the
   // query string and the form body travels with it. After the host and
-  // origin-secret checks, like every other forward in this function.
-  // `/api/unsubscribe` is already exempt from the mutation-origin check
-  // (lib/requestOrigin.ts) for the same reason: the provider sends no Origin.
+  // origin-secret checks, and with the stripped headers, like every other
+  // forward in this function. `/api/unsubscribe` is already exempt from the
+  // mutation-origin check (lib/requestOrigin.ts) for the same reason: the
+  // provider sends no Origin.
   if (
     request.method === "POST" &&
     request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe" &&
@@ -152,7 +228,86 @@ export function proxy(request: NextRequest) {
   ) {
     const target = request.nextUrl.clone();
     target.pathname = "/api/unsubscribe";
-    return NextResponse.rewrite(target);
+    return NextResponse.rewrite(target, { request: { headers: requestHeaders } });
+  }
+
+  // N1a. Answer a CORS preflight from the Capacitor shell here, because no
+  // route does: there is not one `export async function OPTIONS` in the whole
+  // of `app/api/`, so a preflight would otherwise reach a handler that answers
+  // 405 with no CORS headers, and the browser would report the real request as
+  // a network failure.
+  //
+  // Deliberately *after* the host and origin-secret checks and *before* the
+  // mutation-origin check. After, because a preflight is not exempt from the
+  // edge boundary. Before, only because `OPTIONS` is one of the safe methods
+  // that check already skips -- this does not step around it, and the request
+  // the preflight is asking about still has to face it.
+  //
+  // A preflight from any other origin gets no headers and falls through, which
+  // is what makes a hostile origin's fetch fail in its own browser.
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    isPreflightRequest({
+      method: request.method,
+      accessControlRequestMethod: request.headers.get(
+        "access-control-request-method"
+      ),
+    })
+  ) {
+    const preflight = nativeAppPreflightHeaders(request.headers.get("origin"));
+    if (preflight) {
+      return withNativeCors(
+        new NextResponse(null, {
+          status: 204,
+          headers: { ...preflight, "Cache-Control": "no-store" },
+        }),
+        request
+      );
+    }
+  }
+
+  // Section 5.5, steps 5 and 6. The verifier has to run *before* the
+  // mutation-origin check or N1b does not exist -- that ordering is the one
+  // surviving reason the design rejected verifying only inside routes.
+  //
+  // `N1B_BEARER_ROUTES` is empty by approval (decision 13), so today every
+  // verdict is `not_applicable` and this changes nothing about any request.
+  // The order is what is being put in place; opening it is a separate act, one
+  // route at a time, each with evidence that the route reads the bearer rather
+  // than the cookie session.
+  const bearer = nativeBearerVerdict({
+    pathname: request.nextUrl.pathname,
+    authorization: request.headers.get("authorization"),
+    registeredRoutes: N1B_BEARER_ROUTES,
+    verify: (token) => {
+      const verdict = verifyMobileAccessTokenString(token);
+      return verdict.ok
+        ? { ok: true, identity: verdict.identity }
+        : { ok: false, failure: verdict.failure };
+    },
+  });
+  if (bearer.kind === "reject") {
+    return withNativeCors(blockedBearerResponse(), request);
+  }
+  if (bearer.kind === "yes") {
+    applyMobileIdentityHeaders(requestHeaders, bearer.identity);
+  }
+
+  if (
+    request.nextUrl.pathname.startsWith("/api/") &&
+    // Replaced, not skipped: a verified bearer is not an ambient credential,
+    // so the premise the check exists to defend does not hold for it. Every
+    // other verdict -- including `no` and `not_applicable` -- still faces it.
+    bearer.kind !== "yes" &&
+    requiresMutationOriginCheck(request.method, request.nextUrl.pathname) &&
+    !hasValidMutationOrigin(request)
+  ) {
+    // Unchanged. A native origin fails this exactly as it did before N1a --
+    // `capacitor://localhost` is not an http(s) origin and `https://localhost`
+    // is not an allowed host -- and nothing above consulted an `Authorization`
+    // header to decide otherwise. Replacing this check for a *verified* bearer
+    // identity is N1b, and N1b waits on the verifier that N2 builds.
+    return withNativeCors(blockedMutationOriginResponse(request), request);
   }
 
   // Router prefetches fetch an RSC payload rather than a document, so they need
@@ -164,7 +319,13 @@ export function proxy(request: NextRequest) {
   // behaving exactly as it did while the matcher excluded it -- the fix adds
   // the security checks to prefetches without also starting to redirect them.
   if (isRouterPrefetch(request)) {
-    return NextResponse.next();
+    // The stripped headers, not the request's own: a prefetch is the one early
+    // return that reaches a route, so `NextResponse.next()` with no argument
+    // here would forward a client-sent identity header untouched.
+    return withNativeCors(
+      NextResponse.next({ request: { headers: requestHeaders } }),
+      request
+    );
   }
 
   // R-05-LANG. Send a non-English visitor to their own localized page before
@@ -240,7 +401,8 @@ export function proxy(request: NextRequest) {
   const policyHeader = enforce
     ? "Content-Security-Policy"
     : "Content-Security-Policy-Report-Only";
-  const requestHeaders = new Headers(request.headers);
+  // `requestHeaders` was built above, with the internal auth namespace already
+  // stripped and, where the bearer verified, rewritten.
   requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
   // The query string travels beside the path because a server component cannot
   // read either one. `app/not-found.tsx` needs both to hand a visitor back to
@@ -312,7 +474,7 @@ export function proxy(request: NextRequest) {
       ],
     })
   );
-  return response;
+  return withNativeCors(response, request);
 }
 
 export const config = {

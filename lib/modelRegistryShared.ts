@@ -19,6 +19,10 @@ export const AI_PROVIDERS = [
   "qwen",
   "zhipu",
   "perplexity",
+  "deepinfra",
+  "together",
+  "openrouter",
+  "sail",
 ] as const satisfies readonly AiProvider[];
 
 export const PROVIDER_API_CONFIGURATION: Record<
@@ -87,6 +91,31 @@ export const PROVIDER_API_CONFIGURATION: Record<
     apiKeyEnvName: "PERPLEXITY_API_KEY",
     protocol: "openai-compatible",
   },
+  deepinfra: {
+    baseUrl: "https://api.deepinfra.com/v1/openai",
+    apiKeyEnvName: "DEEPINFRA_API_KEY",
+    protocol: "openai-compatible",
+  },
+  together: {
+    // Together's current OpenAI-compatibility docs (api.together.ai), not the
+    // older api.together.xyz host still named in some support articles.
+    baseUrl: "https://api.together.ai/v1",
+    apiKeyEnvName: "TOGETHER_API_KEY",
+    protocol: "openai-compatible",
+  },
+  openrouter: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKeyEnvName: "OPENROUTER_API_KEY",
+    protocol: "openai-compatible",
+  },
+  sail: {
+    // OpenAI-compatible chat completions. The Anthropic Messages base is the
+    // same origin without /v1 and is documented as beta, so it is not this
+    // connection.
+    baseUrl: "https://api.sailresearch.com/v1",
+    apiKeyEnvName: "SAIL_API_KEY",
+    protocol: "openai-compatible",
+  },
 };
 
 /**
@@ -137,6 +166,10 @@ export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
     qwen: ["DASHSCOPE_API_KEY"],
     zhipu: ["ZHIPU_API_KEY"],
     perplexity: ["PERPLEXITY_API_KEY"],
+    deepinfra: ["DEEPINFRA_API_KEY"],
+    together: ["TOGETHER_API_KEY"],
+    openrouter: ["OPENROUTER_API_KEY"],
+    sail: ["SAIL_API_KEY"],
   };
 
 /**
@@ -589,3 +622,241 @@ export const staticModelRegistryReconciliationRows = () =>
         },
       };
     });
+
+/**
+ * Hosts that exist so a ModelDeployment can name them. A catalogue row must
+ * not. `AiProvider` still lists them, because the connection table (base URL,
+ * key name) is one list, and a second list is how DeepInfra was labelled and
+ * then left out of a menu. The catalogue write path and the chat adapter
+ * refuse every entry; the connection check only says what URL a row would
+ * have to use if one existed.
+ */
+export const DEPLOYMENT_ONLY_PROVIDERS = [
+  "deepinfra",
+  "together",
+  "openrouter",
+  "sail",
+] as const satisfies readonly AiProvider[];
+
+export class DeploymentHostRefusal extends Error {
+  readonly code = "DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER" as const;
+
+  constructor() {
+    super("DEPLOYMENT_HOST_NOT_A_CATALOGUE_PROVIDER");
+    this.name = "DeploymentHostRefusal";
+  }
+}
+
+/**
+ * OpenRouter is an aggregator. Left unset, a chat completion is load-balanced
+ * across whoever hosts the model, and `allow_fallbacks` defaults to true, so
+ * an `order` list hops to the next host. `only` is a whitelist, not an order:
+ * it does not itself hop off the list. A base slug inside that whitelist still
+ * matches every endpoint of that provider, including every region and variant
+ * (`deepinfra` matches `deepinfra` and `deepinfra/turbo`). Service-tier
+ * endpoints (`openai/fast`, `google-vertex/flex`) are the exception OpenRouter
+ * documents: a base slug does not match them, and the full suffix is required.
+ * Pinning a region means the allowlist carries that full slug, for example
+ * `google-vertex/us-east5`.
+ *
+ * The pin replaces any `provider` object. It sets `only` to that one slug and
+ * `allow_fallbacks` to false. The false flag is the documented way to stop an
+ * `order` from hopping; we set it even though this pin sends `only`, because
+ * the default is true and a replaced body must not leave the default in place.
+ * Account-wide privacy settings can narrow the request further. They cannot
+ * widen it. This module does not know those settings and does not invent a
+ * recipient list.
+ *
+ * The allowlist is `OPENROUTER_RECIPIENT_ALLOWLIST`, an operator environment
+ * variable. It is not a field on the request. A caller that passes the
+ * recipient and the list together is checking the list against itself.
+ *
+ * This lives beside the provider connection table, not in its own module.
+ * `lib/activeAiModel.ts` is inside the Prompt Refiner runtime source closure,
+ * and a new local import would add a file to that sealed list. The chat
+ * adapter therefore calls these functions through the import it already has.
+ */
+
+/** Base slug, or one suffix: `deepinfra`, `deepinfra/turbo`, `google-vertex/us-east5`. */
+const OPENROUTER_PROVIDER_SLUG =
+  /^[a-z0-9](?:[a-z0-9_-]{0,63})(?:\/[a-z0-9](?:[a-z0-9_-]{0,63}))?$/;
+
+export const OPENROUTER_RECIPIENT_ALLOWLIST_ENV = "OPENROUTER_RECIPIENT_ALLOWLIST";
+
+export type OpenRouterRequest = {
+  /**
+   * The slug OpenRouter will match. A base slug matches every endpoint of
+   * that provider. A suffix pins one variant or region.
+   */
+  recipient: string;
+  /** Hosts already used by an earlier attempt of this logical response. */
+  failedProviders: readonly string[];
+};
+
+export type OpenRouterPin = {
+  only: readonly [string];
+  allow_fallbacks: false;
+  ignore?: readonly string[];
+};
+
+export type OpenRouterRefusalCode =
+  | "OPENROUTER_ADMISSION_REQUIRED"
+  | "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED"
+  | "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID"
+  | "OPENROUTER_RECIPIENT_INVALID"
+  | "OPENROUTER_RECIPIENT_NOT_ALLOWED"
+  | "OPENROUTER_FAILED_PROVIDER_EXCLUDED"
+  | "OPENROUTER_FAILED_PROVIDER_INVALID"
+  | "OPENROUTER_BODY_NOT_PINNABLE";
+
+export class OpenRouterDispatchError extends Error {
+  readonly code: OpenRouterRefusalCode;
+
+  constructor(code: OpenRouterRefusalCode) {
+    super(code);
+    this.name = "OpenRouterDispatchError";
+    this.code = code;
+  }
+}
+
+const isOpenRouterSlug = (value: string) => OPENROUTER_PROVIDER_SLUG.test(value);
+
+const CATALOGUE_HOST_REFUSAL_NAMES = new Set([
+  "OpenRouterDispatchError",
+  "DeploymentHostRefusal",
+]);
+
+/**
+ * The public code for a refusal this module threw, or null for anything else.
+ *
+ * The chat route maps this before the generic application error. A name check
+ * rather than `instanceof`, because the route and this module can be loaded
+ * as two copies and the class identity does not survive that.
+ */
+export const catalogueHostRefusalCode = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") return null;
+  const name = (error as { name?: unknown }).name;
+  const code = (error as { code?: unknown }).code;
+  if (typeof name !== "string" || !CATALOGUE_HOST_REFUSAL_NAMES.has(name)) return null;
+  if (typeof code !== "string" || !/^[A-Z0-9_]{1,80}$/.test(code)) return null;
+  return code;
+};
+
+/**
+ * The operator's recipient allowlist. Empty is a refusal. One invalid slug
+ * refuses the whole list: dropping it would silently shrink the set the
+ * operator thought they configured.
+ */
+export const readOpenRouterRecipientAllowlist = (
+  environment: Record<string, string | undefined> = process.env
+):
+  | { ok: true; allowlist: readonly string[] }
+  | {
+      ok: false;
+      code:
+        | "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED"
+        | "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID";
+    } => {
+  const raw = environment.OPENROUTER_RECIPIENT_ALLOWLIST;
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  const allowlist = raw
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter((slug) => slug.length > 0);
+  if (allowlist.length === 0) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  if (allowlist.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID" };
+  }
+  return { ok: true, allowlist };
+};
+
+export const decideOpenRouterDispatch = (
+  admission: OpenRouterRequest | undefined,
+  allowlist: readonly string[]
+): { ok: true; pin: OpenRouterPin } | { ok: false; code: OpenRouterRefusalCode } => {
+  if (!admission) return { ok: false, code: "OPENROUTER_ADMISSION_REQUIRED" };
+  if (allowlist.length === 0) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_REQUIRED" };
+  }
+  if (allowlist.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_ALLOWLIST_INVALID" };
+  }
+  if (admission.failedProviders.some((slug) => !isOpenRouterSlug(slug))) {
+    return { ok: false, code: "OPENROUTER_FAILED_PROVIDER_INVALID" };
+  }
+  if (!isOpenRouterSlug(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_INVALID" };
+  }
+  if (!allowlist.includes(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_RECIPIENT_NOT_ALLOWED" };
+  }
+  if (admission.failedProviders.includes(admission.recipient)) {
+    return { ok: false, code: "OPENROUTER_FAILED_PROVIDER_EXCLUDED" };
+  }
+  const pin: OpenRouterPin = {
+    only: [admission.recipient],
+    allow_fallbacks: false,
+  };
+  if (admission.failedProviders.length > 0) {
+    pin.ignore = [...admission.failedProviders];
+  }
+  return { ok: true, pin };
+};
+
+/**
+ * Replace any `provider` object already on the body. Merging would let a
+ * caller-supplied `only` or a default `allow_fallbacks: true` widen the pin.
+ * The body is user content; a refusal names a code and not the body.
+ */
+export const pinOpenRouterChatBody = (
+  body: string,
+  pin: OpenRouterPin
+): { ok: true; body: string } | { ok: false; code: "OPENROUTER_BODY_NOT_PINNABLE" } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+  const [recipient] = pin.only;
+  const provider: {
+    only: [string];
+    allow_fallbacks: false;
+    ignore?: string[];
+  } = {
+    only: [recipient],
+    allow_fallbacks: false,
+  };
+  if (pin.ignore && pin.ignore.length > 0) {
+    provider.ignore = [...pin.ignore];
+  }
+  try {
+    return {
+      ok: true,
+      body: JSON.stringify({ ...parsed, provider }),
+    };
+  } catch {
+    return { ok: false, code: "OPENROUTER_BODY_NOT_PINNABLE" };
+  }
+};
+
+export const openRouterPinnedFetch = (
+  pin: OpenRouterPin,
+  baseFetch: typeof fetch
+): typeof fetch => {
+  return async (input, init) => {
+    if (typeof init?.body !== "string") {
+      throw new OpenRouterDispatchError("OPENROUTER_BODY_NOT_PINNABLE");
+    }
+    const pinned = pinOpenRouterChatBody(init.body, pin);
+    if (!pinned.ok) throw new OpenRouterDispatchError(pinned.code);
+    return baseFetch(input, { ...init, body: pinned.body });
+  };
+};

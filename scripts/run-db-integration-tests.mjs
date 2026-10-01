@@ -251,7 +251,29 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // Engineering adapter: the run is written in the AMUX writer's own
+    // transaction after every AMUX lock, one fact or neither, and its
+    // settlement meets delivery ack and expired recovery without a deadlock.
+    "tests/integration/engineering-agent-amux-adapter.db.test.ts",
+    // Engineering agent store: every change commits with its audit entry
+    // under the right actor, and results go where the core says. It closes
+    // what it opens, so it passes whichever engineering file runs first.
+    "tests/integration/engineering-agent-store.db.test.ts",
+    // Engineering agent state: the triggers refuse a late success, a claim
+    // without the next fencing token, a draft closed without its decision, a
+    // second capability consumption and a rewritten snapshot, whoever writes.
+    "tests/integration/engineering-agent-schema.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
+    // Prompt Refiner authority: stage-first locking, runtime price drift,
+    // one-time consume and the permanent 100-slot/cost ceiling.
+    "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // The staging-only create-once writer: exact historical/current provenance,
+    // audit atomicity, immutable approval and DB-clock expiry.
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    // One-run approval, atomic dispatch-intent/reservation consume, immutable
+    // terminal receipts and stop-without-retry unknown recovery.
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
     // repeats a row is silent: a skipped row is reported as verified, and a
@@ -263,6 +285,10 @@ run(
     "tests/integration/account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
+    // Durable Chat recovery is a database coordination contract: duplicate
+    // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
+    // all look correct in one process while failing under PostgreSQL races.
+    "tests/integration/chat-durable-recovery.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
     "tests/integration/provider-probe.db.test.ts",
@@ -283,6 +309,18 @@ run(
     // or a bucket outage cannot record an account as having lost its files.
     "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The permission ledger's constraints and triggers. Append-only, sealing and
+    // verdict immutability are enforced in Postgres because a ledger the
+    // application alone protects is one a migration or an admin script can
+    // rewrite -- and the row it rewrites is the proof that a send was allowed.
+    "tests/integration/email-permission-ledger.db.test.ts",
+    // The ledger's first writers: the sealed cohort a risk_accepted approval
+    // covers, and the one-time in-product notice. Here rather than in a unit
+    // test because what is under test is whether the rows those writers build
+    // survive the triggers -- a sealed approval refusing to change, and an
+    // append-only table accepting a repeated render as one row rather than
+    // raising on the second.
+    "tests/integration/email-send-approval-cohort.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
@@ -298,6 +336,10 @@ run(
     "tests/integration/email-webhook-processing-lease.db.test.ts",
     // Recording the permanent bounces that were handled as soft ones.
     "tests/integration/email-permanent-bounce-recovery.db.test.ts",
+    // The lock every customer-facing send takes: the suppression word read
+    // inside it, the provider call made while it is held, and the row that
+    // waits without counting an attempt when somebody else has the address.
+    "tests/integration/email-send-address-lock.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     // A deletion request and a spam complaint: the suppression and the preference
     // withdrawal commit in one transaction, keyed so a retry records nothing new.
@@ -306,6 +348,40 @@ run(
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // The recipient-authority rules: a version that is no longer a draft
+    // cannot have its rules changed, and one (ruleKey, ruleVersion) names one
+    // content -- both enforced by trigger, because a waiver is scoped to it.
+    "tests/integration/release-notes-country-rule.db.test.ts",
+    // The duty states: each one carries its own evidence and only its own, and a
+    // waiver has to name a sealed approval of the waiver kind. All three are
+    // constraints and a trigger, so only the database can answer for them.
+    "tests/integration/release-notes-rule-obligation.db.test.ts",
+    // The send verdict written down: the evidence it cited is rows the database
+    // will not lose, the seal closes the set in the same transaction, and one
+    // phase of one delivery is recorded once however many times it is evaluated.
+    "tests/integration/release-notes-send-decision.db.test.ts",
+    // The amendment notice's reach (S10): which owed accounts have no attempt at
+    // all, counted as a set in one statement. The first version counted only
+    // `sent` and compared sizes, and both mistakes are about rows.
+    "tests/integration/email-policy-publication.db.test.ts",
+    // The sign-up screen's consent choice (S4): only the database shows that an
+    // existing account never consumes one, that consumption and its evidence
+    // commit together, and that an estimate never replaces a declaration.
+    "tests/integration/signup-consent.db.test.ts",
+    // Sign-in and sign-up split (v25): a proven address with no account is
+    // held for one sign-up, and only the database shows the hold is single use.
+    "tests/integration/email-login-signup-hold.db.test.ts",
+    // DOI section 14: a proven session consents at once; the database shows
+    // the seal, the lock-time address check and the retired link.
+    "tests/integration/email-verified-session-consent.db.test.ts",
+    "tests/integration/au-relationship.db.test.ts",
+    "tests/integration/in-product-consent-notice.db.test.ts",
+    "tests/integration/processing-result-notice.db.test.ts",
+    // The two statutory display checks, whose question is which (policy version,
+    // profile) a message could still be composed under. Both earlier readings of
+    // that were wrong in ways only rows show: the active version alone, and a
+    // profile key assumed equal to a country code.
+    "tests/integration/email-statutory-display-readiness.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
@@ -366,15 +442,37 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
-    // Deploy B: the read authority setting, the cutover under the exclusive
-    // fence, and lifting causes by the release matrix. The fence, the setting
-    // row and the audit row sharing a transaction are all database facts.
+    // Lifting causes by the release matrix, the address lock a concurrent
+    // writer contends for, and a retired setting row proving inert. The lock,
+    // the leftover row and the audit row sharing a transaction with the
+    // release are all database facts.
     "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
     "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // Opening one audit row by id. The property is the relationship between two
+    // reads of the same table -- the newest-N window and the single-row read --
+    // so a single process with no database proves neither.
+    "tests/integration/admin-audit-row-by-id.db.test.ts",
+    // The audit chain writer on real rows: the database clock, the previous
+    // hash read and the verifier agree, inside and outside a caller's
+    // transaction, and a rolled-back caller leaves no entry behind.
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    // The marketing tables' triggers and CHECK constraints, exercised with
+    // direct writes rather than through the store module: what they refuse is
+    // exactly the write that did not go through it.
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    // Proving a template: two human audit entries that still verify against
+    // the chain, which is the only route to a post published without a person
+    // looking at it. Needs real rows, because a fixture that inserted them
+    // would prove the loader agrees with the fixture.
+    "tests/integration/marketing-templates.db.test.ts",
+    // Where a plan number came from, which decides whether a price claim may
+    // rest on it. Needs rows, because the whole question is stored versus
+    // compiled.
+    "tests/integration/marketing-fact-sources.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
@@ -415,6 +513,18 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // AI Review's operational record: that a run round-trips content-free,
+    // that a guest run lands at all (it produces no ComparisonReview row), and
+    // that the 90-day purge reaches only what it should.
+    "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    // The per-item feedback contract: the unique index really is the
+    // idempotency key, a verdict is scoped to one person, and both cascades
+    // are the deletion path the data-domain registry claims.
+    "tests/integration/comparison-review-item-feedback.db.test.ts",
+    // A pin is not activity: the sidebar groups its date headers by
+    // `updatedAt`, so pinning may not touch it, and another account's pin
+    // statement must match no row.
+    "tests/integration/conversation-pin.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",
@@ -442,6 +552,15 @@ run(
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
+    // N2: what the database refuses about mobile bearer authentication -- the
+    // two-step cascade to a rotation row that has no user column of its own,
+    // and the constraint stopping an audit row from naming somebody's device
+    // without naming the account that cascade reaches.
+    "tests/integration/mobile-auth-schema.db.test.ts",
+    // The lifecycle on top of those tables: the conditional UPDATE that makes
+    // strict single use true under a real race, and D8's contract that a
+    // replay's revocation commits even though the caller is refused.
+    "tests/integration/mobile-auth-service.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",
@@ -450,6 +569,7 @@ run(
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
+    "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",
     // Release C3c: which row the runtime reads for a profile-backed turn --
     // Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -520,6 +640,23 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process, and for the same reason: it replaces next-auth. What
+// it pins is which requests reach the lift at all -- a stale cause set, a dead
+// handle and an unknown handle are three different refusals, and every one of
+// them used to answer "not found".
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/admin-suppression-lift-route.db.test.ts",
+  ],
+  "Running the administrator suppression lift route and its refusals"
 );
 // Also its own process: it replaces next-auth and the AI SDK's streamText to
 // drive a real searching turn end to end. What it asserts is the wiring
@@ -689,4 +826,19 @@ run(
     "tests/integration/conversation-auto-selection-route.db.test.ts",
   ],
   "Running the Auto selection-mode route scenarios"
+);
+// Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
+// in its own process rather than changing another integration suite's client.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/message-attachment-resend.db.test.ts",
+  ],
+  "Running restored question attachment persistence scenarios"
 );

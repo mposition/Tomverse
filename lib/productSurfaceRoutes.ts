@@ -24,7 +24,9 @@
  * surface fallback. A conversation with no stored product is not routed on a
  * guess; the caller reports it, which is what `strict` read mode is for.
  *
- * Pure, and unwired: nothing calls this in production yet.
+ * `resolveLegacyChatDeepLink` remains pure and unwired until that cutover.
+ * The additive CHAT_WORKSPACE_PATH below is used by today's gated entry;
+ * using it does not change `/chat`'s legacy meaning.
  */
 
 import type { ConversationProductKey } from "@/lib/conversationProduct";
@@ -47,6 +49,9 @@ export const PRODUCT_SURFACE_PATH: Readonly<
  * of the cutover.
  */
 export const LEGACY_REVIEW_PATH = "/chat";
+
+/** Additive, gated Chat entry. This does not activate the `/chat` cutover. */
+export const CHAT_WORKSPACE_PATH = "/chat/workspace";
 
 export type DeepLinkResolution =
   | { action: "stay"; path: string }

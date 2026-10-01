@@ -103,7 +103,7 @@ Required evidence:
 
 - Versioned decision-grade evaluation report with fixed-model baseline, sample size, paired evaluation unit, confidence-interval method, seed, point estimate, and 95% confidence-interval bounds.
 - NOT the shadow report. Shadow records the model the Router would have chosen; it never generated that model's answer, so there is no pair to compare and no win rate to compute. A Router that echoed the user would agree with every shadow row and be worth nothing, and one that is right where the user was wrong appears there as disagreement. The shadow agreement rate measures how much would change if Auto were switched on -- the blast radius -- and nothing about whether the change would be an improvement. npm run report:routing-shadow prints that distinction beside its own numbers so the two cannot be read as one result.
-- Produced by npm run eval:router-quality -- --mode=decision, which makes real billed calls and emits the report above. npm run check:router-quality-eval validates a report before it may be cited: it refuses a pilot or judge-bias run, a run against the development set, a run that stopped at its cost ceiling, a second use of an already-used decision set, a baseline pre-registered after the run started, and a routable judge with no bias measurement. The procedure the harness implements is docs/ops/tomverse-chat-router-evaluation-set.md; a passing check means the report is citable, not that the gate is approved.
+- Produced by npm run eval:router-quality -- --mode=decision, which makes real billed calls and emits the report above. npm run check:router-quality-eval validates a report before it may be cited: it refuses a pilot or judge-bias run, a run against the development set, a run that stopped at its cost ceiling, a second use of an already-used decision set, a baseline pre-registered after the run started, and a routable judge whose cited calibration is not a calibration of that judge, over development-set answers from a run that finished, against an independent judge that wrote none of them. The procedure the harness implements is docs/ops/tomverse-chat-router-evaluation-set.md; a passing check means the report is citable, not that the gate is approved.
 
 Evidence references: none recorded
 
@@ -586,7 +586,7 @@ Required evidence:
 
 - adjudicated memory injection evaluation report
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md`, `commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d`, `commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4`, `dataset:mem-eval-succ-5@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `scoring-contract:mem-score-v3.4@a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd`, `superseded-dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `superseded-scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777`, `https://github.com/mposition/Tomverse/actions/runs/33154411698`, `https://github.com/mposition/Tomverse/actions/runs/33151805896`
 
 #### MEMORY-03 -- Sensitive data and credentials are never injected from memory
 
@@ -607,7 +607,7 @@ Required evidence:
 
 - adversarial sensitive-memory evaluation report
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md`, `commit:0540e0be6b5da4dbd0ebd9cf0259d0f9f58a3e9d`, `commit:fc57ccf4d6b38e1c87c6d7dbbf2f03ae0032f9a4`, `dataset:mem-eval-succ-5@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `scoring-contract:mem-score-v3.4@a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd`, `superseded-dataset:mem-eval-succ-4@0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0`, `superseded-scoring-contract:mem-score-v3.3@19f4e4f9d5976382d83a03153ef8e7fb52b3f6dd6104efa54f53ef05cd82f777`, `https://github.com/mposition/Tomverse/actions/runs/33154411698`, `https://github.com/mposition/Tomverse/actions/runs/33151805896`
 
 #### MEMORY-04 -- Deleted or superseded memory is never reused
 

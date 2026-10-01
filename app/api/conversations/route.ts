@@ -83,7 +83,17 @@ export async function GET(req: Request) {
       select: {
         id: true,
         title: true,
+        // Returned because the sidebar groups by it. The list was already
+        // ordered by this column and withheld it, so the client could order
+        // rows it could not date -- and a date header cannot be derived from a
+        // position.
+        updatedAt: true,
+        // The pin lives on the account, not in one browser, and its sequence
+        // is what lets the sidebar tell a refreshed list from a stale one.
+        pinnedAt: true,
+        pinSeq: true,
         kind: true,
+        productKey: true,
         projectId: true,
         selectedModels: true,
         disabledPanels: true,
@@ -171,6 +181,9 @@ export async function GET(req: Request) {
       return {
         id: conv.id,
         title: conv.title,
+        updatedAt: conv.updatedAt.toISOString(),
+        pinned: conv.pinnedAt !== null,
+        pinSeq: conv.pinSeq,
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conv.projectId || null,
         selectedModels:
@@ -193,6 +206,7 @@ export async function GET(req: Request) {
         // workspace -- where the imported half it continues does not exist.
         surface: conversationSurface({
           hasContinuationBridge: conv.continuationBridge !== null,
+          productKey: conv.productKey,
         }),
         /*
           The imported conversation's name, for the client to display when

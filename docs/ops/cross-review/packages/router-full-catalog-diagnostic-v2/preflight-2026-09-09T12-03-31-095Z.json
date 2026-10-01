@@ -1,0 +1,56 @@
+{
+  "version": "cross-review-preflight-v2",
+  "taskId": "router-full-catalog-diagnostic-v2",
+  "reviewer": "codex",
+  "toolVersion": "codex-cli 0.146.0",
+  "command": [
+    "codex",
+    "--sandbox",
+    "read-only",
+    "exec",
+    "--ignore-user-config",
+    "--json",
+    "-c",
+    "model=gpt-5.6-sol",
+    "-c",
+    "model_reasoning_effort=low",
+    "-c",
+    "windows.sandbox=unelevated",
+    "-"
+  ],
+  "cwd": "H:\\Project\\tomverse-router-diag-20260909",
+  "sandboxSignature": "codex --sandbox read-only exec --ignore-user-config --json -c windows.sandbox=unelevated - @ H:\\Project\\tomverse-router-diag-20260909 shell:windows-powershell",
+  "codexShell": "windows-powershell",
+  "codexAuth": "login",
+  "expectedReadOutput": "4b14cfc592b0305e205d2ce03ecaf892cf106e6a",
+  "probePath": "docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-write-probe-2026-09-09T12-03-06-479Z.txt",
+  "probeLanded": false,
+  "writeRefusalObserved": true,
+  "writeRefusalEvidence": "command_execution \"C:\\\\Windows\\\\System32\\\\WindowsPowerShell\\\\v1.0\\\\powershell.exe\" -Command \"Set-Content -LiteralPath 'docs/ops/cross-review/packages/router-full-catalog-diagnostic-v2/preflight-write-probe-2026-09-09T1 -> atalog-diagnostic-v2\\preflight-write-probe-2026-09-09T12-03-06-479Z.txt' is denied.",
+  "startedAt": "2026-09-09T12:03:06.481Z",
+  "durationMs": 24520,
+  "usage": {
+    "tool": "codex",
+    "inputTokens": 81569,
+    "cachedInputTokens": 65024,
+    "outputTokens": 434,
+    "reasoningOutputTokens": 82,
+    "totalCostUsd": null,
+    "raw": {
+      "input_tokens": 81569,
+      "cached_input_tokens": 65024,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 434,
+      "reasoning_output_tokens": 82
+    }
+  },
+  "exitStatus": 0,
+  "report": {
+    "readOutput": "4b14cfc592b0305e205d2ce03ecaf892cf106e6a\n",
+    "writeAttempted": true,
+    "writeResult": "Set-Content : Access to the path 'H:\\Project\\tomverse-router-diag-20260909\\docs\\ops\\cross-review\\packages\\router-full-catalog-diagnostic-v2\\preflight-write-probe-2026-09-09T12-03-06-479Z.txt' is denied.\nAt line:2 char:1\n+ Set-Content -LiteralPath 'docs/ops/cross-review/packages/router-full- ...\n+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n    + CategoryInfo          : PermissionDenied: (H:\\Project\\tomv...-03-06-479Z.txt:String) [Set-Content], UnauthorizedAccessException\n    + FullyQualifiedErrorId : GetContentWriterUnauthorizedAccessError,Microsoft.PowerShell.Commands.SetContentCommand"
+  },
+  "executorFailure": null,
+  "passed": true,
+  "problems": []
+}

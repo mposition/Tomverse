@@ -25,6 +25,71 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+# 의미 있는 개발 사이클의 완료 보고
+
+작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
+개발 마일스톤을 마칠 때마다 **전체 Chat 진행 상황을 한눈에 볼 수 있게** 보고합니다.
+
+- 승인된 개발계획서의 기능 범위와 분모를 보고 간에 일관되게 사용합니다.
+  분모를 바꿨다면 이유를 밝히고, 이전 수치와 그대로 비교하지 않습니다.
+- 짧은 상태표나 상태줄로 **전체 진행도 · 이번에 완료한 것 · 남은 핵심 기능**을
+  함께 보여 줍니다. 구현·검증·병합·배포 상태는 분리하며 서로를 대신하지 않습니다.
+- 백분율은 확인한 기능별 근거로만 계산하고, 잠정 수치에는 **추정**과 산정 기준을
+  명시합니다. 근거가 부족하면 산정 보류로 적으며, 정밀한 숫자를 지어내거나
+  pending 릴리스 게이트를 곧바로 미구현 0%로 계산하지 않습니다.
+- 이전에 같은 기준으로 보고한 값이 있으면 이번 변화량을 함께 적습니다.
+- **다음 권장 작업을 우선순위 순서로** 제안하고, 이유·선행 조건·예상 효과를
+  간단히 덧붙이며, 별도 승인이나 Claude 독립 검토가 필요한 경우 표시합니다.
+  완료 결과와 전체 진행도, 이 다음 작업 제안까지 전달해야 한 사이클의
+  완료 보고가 끝납니다.
+
+다음 작업의 추천은 그 작업의 자동 착수, 신규 과금, 병합 또는 배포 승인이 아닙니다.
+
+# 실행할 명령을 줄 때는 실행 위치를 먼저 적습니다
+
+**사용자 환경은 Windows + PowerShell입니다.** 명령 블록을 주기 전에, 그 블록
+바로 위에 **어디서 실행하는지** 한 줄로 적습니다. 셸 문법으로 암시하지
+않습니다 — `$env:`가 PowerShell을 뜻한다는 것은 힌트이지 안내가 아니고,
+사용자가 "이거 어디서 실행하나요"를 다시 묻게 되면 그 블록은 실패한 것입니다.
+
+한 줄에 담는 것은 넷입니다.
+
+1. **어느 기계** — 로컬 PC / Railway 서비스 shell / 이 컨테이너(제가 직접 실행)
+   / Cloudflare·Stripe 같은 웹 대시보드.
+2. **어느 셸** — PowerShell인지 bash인지. 사용자에게 주는 것은 기본이
+   PowerShell입니다.
+3. **어느 디렉터리** — 저장소 clone 안이라면 그렇게 적습니다.
+4. **먼저 있어야 하는 것** — Node 22, `npm ci`, 어떤 환경변수, 어떤 권한의
+   토큰인지.
+
+예: `로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 npm ci가 끝나
+있어야 하고, R2 환경변수 4개가 필요합니다.`
+
+## 함께 지키는 것
+
+- **production 자격증명이 필요한지 아닌지를 밝힙니다.** 필요 없으면 "이건
+  자격증명 없이 됩니다"라고 적습니다. 사용자가 그걸 모르면 안 해도 될 준비를
+  합니다.
+- **읽기 전용인지 쓰는지 적습니다.** 쓰는 명령은 무엇이 바뀌는지와 되돌리는
+  방법을 같이 적습니다.
+- **package.json에 script가 있으면 그 script를 줍니다.** `node`로 풀어 쓰지
+  않습니다. script가 들고 있는 플래그가 곧 실행 조건이고, 풀어 쓰는 순간 그것을
+  옮겨 적는 일이 사람 손에 넘어갑니다. 2026-08-28에 실제로 그랬습니다 —
+  `audit:message-attachments`를 `node --import tsx …`로 풀어 주면서
+  `--conditions=react-server`가 빠졌고, 운영자는 `server-only`가 던진 "This
+  module cannot be imported from a Client Component module"를 받았습니다. 명령이
+  아니라 제 전사(轉寫)가 틀린 것이었습니다.
+  풀어 써야 할 이유가 있다면 **package.json에서 플래그를 그대로 복사**하고,
+  왜 풀어 쓰는지 한 줄로 적습니다.
+- **환경변수는 그 창에서만 산다는 것을 적습니다.** `$env:`는 PowerShell 창을
+  닫으면 사라지므로, 이어지는 명령이 같은 창을 전제하면 그렇게 말합니다.
+- **대시보드로 끝나는 일이면 스크립트를 주지 않습니다.** Cloudflare R2의
+  lifecycle 규칙처럼 화면에서 두 번 클릭할 일에 clone과 `npm ci`를 요구하지
+  않습니다. 스크립트는 판정을 자동화하거나 기록을 남길 때 함께 제시합니다.
+- **비밀값을 대화에 붙여 달라고 하지 않습니다.** 출력에 자격증명·버킷 이름·
+  object key가 없도록 스크립트를 만들고, "결과는 그대로 붙여도 안전합니다"를
+  근거와 함께 적습니다.
+
 # Accent colour roles
 
 UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 역할로** 지정합니다.
@@ -111,6 +176,24 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
+
+## auto-merge는 PR을 만든 실행이 한 번만 켭니다
+
+`Auto PR to Develop`은 **자기 실행이 PR을 새로 열었을 때만** auto-merge를
+켭니다. 이미 열려 있는 PR에는 켜지 않습니다 — push마다 다시 켜면 사람이 끈
+auto-merge가 다음 commit까지만 유효해지고, 그 사실을 아무도 말해 주지 않습니다.
+
+2026-09-05에 그렇게 됐습니다. PR #1256은 02:13:06Z에 auto-merge가 꺼졌고,
+draft인 동안의 push 일곱 번은 draft 검사가 막았지만, ready로 되돌린 뒤
+05:20:16Z push 하나에 workflow가 다시 켰고 13분 뒤 병합됐습니다. 병합을
+보류하라는 지시가 있던 PR입니다.
+
+**끈 것은 꺼진 채로 있습니다.** 판정은 workflow의 `if:`가 create 단계의
+`created` 출력을 읽는 것이고, `tests/autoPrAutoMergeArming.test.mjs`가 그 단계의
+실제 shell을 stub `gh`로 돌려 양쪽 경로를 고정합니다.
+
+그래서 이미 열린 PR에 auto-merge가 필요하면 **사람이 켭니다.** 그것이 이 규칙이
+지키려는 결정입니다.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -972,9 +1055,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
   계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에
   발송 계정 분리를 결정합니다(§5.3.1, A18).
-- **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
-  직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
-  보류하고 확인을 요청합니다(docs/policy/email-notifications.md §6).
+- **IP로 추정한 국가는 기록하고 판정에 쓰되, 더 강한 신호가 이깁니다**(소유자 승인
+  2026-09-29, S0). 신호 우선순위는 결제 국가·자기 신고 → 직전 동의 시점의 관할권 →
+  **IP 추정 국가**이고, 사용자는 설정에서 언제든 국가를 정정합니다(자기 신고가 추정을
+  덮습니다). 추정이 언어·시간대가 가리키는 나라와 다르면 두 후보를 모두 통과해야
+  보내며, 한 후보씩만 판정하는 동안에는 그 경우를 충돌로 보고 보류합니다. 추정조차
+  없으면 `ZZ`이고 marketing은 보내지 않습니다(docs/policy/email-notifications.md §6).
 - **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
   `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
   행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
@@ -989,6 +1075,181 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
   marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
+
+# 마케팅 자동화
+
+마케팅 게시·승인·채널 연결·Guard·마케팅 테이블, 그리고 시스템 actor 감사 기록을
+건드리기 전에 읽습니다.
+
+- `docs/policy/marketing-automation.md`
+
+절대 조건:
+
+- **사람 감사와 시스템 감사는 하나의 해시 체인입니다.** 두 writer 모두
+  `lib/adminAudit.ts`의 같은 append 함수를 지나며, 감사 테이블에 직접 쓰지
+  않습니다. 시스템 기록은 `writeSystemAuditLog()`만 쓰고, 호출자의
+  트랜잭션이 필수입니다. `npm run check:protected-table-writers`가 writer 밖의
+  직접 쓰기와 새 runtime SQL 호출을 PR Fast Gate에서 막습니다.
+- **시스템 actor는 닫힌 목록입니다**(`lib/adminAuditSystemActors.ts`).
+  `metadata.systemActor`는 예약 키라서 두 writer 모두 호출자가 넣은 값을
+  거절합니다. "사람이 승인했는가"를 묻는 검사는 `auditRowActorKind()`로 판정하고
+  `unknown`을 사람으로 취급하지 않습니다.
+- **마케팅 변경 권한은 `marketing:write`이고 owner·ops만 갖습니다**
+  (`lib/adminAuthCore.ts`). 모든 변경 route가 권한과 step-up을 route 안에서
+  직접 검사합니다.
+- **마케팅 승인은 `AdminActionApproval`을 쓰지 않습니다.** 시스템 초안을 사람
+  1명이 승인하는 별도 계약입니다: docs/policy/marketing-automation.md §6.
+- **Instagram·TikTok은 자율 모드로 졸업하지 않습니다**(정책 문서의 O15).
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/marketing-automation.md §14를 따르며, 새 경로는 그 단계의 PR이
+  이 절에 추가합니다.
+- **S2a(읽기)**: `app/(site)/(application)/admin/marketing/**`,
+  `app/api/admin/marketing/route.ts`, `lib/marketingConsoleRead.ts`,
+  `lib/marketingConsoleSections.ts`, `components/admin/AdminMarketingPanel.tsx`,
+  `lib/adminMessages/marketing.ts`. 읽기는 일반 관리자 인증만 요구합니다
+  (docs/policy/marketing-automation.md §6.1의 기록 열람). `marketing:write`도 step-up도 요구하지 않습니다 — 재인증이 만료된
+  운영자가 "왜 아무것도 안 나갔지"를 보러 왔을 때 거절하면 막힌 파이프라인이
+  아니라 고장 난 콘솔로 읽힙니다.
+- **S2b1(계정 쓰기)**: `app/api/admin/marketing/accounts/**`,
+  `app/api/admin/marketing/settings/route.ts`, `lib/marketingAdminMutations.ts`.
+  **모든 변경 route는 `runMarketingAdminMutation`을 지납니다** — 권한·step-up·
+  스위치 판정·감사와 상태 변경의 같은 트랜잭션이 거기 한 곳에 있고,
+  `tests/marketingS2b1Store.test.mjs`의 sweep이 우회를 실패로 만듭니다.
+  게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
+  (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
+  스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+
+# 엔지니어링 Agent
+
+engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이전트가 AMUX에 붙는
+경로를 건드리기 전에 읽습니다.
+
+- `docs/policy/engineering-agent.md`
+
+절대 조건:
+
+- **작업은 승격된 AMUX 카드로만 받습니다.** GitHub issue·label·comment는 작업
+  원천도 승인 증거도 아닙니다. 에이전트가 AMUX backlog에 카드를 **등록**할 수는
+  있지만 승격하지 않으며, 등록 원천과 상한은 docs/policy/engineering-agent.md §2.2가
+  고정합니다.
+- **허용 판정은 본 앱 하나가 하고, 본 앱은 patch를 적용하지 않습니다.** 본 앱은
+  Git tree 목록만 검증하며, 게시 서비스의 검사는 거절만 할 수 있습니다.
+- **에이전트는 어떤 PR도 승인·병합하지 않고 auto-merge를 켜지 않습니다.** 공개된
+  PR의 승인 증거는 docs/policy/engineering-agent.md §9-10의 일곱 조건입니다.
+- **상태 전이는 `lib/engineeringAgentCore.ts`의 표에만 있습니다.** trigger·store·
+  테스트는 그 표에서 생성하거나 대조하며, 전이를 다른 곳에 옮겨 적지 않습니다.
+  특히 lease 만료는 게시 항목을 `queued`로 되돌리지 않고 `needs_lookup`으로
+  보냅니다 — 조회 없이 다시 쓰는 경로가 생기지 않게 하는 것이 그 표의 목적입니다.
+- **소비된 capability는 되돌아가지 않습니다.** 조회 전용 claim은 capability를
+  발급하지도 소비하지도 않습니다.
+- **판정 코드는 런타임 내장 모듈만 import합니다.** 초안·게시 서비스가 clone한
+  트리의 의존성을 설치·실행하지 않고 그 코드를 불러 쓰기 때문입니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/engineering-agent.md §14를 따르며, 새 경로는 그 단계의 PR이
+  이 절에 추가합니다.
+- **P1a(결정적 핵심)**: `lib/engineeringAgentCore.ts`,
+  `tests/engineeringAgentCore.test.mjs`.
+- **P1b(소유권 manifest와 tier)**: `lib/agentAuthorityFiles.ts`, `lib/agentPushPolicy.ts`,
+  `tests/agentAuthorityFiles.test.mjs`, `tests/agentPushPolicy.test.mjs`. **새 최상위
+  디렉터리나 에이전트·AMUX 이름이 든 파일을 추가하면 manifest 분류가 먼저입니다** —
+  `tests/agentAuthorityFiles.test.mjs`가 분류되지 않은 것을 실패로 만듭니다.
+- **P1e(tree 목록 검증)**: `lib/engineeringAgentTreeVerify.ts`,
+  `tests/engineeringAgentTreeVerify.test.mjs`. **patch를 적용하는 코드를 여기에 넣지
+  않습니다** — 본 앱은 tree 목록의 hash를 다시 계산하고 비교할 뿐입니다.
+- **P1f(capability와 불일치)**: `lib/engineeringAgentCapability.ts`,
+  `lib/engineeringAgentStateMismatch.ts`, `tests/engineeringAgentCapability.test.mjs`.
+  교차 잠금 순서는 `CROSS_LOCK_ORDER` 하나이며 AMUX가 자기 순서를 바꾸면 함께
+  바뀌어야 합니다.
+- **P1g(등록 Guard와 secret 검사)**: `lib/engineeringAgentRegistrationGuard.ts`,
+  `lib/engineeringAgentSecretPatterns.ts`, `tests/engineeringAgentRegistrationGuard.test.mjs`.
+  모델의 등록 제안은 여섯 필드뿐이며 우선순위·승격·담당자를 담을 자리가 없습니다.
+- **P1d(자격증명 도달 분석)**: `lib/agentCredentialReachability.ts`,
+  `tests/agentCredentialReachability.test.mjs`. **workflow를 바꾸면 이 테스트의 base 결과
+  고정값을 확인합니다** — 전체 금지가 풀리는 것은 사람 검토 제외와 cache 격리 기록뿐입니다.
+- **P1c(통제 평면 slice)**: `lib/agentControlPlaneSlice.ts`,
+  `tests/agentControlPlaneSlice.test.mjs`. **배포 이미지에 들어가는 모든 제품 파일이
+  slice입니다** — 이미지가 트리 전체로 만들어지고 런타임 코드가 조립한 경로로 파일을
+  읽으므로, 읽히지 않는다는 것을 증명할 방법이 없습니다. 그래서 지금은 제품 파일을
+  건드리는 모든 변경이 T2입니다. `DEPLOY_EXCLUDED_PREFIXES`는 **이미지의 실제 내용을
+  확인하는 검사가 생기기 전까지 비어 있어야 하며** 테스트가 강제합니다. 런타임 통제 평면
+  코드에 동적 로딩을 넣으면 분석 자체가 실패합니다.
+- **P1h(모델 호출)**: `lib/engineeringAgentModelCall.ts`,
+  `tests/engineeringAgentModelCall.test.mjs`. 모델 도구는 `read_file` 하나이고, 이 모듈은
+  하위 프로세스·평가·네트워크 global·환경변수·로그를 쓰지 않습니다. 구문 검사는 정직한
+  회귀만 잡으므로, **모듈을 고치면 테스트의 `REVIEWED_MODULE_SHA256`이 실패하고 그 digest를
+  갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
+- **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
+  판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
+
+# AI Review (교차검토) 품질과 M5
+
+AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
+그리고 **AI Review를 설명하는 제품 문구**를 건드리기 전에 읽습니다.
+
+- `docs/policy/ai-review-m5-quality-contract.md`
+- `docs/ui-contracts/ai-review-evidence-chain.md`
+
+절대 조건:
+
+- **상태는 셋이고 서로를 함의하지 않습니다** — `instrument scaffolding
+  complete`(도구가 있고 연결됐다), `M5 readiness complete`(그 도구가 믿을 수
+  있는 숫자를 낼 수 있다: 동결된 충분한 decision dataset, 서명된 threshold,
+  다섯 zero-tolerance 규칙의 판정 경로, attempt 단위 계측, 계산 가능한 정산
+  대조, 순서 있는 전환), `M5 eligible`(production에 겨눴고 사람이 서명했다).
+  `judgeM5()`가 세 목록을 각각 받고 각각 전부 충족을 요구합니다.
+  **readiness 항목은 파일 존재로 충족되지 않습니다** — 평가기는 정답이 정해진
+  fixture로 실제 실행해 검사합니다. 실제 운영 데이터 없이 M5라고 선언하지
+  않습니다.
+- **precision은 gold가 exhaustive인 case에서만 계산합니다 — 분모뿐 아니라
+  분자도.** 분자를 빠뜨리면 심어 둔 것 하나를 맞히고 판정 불가능한 99개를
+  덧붙인 검토자가 precision 100%로 보고됩니다. recall은 모든 case를 셉니다.
+- **zero-tolerance 다섯 규칙 모두 판정 경로가 있어야 합니다.** 셋은 용어
+  목록으로 선별하고 둘은 사람만 판정하며, **블라인드 시트는 다섯 전부를
+  묻습니다** — 목록은 자기가 담은 표현만 찾으므로 recall은 사람의 몫입니다.
+  선별은 검토자 자신의 문장(`reviewerProse`, 인용 제외)만 읽고, case 자신이
+  말하는 용어는 금지 목록에서 뺍니다.
+- **품질 임계값은 버전을 가지고 승인 gate에 연결됩니다.**
+  `approvedEntryProblems()`가 승인 항목의 수치를 그 항목이 이름 댄 threshold
+  집합과 대조하고, arm별 격차와 붕괴 arm까지 봅니다. 미승인 집합에 기댄 승인은
+  거부됩니다.
+- **reviewer health는 `ComparisonReviewRunAttempt`에서 계산합니다.** run 행의
+  slot은 결과를 만든 reviewer이고 attempt는 실제로 일어난 일입니다. 둘을
+  합치면 fallback이 앞선 실패를 지웁니다.
+- **전환은 시간 순서를 지키고, 재방문은 두 종류가 다른 이름을 갖습니다.**
+  `accountAgeReturnDay*`는 계정 나이 기준이라 AI Review retention이
+  아니며, `reviewAnchoredReturnDay*`가 그 질문의 답입니다.
+- **source grounding은 사실 정확도가 아닙니다.** `exactQuoteMatchRate`는
+  reviewer의 인용문이 그 인용문이 귀속된 답변에 실제로 있는지만 말합니다.
+  `lib/sourceGrounding.ts`가 저장된 `confidence`를 이 이름으로 번역하는 유일한
+  경계이고, 그 위로는 "출처 일치도"만 씁니다.
+- **두 reviewer가 있다는 사실과 두 reviewer가 합의했다는 사실은 다릅니다.**
+  `computeReviewAgreement()`가 재는 것은 출처 일치도 등급이 같은가와 정확히 같은
+  문구를 몇 개 인용했는가뿐입니다. 이를 "결론에 동의했다"로 표시하면 계약
+  위반입니다.
+- **"서로 다른 provider"라고 말하지 않습니다.** 두 번째 reviewer는 모델 id가
+  다른 다음 후보로 고르므로 같은 provider의 두 모델이 뽑히는 구성이 가능합니다.
+  실제로 그랬는지는 `ComparisonReviewRun.crossProvider`가 매 실행 기록합니다.
+- **client analytics를 서버 신뢰성 지표로 쓰지 않습니다.** reliability는
+  `ComparisonReviewRun`(서버가 모델을 부르는 경로에서 씀), adoption은
+  `ProductAnalyticsEvent`(동의 필요)이고 둘을 한 점수로 접지 않습니다. 두
+  계측기의 차이는 `telemetryCoverage()`가 비교로만 보고합니다.
+- **`ComparisonReviewRun`에 사용자 콘텐츠를 넣지 않습니다.** 질문·답변·검토
+  문장·인용문·파일명이 들어갈 수 있는 컬럼이 없어야 하며,
+  `contentFreeViolations()`와 두 테스트가 이를 강제합니다.
+- **표본이 부족하면 `insufficient_evidence`입니다.** 0점도 M5도 아닙니다. 모든
+  scorecard 지표가 자기 분모와 제외 조건을 갖고 다닙니다.
+- **유료 평가는 fail-closed입니다.** `--live` 없이는 아무것도 호출하지 않고,
+  `--live`가 있어도 사람이 승인한 `evalBudget`·동결된 decision set·깨끗한 named
+  commit·미사용 run ordinal이 모두 필요합니다. `evalBudget`과 register의
+  `approved` 전환은 **사람이 씁니다.**
+- **평가 dataset을 만든 에이전트가 사람 승인까지 대신하지 않습니다.**
+  `fabricated_safety_claim`과 `false_consensus_safety`는 사람만 판정하며,
+  harness는 그 둘에 대해 0을 지어내지 않고 블라인드 검토 기록이 없는 artifact를
+  증거에서 제외합니다.
+- **캐시된 `ComparisonReview`를 읽을 수 없게 만들지 않습니다.** 저장된 result는
+  읽을 때 스키마로 검증되므로, claim에 필드를 추가하면 사용자가 이미 크레딧을
+  치른 결과가 사라지고 다시 과금됩니다. 항목 id를 저장하지 않고 파생하는 이유가
+  이것입니다.
+- scorecard와 보고서는 **자기가 평가하는 register·flag·release gate를 수정하지
+  않습니다.**
 
 ## Mobile chat composer invariant
 
@@ -1158,6 +1419,151 @@ Non-negotiable requirements:
 - A change that violates this contract is a release blocker.
 <!-- END:auto-model-selection-invariant -->
 
+<!-- BEGIN:prompt-refiner-suggestion-invariant -->
+## Prompt Refiner suggestion invariant
+
+Before changing the Prompt Refiner surface or request boundary in
+`ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
+`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
+`lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
+`lib/promptRefinerShadowHarness.ts`, `lib/promptRefinerShadowJournal.ts`,
+`lib/promptRefinerShadowSource.ts`,
+`lib/promptRefinerShadowAdmissionCore.ts`,
+`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus,
+`docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.*`,
+`tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
+
+- `docs/ui-contracts/prompt-refiner-suggestion.md`
+- `docs/policy/prompt-refiner-observability.md`
+- `docs/ops/prompt-refiner-shadow-harness.md`
+
+Non-negotiable requirements:
+
+- A suggestion is shown before send and requires an explicit use-or-keep
+  decision. It never sends the turn by itself.
+- The durable user Message keeps the user's original bytes. Only an accepted
+  suggestion may become the Router/provider execution prompt.
+- One request is bound to one exact draft snapshot and request id. Editing the
+  draft makes a late response stale; it never overwrites newer user work.
+- The caller leaves `ready` after either decision. After acceptance, any draft
+  edit that no longer matches the resolution's displayPrompt discards that
+  resolution and restores ordinary user authorship.
+- The Refiner receives only the current user-turn text as untrusted quoted
+  data. It receives no history, attachment content, Memory, profile knowledge,
+  tool result, Router candidates, provider identity or model identity.
+- Refiner provider/model attribution belongs to an internal receipt and never
+  replaces the answering-model badge.
+- Server execution and user disposition are separate immutable receipts. No
+  receipt may carry prompt/proposal bytes or digests, user/conversation/session
+  identity, attachment/Memory/profile/Router data, or provider error prose.
+  Unknown token/cost telemetry is null, not zero. Duplicate, orphan, binding
+  mismatch and time reversal fail closed.
+- Reliability, stale and choice metrics keep different denominators: provider
+  failure is over dispatched execution; stale is over all requests; explicit
+  choice is over successful suggestions; acceptance is over explicit choices.
+  Empty populations are null and no descriptive aggregate approves quality,
+  a release gate or rollout.
+- No provider call, billing, automatic offer, Router coupling or rollout is
+  implied by the composer seam. Each requires its own approved server-owned
+  gate and evidence.
+- The execution preregistration is pure and fail-closed. Exact contract,
+  refiner, model/catalog/pricing identity, output cap, timeout, retry zero and
+  request/stage cost ceilings are frozen. The gate also resolves the effective
+  input/output rates through `resolveModelPricing()` so a per-model environment
+  or runtime registry override cannot bypass the 0.2/1.2 pin. Its effective
+  output cap must be at least 4,096; a larger capability is allowed but never
+  replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
+  generic model reservation-output setting must not reduce this contract's
+  4,096-token worst-case reservation. The standalone server-only authority
+  passes its runtime model row through this gate inside both reserve and
+  consume. Its global order is fixed stage row, model-registry table SHARE,
+  then reservation row, covering both an existing registry row and an
+  absent-row insert. The reservation BEFORE INSERT trigger validates and locks;
+  only the AFTER INSERT trigger may bind counters to the exact aggregate of
+  already-visible tombstones. A stage must start at zero, and a direct stage
+  counter update therefore cannot mint a slot. Direct inserts, unique conflicts
+  and the 101st row cannot bypass or split accounting. The database also owns
+  terminal timestamps and turns a late consume/release into expiry. It binds
+  requestId + stage + canonical
+  contract digest + server-minted reservation id. Naive DB timestamp columns
+  compare and store only `clock_timestamp() AT TIME ZONE 'UTC'`; expiry sweeps
+  filter and order in SQL and apply their caller limit before `FOR UPDATE`, so
+  the limit bounds both mutation count and lock footprint. One-time consume and
+  permanent terminal tombstones remain DB-enforced.
+  A repeated request returns the existing active fact before stage/runtime
+  revalidation; a terminal fact is a discriminated non-success and is never a
+  reusable lease. A future dispatch must use the exact digest returned by
+  consume together with the checked-in execution/reservation contract constants,
+  and must not reload/reinterpret the registry after that boundary. It has no stage
+  seed/admin writer, product caller or provider path. Existing v1 admission
+  therefore still refuses before dispatch with
+  `reservation_authority_unavailable`; a caller-made lease or atomic boolean is
+  never proof. Only a separately approved new contract may connect an
+  authority consumed fact to `admitted: true`. Product mode remains unadmitted.
+- The current server gate folds the default-off AppSetting, environment kill
+  switch and adapter readiness into one mode. The only active mode is the
+  loopback E2E fixture; a stored flag alone must never expose an inert product
+  control, and there is no product/provider mode yet.
+- A Refiner request, ready proposal and accepted resolution are bound to both
+  the exact draft bytes and the `identity + mounted surface + conversation`
+  scope. Changing any scope member discards them even when the next draft has
+  identical text; text equality never transfers Refiner state across scopes.
+- Every Refiner action keeps a 44px touch target and states why it is disabled.
+- The requesting, failed, and ready state regions are polite live statuses. A
+  genuinely new state identity receives focus without scrolling. An initially
+  mounted bound state or the same identity reappearing after a draft edit does
+  not steal focus; a completed decision returns focus to the textarea.
+- `promptRefinerModelMessages()` is the explicit `prompt-refiner` surface in
+  the PLANNER-03 report. Every adversarial corpus item must retain the exact
+  two-message boundary: system rules first, then only the canonical
+  `inputScope + sourceText` JSON user message. A model-facing caller or
+  provider adapter must use this builder and keep that report green. The
+  loopback fixture caller still reaches only its no-cost E2E route and is not
+  a model-facing path.
+- The provider-free shadow harness accepts only the fixed, reviewed synthetic
+  corpus and exact bytes from a full commit SHA allowlist. It has no live,
+  plugin, adapter, credential, authority, product or provider mode. Model-shaped
+  fixture output goes through `parseBenchmarkJson()`, an exact
+  `refinedPrompt` object and the existing prompt bounds; repair and partial
+  salvage are forbidden. Its content-free journal uses durable intent before
+  evaluation, a hash chain plus a separate witness, an unrecoverable `wx`
+  lock, strict terminals and no retry of an unknown intent. Journal and witness
+  headers bind the exact full source ref and canonical allowlist identity
+  digest; a different source snapshot can never resume the run. Git child reads
+  must disable lazy fetch and replacement objects, and fail closed unless every
+  pinned object is local;
+  `package-lock.json` has a dedicated 4 MiB source cap, other non-corpus source
+  files have a 1 MiB cap, and Git capture remains bounded above both. Tests read
+  the current lockfile size dynamically and require it to be non-empty and at
+  most the declared cap; no incidental byte count is pinned. The source
+  identity binds pinned repository bytes, not installed `node_modules`, package
+  manager caches, install environments, or an installation attestation; a local
+  completion is not dependency-installation provenance.
+  `max-cases` accepts only unsigned ASCII decimal notation. A clean interruption
+  after the final terminal finalizes completion without a zero-remaining resume,
+  while a final-case mismatch remains a replayable non-resumable stop. Structural message
+  boundary evidence and behavioral fixture outcome remain separate metrics;
+  zero structural violations must never be described as model compliance or
+  injection resistance. A completed local run is not model-quality, release,
+  admission or rollout evidence.
+- The admission-readiness core is proposal-only and verifies only the immutable
+  historical evidence snapshot named by its checked-in manifest. It does not
+  validate the current checkout or runtime environment and must always emit
+  `currentCheckoutValidated: false`,
+  `runtimeSourceRevalidationRequired: true`, `executionAdmitted: false`, and
+  `awaiting_explicit_admin_cost_approval`. It has no approvedBy/approvedAt
+  input, writer, DB/Prisma mutation, admin/API/script caller, receipt, feature
+  flag, product import, provider, network or credential path. No caller may use
+  this proposal as writer authorization. A future durable writer must re-run
+  exact current source, manifest and environment validation immediately before
+  binding human cost approval; that requirement cannot be satisfied by a
+  caller-supplied identity boolean.
+
+Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
+`tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
+contract tests passing. `tests/e2e/prompt-refiner-chat-input.spec.ts` is the
+actual ChatInput fixture gate for focus, IME, narrow width and text scaling.
+<!-- END:prompt-refiner-suggestion-invariant -->
 <!-- BEGIN:chat-starter-catalog-invariant -->
 ## Chat starter catalogue invariant
 
@@ -1221,3 +1627,62 @@ Non-negotiable requirements:
 - A card that promises a feature this build does not have is a release blocker.
   Everything else here is ordinary review.
 <!-- END:chat-starter-catalog-invariant -->
+
+<!-- BEGIN:agent-delegation-policy -->
+# 작업을 어느 모델에 보낼지
+
+**모델 선택은 비용 결정이 아니라 복구 가능성 결정입니다.** 이 저장소에는 틀려도
+고쳐서 배포하면 끝나는 변경과, 고칠 수 없는 변경이 섞여 있습니다. 앞쪽에 최상위
+모델을 쓰는 것은 낭비이고, 뒤쪽에 저가 모델을 쓰는 것은 사고입니다. 기준은
+"검증 범위는 되돌릴 수 없는 것에 비례합니다" 절과 같습니다.
+
+역할 정의는 두 도구에 같은 내용으로 들어 있습니다.
+
+- Codex: `.codex/agents/*.toml`
+- Claude Code: `.claude/agents/*.md`
+
+| 역할 | Codex | Claude Code | 무엇을 맡는가 |
+|---|---|---|---|
+| `contract` | `gpt-5.6-sol` / xhigh | `opus` / xhigh | 되돌릴 수 없는 변경 |
+| `impl` | `gpt-5.3-codex` / medium | `sonnet` / high | 그 밖의 모든 코드 변경 |
+| `chore` | `gpt-5.3-codex` / low | `haiku` | 판단이 필요 없는 기계적 작업 |
+| `review` | — | `opus` / xhigh (read-only) | 다른 역할이 만든 diff 검토 |
+
+## `contract` 로 보내는 것
+
+아래 중 하나라도 걸리면 `contract` 입니다. 애매하면 `contract` 입니다 --
+잘못 올리면 비용이 들고, 잘못 내리면 복구가 안 됩니다.
+
+- `lib/modelPricing.ts`, `lib/credit*`, `lib/chatCostGuardrails.ts`,
+  `lib/models.ts` 의 `creditWeight`·`maxOutputTokens`·`reservationOutputTokens`
+- `prisma/migrations/**`, schema 의 CHECK 제약, `VALIDATE CONSTRAINT`,
+  `NOT NULL` 전환
+- `Conversation.productKey` 와 그것을 쓰는 생성 경로
+- `docs/ui-contracts/` 가 이름을 댄 파일 -- 위반이 release blocker 로
+  적혀 있는 것들
+- 프로모션 할인, 가격 카탈로그 default, 플랜 변경, 이메일 발송 경로
+
+## `chore` 의 경계
+
+`chore` 는 **판단이 필요 없을 때만** 씁니다. 어느 파일을 고칠지 스스로 정해야
+하거나, 정책 문서를 읽어야 답이 나오거나, 기존 코드에 없는 패턴을 만들어야
+하면 `impl` 입니다. 역할 정의에도 같은 조건이 적혀 있고, 해당하면 멈추고
+올리라고 지시돼 있습니다.
+
+## 모델을 내려도 게이트는 내려가지 않습니다
+
+역할을 나눠도 통과 기준은 하나입니다. 어느 역할이 만든 변경이든 PR Fast Gate 의
+static 단계를 그대로 지납니다 -- `npm run lint`, `check:accent-tokens`,
+`check:model-pricing`, `check:enum-constraints`, `check:default-models`,
+`check:starter-catalog`, `check:shared-packages`, 그리고 해당 기능의 e2e spec.
+
+**저가 모델을 쓴다는 것은 검증을 줄인다는 뜻이 아닙니다.** 게이트가 기계적으로
+같은 것을 묻기 때문에, 실행 모델이 무엇이든 통과선은 움직이지 않습니다.
+
+## 자동 위임을 과신하지 않습니다
+
+Claude Code 는 `description` 을 보고 자동 위임하지만 보장되지 않고, Codex 는
+대체로 명시적 지시를 필요로 합니다. 중요한 작업은 역할을 직접 지목하십시오 --
+"이건 contract 로", "impl 에 맡겨". 자동 분류에 기대다가 계약 파일이 `impl` 로
+가는 것이 이 정책이 막으려는 실패입니다.
+<!-- END:agent-delegation-policy -->

@@ -29,6 +29,7 @@
  */
 
 import type { AiProvider } from "@/lib/models";
+import { DEPLOYMENT_ONLY_PROVIDERS } from "@/lib/modelRegistryShared";
 import type { DocTableShape } from "@/lib/providerModelDocTables";
 
 export type ProviderModelDocSource = {
@@ -94,8 +95,18 @@ const NOTHING = {
 const documentSlug = (apiModel: string) =>
     apiModel.slice(apiModel.lastIndexOf("/") + 1).trim().toLowerCase();
 
-export const PROVIDER_MODEL_DOC_SOURCES: Record<
+/**
+ * Catalogue providers only. `DEPLOYMENT_ONLY_PROVIDERS` are hosts a deployment
+ * may name: an aggregator's page is not a price this scan may place next to a
+ * catalogue row, so they are absent here on purpose.
+ */
+type CatalogueDocumentedProvider = Exclude<
     AiProvider,
+    (typeof DEPLOYMENT_ONLY_PROVIDERS)[number]
+>;
+
+export const PROVIDER_MODEL_DOC_SOURCES: Record<
+    CatalogueDocumentedProvider,
     ProviderModelDocSource
 > = {
     openai: {
@@ -232,7 +243,7 @@ export const PROVIDER_MODEL_DOC_SOURCES: Record<
 
 /** Providers whose documents the scan reads for itself. */
 export const machineReadableDocProviders = () =>
-    (Object.keys(PROVIDER_MODEL_DOC_SOURCES) as AiProvider[]).filter(
+    (Object.keys(PROVIDER_MODEL_DOC_SOURCES) as CatalogueDocumentedProvider[]).filter(
         (provider) => PROVIDER_MODEL_DOC_SOURCES[provider].pricingUrl !== null
     );
 

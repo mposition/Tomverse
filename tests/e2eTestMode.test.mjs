@@ -9,7 +9,7 @@ import {
 } from "../lib/e2eTestMode.ts";
 
 /**
- * The Playwright short-circuits, and the `/e2e/admin-console-fixture` route
+ * The Playwright short-circuits, and the browser-only `/e2e/*-fixture` routes
  * they gate, must be unreachable on anything that is not a local test server.
  *
  * `tests/goLiveSecurityFixes.test.ts` pins the *shape* of the guard by reading

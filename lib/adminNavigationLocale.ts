@@ -102,6 +102,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       usage: { label: "사용 현황", description: "활성 사용자, 메시지, 모델 점유율, 사용 시간대와 지역" },
       product: { label: "제품 분석", description: "유입, 활성화, 매출 퍼널" },
       imports: { label: "가져오기·메모리", description: "외부 대화 가져오기와 메모리 지표" },
+      "ai-review": { label: "AI Review", description: "신뢰성, 채택, 검토자 쌍 근거" },
     },
   },
   users: {
@@ -188,6 +189,36 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       policy: { label: "정책", description: "예산과 장애 임계값" },
       templates: { label: "템플릿", description: "메시지 템플릿과 전송 테스트" },
       deliveries: { label: "전송 로그", description: "무엇을 어디로 보냈고 도착했는지" },
+    },
+  },
+  marketing: {
+    label: "마케팅",
+    description: "초안 대기열, 게시된 글, 브랜드 계정, 자동화가 남긴 보고",
+    aliases: ["소셜", "게시물", "링크드인", "제르니오", "캠페인", "브랜드 계정", "초안 대기열", "가드"],
+    tabs: {
+      queue: { label: "대기열", description: "사람을 기다리는 초안과 Guard가 각각에 대해 말한 것" },
+      published: {
+        label: "게시 상태",
+        description: "승인된 모든 글 — 대기, 전송 중, 게시됨, 실패, 결과 불명",
+      },
+      accounts: { label: "계정", description: "브랜드 계정과 모드, 정지된 계정이 왜 정지됐는지" },
+      experiments: { label: "실험", description: "랜딩 문구 실험과 결과" },
+      reports: { label: "보고서", description: "주간 요약, 경쟁사 사실, 보존 실행 기록" },
+      comments: { label: "댓글", description: "모니터가 올린 댓글 알림 중 아무도 답하지 않은 것" },
+    },
+  },
+  "engineering-agent": {
+    label: "엔지니어링 에이전트",
+    description: "결정을 기다리는 T2 초안, run, 에이전트가 연 pull request, 모드",
+    aliases: ["엔지니어링", "에이전트", "T2 초안", "패치", "풀 리퀘스트", "게시 서비스", "러너", "동결"],
+    tabs: {
+      queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
+      runs: { label: "Run", description: "각 run과 시작 모드, 종료 결과, 정지 여부" },
+      "pull-requests": {
+        label: "Pull request",
+        description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
+      },
+      settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
     },
   },
   "email-campaigns": {
@@ -278,6 +309,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
 export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   Record<(typeof ADMIN_DETAIL_ROUTES)[number]["id"], { label: string; description: string }>
 > = {
+  "prompt-refiner-shadow": {
+    label: "Prompt Refiner shadow 실행",
+    description: "동결된 합성 shadow run의 owner 전용 승인과 실행",
+  },
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
