@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/email-signup-consent-staging-checklist.md
-templateRevision: 2026-09-30b
+templateRevision: 2026-10-01a
 environment:
 deploySha:
 startedAtUtc:
@@ -26,7 +26,7 @@ user id는 적지 않고 계정을 역할 이름(E1, G, M, E2…)으로만 부�
 | 배포 SHA (전체 40자리) | |
 | SHA를 읽은 방법 | `GET /api/build-info` |
 | SHA를 읽은 시각 (UTC) | |
-| template revision | 2026-09-30b |
+| template revision | 2026-10-01a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -45,7 +45,7 @@ user id는 적지 않고 계정을 역할 이름(E1, G, M, E2…)으로만 부�
 | 항목 | 확인 | 값·비고 |
 |---|---|---|
 | staging 서빙 SHA 확보 | | |
-| SHA가 `72c4f05e` 이후 | | |
+| SHA가 `8219eea1` 이후 | | |
 | 두 flag가 `true` | | |
 | 접속 국가가 marketing 허용 국가 | | |
 | 새 주소·새 OAuth 계정 | | |
@@ -56,7 +56,7 @@ user id는 적지 않고 계정을 역할 이름(E1, G, M, E2…)으로만 부�
 |---|---|---|
 | A-1 거부(E1): `notice_shown`+`objected`, `relationship_started` 없음 | | |
 | A-2 동의(G, 증명): 즉시 `granted`, 확인 메일 없음, 결과 알림 1통 | | |
-| A-3 동의(M, 증명 없음): 확인 메일 → 링크 뒤 `granted` | | |
+| A-3 동의(M, Microsoft 증명): 즉시 `granted`, 확인 메일 없음 | | |
 
 ## B. 기존 계정은 아무것도 소비하지 않는다 — 차단
 

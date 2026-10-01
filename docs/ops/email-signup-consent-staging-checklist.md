@@ -6,11 +6,11 @@
 - 같은 문서 §5.2a: 로그인과 가입의 분리(v25)
 - 같은 문서 §5.4: 제품 내 안내(S8)
 - 같은 문서 §7.7: 처리 결과 알림(S6b)
-- 주소가 증명된 세션의 즉시 동의(B안): docs/policy/email-double-opt-in.md §14
+- 주소가 증명된 세션의 즉시 동의(B안): docs/policy/email-double-opt-in.md §14, Microsoft 포함 §14.7
 
 이 체크리스트를 실행하고 서명하는 것이 production에서 `feature.emailSignupConsentEnabled`를 켜기 위한 전제 조건입니다.
 
-- **template revision**: `2026-09-30b`
+- **template revision**: `2026-10-01a`
 
 ## 이 문서는 template입니다
 
@@ -94,7 +94,7 @@ A·B·C·D가 그 경로들입니다.
 
 - [ ] staging이 서빙 중인 **전체 40자리 SHA**를 `GET /api/build-info`에서 읽음.
       merge SHA를 옮겨 적지 않습니다.
-- [ ] 그 SHA가 `72c4f05e`(PR #1793 merge) 이후임
+- [ ] 그 SHA가 `8219eea1`(PR #1804 merge) 이후임 — 여백(#1801)·동의 메일 디자인(#1802)·Microsoft 증명(#1804) 포함
 - [ ] staging DB의 `feature.emailSignupConsentEnabled`와
       `feature.emailConsentConfirmationEnabled`가 둘 다 `true`임
 - [ ] 실행자의 접속 국가가 marketing 허용 국가(`MARKETING_ALLOWED_COUNTRY_CODES`)임.
@@ -137,12 +137,11 @@ A·B·C·D가 그 경로들입니다.
       (`evidence.confirmedVia=verified_session`, `proof=google_verified`,
       `capturedVia=signup_form`), `EmailPreference.confirmedAt` 있음. **확인 메일
       (`marketing_consent_confirmation`)은 없고**, `consent_result_notice` 1통만.
-- [ ] **A-3 (동의, 증명 없는 세션, M)** 동의 체크만 하고 Microsoft로 가입 → 받은
-      확인 메일의 링크를 눌러 확인 완료.
-      기대: Microsoft는 주소 증명이 아니므로(docs/policy/email-double-opt-in.md §14.1) 가입 직후에는 `notice_shown`과
-      `ConsentRecord` `confirmation_requested`, 확인 메일 1통뿐이고 `granted`는
-      **없음**. 링크 확인 뒤 `granted`(`confirmedVia=link`)와 `consent_result_notice` 1통.
-      "무선택"은 C-3이 확인합니다.
+- [ ] **A-3 (동의, Microsoft, M)** 동의 체크만 하고 Microsoft로 가입.
+      기대: Microsoft 로그인도 주소 증명이므로(docs/policy/email-double-opt-in.md §14.7)
+      가입 직후 `notice_shown`과 `product_updates` **`granted`**
+      (`confirmedVia=verified_session`, `proof=microsoft_signin`). **확인 메일은 없고**,
+      `consent_result_notice` 1통만. "무선택"은 C-3이 확인합니다.
 
 ## B. 기존 계정은 아무것도 소비하지 않는다 — 차단, 무료
 
@@ -195,7 +194,7 @@ E4로 가입하면 다시 `true`로 씁니다. 두 쓰기는 기록의 관측 �
       `confirmedVia=verified_session`), 확인 메일 없음. 처리 결과 알림은 동의 기록마다
       나가므로 **3통**입니다 — 한 번의 "네"에 3통이 가는 것은 관측으로 적습니다.
 - [ ] **E-3** A-2(또는 A-3)의 `consent_result_notice`가 도착하고 발신자·처리 내용·결과·날짜를
-      적음.
+      적음. 환영 메일과 같은 디자인(로고·카드·제목 띠)이고, 문구는 승인 문안 그대로(#1802).
 - [ ] **E-4 (G)** 이메일 설정에서 marketing을 모두 끔 → `withdrawn`과
       `unsubscribe_result_notice` 1통.
 
@@ -205,6 +204,7 @@ E4로 가입하면 다시 `true`로 씁니다. 두 쓰기는 기록의 관측 �
       보내 드립니다. 언제든 끄실 수 있습니다." 두 문장뿐이고, 로그인 코드·영수증
       문장과 "로그인 없이"가 없음. ko·en에서 확인.
 - [ ] **F-2** 320px 폭 모바일에서 `/auth/signup`의 두 장치와 버튼이 잘리거나 겹치지
-      않고, 두 체크 모두 44px 터치 영역.
+      않고, 두 체크 모두 44px 터치 영역. 머리글 구분선 아래 여백이 과하지 않고, 고지 문장이
+      동의 체크박스 바로 아래 그 글자 위치에서 시작함(#1801).
 - [ ] **F-3** 로그인·가입 화면이 서로를 링크함("아직 회원이 아니신가요? 회원가입",
       "이미 회원이신가요? 로그인"), 약관 문장은 버튼 아래 한 줄.
