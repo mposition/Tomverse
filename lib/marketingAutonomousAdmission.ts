@@ -152,8 +152,14 @@ const readAdmissionDecisions = async (
   subject: MarketingAdmissionChannel,
   health: MarketingHealthObservation | null,
   now: Date,
+) => admissionDecisionsFrom(await readMarketingAdmissionSettings(database), subject, health, now);
+
+const admissionDecisionsFrom = (
+  settings: ReadonlyMap<string, string>,
+  subject: MarketingAdmissionChannel,
+  health: MarketingHealthObservation | null,
+  now: Date,
 ) => {
-  const settings = await readMarketingAdmissionSettings(database);
   const generation = marketingConfigGeneration(
     settings.get(MARKETING_CONFIG_GENERATION_KEY),
   );
@@ -375,6 +381,10 @@ export const resolvePublishAdmission = async (
   readonly configGeneration?: number;
   readonly deploymentId?: string;
 }> => {
+  // The settings first and the clock last, so the instant this answer reports
+  // is after every read it made -- the dispatch judges the lease, the approval
+  // and the deadline at it.
+  const settings = await readMarketingAdmissionSettings(database);
   const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
     SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `);
@@ -384,8 +394,8 @@ export const resolvePublishAdmission = async (
     // observation of unknown age is not one the resolver may count.
     return { publish: false, reasons: ["input_unreadable:adapterHealthy"] };
   }
-  const { decisions, generation, deploymentId } = await readAdmissionDecisions(
-    database,
+  const { decisions, generation, deploymentId } = admissionDecisionsFrom(
+    settings,
     subject,
     health,
     now,

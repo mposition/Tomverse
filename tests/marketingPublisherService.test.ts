@@ -43,12 +43,12 @@ import {
 
 test("the shipped limits are each strictly inside the one before", () => {
   assert.deepEqual(marketingPublisherTimingProblems(MARKETING_PUBLISHER_TIMING), []);
-  // The figure the plan derives, by the plan's own arithmetic: sixteen
-  // statements at five seconds and the fifteen gaps between them at five. It was
-  // 115s at a budget of twelve, which the first real caller showed was too small
-  // for the unknown-outcome path; see MARKETING_PUBLISHER_MAX_STATEMENTS.
-  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 16 * 5_000 + 15 * 5_000);
-  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 155_000);
+  // The figure the plan derives, by the plan's own arithmetic: eighteen
+  // statements at five seconds and the seventeen gaps between them at five. It
+  // was 115s at a budget of twelve; measuring the publisher's real operations
+  // with an integrity key configured moved it; see MARKETING_PUBLISHER_MAX_STATEMENTS.
+  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 18 * 5_000 + 17 * 5_000);
+  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 175_000);
 });
 
 test("each broken ordering is named, not reported as 'wrong timing'", () => {

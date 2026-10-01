@@ -69,11 +69,11 @@ export const MARKETING_PUBLISHER_CALL_BUDGET_MS = 30_000;
  * the transaction that records what it returned, at that transaction's bound.
  *
  * The bound, not a typical figure. The round-1 review rejected a sixty-second
- * room against a 155-second worst-case outcome write: an estimate of how long a
- * write usually takes is not a promise about how long it can take. With the
- * bound this is 185 seconds of a 240-second run, which leaves the first minute
- * or so of each run for vendor calls -- enough at the caps the policy sets, and
- * the accounts are rotated between runs so the same ones do not always go first.
+ * room against a worst-case outcome write: an estimate of how long a write
+ * usually takes is not a promise about how long it can take. With the bound this
+ * is 205 seconds of a 240-second run, which leaves the first half-minute or so of
+ * each run for vendor calls -- enough at the caps the policy sets, and the
+ * accounts are rotated between runs so the same ones do not always go first.
  */
 export const MARKETING_PUBLISHER_DISPATCH_ROOM_MS =
   MARKETING_PUBLISHER_CALL_BUDGET_MS + MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS;
@@ -166,7 +166,13 @@ export type MarketingPublisherBatchResult = {
   verificationMismatched: number;
   releaseFailed: number;
   refused: Record<string, number>;
-  stopped: null | "deadline" | "heartbeat";
+  /**
+   * Why the run stopped early. `recovery_backlog` means more dead dispatches
+   * remained than one run answers: the run publishes nothing new until they
+   * are all answered, because an account one of them belongs to may be one
+   * that should already be paused.
+   */
+  stopped: null | "deadline" | "heartbeat" | "recovery_backlog";
 };
 
 const count = (record: Record<string, number>, key: string) => {
@@ -236,10 +242,13 @@ export async function runMarketingPublisherBatch(
       result.stopped = "deadline";
       return result;
     }
-    const stale = await operations.listPublishingPastLease({
+    // One more than will be answered, to know whether any remain.
+    const listedStale = await operations.listPublishingPastLease({
       before: start.now,
-      limit: MARKETING_PUBLISHER_RECOVERY_LIMIT,
+      limit: MARKETING_PUBLISHER_RECOVERY_LIMIT + 1,
     });
+    const backlog = listedStale.length > MARKETING_PUBLISHER_RECOVERY_LIMIT;
+    const stale = listedStale.slice(0, MARKETING_PUBLISHER_RECOVERY_LIMIT);
     for (const post of stale) {
       if (!(await deps.heartbeat())) {
         result.stopped = "heartbeat";
@@ -259,6 +268,12 @@ export async function runMarketingPublisherBatch(
         }),
       );
       result.recoveredUnknown += 1;
+    }
+    if (backlog) {
+      // An eleventh dead dispatch may belong to an autonomous account that is
+      // not paused yet. Nothing new is claimed until every one is answered.
+      result.stopped = "recovery_backlog";
+      return result;
     }
   }
 
@@ -338,6 +353,13 @@ export async function runMarketingPublisherBatch(
     if (!afterDispatch.enough) {
       // Nothing was sent, so this is a confirmed non-publication.
       outcome = { outcome: "failed", errorCode: "run_deadline_before_call" };
+    } else if (
+      dispatch.approvalExpiresAt !== null &&
+      dispatch.approvalExpiresAt.getTime() <= afterDispatch.now.getTime()
+    ) {
+      // The approval ran out between the dispatch's clock and this one. What a
+      // person approved was approved until a time, and that time has passed.
+      outcome = { outcome: "failed", errorCode: "approval_expired_before_call" };
     } else if (accountRef === null || accountRef.trim() === "") {
       // The account lost its reference between the list and the lock. Nothing
       // is sent, so this is a confirmed non-publication, not an unknown.

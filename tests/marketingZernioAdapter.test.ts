@@ -16,7 +16,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { zernioPublishAdapter, type ZernioAdapterPorts } from "@/lib/zernioPublishAdapter";
+import {
+  zernioPublishAdapter,
+  zernioRequestUuid,
+  type ZernioAdapterPorts,
+} from "@/lib/zernioPublishAdapter";
 import type { MarketingPublishRequest } from "@/lib/marketingPublishAdapter";
 
 const API_KEY = "sk_" + "a".repeat(64);
@@ -111,9 +115,11 @@ test("a 201 with an identified object is published", async () => {
     publishNow: true,
     metadata: { requestKey: request.requestKey, locale: "en" },
   });
-  // The post's own logical key is the idempotency key end to end.
-  assert.equal(calls[0]?.headers["x-request-id"], request.requestKey);
-  assert.equal(calls[0]?.headers["Idempotency-Key"], request.requestKey);
+  // The post's own logical key is the idempotency key end to end -- as the
+  // UUID the headers are documented to take, derived from it deterministically.
+  const uuid = zernioRequestUuid(request.requestKey);
+  assert.equal(calls[0]?.headers["x-request-id"], uuid);
+  assert.equal(calls[0]?.headers["Idempotency-Key"], uuid);
 });
 
 test("a 201 whose post or platform is not published is not proof", async () => {
@@ -475,4 +481,13 @@ test("the module reads no environment variable and constructs no client of its o
   };
   probeWalk(probe);
   assert.deepEqual(seen, ["process.env"]);
+});
+
+test("the request id is a version-5 UUID, the same for the same post and different otherwise", () => {
+  // `x-request-id` is documented as `format: uuid`; the logical key has
+  // slashes in it and was sent as is.
+  const uuid = zernioRequestUuid(request.requestKey);
+  assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(zernioRequestUuid(request.requestKey), uuid);
+  assert.notEqual(zernioRequestUuid(request.requestKey + "x"), uuid);
 });

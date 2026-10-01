@@ -84,7 +84,9 @@ import {
 } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_AUDIT_PROBLEMS,
+  MARKETING_POST_AUDIT_TARGET_TYPE,
   verifyMarketingAuditEvidence,
+  verifyMarketingSystemAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
 import {
   marketingFactsDigest,
@@ -4444,6 +4446,13 @@ export async function startMarketingPostDispatch(
       readonly requestKey: string;
       readonly attempt: number;
       /**
+       * When the approval this post goes out under expires; null for an
+       * autonomous post. The caller checks it once more, on the database clock,
+       * immediately before the call -- this transaction's check is as of its
+       * own clock, and the call happens after it commits.
+       */
+      readonly approvalExpiresAt: Date | null;
+      /**
        * The content to publish, read under the same row lock this transition
        * took.
        *
@@ -4554,7 +4563,8 @@ export async function startMarketingPostDispatch(
   if (post.leaseUntil.getTime() <= now.getTime()) {
     // Held, by us, and already expired. Not a conflict -- nobody else has it --
     // but not a licence to publish either: the lease is what says this worker is
-    // still the one entitled to, and it is not.
+    // still the one entitled to, and it is not. Checked again below, at the
+    // clock read after everything else here has taken its time.
     return { started: false, reason: "claim_expired" };
   }
 
@@ -4571,6 +4581,11 @@ export async function startMarketingPostDispatch(
     return { started: false, reason: "channel_not_publishing" };
   }
   const mode = post.mode;
+  let autonomousProvenance: {
+    admissionCodeDigest?: unknown;
+    configGeneration?: unknown;
+    deploymentId?: unknown;
+  } | null = null;
   if (mode !== "approval" && mode !== "autonomous") {
     return { started: false, reason: "not_admitted" };
   }
@@ -4580,19 +4595,37 @@ export async function startMarketingPostDispatch(
   if (mode === "autonomous" && channel.status !== "autonomous_mode") {
     return { started: false, reason: "not_admitted" };
   }
-  // **An approval is for an envelope, until a time.** Both are checked here,
-  // at the last moment, rather than trusted from when the post was scheduled:
-  // an approval that has expired, or that was given to different bytes, is not
-  // an approval of what is about to be sent.
+  // **An approval is for an envelope.** Checked here; when it expires is
+  // checked below, at the clock read after the resolver.
   if (
     mode === "approval" &&
     (post.approvedAt === null ||
       post.approvedDigest === null ||
       post.approvedDigest !== post.envelopeDigest ||
-      post.approvalExpiresAt === null ||
-      post.approvalExpiresAt.getTime() <= now.getTime())
+      post.approvalExpiresAt === null)
   ) {
     return { started: false, reason: "approval_not_current" };
+  }
+
+  if (mode === "autonomous") {
+    // **What the autonomous insert recorded is what this compares against** --
+    // read as evidence, not as values. The row must be a system row written by
+    // the Guard, about this post, with a hash that reproduces and a place in
+    // the chain; a row with the right numbers and none of that is not the
+    // insert's record. Read before the resolver, so the resolver's clock is
+    // the one taken after this work too.
+    const scheduled = await verifyMarketingSystemAuditEvidence(database, {
+      action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+      systemActor: "marketing-guard",
+      targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+      targetId: id,
+    });
+    if (!scheduled.ok) return { started: false, reason: "provenance_changed" };
+    autonomousProvenance = scheduled.metadata as {
+      admissionCodeDigest?: unknown;
+      configGeneration?: unknown;
+      deploymentId?: unknown;
+    } | null;
   }
 
   const admission = await rawInput.resolveAdmission(
@@ -4608,26 +4641,9 @@ export async function startMarketingPostDispatch(
   if (!admission.publish) return { started: false, reason: "not_admitted" };
 
   if (mode === "autonomous") {
-    // **What the autonomous insert recorded is what this compares against.** The
-    // insert wrote the admission code digest, configuration generation and
-    // deployment into its audit entry and said dispatch would compare them; this
-    // is that comparison. A post admitted by one build, one configuration or one
-    // deployment is not sent by another without being admitted again.
-    const scheduled = await database.adminAuditLog.findFirst({
-      // The action is only ever written about a post, so it and the post id
-      // name the entry; the target type adds nothing to the match.
-      where: {
-        action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
-        targetId: id,
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { metadata: true },
-    });
-    const recorded = (scheduled?.metadata ?? null) as {
-      admissionCodeDigest?: unknown;
-      configGeneration?: unknown;
-      deploymentId?: unknown;
-    } | null;
+    // A post admitted by one build, one configuration or one deployment is not
+    // sent by another without being admitted again.
+    const recorded = autonomousProvenance;
     const same =
       recorded !== null &&
       typeof recorded.admissionCodeDigest === "string" &&
@@ -4642,13 +4658,24 @@ export async function startMarketingPostDispatch(
     if (!same) return { started: false, reason: "provenance_changed" };
   }
 
-  // **The deadline, judged after everything above has taken its time,** on the
-  // database clock the resolver read. The later of the two readings, so a
-  // resolver cannot move this check earlier than the one made at the start.
+  // **Time, judged after everything above has taken its time,** on the
+  // database clock the resolver read last. The later of the two readings, so a
+  // resolver cannot move these checks earlier than the one made at the start.
+  // The lease, the approval and the deadline are all as of this instant.
   const checkedAt =
     admission.checkedAt instanceof Date && admission.checkedAt.getTime() > now.getTime()
       ? admission.checkedAt
       : now;
+  if (post.leaseUntil.getTime() <= checkedAt.getTime()) {
+    return { started: false, reason: "claim_expired" };
+  }
+  if (
+    mode === "approval" &&
+    (post.approvalExpiresAt === null ||
+      post.approvalExpiresAt.getTime() <= checkedAt.getTime())
+  ) {
+    return { started: false, reason: "approval_not_current" };
+  }
   if (checkedAt.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
     return { started: false, reason: "deadline_too_close" };
   }
@@ -4703,6 +4730,7 @@ export async function startMarketingPostDispatch(
     started: true,
     requestKey: post.logicalKey,
     attempt,
+    approvalExpiresAt: mode === "approval" ? post.approvalExpiresAt : null,
     payload: {
       channel: envelope.channel,
       externalAccountRef: channel.externalAccountRef ?? null,

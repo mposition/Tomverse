@@ -503,7 +503,7 @@ export async function runBoundedMarketingTransaction<T>(
       // this connection a `transaction_timeout`, the timer started at `BEGIN`
       // with that value, and setting the GUC here changes what
       // `current_setting` reports without rescheduling anything. The bound in
-      // force would be somebody else's, and the 155 seconds this function
+      // force would be somebody else's, and the 175 seconds this function
       // promises would be a number in a variable.
       //
       // Whether any such default exists is a fact about the deployment, not

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { MarketingChannel } from "@/lib/marketingAutomationSchema";
 import type {
   MarketingAdapterCapabilities,
@@ -58,6 +60,30 @@ import type {
  */
 
 /** What the constructing service supplies. Nothing here is read from the process. */
+/**
+ * A post's logical key as the UUID Zernio's request headers take.
+ *
+ * `x-request-id` is documented as `format: uuid` and `Idempotency-Key` as "a
+ * UUID per logical post"; the logical key has slashes in it. So the key is
+ * mapped to a UUID the way RFC 4122 version 5 does -- SHA-1 over a fixed
+ * namespace and the name -- which is deterministic: the same post always gets
+ * the same id, which is the property idempotency needs. The logical key itself
+ * still goes in `metadata` for a person reconciling by hand.
+ */
+const ZERNIO_REQUEST_NAMESPACE = Buffer.from("8f0d3a52b1c64e7a9d2f5c7e1a4b6d90", "hex");
+
+export const zernioRequestUuid = (requestKey: string): string => {
+  const hash = createHash("sha1")
+    .update(ZERNIO_REQUEST_NAMESPACE)
+    .update(requestKey, "utf8")
+    .digest();
+  const bytes = Buffer.from(hash.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 /** Zernio's API origin, from the S0 record (OpenAPI `info.version` 1.5.0). */
 export const ZERNIO_API_BASE_URL = "https://zernio.com/api";
 
@@ -219,7 +245,10 @@ export const zernioPublishAdapter = (
           // holds and nothing here re-sends -- but a key the provider honours
           // for longer is a narrower window for an accidental second post.
           ...(init.requestKey
-            ? { "x-request-id": init.requestKey, "Idempotency-Key": init.requestKey }
+            ? {
+                "x-request-id": zernioRequestUuid(init.requestKey),
+                "Idempotency-Key": zernioRequestUuid(init.requestKey),
+              }
             : {}),
         },
         body: init.body === undefined ? undefined : JSON.stringify(init.body),

@@ -126,11 +126,14 @@ test("health is judged against the database clock read in the same transaction",
   assert.ok(none.reasons.includes("input_unreadable:adapterHealthy" as never));
 });
 
-test("a clock that cannot be read refuses without reading anything else", async () => {
+test("a clock that cannot be read refuses", async () => {
+  // The settings are read first and the clock last, so the instant reported is
+  // after every read; without it there is no freshness to judge.
   const { database: db, seen } = database({ clock: [] });
   const answer = await resolvePublishAdmission(db, channel("approval_mode"), health(1_000));
   assert.deepEqual(answer, { publish: false, reasons: ["input_unreadable:adapterHealthy"] });
-  assert.equal(seen.length, 1);
+  assert.equal(seen.length, 2);
+  assert.ok(seen[1]?.includes("clock_timestamp"));
 });
 
 test("the post's own mode picks the question at dispatch", async () => {

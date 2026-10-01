@@ -88,6 +88,7 @@ const world = (scenario: Scenario = {}) => {
           started: true,
           requestKey: "linkedin/linkedin-1/en/2026-10-01/launch",
           attempt: 1,
+          approvalExpiresAt: null,
           payload: {
             channel: "linkedin",
             externalAccountRef: "acct_9",
@@ -340,6 +341,7 @@ test("an account that lost its reference after dispatch is a confirmed failure, 
       started: true,
       requestKey: "k",
       attempt: 1,
+      approvalExpiresAt: null,
       payload: {
         channel: "linkedin",
         externalAccountRef: null,
@@ -447,7 +449,7 @@ test("a dispatch whose worker died is answered outcome_unknown before anything n
   assert.ok(names.indexOf("recordOutcomeUnknown") < names.indexOf("claim"));
   assert.equal(named("lookupByRequestKey").length, 0);
   // Asked with the database clock and a bound.
-  assert.deepEqual(named("listPublishingPastLease")[0]?.input, { before: NOW, limit: 10 });
+  assert.deepEqual(named("listPublishingPastLease")[0]?.input, { before: NOW, limit: 11 });
 });
 
 test("a dead dispatch that cannot be recorded stops the run", async () => {
@@ -523,4 +525,67 @@ test("accounts are taken in a different order from one run period to the next", 
     starts.add(await firstClaimed(new Date(DEADLINE.getTime() + period * 5 * 60 * 1000)));
   }
   assert.equal(starts.size, 3, "each of three consecutive periods starts on a different account");
+});
+
+// ---------------------------------------------------------------------------
+// Round-2 review
+// ---------------------------------------------------------------------------
+
+test("more dead dispatches than one run answers stops the run before any claim", async () => {
+  // The eleventh may belong to an autonomous account that should already be
+  // paused; claiming on any account before it is answered could publish there.
+  const stale = Array.from({ length: 11 }, (_, index) => ({
+    id: `p${index}`,
+    requestKey: `k${index}`,
+    historyVersion: 1,
+  }));
+  const { run, named } = world({ stale });
+  const result = await run();
+  assert.equal(result.recoveredUnknown, 10);
+  assert.equal(result.stopped, "recovery_backlog");
+  assert.equal(named("claim").length, 0);
+  assert.equal(named("observeHealth").length, 0);
+  // Asked for one more than it answers, to know.
+  assert.equal((named("listPublishingPastLease")[0]?.input as { limit: number }).limit, 11);
+});
+
+test("exactly as many dead dispatches as one run answers does not stop it", async () => {
+  const stale = Array.from({ length: 10 }, (_, index) => ({
+    id: `p${index}`,
+    requestKey: `k${index}`,
+    historyVersion: 1,
+  }));
+  const { run, named } = world({ stale });
+  const result = await run();
+  assert.equal(result.recoveredUnknown, 10);
+  assert.notEqual(result.stopped, "recovery_backlog");
+  assert.equal(named("claim").length, 1);
+});
+
+test("an approval that expired after the dispatch committed is not sent", async () => {
+  const expiresAt = new Date(NOW.getTime() + 5_000);
+  const { run, named } = world({
+    clock: [NOW, NOW, expiresAt],
+    dispatch: {
+      started: true,
+      requestKey: "k",
+      attempt: 1,
+      approvalExpiresAt: expiresAt,
+      payload: {
+        channel: "linkedin",
+        externalAccountRef: "acct_9",
+        locale: "en",
+        renderedText: TEXT,
+        assetIds: [],
+        finalUrl: null,
+      },
+    },
+  });
+  const result = await run();
+  assert.equal(named("publish").length, 0);
+  assert.equal(result.failed, 1);
+  assert.equal(
+    (named("recordFailed")[0]?.input as { errorCode: string }).errorCode,
+    "approval_expired_before_call",
+  );
 });

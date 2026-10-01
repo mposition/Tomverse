@@ -40,6 +40,31 @@ import {
   type MarketingAdmissionChannel,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
+import { MARKETING_POST_AUDIT_TARGET_TYPE } from "@/lib/marketingAuditEvidence";
+
+import {
+  auditEvidenceReads,
+  hashedSystemAuditRow,
+  configureTestAuditIntegrityKey,
+} from "./support/hashedAuditEntry";
+
+configureTestAuditIntegrityKey();
+
+// The autonomous insert's record, hashed and linked, so the dispatch's evidence
+// check takes its full path -- three reads -- rather than refusing at the first.
+const SCHEDULED = auditEvidenceReads(
+  hashedSystemAuditRow({
+    action: "marketing_post.autonomous_scheduled",
+    systemActor: "marketing-guard",
+    targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+    targetId: "p1",
+    metadata: {
+      admissionCodeDigest: "code-digest-1",
+      configGeneration: 3,
+      deploymentId: "deploy-1",
+    },
+  }),
+);
 
 const NOW = new Date("2026-09-23T09:00:00.000Z");
 const LEASE = new Date("2026-09-23T09:15:00.000Z");
@@ -159,10 +184,7 @@ const countingClient = (postStatus: string, shape: Shape = {}) => {
     adminAuditLog: {
       // The chain's own tail lookup answers null; the dispatch reading back an
       // autonomous post's admission answers with the provenance it compares.
-      findFirst: (args?: { where?: { action?: string } }) =>
-        args?.where?.action === "marketing_post.autonomous_scheduled"
-          ? { metadata: PROVENANCE }
-          : null,
+      findFirst: (args?: never) => SCHEDULED(args) ?? null,
       create: ({ data }: { data: unknown }) => data,
     },
   };
@@ -256,7 +278,7 @@ const OPERATIONS: ReadonlyArray<{
     // the first conditional write finds nothing and the reclaim writes it. The
     // round-1 review found this path uncounted.
     name: "claim, reclaiming an expired lease",
-    expected: 13,
+    expected: 14,
     postStatus: "scheduled",
     shape: { postUpdates: [0, 1] },
     run: (tx) =>
@@ -270,7 +292,7 @@ const OPERATIONS: ReadonlyArray<{
     // The longest dispatch: an autonomous post, which also reads back the
     // admission it was scheduled under.
     name: "dispatch, autonomous",
-    expected: 12,
+    expected: 15,
     postStatus: "scheduled",
     shape: { mode: "autonomous" },
     run: (tx) =>
@@ -292,7 +314,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "claim",
-    expected: 12,
+    expected: 13,
     postStatus: "scheduled",
     run: (tx) =>
       claimDueMarketingPost(tx, {
@@ -303,7 +325,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "release claim",
-    expected: 5,
+    expected: 6,
     postStatus: "scheduled",
     run: (tx) =>
       releaseMarketingPostClaim(tx, {
@@ -316,7 +338,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "dispatch",
-    expected: 11,
+    expected: 12,
     postStatus: "scheduled",
     run: (tx) =>
       startMarketingPostDispatch(tx, {
@@ -331,7 +353,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "published",
-    expected: 8,
+    expected: 9,
     postStatus: "publishing",
     run: (tx) =>
       recordMarketingPostPublished(tx, {
@@ -344,7 +366,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "failed",
-    expected: 8,
+    expected: 9,
     postStatus: "publishing",
     run: (tx) =>
       recordMarketingPostFailed(tx, {
@@ -356,7 +378,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "outcome_unknown (pauses the account)",
-    expected: 13,
+    expected: 15,
     postStatus: "publishing",
     // The longest path: the post is written and the autonomous account paused.
     run: (tx) =>
@@ -369,7 +391,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "poll published",
-    expected: 8,
+    expected: 9,
     postStatus: "publishing",
     run: (tx) =>
       recordMarketingPostPolledPublished(tx, {
@@ -382,7 +404,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "poll verified",
-    expected: 8,
+    expected: 9,
     postStatus: "published",
     run: (tx) =>
       recordMarketingPostPollVerified(tx, {
@@ -393,7 +415,7 @@ const OPERATIONS: ReadonlyArray<{
   },
   {
     name: "poll removed by platform",
-    expected: 7,
+    expected: 8,
     postStatus: "published",
     run: (tx) =>
       recordMarketingPostPollRemovedByPlatform(tx, {

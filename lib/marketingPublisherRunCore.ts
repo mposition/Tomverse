@@ -13,11 +13,11 @@
  *    supervisor force-kills its worker at this instant. Railway's own
  *    "skip if the previous run is still going" is additional behaviour, not
  *    this mechanism: it decides whether a run starts, not when one stops.
- * 3. **The derived per-transaction maximum** -- 155 seconds. Sixteen statements
- *    at five seconds each, plus fifteen idle gaps between them at five seconds
+ * 3. **The derived per-transaction maximum** -- 175 seconds. Eighteen statements
+ *    at five seconds each, plus seventeen idle gaps between them at five seconds
  *    each. This is an **application figure, not a database bound**: PostgreSQL
  *    has no statement counter in any version, so the thing that stops a
- *    seventeenth statement is the wrapper in lib/marketingPublisherRun.ts.
+ *    nineteenth statement is the wrapper in lib/marketingPublisherRun.ts.
  * 4. **The per-statement and idle ceilings** -- five seconds each, which
  *    PostgreSQL does enforce.
  *
@@ -78,26 +78,29 @@ export const MARKETING_PUBLISHER_IDLE_TIMEOUT_MS = 5_000;
  * **Measured, not chosen.** It was 12 before the bounded transaction had a
  * caller, and the first caller showed it was too small for the one operation
  * where being too small does the most harm. With the real publish resolver
- * wired in, the store operations the publisher runs issue:
+ * wired in and an audit integrity key configured -- as production always has,
+ * and as the first measurement did not, which undercounted every audit append by
+ * one -- the store operations the publisher runs issue:
  *
- *   claim 12, or 13 reclaiming an expired lease · dispatch 11, or 12 for an
- *   autonomous post · published 8 · failed 8 · outcome_unknown 13 · release 5 ·
- *   poll published 8 · poll verified 8 · poll removed 7
+ *   claim 13, or 14 reclaiming an expired lease · dispatch 12, or 15 for an
+ *   autonomous post (its scheduling record is verified as chained evidence) ·
+ *   published 9 · failed 9 · outcome_unknown 15 · release 6 · poll published 9 ·
+ *   poll verified 9 · poll removed 8
  *
- * `outcome_unknown` is over 12, and it is the safety path -- it writes the
+ * `outcome_unknown` measured over 12 at the first caller, and it is the safety path -- it writes the
  * unknown outcome and pauses the autonomous account in one transaction. Over
  * budget it throws, the transaction rolls back, and **the account is not paused**:
  * the stop fails silently in exactly the case it exists for. Two audit appends
  * account for most of it, each taking its own chain lock, timestamp and insert.
  *
  * The plan calls these values tunable together under one contract, derived
- * maximum below the run deadline. Sixteen leaves three statements of headroom
- * over the worst case and gives 16 x 5s + 15 x 5s = 155s, inside the four-minute
+ * maximum below the run deadline. Eighteen leaves three statements of headroom
+ * over the worst case and gives 18 x 5s + 17 x 5s = 175s, inside the four-minute
  * deadline. `tests/marketingPublisherStatementBudget.test.ts` measures every
  * one of these operations against this number, so the next statement added to
  * any of them is noticed by a test rather than by a run that rolls back.
  */
-export const MARKETING_PUBLISHER_MAX_STATEMENTS = 16;
+export const MARKETING_PUBLISHER_MAX_STATEMENTS = 18;
 
 /**
  * The longest one transaction can take, as the application counts it.

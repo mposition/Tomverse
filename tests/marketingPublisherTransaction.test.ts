@@ -356,7 +356,7 @@ test("a transaction timeout already running is refused, not overwritten", async 
   // active, so `set_config` on a connection that opened with a role- or
   // database-level `transaction_timeout` changes what `current_setting`
   // reports and reschedules nothing. The bound in force would be somebody
-  // else's while this function claimed 155 seconds -- a bound it cannot state
+  // else's while this function claimed 175 seconds -- a bound it cannot state
   // is not one it can keep, so it refuses, including when the existing one is
   // shorter.
   for (const existing of ["30s", "200000", "5min"]) {

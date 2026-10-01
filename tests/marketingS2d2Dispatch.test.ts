@@ -23,6 +23,16 @@ import {
   MARKETING_S2D2_ACTIONS,
   type MarketingTransaction,
 } from "@/lib/marketingStore";
+import { MARKETING_POST_AUDIT_TARGET_TYPE } from "@/lib/marketingAuditEvidence";
+
+import {
+  auditEvidenceReads,
+  hashedSystemAuditRow,
+  configureTestAuditIntegrityKey,
+  type StoredAuditRow,
+} from "./support/hashedAuditEntry";
+
+configureTestAuditIntegrityKey();
 
 const CHANNEL_ID = "chn_linkedin_en";
 const POST_ID = "post-due-1";
@@ -143,8 +153,14 @@ const fakeDatabase = (
     updates?: number[];
     now?: Date;
     isolation?: string;
-    /** The autonomous insert's audit metadata, as the dispatch reads it back. */
+    /**
+     * The autonomous insert's audit metadata, as the dispatch reads it back --
+     * wrapped in a row hashed with the real function, so the dispatch's
+     * evidence check passes only where it would against the database.
+     */
     scheduledMetadata?: Record<string, unknown> | null;
+    /** A whole stored row, when a test needs one that is not evidence. */
+    scheduledRow?: StoredAuditRow | null;
   } = {},
 ) => {
   const {
@@ -188,12 +204,23 @@ const fakeDatabase = (
     adminAuditLog: {
       // Two readers: the chain's own tail lookup, and the dispatch reading the
       // autonomous insert's entry back. Told apart by what they ask for.
-      findFirst: async (args?: { where?: { action?: string } }) => {
-        if (args?.where?.action === "marketing_post.autonomous_scheduled") {
-          const metadata = options.scheduledMetadata;
-          return metadata === undefined || metadata === null ? null : { metadata };
-        }
-        return null;
+      findFirst: async (args?: never) => {
+        const scheduled =
+          options.scheduledRow !== undefined
+            ? options.scheduledRow
+            : options.scheduledMetadata === undefined || options.scheduledMetadata === null
+              ? null
+              : hashedSystemAuditRow({
+                  action: "marketing_post.autonomous_scheduled",
+                  systemActor: "marketing-guard",
+                  targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+                  targetId: POST_ID,
+                  metadata: options.scheduledMetadata,
+                });
+        const answer = auditEvidenceReads(scheduled)(args);
+        // Anything the evidence reads do not claim is the chain's own tail
+        // lookup, which this fake answers with no tail.
+        return answer === undefined ? null : answer;
       },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         seen.audits.push(data);
@@ -240,6 +267,7 @@ test("a dispatch moves the post to publishing and sets its own request key", asy
     started: true,
     requestKey: LOGICAL_KEY,
     attempt: 1,
+    approvalExpiresAt: new Date("2026-09-30T09:00:00.000Z"),
     payload: {
       channel: "linkedin",
       externalAccountRef: "acct_9",
@@ -645,4 +673,78 @@ test("the deadline is judged again after the locks and the resolver", async () =
     }),
     { started: false, reason: "deadline_too_close" },
   );
+});
+
+test("an autonomous post whose scheduling record is not evidence does not go out", async () => {
+  // Right values, wrong row: the round-2 review's case. Each is refused even
+  // though the metadata matches the resolver exactly.
+  const scheduled = (overrides: Partial<StoredAuditRow>, actor = "marketing-guard") =>
+    hashedSystemAuditRow(
+      {
+        action: "marketing_post.autonomous_scheduled",
+        systemActor: actor,
+        targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+        targetId: POST_ID,
+        metadata: PROVENANCE,
+      },
+      overrides,
+    );
+  for (const [label, row] of [
+    ["unhashed", { ...scheduled({}), entryHash: null }],
+    ["edited after it was written", { ...scheduled({}), summary: "edited" }],
+    ["written by another actor", scheduled({}, "marketing-publisher")],
+    ["about another post", scheduled({ targetId: "post-other" })],
+  ] as const) {
+    const { database, seen } = fakeDatabase({
+      post: postRow({ mode: "autonomous" }),
+      scheduledRow: row as StoredAuditRow,
+    });
+    assert.deepEqual(
+      await dispatch(database),
+      { started: false, reason: "provenance_changed" },
+      label,
+    );
+    assert.equal(seen.updates.length, 0, label);
+  }
+});
+
+test("an approval that expires while the dispatch works is judged at the later clock", async () => {
+  // Valid at the clock the dispatch read first; expired at the one the resolver
+  // read last. The later one decides.
+  const { database, seen } = fakeDatabase({
+    post: postRow({ approvalExpiresAt: new Date(NOW.getTime() + 1_000) }),
+  });
+  const result = await dispatch(database, {
+    resolveAdmission: async () => ({
+      publish: true,
+      ...PROVENANCE,
+      checkedAt: new Date(NOW.getTime() + 1_000),
+    }),
+  });
+  assert.deepEqual(result, { started: false, reason: "approval_not_current" });
+  assert.equal(seen.updates.length, 0);
+});
+
+test("a lease that runs out while the dispatch works is judged at the later clock", async () => {
+  const { database } = fakeDatabase();
+  const result = await dispatch(database, {
+    resolveAdmission: async () => ({ publish: true, ...PROVENANCE, checkedAt: LEASE_UNTIL }),
+    runDeadlineAt: new Date(LEASE_UNTIL.getTime() + 60 * 60 * 1000),
+  });
+  assert.deepEqual(result, { started: false, reason: "claim_expired" });
+});
+
+test("a started dispatch tells the caller when its approval expires", async () => {
+  const { database } = fakeDatabase();
+  const result = await dispatch(database);
+  assert.equal(result.started, true);
+  if (result.started) {
+    assert.equal(result.approvalExpiresAt?.toISOString(), "2026-09-30T09:00:00.000Z");
+  }
+  const autonomous = fakeDatabase({
+    post: postRow({ mode: "autonomous" }),
+    scheduledMetadata: PROVENANCE,
+  });
+  const started = await dispatch(autonomous.database);
+  assert.equal(started.started && started.approvalExpiresAt, null);
 });

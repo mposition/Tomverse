@@ -9,8 +9,8 @@ import ts from "typescript";
  * Work inside a bounded publisher transaction can reach no client but its own.
  *
  * `runBoundedMarketingTransaction` promises three things: a transaction that
- * cannot outlast 155 seconds, statements that cannot outlast 5 seconds, and at
- * most sixteen of them. All three are properties of one connection. A callback
+ * cannot outlast 175 seconds, statements that cannot outlast 5 seconds, and at
+ * most eighteen of them. All three are properties of one connection. A callback
  * that reaches a different client is on a different connection: none of the
  * three applies to it, the statement counter never sees it, and -- the part that
  * is not merely inaccurate -- its writes can commit after this transaction rolls
