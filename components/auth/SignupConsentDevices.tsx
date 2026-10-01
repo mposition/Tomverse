@@ -45,22 +45,31 @@ export function SignupConsentDevices(props: {
       data-testid="signup-consent-devices"
       className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-left dark:border-zinc-800 dark:bg-zinc-950/60"
     >
-      <label htmlFor={`${id}-optin`} className="flex min-h-11 cursor-pointer items-start gap-3">
+      {/* The 44px row is the touch target; the label is centred in it rather
+          than pinned to its top, so the notice below can sit right under it. */}
+      <label htmlFor={`${id}-optin`} className="flex min-h-11 cursor-pointer items-center gap-3">
         <input
           id={`${id}-optin`}
           type="checkbox"
+          aria-describedby={`${id}-notice`}
           checked={props.optIn}
           onChange={(event) =>
             props.onChange({ optIn: event.target.checked, objected: event.target.checked ? false : props.objected })
           }
           data-testid="signup-consent-optin"
-          className="mt-0.5 h-5 w-5 shrink-0 rounded border-zinc-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+          className="h-5 w-5 shrink-0 rounded border-zinc-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
         />
         <span className="text-sm font-semibold leading-6 text-zinc-900 dark:text-zinc-100">
           {text("signupOptIn")}
         </span>
       </label>
-      <p data-testid="signup-consent-notice" className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+      {/* The opt-in's own notice: pulled up under it and indented to its
+          label (20px box + 12px gap), so it reads as that box's explanation. */}
+      <p
+        id={`${id}-notice`}
+        data-testid="signup-consent-notice"
+        className="-mt-2 pl-8 text-xs leading-5 text-zinc-600 dark:text-zinc-300"
+      >
         {text("signupNotice")}
       </p>
       <label htmlFor={`${id}-refuse`} className="flex min-h-11 cursor-pointer items-start gap-3">
