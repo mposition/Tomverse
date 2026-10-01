@@ -1,4 +1,8 @@
-import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
+import {
+  renderEmailButton,
+  renderEmailParagraph,
+  renderTransactionalEmailLayout,
+} from "@/lib/accountEmails";
 
 /**
  * The mail that asks a person to confirm a marketing consent.
@@ -253,14 +257,19 @@ export function buildMarketingConsentConfirmationEmail(
       copy.ignore,
       copy.change,
     ].join("\n"),
-    html: `
-      <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
-        <p>${escapeHtml(intro)}</p>
-        <p><a href="${escapeHtml(payload.confirmUrl)}" style="display:inline-block;padding:10px 20px;background:#18181b;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">${escapeHtml(copy.button)}</a></p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.expiry)}</p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.ignore)}</p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.change)}</p>
-      </div>
-    `,
+    // The same sentences in the branded frame used by the other account mail;
+    // the title is the subject line.
+    html: renderTransactionalEmailLayout({
+      preview: intro,
+      title: copy.subject,
+      // The confirm link is the only link this mail carries.
+      siteLink: false,
+      bodyHtml:
+        renderEmailParagraph(escapeHtml(intro)) +
+        renderEmailButton(escapeHtml(payload.confirmUrl), escapeHtml(copy.button)) +
+        renderEmailParagraph(escapeHtml(copy.expiry), "muted") +
+        renderEmailParagraph(escapeHtml(copy.ignore), "muted") +
+        renderEmailParagraph(escapeHtml(copy.change), "muted"),
+    }),
   };
 }

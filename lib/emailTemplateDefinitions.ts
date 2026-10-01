@@ -5,6 +5,8 @@ import {
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
+  renderEmailParagraph,
+  renderTransactionalEmailLayout,
 } from "@/lib/accountEmails";
 import {
   buildAdminPlanChangedEmail,
@@ -825,8 +827,14 @@ export function buildProcessingResultNotice(
   return {
     subject: copy.subject,
     text: `${lines.join("\n")}\n\n${copy.closing}`,
-    html:
-      `<p>${lines.map(escapeResultHtml).join("<br>")}</p>` +
-      `<p>${escapeResultHtml(copy.closing)}</p>`,
+    // The approved lines and closing, unchanged, in the branded frame; its
+    // title is the approved subject.
+    html: renderTransactionalEmailLayout({
+      preview: copy.subject,
+      title: copy.subject,
+      bodyHtml:
+        renderEmailParagraph(lines.map(escapeResultHtml).join("<br>")) +
+        renderEmailParagraph(escapeResultHtml(copy.closing)),
+    }),
   };
 }
