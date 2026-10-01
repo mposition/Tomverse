@@ -10,6 +10,7 @@ import {
   expiredUndecidedDraftPurgeWindow,
   executionBriefPurgeAt,
   holdTimeWindow,
+  planDraftUnitRetention,
   purgeDisposition,
   rawPurgeBy,
   rawPurgeEligibleAt,
@@ -74,6 +75,84 @@ test("expired hold does not restart a previously due purge clock", () => {
   assert.equal(purgeDisposition({ purgeAt: at(3), purgedAt: null, activeHoldExpiresAt: null, dbNow: at(2) }), "not_due");
   assert.equal(purgeDisposition({ purgeAt: at(1), purgedAt: null, activeHoldExpiresAt: at(3), dbNow: at(2) }), "held");
   assert.equal(purgeDisposition({ purgeAt: at(1), purgedAt: null, activeHoldExpiresAt: at(2), dbNow: at(2) }), "due");
+});
+
+test("unit cleanup plans keep each undecided body on its own absolute expiry", () => {
+  const proposed = {
+    state: "proposed", expiresAt: at(30), finalDecisionAt: null,
+    bodyPurgeAfter: null, bodyPurgedAt: null, activeHoldExpiresAt: null,
+  };
+  const before = planDraftUnitRetention({ ...proposed, dbNow: new Date(at(30).getTime() - 1) });
+  assert.equal(before.expireNow, false);
+  assert.equal(before.bodyDisposition, "not_due");
+  assert.equal(before.undecidedPurgeBy.toISOString(), at(31).toISOString());
+  assert.equal(planDraftUnitRetention({ ...proposed, dbNow: at(29), activeHoldExpiresAt: at(35) }).bodyDisposition, "not_due");
+
+  const atExpiry = planDraftUnitRetention({ ...proposed, dbNow: at(30) });
+  assert.equal(atExpiry.expireNow, true);
+  assert.equal(atExpiry.bodyDisposition, "due");
+  assert.equal(atExpiry.unpurgedAtOrAfterOriginalDeadline, false);
+
+  const held = planDraftUnitRetention({ ...proposed, dbNow: at(32), activeHoldExpiresAt: at(35) });
+  assert.equal(held.expireNow, true);
+  assert.equal(held.bodyDisposition, "held");
+  assert.equal(held.unpurgedAtOrAfterOriginalDeadline, true);
+  assert.equal(held.undecidedPurgeBy.toISOString(), at(31).toISOString());
+  assert.equal(planDraftUnitRetention({ ...proposed, dbNow: at(35), activeHoldExpiresAt: at(35) }).bodyDisposition, "due");
+});
+
+test("independent unit plans use decided and undecided clocks without sharing state", () => {
+  const approved = planDraftUnitRetention({
+    state: "approved", expiresAt: at(30), finalDecisionAt: at(29),
+    bodyPurgeAfter: at(59), bodyPurgedAt: null, activeHoldExpiresAt: null, dbNow: at(31),
+  });
+  assert.equal(approved.expireNow, false);
+  assert.equal(approved.bodyDisposition, "not_due");
+  assert.equal(approved.undecidedPurgeBy, null);
+  const sibling = planDraftUnitRetention({
+    state: "proposed", expiresAt: at(30), finalDecisionAt: null,
+    bodyPurgeAfter: null, bodyPurgedAt: null, activeHoldExpiresAt: null, dbNow: at(31),
+  });
+  assert.equal(sibling.expireNow, true);
+  assert.equal(sibling.bodyDisposition, "due");
+  assert.equal(sibling.unpurgedAtOrAfterOriginalDeadline, true);
+
+  const rejected = planDraftUnitRetention({
+    state: "rejected", expiresAt: at(30), finalDecisionAt: at(20),
+    bodyPurgeAfter: at(50), bodyPurgedAt: null, activeHoldExpiresAt: null, dbNow: at(50),
+  });
+  assert.equal(rejected.bodyDisposition, "due");
+  assert.equal(rejected.undecidedPurgeBy, null);
+  assert.equal(planDraftUnitRetention({
+    state: "rejected", expiresAt: at(30), finalDecisionAt: at(20),
+    bodyPurgeAfter: at(50), bodyPurgedAt: null, activeHoldExpiresAt: at(55), dbNow: at(50),
+  }).bodyDisposition, "held");
+  const expired = planDraftUnitRetention({
+    state: "expired", expiresAt: at(30), finalDecisionAt: null,
+    bodyPurgeAfter: at(30), bodyPurgedAt: at(30), activeHoldExpiresAt: null, dbNow: at(50),
+  });
+  assert.equal(expired.bodyDisposition, "already_purged");
+  assert.equal(expired.unpurgedAtOrAfterOriginalDeadline, false);
+});
+
+test("unit retention planning rejects inconsistent state and clock pairs", () => {
+  const proposed = {
+    state: "proposed", expiresAt: at(30), finalDecisionAt: null,
+    bodyPurgeAfter: null, bodyPurgedAt: null, activeHoldExpiresAt: null, dbNow: at(31),
+  };
+  assert.throws(() => planDraftUnitRetention({ ...proposed, bodyPurgeAfter: at(30) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "expired" }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "expired", bodyPurgeAfter: at(30), dbNow: at(29) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "approved", finalDecisionAt: at(29), bodyPurgeAfter: at(31) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "expired", bodyPurgeAfter: at(30), bodyPurgedAt: at(29) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "approved", finalDecisionAt: at(30), bodyPurgeAfter: at(60) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "rejected", bodyPurgeAfter: at(60) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, bodyPurgedAt: at(31) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, activeHoldExpiresAt: new Date("invalid") }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "unknown" }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "approved", finalDecisionAt: at(29), bodyPurgeAfter: at(59), dbNow: at(28) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, state: "expired", bodyPurgeAfter: at(30), bodyPurgedAt: at(32), dbNow: at(31) }));
+  assert.throws(() => planDraftUnitRetention({ ...proposed, expiresAt: new Date("invalid") }));
 });
 
 test("invalid or overflowing clocks fail closed", () => {

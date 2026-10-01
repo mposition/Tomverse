@@ -135,6 +135,86 @@ export function expiredUndecidedDraftPurgeWindow(input: {
   return { eligibleAt, purgeBy: after(eligibleAt, AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS) };
 }
 
+export type DraftUnitRetentionState = "proposed" | "approved" | "rejected" | "expired";
+
+/** A read-only plan for one independently purgeable draft unit. The DB trigger,
+ * not this plan, is the authority for state transitions and purge eligibility.
+ * A valid legal hold delays the body write but never moves expiresAt or its
+ * original 24-hour deadline. Callers must re-read under a row lock and write
+ * the closed system audit in the same transaction. */
+export function planDraftUnitRetention(input: {
+  state: DraftUnitRetentionState;
+  expiresAt: Date;
+  finalDecisionAt: Date | null;
+  bodyPurgeAfter: Date | null;
+  bodyPurgedAt: Date | null;
+  activeHoldExpiresAt: Date | null;
+  dbNow: Date;
+}): {
+  expireNow: boolean;
+  bodyDisposition: "already_purged" | "not_due" | "held" | "due";
+  purgeEligibleAt: Date;
+  undecidedPurgeBy: Date | null;
+  /** Informational only: an unpurged undecided body at/after its original deadline.
+   * A valid hold can make this true without a policy breach. */
+  unpurgedAtOrAfterOriginalDeadline: boolean;
+} {
+  const expiry = timestamp(input.expiresAt);
+  const now = timestamp(input.dbNow);
+  if (input.activeHoldExpiresAt !== null) timestamp(input.activeHoldExpiresAt);
+  if (input.bodyPurgedAt !== null && timestamp(input.bodyPurgedAt) > now) {
+    throw new Error("AMUX draft unit retention row is inconsistent");
+  }
+
+  let purgeEligibleAt: Date;
+  let undecidedPurgeBy: Date | null = null;
+  if (input.state === "proposed") {
+    if (input.finalDecisionAt !== null || input.bodyPurgeAfter !== null || input.bodyPurgedAt !== null) {
+      throw new Error("AMUX draft unit retention row is inconsistent");
+    }
+    purgeEligibleAt = new Date(expiry);
+    undecidedPurgeBy = after(purgeEligibleAt, AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS);
+  } else if (input.state === "expired") {
+    if (input.finalDecisionAt !== null || input.bodyPurgeAfter === null ||
+        timestamp(input.bodyPurgeAfter) !== expiry || now < expiry) {
+      throw new Error("AMUX draft unit retention row is inconsistent");
+    }
+    purgeEligibleAt = new Date(expiry);
+    undecidedPurgeBy = after(purgeEligibleAt, AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS);
+  } else if (input.state === "approved" || input.state === "rejected") {
+    if (input.finalDecisionAt === null || input.bodyPurgeAfter === null ||
+        timestamp(input.finalDecisionAt) >= expiry ||
+        timestamp(input.finalDecisionAt) > now ||
+        timestamp(input.bodyPurgeAfter) !== timestamp(decidedDraftPurgeAt(input.finalDecisionAt))) {
+      throw new Error("AMUX draft unit retention row is inconsistent");
+    }
+    purgeEligibleAt = new Date(timestamp(input.bodyPurgeAfter));
+  } else {
+    throw new Error("AMUX draft unit retention state is invalid");
+  }
+  if (input.bodyPurgedAt !== null && timestamp(input.bodyPurgedAt) < timestamp(purgeEligibleAt)) {
+    throw new Error("AMUX draft unit retention row is inconsistent");
+  }
+
+  const bodyDisposition = purgeDisposition({
+    purgeAt: purgeEligibleAt,
+    purgedAt: input.bodyPurgedAt,
+    activeHoldExpiresAt: input.activeHoldExpiresAt,
+    dbNow: input.dbNow,
+  });
+  if (bodyDisposition === "not_scheduled") {
+    throw new Error("AMUX draft unit retention row is inconsistent");
+  }
+  return {
+    expireNow: input.state === "proposed" && now >= expiry,
+    bodyDisposition,
+    purgeEligibleAt,
+    undecidedPurgeBy,
+    unpurgedAtOrAfterOriginalDeadline: input.bodyPurgedAt === null &&
+      undecidedPurgeBy !== null && now >= timestamp(undecidedPurgeBy),
+  };
+}
+
 /** Hold validity is a separate owner/audit gate; this only checks time bounds.
  * Holds of seven days or less receive their notice at creation. */
 export function holdTimeWindow(input: { createdAt: Date; expiresAt: Date }): {
