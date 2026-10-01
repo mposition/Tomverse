@@ -84,6 +84,7 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   assert.equal(audit.actorUserId, null);
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, AMUX_V4_IDEA_SYSTEM_ACTOR);
   assert.equal((audit.metadata as Record<string, unknown>).actorScope, AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE);
+  assert.equal(Object.hasOwn(audit.metadata as Record<string, unknown>, "actorUserId"), false);
   assert.ok(audit.entryHash);
   assert.equal(JSON.stringify(audit.metadata).includes(text), false);
   assert.equal(await prisma.amuxWorkItem.count(), beforeCards);

@@ -111,7 +111,6 @@ export async function createInitialIdeaOnlySourcePlan(
         sourceSystem: AMUX_V4_IDEA_SOURCE_SYSTEM,
         ideaId: input.ideaId,
         submittedAuditId: submittedAudit.id,
-        actorUserId: input.actorUserId,
         revisionNumber: 1,
         sourceUnitCount: manifest.sourceUnitCount,
         manifestDigest: manifest.manifestDigest,
