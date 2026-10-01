@@ -379,10 +379,91 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await addNode(ids.epic, "epic", ids.initiative);
     await addNode(ids.feature, "feature", ids.epic);
     await addNode(ids.archivedInitiative, "initiative");
+    const insertNodeWithClock = `INSERT INTO public."AmuxPortfolioNode"
+      ("id", "level", "state", "revision", "titleCiphertext", "contentKeyId",
+       "contentKeyVersion", "contentDigest", "contentDigestKeyId", "approvedByUserId",
+       "authorizationAuditLogId", "archivedAt", "contentPurgeAfter", "updatedAt")
+      VALUES ($1, 'initiative', $2, 0, $3, 'synthetic', 1, $4, 'synthetic',
+              'synthetic', $5, $6, $7, CURRENT_TIMESTAMP)`;
+    await expectRejected(
+      insertNodeWithClock,
+      [randomUUID(), "archived", title, digest, randomUUID(), null, null],
+      "AmuxPortfolioNode_retention_insert_check",
+    );
+    await expectRejected(
+      insertNodeWithClock,
+      [randomUUID(), "active", title, digest, randomUUID(), new Date(), null],
+      "AmuxPortfolioNode_retention_insert_check",
+    );
+    await expectRejected(
+      insertNodeWithClock,
+      [randomUUID(), "active", title, digest, randomUUID(), null, new Date()],
+      "AmuxPortfolioNode_retention_insert_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxPortfolioNode"
+       SET "state" = 'archived', "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      [ids.archivedInitiative],
+      "AmuxPortfolioNode_retention_clock_immutable_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxPortfolioNode"
+       SET "state" = 'archived', "contentPurgeAfter" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      [ids.archivedInitiative],
+      "AmuxPortfolioNode_retention_clock_immutable_check",
+    );
+    const beforeArchive = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
     await client.query(
       `UPDATE public."AmuxPortfolioNode" SET "state" = 'archived'
        WHERE "id" = $1`,
       [ids.archivedInitiative],
+    );
+    const afterArchive = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
+    const archiveClock = await client.query(
+      `SELECT "archivedAt", "archivedAt" IS NOT NULL AS "recorded",
+              "contentPurgeAfter" = "archivedAt" + INTERVAL '90 days' AS "dueAt90Days"
+       FROM public."AmuxPortfolioNode" WHERE "id" = $1`,
+      [ids.archivedInitiative],
+    );
+    assert.equal(archiveClock.rows[0].recorded, true);
+    assert.equal(archiveClock.rows[0].dueAt90Days, true);
+    assert.ok(archiveClock.rows[0].archivedAt.getTime() >= beforeArchive.rows[0].moment.getTime() - 1);
+    assert.ok(archiveClock.rows[0].archivedAt.getTime() <= afterArchive.rows[0].moment.getTime() + 1);
+    await client.query(
+      `UPDATE public."AmuxPortfolioNode" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      [ids.archivedInitiative],
+    );
+    const unchangedArchiveClock = await client.query(
+      `SELECT "archivedAt" FROM public."AmuxPortfolioNode" WHERE "id" = $1`,
+      [ids.archivedInitiative],
+    );
+    assert.equal(unchangedArchiveClock.rows[0].archivedAt.getTime(), archiveClock.rows[0].archivedAt.getTime());
+    const reactivateError = await expectRejected(
+      `UPDATE public."AmuxPortfolioNode" SET "state" = 'active' WHERE "id" = $1`,
+      [ids.archivedInitiative],
+    );
+    assert.match(reactivateError.message, /reactivation requires/);
+    const clearClockError = await expectRejected(
+      `UPDATE public."AmuxPortfolioNode"
+       SET "state" = 'active', "archivedAt" = NULL, "contentPurgeAfter" = NULL WHERE "id" = $1`,
+      [ids.archivedInitiative],
+    );
+    assert.match(clearClockError.message, /reactivation requires/);
+    await expectRejected(
+      `UPDATE public."AmuxPortfolioNode"
+       SET "archivedAt" = "archivedAt" + INTERVAL '1 day' WHERE "id" = $1`,
+      [ids.archivedInitiative],
+      "AmuxPortfolioNode_retention_clock_immutable_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxPortfolioNode"
+       SET "contentPurgeAfter" = CURRENT_TIMESTAMP WHERE "id" = $1`,
+      [ids.initiative],
+      "AmuxPortfolioNode_retention_clock_immutable_check",
     );
 
     // A temporary table with the same name must not shadow the trigger's

@@ -6905,6 +6905,10 @@ model AmuxPortfolioNode {
   level                   String
   parentId                String?
   state                   String
+  /// DB-clock start of v8 retention after the one-way active -> archived edge.
+  /// No purge writer is enabled by these metadata fields alone.
+  archivedAt              DateTime?
+  contentPurgeAfter       DateTime?
   revision                Int
   titleCiphertext         Bytes?
   descriptionCiphertext   Bytes?
@@ -6924,6 +6928,7 @@ model AmuxPortfolioNode {
 
   @@index([parentId, level, state])
   @@index([level, state, createdAt])
+  @@index([contentPurgeAfter])
 }
 
 /// Append-only evidence of an owner-approved hierarchy revision. This stores
