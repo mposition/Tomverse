@@ -24,6 +24,7 @@ export type AmuxAnalysisContinuationInput = {
   raw: string;
   expectedPreviewId: string;
   expectedChunkIndex: number;
+  expectedRevisionChunkIndex: number;
   permittedSourceRefIds: readonly string[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
   sourceUnitCount: number;
@@ -61,13 +62,13 @@ function snapshotPage(raw: unknown): AmuxAnalysisOutputPage | null {
   }
 }
 
-function snapshotHistory(raw: unknown, expectedChunkIndex: number): readonly AmuxAnalysisOutputPage[] | null {
+function snapshotHistory(raw: unknown, expectedRevisionChunkIndex: number): readonly AmuxAnalysisOutputPage[] | null {
   try {
-    if (!Array.isArray(raw) || !Number.isSafeInteger(expectedChunkIndex) ||
-        expectedChunkIndex < 0 ||
-        Object.getOwnPropertyDescriptor(raw, "length")?.value !== expectedChunkIndex) return null;
+    if (!Array.isArray(raw) || !Number.isSafeInteger(expectedRevisionChunkIndex) ||
+        expectedRevisionChunkIndex < 0 ||
+        Object.getOwnPropertyDescriptor(raw, "length")?.value !== expectedRevisionChunkIndex) return null;
     const copy: AmuxAnalysisOutputPage[] = [];
-    for (let index = 0; index < expectedChunkIndex; index += 1) {
+    for (let index = 0; index < expectedRevisionChunkIndex; index += 1) {
       const descriptor = Object.getOwnPropertyDescriptor(raw, index);
       if (!descriptor || !("value" in descriptor)) return null;
       const page = snapshotPage(descriptor.value);
@@ -98,7 +99,8 @@ export function inspectAmuxAnalysisContinuation(
       return { ok: false, stage: "history", reason: "history_invalid" };
     }
     const descriptors = Object.getOwnPropertyDescriptors(input);
-    const keys = ["raw", "expectedPreviewId", "expectedChunkIndex", "permittedSourceRefIds",
+    const keys = ["raw", "expectedPreviewId", "expectedChunkIndex", "expectedRevisionChunkIndex",
+      "permittedSourceRefIds",
       "permittedTargetRefs", "sourceUnitCount", "coveredStartOrdinal", "coveredEndOrdinal", "history"];
     if (Reflect.ownKeys(descriptors).length !== keys.length ||
         !keys.every((key) => "value" in (descriptors[key] ?? {}))) {
@@ -109,8 +111,18 @@ export function inspectAmuxAnalysisContinuation(
   } catch {
     return { ok: false, stage: "history", reason: "history_invalid" };
   }
-  const history = snapshotHistory(fields.history, fields.expectedChunkIndex);
+  if (!Number.isSafeInteger(fields.expectedChunkIndex) || fields.expectedChunkIndex < 0 ||
+      !Number.isSafeInteger(fields.expectedRevisionChunkIndex) ||
+      fields.expectedRevisionChunkIndex < 0 ||
+      fields.expectedRevisionChunkIndex > fields.expectedChunkIndex) {
+    return { ok: false, stage: "history", reason: "history_invalid" };
+  }
+  const planStartChunkIndex = fields.expectedChunkIndex - fields.expectedRevisionChunkIndex;
+  const history = snapshotHistory(fields.history, fields.expectedRevisionChunkIndex);
   if (history === null) return { ok: false, stage: "history", reason: "history_invalid" };
+  if (history.some((page, index) => page.chunkIndex !== planStartChunkIndex + index)) {
+    return { ok: false, stage: "history", reason: "history_invalid" };
+  }
   // An owner answer changes the source-plan revision, so this history may not
   // be resumed by merely presenting an audit id. The new plan starts anew.
   if (history.some((page) => page.coverageStatus === "needs_owner_input")) {
@@ -123,6 +135,7 @@ export function inspectAmuxAnalysisContinuation(
     raw: fields.raw,
     expectedPreviewId: fields.expectedPreviewId,
     expectedChunkIndex: fields.expectedChunkIndex,
+    expectedRevisionChunkIndex: fields.expectedRevisionChunkIndex,
     previousContinuationKind: previousKind,
     permittedSourceRefIds: fields.permittedSourceRefIds,
     permittedTargetRefs: fields.permittedTargetRefs,
@@ -145,15 +158,19 @@ export function inspectAmuxAnalysisContinuation(
     outputPartIndex,
     outputPending: continuationKind === "output",
   };
+  const localCandidate: AmuxAnalysisOutputPage = {
+    ...candidate,
+    chunkIndex: fields.expectedRevisionChunkIndex,
+  };
   const cursor = assessAmuxOutputCursorHistory({
     sourceUnitCount: fields.sourceUnitCount,
-    history,
+    history: history.map((page, index) => ({ ...page, chunkIndex: index })),
     verifiedOwnerResolutions: [],
-    candidate,
+    candidate: localCandidate,
   });
   if (cursor.decision === "hold") return { ok: false, stage: "cursor", reason: cursor.reason };
   if (coverageStatus === "needs_owner_input") {
     return { ok: false, stage: "owner_input", reason: "new_source_plan_required", parsed };
   }
-  return { ok: true, parsed, cursor };
+  return { ok: true, parsed, cursor: { ...cursor, candidate } };
 }

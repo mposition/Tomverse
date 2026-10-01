@@ -10,6 +10,7 @@ import {
 const valid = () => ({
   previewId: "preview_12345678",
   chunkIndex: 2,
+  revisionChunkIndex: 2,
   continuation: {
     previousChunkIndex: 1,
     previousChunkDigest: "a".repeat(64),
@@ -80,6 +81,7 @@ test("missing idea, forged target and oversized data fail closed", () => {
 test("continuation requires the preceding chunk and preserves its remaining scope", () => {
   const first = valid();
   first.chunkIndex = 0;
+  first.revisionChunkIndex = 0;
   first.continuation = null;
   assert.equal(buildAmuxIdeaAnalysisPrompt(first).status, "prompt_candidate");
   const wrong = valid();
@@ -101,6 +103,28 @@ test("continuation requires the preceding chunk and preserves its remaining scop
   const largePreview = valid();
   largePreview.sourceTexts[0].text = "A".repeat(7_000);
   assert.equal(buildAmuxIdeaAnalysisPrompt(largePreview).status, "prompt_candidate");
+});
+
+test("a new source-plan revision has a local zero without reusing the global chunk id", () => {
+  const newRevision = valid();
+  newRevision.chunkIndex = 5;
+  newRevision.revisionChunkIndex = 0;
+  newRevision.continuation = null;
+  const result = buildAmuxIdeaAnalysisPrompt(newRevision);
+  assert.equal(result.status, "prompt_candidate");
+  if (result.status === "prompt_candidate") {
+    assert.ok(result.prompt.includes("localId beginning c5:"));
+    const data = JSON.parse(result.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
+      .split("\nEND_CONFIRMED_DATA_JSON")[0]);
+    assert.equal(data.chunkIndex, 5);
+    assert.equal(data.revisionChunkIndex, 0);
+  }
+  newRevision.revisionChunkIndex = 1;
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(newRevision),
+    { status: "hold", reason: "prompt_data_unverified" });
+  newRevision.revisionChunkIndex = 6;
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(newRevision),
+    { status: "hold", reason: "prompt_data_unverified" });
 });
 
 test("a verified chunk can supply continuation fields without hand-transcription", () => {

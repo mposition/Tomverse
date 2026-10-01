@@ -416,7 +416,10 @@ const validateUnitRefs = (units: AmuxAnalysisChunk["units"], permitted: readonly
 type AmuxAnalysisChunkInspectionInput = {
   raw: string;
   expectedPreviewId: string;
+  /** Global idea-scoped identity used in the model's localId prefix. */
   expectedChunkIndex: number;
+  /** Zero-based position within the immutable source-plan revision. */
+  expectedRevisionChunkIndex: number;
   /** Prior chunk's continuationKind from a digest-verified app DB row. */
   previousContinuationKind: "input" | "output" | null;
   permittedSourceRefIds: readonly string[];
@@ -427,17 +430,21 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
   raw: string;
   expectedPreviewId: string;
   expectedChunkIndex: number;
+  expectedRevisionChunkIndex: number;
   previousContinuationKind: "input" | "output" | null;
   sourceRefs: string[];
   targetRefs: AmuxPermittedTargetRef[];
 } | null => {
   try {
     if (!input || typeof input !== "object") return null;
-    const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
+    const { raw, expectedPreviewId, expectedChunkIndex, expectedRevisionChunkIndex,
+      previousContinuationKind,
       permittedSourceRefIds, permittedTargetRefs } = input;
     if (typeof raw !== "string" || !amuxAnalysisRefSafe(expectedPreviewId) ||
         !Number.isSafeInteger(expectedChunkIndex) || expectedChunkIndex < 0 ||
-        (expectedChunkIndex === 0 ? previousContinuationKind !== null :
+        !Number.isSafeInteger(expectedRevisionChunkIndex) ||
+        expectedRevisionChunkIndex < 0 || expectedRevisionChunkIndex > expectedChunkIndex ||
+        (expectedRevisionChunkIndex === 0 ? previousContinuationKind !== null :
           previousContinuationKind !== "input" && previousContinuationKind !== "output") ||
         !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs)) return null;
     const sourceRefs = copyBoundedAmuxArray<string>(permittedSourceRefIds, 256);
@@ -448,7 +455,8 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
     if (targetRefs.some((target) => target === null)) return null;
     const verifiedTargets = targetRefs as AmuxPermittedTargetRef[];
     if (verifiedTargets.some((target) => !amuxPermittedTargetRefSafe(target, expectedChunkIndex))) return null;
-    return { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
+    return { raw, expectedPreviewId, expectedChunkIndex, expectedRevisionChunkIndex,
+      previousContinuationKind,
       sourceRefs, targetRefs: verifiedTargets };
   } catch {
     return null;

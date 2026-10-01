@@ -44,6 +44,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisContinuation({
   raw: JSON.stringify(value),
   expectedPreviewId: value.previewId,
   expectedChunkIndex: value.chunkIndex,
+  expectedRevisionChunkIndex: value.chunkIndex,
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [feature],
   sourceUnitCount: 1,
@@ -84,6 +85,38 @@ test("input continuation advances only after the previous source unit closes", (
   });
   assert.equal(second.ok, true);
   if (second.ok) assert.equal(second.cursor.nextCursor, null);
+});
+
+test("a new revision resets the cursor locally but preserves global chunk IDs", () => {
+  const first = inspect(chunk(5, {
+    coverageStatus: "more", continuationKind: "input",
+    remainingScope: "The next source unit remains.",
+  }), { expectedRevisionChunkIndex: 0, sourceUnitCount: 2 });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  assert.equal(first.cursor.candidate.chunkIndex, 5);
+  assert.deepEqual(first.cursor.nextCursor,
+    { sourceOrdinal: 1, outputPartIndex: 0 },
+    "the next cursor is source-local, not a second global chunk identity");
+  const second = inspect(chunk(6), {
+    expectedRevisionChunkIndex: 1,
+    sourceUnitCount: 2, coveredStartOrdinal: 1, coveredEndOrdinal: 1,
+    history: [first.cursor.candidate],
+  });
+  assert.equal(second.ok, true);
+  if (second.ok) assert.equal(second.cursor.candidate.chunkIndex, 6);
+  assert.deepEqual(inspect(chunk(7), {
+    expectedRevisionChunkIndex: 1,
+    sourceUnitCount: 2, coveredStartOrdinal: 1, coveredEndOrdinal: 1,
+    history: [first.cursor.candidate],
+  }), { ok: false, stage: "history", reason: "history_invalid" });
+  assert.deepEqual(inspect(chunk(6), {
+    expectedRevisionChunkIndex: 0, history: [first.cursor.candidate],
+  }), { ok: false, stage: "history", reason: "history_invalid" });
+  assert.deepEqual(inspect(chunk(5), { expectedRevisionChunkIndex: 6 }),
+    { ok: false, stage: "history", reason: "history_invalid" });
+  assert.deepEqual(inspect(chunk(5), { expectedRevisionChunkIndex: -1 }),
+    { ok: false, stage: "history", reason: "history_invalid" });
 });
 
 test("model-declared completion cannot close an unvisited source ordinal", () => {

@@ -12,7 +12,8 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
   raw: JSON.stringify(value),
   expectedPreviewId: "preview-01",
   expectedChunkIndex: 0,
-  previousContinuationKind: (overrides.expectedChunkIndex ?? 0) === 0 ? null : "input",
+  expectedRevisionChunkIndex: overrides.expectedRevisionChunkIndex ?? overrides.expectedChunkIndex ?? 0,
+  previousContinuationKind: (overrides.expectedRevisionChunkIndex ?? overrides.expectedChunkIndex ?? 0) === 0 ? null : "input",
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
   ...overrides,
@@ -102,6 +103,19 @@ test("eight cards cap a chunk, not an entire project idea", () => {
   assert.deepEqual(inspect(chunk([...first.units, story("c0:card-9")])), { ok: false, code: "too_large" });
 });
 
+test("a new source-plan revision may begin at a later global chunk identity", () => {
+  const fresh = { ...chunk([story("c5:card-1")]), previewId: "preview-05", chunkIndex: 5 };
+  const binding = { expectedPreviewId: "preview-05", expectedChunkIndex: 5,
+    expectedRevisionChunkIndex: 0, previousContinuationKind: null };
+  assert.equal(inspect(fresh, binding).ok, true);
+  assert.deepEqual(inspect(fresh, { ...binding, expectedRevisionChunkIndex: 1 }),
+    { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(inspect(fresh, { ...binding, previousContinuationKind: "input" }),
+    { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(inspect(fresh, { ...binding, expectedRevisionChunkIndex: 6 }),
+    { ok: false, code: "metadata_incomplete" });
+});
+
 test("an incomplete analysis must disclose remaining scope", () => {
   const more = chunk([story()]);
   more.coverageStatus = "more";
@@ -188,6 +202,7 @@ test("sparse trusted allowlists fail closed instead of throwing", () => {
     { ok: false, code: "metadata_incomplete" });
   const throwingInput = {
     raw: JSON.stringify(chunk()), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0,
     previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef], permittedTargetRefs: [],
   };
@@ -407,6 +422,7 @@ test("raw and normalized output are bounded without silent truncation", () => {
     raw: oversized,
     expectedPreviewId: "preview-01",
     expectedChunkIndex: 0,
+    expectedRevisionChunkIndex: 0,
     previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef],
     permittedTargetRefs: [],
