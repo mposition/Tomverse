@@ -434,7 +434,9 @@ function SignInButtons({
     }
 
     return (
-        <div className="mt-8 space-y-4">
+        <div className="space-y-4">
+            {/* No top margin: the card body above already pads 28px below
+                the header, and a second 32px under it left a 60px gap. */}
             {adminReauthentication ? (
                 <div
                     role="status"

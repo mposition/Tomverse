@@ -146,7 +146,7 @@ jobs:
       # generated, because generating 210 answers is the expensive thing this
       # probe exists to price and is not approved.
       - name: Fetch the answer bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.source_artifact }}
           run-id: ${{ inputs.source_run_id }}
@@ -193,7 +193,7 @@ jobs:
       # even when the probe stopped on one of its abort conditions.
       - name: Preserve the measurement
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: judge-cap-probe
           path: artifacts/judge-cap-probe.json
