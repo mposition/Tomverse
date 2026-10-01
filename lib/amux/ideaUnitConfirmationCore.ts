@@ -8,7 +8,9 @@ import { checkV4TaskApprovedCeiling, type V4TaskCostCeilingResult } from "./v4Ta
  * Dark v4 owner-confirmation contract. This module only hashes bounded,
  * non-body metadata. The app must assemble it from freshly authorized DB
  * rows and a server-computed cost receipt, then re-read those rows under the
- * consume transaction. A model or browser must never supply the final snapshot.
+ * consume transaction. Consume must compare against the stored prepare snapshot;
+ * rebuilding its reviewed timestamps changes the digest. A model or browser
+ * must never supply the final snapshot.
  */
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -19,7 +21,8 @@ const utcIso = z.string().length(24)
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
   .refine((value) => Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString() === value);
-const amount = z.string().max(19).regex(/^(0|[1-9]\d*)$/);
+const amount = z.string().max(19).regex(/^(0|[1-9]\d*)$/)
+  .refine((value) => BigInt(value) <= BigInt("9223372036854775807"));
 const routeLabel = z.string().min(1).max(160)
   .refine((value) => value === value.trim() && value === value.normalize("NFC") &&
     !/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/iu.test(value) &&
@@ -267,7 +270,7 @@ const semanticShapeValid = (
           c.dependencies.length !== 0 || currentTaskCost !== null) return false;
     } else {
       if (c.storyKind !== null || c.task === null) return false;
-      if (currentTaskCost === null || !currentTaskCost.ok) return false;
+      if (currentTaskCost?.ok !== true) return false;
       const currentReceipt = costReceipt.safeParse(currentTaskCost.receipt);
       if (!currentReceipt.success) return false;
       const reviewedCostAt = c.task.costReceipt.calculatedAtIso;
@@ -276,7 +279,8 @@ const semanticShapeValid = (
           currentCostAt < reviewedCostAt ||
           amuxCanonicalJson(stableCostBody(c.task.costReceipt)) !==
             amuxCanonicalJson(stableCostBody(currentReceipt.data)) ||
-          checkV4TaskApprovedCeiling(c.task.costReceipt, currentTaskCost).decision !== "allow") {
+          checkV4TaskApprovedCeiling(c.task.costReceipt,
+            { ok: true, receipt: currentReceipt.data }).decision !== "allow") {
         return false;
       }
     }

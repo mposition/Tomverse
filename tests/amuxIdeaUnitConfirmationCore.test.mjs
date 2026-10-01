@@ -307,6 +307,19 @@ test("unknown fields, mismatched kind, broken scope and forged receipt fail clos
   forged.card.task.costReceipt.receiptDigest = hash("0");
   assert.deepEqual(confirm(forged),
     { ok: false, code: "semantic_conflict" });
+  const incoherentStory = story();
+  incoherentStory.draftShape.storyKind = null;
+  incoherentStory.card.storyKind = null;
+  assert.deepEqual(confirm(incoherentStory),
+    { ok: false, code: "semantic_conflict" });
+  const missingCost = task();
+  assert.deepEqual(deriveAmuxIdeaUnitConfirmation(missingCost, key,
+    missingCost.duplicates, undefined),
+    { ok: false, code: "semantic_conflict" });
+  const outOfRange = task();
+  outOfRange.card.task.costReceipt.ceilingMicroUsd = "9223372036854775808";
+  assert.deepEqual(confirm(outOfRange),
+    { ok: false, code: "schema_rejected" });
   const unknownAction = story();
   unknownAction.action = "merge_everything";
   assert.deepEqual(confirm(unknownAction),
