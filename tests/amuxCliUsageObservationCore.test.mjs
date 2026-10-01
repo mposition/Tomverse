@@ -116,6 +116,7 @@ test("Codex malformed, oversized, negative, fractional or unsafe integer reports
   for (const lines of [
     ["{not-json"],
     [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "turn.started" }), codexTurn(codexUsage(1, 2, 0, 0))],
+    [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "turn.started" }), codexTurn(codexUsage(1, 0, 1, 2))],
     [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "turn.started" }), codexTurn(codexUsage(-1, 0, 0, 0))],
     [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "turn.started" }), codexTurn(codexUsage(1.5, 0, 0, 0))],
     ["x".repeat(1_048_577)],
@@ -193,6 +194,37 @@ test("Claude aggregate-only reports remain observable without inventing model at
   assert.equal(result.completeness, "reported_partial");
   assert.equal(result.observed.inputTokens, 42);
   assert.deepEqual(result.models, []);
+});
+
+test("Claude all-zero defaults never certify zero spend, while cache-only usage is observed", () => {
+  const base = { type: "result", subtype: "success", num_turns: 1 };
+  const zeroByModel = inspectClaude({
+    ...base, modelUsage: { "claude-opus-test": claudeModel(0, 0, 0, 0) },
+  });
+  assert.equal(zeroByModel.completeness, "unknown");
+  assert.equal(zeroByModel.observed, null);
+  const zeroAggregate = inspectClaude({
+    ...base,
+    usage: {
+      input_tokens: 0, output_tokens: 0,
+      cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+    },
+  });
+  assert.equal(zeroAggregate.completeness, "unknown");
+  assert.equal(zeroAggregate.observed, null);
+  const cacheOnly = inspectClaude({
+    ...base, modelUsage: { "claude-opus-test": claudeModel(0, 0, 1, 0) },
+  });
+  assert.equal(cacheOnly.completeness, "reported_complete");
+  assert.equal(cacheOnly.observed.cacheReadInputTokens, 1);
+  assert.equal(inspectClaude({
+    type: "result", subtype: "success",
+    modelUsage: { "claude-opus-test": claudeModel(1, 1, 0, 0) },
+  }).completeness, "reported_partial");
+  assert.equal(inspectClaude({
+    ...base, num_turns: 129,
+    modelUsage: { "claude-opus-test": claudeModel(1, 1, 0, 0) },
+  }).completeness, "reported_partial");
 });
 
 test("Claude failure with reported usage is partial; missing or invalid usage is unknown", () => {
