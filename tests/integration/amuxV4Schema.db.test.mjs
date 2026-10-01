@@ -56,7 +56,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       await client.query("RELEASE SAVEPOINT reject_probe");
     }
     assert.ok(error, "database write unexpectedly succeeded");
-    if (expectedConstraint) assert.equal(error.constraint, expectedConstraint);
+    if (expectedConstraint) assert.equal(error.constraint, expectedConstraint, error.message);
     return error;
   }
 
@@ -66,21 +66,66 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await client.query("SET LOCAL statement_timeout = '5s'");
 
     const insertIdea = `INSERT INTO public."AmuxIdeaSubmission"
-      ("id", "actorUserId", "state", "rawCiphertext", "rawKeyId", "rawKeyVersion",
-       "rawDigest", "rawDigestKeyId", "submittedAt", "analysisDeadlineAt", "updatedAt")
-      VALUES ($1, 'synthetic-owner', 'submitted', $2, $3, $4, $5, $6,
-              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days', CURRENT_TIMESTAMP)`;
+      ("id", "requestId", "actorUserId", "state", "rawCiphertext", "rawKeyId", "rawKeyVersion",
+       "rawDigest", "rawDigestKeyId", "submittedAt", "analysisDeadlineAt",
+       "rawPurgeAfter", "updatedAt")
+      VALUES ($1, $2, 'synthetic-owner', 'submitted', $3, $4, $5, $6, $7,
+              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days',
+              CASE WHEN $3::bytea IS NOT NULL THEN CURRENT_TIMESTAMP + INTERVAL '7 days' ELSE NULL END,
+              CURRENT_TIMESTAMP)`;
     await expectRejected(
       insertIdea,
-      [randomUUID(), title, "", 1, null, null],
+      [randomUUID(), randomUUID(), title, "", 1, null, null],
       "AmuxIdeaSubmission_raw_key_pair_check",
     );
     await expectRejected(
       insertIdea,
-      [randomUUID(), null, null, null, digest, null],
+      [randomUUID(), randomUUID(), null, null, null, digest, null],
       "AmuxIdeaSubmission_raw_digest_check",
     );
-    await client.query(insertIdea, [ids.idea, null, null, null, null, null]);
+    const firstRequestId = randomUUID();
+    await client.query(insertIdea, [ids.idea, firstRequestId, null, null, null, null, null]);
+    await expectRejected(
+      insertIdea,
+      [randomUUID(), firstRequestId, null, null, null, null, null],
+      "AmuxIdeaSubmission_requestId_key",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaSubmission"
+       SET "submittedAt" = "submittedAt" + INTERVAL '1 day',
+           "analysisDeadlineAt" = "analysisDeadlineAt" + INTERVAL '1 day'
+       WHERE "id" = $1`,
+      [ids.idea],
+      "AmuxIdeaSubmission_identity_immutable_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaSubmission"
+       SET "state" = 'awaiting_owner', "analysisCompletedAt" = "analysisDeadlineAt"
+       WHERE "id" = $1`,
+      [ids.idea],
+      "AmuxIdeaSubmission_completion_before_deadline_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaSubmission"
+       SET "rawCiphertext" = $2, "rawKeyId" = 'synthetic',
+           "rawKeyVersion" = 1, "rawPurgeAfter" = "analysisDeadlineAt" + INTERVAL '1 day'
+       WHERE "id" = $1`,
+      [ids.idea, title],
+      "AmuxIdeaSubmission_raw_purge_bound_check",
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaSubmission"
+       SET "rawCiphertext" = $2, "rawKeyId" = 'synthetic',
+           "rawKeyVersion" = 1, "rawPurgeAfter" = "analysisDeadlineAt" - INTERVAL '1 day'
+       WHERE "id" = $1`,
+      [ids.idea, title],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaSubmission"
+       SET "rawPurgeAfter" = "analysisDeadlineAt" WHERE "id" = $1`,
+      [ids.idea],
+      "AmuxIdeaSubmission_raw_purge_monotonic_check",
+    );
 
     const insertChunk = `INSERT INTO public."AmuxIdeaAnalysisChunk"
       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt", "leaseGeneration",

@@ -6711,6 +6711,7 @@ model PinnedDeploymentExperimentHold {
 /// key identified by *DigestKeyId; no plain SHA-256 of a short idea is retained.
 model AmuxIdeaSubmission {
   id                  String    @id
+  requestId           String    @unique @db.Uuid
   actorUserId         String
   state               String
   rawCiphertext       Bytes?
