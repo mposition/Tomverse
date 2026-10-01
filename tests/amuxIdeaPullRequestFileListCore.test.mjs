@@ -24,7 +24,7 @@ const page = {
 };
 
 test("stable complete PR observations produce side-aware changed paths", () => {
-  const result = inspectAmuxPullRequestFileList(snapshot, page, { ...snapshot });
+  const result = inspectAmuxPullRequestFileList(snapshot, page, { ...snapshot }, BASE);
   assert.equal(result.status, "complete");
   assert.deepEqual(result.basePaths, ["docs/guide.md", "docs/old-name.md"]);
   assert.deepEqual(result.headPaths, ["docs/guide.md", "docs/new-name.md", "src/new.ts"]);
@@ -58,8 +58,10 @@ test("changed count, pagination and moving PR snapshots hold", () => {
     [{ ...snapshot, headRepositoryId: 26 }, page, snapshot, "pr_snapshot_unverified"],
     [{ ...snapshot, headSha: "b".repeat(64) }, page, snapshot, "pr_snapshot_unverified"],
     [{ ...snapshot, changedFiles: 0 }, page, snapshot, "pr_snapshot_unverified"],
-  ]) assert.deepEqual(inspectAmuxPullRequestFileList(before, files, after),
+  ]) assert.deepEqual(inspectAmuxPullRequestFileList(before, files, after, BASE),
     { status: "hold", reason });
+  assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, page, snapshot, HEAD),
+    { status: "hold", reason: "pr_base_not_merge_base" });
 });
 
 test("unsafe paths, duplicate entries and unknown statuses hold", () => {
@@ -73,23 +75,23 @@ test("unsafe paths, duplicate entries and unknown statuses hold", () => {
     [{ ...page.files[0], previousFilename: undefined }, "file_list_invalid"],
   ]) {
     const altered = { ...page, files: [file, ...page.files.slice(1)] };
-    assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, altered, snapshot),
+    assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, altered, snapshot, BASE),
       { status: "hold", reason });
   }
   const duplicate = { ...page, files: [page.files[0], page.files[0], page.files[2]] };
-  assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, duplicate, snapshot),
+  assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, duplicate, snapshot, BASE),
     { status: "hold", reason: "file_list_invalid" });
   const duplicateBase = { ...page, files: [
     { filename: "docs/old-name.md", status: "removed", previousFilename: null },
     page.files[1], page.files[2],
   ] };
-  assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, duplicateBase, snapshot),
+  assert.deepEqual(inspectAmuxPullRequestFileList(snapshot, duplicateBase, snapshot, BASE),
     { status: "hold", reason: "file_list_invalid" });
   const validPathReuse = { ...page, files: [
     { filename: "docs/old-name.md", status: "added", previousFilename: null },
     page.files[1], page.files[2],
   ] };
-  assert.equal(inspectAmuxPullRequestFileList(snapshot, validPathReuse, snapshot).status, "complete");
+  assert.equal(inspectAmuxPullRequestFileList(snapshot, validPathReuse, snapshot, BASE).status, "complete");
 });
 
 test("the one-page 100-file bound accepts only a complete page", () => {
@@ -98,7 +100,7 @@ test("the one-page 100-file bound accepts only a complete page", () => {
   }));
   const hundred = { ...snapshot, changedFiles: 100 };
   const complete = inspectAmuxPullRequestFileList(hundred,
-    { page: 1, perPage: 100, hasNext: false, files }, hundred);
+    { page: 1, perPage: 100, hasNext: false, files }, hundred, BASE);
   assert.equal(complete.status, "complete");
   assert.equal(complete.basePaths.length, 100);
   assert.equal(complete.headPaths.length, 100);

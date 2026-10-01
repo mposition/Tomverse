@@ -6,9 +6,10 @@ import type { IdeaSourceFile } from "./ideaSourceScopeCore.ts";
  * must fetch the PR before and after its complete file page, bind numeric repo
  * identity, and re-fetch immediately before any one-time external transfer.
  * Fork PRs hold: base and head must both be the expected repository. The
- * "base" path means the file at the observed current base SHA, not the
- * merge-base used by GitHub's three-dot changed-file presentation; callers
- * must label that distinction and verify the actual selected bytes at SHA.
+ * GitHub's changed-file page is a three-dot merge-base/head diff. A base-side
+ * source is eligible only when the observed base SHA equals that merge-base;
+ * otherwise the page cannot prove membership at the current base SHA.
+ * Callers must still verify the actual selected bytes at the immutable SHA.
  * The one-page/100-file bound is provisional and deliberately holds larger
  * PRs; GitHub's API caps the files response at 3,000, so count alone cannot
  * prove completeness above that ceiling.
@@ -46,6 +47,7 @@ export type AmuxPullRequestFileListResult =
       number: number;
       baseSha: string;
       headSha: string;
+      mergeBaseSha: string;
       basePaths: readonly string[];
       headPaths: readonly string[];
     }
@@ -66,6 +68,7 @@ export function inspectAmuxPullRequestFileList(
   before: AmuxPullRequestObservation,
   page: AmuxPullRequestFilePage,
   after: AmuxPullRequestObservation,
+  mergeBaseSha: string,
 ): AmuxPullRequestFileListResult {
   const hold = (reason: string): AmuxPullRequestFileListResult => ({ status: "hold", reason });
   if (!before || !after || !page || !validId(before.repositoryId) ||
@@ -79,6 +82,8 @@ export function inspectAmuxPullRequestFileList(
       !Number.isSafeInteger(before.changedFiles) || before.changedFiles < 1 ||
       before.changedFiles > AMUX_V4_PR_FILE_LIST_MAX ||
       !sameSnapshot(before, after)) return hold("pr_snapshot_unverified");
+  if (typeof mergeBaseSha !== "string" || !SHA.test(mergeBaseSha) ||
+      mergeBaseSha !== before.baseSha) return hold("pr_base_not_merge_base");
   if (page.page !== 1 || page.perPage !== AMUX_V4_PR_FILE_LIST_MAX || page.hasNext !== false ||
       !Array.isArray(page.files) || page.files.length !== before.changedFiles) {
     return hold("file_list_incomplete");
@@ -120,6 +125,7 @@ export function inspectAmuxPullRequestFileList(
   return {
     status: "complete", repositoryId: before.repositoryId, number: before.number,
     baseSha: before.baseSha, headSha: before.headSha,
+    mergeBaseSha,
     basePaths, headPaths,
   };
 }
