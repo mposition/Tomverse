@@ -73,7 +73,10 @@ const australian = async () => {
   return user as { id: string; email: string };
 };
 
-const proofFor = (email: string, method: "email_code" | "google_verified" = "google_verified") => ({
+const proofFor = (
+  email: string,
+  method: "email_code" | "google_verified" | "microsoft_signin" = "google_verified"
+) => ({
   method,
   address: email.toLowerCase(),
   provenAt: new Date().toISOString(),
@@ -246,7 +249,7 @@ test("a sign-up from a proven session is consented in the consumption, without a
   assert.equal((await preference(user.id)).enabled, true);
 });
 
-test("a sign-up without proof still takes the confirmation mail", async () => {
+test("a sign-up whose session carries no proof still takes the confirmation mail", async () => {
   const issuedAt = new Date();
   const issued = await issueSignupConsentAttempt({
     channel: "oauth",
@@ -382,3 +385,38 @@ test("a proven session cannot consent to a suppressed address through the notice
   assert.equal(result.recorded, false);
   assert.equal(await prisma.consentRecord.count({ where: { userId: user.id, action: "granted" } }), 0);
 });
+
+test("a Microsoft sign-up is consented at once (owner decision, DOI section 14.7)", async () => {
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "azure-ad",
+    expressOptInRequested: true,
+    objected: false,
+    language: "en",
+    ipCountry: "AU",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  if (!issued.ok) return;
+  const user = await prisma.user.create({
+    data: { email: `ms-proof-${randomUUID()}@example.test`, createdAt: new Date(issuedAt.getTime() + 1_000) },
+    select: { id: true, email: true },
+  });
+  await prisma.account.create({
+    data: { userId: user.id, type: "oauth", provider: "azure-ad", providerAccountId: randomUUID() },
+  });
+  const result = await finalizeSignupConsentAttempt({
+    userId: user.id,
+    createdBySignIn: true,
+    addressProof: proofFor(user.email as string, "microsoft_signin"),
+    attemptId: issued.attemptId,
+    nonce: issued.nonce,
+  });
+  assert.deepEqual(result, { ok: true, confirmationRequested: false, consentGranted: true });
+  const granted = await prisma.consentRecord.findFirstOrThrow({
+    where: { userId: user.id, action: "granted" },
+  });
+  assert.equal((granted.evidence as Record<string, unknown>).proof, "microsoft_signin");
+});
+

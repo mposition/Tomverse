@@ -3,6 +3,7 @@
 > **상태: 승인됨.** 승인자 `mposition`, 승인일 2026-09-15.
 > **§14 개정(2026-09-30, `mposition`):** 주소가 증명된 세션의 동의는 확인 메일 없이
 > 즉시 확인된 것으로 기록합니다. §3 규칙 1·6은 §14.4대로 읽습니다.
+> **§14.1 개정(2026-10-01, `mposition`):** Microsoft 로그인도 증명의 출처로 인정합니다(§14.7).
 > `docs/policy/email-notifications.md` v9 개정으로 들어갔고 §15.2의 "만들되 끄는
 > 것" 목록에 `feature.emailConsentConfirmationEnabled`가 추가됐습니다.
 >
@@ -370,28 +371,29 @@ https://tomverse.app/api/admin/marketing-reach
 ### 14.1 "증명된 주소"의 정의
 
 동의를 누르는 **요청의 세션**이, 그 세션을 만든 로그인에서 **계정의 현재 주소**를
-증명했을 때만 증명된 주소입니다. 증명의 출처는 둘뿐입니다.
+증명했을 때만 증명된 주소입니다. 증명의 출처는 셋뿐입니다(셋째는 §14.7의 소유자 결정).
 
 | 출처 | 조건 | 증명되는 것 |
 |---|---|---|
 | `email_code` | 그 로그인이 이 앱의 코드 또는 링크로 주소를 증명함 | 메일함 소유(우리가 직접 확인) |
 | `google_verified` | 그 로그인의 Google 프로필이 `email_verified === true`이고 프로필 주소가 계정 주소와 같음 | Google이 확인한 메일함 소유 |
+| `microsoft_signin` | 그 로그인의 Microsoft 원본 프로필 주소가 계정 주소와 같음 | 개인 계정은 Microsoft가 확인한 메일함 소유. 회사·학교 계정은 소유가 증명되지 않음 — §14.7이 그 위험을 받아들임 |
 
-- **Microsoft는 출처가 아닙니다.** 조직 계정(Entra ID)의 이메일 값은 테넌트 관리자가
-  정할 수 있어, 그 값만으로는 메일함 소유를 증명하지 못합니다. Microsoft로만 로그인한
-  세션의 동의는 지금처럼 **확인 메일**로 갑니다.
+- ~~Microsoft는 출처가 아닙니다.~~ **(2026-10-01 개정, §14.7)** Microsoft 로그인도
+  출처입니다.
 - 증명은 **로그인 시점에 서버가 세션 토큰에 기록**합니다(방법, 증명된 주소, 시각).
   클라이언트가 말하는 값이 아니며, 이 변경 이전에 발급된 세션에는 없습니다 — 그
   세션은 확인 메일로 갑니다.
 - 기록은 **로그인 분기에서만** 합니다. 출처는 이메일 코드 로그인의 `authorize()`
-  결과, 또는 Google 로그인의 **원본 프로필**(`profile.email`, `email_verified === true`)
-  입니다. 매핑된 user 객체, `User.emailVerified`(OAuth 계정은 NULL), 세션 갱신
+  결과, Google 로그인의 **원본 프로필**(`profile.email`, `email_verified === true`),
+  또는 Microsoft 로그인의 **원본 프로필**(`profile.email`, §14.7)입니다. 매핑된 user 객체, `User.emailVerified`(OAuth 계정은 NULL), 세션 갱신
   (`trigger: "update"`)의 클라이언트 값은 출처가 아닙니다. 저장하는 주소는 원본
   프로필 주소를 trim·소문자로 정규화한 것이고, **그 토큰의 사용자 주소와 같을 때만**
   저장합니다 — 세션이 있는 상태의 OAuth 로그인은 NextAuth가 그 제공자를 기존 사용자에게
-  연결하므로, 다른 주소의 Google 프로필이 이 계정을 증명하지 않게 하기 위해서입니다.
-- Microsoft 로그인, 로그인 방법 연결(`app/api/user/login-methods/**`), 이메일 로그인
-  재활성화는 증명을 기록하지 않습니다. 새 로그인은 이전 토큰의 증명을 잇지 않습니다.
+  연결하므로, 다른 주소의 Google·Microsoft 프로필이 이 계정을 증명하지 않게 하기 위해서입니다.
+- 로그인 방법 연결(`app/api/user/login-methods/**`)과 이메일 로그인 재활성화는 증명을
+  기록하지 않습니다 — 그 흐름은 NextAuth 로그인 분기를 타지 않으므로 Microsoft를 연결해도
+  마찬가지입니다. 새 로그인은 이전 토큰의 증명을 잇지 않습니다.
 - 증명된 주소와 계정의 현재 주소가 다르면(주소 변경 이후) 증명이 아닙니다. 대조는
   동의를 쓰는 트랜잭션 안, User 행 잠금 아래에서 합니다(§13.1 항목 15와 같은 순서).
 
@@ -428,7 +430,7 @@ https://tomverse.app/api/admin/marketing-reach
 
 `ConsentRecord(action="granted")`의 `evidence`는 링크 확인의
 `{ tokenVersion, requestedAt, confirmedVia: "link" }` 대신
-`{ confirmedVia: "verified_session", proof: "email_code" | "google_verified",
+`{ confirmedVia: "verified_session", proof: "email_code" | "google_verified" | "microsoft_signin",
 provenAt }`입니다. `capturedVia`는 지금과 같이 `signup_form`(가입) 또는
 `preference_center`(설정·제품 내 안내)이고, 제품 내 안내는 `evidence.via`에 화면을
 적습니다 — `in_product_notice`는 `ConsentRecord`의 수집 경로 값이 아닙니다. 정책
@@ -456,4 +458,22 @@ provenAt }`입니다. `capturedVia`는 지금과 같이 `signup_form`(가입) �
    트랜잭션 밖에서 합니다(§13.1 항목 16).
 6. **호주 관계와는 별개입니다.** 가입의 `relationship_started`(지금은 비활성)는
    opt-in과 독립이며 즉시 동의가 대신하지 않습니다.
+
+### 14.7 Microsoft 로그인도 증명으로 인정 (소유자 결정 2026-10-01)
+
+**결정.** Microsoft 로그인(`azure-ad`)도 §14.1의 증명 출처입니다. 그 로그인의 원본
+프로필 주소(`profile.email`)를 trim·소문자로 정규화한 값이 그 토큰의 사용자 주소와 같을
+때 `microsoft_signin`으로 기록하며, 그 밖의 규칙(로그인 분기에서만, 다른 주소의 프로필은
+증명 아님, 잠금 아래 재대조)은 §14.1 그대로입니다.
+
+**받아들인 위험.** 개인 Microsoft 계정의 주소는 Microsoft가 확인한 메일함입니다. 회사·
+학교 계정(Entra ID)은 테넌트 관리자가 이메일 값을 정할 수 있어, 로그인했다는 사실이 그
+메일함의 소유를 증명하지 않습니다(nOAuth). 그래서 다른 사람의 주소로 만든 계정이 동의를
+체크하면, 동의하지 않은 그 주소의 주인에게 광고성 메일이 갈 수 있습니다. 소유자는 이
+위험을 받아들였습니다 — 피해는 원치 않는 메일이고, 모든 메일의 수신거부(로그인 없이)와
+처리 결과 알림이 그것을 끝냅니다. 계정 탈취로는 이어지지 않습니다(위험한 주소 연결은
+꺼져 있습니다).
+
+**재검토 조건.** 이 경로로 들어온 동의에서 스팸 신고나 "가입한 적 없다"는 문의가 나오면
+회사·학교 계정(개인 계정 테넌트가 아닌 `tid`)을 출처에서 다시 빼는 것을 검토합니다.
 
