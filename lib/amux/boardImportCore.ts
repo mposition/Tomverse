@@ -13,8 +13,10 @@ import {
  *
  * Preview and classification are pure. Nothing in this module opens a
  * transaction, writes an audit row, or creates a card. The service is the
- * only writer, and production apply stays off until both the environment
- * latch and `BOARD_IMPORT_APPLY_CODE_LATCH` are on. This constant ships false.
+ * only writer. Production apply needs both the environment latch and
+ * `BOARD_IMPORT_APPLY_CODE_LATCH`. The one-time catalog import was consumed,
+ * so this constant ships false again. The environment variable must still be
+ * exactly `enabled` before a card can be created, and a card is still backlog.
  *
  * The canonicalizer is `amux-json-v1`: object keys sort in JavaScript string
  * order, array order and string code points are preserved, and no Unicode
@@ -44,6 +46,9 @@ export const BOARD_IMPORT_APPLY_ENV = "TOMVERSE_AMUX_BOARD_IMPORT_APPLY";
 /**
  * Second apply latch. One environment variable must not be enough to write
  * cards. The HTTP route passes this constant and never a literal `true`.
+ * The operator-approved one-time catalog import was consumed on 2026-09-23.
+ * This constant is false again. It does not promote a card, start a worker,
+ * or spend credits.
  */
 export const BOARD_IMPORT_APPLY_CODE_LATCH = false;
 
