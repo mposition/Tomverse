@@ -54,6 +54,29 @@ type PostRow = {
   leaseUntil: Date | null;
   historyVersion: number;
   publishAttempt: number;
+  envelope: unknown;
+};
+
+const RENDERED_TEXT = "Three answers to one question, side by side.";
+
+/**
+ * A real envelope, of the shape the approval digested.
+ *
+ * The dispatch now returns the payload it locked, parsed with the envelope schema,
+ * and refuses a row whose envelope does not parse. The fake used to carry no
+ * envelope at all, which was harmless while nothing read it and is exactly the
+ * kind of gap a fake should not hide once something does.
+ */
+const ENVELOPE = {
+  channel: "linkedin",
+  accountSlug: "linkedin-1",
+  locale: "en",
+  renderedText: RENDERED_TEXT,
+  claimIds: ["claim.compare"],
+  assets: [{ assetId: "asset.hero", altKey: "alt.hero" }],
+  finalUrl: null,
+  scheduledAt: "2026-09-23T09:00:00.000Z",
+  disclosureFlags: [],
 };
 
 const postRow = (overrides: Partial<PostRow> = {}): PostRow => ({
@@ -65,6 +88,7 @@ const postRow = (overrides: Partial<PostRow> = {}): PostRow => ({
   leaseUntil: LEASE_UNTIL,
   historyVersion: 4,
   publishAttempt: 0,
+  envelope: ENVELOPE,
   ...overrides,
 });
 
@@ -76,6 +100,7 @@ type ChannelRow = {
   connectionGeneration: number;
   dailyCapOverride: number | null;
   weeklyCapOverride: number | null;
+  externalAccountRef: string | null;
 };
 
 const channelRow = (overrides: Partial<ChannelRow> = {}): ChannelRow => ({
@@ -86,6 +111,7 @@ const channelRow = (overrides: Partial<ChannelRow> = {}): ChannelRow => ({
   connectionGeneration: 1,
   dailyCapOverride: null,
   weeklyCapOverride: null,
+  externalAccountRef: "acct_9",
   ...overrides,
 });
 
@@ -182,7 +208,19 @@ test("a dispatch moves the post to publishing and sets its own request key", asy
 
   const result = await dispatch(database);
 
-  assert.deepEqual(result, { started: true, requestKey: LOGICAL_KEY, attempt: 1 });
+  assert.deepEqual(result, {
+    started: true,
+    requestKey: LOGICAL_KEY,
+    attempt: 1,
+    payload: {
+      channel: "linkedin",
+      externalAccountRef: "acct_9",
+      locale: "en",
+      renderedText: RENDERED_TEXT,
+      assetIds: ["asset.hero"],
+      finalUrl: null,
+    },
+  });
   assert.equal(seen.updates.length, 1);
   const [written] = seen.updates;
   // The transition is whitelisted in one direction, and the predicate binds
@@ -240,7 +278,11 @@ test("the attempt count is the old one plus one, not a fixed 1", async () => {
   // distinguishable from its first in the record.
   const { database, seen } = fakeDatabase({ post: postRow({ publishAttempt: 2 }) });
   const result = await dispatch(database);
-  assert.deepEqual(result, { started: true, requestKey: LOGICAL_KEY, attempt: 3 });
+  assert.equal(result.started, true);
+  if (result.started) {
+    assert.equal(result.requestKey, LOGICAL_KEY);
+    assert.equal(result.attempt, 3);
+  }
   assert.equal(seen.updates[0]?.data.publishAttempt, 3);
 });
 
@@ -439,4 +481,39 @@ test("a caller that supplies nonsense is refused before anything is read", async
     await assert.rejects(dispatch(database, overrides), MarketingStoreRefusedError);
     assert.deepEqual(seen.sql, [], "nothing is read before the input is checked");
   }
+});
+
+test("the payload is the locked envelope's, sent byte for byte", async () => {
+  // What is sent is what was locked: returned from the same row lock the
+  // transition took, rather than read afterwards in another transaction where an
+  // edit could have landed. Nothing is added to the text -- anything added would
+  // be bytes the approval did not cover.
+  const text = "A sentence with a trailing space and an emoji 🚀 ";
+  const { database } = fakeDatabase({
+    post: postRow({ envelope: { ...ENVELOPE, renderedText: text } }),
+  });
+  const result = await dispatch(database);
+  assert.equal(result.started, true);
+  if (result.started) {
+    assert.equal(result.payload.renderedText, text);
+  }
+});
+
+test("a row whose envelope no longer parses is not one this can say it is sending", async () => {
+  const { database } = fakeDatabase({
+    post: postRow({ envelope: { ...ENVELOPE, renderedText: "" } }),
+  });
+  await assert.rejects(dispatch(database));
+});
+
+test("a malformed envelope is refused before the post moves or anything is audited", async () => {
+  // Refused without moving the post or writing an audit entry, rather than undone
+  // afterwards by the transaction rolling back. The difference matters for the
+  // audit chain lock, which a late refusal would hold for nothing.
+  const { database, seen } = fakeDatabase({
+    post: postRow({ envelope: { ...ENVELOPE, renderedText: "" } }),
+  });
+  await assert.rejects(dispatch(database));
+  assert.deepEqual(seen.updates, [], "the post did not move");
+  assert.deepEqual(seen.audits, [], "nothing was audited");
 });

@@ -926,6 +926,8 @@ type LockedMarketingChannel = {
   id: string;
   channel: MarketingChannelName;
   status: MarketingChannelStatus;
+  /** The account to post from, as the platform knows it. Read under the lock. */
+  externalAccountRef: string | null;
   connectionGeneration: number;
   scopesDigest: string;
   policyVersion: number;
@@ -950,7 +952,7 @@ async function lockMarketingChannel(
       "id", "channel", "status", "connectionGeneration", "scopesDigest",
       "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
       "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
-      "dailyCapOverride", "weeklyCapOverride"
+      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef"
     FROM "MarketingChannel"
     WHERE "id" = ${id}
     FOR UPDATE
@@ -2822,7 +2824,18 @@ export async function claimDueMarketingPost(
     readonly leaseMs?: number;
   },
 ): Promise<
-  | { readonly claimed: true; readonly id: string; readonly leaseUntil: Date }
+  | {
+      readonly claimed: true;
+      readonly id: string;
+      readonly leaseUntil: Date;
+      /**
+       * The version the claim was made against, which a claim does not move.
+       * The dispatch CASes on it, so the caller has to be told it -- reading it
+       * again in another transaction would be reading it after anything that
+       * had happened in between.
+       */
+      readonly historyVersion: number;
+    }
   | { readonly claimed: false; readonly reason: MarketingClaimRefusal }
 > {
   const channelId = String(rawInput.channelId);
@@ -3029,7 +3042,12 @@ export async function claimDueMarketingPost(
     },
   });
 
-  return { claimed: true, id: due.id, leaseUntil };
+  return {
+    claimed: true,
+    id: due.id,
+    leaseUntil,
+    historyVersion: Number(due.historyVersion),
+  };
 }
 
 /**
@@ -4238,6 +4256,25 @@ export async function startMarketingPostDispatch(
       /** What to send, and what to ask about if nothing comes back. */
       readonly requestKey: string;
       readonly attempt: number;
+      /**
+       * The content to publish, read under the same row lock this transition
+       * took.
+       *
+       * Returned from here rather than read by the caller afterwards, because
+       * afterwards is a different transaction: an edit could land between the
+       * dispatch and the read, and the post sent would then not be the post that
+       * was dispatched. `renderedText` is sent byte for byte -- nothing is added
+       * at publish time, because anything added would be bytes the approval did
+       * not cover.
+       */
+      readonly payload: {
+        readonly channel: string;
+        readonly externalAccountRef: string | null;
+        readonly locale: string;
+        readonly renderedText: string;
+        readonly assetIds: readonly string[];
+        readonly finalUrl: string | null;
+      };
     }
   | { readonly started: false; readonly reason: MarketingDispatchRefusal }
 > {
@@ -4298,10 +4335,11 @@ export async function startMarketingPostDispatch(
       leaseUntil: Date | null;
       historyVersion: number;
       publishAttempt: number;
+      envelope: Prisma.JsonValue | null;
     }>
   >(Prisma.sql`
     SELECT
-      "id", "channelId", "logicalKey", "status",
+      "id", "channelId", "logicalKey", "status", "envelope",
       "claimToken", "leaseUntil", "historyVersion", "publishAttempt"
     FROM "MarketingPost"
     WHERE "id" = ${id}
@@ -4327,6 +4365,14 @@ export async function startMarketingPostDispatch(
     // still the one entitled to, and it is not.
     return { started: false, reason: "claim_expired" };
   }
+
+  // **Parsed before anything is written.** The envelope was digested and approved
+  // as a whole, so it is read with the same schema rather than picked apart field
+  // by field, and a row whose envelope no longer parses is not one this function
+  // can say it is sending. Parsing it here rather than just before returning
+  // means a malformed row is refused without moving the post or writing an audit
+  // entry -- not undone afterwards by the transaction rolling back.
+  const envelope = marketingEnvelopeSchema.parse(post.envelope);
 
   const channel = await lockMarketingChannel(database, post.channelId);
   if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
@@ -4386,7 +4432,19 @@ export async function startMarketingPostDispatch(
     },
   });
 
-  return { started: true, requestKey: post.logicalKey, attempt };
+  return {
+    started: true,
+    requestKey: post.logicalKey,
+    attempt,
+    payload: {
+      channel: envelope.channel,
+      externalAccountRef: channel.externalAccountRef ?? null,
+      locale: envelope.locale,
+      renderedText: envelope.renderedText,
+      assetIds: envelope.assets.map((asset) => asset.assetId),
+      finalUrl: envelope.finalUrl,
+    },
+  };
 }
 
 /**

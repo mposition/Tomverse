@@ -482,7 +482,7 @@ export async function runBoundedMarketingTransaction<T>(
       // this connection a `transaction_timeout`, the timer started at `BEGIN`
       // with that value, and setting the GUC here changes what
       // `current_setting` reports without rescheduling anything. The bound in
-      // force would be somebody else's, and the 115 seconds this function
+      // force would be somebody else's, and the 155 seconds this function
       // promises would be a number in a variable.
       //
       // Whether any such default exists is a fact about the deployment, not
@@ -546,7 +546,7 @@ export async function runBoundedMarketingTransaction<T>(
 }
 
 /**
- * A transaction client that refuses its thirteenth statement.
+ * A transaction client that refuses the statement after its budget.
  *
  * Every model delegate call and every raw query is one statement. Counted on
  * the call, not on completion, so a statement that is slow still spends its
@@ -554,7 +554,7 @@ export async function runBoundedMarketingTransaction<T>(
  *
  * What it counts is what the plan names: statements *in application code*.
  * One Prisma call can send more than one SQL statement -- an `include` is a
- * second query -- so twelve is a count of calls rather than of SQL, which is
+ * second query -- so the budget is a count of calls rather than of SQL, which is
  * why the plan calls the derived maximum an application figure and names
  * `transaction_timeout` as the bound that actually holds.
  *

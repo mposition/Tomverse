@@ -178,8 +178,9 @@ test("an ordinary run answers 200 and names why it did nothing", async () => {
   const { status, body } = await post();
   assert.equal(status, 200);
   assert.equal(body.status, "succeeded");
-  // No adapter exists until S2d2, and the run says so rather than looking idle.
-  assert.equal(body.skipped, "no_adapter_implemented");
+  // The Zernio adapter exists, but this route is not handed its credential, and
+  // the run says so rather than looking idle.
+  assert.equal(body.skipped, "no_credential");
   assert.deepEqual(world.incidents, []);
 });
 
