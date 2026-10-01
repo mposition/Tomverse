@@ -403,6 +403,16 @@ const REGISTRY = {
       "The reservation lifecycle, written by the credit paths as literals inside the transactions that move it.",
   },
   // --- AMUX development-agent orchestration ------------------------------
+  AmuxIdeaFrontierModelApproval_provider_check: {
+    owner: "database",
+    reason:
+      "AMUX v4 analysis currently admits only OpenAI and Anthropic for operator-approved Frontier models. A future provider needs a policy and migration change; no live model writer is enabled here.",
+  },
+  AmuxIdeaFrontierModelApproval_status_check: {
+    owner: "database",
+    reason:
+      "The dark Frontier approval row has a one-way approved-to-revoked lifecycle. Reapproval creates a new version and a distinct human audit event.",
+  },
   AmuxIdeaSubmission_state_check: {
     owner: "database",
     reason:

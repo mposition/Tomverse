@@ -254,6 +254,7 @@ run(
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
+    "tests/integration/amux-v4-frontier-model.db.test.mjs",
     // Dark v4 submission must bind its owner, request idempotency and audit
     // atomically without opening collection, analysis or transfer.
     "tests/integration/amux-v4-idea-submission.db.test.ts",
