@@ -9,6 +9,10 @@ import type {
   AmuxOwnedRefSearchResult,
 } from "./ideaOwnedRefSearchCore.ts";
 import { searchAmuxOwnedRefWitness } from "./ideaOwnedRefSearchCore.ts";
+import type {
+  AmuxGitHubFileAtCommitAdapter,
+  AmuxGitHubTreeEntry,
+} from "./ideaGitHubFileAtCommitCore.ts";
 
 /**
  * A dark read-only GitHub adapter. Only a separate, credential-isolated
@@ -22,6 +26,8 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const COLLECTION_TIMEOUT_MS = 30_000;
 const MAX_GRAPHQL_BYTES = 256 * 1024;
 const MAX_REST_BYTES = 512 * 1024;
+const MAX_FILE_JSON_BYTES = 256 * 1024;
+const MAX_FILE_BYTES = 64 * 1024;
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const NAME = /^[A-Za-z0-9_.-]+$/;
 
@@ -125,6 +131,8 @@ export type AmuxIdeaGitHubRefAdapterConfig = {
 
 export type AmuxIdeaGitHubRefReader = {
   adapter: AmuxOwnedRefSearchAdapter;
+  /** REST observations for the separate exact-file byte verification core. */
+  fileAdapter: AmuxGitHubFileAtCommitAdapter;
   /** Check the stable numeric ID before collection and again before transfer. */
   readRepositoryIdentity: () => Promise<{ id: number; fullName: string }>;
 };
@@ -299,8 +307,64 @@ export function createAmuxIdeaGitHubRefReader(
     },
   };
 
+  const fileAdapter: AmuxGitHubFileAtCommitAdapter = {
+    async readCommit(sha) {
+      if (!validSha(sha)) return fail("invalid_response");
+      const commit = record(await request(`${repositoryPath}/git/commits/${sha}`));
+      const tree = record(commit?.tree);
+      if (!commit || !tree || commit.sha !== sha || !validSha(tree.sha) ||
+          tree.sha.length !== sha.length) return fail("invalid_response");
+      return { repositoryId: expectedRepositoryId, sha, treeSha: tree.sha };
+    },
+    async readTree(sha) {
+      if (!validSha(sha)) return fail("invalid_response");
+      // Deliberately omit `recursive`: even `recursive=0` means recursive in GitHub's API.
+      const tree = record(await request(`${repositoryPath}/git/trees/${sha}`));
+      if (!tree || tree.sha !== sha || typeof tree.truncated !== "boolean" ||
+          !Array.isArray(tree.tree)) return fail("invalid_response");
+      const entries = tree.tree.map((raw: unknown): AmuxGitHubTreeEntry => {
+        const entry = record(raw);
+        if (!entry || typeof entry.path !== "string" || typeof entry.mode !== "string" ||
+            !["tree", "blob", "commit"].includes(String(entry.type)) || !validSha(entry.sha) ||
+            (entry.size !== undefined && entry.size !== null &&
+             (!Number.isSafeInteger(entry.size) || (entry.size as number) < 0))) {
+          return fail("invalid_response");
+        }
+        return {
+          path: entry.path,
+          mode: entry.mode,
+          type: entry.type as AmuxGitHubTreeEntry["type"],
+          sha: entry.sha,
+          // GitHub omits size for trees and gitlinks; the core requires null.
+          size: entry.size === undefined ? null : entry.size as number | null,
+        };
+      });
+      return { repositoryId: expectedRepositoryId, sha, truncated: tree.truncated, entries };
+    },
+    async readBlob(sha) {
+      if (!validSha(sha)) return fail("invalid_response");
+      const blob = record(await request(`${repositoryPath}/git/blobs/${sha}`, undefined, MAX_FILE_JSON_BYTES));
+      if (!blob || blob.sha !== sha || blob.encoding !== "base64" ||
+          typeof blob.content !== "string" || !Number.isSafeInteger(blob.size) ||
+          (blob.size as number) < 0 || (blob.size as number) > MAX_FILE_BYTES) {
+        return fail("invalid_response");
+      }
+      const compact = blob.content.replace(/[\r\n]/g, "");
+      if (compact.length > Math.ceil(MAX_FILE_BYTES / 3) * 4 ||
+          compact.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]*={0,2})$/.test(compact)) {
+        return fail("invalid_response");
+      }
+      const bytes = Buffer.from(compact, "base64");
+      if (bytes.byteLength !== blob.size || bytes.toString("base64") !== compact) {
+        return fail("invalid_response");
+      }
+      return { repositoryId: expectedRepositoryId, sha, size: blob.size as number, bytes };
+    },
+  };
+
   return {
     adapter,
+    fileAdapter,
     async readRepositoryIdentity() {
       const repo = record(await request(repositoryPath));
       if (!repo || repo.id !== expectedRepositoryId ||
