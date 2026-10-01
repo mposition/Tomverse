@@ -14,6 +14,7 @@ import {
   writeMarketingWebhookShadowSwitch,
 } from "@/lib/marketingWebhookSettings";
 import { MarketingWebhookSettingRefusedError } from "@/lib/marketingWebhookCore";
+import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 // The staging shadow receiver's two races, against PostgreSQL (S2 plan, S2e).
@@ -168,48 +169,47 @@ test("two first writes of an absent setting: one succeeds, one is a conflict", a
   );
 });
 
-test("an arm and a delivery crossing on one row never deadlock", async () => {
-  // The admin runner takes the audit chain lock and then writes the arm; the
-  // receiver now does the same. Round 2 of the review found the receiver taking
-  // them in the opposite order, which is a deadlock waiting for the right
-  // interleaving -- so this crosses them repeatedly and requires every one to
-  // settle without a database error.
+test("an arm holding the audit lock and a delivery crossing it never deadlock", async () => {
+  // The interleaving that deadlocked, made to happen rather than hoped for. The
+  // arm side does what the admin runner does -- the audit chain lock first --
+  // then waits until the delivery has started and gone as far as it can before
+  // it writes the row. A delivery that took the row before the audit lock (the
+  // order round 2 of the review found) would now hold the row and wait for the
+  // audit lock, while the arm holds the audit lock and waits for the row:
+  // PostgreSQL would kill one of them with a deadlock error, which is not a
+  // domain refusal and fails this test. With the audit lock first on both
+  // sides, the delivery simply waits its turn.
   await runMarketingTransaction(prisma, (tx) =>
     setMarketingWebhookFaultArm(tx, { eventIdDigest: DIGEST, expectedGeneration: 0, ttlMs: 60_000 }),
   );
-  for (let round = 1; round <= 5; round += 1) {
-    const outcomes = await Promise.allSettled([
-      runMarketingTransaction(prisma, (tx) =>
-        setMarketingWebhookFaultArm(tx, {
-          eventIdDigest: DIGEST,
-          expectedGeneration: round,
-          ttlMs: 60_000,
-        }),
-      ),
-      runMarketingTransaction(prisma, (tx) =>
-        consumeMarketingWebhookFaultArm(tx, { eventIdDigest: DIGEST }),
-      ),
-    ]);
-    for (const outcome of outcomes) {
-      if (outcome.status === "rejected") {
-        // A lost compare-and-set is an answer; a deadlock is not.
-        assert.ok(
-          outcome.reason instanceof MarketingWebhookSettingRefusedError,
-          String(outcome.reason),
-        );
-      }
-    }
-    // Re-arm for the next crossing at whatever generation the row now holds.
-    const row = await prisma.appSetting.findUnique({ where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY } });
-    const generation = JSON.parse(row?.value ?? "{}").generation as number;
-    if (generation === round) {
-      await runMarketingTransaction(prisma, (tx) =>
-        setMarketingWebhookFaultArm(tx, {
-          eventIdDigest: DIGEST,
-          expectedGeneration: generation,
-          ttlMs: 60_000,
-        }),
+  let delivery: Promise<{ readonly consumed: boolean }> | null = null;
+  const arm = runMarketingTransaction(
+    prisma,
+    async (tx) => {
+      await takeAuditChainLock(tx);
+      delivery = runMarketingTransaction(prisma, (inner) =>
+        consumeMarketingWebhookFaultArm(inner, { eventIdDigest: DIGEST }),
       );
-    }
-  }
+      // Long enough for the delivery to reach whatever it will block on.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return setMarketingWebhookFaultArm(tx, {
+        eventIdDigest: OTHER_DIGEST,
+        expectedGeneration: 1,
+        ttlMs: 60_000,
+      });
+    },
+    { timeout: 15_000 },
+  );
+  const [armed, consumed] = await Promise.allSettled([
+    arm,
+    (async () => {
+      while (delivery === null) await new Promise((resolve) => setTimeout(resolve, 10));
+      return delivery;
+    })(),
+  ]);
+  // The arm committed first, so the delivery found an arm for another event and
+  // consumed nothing. Neither side failed.
+  assert.equal(armed.status, "fulfilled", armed.status === "rejected" ? String(armed.reason) : "");
+  assert.equal(consumed.status, "fulfilled", consumed.status === "rejected" ? String(consumed.reason) : "");
+  assert.deepEqual(consumed.status === "fulfilled" ? consumed.value : null, { consumed: false });
 });
