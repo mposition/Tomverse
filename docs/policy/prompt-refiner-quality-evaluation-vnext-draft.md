@@ -4,6 +4,7 @@ policyVersion: 1
 implementationBlockedUntilApproved: true
 approvedScopes:
   - OFFLINE_SCHEMA_PARSER_VALIDATOR_TESTS
+  - OFFLINE_80_SLOT_EXECUTION_CONTRACT_AND_CACHE_WRITE_GUARD
 approvedBy: mposition
 approvedAt: 2026-10-01T08:31:06+10:00
 approvalTicket: N/A
@@ -16,8 +17,12 @@ approvedDraftCommit: 167a87404355ba63cb1c8aa99f94e101f8ec9a19
 승인은 PR #1796의 정확한 초안 커밋 `167a87404355ba63cb1c8aa99f94e101f8ec9a19`에
 결속되며, `OFFLINE_SCHEMA_PARSER_VALIDATOR_TESTS` 범위의 무과금·오프라인 schema,
 parser, validator와 테스트 구현만 허용한다. `implementationBlockedUntilApproved: true`는
-나머지 구현 범위가 여전히 차단됨을 뜻한다. 특히 수치 spec·holdout 작성,
-runtime provider 연결, 비용·stage/run 승인, 유료 호출, flag 전환, PR 병합·배포,
+나머지 구현 범위가 여전히 차단됨을 뜻한다. 2026-10-01 후속 승인으로
+`OFFLINE_80_SLOT_EXECUTION_CONTRACT_AND_CACHE_WRITE_GUARD`의 무과금 구현·테스트·
+Claude 독립 검토만 추가됐다. 최초 `approvedDraftCommit`은 첫 범위의 결속값이며,
+후속 범위는 [별도 기록](../ops/prompt-refiner-quality-evaluation-vnext-execution-contract-approval.md)에
+정확히 적는다. 특히 holdout 작성,
+runtime provider 연결, 운영 비용·stage/run 승인, 유료 호출, flag 전환, PR 병합·배포,
 실제 사용자 traffic 또는 제품 노출은 승인하지 않는다. 일반적인 자동 개발 지시,
 코드 리뷰·CI 통과나 이 문서의 병합도 남은 범위의 운영자 승인을 대신하지 않는다.
 
@@ -159,13 +164,18 @@ writer로 같은 상태 변경 transaction에 기록한다. receipt는 opaque �
 content-free 판정만 가진다.
 제한 평가 자료의 보존·파기 기간과 접근자는 별도 수치 spec에서 확정한다.
 
-## 5. 아직 승인되지 않은 수치와 제품 경계
+## 5. 수치 설계 승인과 미승인 운영 경계
 
-N, 언어·층 분포, 재작성·자제 전체율, 축·사유별 성공 하한, 비용·지연 상한,
-감사 표본·기간과 보존/파기는 **미결정**이다. 예시 N=32/64나 과거 v1의
-24,916 microUSD/요청·398,656 microUSD/run·p90 5초·최대 10초를 새
-승인값으로 복사하지 않는다. 여섯 안전 축만으로 강제되는 최소 성공 수를
-재작성 전체율·언어별 하한이 **초과**해야 한다. 값이 없으면 실행도 `pass`도 없다.
+N·언어/층 분포·성공 하한·비용/지연 상한과 감사 **표본 최대치**는
+[별도 수치 설계 승인](../ops/prompt-refiner-quality-evaluation-vnext-numeric-approval.md)에
+정확한 문서 hash와 함께 고정됐다. 이는 **설계·비용 상한 승인**이며 spend authority,
+봉인 manifest, stage/run, provider 호출이나 gate `pass` 승인과 다르다.
+접근자·보존/파기 수치의 운영 결속은 holdout 작성 전에 별도로 승인받아야 한다.
+과거 v1의 24,916 microUSD/요청·398,656 microUSD/run·p90 5초·최대 10초를
+새 실행 승인값으로 복사하지 않는다. 봉인 자료와 운영 결속이 없으면 실행도
+`pass`도 없다.
+향후 수치를 다시 설계하더라도 재작성 전체율·언어별 성공 하한은 여섯 안전 축이
+강제하는 서로 다른 재작성 성공 문항의 최소치를 **초과**해야 한다.
 
 `productAdapterReady=false`와 default-off 제안 UI, 사용자 원문 Message 보존,
 제안의 명시적 사용/원문 유지, Router 비결합을 유지한다. 이 평가의 통과는
