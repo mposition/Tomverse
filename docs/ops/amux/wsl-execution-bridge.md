@@ -104,9 +104,9 @@ halt 뒤에는 로그(`journalctl --user -u tomverse-wsl-bridge`)와 Tomverse의
 
 래치가 꺼져 있던 `fff30f8dd`의 독립 검토는 Codex `gpt-5.6-sol` pass다. 버전 14의 래치 변경은 그 판정 대상이 아니다. 배포된 staging에서 runner를 실행하지 않았다.
 
-## 전용 Ubuntu 서버 이전 절차 초안 (정책 v23 미승인)
+## 전용 Ubuntu 서버 이전 절차 (정책 v23 승인, 운영 활성화 대기)
 
-이 절은 `docs/policy/development-agent-orchestration.md` v23 제안의 실행 절차다. 그 정책에 운영자 `approvedBy`·`approvedAt`이 기록되고 수정본의 독립 검토가 끝나기 전에는 새 호스트의 bridge를 켜지 않는다. 위 WSL 사용자 서비스 예시는 기존 호스트의 기록이며, 새 호스트에 그대로 적용하지 않는다. Linux 세션 이전과 8개 worker 자동 시작은 이미 끝났지만 제품 bridge는 꺼져 있다. 이 초안이 그 사전 작업을 소급 승인하지 않는다.
+이 절은 `docs/policy/development-agent-orchestration.md` v23의 실행 절차다. 운영자 `mposition`이 2026-10-01 승인했고 Claude 독립 검토에서 정책 문구 차단 사항이 없음을 확인했다. 아래 운영 게이트를 통과하기 전에는 새 호스트의 bridge를 켜지 않는다. 위 WSL 사용자 서비스 예시는 기존 호스트의 기록이며, 새 호스트에 그대로 적용하지 않는다. Linux 세션 이전과 8개 worker 자동 시작은 이미 끝났지만 제품 bridge는 꺼져 있다. v23 승인은 그 사전 작업을 소급 승인하지 않는다.
 
 1. 새 서버의 worker 계정에서 AMUX 서버와 8개 worker를 Linux native worktree로 운행한다. `amux-worker-start.service`가 재부팅 후 8개를 시작했는지 각 세션의 실제 프로세스와 작업 디렉터리로 확인한다. 새 서버의 옛 `tomverse-wsl-bridge.service` **사용자** unit은 disabled/inactive로 둔다. AMUX invariant confidence도 healthy를 확인한다.
 2. 기존 WSL AMUX 서버·bridge의 systemd뿐 아니라 Windows Task Scheduler·시작 프로그램·`wsl.conf` boot 명령 등 자동 시작 경로를 읽어 끈다. 새 등록 전에 제품 DB에서 이전 worker **각각**의 열린 attempt 0건, 소유된 Todo 0건, 미해결 `AmuxOrchestratorWrite` 영수증 0건, lease·generation을 read-back한다. 종료되지 않은 로컬 카드 중 `Execution attempt:`를 담은 카드는 원래 Tomverse attempt에 모두 대응시킨다. 해소된 attempt의 로컬 작업은 claim을 열기 전에 멈춘다. 남은 건은 기존 app route의 lease expiry/recover 또는 사람 Review·escalation으로 해소하고 다시 읽는다. 직접 SQL로 고치거나 로컬 카드 상태를 제품 상태로 추정하지 않는다.

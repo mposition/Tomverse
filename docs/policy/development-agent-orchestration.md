@@ -1,8 +1,8 @@
 # Development Agent Orchestration
 
 상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 같은 운영자가 2026-09-29에 버전 19로 버전 18의 활성화 증거 절을 갱신했다. late COMMIT을 DB가 COMMIT 시점에 거부하는 장치와 그 테스트가 `develop`에서 `routing` 레인을 통과했다는 사실을 run 링크와 head SHA로 기록하고, 남는 구간을 적는다. 그 승인은 `main` 이식 조건의 2와 3을 면제하지 않고, 환경 변수를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 20으로 orchestrator 정지와 재시작을 승인했다. 알려진 답만 지금처럼 처리하고, 결과 불명 쓰기와 그 밖의 응답에서는 프로세스를 끝내지 않고 앱 DB에 기록하는 정지로 들어가며, 쓰기 접수와 영수증으로 기록 전 종료도 잡는다. 해제는 owner와 최근 step-up의 사람 조작뿐이다. 그 승인은 환경 변수와 Railway 재시작 정책을 바꾸지 않고, 외부 알림을 만들지 않으며, WSL bridge와 실행 모드를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 21로 버전 20 절 5의 데이터 도메인 레지스트리 문장을 개정했다. 레지스트리에는 사람의 id를 가진 `AmuxOrchestratorHalt`만 등록한다. 그 승인은 동작, 테이블, 보존 규칙을 바꾸지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
-상태(최신): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
-제안(미승인): **v23 전용 Ubuntu runner 이전.** 운영자 승인·독립 검토 전에는 아래 v23 초안이 기존 실행 위치 제한을 바꾸지 않는다.
+상태(v22 이력): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
+상태(최신): **v23 전용 Ubuntu runner 실행 위치 승인, 운영 활성화 별도.** 2026-10-01 운영자 `mposition`이 아래 v23 절을 승인했다. Claude의 독립 검토에서 정책 문구 승인 차단 사항이 없음을 확인했다. 이전 v22 상태 줄은 이력이다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -24,6 +24,7 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 19
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 20
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 21
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 22
+approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 23
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -51,7 +52,7 @@ approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 22
 | 20 | 2026-09-30 mposition | orchestrator 정지와 재시작. 알려진 답만 지금처럼 처리하고, 그 밖의 응답·무응답과 선택 읽기 61번째 연속 실패에서 프로세스를 끝내지 않고 앱 DB `AmuxOrchestratorHalt`에 기록하는 정지로 들어간다. 쓰기 호출은 처리 전에 접수를 커밋하고 쓰기와 같은 트랜잭션에 영수증을 남겨, 기한이 지난 뒤 영수증이 없으면 롤백 확정, 있으면 사람 확인으로 가른다. 해제는 owner와 최근 step-up의 Admin 조작과 사람 감사로만 하며 원래 작업을 다시 하지 않는다. 구현 배포 뒤 Railway 재시작 정책을 `On Failure`로 명시한다. 환경 변수, 외부 알림, WSL bridge, 실행 모드는 바꾸지 않는다. |
 | 21 | 2026-09-30 mposition | 버전 20 절 5의 데이터 도메인 레지스트리 문장 개정. 사람의 id를 가진 `AmuxOrchestratorHalt`만 레지스트리에 운영 기록으로 등록하고, 사용자 데이터가 없는 `AmuxOrchestratorWrite`와 `AmuxOrchestratorWriteReceipt`는 레지스트리 대상이 아니다. 세 테이블 모두 고객 export에 넣지 않는다. 동작, 테이블, 보존 규칙, 해제 조건은 바꾸지 않는다. |
 | 22 | 2026-09-30 mposition | 전략적 계층·점수와 자동 실행 풀 편입, 별도 Task DAG·실행 등급, 병행/SEV1 예약, develop과 main의 PR·배포 권한 분리, 운영자 최종 완료, 실패 복구·결과 환류, 전 worker CLI 토큰 계측, Admin Kanban·계층 목록을 승인한다. 기존 v16 단계 순환은 새 카드에 적용하지 않는다. 이 승인 자체로 migration·flag·Publisher 권한·자동 병합/배포를 켜지 않는다. |
-| 23 (제안) | 미승인 | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. |
+| 23 | 2026-10-01 mposition | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. 이 승인 자체로 제품 bridge·claim·실행 API를 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1158,9 +1159,9 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 순서는 공통 기반과 intake v4의 실행 위치·CLI 계약 정합성, hierarchy/Task DAG·점수·capacity·usage schema와 정책 테스트, 합성 데이터·동시성/결과 불명 검증, Admin preview, staging 비실행 관측, staging 제한 실행, 별도 production 승인이다. 기존 v16 단계 카드의 전환/종료 계획 없이는 v22 Task를 같은 카드에 중복 부착하지 않는다. source 유출, 무승인 카드·노드 write, 무승인 실행·PR push/병합·배포, provider 비용 폭주, 사용자 데이터·승인 이력 소실, 감사 누락은 차단한다. UI 문구·정렬은 복구 가능한 비차단 항목이다. 이 버전은 flag·환경 값·계정/Publisher 권한·Railway 설정을 변경하지 않는다.
 
-## 버전 23 제안 — 전용 Ubuntu 서버의 개발용 runner
+## 버전 23 — 전용 Ubuntu 서버의 개발용 runner
 
-**미승인 초안.** 이 절은 운영자 `approvedBy`·`approvedAt` 기록과 작성자와 다른 provider의 독립 검토가 끝나기 전에는 효력이 없다. v13~15의 WSL 예외에서 **실행 위치만** 전용 Ubuntu 서버로 옮긴다. 기존 `tomverse-wsl-bridge` 바이너리와 `TOMVERSE_AMUX_WSL_*` 이름은 호환 이름이며, 이름만으로 WSL 또는 Ubuntu 실행 권한을 판단하지 않는다. v13의 승인 brief 원문·digest 결속과 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 실제 provider 교차 검토, v12 engineering adapter의 꺼진 래치, v18 실행 API 게이트와 v22의 미구현 경계는 유지한다. v20 정지·영수증 계약은 Railway orchestrator의 것이며 bridge에 적용됐다고 주장하지 않는다. 이 절은 v22 §7과 intake v4의 실행 위치·CLI 계약 정합성 전체를 완료한 것으로 세지 않는다. 설계 승인 자체는 bridge 환경 변수, 제품 실행 API, claim, 자동 승격, Publisher, 병합 또는 배포를 켜지 않는다.
+승인자 `mposition`, 승인일 2026-10-01. 작성자 Codex와 다른 provider인 Claude의 독립 검토를 거쳤다. v13~15의 WSL 예외에서 **실행 위치만** 전용 Ubuntu 서버로 옮긴다. 기존 `tomverse-wsl-bridge` 바이너리와 `TOMVERSE_AMUX_WSL_*` 이름은 호환 이름이며, 이름만으로 WSL 또는 Ubuntu 실행 권한을 판단하지 않는다. v13의 승인 brief 원문·digest 결속과 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 실제 provider 교차 검토, v12 engineering adapter의 꺼진 래치, v18 실행 API 게이트와 v22의 미구현 경계는 유지한다. v20 정지·영수증 계약은 Railway orchestrator의 것이며 bridge에 적용됐다고 주장하지 않는다. 이 절은 v22 §7과 intake v4의 실행 위치·CLI 계약 정합성 전체를 완료한 것으로 세지 않는다. 이 승인 자체는 bridge 환경 변수, 제품 실행 API, claim, 자동 승격, Publisher, 병합 또는 배포를 켜지 않는다.
 
 이번 이전에서 Linux worktree와 AMUX 세션의 복사·자동 시작, 기존 WSL 서비스 중지는 v23 승인 전에 이미 이뤄졌다. 제품 bridge는 새 호스트에서 활성화되지 않았고 제품 카드의 새 dispatch도 이 이전의 승인으로 열리지 않았다. 이후의 v23 승인은 그 사전 작업에 소급 권한을 부여하지 않는다. v22가 설계 범위에서 부른 “로컬 Ubuntu worker”는 v13의 현행 WSL bridge 실행 위치를 먼저 바꾼 승인이 아니었다.
 
