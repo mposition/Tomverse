@@ -13,6 +13,8 @@
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
 
+import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "./amux/ideaIdentityCore.ts";
+
 export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
 
 /**
@@ -30,6 +32,7 @@ export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
  * separate review. The auto-admission actor especially needs its own gate.
  */
 export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
   "amux-intake-supervisor",
   "amux-intake-retention",
   "amux-portfolio-scorer",

@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { AMUX_V4_IDEA_SOURCE_SYSTEM } from "./ideaIdentityCore.ts";
 import { checkV4TaskApprovedCeiling, type V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 
 /**
@@ -47,7 +48,7 @@ const cardTarget = z.object({
   cardType: z.enum(["story", "task"]),
   storyKind: z.enum(["general", "bug"]).nullable(),
   featureNodeId: id,
-  sourceSystem: z.literal("admin-idea-v4"),
+  sourceSystem: z.literal(AMUX_V4_IDEA_SOURCE_SYSTEM),
   status: z.enum(["backlog", "todo", "doing", "review", "done", "blocked", "cancelled"]),
   revision,
   content: keyedDigest,
@@ -66,7 +67,7 @@ const cardReference = z.object({
   id,
   cardType: z.enum(["story", "task"]),
   featureNodeId: id,
-  sourceSystem: z.literal("admin-idea-v4"),
+  sourceSystem: z.literal(AMUX_V4_IDEA_SOURCE_SYSTEM),
   status: z.enum(["backlog", "todo", "doing", "review", "done", "blocked", "cancelled"]),
   revision,
   content: keyedDigest,

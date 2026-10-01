@@ -11,6 +11,11 @@ import {
   isSystemAuditActor,
   metadataClaimsSystemActor,
 } from "../lib/adminAuditSystemActors.ts";
+import {
+  AMUX_V4_IDEA_AGENT_ID,
+  AMUX_V4_IDEA_SOURCE_SYSTEM,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+} from "../lib/amux/ideaIdentityCore.ts";
 
 // The closed list of system actors and the reserved metadata key.
 //
@@ -27,11 +32,15 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
   // Intake v4 and orchestration v22 are designs, not audit-writer authority.
   assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
+    "amux-v4-intake",
     "amux-intake-supervisor",
     "amux-intake-retention",
     "amux-portfolio-scorer",
     "amux-v22-auto-admit",
   ]);
+  assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
+  assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
+  assert.equal(AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS.includes(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
   for (const proposed of AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS) {
     assert.equal(new Set<string>(SYSTEM_AUDIT_ACTORS).has(proposed), false);
     assert.equal(isSystemAuditActor(proposed), false);
