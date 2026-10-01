@@ -425,6 +425,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaUnitDecision",
+    publicName: "amux_idea_unit_decisions",
+    prismaModel: "AmuxIdeaUnitDecision",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaSourceScopeApproval",
     publicName: "amux_idea_source_scope_approvals",
     prismaModel: "AmuxIdeaSourceScopeApproval",

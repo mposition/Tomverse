@@ -286,6 +286,19 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       `DELETE FROM public."AmuxIdeaUnitDecision" WHERE "id" = $1`,
       [decisionId], "AmuxIdeaUnitDecision_no_delete_check",
     );
+    await expectRejected(
+      `TRUNCATE TABLE public."AmuxIdeaUnitDecision"`,
+      [], "AmuxIdeaUnitDecision_no_truncate_check",
+    );
+    await expectRejected(
+      `TRUNCATE TABLE public."AmuxIdeaSubmission" CASCADE`,
+      [], "AmuxIdeaUnitDecision_no_truncate_check",
+    );
+    const retainedDecision = await client.query(
+      `SELECT "id" FROM public."AmuxIdeaUnitDecision" WHERE "id" = $1`,
+      [decisionId],
+    );
+    assert.equal(retainedDecision.rowCount, 1, "cascading truncate must retain the decision");
 
     await client.query(
       `INSERT INTO public."AmuxIdeaAnalysisChunk"
@@ -632,6 +645,24 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       [ids.story],
     );
     assert.equal(todoError.code, "23514");
+
+    // Empty-table fixture cleanup is the sole allowed TRUNCATE path.
+    await client.query("ROLLBACK");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    await client.query(`TRUNCATE TABLE public."AmuxIdeaUnitDecision"`);
+    await client.query("ROLLBACK");
+
+    // A fixed older snapshot must never take the empty-table exception. It
+    // could predate another transaction's first committed decision.
+    for (const level of ["REPEATABLE READ", "SERIALIZABLE"]) {
+      await client.query(`BEGIN ISOLATION LEVEL ${level}`);
+      await client.query("SELECT 1");
+      await expectRejected(
+        `TRUNCATE TABLE public."AmuxIdeaUnitDecision"`,
+        [], "AmuxIdeaUnitDecision_no_truncate_check",
+      );
+      await client.query("ROLLBACK");
+    }
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     await client.end();
