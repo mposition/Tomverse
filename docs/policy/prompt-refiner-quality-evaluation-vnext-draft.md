@@ -5,6 +5,7 @@ implementationBlockedUntilApproved: true
 approvedScopes:
   - OFFLINE_SCHEMA_PARSER_VALIDATOR_TESTS
   - OFFLINE_80_SLOT_EXECUTION_CONTRACT_AND_CACHE_WRITE_GUARD
+  - DEVELOPMENT_CANDIDATE_AND_FIXTURE_EVALUATION
 approvedBy: mposition
 approvedAt: 2026-10-01T08:31:06+10:00
 approvalTicket: N/A
@@ -25,6 +26,12 @@ Claude 독립 검토만 추가됐다. 최초 `approvedDraftCommit`은 첫 범위
 runtime provider 연결, 운영 비용·stage/run 승인, 유료 호출, flag 전환, PR 병합·배포,
 실제 사용자 traffic 또는 제품 노출은 승인하지 않는다. 일반적인 자동 개발 지시,
 코드 리뷰·CI 통과나 이 문서의 병합도 남은 범위의 운영자 승인을 대신하지 않는다.
+
+운영자의 추가 승인에 따른 `DEVELOPMENT_CANDIDATE_AND_FIXTURE_EVALUATION` 범위는
+[개발 기록](../ops/prompt-refiner-quality-evaluation-vnext-candidate-development.md)에
+별도로 결속한다. 이전 v6 실패 증거의 읽기 전용 진단, 합성 개발 fixture의
+후보·strict parser·평가기 검증과 source closure 고정만 허용한다. 기존 실패
+case의 본문이나 점수는 새 holdout의 독립 증거가 아니다.
 
 기존 [관측 계약](prompt-refiner-observability.md),
 [제안 UI 계약](../ui-contracts/prompt-refiner-suggestion.md),

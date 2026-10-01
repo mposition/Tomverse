@@ -93,7 +93,7 @@ function strictReasonArray(value: unknown): unknown[] {
     }
 }
 
-function validatedSourceText(value: unknown): string {
+export function validatePromptRefinerVnextSourceText(value: unknown): string {
     if (
         typeof value !== "string" ||
         value.length > PROMPT_REFINER_VNEXT_MAX_PROMPT_CHARS ||
@@ -110,7 +110,7 @@ export function validatePromptRefinerVnextModelOutput(
     value: unknown,
     sourceText: string
 ): PromptRefinerVnextModelOutput {
-    const source = validatedSourceText(sourceText);
+    const source = validatePromptRefinerVnextSourceText(sourceText);
     const output = strictDataObject(
         value,
         ["outcome", "refinedPrompt", "abstentionReason"],
