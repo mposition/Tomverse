@@ -314,6 +314,9 @@ test("an opt-in whose confirmation cannot be requested rolls back, and can be fi
   assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 0);
   assert.equal(await prisma.userSettings.count({ where: { userId: user.id } }), 0);
   assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  // Not even the default preference rows: seeding happens only on the path
+  // that goes on to request.
+  assert.equal(await prisma.emailPreference.count({ where: { userId: user.id } }), 0);
 
   await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, true);
   assert.deepEqual(

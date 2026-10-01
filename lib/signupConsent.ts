@@ -394,11 +394,16 @@ export async function finalizeSignupConsentAttempt(input: {
         })
       : null;
 
-  // Seeded before the transaction: a request inside it seeding on the root
-  // client would wait on the row the first purpose locked.
-  if (attempt.expressOptInRequested && !sessionGrant?.ok) {
-    await ensureDefaultPreferences(input.userId);
-  }
+  // The confirmation mail is the fallback for a missing proof only, as on the
+  // settings screen. Any other refusal -- the flag, a country marketing cannot
+  // reach -- would also refuse the link's confirmation, so mailing it would
+  // queue mail that can never become consent; it rolls back instead.
+  const mailFallback =
+    sessionGrant !== null && !sessionGrant.ok && sessionGrant.reason === "no_proof";
+  // Seeded before the transaction, and only on the path that requests: a
+  // request inside it seeding on the root client would wait on the row the
+  // first purpose locked, and a refusal must leave no rows behind.
+  if (mailFallback) await ensureDefaultPreferences(input.userId);
 
   let confirmationRequested = false;
   let consentGranted = false;
@@ -475,7 +480,7 @@ export async function finalizeSignupConsentAttempt(input: {
         }
         consentGranted = true;
       } else if (attempt.expressOptInRequested) {
-        if (!candidate) throw CONFIRMATION_UNAVAILABLE;
+        if (!candidate || !mailFallback) throw CONFIRMATION_UNAVAILABLE;
         // Without a proof, one confirmation per purpose, as the in-product
         // notice asks them (docs/policy/email-double-opt-in.md §14.8).
         for (const purpose of signupOptInPurposes()) {

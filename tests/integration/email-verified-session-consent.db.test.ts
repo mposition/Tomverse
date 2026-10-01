@@ -61,13 +61,13 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-/** An account that declared Australia. */
 /** Korea's processing-result notices queued for the account. */
 const resultNotices = (userId: string) =>
   prisma.emailDelivery.count({
     where: { userId, templateVersion: { template: { key: "consent_result_notice" } } },
   });
 
+/** An account that declared Australia. */
 const australian = async () => {
   const user = await prisma.user.create({
     data: { email: `vsc-${randomUUID().slice(0, 8)}@example.test` },
@@ -303,6 +303,44 @@ test("a sign-up whose session carries no proof still takes the confirmation mail
     await prisma.consentRecord.count({ where: { userId: user.id, action: "confirmation_requested" } }),
     3
   );
+});
+
+test("a sign-up from a country marketing cannot reach mails nothing, even with a proof", async () => {
+  // Only a missing proof falls back to the confirmation mail. A country the
+  // jurisdiction verdict refuses would refuse the link too, so the consumption
+  // rolls back rather than queue three mails that can never become consent.
+  const issuedAt = new Date();
+  const issued = await issueSignupConsentAttempt({
+    channel: "oauth",
+    provider: "google",
+    expressOptInRequested: true,
+    objected: false,
+    language: "en",
+    ipCountry: "NL",
+    now: issuedAt,
+  });
+  assert.ok(issued.ok);
+  if (!issued.ok) return;
+  const user = await prisma.user.create({
+    data: { email: `nl-${randomUUID()}@example.test`, createdAt: new Date(issuedAt.getTime() + 1_000) },
+    select: { id: true, email: true },
+  });
+  await prisma.account.create({
+    data: { userId: user.id, type: "oauth", provider: "google", providerAccountId: randomUUID() },
+  });
+  const result = await finalizeSignupConsentAttempt({
+    userId: user.id,
+    createdBySignIn: true,
+    addressProof: proofFor(user.email as string),
+    attemptId: issued.attemptId,
+    nonce: issued.nonce,
+  });
+  assert.deepEqual(result, { ok: false, reason: "confirmation_unavailable" });
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 0);
+  assert.equal(await prisma.emailPreference.count({ where: { userId: user.id } }), 0);
+  const pending = await prisma.signupConsentAttempt.findUniqueOrThrow({ where: { id: issued.attemptId } });
+  assert.equal(pending.consumedAt, null);
 });
 
 test("the notice's Yes from a proven session consents to all three purposes at once", async () => {
