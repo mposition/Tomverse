@@ -96,6 +96,16 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
       body: JSON.stringify({ url: "http://127.0.0.1:3100/chat" }),
     })
   );
+  // Sign-in withdraws any pending signup intent before an OAuth redirect and
+  // stops if that is not confirmed (#1787). The E2E server has no database, so
+  // the withdrawal is answered here.
+  await page.route("**/api/auth/signup-intent", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    })
+  );
 
   await page.goto(
     "/?utm_source=qa-search&utm_medium=cpc&utm_campaign=launch-validation"
