@@ -7,7 +7,7 @@ import {
   decidedDraftPurgeAt,
   draftDecisionAllowed,
   effectiveAnalysisTerminationAt,
-  EXPIRED_UNDECIDED_DRAFT_BODY_PURGE,
+  expiredUndecidedDraftPurgeWindow,
   executionBriefPurgeAt,
   holdTimeWindow,
   purgeDisposition,
@@ -39,7 +39,7 @@ test("unfinished analysis cancels at absolute day seven, independent of activity
   assert.equal(rawPurgeBy({ submittedAt: base, analysisCompletedAt: at(5), cancelledAt: null, dbNow: at(9) })?.toISOString(), at(6).toISOString());
 });
 
-test("undecided draft expires after thirty days without silently scheduling its body purge", () => {
+test("undecided draft expires after thirty days and its body is due within twenty-four hours", () => {
   assert.equal(undecidedDraftExpiresAt(base).toISOString(), at(30).toISOString());
   assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: new Date(at(30).getTime() - 1) }), false);
   assert.equal(shouldExpireUndecidedDraft({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(30) }), true);
@@ -50,7 +50,13 @@ test("undecided draft expires after thirty days without silently scheduling its 
   assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: false, dbNow: at(30) }), false);
   assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: at(29), alreadyExpired: false, dbNow: at(29) }), false);
   assert.equal(draftDecisionAllowed({ analysisCompletedAt: base, finalDecisionAt: null, alreadyExpired: true, dbNow: at(10) }), false);
-  assert.equal(EXPIRED_UNDECIDED_DRAFT_BODY_PURGE, "policy_decision_required");
+  const purge = expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: null });
+  assert.equal(purge?.eligibleAt.toISOString(), at(30).toISOString());
+  assert.equal(purge?.purgeBy.toISOString(), at(31).toISOString());
+  assert.equal(purgeDisposition({ purgeAt: purge?.eligibleAt ?? null, purgedAt: null, activeHoldExpiresAt: null, dbNow: at(30) }), "due");
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(29) }), null);
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(30) })?.purgeBy.toISOString(), at(31).toISOString());
+  assert.equal(expiredUndecidedDraftPurgeWindow({ analysisCompletedAt: base, bodyFinalDecisionAt: at(40) })?.purgeBy.toISOString(), at(31).toISOString());
   assert.equal(decidedDraftPurgeAt(at(2)).toISOString(), at(32).toISOString());
   assert.equal(executionBriefPurgeAt(at(2)).toISOString(), at(92).toISOString());
 });

@@ -7,6 +7,7 @@ const DAY_MS = 24 * HOUR_MS;
 export const AMUX_ANALYSIS_MAX_AGE_MS = 7 * DAY_MS;
 export const AMUX_RAW_PURGE_WINDOW_MS = 24 * HOUR_MS;
 export const AMUX_UNDECIDED_DRAFT_WINDOW_MS = 30 * DAY_MS;
+export const AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS = 24 * HOUR_MS;
 export const AMUX_DECIDED_DRAFT_RETENTION_MS = 30 * DAY_MS;
 export const AMUX_BRIEF_RETENTION_MS = 90 * DAY_MS;
 export const AMUX_HOLD_MAX_MS = 90 * DAY_MS;
@@ -106,7 +107,7 @@ export function draftDecisionAllowed(input: {
     !reached(input.dbNow, undecidedDraftExpiresAt(input.analysisCompletedAt));
 }
 
-/** Expiry prevents new registration. It is not consent or a deletion clock. */
+/** Expiry prevents new registration. It is not consent. */
 export function shouldExpireUndecidedDraft(input: {
   analysisCompletedAt: Date;
   finalDecisionAt: Date | null;
@@ -118,10 +119,21 @@ export function shouldExpireUndecidedDraft(input: {
   return !decidedInTime && !input.alreadyExpired && reached(input.dbNow, expiresAt);
 }
 
-/** The current approved policy does not define when the body of an
- * automatically expired, undecided draft is deleted. Never infer it from the
- * explicit human-decision clock above. */
-export const EXPIRED_UNDECIDED_DRAFT_BODY_PURGE = "policy_decision_required" as const;
+/** One independently deletable undecided draft body/slice is purge-eligible
+ * at the absolute expiry, with a 24-hour completion SLA. A late expiry worker
+ * write must not restart either clock. A human decision made strictly before
+ * expiry uses its own 30-day retention clock instead. Do not pass another
+ * card/slice's decision here. */
+export function expiredUndecidedDraftPurgeWindow(input: {
+  analysisCompletedAt: Date;
+  bodyFinalDecisionAt: Date | null;
+}): { eligibleAt: Date; purgeBy: Date } | null {
+  const eligibleAt = undecidedDraftExpiresAt(input.analysisCompletedAt);
+  if (input.bodyFinalDecisionAt !== null && timestamp(input.bodyFinalDecisionAt) < timestamp(eligibleAt)) {
+    return null;
+  }
+  return { eligibleAt, purgeBy: after(eligibleAt, AMUX_EXPIRED_DRAFT_PURGE_WINDOW_MS) };
+}
 
 /** Hold validity is a separate owner/audit gate; this only checks time bounds.
  * Holds of seven days or less receive their notice at creation. */
