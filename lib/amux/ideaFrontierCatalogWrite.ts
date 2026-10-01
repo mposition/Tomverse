@@ -63,7 +63,7 @@ const setDatabaseTimeouts = async (tx: Client): Promise<void> => {
 
 /** The same per-model advisory lock as the DB insert trigger. */
 const lockModel = async (tx: Client, provider: string, modelId: string): Promise<void> => {
-  await tx.$queryRaw`
+  await tx.$executeRaw`
     SELECT pg_advisory_xact_lock(
       hashtextextended('amux-v4-frontier:' || ${provider} || ':' || ${modelId}, 0)
     )
