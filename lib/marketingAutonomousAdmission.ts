@@ -356,12 +356,24 @@ export const resolvePublishAdmission = async (
   database: MarketingTransaction,
   subject: MarketingAdmissionChannel,
   health: MarketingHealthObservation | null,
+  /**
+   * The post's own mode, when the question is about one post (the dispatch).
+   * Omitted when it is about the account (the claim), which then asks the
+   * question the channel's mode implies.
+   */
+  postMode?: "approval" | "autonomous",
 ): Promise<{
   readonly publish: boolean;
   readonly reasons: readonly (
     | MarketingAutomationAccessReason
     | MarketingAutonomousAdmissionReason
   )[];
+  /** The database clock this answer was judged at. */
+  readonly checkedAt?: Date;
+  /** What an autonomous post's recorded admission is compared against. */
+  readonly admissionCodeDigest?: string;
+  readonly configGeneration?: number;
+  readonly deploymentId?: string;
 }> => {
   const clock = await database.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
     SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
@@ -378,18 +390,30 @@ export const resolvePublishAdmission = async (
     health,
     now,
   );
-  if (subject.status === "autonomous_mode") {
+  const provenance = {
+    checkedAt: now,
+    admissionCodeDigest: MARKETING_ADMISSION_CODE_DIGEST,
+    configGeneration: generation ?? 0,
+    deploymentId,
+  };
+  if (subject.status !== "autonomous_mode" && subject.status !== "approval_mode") {
+    return { publish: false, reasons: ["input_invalid:channelMode"], ...provenance };
+  }
+  // A post without a person needs the autonomy decision, and so does a claim
+  // on an autonomous account; a post a person approved needs the approval one.
+  // The autonomy decision already refuses a channel that is not autonomous.
+  const autonomy =
+    postMode === "autonomous" ||
+    (postMode === undefined && subject.status === "autonomous_mode");
+  if (autonomy) {
     const reasons: (
       | MarketingAutomationAccessReason
       | MarketingAutonomousAdmissionReason
     )[] = [...decisions.autonomousPublish.reasons];
     if (generation === null) reasons.push("config_generation_unreadable");
     if (deploymentId === "") reasons.push("deployment_unknown");
-    return { publish: reasons.length === 0, reasons };
+    return { publish: reasons.length === 0, reasons, ...provenance };
   }
-  if (subject.status === "approval_mode") {
-    const reasons = [...decisions.approvalPublish.reasons];
-    return { publish: reasons.length === 0, reasons };
-  }
-  return { publish: false, reasons: ["input_invalid:channelMode"] };
+  const reasons = [...decisions.approvalPublish.reasons];
+  return { publish: reasons.length === 0, reasons, ...provenance };
 };

@@ -55,6 +55,11 @@ type PostRow = {
   historyVersion: number;
   publishAttempt: number;
   envelope: unknown;
+  mode: string;
+  envelopeDigest: string;
+  approvedDigest: string | null;
+  approvedAt: Date | null;
+  approvalExpiresAt: Date | null;
 };
 
 const RENDERED_TEXT = "Three answers to one question, side by side.";
@@ -89,6 +94,13 @@ const postRow = (overrides: Partial<PostRow> = {}): PostRow => ({
   historyVersion: 4,
   publishAttempt: 0,
   envelope: ENVELOPE,
+  // An approved post, approved for these bytes and not yet expired: the
+  // ordinary case. The autonomous and expired cases override these.
+  mode: "approval",
+  envelopeDigest: "digest-1",
+  approvedDigest: "digest-1",
+  approvedAt: new Date("2026-09-22T09:00:00.000Z"),
+  approvalExpiresAt: new Date("2026-09-30T09:00:00.000Z"),
   ...overrides,
 });
 
@@ -131,6 +143,8 @@ const fakeDatabase = (
     updates?: number[];
     now?: Date;
     isolation?: string;
+    /** The autonomous insert's audit metadata, as the dispatch reads it back. */
+    scheduledMetadata?: Record<string, unknown> | null;
   } = {},
 ) => {
   const {
@@ -172,7 +186,15 @@ const fakeDatabase = (
       },
     },
     adminAuditLog: {
-      findFirst: async () => null,
+      // Two readers: the chain's own tail lookup, and the dispatch reading the
+      // autonomous insert's entry back. Told apart by what they ask for.
+      findFirst: async (args?: { where?: { action?: string } }) => {
+        if (args?.where?.action === "marketing_post.autonomous_scheduled") {
+          const metadata = options.scheduledMetadata;
+          return metadata === undefined || metadata === null ? null : { metadata };
+        }
+        return null;
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         seen.audits.push(data);
         return data;
@@ -182,7 +204,13 @@ const fakeDatabase = (
   return { database, seen };
 };
 
-const admits = async () => ({ publish: true });
+const PROVENANCE = {
+  admissionCodeDigest: "code-digest-1",
+  configGeneration: 3,
+  deploymentId: "deploy-1",
+};
+
+const admits = async () => ({ publish: true, ...PROVENANCE });
 
 const dispatch = (
   database: unknown,
@@ -516,4 +544,105 @@ test("a malformed envelope is refused before the post moves or anything is audit
   await assert.rejects(dispatch(database));
   assert.deepEqual(seen.updates, [], "the post did not move");
   assert.deepEqual(seen.audits, [], "nothing was audited");
+});
+
+// ---------------------------------------------------------------------------
+// What was approved, and what an autonomous post was admitted under
+// ---------------------------------------------------------------------------
+
+test("an approval that has expired, or covers other bytes, does not send", async () => {
+  for (const overrides of [
+    { approvalExpiresAt: new Date(NOW.getTime() - 1) },
+    { approvalExpiresAt: NOW },
+    { approvalExpiresAt: null },
+    { approvedDigest: "digest-0" },
+    { approvedDigest: null },
+    { approvedAt: null },
+  ]) {
+    const { database, seen } = fakeDatabase({ post: postRow(overrides) });
+    assert.deepEqual(
+      await dispatch(database),
+      { started: false, reason: "approval_not_current" },
+      JSON.stringify(overrides),
+    );
+    assert.equal(seen.updates.length, 0);
+    assert.equal(seen.audits.length, 0);
+  }
+});
+
+test("an autonomous post goes out under the provenance it was admitted with", async () => {
+  const { database } = fakeDatabase({
+    post: postRow({ mode: "autonomous", approvedDigest: null, approvedAt: null, approvalExpiresAt: null }),
+    scheduledMetadata: { ...PROVENANCE, commitSha: "abc" },
+  });
+  const result = await dispatch(database);
+  assert.equal(result.started, true);
+});
+
+test("an autonomous post admitted under another build, generation or deployment does not", async () => {
+  for (const changed of [
+    { admissionCodeDigest: "code-digest-0" },
+    { configGeneration: 2 },
+    { deploymentId: "deploy-0" },
+    { deploymentId: "" },
+  ]) {
+    const { database, seen } = fakeDatabase({
+      post: postRow({ mode: "autonomous" }),
+      scheduledMetadata: { ...PROVENANCE, ...changed },
+    });
+    assert.deepEqual(
+      await dispatch(database),
+      { started: false, reason: "provenance_changed" },
+      JSON.stringify(changed),
+    );
+    assert.equal(seen.updates.length, 0);
+  }
+  // No recorded admission at all is not a match either.
+  const { database } = fakeDatabase({ post: postRow({ mode: "autonomous" }), scheduledMetadata: null });
+  assert.deepEqual(await dispatch(database), { started: false, reason: "provenance_changed" });
+});
+
+test("an autonomous post on an account moved back to approval mode does not go out", async () => {
+  const { database } = fakeDatabase({
+    post: postRow({ mode: "autonomous" }),
+    channel: channelRow({ status: "approval_mode" }),
+    scheduledMetadata: PROVENANCE,
+  });
+  assert.deepEqual(await dispatch(database), { started: false, reason: "not_admitted" });
+});
+
+test("the resolver is told the post's mode", async () => {
+  const modes: string[] = [];
+  const { database } = fakeDatabase({ post: postRow({ mode: "autonomous" }), scheduledMetadata: PROVENANCE });
+  await dispatch(database, {
+    resolveAdmission: async (_database, _channel, postMode) => {
+      modes.push(postMode);
+      return { publish: true, ...PROVENANCE };
+    },
+  });
+  assert.deepEqual(modes, ["autonomous"]);
+});
+
+test("the deadline is judged again after the locks and the resolver", async () => {
+  // Enough time at the start; not by the time the resolver has answered. The
+  // resolver's clock is the later one, and it is the one that decides.
+  const { database, seen } = fakeDatabase();
+  const result = await dispatch(database, {
+    resolveAdmission: async () => ({
+      publish: true,
+      ...PROVENANCE,
+      checkedAt: new Date(DEADLINE.getTime() - CALL_BUDGET_MS + 1),
+    }),
+  });
+  assert.deepEqual(result, { started: false, reason: "deadline_too_close" });
+  assert.equal(seen.updates.length, 0);
+
+  // And a resolver cannot move the check earlier than the store's own clock.
+  const late = fakeDatabase({ now: new Date(DEADLINE.getTime() - CALL_BUDGET_MS + 1) });
+  assert.deepEqual(
+    await dispatch(late.database, {
+      resolveAdmission: async () => ({ publish: true, ...PROVENANCE, checkedAt: new Date(0) }),
+    }),
+    { started: false, reason: "deadline_too_close" },
+  );
 });

@@ -17,10 +17,21 @@
  *   committed, the post is `publishing` and some outcome must be written for it
  *   -- published, failed or unknown. Anything thrown between the two becomes
  *   `outcome_unknown`, because by then a request may have left.
- * - **A recording that fails stops the run.** If the outcome cannot be written,
- *   the post is left `publishing` with nobody answering for it, and continuing to
- *   publish other posts would add to what a person has to untangle. The error
- *   goes up to the route, which records an incident and fails the run.
+ * - **A recording that fails stops the run** -- whether it throws or answers
+ *   `recorded: false`. Either way the post is left `publishing` with nobody
+ *   answering for it, and continuing to publish other posts would add to what a
+ *   person has to untangle. The error goes up to the route, which records an
+ *   incident and fails the run.
+ * - **A dispatched post whose worker died is answered first.** Before anything
+ *   new is claimed, `publishing` rows past their lease are written
+ *   `outcome_unknown` (and their autonomous accounts paused): the same rule as
+ *   any started call without proof.
+ * - **No vendor call starts unless it and its outcome write fit before the
+ *   deadline under their bounds:** the call budget plus the derived
+ *   per-transaction maximum, checked on the database clock both inside the
+ *   dispatch and again after it commits. Database work *before* a call that
+ *   overruns makes the run late, which the deadline trigger records as failed
+ *   -- and nothing has left.
  * - **Health is observed fresh for each account,** stamped with the database's
  *   clock before the probe, and handed to the resolver that runs inside the
  *   claim and again inside the dispatch.
@@ -30,6 +41,10 @@
  */
 
 import type { MarketingChannel } from "@/lib/marketingAutomationSchema";
+import {
+  MARKETING_PUBLISHER_CRON_PERIOD_MS,
+  MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS,
+} from "@/lib/marketingPublisherRunCore";
 import type {
   MarketingPublishAdapter,
   MarketingPublishResult,
@@ -50,17 +65,50 @@ import type {
 export const MARKETING_PUBLISHER_CALL_BUDGET_MS = 30_000;
 
 /**
- * Room a dispatch needs before the run's deadline: the call, and then the
- * transaction that records what it returned.
+ * Room a vendor call needs before the run's deadline: the call itself, and then
+ * the transaction that records what it returned, at that transaction's bound.
  *
- * Passed to the dispatch as its call budget, so the dispatch refuses -- on the
- * database's clock -- to start a call whose outcome could not be written before
- * the run is over. Recording takes at most the derived transaction maximum;
- * thirty seconds is what an ordinary recording leaves to spare many times over,
- * and the transaction timeout still bounds the rare one that does not.
+ * The bound, not a typical figure. The round-1 review rejected a sixty-second
+ * room against a 155-second worst-case outcome write: an estimate of how long a
+ * write usually takes is not a promise about how long it can take. With the
+ * bound this is 185 seconds of a 240-second run, which leaves the first minute
+ * or so of each run for vendor calls -- enough at the caps the policy sets, and
+ * the accounts are rotated between runs so the same ones do not always go first.
  */
 export const MARKETING_PUBLISHER_DISPATCH_ROOM_MS =
-  MARKETING_PUBLISHER_CALL_BUDGET_MS + 30_000;
+  MARKETING_PUBLISHER_CALL_BUDGET_MS + MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS;
+
+/** How many dead dispatches one run answers before claiming anything new. */
+export const MARKETING_PUBLISHER_RECOVERY_LIMIT = 10;
+
+/**
+ * An outcome writer answered without writing.
+ *
+ * Thrown rather than counted: after a vendor call, a post nobody can record is
+ * a post left `publishing` with no worker answering for it, and an autonomous
+ * account that should have paused and did not.
+ */
+export class MarketingPublisherOutcomeNotRecordedError extends Error {
+  constructor(
+    readonly outcome: "published" | "failed" | "outcome_unknown",
+    readonly reason: string,
+  ) {
+    super(`The ${outcome} outcome could not be recorded: ${reason}`);
+    this.name = "MarketingPublisherOutcomeNotRecordedError";
+  }
+}
+
+const requireRecorded = (
+  outcome: "published" | "failed" | "outcome_unknown",
+  answer: { readonly recorded: boolean; readonly reason?: string },
+) => {
+  if (answer.recorded !== true) {
+    throw new MarketingPublisherOutcomeNotRecordedError(
+      outcome,
+      typeof answer.reason === "string" ? answer.reason : "not_recorded",
+    );
+  }
+};
 
 /** How many published posts one run asks the platform about. */
 export const MARKETING_PUBLISHER_VERIFY_LIMIT = 5;
@@ -75,6 +123,8 @@ export const MARKETING_PUBLISHER_VERIFY_LIMIT = 5;
 const RELEASE_FOR: Partial<Record<MarketingDispatchRefusal, MarketingClaimReleaseReason>> = {
   not_admitted: "no_longer_admitted",
   channel_not_publishing: "no_longer_admitted",
+  approval_not_current: "no_longer_admitted",
+  provenance_changed: "no_longer_admitted",
   deadline_too_close: "worker_shutdown",
 };
 
@@ -82,6 +132,7 @@ export type MarketingPublisherBatchDeps = {
   readonly operations: Pick<
     MarketingPublisherOperations,
     | "listChannels"
+    | "listPublishingPastLease"
     | "listAwaitingVerification"
     | "claim"
     | "release"
@@ -105,6 +156,8 @@ export type MarketingPublisherBatchInput = {
 
 export type MarketingPublisherBatchResult = {
   channels: number;
+  /** Dispatches whose worker died, answered `outcome_unknown` this run. */
+  recoveredUnknown: number;
   claimed: number;
   published: number;
   failed: number;
@@ -155,6 +208,7 @@ export async function runMarketingPublisherBatch(
   const { operations, adapter } = deps;
   const result: MarketingPublisherBatchResult = {
     channels: 0,
+    recoveredUnknown: 0,
     claimed: 0,
     published: 0,
     failed: 0,
@@ -169,20 +223,62 @@ export async function runMarketingPublisherBatch(
   const claimToken = `marketing-publisher:${input.runId}`;
   const deadline = input.deadlineAt.getTime();
 
-  const roomLeft = async () => {
+  const roomLeft = async (needed: number) => {
     const now = await deps.databaseNow();
-    return { now, enough: now.getTime() + MARKETING_PUBLISHER_DISPATCH_ROOM_MS <= deadline };
+    return { now, enough: now.getTime() + needed <= deadline };
   };
 
-  const channels = await operations.listChannels();
-  result.channels = channels.length;
+  // Dispatches whose worker is gone, before anything new. Each is one bounded
+  // write, so each needs the derived maximum of room.
+  {
+    const start = await roomLeft(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS);
+    if (!start.enough) {
+      result.stopped = "deadline";
+      return result;
+    }
+    const stale = await operations.listPublishingPastLease({
+      before: start.now,
+      limit: MARKETING_PUBLISHER_RECOVERY_LIMIT,
+    });
+    for (const post of stale) {
+      if (!(await deps.heartbeat())) {
+        result.stopped = "heartbeat";
+        return result;
+      }
+      if (!(await roomLeft(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS)).enough) {
+        result.stopped = "deadline";
+        return result;
+      }
+      requireRecorded(
+        "outcome_unknown",
+        await operations.recordOutcomeUnknown({
+          id: post.id,
+          requestKey: post.requestKey,
+          expectedHistoryVersion: post.historyVersion,
+          errorCode: "lease_expired_after_dispatch",
+        }),
+      );
+      result.recoveredUnknown += 1;
+    }
+  }
+
+  const listed = await operations.listChannels();
+  result.channels = listed.length;
+  // Rotated by run, so a run that runs out of room does not always run out on
+  // the same accounts. The rotation is a function of the deadline, which the
+  // service sets once per run: deterministic, and different every period.
+  const offset =
+    listed.length === 0
+      ? 0
+      : Math.floor(deadline / MARKETING_PUBLISHER_CRON_PERIOD_MS) % listed.length;
+  const channels = [...listed.slice(offset), ...listed.slice(0, offset)];
 
   for (const channel of channels) {
     if (!(await deps.heartbeat())) {
       result.stopped = "heartbeat";
       return result;
     }
-    const room = await roomLeft();
+    const room = await roomLeft(MARKETING_PUBLISHER_DISPATCH_ROOM_MS);
     if (!room.enough) {
       result.stopped = "deadline";
       return result;
@@ -235,7 +331,14 @@ export async function runMarketingPublisherBatch(
     // outcome.
     let outcome: MarketingPublishResult;
     const accountRef = dispatch.payload.externalAccountRef;
-    if (accountRef === null || accountRef.trim() === "") {
+    // The dispatch checked the room before it wrote; its own write took time
+    // after that. Checked again now, before anything leaves: a call that could
+    // not have its outcome written before the deadline is not started.
+    const afterDispatch = await roomLeft(MARKETING_PUBLISHER_DISPATCH_ROOM_MS);
+    if (!afterDispatch.enough) {
+      // Nothing was sent, so this is a confirmed non-publication.
+      outcome = { outcome: "failed", errorCode: "run_deadline_before_call" };
+    } else if (accountRef === null || accountRef.trim() === "") {
       // The account lost its reference between the list and the lock. Nothing
       // is sent, so this is a confirmed non-publication, not an unknown.
       outcome = { outcome: "failed", errorCode: "account_ref_missing" };
@@ -264,17 +367,26 @@ export async function runMarketingPublisherBatch(
       expectedHistoryVersion: claim.historyVersion,
     };
     if (outcome.outcome === "published") {
-      await operations.recordPublished({
-        ...recorded,
-        externalPostId: outcome.externalPostId,
-        externalUrl: outcome.externalUrl,
-      });
+      requireRecorded(
+        "published",
+        await operations.recordPublished({
+          ...recorded,
+          externalPostId: outcome.externalPostId,
+          externalUrl: outcome.externalUrl,
+        }),
+      );
       result.published += 1;
     } else if (outcome.outcome === "failed") {
-      await operations.recordFailed({ ...recorded, errorCode: outcome.errorCode });
+      requireRecorded(
+        "failed",
+        await operations.recordFailed({ ...recorded, errorCode: outcome.errorCode }),
+      );
       result.failed += 1;
     } else {
-      await operations.recordOutcomeUnknown({ ...recorded, errorCode: outcome.errorCode });
+      requireRecorded(
+        "outcome_unknown",
+        await operations.recordOutcomeUnknown({ ...recorded, errorCode: outcome.errorCode }),
+      );
       result.outcomeUnknown += 1;
     }
   }
@@ -287,8 +399,8 @@ export async function runMarketingPublisherBatch(
       result.stopped = "heartbeat";
       return result;
     }
-    const now = await deps.databaseNow();
-    if (now.getTime() + MARKETING_PUBLISHER_DISPATCH_ROOM_MS > deadline) {
+    // A status query and its write, each at its bound.
+    if (!(await roomLeft(MARKETING_PUBLISHER_DISPATCH_ROOM_MS)).enough) {
       result.stopped = "deadline";
       return result;
     }

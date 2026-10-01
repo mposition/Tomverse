@@ -406,7 +406,14 @@ export type MarketingDispatchRefusal =
   | "claim_not_held"
   | "claim_expired"
   | "dispatch_conflict"
-  | "deadline_too_close";
+  | "deadline_too_close"
+  /** An approval-mode post whose approval has expired or no longer covers its envelope. */
+  | "approval_not_current"
+  /**
+   * An autonomous post whose admission was decided under a different build,
+   * configuration generation or deployment than the one running now.
+   */
+  | "provenance_changed";
 
 /**
  * How long a claim is good for before a sweep may take it back.
@@ -2849,6 +2856,60 @@ export async function listPublishingMarketingChannels(
 }
 
 /**
+ * Dispatched posts whose worker is gone: `publishing`, with the lease expired.
+ *
+ * A dispatch commits `publishing` before the call, and only the worker that
+ * made the call writes its outcome. If that worker died in between, nothing
+ * else ever would: the claim path reads `scheduled` posts and polling reads
+ * `published` ones. The plan's rule for this row is the one for a lease that
+ * expires after the call began -- it follows the same rules as any started call
+ * without proof, which is `outcome_unknown` and, for an autonomous account, a
+ * pause. Never a lookup (there is none, amendment 4) and never a re-send.
+ *
+ * The lease is fifteen minutes and a run is bounded well inside that, so a
+ * `publishing` row past its lease has no live worker answering for it.
+ *
+ * `before` is the database's clock, read by the caller; the outcome writer
+ * locks the row and checks `status = 'publishing'` and the request key again.
+ */
+export async function listMarketingPostsPublishingPastLease(
+  database: MarketingTransaction,
+  input: { readonly before: Date; readonly limit: number },
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly requestKey: string;
+    readonly historyVersion: number;
+  }>
+> {
+  const before = new Date(input.before.getTime());
+  if (!Number.isFinite(before.getTime())) return [];
+  const take = Math.max(0, Math.min(Math.floor(Number(input.limit) || 0), 50));
+  if (take === 0) return [];
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: "publishing",
+      leaseUntil: { lt: before },
+      providerRequestKey: { not: null },
+    },
+    select: { id: true, providerRequestKey: true, historyVersion: true },
+    orderBy: [{ leaseUntil: "asc" }, { id: "asc" }],
+    take,
+  });
+  return rows.flatMap((row) =>
+    row.providerRequestKey
+      ? [
+          {
+            id: row.id,
+            requestKey: row.providerRequestKey,
+            historyVersion: Number(row.historyVersion),
+          },
+        ]
+      : [],
+  );
+}
+
+/**
  * Published posts a status query may confirm, oldest first.
  *
  * A read for the same reason as the channel list: `recordMarketingPostPollVerified`
@@ -4354,11 +4415,27 @@ export async function startMarketingPostDispatch(
     readonly runDeadlineAt: Date;
     /** How long the vendor call may take, at worst. */
     readonly callBudgetMs: number;
-    /** The whole resolver, re-run here. Not a boolean carried from the claim. */
+    /**
+     * The whole resolver, re-run here. Not a boolean carried from the claim.
+     *
+     * Given the post's own mode, because the question differs: an approved post
+     * needs the approval decision, an autonomous one the autonomy decision. It
+     * answers with the database clock it judged health against, which this
+     * function uses for the deadline -- read after the locks and the resolver,
+     * not before them -- and with the provenance an autonomous post is compared
+     * against.
+     */
     readonly resolveAdmission: (
       database: MarketingTransaction,
       channel: MarketingAdmissionChannel,
-    ) => Promise<{ readonly publish: boolean }>;
+      postMode: MarketingPostMode,
+    ) => Promise<{
+      readonly publish: boolean;
+      readonly checkedAt?: Date;
+      readonly admissionCodeDigest?: string;
+      readonly configGeneration?: number;
+      readonly deploymentId?: string;
+    }>;
   },
 ): Promise<
   | {
@@ -4427,10 +4504,9 @@ export async function startMarketingPostDispatch(
   await takeAuditChainLock(database);
 
   const now = await marketingDatabaseNow(database);
-  // **Time for the call, on the database's clock.** Not the process's: the
-  // deadline the supervisor enforces is wall-clock, but every other decision in
-  // this transaction is made against the database's, and mixing the two means
-  // the refusal and the kill disagree about when "now" was.
+  // Refused early when there is plainly no time, so a run at its end does not
+  // take locks it cannot use. The check that counts is the one below, made
+  // after the locks and the resolver, because those take time too.
   if (now.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
     return { started: false, reason: "deadline_too_close" };
   }
@@ -4446,11 +4522,17 @@ export async function startMarketingPostDispatch(
       historyVersion: number;
       publishAttempt: number;
       envelope: Prisma.JsonValue | null;
+      mode: string;
+      envelopeDigest: string;
+      approvedDigest: string | null;
+      approvedAt: Date | null;
+      approvalExpiresAt: Date | null;
     }>
   >(Prisma.sql`
     SELECT
       "id", "channelId", "logicalKey", "status", "envelope",
-      "claimToken", "leaseUntil", "historyVersion", "publishAttempt"
+      "claimToken", "leaseUntil", "historyVersion", "publishAttempt",
+      "mode", "envelopeDigest", "approvedDigest", "approvedAt", "approvalExpiresAt"
     FROM "MarketingPost"
     WHERE "id" = ${id}
       AND "deletedAt" IS NULL
@@ -4488,13 +4570,88 @@ export async function startMarketingPostDispatch(
   if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
     return { started: false, reason: "channel_not_publishing" };
   }
-  const admission = await rawInput.resolveAdmission(database, {
-    id: channel.id,
-    channel: channel.channel as MarketingChannelName,
-    status: channel.status as MarketingChannelStatus,
-    connectionGeneration: Number(channel.connectionGeneration),
-  });
+  const mode = post.mode;
+  if (mode !== "approval" && mode !== "autonomous") {
+    return { started: false, reason: "not_admitted" };
+  }
+  // A post scheduled without a person goes out only while its account is still
+  // autonomous. An account moved back to approval mode has said a person decides,
+  // and this post was never shown to one.
+  if (mode === "autonomous" && channel.status !== "autonomous_mode") {
+    return { started: false, reason: "not_admitted" };
+  }
+  // **An approval is for an envelope, until a time.** Both are checked here,
+  // at the last moment, rather than trusted from when the post was scheduled:
+  // an approval that has expired, or that was given to different bytes, is not
+  // an approval of what is about to be sent.
+  if (
+    mode === "approval" &&
+    (post.approvedAt === null ||
+      post.approvedDigest === null ||
+      post.approvedDigest !== post.envelopeDigest ||
+      post.approvalExpiresAt === null ||
+      post.approvalExpiresAt.getTime() <= now.getTime())
+  ) {
+    return { started: false, reason: "approval_not_current" };
+  }
+
+  const admission = await rawInput.resolveAdmission(
+    database,
+    {
+      id: channel.id,
+      channel: channel.channel as MarketingChannelName,
+      status: channel.status as MarketingChannelStatus,
+      connectionGeneration: Number(channel.connectionGeneration),
+    },
+    mode,
+  );
   if (!admission.publish) return { started: false, reason: "not_admitted" };
+
+  if (mode === "autonomous") {
+    // **What the autonomous insert recorded is what this compares against.** The
+    // insert wrote the admission code digest, configuration generation and
+    // deployment into its audit entry and said dispatch would compare them; this
+    // is that comparison. A post admitted by one build, one configuration or one
+    // deployment is not sent by another without being admitted again.
+    const scheduled = await database.adminAuditLog.findFirst({
+      // The action is only ever written about a post, so it and the post id
+      // name the entry; the target type adds nothing to the match.
+      where: {
+        action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+        targetId: id,
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { metadata: true },
+    });
+    const recorded = (scheduled?.metadata ?? null) as {
+      admissionCodeDigest?: unknown;
+      configGeneration?: unknown;
+      deploymentId?: unknown;
+    } | null;
+    const same =
+      recorded !== null &&
+      typeof recorded.admissionCodeDigest === "string" &&
+      recorded.admissionCodeDigest !== "" &&
+      recorded.admissionCodeDigest === admission.admissionCodeDigest &&
+      typeof recorded.configGeneration === "number" &&
+      recorded.configGeneration === admission.configGeneration &&
+      typeof recorded.deploymentId === "string" &&
+      // "We do not know which deployment this is" is not a match, on either side.
+      recorded.deploymentId !== "" &&
+      recorded.deploymentId === admission.deploymentId;
+    if (!same) return { started: false, reason: "provenance_changed" };
+  }
+
+  // **The deadline, judged after everything above has taken its time,** on the
+  // database clock the resolver read. The later of the two readings, so a
+  // resolver cannot move this check earlier than the one made at the start.
+  const checkedAt =
+    admission.checkedAt instanceof Date && admission.checkedAt.getTime() > now.getTime()
+      ? admission.checkedAt
+      : now;
+  if (checkedAt.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
+    return { started: false, reason: "deadline_too_close" };
+  }
 
   const attempt = Number(post.publishAttempt) + 1;
   const started = await database.marketingPost.updateMany({

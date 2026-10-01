@@ -80,8 +80,9 @@ export const MARKETING_PUBLISHER_IDLE_TIMEOUT_MS = 5_000;
  * where being too small does the most harm. With the real publish resolver
  * wired in, the store operations the publisher runs issue:
  *
- *   claim 12 · dispatch 11 · published 8 · failed 8 · outcome_unknown 13
- *   release 5 · poll published 8 · poll verified 8 · poll removed 7
+ *   claim 12, or 13 reclaiming an expired lease · dispatch 11, or 12 for an
+ *   autonomous post · published 8 · failed 8 · outcome_unknown 13 · release 5 ·
+ *   poll published 8 · poll verified 8 · poll removed 7
  *
  * `outcome_unknown` is over 12, and it is the safety path -- it writes the
  * unknown outcome and pauses the autonomous account in one transaction. Over

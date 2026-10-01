@@ -12,9 +12,11 @@ import test from "node:test";
 import {
   MARKETING_PUBLISHER_DISPATCH_ROOM_MS,
   MARKETING_PUBLISHER_VERIFY_LIMIT,
+  MarketingPublisherOutcomeNotRecordedError,
   runMarketingPublisherBatch,
   type MarketingPublisherBatchDeps,
 } from "@/lib/marketingPublisherBatch";
+import { MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS } from "@/lib/marketingPublisherRunCore";
 import type {
   MarketingPublishAdapter,
   MarketingPublishRequest,
@@ -39,6 +41,9 @@ type Scenario = {
   heartbeats?: boolean[];
   clock?: Date[];
   recordThrows?: Error;
+  /** What each outcome writer answers, when a test needs it to refuse. */
+  recordAnswer?: { recorded: boolean; reason?: string };
+  stale?: Array<{ id: string; requestKey: string; historyVersion: number }>;
 };
 
 const world = (scenario: Scenario = {}) => {
@@ -49,7 +54,7 @@ const world = (scenario: Scenario = {}) => {
   const record = (name: string) => async (input: unknown) => {
     note(name, input);
     if (scenario.recordThrows) throw scenario.recordThrows;
-    return { recorded: true, paused: false };
+    return scenario.recordAnswer ?? { recorded: true, paused: false };
   };
   const operations = {
     listChannels: async () => {
@@ -57,6 +62,10 @@ const world = (scenario: Scenario = {}) => {
       return (
         scenario.channels ?? [{ id: "c1", connectionGeneration: 3, externalAccountRef: "acct_9" }]
       );
+    },
+    listPublishingPastLease: async (input: unknown) => {
+      note("listPublishingPastLease", input);
+      return scenario.stale ?? [];
     },
     listAwaitingVerification: async (limit: number) => {
       note("listAwaitingVerification", limit);
@@ -95,7 +104,7 @@ const world = (scenario: Scenario = {}) => {
     recordOutcomeUnknown: async (input: unknown) => {
       note("recordOutcomeUnknown", input);
       if (scenario.recordThrows) throw scenario.recordThrows;
-      return { recorded: true, paused: true };
+      return scenario.recordAnswer ?? { recorded: true, paused: true };
     },
     recordVerified: async (input: unknown) => {
       note("recordVerified", input);
@@ -238,7 +247,9 @@ test("an outcome that cannot be recorded stops the run rather than publish more"
 
 test("health is observed fresh, stamped with the database clock before the probe, and passed to both checks", async () => {
   const stamped = new Date(NOW.getTime() + 1_000);
-  const { run, named, calls } = world({ clock: [stamped] });
+  // The first reading is the recovery pass's; the second is the one the
+  // account's health is stamped with.
+  const { run, named, calls } = world({ clock: [NOW, stamped] });
   await run();
   const claimHealth = (named("claim")[0]?.input as { health: unknown }).health;
   const dispatchHealth = (named("dispatch")[0]?.input as { health: unknown }).health;
@@ -250,7 +261,7 @@ test("health is observed fresh, stamped with the database clock before the probe
   });
   assert.deepEqual(dispatchHealth, claimHealth);
   const names = calls.map((call) => call.name);
-  assert.ok(names.indexOf("databaseNow") < names.indexOf("observeHealth"));
+  assert.ok(names.lastIndexOf("databaseNow", names.indexOf("observeHealth")) >= 0);
 });
 
 test("a probe that throws, or answers for the wrong capability, is unhealthy", async () => {
@@ -309,7 +320,7 @@ test("too little room before the deadline gives the claim back and stops", async
 
 test("a run with no room left probes nothing", async () => {
   const late = new Date(DEADLINE.getTime() - MARKETING_PUBLISHER_DISPATCH_ROOM_MS + 1);
-  const { run, named } = world({ clock: [late] });
+  const { run, named } = world({ clock: [late, late] });
   const result = await run();
   assert.equal(result.stopped, "deadline");
   assert.equal(named("observeHealth").length, 0);
@@ -391,4 +402,125 @@ test("the run never cancels, retracts or looks up by key", async () => {
   await run();
   assert.equal(named("cancel").length, 0);
   assert.equal(named("lookupByRequestKey").length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Round-1 review: what the first version let through
+// ---------------------------------------------------------------------------
+
+test("an outcome writer that answers without writing fails the run", async () => {
+  // The first version counted `{ recorded: false }` as done: a post left
+  // `publishing`, an autonomous account left unpaused, and a run reported fine.
+  for (const [publish, outcome] of [
+    [undefined, "published"],
+    [{ outcome: "failed", errorCode: "provider_rejected_content" }, "failed"],
+    [{ outcome: "outcome_unknown", errorCode: "provider_timeout" }, "outcome_unknown"],
+  ] as const) {
+    const { run } = world({
+      publish: publish as MarketingPublishResult | undefined,
+      recordAnswer: { recorded: false, reason: "outcome_conflict" },
+    });
+    await assert.rejects(
+      run(),
+      (error: unknown) =>
+        error instanceof MarketingPublisherOutcomeNotRecordedError &&
+        error.outcome === outcome &&
+        error.reason === "outcome_conflict",
+    );
+  }
+});
+
+test("a dispatch whose worker died is answered outcome_unknown before anything new", async () => {
+  const { run, calls, named } = world({
+    stale: [{ id: "p0", requestKey: "k0", historyVersion: 7 }],
+  });
+  const result = await run();
+  assert.equal(result.recoveredUnknown, 1);
+  assert.deepEqual(named("recordOutcomeUnknown")[0]?.input, {
+    id: "p0",
+    requestKey: "k0",
+    expectedHistoryVersion: 7,
+    errorCode: "lease_expired_after_dispatch",
+  });
+  // Before the first claim, and with nothing sent and nothing looked up.
+  const names = calls.map((call) => call.name);
+  assert.ok(names.indexOf("recordOutcomeUnknown") < names.indexOf("claim"));
+  assert.equal(named("lookupByRequestKey").length, 0);
+  // Asked with the database clock and a bound.
+  assert.deepEqual(named("listPublishingPastLease")[0]?.input, { before: NOW, limit: 10 });
+});
+
+test("a dead dispatch that cannot be recorded stops the run", async () => {
+  const { run, named } = world({
+    stale: [{ id: "p0", requestKey: "k0", historyVersion: 7 }],
+    recordAnswer: { recorded: false, reason: "post_not_publishing" },
+  });
+  await assert.rejects(run(), MarketingPublisherOutcomeNotRecordedError);
+  assert.equal(named("claim").length, 0);
+});
+
+test("no room for even one recovery write probes and claims nothing", async () => {
+  const late = new Date(DEADLINE.getTime() - MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS + 1);
+  const { run, named } = world({ clock: [late] });
+  const result = await run();
+  assert.equal(result.stopped, "deadline");
+  assert.equal(named("listPublishingPastLease").length, 0);
+  assert.equal(named("claim").length, 0);
+});
+
+test("the room is the call budget plus an outcome write at its bound", () => {
+  assert.equal(
+    MARKETING_PUBLISHER_DISPATCH_ROOM_MS,
+    30_000 + MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS,
+  );
+  assert.ok(MARKETING_PUBLISHER_DISPATCH_ROOM_MS < DEADLINE.getTime() - NOW.getTime());
+});
+
+test("a dispatch that commits too late is a confirmed failure, and nothing is sent", async () => {
+  // The room was there when the dispatch checked; its own write took the rest.
+  const late = new Date(DEADLINE.getTime() - MARKETING_PUBLISHER_DISPATCH_ROOM_MS + 1);
+  const { run, named } = world({ clock: [NOW, NOW, late] });
+  const result = await run();
+  assert.equal(named("publish").length, 0);
+  assert.equal(result.failed, 1);
+  assert.equal(
+    (named("recordFailed")[0]?.input as { errorCode: string }).errorCode,
+    "run_deadline_before_call",
+  );
+});
+
+test("accounts are taken in a different order from one run period to the next", async () => {
+  const channels = [
+    { id: "c1", connectionGeneration: 1, externalAccountRef: "a1" },
+    { id: "c2", connectionGeneration: 1, externalAccountRef: "a2" },
+    { id: "c3", connectionGeneration: 1, externalAccountRef: "a3" },
+  ];
+  const firstClaimed = async (deadlineAt: Date) => {
+    await runMarketingPublisherBatch(
+      {
+        operations: {
+          listChannels: async () => channels,
+          listPublishingPastLease: async () => [],
+          listAwaitingVerification: async () => [],
+          claim: async (input: { channelId: string }) => {
+            order.push(input.channelId);
+            return { claimed: false, reason: "nothing_due" };
+          },
+        } as unknown as MarketingPublisherBatchDeps["operations"],
+        adapter: {
+          observeHealth: async () => ({ capability: "publish", healthy: true, reason: null }),
+        } as unknown as MarketingPublishAdapter,
+        databaseNow: async () => new Date(deadlineAt.getTime() - 4 * 60 * 1000),
+        heartbeat: async () => true,
+      },
+      { runId: "r", deadlineAt },
+    );
+    return order.splice(0)[0];
+  };
+  const order: string[] = [];
+  const starts = new Set<string | undefined>();
+  for (let period = 0; period < 3; period += 1) {
+    starts.add(await firstClaimed(new Date(DEADLINE.getTime() + period * 5 * 60 * 1000)));
+  }
+  assert.equal(starts.size, 3, "each of three consecutive periods starts on a different account");
 });

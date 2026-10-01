@@ -30,6 +30,7 @@ import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
 import {
   claimDueMarketingPost,
   listMarketingPostsAwaitingVerification,
+  listMarketingPostsPublishingPastLease,
   listPublishingMarketingChannels,
   recordMarketingPostFailed,
   recordMarketingPostOutcomeUnknown,
@@ -667,6 +668,11 @@ export const marketingPublisherOperations = (client: PrismaClient) => ({
   listChannels: () =>
     runBoundedMarketingTransaction(client, (tx) => listPublishingMarketingChannels(tx)),
 
+  listPublishingPastLease: (input: { readonly before: Date; readonly limit: number }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      listMarketingPostsPublishingPastLease(tx, input),
+    ),
+
   listAwaitingVerification: (limit: number) =>
     runBoundedMarketingTransaction(client, (tx) =>
       listMarketingPostsAwaitingVerification(tx, limit),
@@ -711,8 +717,8 @@ export const marketingPublisherOperations = (client: PrismaClient) => ({
         expectedHistoryVersion: input.expectedHistoryVersion,
         runDeadlineAt: input.runDeadlineAt,
         callBudgetMs: input.callBudgetMs,
-        resolveAdmission: (database, channel) =>
-          resolvePublishAdmission(database, channel, input.health),
+        resolveAdmission: (database, channel, postMode) =>
+          resolvePublishAdmission(database, channel, input.health, postMode),
       }),
     ),
 

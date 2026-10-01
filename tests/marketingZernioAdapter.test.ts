@@ -20,7 +20,10 @@ import { zernioPublishAdapter, type ZernioAdapterPorts } from "@/lib/zernioPubli
 import type { MarketingPublishRequest } from "@/lib/marketingPublishAdapter";
 
 const API_KEY = "sk_" + "a".repeat(64);
-const BASE = "https://api.zernio.test";
+// Shaped like the real origin, path prefix included. The fixture used to be a
+// bare origin, which had no `/api` to lose -- so the URL bug that dropped it
+// passed every test here.
+const BASE = "https://zernio.test/api";
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown };
 
@@ -70,7 +73,7 @@ const request: MarketingPublishRequest = {
 
 const created = (overrides: Record<string, unknown> = {}) => ({
   post: {
-    id: "zpost_1",
+    _id: "zpost_1",
     status: "published",
     platforms: [
       {
@@ -93,14 +96,100 @@ test("a 201 with an identified object is published", async () => {
   const result = await adapter.publish(request);
   assert.deepEqual(result, {
     outcome: "published",
-    externalPostId: "urn:li:share:7100",
+    // Zernio's id, which is what a later status query must name.
+    externalPostId: "zpost_1",
     externalUrl: "https://www.linkedin.com/feed/update/urn:li:share:7100",
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.method, "POST");
-  assert.match(calls[0]?.url ?? "", /\/v1\/posts$/);
+  // The whole URL and the whole body, not their ends: checking a suffix is how
+  // a lost `/api` prefix and a missing `publishNow` both passed.
+  assert.equal(calls[0]?.url, "https://zernio.test/api/v1/posts");
+  assert.deepEqual(calls[0]?.body, {
+    content: request.renderedText,
+    platforms: [{ platform: "linkedin", accountId: "acct_9" }],
+    publishNow: true,
+    metadata: { requestKey: request.requestKey, locale: "en" },
+  });
   // The post's own logical key is the idempotency key end to end.
   assert.equal(calls[0]?.headers["x-request-id"], request.requestKey);
+  assert.equal(calls[0]?.headers["Idempotency-Key"], request.requestKey);
+});
+
+test("a 201 whose post or platform is not published is not proof", async () => {
+  for (const body of [
+    created({ status: "publishing" }),
+    created({ status: "draft" }),
+    created({
+      platforms: [
+        {
+          platform: "linkedin",
+          status: "failed",
+          platformPostId: "urn:li:share:7100",
+          platformPostUrl: "https://www.linkedin.com/feed/update/urn:li:share:7100",
+        },
+      ],
+    }),
+  ]) {
+    const { adapter } = adapterWith([{ status: 201, body }]);
+    assert.deepEqual(await adapter.publish(request), {
+      outcome: "outcome_unknown",
+      errorCode: "provider_unreadable_response",
+    });
+  }
+});
+
+test("the post id falls back to `id` when `_id` is absent, as the S0 probe reads it", async () => {
+  const body = created();
+  const { _id: _ignored, ...rest } = body.post;
+  void _ignored;
+  const { adapter } = adapterWith([{ status: 201, body: { post: { ...rest, id: "zpost_2" } } }]);
+  const result = await adapter.publish(request);
+  assert.equal(result.outcome === "published" ? result.externalPostId : null, "zpost_2");
+});
+
+// ---------------------------------------------------------------------------
+// observeHealth
+// ---------------------------------------------------------------------------
+
+const healthy = {
+  status: "healthy",
+  tokenStatus: { valid: true },
+  permissions: { canPost: true },
+};
+
+test("health asks the account-health endpoint and needs all three answers", async () => {
+  const { adapter, calls } = adapterWith([{ status: 200, body: healthy }]);
+  assert.deepEqual(await adapter.observeHealth("acct_9", "publish"), {
+    capability: "publish",
+    healthy: true,
+    reason: null,
+  });
+  assert.equal(calls[0]?.url, "https://zernio.test/api/v1/accounts/acct_9/health");
+  assert.equal(calls[0]?.method, "GET");
+
+  for (const body of [
+    { ...healthy, status: "warning" },
+    { ...healthy, tokenStatus: { valid: false } },
+    { ...healthy, permissions: { canPost: false } },
+    { status: "healthy" },
+    null,
+  ]) {
+    const { adapter: other } = adapterWith([{ status: 200, body }]);
+    const answer = await other.observeHealth("acct_9", "publish");
+    assert.equal(answer.healthy, false, JSON.stringify(body));
+  }
+});
+
+test("a 200 from the health endpoint does not make comments healthy", async () => {
+  // Nothing in the response answers for comments, so a post permission is not
+  // stretched to cover them.
+  const { adapter } = adapterWith([{ status: 200, body: healthy }]);
+  assert.deepEqual(await adapter.observeHealth("acct_9", "comments"), {
+    capability: "comments",
+    healthy: false,
+    reason: "capability_not_reported",
+  });
 });
 
 test("a 207 is a 2xx and is not a success", async () => {

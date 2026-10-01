@@ -148,9 +148,38 @@ type ZernioPlatformResult = {
 };
 
 type ZernioPost = {
+  _id?: string;
   id?: string;
   status?: string;
   platforms?: ZernioPlatformResult[];
+};
+
+/**
+ * Zernio's own id for a post, which is what its API is asked about.
+ *
+ * `_id` first, then `id` -- the order the S0 probe reads them in. This, and not
+ * the platform's `platformPostId`, is what `GET /v1/posts/{postId}` and
+ * `POST /v1/posts/{postId}/unpublish` take. The adapter used to return the
+ * platform's id as `externalPostId`, and every later status query then asked
+ * Zernio about an id it had never issued.
+ */
+const zernioPostId = (post: ZernioPost | null | undefined): string | null => {
+  const value = post?._id ?? post?.id;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+};
+
+/**
+ * Join the API origin and a path without losing the origin's path.
+ *
+ * `new URL("/v1/posts", "https://zernio.com/api")` is
+ * `https://zernio.com/v1/posts`: an absolute path replaces the base's path, so
+ * the `/api` prefix vanished and every call went to the wrong place. The test
+ * fixture had no prefix to lose, which is how it hid.
+ */
+const joinUrl = (baseUrl: string, path: string): URL => {
+  const base = new URL(baseUrl);
+  const prefix = base.pathname.replace(/\/+$/, "");
+  return new URL(`${prefix}${path}`, base.origin);
 };
 
 const httpsUrl = (value: unknown): string | null => {
@@ -176,15 +205,22 @@ export const zernioPublishAdapter = (
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ports.callBudgetMs);
     try {
-      const response = await doFetch(new URL(path, ports.baseUrl), {
+      const response = await doFetch(joinUrl(ports.baseUrl, path), {
         method: init.method,
         headers: {
           // The only place the key appears. It is not logged and not returned.
           Authorization: `Bearer ${ports.apiKey}`,
           "Content-Type": "application/json",
           // Zernio's idempotency for POST /v1/posts, and the reason the post's
-          // own logicalKey is the request key end to end.
-          ...(init.requestKey ? { "x-request-id": init.requestKey } : {}),
+          // own logicalKey is the request key end to end. Both headers: the S0
+          // record names `x-request-id` (about five minutes); the current
+          // documentation also names `Idempotency-Key` (24 hours, taking
+          // precedence). Neither is a licence to retry -- amendment 4 still
+          // holds and nothing here re-sends -- but a key the provider honours
+          // for longer is a narrower window for an accidental second post.
+          ...(init.requestKey
+            ? { "x-request-id": init.requestKey, "Idempotency-Key": init.requestKey }
+            : {}),
         },
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controller.signal,
@@ -235,16 +271,39 @@ export const zernioPublishAdapter = (
       externalAccountRef: string,
       capability: MarketingHealthCapability,
     ): Promise<MarketingAdapterHealth> {
-      // Cheap and frequent by contract, so it reads one account rather than
-      // listing posts.
+      // `GET /v1/accounts/{accountId}/health`, not the account itself: an
+      // account row answers 200 whether or not its token is still valid or its
+      // posting scope still granted, and the health endpoint is the one that
+      // says. The earlier version read the account and called every 200
+      // healthy.
       const result = await call(
-        `/v1/accounts/${encodeURIComponent(externalAccountRef)}`,
+        `/v1/accounts/${encodeURIComponent(externalAccountRef)}/health`,
         { method: "GET" },
       );
       if (result.kind === "unreachable") {
         return { capability, healthy: false, reason: result.code };
       }
-      if (result.status === 200) return { capability, healthy: true, reason: null };
+      if (result.status === 200) {
+        // Only the publish capability has a field that answers it. Comments
+        // have none in this response, so they are not reported healthy on the
+        // strength of a post permission.
+        if (capability !== "publish") {
+          return { capability, healthy: false, reason: "capability_not_reported" };
+        }
+        const body = result.body as {
+          status?: unknown;
+          tokenStatus?: { valid?: unknown } | null;
+          permissions?: { canPost?: unknown } | null;
+        } | null;
+        // All three, each exactly: a missing field is not a yes.
+        const healthy =
+          body?.status === "healthy" &&
+          body.tokenStatus?.valid === true &&
+          body.permissions?.canPost === true;
+        return healthy
+          ? { capability, healthy: true, reason: null }
+          : { capability, healthy: false, reason: "provider_reports_unhealthy" };
+      }
       // A closed code, never the provider's sentence: a 401 says the token is
       // wrong, and the token is not part of saying so.
       return { capability, healthy: false, reason: rejectionCode(result.status) };
@@ -272,6 +331,11 @@ export const zernioPublishAdapter = (
         body: {
           content: request.renderedText,
           platforms: [{ platform, accountId: request.externalAccountRef }],
+          // Without this, or a `scheduledFor`, Zernio creates a draft (S0
+          // record, "예약"): a 201 that publishes nothing. With it, publishing
+          // happens in this request and the response carries each platform's
+          // result.
+          publishNow: true,
           ...(mediaItems.length > 0 ? { mediaItems } : {}),
           // Stored and returned on read and webhook. Recorded so a person
           // reconciling by hand can find our key -- **not** so this adapter can
@@ -314,8 +378,16 @@ export const zernioPublishAdapter = (
 
       const post = (result.body as { post?: ZernioPost } | null)?.post ?? (result.body as ZernioPost | null);
       const entry = post?.platforms?.find((candidate) => candidate.platform === platform);
-      const externalPostId = entry?.platformPostId;
+      // Zernio's id, because that is what a later status query or unpublish
+      // must name; the platform's own id is not one Zernio's API takes.
+      const externalPostId = zernioPostId(post);
       const externalUrl = httpsUrl(entry?.platformPostUrl ?? entry?.publishedUrl);
+      // **A 201 is a creation, and published is a status.** Both the post and
+      // this platform's entry must say `published`; a 201 carrying any other
+      // status is not proof, and not a confirmed failure either.
+      if (post?.status !== "published" || entry?.status !== "published") {
+        return { outcome: "outcome_unknown", errorCode: "provider_unreadable_response" };
+      }
       if (!externalPostId || !externalUrl) {
         // Created, by the status code, and the object it created is not
         // identified. We cannot say published without an id and a URL, and we

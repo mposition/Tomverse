@@ -28,6 +28,7 @@ import { runBoundedMarketingTransaction } from "@/lib/marketingPublisherRun";
 import { MARKETING_PUBLISHER_MAX_STATEMENTS } from "@/lib/marketingPublisherRunCore";
 import {
   claimDueMarketingPost,
+  listMarketingPostsPublishingPastLease,
   recordMarketingPostFailed,
   recordMarketingPostOutcomeUnknown,
   recordMarketingPostPolledPublished,
@@ -70,8 +71,22 @@ const SETUP = [/server_version_num/, /current_setting\('transaction_timeout'\)/,
  * still counted rather than missed. The wrapper's own setup statements are not
  * charged to the work, as the wrapper does not charge them either.
  */
-const countingClient = (postStatus: string) => {
+type Shape = {
+  /** The post's mode, which decides the dispatch's longest path. */
+  mode?: "approval" | "autonomous";
+  /** Answers for successive `marketingPost.updateMany` calls; then 1. */
+  postUpdates?: number[];
+};
+
+const PROVENANCE = {
+  admissionCodeDigest: "code-digest-1",
+  configGeneration: 3,
+  deploymentId: "deploy-1",
+};
+
+const countingClient = (postStatus: string, shape: Shape = {}) => {
   const calls: string[] = [];
+  const postUpdates = [...(shape.postUpdates ?? [])];
   const raw = async (query: unknown) => {
     const sql = statementText(query);
     if (sql.includes("server_version_num")) return [{ num: 170002 }];
@@ -93,6 +108,11 @@ const countingClient = (postStatus: string) => {
           historyVersion: 4,
           publishAttempt: 0,
           envelope: ENVELOPE,
+          mode: shape.mode ?? "approval",
+          envelopeDigest: "digest-1",
+          approvedDigest: "digest-1",
+          approvedAt: new Date(NOW.getTime() - 24 * 60 * 60 * 1000),
+          approvalExpiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
         },
       ];
     }
@@ -132,9 +152,17 @@ const countingClient = (postStatus: string) => {
       findUnique: () => ({ id: "c1" }),
       updateMany: () => ({ count: 1 }),
     },
-    marketingPost: { updateMany: () => ({ count: 1 }) },
+    marketingPost: {
+      updateMany: () => ({ count: postUpdates.length > 0 ? postUpdates.shift() : 1 }),
+      findMany: () => [],
+    },
     adminAuditLog: {
-      findFirst: () => null,
+      // The chain's own tail lookup answers null; the dispatch reading back an
+      // autonomous post's admission answers with the provenance it compares.
+      findFirst: (args?: { where?: { action?: string } }) =>
+        args?.where?.action === "marketing_post.autonomous_scheduled"
+          ? { metadata: PROVENANCE }
+          : null,
       create: ({ data }: { data: unknown }) => data,
     },
   };
@@ -186,26 +214,28 @@ const countingClient = (postStatus: string) => {
 const realResolverAdmitting = async (
   database: MarketingTransaction,
   channel: MarketingAdmissionChannel,
+  postMode?: "approval" | "autonomous",
 ) => {
   // The resolver the publisher's claim and dispatch actually use, including its
   // own read of the database clock.
-  await resolvePublishAdmission(database, channel, null);
-  return { publish: true };
+  const answer = await resolvePublishAdmission(database, channel, null, postMode);
+  return { ...answer, ...PROVENANCE, publish: true };
 };
 
 const measure = async (
   postStatus: string,
   work: (tx: MarketingTransaction) => Promise<unknown>,
+  shape: Shape = {},
 ) => {
-  const { client, calls } = countingClient(postStatus);
+  const { client, calls } = countingClient(postStatus, shape);
   const result = (await runBoundedMarketingTransaction(client, (tx) =>
     work(tx as MarketingTransaction),
   )) as Record<string, unknown>;
   // The count is only the longest path if the operation took it. A refusal is a
   // shorter path, and pinning its count would pin the wrong number.
-  const succeeded = ["claimed", "released", "started", "recorded"].some(
-    (key) => result[key] === true,
-  );
+  const succeeded =
+    Array.isArray(result) ||
+    ["claimed", "released", "started", "recorded"].some((key) => result[key] === true);
   assert.ok(succeeded, `the operation took a refusal path: ${JSON.stringify(result)}`);
   return { calls, result };
 };
@@ -218,8 +248,48 @@ const OPERATIONS: ReadonlyArray<{
   name: string;
   expected: number;
   postStatus: string;
+  shape?: Shape;
   run: (tx: MarketingTransaction) => Promise<unknown>;
 }> = [
+  {
+    // The longest claim: the post was held by a worker whose lease ran out, so
+    // the first conditional write finds nothing and the reclaim writes it. The
+    // round-1 review found this path uncounted.
+    name: "claim, reclaiming an expired lease",
+    expected: 13,
+    postStatus: "scheduled",
+    shape: { postUpdates: [0, 1] },
+    run: (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: "c1",
+        claimToken: "t",
+        resolveAdmission: realResolverAdmitting,
+      }),
+  },
+  {
+    // The longest dispatch: an autonomous post, which also reads back the
+    // admission it was scheduled under.
+    name: "dispatch, autonomous",
+    expected: 12,
+    postStatus: "scheduled",
+    shape: { mode: "autonomous" },
+    run: (tx) =>
+      startMarketingPostDispatch(tx, {
+        id: "p1",
+        claimToken: "t",
+        expectedLeaseUntil: LEASE,
+        expectedHistoryVersion: 4,
+        runDeadlineAt: new Date("2026-09-23T09:04:00.000Z"),
+        callBudgetMs: 30_000,
+        resolveAdmission: realResolverAdmitting,
+      }),
+  },
+  {
+    name: "list dead dispatches",
+    expected: 1,
+    postStatus: "publishing",
+    run: (tx) => listMarketingPostsPublishingPastLease(tx, { before: NOW, limit: 10 }),
+  },
   {
     name: "claim",
     expected: 12,
@@ -336,7 +406,7 @@ const OPERATIONS: ReadonlyArray<{
 
 for (const operation of OPERATIONS) {
   test(`${operation.name} issues the measured number of statements`, async () => {
-    const { calls } = await measure(operation.postStatus, operation.run);
+    const { calls } = await measure(operation.postStatus, operation.run, operation.shape);
     assert.equal(
       calls.length,
       operation.expected,

@@ -93,7 +93,8 @@ test("a channel in any other mode is refused", async () => {
   for (const status of ["paused", "disconnected", "connect_pending"]) {
     const { database: db } = database();
     const answer = await resolvePublishAdmission(db, channel(status), health(1_000));
-    assert.deepEqual(answer, { publish: false, reasons: ["input_invalid:channelMode"] });
+    assert.equal(answer.publish, false);
+    assert.deepEqual(answer.reasons, ["input_invalid:channelMode"]);
   }
 });
 
@@ -130,4 +131,40 @@ test("a clock that cannot be read refuses without reading anything else", async 
   const answer = await resolvePublishAdmission(db, channel("approval_mode"), health(1_000));
   assert.deepEqual(answer, { publish: false, reasons: ["input_unreadable:adapterHealthy"] });
   assert.equal(seen.length, 1);
+});
+
+test("the post's own mode picks the question at dispatch", async () => {
+  // An approved post on an autonomous account is judged as an approved post;
+  // an autonomous post on an approval account is asked the autonomy question,
+  // which refuses a channel that is not autonomous.
+  const approved = await resolvePublishAdmission(
+    database().database,
+    channel("autonomous_mode"),
+    health(1_000),
+    "approval",
+  );
+  assert.equal(
+    approved.reasons.some((reason) => reason.includes("commentsMonitorHealthy")),
+    false,
+  );
+  const autonomous = await resolvePublishAdmission(
+    database().database,
+    channel("approval_mode"),
+    health(1_000),
+    "autonomous",
+  );
+  assert.ok(autonomous.reasons.includes("input_invalid:channelMode" as never));
+  assert.ok(autonomous.reasons.includes("input_unreadable:commentsMonitorHealthy" as never));
+});
+
+test("the answer carries the clock it was judged at and the provenance to compare", async () => {
+  const answer = await resolvePublishAdmission(
+    database().database,
+    channel("autonomous_mode"),
+    health(1_000),
+    "autonomous",
+  );
+  assert.equal(answer.checkedAt?.getTime(), NOW.getTime());
+  assert.equal(typeof answer.admissionCodeDigest, "string");
+  assert.equal(answer.configGeneration, 2);
 });
