@@ -3,18 +3,20 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
 
-const databaseUrl = process.env.AMUX_V4_SCHEMA_TEST_DATABASE_URL;
+const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
   if (!databaseUrl) return false;
   const url = new URL(databaseUrl);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  const isolationMarker = `${databaseName}_${url.searchParams.get("schema") || ""}`;
   return (
     ["127.0.0.1", "localhost"].includes(url.hostname) &&
-    url.pathname === "/amux_v4_test"
+    /(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(isolationMarker)
   );
 })();
 
 test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes", {
-  skip: allowed ? undefined : "requires a loopback amux_v4_test database",
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
 }, async () => {
   const client = new pg.Client({ connectionString: databaseUrl });
   const ids = {
@@ -81,21 +83,26 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await client.query(insertIdea, [ids.idea, null, null, null, null, null]);
 
     const insertChunk = `INSERT INTO public."AmuxIdeaAnalysisChunk"
-      ("ideaId", "chunkIndex", "state", "attempt", "leaseGeneration",
+      ("ideaId", "actorUserId", "chunkIndex", "state", "attempt", "leaseGeneration",
        "coveredStartOrdinal", "coveredEndOrdinal", "remainingStartOrdinal",
        "remainingEndOrdinal", "updatedAt")
-      VALUES ($1, 0, 'pending', 0, 0, $2, $3, $4, $5, CURRENT_TIMESTAMP)`;
+      VALUES ($1, $2, 0, 'pending', 0, 0, $3, $4, $5, $6, CURRENT_TIMESTAMP)`;
     await expectRejected(
       insertChunk,
-      [ids.idea, 5, null, null, null],
+      [ids.idea, "synthetic-owner", 5, null, null, null],
       "AmuxIdeaAnalysisChunk_covered_ordinals_check",
     );
     await expectRejected(
       insertChunk,
-      [ids.idea, null, null, null, 5],
+      [ids.idea, "synthetic-owner", null, null, null, 5],
       "AmuxIdeaAnalysisChunk_remaining_ordinals_check",
     );
-    await client.query(insertChunk, [ids.idea, null, null, null, null]);
+    await expectRejected(
+      insertChunk,
+      [ids.idea, "not-the-owner", null, null, null, null],
+      "AmuxIdeaAnalysisChunk_ideaId_actorUserId_fkey",
+    );
+    await client.query(insertChunk, [ids.idea, "synthetic-owner", null, null, null, null]);
 
     const insertPreview = `INSERT INTO public."AmuxIdeaTransferPreview"
       ("id", "ideaId", "chunkIndex", "attempt", "state", "modelId",

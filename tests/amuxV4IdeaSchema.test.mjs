@@ -33,6 +33,7 @@ test("v4 digests have key ids and undecided draft purge has no default", () => {
 
 test("v4 source, confirmation and chunk boundaries have database relations", () => {
   assert.match(sql, /FOREIGN KEY \("ideaId", "actorUserId"\) REFERENCES "AmuxIdeaSubmission"\("id", "actorUserId"\)/);
+  assert.match(sql, /"AmuxIdeaAnalysisChunk_ideaId_actorUserId_fkey"\s+FOREIGN KEY \("ideaId", "actorUserId"\) REFERENCES "AmuxIdeaSubmission"\("id", "actorUserId"\)/);
   assert.match(sql, /FOREIGN KEY \("ideaId", "confirmedByUserId"\)/);
   assert.match(sql, /FOREIGN KEY \("sourceScopeApprovalId", "ideaId"\)/);
   assert.match(sql, /FOREIGN KEY \("ideaId", "chunkIndex"\)\s+REFERENCES "AmuxIdeaAnalysisChunk"/);

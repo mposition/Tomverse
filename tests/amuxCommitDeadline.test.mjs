@@ -52,6 +52,10 @@ const boundary = read("lib/amux/dbBoundary.ts");
 const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // Orchestration policy version 20: the orchestrator halt tables.
   "20260930120000_amux_orchestrator_halt",
+  // Owner-approved AMUX intake v4 and orchestration v22: inert additive
+  // schema. This set orders migrations; it does not exempt their own guards.
+  "20261001102000_amux_v4_idea_schema",
+  "20261001102100_amux_v4_portfolio_schema",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {

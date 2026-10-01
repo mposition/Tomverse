@@ -6818,6 +6818,7 @@ model AmuxIdeaTransferPreview {
 /// never source paths or excerpts, are stored outside encrypted payloads.
 model AmuxIdeaAnalysisChunk {
   ideaId                  String
+  actorUserId             String
   chunkIndex              Int
   state                   String
   attempt                 Int
@@ -6845,7 +6846,7 @@ model AmuxIdeaAnalysisChunk {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
-  idea           AmuxIdeaSubmission        @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea           AmuxIdeaSubmission        @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   currentPreview AmuxIdeaTransferPreview? @relation("AmuxCurrentChunkPreview", fields: [currentPreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   previews       AmuxIdeaTransferPreview[] @relation("AmuxChunkPreviews")
 

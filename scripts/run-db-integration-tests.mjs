@@ -251,6 +251,9 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // AMUX v4 inert schema still has privacy ownership, hierarchy and source
+    // integrity invariants. Exercise its database guards in the CI lane.
+    "tests/integration/amuxV4Schema.db.test.mjs",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or

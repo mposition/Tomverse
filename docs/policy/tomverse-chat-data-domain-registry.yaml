@@ -2,7 +2,7 @@ schemaVersion: 4
 
 metadata:
   status: draft
-  lastUpdated: "2026-08-27"
+  lastUpdated: "2026-10-01"
   owner: security-privacy
   validatorCommand: npm run check:data-domain-registry
   purpose: >-
@@ -1253,6 +1253,109 @@ domains:
       AmuxOrchestratorWriteReceipt have no user column and are not
       registered, as with AmuxRecommendationAutoUnknown and
       AmuxRecommendationAutoCostEntry.
+
+  # AMUX v4 tables are inert schema only. The operational content clocks in
+  # amux-intake v5-v7 do not answer account deletion or unified export. Keep
+  # both axes unverified until those paths are implemented and reviewed.
+  - domain: amuxIdeaSubmission
+    prismaModel: AmuxIdeaSubmission
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      actorUserId names the operator. Encrypted raw idea text may contain a
+      third party's data even though there is no typed customer subject link.
+      The approved 7-day analysis and 24-hour body purge clocks are separate
+      from the unresolved account-deletion and export decisions. Child chunks
+      have their own registered actor link and privacy decision; no v4 live
+      input is enabled.
+
+  - domain: amuxIdeaAnalysisChunk
+    prismaModel: AmuxIdeaAnalysisChunk
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 analysis-chunk deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      actorUserId is constrained to the submission owner by a composite
+      foreign key. Encrypted draft and provider freeform text may include
+      third-party data. Approved body purge clocks do not resolve account
+      deletion or unified export. ON UPDATE RESTRICT means an account-deletion
+      implementation must decide child-first purge or another safe treatment;
+      live analysis remains disabled until that gate is resolved.
+
+  - domain: amuxIdeaSourceScopeApproval
+    prismaModel: AmuxIdeaSourceScopeApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 source-scope deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The actor is the approving operator. Encrypted repository, PR and path
+      scope can name private material. Account-deletion and export treatment
+      remain unverified; the source collector and approval writer are dark.
+
+  - domain: amuxIdeaTransferPreview
+    prismaModel: AmuxIdeaTransferPreview
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 transfer-preview deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      confirmedByUserId, when present, must match the submission owner through
+      a composite foreign key. The encrypted model input can contain private
+      source excerpts or third-party data, with no typed customer link.
+      The approved 24-hour content purge does not settle account deletion or
+      unified export. No transfer writer or live model call is enabled.
+
+  - domain: amuxPortfolioNode
+    prismaModel: AmuxPortfolioNode
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 hierarchy retention and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The approving actor is an operator. An encrypted node title or summary
+      may derive from private idea text. Its operational retention and the
+      account-deletion/export treatment are still open; live node writes stay
+      disabled.
 
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft

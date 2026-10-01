@@ -19,12 +19,10 @@
 //   excluded          nothing in the row is the user's data.
 //   unverified        nobody has decided yet. Blocks PRIVACY-02 rather than
 //                     being read as safe, and must be zero at the release gate.
-//                     It is zero today; the state stays because the next table
-//                     somebody adds starts there.
+//                     AMUX v4 actor-linked domains intentionally remain in
+//                     this state until deletion and export gates are approved.
 //
-// Of the 33 registered domains, 8 are wholly the user's own data, 23 are
-// projections and 2 hold nothing of theirs. That the filtered case is the
-// common one is the finding rather than a drafting accident: a table recording
+// The filtered case is common rather than a drafting accident: a table recording
 // something a person did almost always also records what it cost Tomverse,
 // which idempotency key deduplicated it, or which digest reconciles it.
 //
@@ -407,6 +405,36 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "Operator evidence for one orchestrator halt, not customer data. The cleared-by id is the administrator who cleared the halt and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed reason code and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxIdeaSubmission",
+    publicName: "amux_idea_submissions",
+    prismaModel: "AmuxIdeaSubmission",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaAnalysisChunk",
+    publicName: "amux_idea_analysis_chunks",
+    prismaModel: "AmuxIdeaAnalysisChunk",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaSourceScopeApproval",
+    publicName: "amux_idea_source_scope_approvals",
+    prismaModel: "AmuxIdeaSourceScopeApproval",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaTransferPreview",
+    publicName: "amux_idea_transfer_previews",
+    prismaModel: "AmuxIdeaTransferPreview",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioNode",
+    publicName: "amux_portfolio_nodes",
+    prismaModel: "AmuxPortfolioNode",
+    state: "unverified",
   },
   {
     domain: "amuxIntakeDraft",

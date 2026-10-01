@@ -214,6 +214,7 @@ ALTER TABLE "AmuxIdeaTransferPreview"
 
 CREATE TABLE "AmuxIdeaAnalysisChunk" (
     "ideaId" TEXT NOT NULL,
+    "actorUserId" TEXT NOT NULL,
     "chunkIndex" INTEGER NOT NULL,
     "state" TEXT NOT NULL,
     "attempt" INTEGER NOT NULL,
@@ -300,8 +301,8 @@ CREATE INDEX "AmuxIdeaAnalysisChunk_freeformPurgeAfter_freeformPurgedAt_idx"
     ON "AmuxIdeaAnalysisChunk"("freeformPurgeAfter", "freeformPurgedAt");
 
 ALTER TABLE "AmuxIdeaAnalysisChunk"
-    ADD CONSTRAINT "AmuxIdeaAnalysisChunk_ideaId_fkey"
-    FOREIGN KEY ("ideaId") REFERENCES "AmuxIdeaSubmission"("id")
+    ADD CONSTRAINT "AmuxIdeaAnalysisChunk_ideaId_actorUserId_fkey"
+    FOREIGN KEY ("ideaId", "actorUserId") REFERENCES "AmuxIdeaSubmission"("id", "actorUserId")
     ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT "AmuxIdeaAnalysisChunk_currentPreviewId_ideaId_chunkIndex_fkey"
     FOREIGN KEY ("currentPreviewId", "ideaId", "chunkIndex")
