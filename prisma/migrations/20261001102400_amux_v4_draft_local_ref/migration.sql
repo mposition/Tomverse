@@ -12,7 +12,7 @@ ALTER TABLE "AmuxIdeaDraftUnit"
     ADD CONSTRAINT "AmuxIdeaDraftUnit_local_ref_shape_check" CHECK (
         "localRef" IS NULL OR (
             length("localRef") <= 128 AND
-            "localRef" ~ '^c(0|[1-9][0-9]*):(node|card|evidence)-(0|[1-9][0-9]*)$' AND
+            "localRef" ~ '^c(0|[1-9][0-9]*):(node|card|evidence)-(0|[1-9][0-9]{0,3})$' AND
             split_part("localRef", ':', 1) = 'c' || "chunkIndex"::text AND
             split_part(split_part("localRef", ':', 2), '-', 1) = "unitKind"
         )

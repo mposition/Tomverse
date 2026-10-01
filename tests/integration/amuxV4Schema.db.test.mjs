@@ -233,6 +233,15 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     await expectRejected(
       insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-10000"],
+      "AmuxIdeaDraftUnit_local_ref_shape_check",
+    );
+    await client.query(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 3, title, digest, "c1:card-9999"],
+    );
+    await expectRejected(
+      insertUnit,
       [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, `c1:card-${"9".repeat(122)}`],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );

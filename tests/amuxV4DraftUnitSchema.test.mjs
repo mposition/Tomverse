@@ -46,6 +46,7 @@ test("v4 draft local references are idea-unique, kind- and chunk-bound, and immu
   assert.match(localRefMigration, /ADD COLUMN "localRef" TEXT/);
   assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_shape_check/);
   assert.match(localRefMigration, /length\("localRef"\) <= 128/);
+  assert.match(localRefMigration, /\[0-9\]\{0,3\}/);
   assert.match(localRefMigration, /split_part\("localRef", ':', 1\) = 'c' \|\| "chunkIndex"::text/);
   assert.match(localRefMigration, /split_part\(split_part\("localRef", ':', 2\), '-', 1\) = "unitKind"/);
   assert.match(localRefMigration, /UNIQUE INDEX "AmuxIdeaDraftUnit_ideaId_localRef_key"/);
