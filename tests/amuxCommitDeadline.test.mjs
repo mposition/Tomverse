@@ -58,6 +58,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001102100_amux_v4_portfolio_schema",
   // AMUX intake v4: additive request identity fence for dark idea submission.
   "20261001102200_amux_v4_idea_submission_request_id",
+  // AMUX intake v7: separately purgeable normalized draft units, still dark.
+  "20261001102300_amux_v4_draft_units",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {

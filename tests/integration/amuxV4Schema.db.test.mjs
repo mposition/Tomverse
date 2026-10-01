@@ -63,7 +63,8 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
   await client.connect();
   try {
     await client.query("BEGIN");
-    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '10s'");
+    await client.query("SET LOCAL TIME ZONE 'UTC'");
 
     const insertIdea = `INSERT INTO public."AmuxIdeaSubmission"
       ("id", "requestId", "actorUserId", "state", "rawCiphertext", "rawKeyId", "rawKeyVersion",
@@ -148,6 +149,164 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       "AmuxIdeaAnalysisChunk_ideaId_actorUserId_fkey",
     );
     await client.query(insertChunk, [ids.idea, "synthetic-owner", null, null, null, null]);
+    await expectRejected(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "analysisCompletedAt" = (clock_timestamp() AT TIME ZONE 'UTC') + INTERVAL '1 day'
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [ids.idea],
+      "AmuxIdeaAnalysisChunk_completion_future_check",
+    );
+    await expectRejected(
+      `INSERT INTO public."AmuxIdeaAnalysisChunk"
+       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+        "leaseGeneration", "analysisCompletedAt", "updatedAt")
+       VALUES ($1, 'synthetic-owner', 2, 'draft_ready', 0, 0,
+               (clock_timestamp() AT TIME ZONE 'UTC') + INTERVAL '1 day', CURRENT_TIMESTAMP)`,
+      [ids.idea],
+      "AmuxIdeaAnalysisChunk_completion_future_check",
+    );
+
+    await expectRejected(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "draftCiphertext" = $2, "draftKeyId" = 'synthetic', "draftKeyVersion" = 1
+       WHERE "ideaId" = $1`,
+      [ids.idea, title],
+      "AmuxIdeaAnalysisChunk_no_monolithic_draft_check",
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "state" = 'draft_ready', "analysisCompletedAt" = CURRENT_TIMESTAMP
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [ids.idea],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "analysisCompletedAt" = "analysisCompletedAt" + INTERVAL '1 day'
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [ids.idea],
+      "AmuxIdeaAnalysisChunk_completion_immutable_check",
+    );
+    await client.query(
+      `INSERT INTO public."AmuxIdeaAnalysisChunk"
+       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+        "leaseGeneration", "analysisCompletedAt", "updatedAt")
+       VALUES ($1, 'synthetic-owner', 1, 'draft_ready', 0, 0,
+               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
+               CURRENT_TIMESTAMP)`,
+      [ids.idea],
+    );
+
+    const insertUnit = `INSERT INTO public."AmuxIdeaDraftUnit"
+      ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "unitKind",
+       "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+       "bodyDigest", "bodyDigestKeyId", "updatedAt")
+      VALUES ($1, $2, $3, $4, $5, 'card', 'proposed', $6, 'synthetic', 1,
+              $7, 'synthetic', CURRENT_TIMESTAMP)`;
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "not-the-owner", 1, 0, title, digest],
+      "AmuxIdeaDraftUnit_ideaId_actorUserId_fkey",
+    );
+    const firstUnitId = randomUUID();
+    const secondUnitId = randomUUID();
+    await client.query(insertUnit, [firstUnitId, ids.idea, "synthetic-owner", 1, 0, title, digest]);
+    await client.query(insertUnit, [secondUnitId, ids.idea, "synthetic-owner", 1, 1, title, digest]);
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 1, title, digest],
+      "AmuxIdeaDraftUnit_ideaId_chunkIndex_unitIndex_key",
+    );
+    await client.query("SELECT pg_sleep(5.5)");
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'approved' WHERE "id" = $1`,
+      [firstUnitId],
+      "AmuxIdeaDraftUnit_decision_expired_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest],
+      "AmuxIdeaDraftUnit_insert_expired_check",
+    );
+    await expectRejected(
+      `DELETE FROM public."AmuxIdeaDraftUnit" WHERE "id" = $1`,
+      [firstUnitId],
+      "AmuxIdeaDraftUnit_no_delete_check",
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaDraftUnit"
+       SET "state" = 'expired'
+       WHERE "id" = $1`,
+      [firstUnitId],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'proposed' WHERE "id" = $1`,
+      [firstUnitId],
+      "AmuxIdeaDraftUnit_transition_check",
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaDraftUnit"
+       SET "bodyCiphertext" = NULL, "bodyKeyId" = NULL, "bodyKeyVersion" = NULL
+       WHERE "id" = $1`,
+      [firstUnitId],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "bodyCiphertext" = $2,
+        "bodyKeyId" = 'synthetic', "bodyKeyVersion" = 1 WHERE "id" = $1`,
+      [firstUnitId, title],
+      "AmuxIdeaDraftUnit_no_resurrection_check",
+    );
+    const units = await client.query(
+      `SELECT "id", "bodyCiphertext", "bodyPurgedAt", "bodyPurgeAfter", "expiresAt"
+       FROM public."AmuxIdeaDraftUnit" WHERE "id" IN ($1, $2) ORDER BY "id"`,
+      [firstUnitId, secondUnitId],
+    );
+    const first = units.rows.find((row) => row.id === firstUnitId);
+    const second = units.rows.find((row) => row.id === secondUnitId);
+    assert.equal(first?.bodyCiphertext, null);
+    assert.ok(first?.bodyPurgedAt);
+    assert.equal(first?.bodyPurgeAfter?.getTime(), first?.expiresAt?.getTime());
+    const expiryClock = await client.query(
+      `SELECT u."expiresAt" = c."analysisCompletedAt" + INTERVAL '30 days' AS "clockOk"
+       FROM public."AmuxIdeaDraftUnit" u
+       JOIN public."AmuxIdeaAnalysisChunk" c
+         ON c."ideaId" = u."ideaId" AND c."chunkIndex" = u."chunkIndex"
+       WHERE u."id" = $1`,
+      [firstUnitId],
+    );
+    assert.equal(expiryClock.rows[0].clockOk, true);
+    assert.deepEqual(second?.bodyCiphertext, title);
+    assert.equal(second?.bodyPurgedAt, null);
+
+    const currentUnitId = randomUUID();
+    await client.query(insertUnit, [currentUnitId, ids.idea, "synthetic-owner", 0, 0, title, digest]);
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit"
+       SET "expiresAt" = "expiresAt" + INTERVAL '1 day' WHERE "id" = $1`,
+      [currentUnitId],
+      "AmuxIdeaDraftUnit_identity_immutable_check",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'expired' WHERE "id" = $1`,
+      [currentUnitId],
+      "AmuxIdeaDraftUnit_early_expiry_check",
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'approved' WHERE "id" = $1`,
+      [currentUnitId],
+    );
+    const approvedClock = await client.query(
+      `SELECT "bodyPurgeAfter" = "finalDecisionAt" + INTERVAL '30 days' AS "clockOk"
+       FROM public."AmuxIdeaDraftUnit" WHERE "id" = $1`,
+      [currentUnitId],
+    );
+    assert.equal(approvedClock.rows[0].clockOk, true);
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit"
+       SET "bodyCiphertext" = NULL, "bodyKeyId" = NULL, "bodyKeyVersion" = NULL
+       WHERE "id" = $1`,
+      [currentUnitId],
+      "AmuxIdeaDraftUnit_early_purge_check",
+    );
 
     const insertPreview = `INSERT INTO public."AmuxIdeaTransferPreview"
       ("id", "ideaId", "chunkIndex", "attempt", "state", "modelId",

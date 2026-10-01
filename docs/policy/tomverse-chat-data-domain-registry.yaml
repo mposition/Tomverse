@@ -1299,6 +1299,32 @@ domains:
       implementation must decide child-first purge or another safe treatment;
       live analysis remains disabled until that gate is resolved.
 
+  - domain: amuxIdeaDraftUnit
+    prismaModel: AmuxIdeaDraftUnit
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v7, AMUX v4 per-unit draft deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      Each encrypted proposal unit has a random envelope data key. bodyKeyId
+      identifies the shared master key, not that per-unit key. The database
+      derives expiresAt from the completed chunk and prevents later decisions
+      or a postponed purge clock. The keyed bodyDigest survives body purge
+      under the approved 7-year decision/digest rule. A composite foreign key
+      binds actorUserId to the idea owner. The 24-hour physical purge SLA,
+      backup/key destruction evidence, legal holds, account deletion and
+      unified export still need writers and monitoring. Both RESTRICT foreign
+      keys require a child-first account-deletion decision. Live draft writes
+      remain disabled until those gates pass.
+
   - domain: amuxIdeaSourceScopeApproval
     prismaModel: AmuxIdeaSourceScopeApproval
     userLinkageRole: actor

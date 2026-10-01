@@ -6732,6 +6732,7 @@ model AmuxIdeaSubmission {
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
   confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
   chunks            AmuxIdeaAnalysisChunk[]
+  draftUnits        AmuxIdeaDraftUnit[]
 
   @@unique([id, actorUserId])
   @@index([state, analysisDeadlineAt])
@@ -6850,12 +6851,47 @@ model AmuxIdeaAnalysisChunk {
   idea           AmuxIdeaSubmission        @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   currentPreview AmuxIdeaTransferPreview? @relation("AmuxCurrentChunkPreview", fields: [currentPreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   previews       AmuxIdeaTransferPreview[] @relation("AmuxChunkPreviews")
+  draftUnits     AmuxIdeaDraftUnit[]
 
   @@id([ideaId, chunkIndex])
   @@unique([currentPreviewId, ideaId, chunkIndex])
   @@index([state, analysisCompletedAt])
   @@index([bodyPurgeAfter, bodyPurgedAt])
   @@index([freeformPurgeAfter, freeformPurgedAt])
+}
+
+/// One independently decidable and purgeable normalized proposal unit.
+/// A chunk never stores a monolithic draft body once unit rows are available.
+/// Each unit's envelope has its own random data key; bodyKeyId identifies the
+/// shared wrapping master key, not that data key. A decision on another unit
+/// does not delay expiry or preserve this unit's text. No writer is enabled.
+model AmuxIdeaDraftUnit {
+  id                String    @id
+  ideaId            String
+  actorUserId       String
+  chunkIndex        Int
+  unitIndex         Int
+  unitKind          String
+  state             String
+  expiresAt         DateTime
+  bodyCiphertext    Bytes?
+  bodyKeyId         String?
+  bodyKeyVersion    Int?
+  bodyDigest        String
+  bodyDigestKeyId   String
+  finalDecisionAt   DateTime?
+  bodyPurgeAfter    DateTime?
+  bodyPurgedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([ideaId, chunkIndex, unitIndex])
+  @@index([actorUserId, ideaId])
+  /// The due/expiry partial indexes live only in the SQL migration; Prisma
+  /// schema cannot express their WHERE predicates.
 }
 
 /// Non-runnable Initiative -> Epic -> Feature hierarchy. Node content is
