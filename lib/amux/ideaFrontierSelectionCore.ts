@@ -39,7 +39,7 @@ const ID = /^[A-Za-z0-9_-]{8,100}$/;
 const validDate = (value: unknown): value is Date =>
   value instanceof Date && Number.isFinite(value.getTime());
 
-function validApproval(row: AmuxIdeaFrontierApproval): boolean {
+export function validAmuxIdeaFrontierApproval(row: AmuxIdeaFrontierApproval): boolean {
   return Boolean(row && ID.test(row.id) && PROVIDERS.has(row.provider) &&
     MODEL_ID.test(row.modelId) && Number.isSafeInteger(row.version) && row.version > 0 &&
     (row.status === "approved" || row.status === "revoked") &&
@@ -59,7 +59,7 @@ export function checkAmuxIdeaFrontierSelection(
   databaseNow: Date,
 ): AmuxIdeaFrontierSelectionDecision {
   if (!validDate(databaseNow) || !Array.isArray(approvals) || approvals.length > 256 ||
-      approvals.some((row) => !validApproval(row)) ||
+      approvals.some((row) => !validAmuxIdeaFrontierApproval(row)) ||
       new Set(approvals.map((row) => row.id)).size !== approvals.length) {
     return { decision: "hold", reason: "model_catalog_unverified" };
   }
