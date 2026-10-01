@@ -255,6 +255,9 @@ run(
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
     "tests/integration/amux-v4-frontier-model.db.test.mjs",
+    // Dark Frontier owner decisions must bind model eligibility, canonical
+    // audit and versioned revocation without creating executable AMUX work.
+    "tests/integration/amux-v4-frontier-catalog-write.db.test.ts",
     // Dark v4 submission must bind its owner, request idempotency and audit
     // atomically without opening collection, analysis or transfer.
     "tests/integration/amux-v4-idea-submission.db.test.ts",
