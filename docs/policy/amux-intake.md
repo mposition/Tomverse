@@ -1,6 +1,6 @@
 # AMUX intake
 
-상태: **v1~v4 설계 승인, v5 구현 착수·보존 계약, v6 보존 세부 수치, v7 미결정 초안 삭제 시점, v8 제목·설명, v9 카드 작업 본문 보존 및 v10 Task 경로·비용 상한 산출 방식 승인.** 운영자 `mposition`이 2026-09-24에 v1, 2026-09-28에 v2, 2026-09-29에 v3를 승인하고, 2026-09-30에 v3 등록 래치 활성화와 v4 새 경로의 설계를 승인했다. 2026-10-01 v5는 18개 전체 작업의 정책·계약·코드·migration 파일 작성·로컬 합성 검증 착수를, 같은 날 v6~v10은 아래 보존·산출 계약을 승인했다. v4 환경 값·코드 래치는 설정하지 않으며, migration 적용·staging write·라이브 모델 호출·production 스위치·자동 실행은 별도 gate다.
+상태: **v1~v4 설계 승인, v5 구현 착수·보존 계약, v6~v10 보존·산출 계약, v11 단위별 결정·파생 이력 및 v12 실행 위치·식별자·권한 경계 승인.** 운영자 `mposition`이 2026-09-24에 v1, 2026-09-28에 v2, 2026-09-29에 v3를 승인하고, 2026-09-30에 v3 등록 래치 활성화와 v4 새 경로의 설계를 승인했다. 2026-10-01 v5는 18개 전체 작업의 정책·계약·코드·migration 파일 작성·로컬 합성 검증 착수를, 같은 날 v6~v12는 아래 계약을 승인했다. v4 환경 값·코드 래치는 설정하지 않으며, migration 적용·staging write·라이브 모델 호출·production 스위치·자동 실행은 별도 gate다.
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 1
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 3
@@ -11,6 +11,8 @@ approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 7
 approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 8
 approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 9
 approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 10
+approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 11
+approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 12
 
 v1~v3의 기록에 있는 `USD 상한 미정`은 그 이전 원천의 사실이다. **v4 분석 Agent의 API 월 USD 50은 2026-09-30 운영자가 이 버전에서 새로 승인한 값**이며, 구독형 CLI의 실제 청구액이라고 주장하지 않는다. v4 분석 경로의 **운영상** 보존·삭제 기간은 2026-10-01 v5에서 새로 승인했고, 미종료·미결정 체류와 brief·hold의 세부 수치는 같은 날 v6, 자동 만료 초안 본문 삭제 시점은 v7, 노드·카드 제목·설명의 기간은 v8, 카드 작업 본문의 기간은 v9에서 추가 승인했다. 이것은 법률 의견이 아니며, v1~v3 원천의 법적 보존 기간은 여전히 미정이다. 과거 기록을 소급 수정하지 않는다.
 
@@ -30,6 +32,8 @@ v1 승인은 설계 권고 16개를 승인했고 그때 법적 보존 기간과 
 | 8 | 2026-10-01 mposition | v4에서 생성하는 계층 노드와 카드의 사용자 표시 제목·설명은 활성 상태 동안 보존하고, 완료·취소·보관 후 90일에 본문을 삭제한다. 식별자·keyed digest·결정 감사는 7년 보존한다. 기존 gate와 v1~v3 원천은 바꾸지 않는다. |
 | 9 | 2026-10-01 mposition | v4 카드의 문제·포함/제외 범위·완료 기준도 v8과 같은 규칙으로 활성 중 보존하고 카드 완료·취소·보관 후 90일에 본문을 삭제한다. v8 제목·설명 외 범위의 보존 결정을 이 항목에 한해 닫는다. |
 | 10 | 2026-10-01 mposition | Task 카드 승인 preview의 예상 실행 경로·비용 상한은 서버가 버전 고정된 worker/model 가격표와 등급별 토큰·시도 상한으로 산출한다. 실행 전 다시 계산해 상한이 높아지면 운영자 재확인을 요구한다. 계산 근거가 없으면 등록·실행을 보류한다. 실제 숫자와 catalog 증거는 별도 구현 gate다. |
+| 11 | 2026-10-01 mposition | v4 전용 단위별 사람 결정과 분할·통합 파생 이력을 승인한다. 아래 v11 절의 별도 결정 행·결속·불변식과 부분 등록 경계를 적용하고 v1~v3 승인 행은 재사용하지 않는다. |
+| 12 | 2026-10-01 mposition | 공통 기반의 AMUX v4 전용 로컬 Ubuntu 분석 예외와 운영자 확인을 전제로 한 제한 GitHub 원문 전송 허용 범위를 승인하고, 이 원천의 식별자·owner 수동 쓰기·v22 자동 편입 경계를 확정한다. 아래 v12 절의 미완 S0·별도 활성화 gate는 유지한다. |
 
 아래 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. 2026-09-30 활성화 승인이 코드 래치를 켜고, 환경 값이 `enabled`일 때만 writer를 연다. v1과 v2의 writer는 바뀌지 않는다.
 
@@ -368,3 +372,14 @@ v4의 **Task 카드** 승인 화면은 제안된 실행 역할·등급만 보여
 5. 기존 Epic/Story와 일부 겹치면 운영자에게 연결·분할·통합·재제안의 차이를 보여 준다. 기존 카드나 노드의 제목·상태·source·revision을 조용히 바꾸지 않는다. `link_existing_card/node`는 새 카드/노드를 만들지 않고 승인된 대상의 ID/revision/digest에 결속된 불변 link만 추가한다. 첫 버전은 타입을 증명할 수 있는 v4 대상만 허용한다. 분할·통합은 원 단위를 덮지 않고 별도의 사람 승인 derivation group과 append-only edge로 남긴다. 승인된 원본은 상태를 되돌리지 않는다. 파생 단위와 뒤 청크에서 처음 제안한 단위 모두의 만료 기준은 원 아이디어의 **첫 청크 분석 완료 시각 +30일**이며 청크 추가·파생으로 다시 시작하지 않는다. 7년 기록에는 원문이나 자유형 사유 대신 ID·version·keyed digest·사유 keyed digest만 둔다.
 
 이 절은 **단위별 결정 행과 별도 파생 이력의 설계 승인**이다. 실제 비용 catalog·숫자, 계층/중복 대상의 소비 시 재검증, DB 교차 행 불변식과 권한, 보존·백업 삭제 증거, canonical 감사·동시성·결과 불명 DB 테스트, 독립 검토, 단계별 운영자 승인이 갖춰지기 전에는 v4 비합성 등록 writer를 열지 않는다. 스키마 파일 작성이나 draft PR은 migration 적용·staging/live write·모델 실사용 호출·자동 승격·배포 승인이 아니다.
+
+## v12 — 로컬 분석 실행·식별자·수동 권한 [결정, 운영자 mposition 2026-10-01]
+
+운영자는 공통 Agent 기반의 Railway 기본 실행 위치에 대해 **AMUX v4 운영자 아이디어 분석 한 능력만** 로컬 Ubuntu CLI 예외로 승인했다. 운영자가 preview에서 실제 GitHub 발췌와 모델·전송 범위·digest를 확인한 경우에 한해 제한된 원문을 격리된 분석 CLI에 typed data로 전달할 수 있다. 자동 수집, 발췌 안 지시 실행, child CLI의 GitHub 도구·checkout·credential 접근은 허용하지 않는다. 이 두 정책 결정은 **라이브 호출 승인과 다르다**. 앱 DB 단일 writer, 제품 DB 자격증명 없는 Agent, 미완 S0, 일회용 확인, 비용·실패·kill switch, 단계별 운영 승인 요구를 유지한다.
+
+- 신규 Admin 아이디어 원천의 `sourceSystem`은 `admin-idea-v4`, 분석 Agent의 `agentId`는 `amux-intake`, 이 원천의 자동 만료·분석 상태 기록용 닫힌 system actor는 `amux-v4-intake`다. 기존 `codex-conversation`, `local-agent-intake`, 엔지니어링 등록 원천의 식별자·승인 행·스위치를 재사용하지 않는다. 새 actor는 canonical system audit의 닫힌 목록에 등록·검증되기 전에는 시스템 쓰기를 열지 않는다.
+- 아이디어 입력의 전송 확인, 노드·카드 등록과 승인, 수동 승격·예외 조작은 owner Admin과 최근 step-up으로만 허용한다. `ops:write`, Agent secret, CLI receipt, 모델 출력은 이 사람 권한을 대체하지 않는다. 등록·승인·수동 승격의 canonical human audit는 그 상태 변경과 같은 트랜잭션에 쓴다.
+- 앞 문장의 **수동** 승격 권한은 v22의 조건부 `backlog→todo` **자동 편입을 취소하지 않는다**. 운영자가 이미 승인한 source·hierarchy·Task brief에 결속된 `ready` 카드만 v22 졸업·점수·용량·결정적 Guard·off switch·canonical system audit를 통과해 카드별 새 사람 승인 없이 자동 편입될 수 있다. `amux-v4-intake`는 그 편입 actor가 아니며, 자동 편입은 별도 v22 actor·영수증을 사용한다. 기존 v1~v3 카드는 명시적 opt-in·재검증 전까지 이 경로에 넣지 않는다.
+- Gateway 도입 전 이 원천은 `platformProductKey`를 사용하지 않는다. 현재 허용 enum의 다른 값을 빌려 쓰거나 새 값을 암묵적으로 추가하지 않는다. Gateway 결합이 필요해지면 명시적 정책·스키마 선행 개정 뒤에만 도입한다.
+
+이 승인으로 migration 적용, staging/live write, 라이브 아이디어·GitHub 원문 전송, 자동 편입 활성화, worker claim, PR 병합·배포는 열리지 않는다. 각 전환은 해당 S0·DB/권한/감사 검증과 별도 운영자 승인을 요구한다.
