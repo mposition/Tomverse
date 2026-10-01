@@ -56,6 +56,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // schema. This set orders migrations; it does not exempt their own guards.
   "20261001102000_amux_v4_idea_schema",
   "20261001102100_amux_v4_portfolio_schema",
+  // AMUX intake v4: additive request identity fence for dark idea submission.
+  "20261001102200_amux_v4_idea_submission_request_id",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {
