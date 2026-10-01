@@ -151,7 +151,7 @@ export async function handleZernioWebhook(
   }
 
   const derivedStatus = MARKETING_WEBHOOK_DERIVED_STATUS[envelope.eventType];
-  let state: "live" | "removed" | "unknown" = "unknown";
+  let state: "live" | "not_live" | "removed" | "unknown" = "unknown";
   if (deps.adapter) {
     try {
       const answer = await deps.adapter.lookupStatus(envelope.zernioPostId, envelope.accountId);

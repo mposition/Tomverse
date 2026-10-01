@@ -35,7 +35,7 @@ import {
   serializeMarketingWebhookFaultArm,
   type MarketingWebhookFaultArm,
 } from "@/lib/marketingWebhookCore";
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { MARKETING_S2E_ACTIONS, type MarketingTransaction } from "@/lib/marketingStore";
 import { Prisma } from "@prisma/client";
 
@@ -253,6 +253,12 @@ export async function consumeMarketingWebhookFaultArm(
 ): Promise<{ readonly consumed: boolean }> {
   requireStaging();
   const eventIdDigest = String(input.eventIdDigest);
+  // **The audit chain's lock before the row's.** The arm route runs inside the
+  // admin mutation runner, which takes the chain lock first and then writes this
+  // row; taking the row first here and the chain lock second -- as the audit
+  // append below does -- is the opposite order, and an arm and a delivery
+  // crossing would each wait on the other's lock. Same order, no cycle.
+  await takeAuditChainLock(tx);
   const { stored, arm } = await readArm(tx);
   const now = await databaseNow(tx);
   if (stored === undefined || !marketingWebhookFaultArmMatches(arm, eventIdDigest, now)) {

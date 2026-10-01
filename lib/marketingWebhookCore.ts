@@ -250,18 +250,22 @@ export const parseZernioWebhookEnvelope = (
 };
 
 /**
- * Whether a status query agrees with the status an event implies.
+ * Whether a status query about the event's own account agrees with the status
+ * the event implies.
  *
- * `live` agrees with `published` and with nothing else. Any other answer agrees
- * with any status that is not `published` -- except `unknown`, which agrees with
+ * Each answer agrees with one thing: `live` with `published`, `removed` with
+ * removal by the platform, `not_live` (failed, or retracted through the
+ * provider) with every other non-published status. `unknown` agrees with
  * nothing: a query that could not say is not a confirmation of either.
  */
 export const marketingWebhookStatusQueryMatch = (
   derived: MarketingPostStatus,
-  state: "live" | "removed" | "unknown",
+  state: "live" | "not_live" | "removed" | "unknown",
 ): boolean => {
   if (state === "unknown") return false;
-  return derived === "published" ? state === "live" : state !== "live";
+  if (derived === "published") return state === "live";
+  if (derived === "removed_by_platform") return state === "removed";
+  return state === "not_live";
 };
 
 /**

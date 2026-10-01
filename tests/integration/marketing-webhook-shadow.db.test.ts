@@ -167,3 +167,49 @@ test("two first writes of an absent setting: one succeeds, one is a conflict", a
       lost.reason.code === "fault_arm_conflict",
   );
 });
+
+test("an arm and a delivery crossing on one row never deadlock", async () => {
+  // The admin runner takes the audit chain lock and then writes the arm; the
+  // receiver now does the same. Round 2 of the review found the receiver taking
+  // them in the opposite order, which is a deadlock waiting for the right
+  // interleaving -- so this crosses them repeatedly and requires every one to
+  // settle without a database error.
+  await runMarketingTransaction(prisma, (tx) =>
+    setMarketingWebhookFaultArm(tx, { eventIdDigest: DIGEST, expectedGeneration: 0, ttlMs: 60_000 }),
+  );
+  for (let round = 1; round <= 5; round += 1) {
+    const outcomes = await Promise.allSettled([
+      runMarketingTransaction(prisma, (tx) =>
+        setMarketingWebhookFaultArm(tx, {
+          eventIdDigest: DIGEST,
+          expectedGeneration: round,
+          ttlMs: 60_000,
+        }),
+      ),
+      runMarketingTransaction(prisma, (tx) =>
+        consumeMarketingWebhookFaultArm(tx, { eventIdDigest: DIGEST }),
+      ),
+    ]);
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        // A lost compare-and-set is an answer; a deadlock is not.
+        assert.ok(
+          outcome.reason instanceof MarketingWebhookSettingRefusedError,
+          String(outcome.reason),
+        );
+      }
+    }
+    // Re-arm for the next crossing at whatever generation the row now holds.
+    const row = await prisma.appSetting.findUnique({ where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY } });
+    const generation = JSON.parse(row?.value ?? "{}").generation as number;
+    if (generation === round) {
+      await runMarketingTransaction(prisma, (tx) =>
+        setMarketingWebhookFaultArm(tx, {
+          eventIdDigest: DIGEST,
+          expectedGeneration: generation,
+          ttlMs: 60_000,
+        }),
+      );
+    }
+  }
+});

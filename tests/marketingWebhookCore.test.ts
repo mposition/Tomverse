@@ -167,11 +167,16 @@ test("every recorded event has a derived status, and only the platform's deletio
   assert.equal(MARKETING_WEBHOOK_DERIVED_STATUS["post.partial"], "outcome_unknown");
 });
 
-test("a status query agrees only when it can say", () => {
+test("a status query agrees only when it can say, and only with its own answer", () => {
   assert.equal(marketingWebhookStatusQueryMatch("published", "live"), true);
   assert.equal(marketingWebhookStatusQueryMatch("published", "removed"), false);
-  assert.equal(marketingWebhookStatusQueryMatch("failed", "removed"), true);
+  assert.equal(marketingWebhookStatusQueryMatch("published", "not_live"), false);
+  assert.equal(marketingWebhookStatusQueryMatch("failed", "not_live"), true);
+  assert.equal(marketingWebhookStatusQueryMatch("deleted", "not_live"), true);
+  assert.equal(marketingWebhookStatusQueryMatch("failed", "removed"), false);
   assert.equal(marketingWebhookStatusQueryMatch("failed", "live"), false);
+  assert.equal(marketingWebhookStatusQueryMatch("removed_by_platform", "removed"), true);
+  assert.equal(marketingWebhookStatusQueryMatch("removed_by_platform", "not_live"), false);
   for (const derived of ["published", "failed", "removed_by_platform"] as const) {
     assert.equal(marketingWebhookStatusQueryMatch(derived, "unknown"), false, derived);
   }
