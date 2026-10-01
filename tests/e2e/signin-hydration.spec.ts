@@ -69,6 +69,20 @@ async function readServerRenderedCard(browser: Browser, lang: string): Promise<C
 }
 
 async function gotoHydratedSignIn(page: Page, lang: string) {
+  // The sign-in form renders a Turnstile widget once hydrated (#1651). The E2E
+  // server's site key is a placeholder, so the real Cloudflare script would
+  // reject it and the form would show its verification-failed text -- a change
+  // this test did not make. A silent stand-in keeps the widget idle, which is
+  // what a correctly configured key does before anything is submitted.
+  await page.addInitScript(() => {
+    let seq = 0;
+    window.turnstile = {
+      render: () => `signin-hydration-turnstile-${++seq}`,
+      execute: () => {},
+      reset: () => {},
+      remove: () => {},
+    };
+  });
   await page.goto(`/auth/signin?lang=${lang}`);
   await expect(page.locator(CARD)).toBeVisible();
   await expect(page.locator(`${CARD} button`).first()).toBeEnabled();

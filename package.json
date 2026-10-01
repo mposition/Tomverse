@@ -170,7 +170,6 @@
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:model-credit-weights": "node --conditions=react-server --import tsx scripts/report-model-credit-weights.mjs",
     "report:provider-data-destinations": "node --conditions=react-server --import tsx scripts/report-provider-data-destinations.mjs",
-    "email:suppression-cutover": "node --conditions=react-server --import tsx scripts/email-suppression-cutover.mjs",
     "email:check-message-id-duplicates": "node --conditions=react-server --import tsx scripts/email-check-message-id-duplicates.mjs",
     "email:recover-permanent-bounces": "node --conditions=react-server --import tsx scripts/email-recover-permanent-bounces.mjs",
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",

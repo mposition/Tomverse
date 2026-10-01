@@ -17,9 +17,10 @@ test("a fresh private-style session uses the browser language before opening cha
     .toBe("ko");
   await expect(page.locator("html")).toHaveAttribute("lang", "ko");
 
-  const startChat = page
-    .getByRole("link", { name: "무료로 채팅 시작하기" })
-    .first();
+  // The hero CTA's wording follows the landing copy (e093addfa renamed it);
+  // the Korean label is what proves the browser language was used.
+  const startChat = page.getByTestId("landing-primary-cta");
+  await expect(startChat).toHaveText("무료로 비교 시작하기");
   await expect(startChat).toHaveAttribute(
     "href",
     "/chat?lang=ko&entry=guest-preview"
