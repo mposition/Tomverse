@@ -16,11 +16,16 @@ const GITHUB_MAX_PER_PAGE = 100;
 const NAME = /^[A-Za-z0-9_.-]+$/;
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
+type AmuxIdeaPullRequestReadErrorCode =
+  | "invalid_collector_config" | "transport_error" | "http_error"
+  | "oversized_response" | "invalid_response" | "wrong_repository";
+
 export class AmuxIdeaPullRequestReadError extends Error {
-  constructor(readonly code:
-    | "invalid_collector_config" | "transport_error" | "http_error"
-    | "oversized_response" | "invalid_response" | "wrong_repository") {
+  readonly code: AmuxIdeaPullRequestReadErrorCode;
+
+  constructor(code: AmuxIdeaPullRequestReadErrorCode) {
     super(code); // Do not include upstream response text, URLs, paths or tokens.
+    this.code = code;
     this.name = "AmuxIdeaPullRequestReadError";
   }
 }
@@ -170,6 +175,26 @@ export async function collectAmuxIdeaPullRequestFileList(
     };
   }
 
+  async function readMergeBase(baseSha: string, headSha: string): Promise<{
+    sha: string; status: string;
+  }> {
+    // The compare response may include patches even at per_page=1. A large
+    // legitimate response holds at 2 MiB; S0 must measure this false-hold rate.
+    const comparison = record((await request(
+      `${repositoryPath}/compare/${baseSha}...${headSha}?per_page=1&page=1`,
+    )).body);
+    const base = record(comparison?.base_commit);
+    const mergeBase = record(comparison?.merge_base_commit);
+    if (!comparison || !base || !mergeBase || base.sha !== baseSha ||
+        typeof mergeBase.sha !== "string" || !SHA.test(mergeBase.sha) ||
+        !["ahead", "behind", "diverged", "identical"].includes(String(comparison.status)) ||
+        !Number.isSafeInteger(comparison.ahead_by) ||
+        (comparison.ahead_by as number) < 0 ||
+        !Number.isSafeInteger(comparison.behind_by) ||
+        (comparison.behind_by as number) < 0) return fail("invalid_response");
+    return { sha: mergeBase.sha, status: comparison.status as string };
+  }
+
   try {
     await readRepositoryIdentity();
     const before = await readPullRequest();
@@ -178,6 +203,12 @@ export async function collectAmuxIdeaPullRequestFileList(
         before.headRepositoryId !== config.expectedRepositoryId) {
       return { status: "hold", reason: "pr_snapshot_unverified" };
     }
+    const mergeBase = await readMergeBase(before.baseSha, before.headSha);
+    const mergeBaseSha = mergeBase.sha;
+    if (mergeBaseSha !== before.baseSha) {
+      return { status: "hold", reason: "pr_base_not_merge_base" };
+    }
+    if (mergeBase.status !== "ahead") return { status: "hold", reason: "pr_snapshot_unverified" };
     const fileResponse = await request(
       `${repositoryPath}/pulls/${number}/files?per_page=${AMUX_V4_PR_FILE_LIST_MAX}&page=1`,
     );
@@ -202,7 +233,7 @@ export async function collectAmuxIdeaPullRequestFileList(
       // Reject it instead of parsing a possibly unfamiliar next-link form.
       hasNext: fileResponse.link !== null,
       files,
-    }, after);
+    }, after, mergeBaseSha);
   } catch (error) {
     return {
       status: "hold",

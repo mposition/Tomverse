@@ -19,6 +19,10 @@ function fixture() {
       head: { sha: HEAD, repo: { id: ID } },
     },
     after: null,
+    comparison: {
+      status: "ahead", ahead_by: 1, behind_by: 0,
+      base_commit: { sha: BASE }, merge_base_commit: { sha: BASE },
+    },
     files: [
       { filename: "docs/new.md", previous_filename: "docs/old.md", status: "renamed" },
       { filename: "lib/changed.ts", status: "modified" },
@@ -37,6 +41,9 @@ function fixture() {
     if (parsed.pathname === `${ROOT}/pulls/17`) {
       const body = prReads++ === 0 ? state.before : state.after ?? state.before;
       return Response.json(body);
+    }
+    if (parsed.pathname === `${ROOT}/compare/${BASE}...${HEAD}`) {
+      return Response.json(state.comparison);
     }
     if (parsed.pathname === `${ROOT}/pulls/17/files`) {
       if (state.fileResponse) return state.fileResponse;
@@ -58,12 +65,14 @@ test("collector proves a bounded same-repository PR file page without returning 
   const result = await collectAmuxIdeaPullRequestFileList(item.config, 17);
   assert.deepEqual(result, {
     status: "complete", repositoryId: ID, number: 17,
-    baseSha: BASE, headSha: HEAD,
+    baseSha: BASE, headSha: HEAD, mergeBaseSha: BASE,
     basePaths: ["docs/old.md", "lib/changed.ts"],
     headPaths: ["docs/new.md", "lib/changed.ts"],
   });
   assert.deepEqual(item.calls.map(({ path }) => path), [
-    ROOT, `${ROOT}/pulls/17`, `${ROOT}/pulls/17/files?per_page=100&page=1`,
+    ROOT, `${ROOT}/pulls/17`,
+    `${ROOT}/compare/${BASE}...${HEAD}?per_page=1&page=1`,
+    `${ROOT}/pulls/17/files?per_page=100&page=1`,
     `${ROOT}/pulls/17`, ROOT,
   ]);
   assert(item.calls.every(({ init }) => init.method === "GET" &&
@@ -83,6 +92,11 @@ test("collector holds changed PR snapshot and incomplete pagination", async () =
   const paged = fixture();
   paged.state.link = `<https://api.github.com${ROOT}/pulls/17/files?per_page=100&page=2>; rel=next`;
   assert.deepEqual(await collectAmuxIdeaPullRequestFileList(paged.config, 17),
+    { status: "hold", reason: "file_list_incomplete" });
+
+  const truncated = fixture();
+  truncated.state.files.pop();
+  assert.deepEqual(await collectAmuxIdeaPullRequestFileList(truncated.config, 17),
     { status: "hold", reason: "file_list_incomplete" });
 });
 
@@ -109,7 +123,28 @@ test("collector never fetches a fork, oversized list, or wrong repository", asyn
   lateWrong.state.repoAfter = { id: 99, full_name: "mposition/Tomverse" };
   assert.deepEqual(await collectAmuxIdeaPullRequestFileList(lateWrong.config, 17),
     { status: "hold", reason: "wrong_repository" });
-  assert.equal(lateWrong.calls.length, 5);
+  assert.equal(lateWrong.calls.length, 6);
+});
+
+test("collector holds a PR whose current base moved beyond the merge base", async () => {
+  const item = fixture();
+  item.state.comparison.status = "diverged";
+  item.state.comparison.behind_by = 1;
+  item.state.comparison.merge_base_commit.sha = "c".repeat(40);
+  assert.deepEqual(await collectAmuxIdeaPullRequestFileList(item.config, 17),
+    { status: "hold", reason: "pr_base_not_merge_base" });
+  assert.deepEqual(item.calls.map(({ path }) => path), [
+    ROOT, `${ROOT}/pulls/17`,
+    `${ROOT}/compare/${BASE}...${HEAD}?per_page=1&page=1`,
+  ]);
+});
+
+test("collector rejects inconsistent identical comparison with changed files", async () => {
+  const item = fixture();
+  item.state.comparison.status = "identical";
+  item.state.comparison.ahead_by = 0;
+  assert.deepEqual(await collectAmuxIdeaPullRequestFileList(item.config, 17),
+    { status: "hold", reason: "pr_snapshot_unverified" });
 });
 
 test("collector normalizes absent previous_filename but rejects malformed file data", async () => {
