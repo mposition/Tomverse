@@ -73,7 +73,9 @@ const codexUsage = (raw: unknown): AmuxCliTokenCounts | null => {
       !token(value.output_tokens) ||
       (value.reasoning_output_tokens !== undefined && !token(value.reasoning_output_tokens)) ||
       (value.cache_write_input_tokens !== undefined && !token(value.cache_write_input_tokens)) ||
-      value.cached_input_tokens > value.input_tokens) return null;
+      value.cached_input_tokens > value.input_tokens ||
+      (value.reasoning_output_tokens !== undefined &&
+       value.reasoning_output_tokens > value.output_tokens)) return null;
   return {
     inputTokens: value.input_tokens,
     outputTokens: value.output_tokens,
@@ -220,17 +222,26 @@ export function inspectClaudeCliResultUsage(raw: unknown, options: {
       reasoningOutputTokens: null,
     };
   }
+  // A successful CLI result containing only default zeroes is not evidence of
+  // zero spend. Cache-only usage still counts as a nonzero observation.
+  if (!observed || ![
+    observed.inputTokens,
+    observed.outputTokens,
+    observed.cacheReadInputTokens,
+    observed.cacheCreationInputTokens ?? 0,
+  ].some((count) => count > 0)) return unknown;
+  const completedTurns = token(result.num_turns) && result.num_turns > 0 &&
+    result.num_turns <= MAX_TURNS ? result.num_turns : 0;
   return {
     version: 1,
     cli: "claude",
     completeness: models.length > 0 && options.exitCode === 0 &&
-      result.subtype === "success" && result.is_error !== true
+      result.subtype === "success" && result.is_error !== true && completedTurns > 0
       ? "reported_complete" : "reported_partial",
     observed,
     // One CLI result may contain several assistant turns. This is a result
     // count, not a claim that all internal provider calls were observed.
-    completedTurns: token(result.num_turns) && result.num_turns > 0 && result.num_turns <= MAX_TURNS
-      ? result.num_turns : 0,
+    completedTurns,
     inputTokensIncludeCacheRead: false,
     inputTokensIncludeCacheWrite: false,
     reasoningOutputIncludedInOutput: null,
