@@ -33,6 +33,8 @@ export type AmuxCommitComparison = {
   baseSha: string;
   /** Resolved commit SHA reported by GitHub, never echoed request arguments. */
   headSha: string;
+  /** Resolved merge-base commit SHA reported by GitHub. */
+  mergeBaseSha: string;
   status: "ahead" | "behind" | "diverged" | "identical";
   aheadBy: number;
   behindBy: number;
@@ -157,11 +159,12 @@ export async function searchAmuxOwnedRefWitness(
           const comparison = await adapter.compareCommits(targetCommitSha, refCommitSha);
           if (!comparison || comparison.repositoryId !== repositoryId ||
               comparison.baseSha !== targetCommitSha || comparison.headSha !== refCommitSha ||
+              !validSha(comparison.mergeBaseSha) ||
               !nonNegative(comparison.aheadBy) || !nonNegative(comparison.behindBy) ||
               !["ahead", "behind", "diverged", "identical"].includes(comparison.status)) {
             return hold("comparison_unverified");
           }
-          const isWitness = comparison.behindBy === 0 &&
+          const isWitness = comparison.mergeBaseSha === targetCommitSha && comparison.behindBy === 0 &&
             (comparison.status === "identical" && comparison.aheadBy === 0 ||
              comparison.status === "ahead" && comparison.aheadBy > 0);
           if (!isWitness) continue;

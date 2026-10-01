@@ -13,7 +13,7 @@ const page = (refs, hasNextPage = false, endCursor = null) =>
 const ref = (name, objectSha = head, objectType = "commit") =>
   ({ name, objectSha, objectType, protected: false });
 const comparison = (baseSha, headSha, status = "ahead", aheadBy = 1, behindBy = 0) =>
-  ({ repositoryId: 25, baseSha, headSha, status, aheadBy, behindBy });
+  ({ repositoryId: 25, baseSha, headSha, mergeBaseSha: baseSha, status, aheadBy, behindBy });
 const adapter = (overrides = {}) => ({
   listRefs: async (namespace) => page(namespace === "refs/heads/" ? [ref("refs/heads/main")] : []),
   readTag: async () => { throw new Error("unexpected tag"); },
@@ -180,6 +180,7 @@ test("comparison must report resolved target and ref commits", async () => {
     comparison(sha("f"), head),
     comparison(target, sha("f")),
     { ...comparison(target, head), repositoryId: 26 },
+    { ...comparison(target, head), mergeBaseSha: sha("f") },
     comparison(target, head, "ahead", -1, 0),
     comparison(target, head, "unknown", 1, 0),
     comparison(target, head, "ahead", 1, 1),
