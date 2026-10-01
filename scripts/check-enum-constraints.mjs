@@ -403,6 +403,36 @@ const REGISTRY = {
       "The reservation lifecycle, written by the credit paths as literals inside the transactions that move it.",
   },
   // --- AMUX development-agent orchestration ------------------------------
+  AmuxIdeaSubmission_state_check: {
+    owner: "database",
+    reason:
+      "AMUX v4 idea analysis storage is a closed lifecycle. This schema-only migration does not enable a writer; the future intake service must validate exactly these states before activation.",
+  },
+  AmuxIdeaSourceScopeApproval_status_check: {
+    owner: "database",
+    reason:
+      "An owner-approved GitHub read scope is consumed once, expires, is revoked, or needs outcome read-back. No collector is enabled by the schema migration.",
+  },
+  AmuxIdeaTransferPreview_state_check: {
+    owner: "database",
+    reason:
+      "The v4 model-transfer preview has one confirmed or in-flight attempt per idea chunk; outcome_unknown remains occupied until read-back and owner resolution.",
+  },
+  AmuxIdeaAnalysisChunk_state_check: {
+    owner: "database",
+    reason:
+      "One bounded v4 analysis chunk records a normalized draft or an explicit terminal/unknown state. It cannot become a runnable AMUX Task without later owner approval.",
+  },
+  AmuxPortfolioNode_level_check: {
+    owner: "database",
+    reason:
+      "The non-runnable v4 hierarchy has exactly Initiative, Epic and Feature levels. No live hierarchy writer is enabled by the schema migration.",
+  },
+  AmuxPortfolioNode_state_check: {
+    owner: "database",
+    reason:
+      "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
