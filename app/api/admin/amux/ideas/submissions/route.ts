@@ -68,7 +68,10 @@ export async function POST(request: Request) {
   try {
     const session = await owner();
     if (session instanceof NextResponse) return session;
-    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV])) {
+    // A write without its independent read-back gate could strand an
+    // ambiguous COMMIT with no safe operator recovery path.
+    if (!ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) ||
+        !ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
       return NextResponse.json({ error: "submission_disabled" }, { status: 503, headers: noStore });
     }
     if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {

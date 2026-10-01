@@ -6,6 +6,10 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import {
+  classifyIdeaSubmissionPost,
+  classifyIdeaSubmissionReadBack,
+} from "@/lib/amux/ideaSubmissionUiCore";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 
@@ -18,6 +22,13 @@ type InputPreviewResult = {
   repositoryCount?: number;
   pullRequestCount?: number;
 };
+
+type SubmissionState =
+  | { kind: "idle" }
+  | { kind: "pending"; requestId: string }
+  | { kind: "submitted"; requestId: string; ideaId: string }
+  | { kind: "outcome_unknown"; requestId: string }
+  | { kind: "refused"; code: string };
 
 const lines = (value: string) => value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
@@ -33,18 +44,75 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
   return result;
 }
 
-export function AmuxIdeaInputPanel() {
+export function AmuxIdeaInputPanel({ submissionAvailable }: { submissionAvailable: boolean }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
   const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
   const [pending, setPending] = useState(false);
+  const [readBackPending, setReadBackPending] = useState(false);
   const [result, setResult] = useState<InputPreviewResult | null>(null);
+  const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
   const inputRevision = useRef(0);
 
   const invalidateResult = () => {
     inputRevision.current += 1;
     setResult(null);
+    setSubmission({ kind: "idle" });
+  };
+
+  const readBack = async (requestId: string) => {
+    setReadBackPending(true);
+    try {
+      const response = await adminFetch(
+        `/api/admin/amux/ideas/submissions?requestId=${encodeURIComponent(requestId)}`,
+        { cache: "no-store" },
+      );
+      const decision = classifyIdeaSubmissionReadBack({
+        status: response.status,
+        body: await response.json(),
+      });
+      setSubmission(decision.kind === "submitted"
+        ? { kind: "submitted", requestId, ideaId: decision.ideaId }
+        : { kind: "outcome_unknown", requestId });
+    } catch {
+      setSubmission({ kind: "outcome_unknown", requestId });
+    } finally {
+      setReadBackPending(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!submissionAvailable || result?.outcome !== "input_checked" ||
+        submission.kind === "pending" || submission.kind === "outcome_unknown" ||
+        submission.kind === "submitted") return;
+    const refs = parsePullRequests(pullRequests);
+    if (!refs) return;
+    const requestId = crypto.randomUUID();
+    setSubmission({ kind: "pending", requestId });
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/submissions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          version: 1, requestId,
+          input: { version: 1, idea, repositories: lines(repositories), pullRequests: refs },
+        }),
+      });
+      const decision = classifyIdeaSubmissionPost({
+        status: response.status,
+        body: await response.json(),
+      }, requestId);
+      if (decision.kind === "submitted") {
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+      } else if (decision.kind === "refused") {
+        setSubmission({ kind: "refused", code: decision.code });
+      } else {
+        await readBack(requestId);
+      }
+    } catch {
+      await readBack(requestId);
+    }
   };
 
   const checkInput = async () => {
@@ -72,7 +140,10 @@ export function AmuxIdeaInputPanel() {
   };
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
-  const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
+    submission.kind === "submitted";
+  const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
+    (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED");
   const errorMessage = result?.error
     ? (messages.errors[result.error as keyof typeof messages.errors] ?? messages.errors.preview_failed)
     : null;
@@ -93,7 +164,7 @@ export function AmuxIdeaInputPanel() {
             id="amux-v4-idea"
             value={idea}
             onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
-            disabled={pending}
+            disabled={pending || frozen}
             maxLength={8192}
             className="min-h-56 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-base font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
@@ -113,7 +184,7 @@ export function AmuxIdeaInputPanel() {
               id="amux-v4-repositories"
               value={repositories}
               onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
-              disabled={pending}
+              disabled={pending || frozen}
               className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
@@ -123,7 +194,7 @@ export function AmuxIdeaInputPanel() {
               id="amux-v4-pull-requests"
               value={pullRequests}
               onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
-              disabled={pending}
+              disabled={pending || frozen}
               className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
@@ -149,10 +220,18 @@ export function AmuxIdeaInputPanel() {
         <button
           type="button"
           onClick={checkInput}
-          disabled={pending || idea.trim().length === 0 || ideaBytes > 8192}
+          disabled={pending || frozen || idea.trim().length === 0 || ideaBytes > 8192}
           className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:focus-visible:outline-blue-300"
         >
           {messages.preview}
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!submissionAvailable || result?.outcome !== "input_checked" || frozen}
+          className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200"
+        >
+          {submission.kind === "pending" ? messages.submitting : messages.submit}
         </button>
         <button
           type="button"
@@ -163,10 +242,37 @@ export function AmuxIdeaInputPanel() {
           {messages.transfer}
         </button>
       </div>
+      <p className="text-sm text-zinc-700 dark:text-zinc-300">
+        {submissionAvailable ? messages.submitBoundary : messages.submitUnavailable}
+      </p>
       <p id="amux-v4-transfer-disabled" className="text-sm text-zinc-700 dark:text-zinc-300">{messages.transferUnavailable}</p>
 
       {refusedForStepUp ? (
         <a href={STEP_UP_HREF} className="text-sm font-medium text-zinc-900 underline dark:text-zinc-100">{messages.stepUp}</a>
+      ) : null}
+      {submission.kind === "refused" ? (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+          {messages.submitErrors[submission.code as keyof typeof messages.submitErrors] ?? messages.submitErrors.submit_failed}
+        </p>
+      ) : null}
+      {submission.kind === "submitted" ? (
+        <p role="status" className="text-sm text-zinc-800 dark:text-zinc-100">
+          {messages.submitted(submission.ideaId)}
+        </p>
+      ) : null}
+      {submission.kind === "outcome_unknown" ? (
+        <div role="alert" className="space-y-2 text-sm text-amber-800 dark:text-amber-200">
+          <p>{messages.outcomeUnknown(submission.requestId)}</p>
+          <button
+            type="button"
+            onClick={() => readBack(submission.requestId)}
+            disabled={readBackPending}
+            className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600 disabled:opacity-50 dark:border-amber-300"
+          >
+            {messages.checkSubmissionStatus}
+          </button>
+          <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
+        </div>
       ) : null}
       {result ? (
         <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-800 dark:border-zinc-700 dark:text-zinc-100" role="status">
@@ -177,7 +283,9 @@ export function AmuxIdeaInputPanel() {
               <p className="mt-2">{messages.excluded}</p>
             </>
           ) : null}
-          <p className="mt-2 text-zinc-600 dark:text-zinc-400">{messages.noWrite}</p>
+          {submission.kind === "idle" || submission.kind === "refused" ? (
+            <p className="mt-2 text-zinc-600 dark:text-zinc-400">{messages.noWrite}</p>
+          ) : null}
         </div>
       ) : null}
     </section>

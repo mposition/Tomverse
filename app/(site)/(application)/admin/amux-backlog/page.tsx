@@ -11,6 +11,12 @@ import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
+import {
+  AMUX_V4_IDEA_READBACK_ENV,
+  AMUX_V4_IDEA_SUBMISSION_ENV,
+  ideaSubmissionReadBackPermitted,
+  ideaSubmissionWritePermitted,
+} from "@/lib/amux/ideaSubmissionCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -25,8 +31,9 @@ const TABS = adminNavItemTabs("amux-backlog");
  * The original four owner-only sections used to be unlisted routes
  * (`/admin/amux-intake`, `/admin/amux-board-import`,
  * `/admin/amux-reconciliation`, `/admin/amux-backlog-metadata`), each now a
- * section. The separate Ideas section performs an input-only check: it saves
- * no idea, collects no GitHub data, and never authorizes external transfer.
+ * section. The separate Ideas section performs an input check and has an
+ * independently gated submission path. Neither action collects GitHub
+ * content or authorizes external transfer.
  * Only the open section is rendered.
  *
  * Owner-only exactly as each screen was: the route table's `viewRoles` keeps
@@ -42,8 +49,12 @@ export default async function AdminAmuxBacklogPage({
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
+  const ideaSubmissionAvailable =
+    ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
+    ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
   const chips = amuxTabChips(
-    { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]), ideas: "read_only" },
+    { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
+      ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
     m.status
   );
 
@@ -63,7 +74,7 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "ideas" ? (
-        <AmuxIdeaInputPanel />
+        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (
