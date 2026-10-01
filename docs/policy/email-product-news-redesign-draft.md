@@ -27,7 +27,8 @@
 - §5.4 "네, 받겠습니다는 세 항목 각각의 확인 메일을 요청" → 증명된 세션이면 세 항목
   **즉시 동의**, 아니면 확인 메일.
 
-Microsoft만으로 로그인한 세션은 증명이 아니므로 확인 메일이 남습니다(§14.1).
+Microsoft만으로 로그인한 세션은 증명이 아니므로 확인 메일이 남습니다(§14.1) — **2026-10-01
+개정: Microsoft 로그인도 증명입니다([double opt-in](email-double-opt-in.md) §14.7).**
 
 ### v25 (2026-09-30) — 로그인과 가입을 나눕니다(§5.2a)
 
@@ -583,7 +584,7 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
   - 체크한 opt-in은 **그 자리의 동의, 확인 메일, 또는 아무것도 아닌 것**으로 끝납니다(v26).
     계정을 만든 로그인이 주소를 증명했으면(이메일 코드·링크, 또는 `email_verified`인
     Google) 소비 트랜잭션에서 `product_updates`를 **즉시 `granted`** 로 기록합니다
-    ([double opt-in](email-double-opt-in.md) §14). 그렇지 않으면(Microsoft 가입 등)
+    ([double opt-in](email-double-opt-in.md) §14). 그렇지 않으면(증명 없는 세션)
     확인 메일입니다. 둘 다 불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
     503), 그 착지가 몇 번 다시 시도합니다. 그래서 화면은 **수집 게이트·확인 게이트와
     키·신뢰할 수 있는 국가**가 모두 있을 때만 장치를 보여 주고, 하나라도 없으면 장치
