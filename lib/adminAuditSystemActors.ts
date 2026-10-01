@@ -22,6 +22,20 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
  */
 export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
 
+/**
+ * Candidate actor identities for the approved AMUX intake v4 and
+ * orchestration v22 designs. They are deliberately NOT in the active list:
+ * adding a name there makes writeSystemAuditLog accept it immediately.
+ * Each future activation needs a scoped writer, policy citation, tests and
+ * separate review. The auto-admission actor especially needs its own gate.
+ */
+export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
+  "amux-intake-supervisor",
+  "amux-intake-retention",
+  "amux-portfolio-scorer",
+  "amux-v22-auto-admit",
+] as const;
+
 export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR, AMUX_AUTO_PROMOTER_AUDIT_ACTOR] as const;
 
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];

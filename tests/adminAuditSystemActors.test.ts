@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   auditRowActorKind,
@@ -24,6 +25,18 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
+  // Intake v4 and orchestration v22 are designs, not audit-writer authority.
+  assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
+    "amux-intake-supervisor",
+    "amux-intake-retention",
+    "amux-portfolio-scorer",
+    "amux-v22-auto-admit",
+  ]);
+  for (const proposed of AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS) {
+    assert.equal(new Set<string>(SYSTEM_AUDIT_ACTORS).has(proposed), false);
+    assert.equal(isSystemAuditActor(proposed), false);
+    assert.equal(auditRowActorKind(row({ metadata: { systemActor: proposed } })), "unknown");
+  }
   assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
   // The column marker is not an audit actor name.
   assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);
