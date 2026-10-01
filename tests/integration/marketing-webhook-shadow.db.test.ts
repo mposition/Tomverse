@@ -39,7 +39,20 @@ const shadow = (eventIdDigest: string) => ({
 const saved: Record<string, string | undefined> = {};
 
 const reset = async () => {
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "MarketingReport", "AdminAuditLog" RESTART IDENTITY`);
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "MarketingReport" RESTART IDENTITY`);
+  // AdminAuditLog is referenced by these tables' foreign keys, so it is
+  // truncated with them -- the same set the marketing schema suite truncates.
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "PromptRefinerShadowAttempt",
+      "PromptRefinerShadowRun",
+      "PromptRefinerReservation",
+      "PromptRefinerReservationStage",
+      "AmuxReviewDecision",
+      "EngineeringAgentApproval",
+      "AdminAuditLog"
+    RESTART IDENTITY
+  `);
   await prisma.appSetting.deleteMany({
     where: { key: { in: [MARKETING_WEBHOOK_FAULT_ARM_KEY, MARKETING_WEBHOOK_SHADOW_KEY] } },
   });

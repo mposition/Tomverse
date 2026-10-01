@@ -1130,8 +1130,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
   `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
   **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
-  의도적 5xx 어느 것도 일어나지 않습니다**(`TOMVERSE_DEPLOY_ENV`와 해석된 배포
-  환경이 둘 다 staging). `ZERNIO_WEBHOOK_SECRET`도 route에서만 읽습니다. 게시물은
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`도 route에서만 읽습니다. 게시물은
   바꾸지 않습니다 — 적용은 S2f이고 staging 서명 이후입니다.
 
 # 엔지니어링 Agent
