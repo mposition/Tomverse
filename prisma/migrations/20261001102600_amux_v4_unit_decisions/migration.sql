@@ -463,10 +463,25 @@ BEFORE INSERT OR UPDATE OR DELETE ON "AmuxIdeaUnitDecision"
 FOR EACH ROW EXECUTE FUNCTION amux_v4_unit_decision_guard();
 
 CREATE FUNCTION amux_v4_unit_decision_no_truncate()
-RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql VOLATILE
+SET search_path = pg_catalog, public, pg_temp
+SET row_security = off AS $$
 BEGIN
-    RAISE EXCEPTION 'unit decision truncation is forbidden'
-        USING ERRCODE = '23514', CONSTRAINT = 'AmuxIdeaUnitDecision_no_truncate_check';
+    -- A fixed transaction snapshot can miss a row committed before TRUNCATE
+    -- acquires ACCESS EXCLUSIVE. Only READ COMMITTED may use the empty-table
+    -- exception; this VOLATILE trigger query takes a fresh snapshot after
+    -- the table lock. row_security=off errors rather than hiding rows.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'unit decision truncation requires a fresh snapshot'
+            USING ERRCODE = '23514', CONSTRAINT = 'AmuxIdeaUnitDecision_no_truncate_check';
+    END IF;
+    -- Unrelated test-fixture TRUNCATE ... CASCADE includes this dark empty
+    -- table. It loses no evidence while empty; a populated table is immutable.
+    IF EXISTS (SELECT 1 FROM public."AmuxIdeaUnitDecision" LIMIT 1) THEN
+        RAISE EXCEPTION 'unit decision truncation is forbidden'
+            USING ERRCODE = '23514', CONSTRAINT = 'AmuxIdeaUnitDecision_no_truncate_check';
+    END IF;
+    RETURN NULL;
 END;
 $$;
 

@@ -1325,6 +1325,29 @@ domains:
       keys require a child-first account-deletion decision. Live draft writes
       remain disabled until those gates pass.
 
+  - domain: amuxIdeaUnitDecision
+    prismaModel: AmuxIdeaUnitDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v11, AMUX v4 unit-decision account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The actor is the confirming operator. This dark append-only row keeps
+      keyed digests and decision/audit identifiers, not proposal text. A
+      seven-year decision period is approved, but enforcement, account
+      deletion, legal hold and unified export remain unverified. Append-only
+      guards and RESTRICT references exclude child-first deletion after a
+      decision exists; a retention-preserving account-deletion plan is needed
+      before any live owner-decision writer can be enabled.
+
   - domain: amuxIdeaSourceScopeApproval
     prismaModel: AmuxIdeaSourceScopeApproval
     userLinkageRole: actor
