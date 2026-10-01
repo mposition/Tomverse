@@ -385,14 +385,15 @@ https://tomverse.app/api/admin/marketing-reach
   클라이언트가 말하는 값이 아니며, 이 변경 이전에 발급된 세션에는 없습니다 — 그
   세션은 확인 메일로 갑니다.
 - 기록은 **로그인 분기에서만** 합니다. 출처는 이메일 코드 로그인의 `authorize()`
-  결과, 또는 Google 로그인의 **원본 프로필**(`profile.email`, `email_verified === true`)
-  입니다. 매핑된 user 객체, `User.emailVerified`(OAuth 계정은 NULL), 세션 갱신
+  결과, Google 로그인의 **원본 프로필**(`profile.email`, `email_verified === true`),
+  또는 Microsoft 로그인의 **원본 프로필**(`profile.email`, §14.7)입니다. 매핑된 user 객체, `User.emailVerified`(OAuth 계정은 NULL), 세션 갱신
   (`trigger: "update"`)의 클라이언트 값은 출처가 아닙니다. 저장하는 주소는 원본
   프로필 주소를 trim·소문자로 정규화한 것이고, **그 토큰의 사용자 주소와 같을 때만**
   저장합니다 — 세션이 있는 상태의 OAuth 로그인은 NextAuth가 그 제공자를 기존 사용자에게
-  연결하므로, 다른 주소의 Google 프로필이 이 계정을 증명하지 않게 하기 위해서입니다.
-- 로그인 방법 연결(`app/api/user/login-methods/**`), 이메일 로그인 재활성화는 증명을
-  기록하지 않습니다(Microsoft 로그인은 §14.7부터 기록합니다). 새 로그인은 이전 토큰의 증명을 잇지 않습니다.
+  연결하므로, 다른 주소의 Google·Microsoft 프로필이 이 계정을 증명하지 않게 하기 위해서입니다.
+- 로그인 방법 연결(`app/api/user/login-methods/**`)과 이메일 로그인 재활성화는 증명을
+  기록하지 않습니다 — 그 흐름은 NextAuth 로그인 분기를 타지 않으므로 Microsoft를 연결해도
+  마찬가지입니다. 새 로그인은 이전 토큰의 증명을 잇지 않습니다.
 - 증명된 주소와 계정의 현재 주소가 다르면(주소 변경 이후) 증명이 아닙니다. 대조는
   동의를 쓰는 트랜잭션 안, User 행 잠금 아래에서 합니다(§13.1 항목 15와 같은 순서).
 
@@ -429,7 +430,7 @@ https://tomverse.app/api/admin/marketing-reach
 
 `ConsentRecord(action="granted")`의 `evidence`는 링크 확인의
 `{ tokenVersion, requestedAt, confirmedVia: "link" }` 대신
-`{ confirmedVia: "verified_session", proof: "email_code" | "google_verified",
+`{ confirmedVia: "verified_session", proof: "email_code" | "google_verified" | "microsoft_signin",
 provenAt }`입니다. `capturedVia`는 지금과 같이 `signup_form`(가입) 또는
 `preference_center`(설정·제품 내 안내)이고, 제품 내 안내는 `evidence.via`에 화면을
 적습니다 — `in_product_notice`는 `ConsentRecord`의 수집 경로 값이 아닙니다. 정책
