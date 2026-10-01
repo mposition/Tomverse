@@ -77,8 +77,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, operatorId }: {
   const readBack = useCallback(async (requestId: string) => {
     setReadBackPending(true);
     try {
+      const query = new URLSearchParams({ requestId }).toString();
       const response = await adminFetch(
-        `/api/admin/amux/ideas/submissions?requestId=${encodeURIComponent(requestId)}`,
+        `/api/admin/amux/ideas/submissions?${query}`,
         { cache: "no-store" },
       );
       const decision = classifyIdeaSubmissionReadBack({
