@@ -7,7 +7,7 @@ import { scanAmuxV4Input } from "./localIntakeCore.ts";
  * The trusted caller supplies the source-ref allowlist from the confirmed
  * transfer preview; the model cannot grant itself another source.
  */
-export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 1 as const;
+export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 2 as const;
 export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
 export const AMUX_ANALYSIS_CHUNK_CARD_CAP = 8;
 export const AMUX_ANALYSIS_CHUNK_NODE_CAP = 16;
@@ -142,6 +142,8 @@ export type AmuxAnalysisChunk = {
   chunkIndex: number;
   outcome: "propose" | "needs_information" | "reject";
   coverageStatus: "complete" | "more" | "needs_owner_input";
+  continuationKind: "input" | "output" | null;
+  ownerQuestion: string | null;
   coveredScope: string;
   remainingScope: string | null;
   units: Array<AmuxAnalysisNode | AmuxAnalysisCard | AmuxAnalysisEvidence>;
@@ -415,6 +417,8 @@ type AmuxAnalysisChunkInspectionInput = {
   raw: string;
   expectedPreviewId: string;
   expectedChunkIndex: number;
+  /** Prior chunk's continuationKind from a digest-verified app DB row. */
+  previousContinuationKind: "input" | "output" | null;
   permittedSourceRefIds: readonly string[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
 };
@@ -423,15 +427,18 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
   raw: string;
   expectedPreviewId: string;
   expectedChunkIndex: number;
+  previousContinuationKind: "input" | "output" | null;
   sourceRefs: string[];
   targetRefs: AmuxPermittedTargetRef[];
 } | null => {
   try {
     if (!input || typeof input !== "object") return null;
-    const { raw, expectedPreviewId, expectedChunkIndex,
+    const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
       permittedSourceRefIds, permittedTargetRefs } = input;
     if (typeof raw !== "string" || !amuxAnalysisRefSafe(expectedPreviewId) ||
         !Number.isSafeInteger(expectedChunkIndex) || expectedChunkIndex < 0 ||
+        (expectedChunkIndex === 0 ? previousContinuationKind !== null :
+          previousContinuationKind !== "input" && previousContinuationKind !== "output") ||
         !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs)) return null;
     const sourceRefs = copyBoundedAmuxArray<string>(permittedSourceRefIds, 256);
     const rawTargets = copyBoundedAmuxArray<AmuxPermittedTargetRef>(permittedTargetRefs, 512);
@@ -441,7 +448,8 @@ const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
     if (targetRefs.some((target) => target === null)) return null;
     const verifiedTargets = targetRefs as AmuxPermittedTargetRef[];
     if (verifiedTargets.some((target) => !amuxPermittedTargetRefSafe(target, expectedChunkIndex))) return null;
-    return { raw, expectedPreviewId, expectedChunkIndex, sourceRefs, targetRefs: verifiedTargets };
+    return { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
+      sourceRefs, targetRefs: verifiedTargets };
   } catch {
     return null;
   }
@@ -452,7 +460,8 @@ export function inspectAmuxAnalysisChunk(
 ): AmuxAnalysisChunkInspection {
   const snapshot = snapshotInspectionInput(input);
   if (snapshot === null) return { ok: false, code: "metadata_incomplete" };
-  const { raw, expectedPreviewId, expectedChunkIndex, sourceRefs, targetRefs } = snapshot;
+  const { raw, expectedPreviewId, expectedChunkIndex, previousContinuationKind,
+    sourceRefs, targetRefs } = snapshot;
   if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
@@ -462,7 +471,8 @@ export function inspectAmuxAnalysisChunk(
   }
   try {
     const data = object(parsed, [
-      "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "coveredScope", "remainingScope", "units",
+      "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind", "ownerQuestion",
+      "coveredScope", "remainingScope", "units",
     ]);
     if (data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION ||
         data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
@@ -482,8 +492,20 @@ export function inspectAmuxAnalysisChunk(
     validateUnitRefs(units, targetRefs);
     const outcome = oneOf(data.outcome, ["propose", "needs_information", "reject"] as const);
     const coverageStatus = oneOf(data.coverageStatus, ["complete", "more", "needs_owner_input"] as const);
+    const continuationKind = data.continuationKind === null ? null :
+      oneOf(data.continuationKind, ["input", "output"] as const);
+    const ownerQuestion = nullableText(data.ownerQuestion, 2_000);
     const remainingScope = nullableText(data.remainingScope, 2_000);
-    if ((coverageStatus === "complete") !== (remainingScope === null) ||
+    if ((remainingScope === null) !== (continuationKind === null) ||
+        (coverageStatus === "complete" && continuationKind !== null) ||
+        (coverageStatus === "more" && continuationKind === null) ||
+        (coverageStatus === "needs_owner_input" && continuationKind === "output") ||
+        (coverageStatus === "needs_owner_input") !== (ownerQuestion !== null) ||
+        (continuationKind === "output" && outcome !== "propose") ||
+        (continuationKind === "output" && counts.cards === 0) ||
+        (previousContinuationKind === "output" &&
+          (outcome === "reject" || (outcome === "propose" && counts.cards === 0) ||
+           (outcome === "needs_information" && continuationKind !== "input"))) ||
         (outcome === "needs_information") !== (coverageStatus === "needs_owner_input") ||
         (outcome === "reject" && coverageStatus !== "complete") ||
         (outcome === "propose" && units.length === 0) ||
@@ -494,6 +516,8 @@ export function inspectAmuxAnalysisChunk(
       chunkIndex: expectedChunkIndex,
       outcome,
       coverageStatus,
+      continuationKind,
+      ownerQuestion,
       coveredScope: text(data.coveredScope, 2_000),
       remainingScope,
       units,

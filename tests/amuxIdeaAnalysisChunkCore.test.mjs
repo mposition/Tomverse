@@ -12,6 +12,7 @@ const inspect = (value, overrides = {}) => inspectAmuxAnalysisChunk({
   raw: JSON.stringify(value),
   expectedPreviewId: "preview-01",
   expectedChunkIndex: 0,
+  previousContinuationKind: (overrides.expectedChunkIndex ?? 0) === 0 ? null : "input",
   permittedSourceRefIds: [sourceRef],
   permittedTargetRefs: [{ ref: "feature_existing_01", kind: "node", level: "feature" }],
   ...overrides,
@@ -67,11 +68,13 @@ const evidence = () => ({
 });
 
 const chunk = (units = [node(), story(), task(), evidence()]) => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   previewId: "preview-01",
   chunkIndex: 0,
   outcome: "propose",
   coverageStatus: "complete",
+  continuationKind: null,
+  ownerQuestion: null,
   coveredScope: "The owner idea and one confirmed source excerpt.",
   remainingScope: null,
   units,
@@ -91,6 +94,7 @@ test("eight cards cap a chunk, not an entire project idea", () => {
   const first = chunk(Array.from({ length: AMUX_ANALYSIS_CHUNK_CARD_CAP }, (_, index) =>
     story(`c0:card-${index + 1}`)));
   first.coverageStatus = "more";
+  first.continuationKind = "output";
   first.remainingScope = "Further independently verifiable tasks remain.";
   assert.equal(inspect(first).ok, true);
   const second = { ...chunk([story("c1:card-1")]), previewId: "preview-02", chunkIndex: 1 };
@@ -102,10 +106,66 @@ test("an incomplete analysis must disclose remaining scope", () => {
   const more = chunk([story()]);
   more.coverageStatus = "more";
   assert.deepEqual(inspect(more), { ok: false, code: "schema_rejected" });
+  more.continuationKind = "input";
   more.remainingScope = "One source still needs review.";
   assert.equal(inspect(more).ok, true);
   more.coverageStatus = "complete";
   assert.deepEqual(inspect(more), { ok: false, code: "schema_rejected" });
+});
+
+test("output overflow must be explicit and cannot masquerade as completion", () => {
+  const value = chunk([story()]);
+  value.coverageStatus = "more";
+  value.continuationKind = "output";
+  value.remainingScope = "Four additional cards from this source unit remain to propose.";
+  const accepted = inspect(value);
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.chunk.continuationKind, "output");
+  assert.deepEqual(inspect({ ...value, units: [node()] }),
+    { ok: false, code: "schema_rejected" });
+  value.continuationKind = null;
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.continuationKind = "output";
+  value.remainingScope = null;
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.remainingScope = "More cards remain.";
+  value.coverageStatus = "complete";
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.coverageStatus = "more";
+  value.outcome = "needs_information";
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.coverageStatus = "needs_owner_input";
+  value.ownerQuestion = "Which source unit remains?";
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.coverageStatus = "more";
+  value.outcome = "propose";
+  value.ownerQuestion = "Why is this set without an owner pause?";
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.ownerQuestion = null;
+  value.outcome = "propose";
+  value.schemaVersion = 1;
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+});
+
+test("a previous output remainder cannot disappear in a cardless next chunk", () => {
+  const binding = { expectedPreviewId: "preview-02", expectedChunkIndex: 1,
+    previousContinuationKind: "output" };
+  const next = { ...chunk([story("c1:card-1")]), previewId: "preview-02", chunkIndex: 1 };
+  assert.equal(inspect(next, binding).ok, true);
+  assert.deepEqual(inspect({ ...next, units: [node("c1:node-1")] }, binding),
+    { ok: false, code: "schema_rejected" });
+  assert.deepEqual(inspect({ ...next, outcome: "reject", units: [] }, binding),
+    { ok: false, code: "schema_rejected" });
+  assert.equal(inspect({ ...next, outcome: "needs_information", units: [],
+    coverageStatus: "needs_owner_input", continuationKind: "input",
+    remainingScope: "Unproposed cards from the previous source unit remain.",
+    ownerQuestion: "Which remaining card is required?" },
+  binding).ok, true);
+  assert.deepEqual(inspect({ ...next, outcome: "needs_information", units: [],
+    coverageStatus: "needs_owner_input", ownerQuestion: "Which remaining card is required?" },
+  binding), { ok: false, code: "schema_rejected" });
+  assert.deepEqual(inspect(next, { ...binding, previousContinuationKind: null }),
+    { ok: false, code: "metadata_incomplete" });
 });
 
 test("confirmed source refs are the only model-citable refs", () => {
@@ -128,6 +188,7 @@ test("sparse trusted allowlists fail closed instead of throwing", () => {
     { ok: false, code: "metadata_incomplete" });
   const throwingInput = {
     raw: JSON.stringify(chunk()), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef], permittedTargetRefs: [],
   };
   Object.defineProperty(throwingInput, "permittedTargetRefs", {
@@ -202,6 +263,20 @@ test("qualified prior-chunk refs are unambiguous and require caller proof", () =
   assert.deepEqual(inspect(later, { ...binding, permittedTargetRefs: [
     { ref: "c0:card-1", kind: "node", level: "feature" },
   ] }), { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(inspect(later, { ...binding, permittedTargetRefs: [
+    { ref: "feature_existing_01", kind: "node", level: "feature" },
+    { ref: "c0:card-1", kind: "card", cardType: "task", storyKind: null,
+      featureRef: "feature_existing_01" },
+  ] }), { ok: false, code: "schema_rejected" });
+  const dependent = { ...later, units: [{ ...later.units[0],
+    dependencyRefs: ["c0:card-2"] }] };
+  assert.equal(inspect(dependent, { ...binding, permittedTargetRefs: [
+    { ref: "feature_existing_01", kind: "node", level: "feature" },
+    { ref: "c0:card-1", kind: "card", cardType: "story", storyKind: "bug",
+      featureRef: "feature_existing_01" },
+    { ref: "c0:card-2", kind: "card", cardType: "task", storyKind: null,
+      featureRef: "feature_existing_01" },
+  ] }).ok, true);
 });
 
 test("same-chunk parent, evidence and dependency references have the right kind and no cycles", () => {
@@ -257,11 +332,13 @@ test("initiative parent and rejection payload remain structurally constrained", 
   assert.deepEqual(inspect(rejected), { ok: false, code: "schema_rejected" });
 });
 
-test("needs-information always names the unanalysed scope", () => {
+test("needs-information discloses a pause without approving partial proposals", () => {
   const value = chunk([]);
   value.outcome = "needs_information";
   assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
   value.coverageStatus = "needs_owner_input";
+  value.continuationKind = "input";
+  value.ownerQuestion = "Which feature owns the affected work?";
   value.remainingScope = "The owner must identify the affected feature.";
   assert.equal(inspect(value).ok, true);
   // A partial package may contain proposals, but this parser grants none of
@@ -272,6 +349,19 @@ test("needs-information always names the unanalysed scope", () => {
   assert.equal("approved" in partial, false);
   value.outcome = "reject";
   assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+});
+
+test("a terminal owner question can have no further source scope", () => {
+  const value = chunk([]);
+  value.outcome = "needs_information";
+  value.coverageStatus = "needs_owner_input";
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.ownerQuestion = "Should this be attached to the existing feature?";
+  assert.equal(inspect(value).ok, true);
+  value.ownerQuestion = null;
+  assert.deepEqual(inspect(value), { ok: false, code: "schema_rejected" });
+  value.ownerQuestion = "  ";
+  assert.deepEqual(inspect(value), { ok: false, code: "metadata_incomplete" });
 });
 
 test("model role and execution grade are closed proposal vocabularies", () => {
@@ -317,6 +407,7 @@ test("raw and normalized output are bounded without silent truncation", () => {
     raw: oversized,
     expectedPreviewId: "preview-01",
     expectedChunkIndex: 0,
+    previousContinuationKind: null,
     permittedSourceRefIds: [sourceRef],
     permittedTargetRefs: [],
   }), { ok: false, code: "too_large" });

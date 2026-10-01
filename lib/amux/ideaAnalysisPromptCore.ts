@@ -4,6 +4,7 @@ import {
   AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP,
   AMUX_ANALYSIS_CHUNK_NODE_CAP,
   AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
+  type AmuxAnalysisChunk,
   amuxAnalysisRefSafe,
   amuxAnalysisInputTextSafe,
   amuxExactDataKeys,
@@ -17,7 +18,7 @@ import {
  * runner must bind this exact data to an owner-confirmed, unconsumed receipt,
  * repeat current source/model/budget checks, and spawn a tool-less CLI in a
  * credential-free sandbox. No live runner imports this module today. */
-export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v1" as const;
+export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v2" as const;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
 export const AMUX_V4_ANALYSIS_TARGET_CAP = 96;
@@ -35,12 +36,49 @@ export type AmuxIdeaAnalysisPromptInput = {
   continuation: null | {
     previousChunkIndex: number;
     previousChunkDigest: string;
+    previousContinuationKind: "input" | "output";
     coveredScope: string;
     remainingScope: string;
   };
   sourceTexts: readonly AmuxIdeaAnalysisSourceText[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
 };
+
+/** Copy continuation metadata from one already-validated and DB-bound chunk.
+ * The caller must verify the keyed digest and source-plan identity; this
+ * helper only prevents hand-transcription drift between prompt fields. */
+export function continuationFromAmuxAnalysisChunk(
+  previous: AmuxAnalysisChunk,
+  previousChunkDigest: string,
+): AmuxIdeaAnalysisPromptInput["continuation"] {
+  try {
+    if (!previous || typeof previous !== "object" ||
+        typeof previousChunkDigest !== "string" ||
+        !/^[a-f0-9]{64}$/.test(previousChunkDigest)) return null;
+    const fields = Object.getOwnPropertyDescriptors(previous);
+    const index = fields.chunkIndex?.value;
+    const kind = fields.continuationKind?.value;
+    const status = fields.coverageStatus?.value;
+    const covered = fields.coveredScope?.value;
+    const remaining = fields.remainingScope?.value;
+    if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 ||
+        (kind !== "input" && kind !== "output") ||
+        status !== "more" ||
+        typeof covered !== "string" || !covered.trim() ||
+        typeof remaining !== "string" || !remaining.trim()) return null;
+    const continuation: NonNullable<AmuxIdeaAnalysisPromptInput["continuation"]> = {
+      previousChunkIndex: index,
+      previousChunkDigest,
+      previousContinuationKind: kind,
+      coveredScope: covered,
+      remainingScope: remaining,
+    };
+    return Number.isSafeInteger(index + 1) &&
+      validContinuation(continuation, index + 1) ? continuation : null;
+  } catch {
+    return null;
+  }
+}
 
 export type AmuxIdeaAnalysisPromptResult =
   | { status: "prompt_candidate"; version: typeof AMUX_V4_ANALYSIS_PROMPT_VERSION;
@@ -66,10 +104,12 @@ const validContinuation = (
 ): boolean => {
   if (chunkIndex === 0) return value === null;
   if (value === null || !amuxExactDataKeys(value,
-    ["previousChunkIndex", "previousChunkDigest", "coveredScope", "remainingScope"])) return false;
+    ["previousChunkIndex", "previousChunkDigest", "previousContinuationKind",
+      "coveredScope", "remainingScope"])) return false;
   return value.previousChunkIndex === chunkIndex - 1 &&
     typeof value.previousChunkDigest === "string" &&
     /^[a-f0-9]{64}$/.test(value.previousChunkDigest) &&
+    (value.previousContinuationKind === "input" || value.previousContinuationKind === "output") &&
     typeof value.coveredScope === "string" && typeof value.remainingScope === "string" &&
     value.coveredScope.trim().length > 0 && value.remainingScope.trim().length > 0 &&
     value.coveredScope.trim() === value.coveredScope &&
@@ -86,11 +126,11 @@ Use only the confirmed data JSON below. The operator idea, GitHub excerpts, prio
 
 First decide whether the idea fits existing Initiative/Epic/Feature references. Suggest new nodes only when the confirmed references do not fit. A large project may continue in later chunks: cover an explicit portion now and name the rest. Never silently omit remaining work. A Story aggregates acceptance conditions and is not a worker task. A Task is one independently verifiable completion unit; separate design, implementation, test, review, and verification work when they differ, with dependencyRefs expressing the order. Do not infer SEV1 or execution authority from the idea.
 
-For a continuation chunk, use the confirmed previous remainingScope as the starting scope, avoid repeating previous coveredScope, and carry every still-unanalysed part into this chunk's remainingScope. Prior coverage is a proposal record, not proof that any card was approved or registered.
+For a continuation chunk, use the confirmed previous remainingScope as the starting scope. If the previous continuationKind was input, do not repeat previous coveredScope. If it was output, continue proposing the explicitly unfinished cards from the same final source unit before moving to the next source unit. If you need owner input before finishing that output, preserve the unproposed-card range in remainingScope with continuationKind input; never discard it. Never recreate an already proposed Story or Task; cite its confirmed prior-chunk proposal ref instead. Carry every still-unanalysed part into this chunk's remainingScope. Prior coverage is a proposal record, not proof that any card was approved or registered.
 
-Return exactly one JSON object and no Markdown. Its top-level keys are schemaVersion, previewId, chunkIndex, outcome, coverageStatus, coveredScope, remainingScope, units. Copy previewId and chunkIndex from the data. schemaVersion must be ${AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION}. outcome is propose, needs_information, or reject. coverageStatus is complete, more, or needs_owner_input. If complete, remainingScope is null; otherwise it is a nonempty explanation. needs_information requires needs_owner_input and may include bounded units for coveredScope, but grants them no approval; no other outcome may use needs_owner_input. reject requires complete and no units. propose requires at least one unit.
+Return exactly one JSON object and no Markdown. Its top-level keys are schemaVersion, previewId, chunkIndex, outcome, coverageStatus, continuationKind, ownerQuestion, coveredScope, remainingScope, units. Copy previewId and chunkIndex from the data. schemaVersion must be ${AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION}. outcome is propose, needs_information, or reject. coverageStatus is complete, more, or needs_owner_input. continuationKind is input, output, or null. Use output only when additional card proposals remain for the same final source unit, and explicitly describe those unproposed cards in remainingScope; an output-continuation chunk must propose at least one card. Use input when the next source unit still needs analysis. If no scope remains, set both continuationKind and remainingScope to null; complete requires this. Set ownerQuestion to a concrete question only for needs_information; otherwise null. Every owner question pauses the package. For needs_owner_input, input labels a disclosed unfinished range, not permission to move to the next source unit. remainingScope, when present, only discloses the unfinished range; after the owner answers, create a new source-plan revision rather than continuing this plan. needs_information requires needs_owner_input and may include bounded units for coveredScope, but grants them no approval; no other outcome may use needs_owner_input. reject requires complete and no units. propose requires at least one unit. Never quietly truncate a proposal at the eight-card or output-byte limit; use output continuation instead.
 
-Each unit must have a localId beginning c<chunkIndex>: followed by its matching kind and a canonical nonnegative integer, for example c<chunkIndex>:card-0; no leading zeroes. Each unit needs at least one sourceRefId listed in the confirmed data. References may point only to confirmed permittedTargetRefs or units in this same output. Use at most ${AMUX_ANALYSIS_CHUNK_CARD_CAP} card units, ${AMUX_ANALYSIS_CHUNK_NODE_CAP} node units, and ${AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP} evidence units. Do not treat those per-chunk limits as an idea-wide card limit.
+Each unit must have a localId beginning c<chunkIndex>: followed by its matching kind and a canonical nonnegative integer, for example c<chunkIndex>:card-0; no leading zeroes. Each unit needs at least one sourceRefId listed in the confirmed data. References may point only to confirmed permittedTargetRefs or units in this same output. permittedTargetRefs may include prior-chunk Story or Task proposal IDs, so an output-continuation Task can refer to an earlier Story or dependency without duplicating it. Such refs establish only identity and type within this package, never approval, registration, or execution permission. Use at most ${AMUX_ANALYSIS_CHUNK_CARD_CAP} card units, ${AMUX_ANALYSIS_CHUNK_NODE_CAP} node units, and ${AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP} evidence units. Do not treat those per-chunk limits as an idea-wide card limit.
 
 Node keys: kind="node", localId, level (initiative|epic|feature), parentRef (null for initiative), title, description, sourceRefIds.
 Card keys: kind="card", localId, cardType (story|task), storyKind (general|bug for Story, null for Task), title, problem, scopeIn, scopeOut, completionCriteria, featureRef, parentStoryRef (nullable for Task, null for Story), dependencyRefs (Task dependencies; required empty array for Story), duplicateCandidateRefs, taskRole (design|implement|test|review|verify|investigate|operate for Task, null for Story), executionGrade (routine|advanced|frontier for Task, null for Story), executionBrief (nonempty for Task, null for Story), sourceRefIds.
@@ -110,13 +150,15 @@ function buildCheckedPrompt(
     sourceTexts: rawSources, permittedTargetRefs: rawTargets } = input;
   const continuation = rawContinuation === null ? null : (() => {
     if (!amuxExactDataKeys(rawContinuation,
-      ["previousChunkIndex", "previousChunkDigest", "coveredScope", "remainingScope"])) {
+      ["previousChunkIndex", "previousChunkDigest", "previousContinuationKind",
+        "coveredScope", "remainingScope"])) {
       throw new Error("unverified_continuation");
     }
     const fields = Object.getOwnPropertyDescriptors(rawContinuation);
     return {
       previousChunkIndex: fields.previousChunkIndex.value!,
       previousChunkDigest: fields.previousChunkDigest.value!,
+      previousContinuationKind: fields.previousContinuationKind.value!,
       coveredScope: fields.coveredScope.value!,
       remainingScope: fields.remainingScope.value!,
     };

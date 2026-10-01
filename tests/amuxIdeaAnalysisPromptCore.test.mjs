@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AMUX_V4_ANALYSIS_DATA_MAX_BYTES,
   buildAmuxIdeaAnalysisPrompt,
+  continuationFromAmuxAnalysisChunk,
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
 
 const valid = () => ({
@@ -12,6 +13,7 @@ const valid = () => ({
   continuation: {
     previousChunkIndex: 1,
     previousChunkDigest: "a".repeat(64),
+    previousContinuationKind: "input",
     coveredScope: "The previous chunk covered model eligibility.",
     remainingScope: "Analyse the remaining card approval and worker tasks.",
   },
@@ -32,6 +34,9 @@ test("prompt candidate states the bounded proposal schema and no write authority
   assert.ok(result.prompt.includes("You do not approve, register, prioritize, promote, execute"));
   assert.ok(result.prompt.includes("at most 8 card units"));
   assert.ok(result.prompt.includes("needs_information"));
+  assert.ok(result.prompt.includes("continuationKind"));
+  assert.ok(result.prompt.includes("Never quietly truncate"));
+  assert.ok(result.prompt.includes("Never recreate an already proposed Story or Task"));
   assert.ok(result.prompt.includes("localId beginning c2:"));
   assert.ok(result.prompt.includes("for example c2:card-0"));
   assert.equal(result.prompt.includes("c<chunkIndex>:"), false);
@@ -42,6 +47,7 @@ test("prompt candidate states the bounded proposal schema and no write authority
     .split("\nEND_CONFIRMED_DATA_JSON")[0]);
   assert.equal(data.previewId, "preview_12345678");
   assert.equal(data.continuation.previousChunkIndex, 1);
+  assert.equal(data.continuation.previousContinuationKind, "input");
   assert.equal(data.sourceTexts.length, 2);
 });
 
@@ -80,6 +86,10 @@ test("continuation requires the preceding chunk and preserves its remaining scop
   wrong.continuation.previousChunkIndex = 0;
   assert.deepEqual(buildAmuxIdeaAnalysisPrompt(wrong),
     { status: "hold", reason: "prompt_data_unverified" });
+  const unknownKind = valid();
+  unknownKind.continuation.previousContinuationKind = "policy_override";
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(unknownKind),
+    { status: "hold", reason: "prompt_data_unverified" });
   const unsigned = valid();
   unsigned.continuation.previousChunkDigest = "not-a-keyed-digest";
   assert.deepEqual(buildAmuxIdeaAnalysisPrompt(unsigned),
@@ -91,6 +101,54 @@ test("continuation requires the preceding chunk and preserves its remaining scop
   const largePreview = valid();
   largePreview.sourceTexts[0].text = "A".repeat(7_000);
   assert.equal(buildAmuxIdeaAnalysisPrompt(largePreview).status, "prompt_candidate");
+});
+
+test("a verified chunk can supply continuation fields without hand-transcription", () => {
+  const previous = {
+    chunkIndex: 1, continuationKind: "output", coverageStatus: "more",
+    coveredScope: "The first eight cards from source unit two.",
+    remainingScope: "Four more cards from source unit two remain.",
+  };
+  const continuation = continuationFromAmuxAnalysisChunk(previous, "b".repeat(64));
+  assert.deepEqual(continuation, {
+    previousChunkIndex: 1, previousChunkDigest: "b".repeat(64),
+    previousContinuationKind: "output", coveredScope: previous.coveredScope,
+    remainingScope: previous.remainingScope,
+  });
+  const input = valid();
+  input.continuation = continuation;
+  assert.equal(buildAmuxIdeaAnalysisPrompt(input).status, "prompt_candidate");
+  assert.equal(continuationFromAmuxAnalysisChunk({ ...previous, coverageStatus: "complete" },
+    "b".repeat(64)), null);
+  assert.equal(continuationFromAmuxAnalysisChunk({ ...previous, continuationKind: null },
+    "b".repeat(64)), null);
+  assert.equal(continuationFromAmuxAnalysisChunk({ ...previous,
+    coverageStatus: "needs_owner_input", ownerQuestion: "Which feature?" },
+  "b".repeat(64)), null);
+  assert.equal(continuationFromAmuxAnalysisChunk(previous, "invalid-digest"), null);
+  assert.equal(continuationFromAmuxAnalysisChunk({ ...previous,
+    remainingScope: " Untrimmed remaining scope" }, "b".repeat(64)), null);
+  input.permittedTargetRefs.push({ ref: "c0:card-1", kind: "card", cardType: "story",
+    storyKind: "general", featureRef: "feature_1" });
+  const withPriorDraft = buildAmuxIdeaAnalysisPrompt(input);
+  assert.equal(withPriorDraft.status, "prompt_candidate");
+  if (withPriorDraft.status === "prompt_candidate") {
+    assert.ok(withPriorDraft.prompt.includes("prior-chunk Story or Task proposal IDs"));
+    const data = JSON.parse(withPriorDraft.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
+      .split("\nEND_CONFIRMED_DATA_JSON")[0]);
+    assert.equal(data.permittedTargetRefs.at(-1).ref, "c0:card-1");
+    assert.equal(data.continuation.previousContinuationKind, "output");
+  }
+  const currentRef = valid();
+  currentRef.permittedTargetRefs.push({ ref: "c2:card-0", kind: "card",
+    cardType: "story", storyKind: "general", featureRef: "feature_1" });
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(currentRef),
+    { status: "hold", reason: "prompt_data_unverified" });
+  const futureRef = valid();
+  futureRef.permittedTargetRefs.push({ ref: "c3:card-0", kind: "card",
+    cardType: "story", storyKind: "general", featureRef: "feature_1" });
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(futureRef),
+    { status: "hold", reason: "prompt_data_unverified" });
 });
 
 test("unconfirmed properties, duplicate refs and malformed chunk inputs fail closed", () => {
