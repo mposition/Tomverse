@@ -186,6 +186,107 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       [ids.idea],
       "AmuxIdeaAnalysisChunk_completion_immutable_check",
     );
+
+    // Dark v4 owner-decision ledger: exercise the real PostgreSQL trigger,
+    // including source/audit binding and the no-commit unknown-outcome path.
+    const decisionUnitId = randomUUID();
+    const decisionPreviewId = randomUUID();
+    const decisionId = randomUUID();
+    const decisionAudit = async (action, actorUserId, metadata = null) => {
+      const auditId = randomUUID();
+      const entryHash = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+      await client.query(
+        `INSERT INTO public."AdminAuditLog"
+         ("id", "actorUserId", "action", "targetType", "targetId", "summary", "metadata", "entryHash")
+         VALUES ($1, $2, $3, 'AmuxIdeaUnitDecision', $4, 'synthetic decision probe', $5::jsonb, $6)`,
+        [auditId, actorUserId, action, decisionId, metadata && JSON.stringify(metadata), entryHash],
+      );
+      return auditId;
+    };
+    await client.query(
+      `INSERT INTO public."AmuxIdeaTransferPreview"
+       ("id", "ideaId", "chunkIndex", "attempt", "state", "modelId", "templateVersion",
+        "payloadDigest", "payloadDigestKeyId", "expiresAt", "confirmedAt",
+        "confirmExpiresAt", "confirmedByUserId", "confirmationAuditLogId", "updatedAt")
+       VALUES ($1, $2, 0, 99, 'completed', 'synthetic-model', 'synthetic-template',
+               $3, 'synthetic', CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP + INTERVAL '15 minutes', 'synthetic-owner', $4, CURRENT_TIMESTAMP)`,
+      [decisionPreviewId, ids.idea, digest, randomUUID()],
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaAnalysisChunk" SET "currentPreviewId" = $2
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [ids.idea, decisionPreviewId],
+    );
+    await client.query(
+      `INSERT INTO public."AmuxIdeaDraftUnit"
+       ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
+        "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+        "bodyDigest", "bodyDigestKeyId", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 0, 0, 'c0:card-0', 'card', 'proposed',
+               $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+      [decisionUnitId, ids.idea, title, digest],
+    );
+    const prepareAuditId = await decisionAudit("amux.v4.unit.prepare", "synthetic-owner");
+    const insertDecision = `INSERT INTO public."AmuxIdeaUnitDecision"
+      ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex", "prepareRequestId",
+       "action", "state", "ownerSessionDigest", "ownerSessionDigestKeyId",
+       "unitDigest", "unitDigestKeyId", "confirmationDigest", "confirmationDigestKeyId",
+       "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+       "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+      VALUES ($1, $2, $3, 'synthetic-owner', $4, $5,
+              'reject_unit', 'prepared', $6, 'synthetic',
+              $7, 'synthetic', $8, 'synthetic', $9, $10, 'synthetic',
+              CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes', $11, CURRENT_TIMESTAMP)`;
+    const decisionParams = [decisionId, ids.idea, decisionUnitId, 0, randomUUID(),
+      "c".repeat(64), digest, "d".repeat(64), decisionPreviewId, digest, prepareAuditId];
+    await expectRejected(insertDecision, [...decisionParams.slice(0, 3), 1, ...decisionParams.slice(4)],
+      "AmuxIdeaUnitDecision_unit_binding_check");
+    await client.query(insertDecision, decisionParams);
+    await expectRejected(insertDecision, [randomUUID(), ...decisionParams.slice(1, 4), randomUUID(),
+      ...decisionParams.slice(5)], "AmuxIdeaUnitDecision_prepare_audit_check");
+    const unknownAuditId = await decisionAudit("amux.v4.unit.outcome_unknown", null,
+      { systemActor: "tomverse-amux-orchestrator" });
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision"
+       SET "outcomeUnknownAt" = CURRENT_TIMESTAMP,
+           "outcomeUnknownConsumeRequestId" = $2,
+           "outcomeUnknownAuditLogId" = $3
+       WHERE "id" = $1`,
+      [decisionId, randomUUID(), unknownAuditId],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+       "consumeRequestId" = $2, "finalAuditLogId" = $3 WHERE "id" = $1`,
+      [decisionId, randomUUID(), randomUUID()],
+      "AmuxIdeaUnitDecision_unknown_freeze_check",
+    );
+    const resolvedAuditId = await decisionAudit("amux.v4.unit.no_commit_confirmed", "synthetic-owner");
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision"
+       SET "outcomeUnknownResolvedAt" = CURRENT_TIMESTAMP,
+           "outcomeUnknownResolution" = 'no_commit',
+           "outcomeUnknownResolvedAuditLogId" = $2 WHERE "id" = $1`,
+      [decisionId, resolvedAuditId],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+       "consumeRequestId" = $2, "finalAuditLogId" = $3 WHERE "id" = $1`,
+      [decisionId, randomUUID(), randomUUID()],
+      "AmuxIdeaUnitDecision_consume_boundary_check",
+    );
+    const invalidateAuditId = await decisionAudit("amux.v4.unit.invalidate", null,
+      { systemActor: "tomverse-amux-orchestrator" });
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'invalidated',
+       "finalAuditLogId" = $2 WHERE "id" = $1`,
+      [decisionId, invalidateAuditId],
+    );
+    await expectRejected(
+      `DELETE FROM public."AmuxIdeaUnitDecision" WHERE "id" = $1`,
+      [decisionId], "AmuxIdeaUnitDecision_no_delete_check",
+    );
+
     await client.query(
       `INSERT INTO public."AmuxIdeaAnalysisChunk"
        ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",

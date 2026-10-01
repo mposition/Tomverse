@@ -64,6 +64,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001102400_amux_v4_draft_local_ref",
   // AMUX intake v4 (policy v8): database-owned node archive clock, still dark.
   "20261001102500_amux_v4_node_retention_clock",
+  // AMUX intake v4: owner decision receipt ledger, still dark.
+  "20261001102600_amux_v4_unit_decisions",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {

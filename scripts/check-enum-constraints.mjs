@@ -433,6 +433,16 @@ const REGISTRY = {
     reason:
       "DraftUnitRetentionState in lib/amux/ideaRetentionCore.ts has proposed, approved, rejected, and expired. The read-only cleanup planner knows these four states, but no runtime writer list or live transition route exists yet.",
   },
+  AmuxIdeaUnitDecision_action_check: {
+    owner: "database",
+    reason:
+      "The dark AMUX v4 owner-decision ledger has a closed action vocabulary. No live decision writer or registration route is enabled by this migration.",
+  },
+  AmuxIdeaUnitDecision_state_check: {
+    owner: "database",
+    reason:
+      "The dark AMUX v4 owner-decision ledger has one prepared state and terminal states; unresolved outcomes freeze the prepared row until owner read-back.",
+  },
   AmuxPortfolioNode_level_check: {
     owner: "database",
     reason:
