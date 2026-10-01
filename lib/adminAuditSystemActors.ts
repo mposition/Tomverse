@@ -13,9 +13,11 @@
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
 
-import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "./amux/ideaIdentityCore.ts";
-
 export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
+
+/** The v4 intake actor is defined here so existing audit consumers do not
+ * acquire an unrelated AMUX module in their fixed runtime source closure. */
+export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
 
 /**
  * The internal auto-promotion tick (orchestration policy version 15,

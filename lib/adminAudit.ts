@@ -3,13 +3,13 @@ import "server-only";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 import { getTrustedClientIp } from "@/lib/clientIp";
-import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/amux/ideaIdentityCore";
 import { prisma } from "@/lib/prisma";
 import {
   adminAuditIntegrityKeys,
   computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
 import {
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   isSystemAuditActor,
