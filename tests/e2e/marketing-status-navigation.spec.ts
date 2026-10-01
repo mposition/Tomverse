@@ -31,11 +31,13 @@ test("mobile marketing menu stays focused on the four primary destinations", asy
   const menuButton = page.getByRole("button", { name: "Menu" });
   await expect(menuButton).toBeVisible();
   await menuButton.click();
-  const menu = page.locator("header nav").filter({ hasText: "Features" });
-  await expect(menu.getByRole("link", { name: "Features" })).toBeVisible();
+  // The four top destinations since e093addfa; FAQ moved to the footer menu.
+  const menu = page.locator("header nav").filter({ hasText: "How it works" });
+  await expect(menu.getByRole("link", { name: "How it works" })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Models" })).toBeVisible();
   await expect(menu.getByRole("link", { name: "Pricing" })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "FAQ" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Trust" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "FAQ" })).toHaveCount(0);
   await expect(menu.getByRole("link", { name: "Status" })).toHaveCount(0);
 });
 
