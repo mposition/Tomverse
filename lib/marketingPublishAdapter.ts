@@ -143,9 +143,14 @@ export type MarketingPublishAdapter = {
     externalPostId: string,
     externalAccountRef: string,
   ): Promise<MarketingObjectStatus>;
+  /**
+   * Take a published post down. The channel is part of the question: the
+   * provider retracts per platform, and a post is published to one.
+   */
   cancel(
     externalPostId: string,
     externalAccountRef: string,
+    channel: MarketingChannel,
   ): Promise<{ readonly cancelled: boolean; readonly errorCode: string | null }>;
 };
 

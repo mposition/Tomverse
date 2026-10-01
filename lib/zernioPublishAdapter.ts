@@ -471,19 +471,28 @@ export const zernioPublishAdapter = (
     async cancel(
       externalPostId: string,
       externalAccountRef: string,
+      channel: MarketingChannel,
     ): Promise<{ readonly cancelled: boolean; readonly errorCode: string | null }> {
-      void externalAccountRef;
       // `DELETE /v1/posts/{id}` only removes drafts and scheduled posts -- the
       // record says "Published posts cannot be deleted" -- so retracting a live
       // post is `unpublish`, which leaves Zernio's own row as `cancelled`.
+      //
+      // **`platform` is required, and `accountId` names which copy.** The first
+      // version sent an empty body, which the provider answers 400 -- so every
+      // channel this adapter reported as retractable could not in fact be
+      // retracted, which is the premise O15 rests autonomy on. A platform the
+      // unpublish enum does not list is refused here, without a call.
+      const platform = PLATFORM_BY_CHANNEL[channel];
+      if (!platform || !RETRACTABLE_PLATFORMS.has(platform)) {
+        return { cancelled: false, errorCode: "provider_cannot_retract" };
+      }
       const result = await call(`/v1/posts/${encodeURIComponent(externalPostId)}/unpublish`, {
         method: "POST",
-        body: {},
+        body: { platform, accountId: externalAccountRef },
       });
       if (result.kind === "unreachable") return { cancelled: false, errorCode: result.code };
-      if (result.status === 200 || result.status === 204) {
-        return { cancelled: true, errorCode: null };
-      }
+      // 200 is the documented success; anything else is not one.
+      if (result.status === 200) return { cancelled: true, errorCode: null };
       return { cancelled: false, errorCode: rejectionCode(result.status) };
     },
   };

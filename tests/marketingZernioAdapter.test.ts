@@ -381,19 +381,41 @@ test("cancelling a live post unpublishes it rather than deleting it", async () =
   // `DELETE /v1/posts/{id}` only removes drafts and scheduled posts -- the record
   // says published posts cannot be deleted -- so retraction is unpublish.
   const { adapter, calls } = adapterWith([{ status: 200, body: null }]);
-  assert.deepEqual(await adapter.cancel("zpost_1", "acct_9"), {
+  assert.deepEqual(await adapter.cancel("zpost_1", "acct_9", "linkedin"), {
     cancelled: true,
     errorCode: null,
   });
-  assert.match(calls[0]?.url ?? "", /\/v1\/posts\/zpost_1\/unpublish$/);
+  assert.equal(calls[0]?.url, "https://zernio.test/api/v1/posts/zpost_1/unpublish");
   assert.equal(calls[0]?.method, "POST");
+  // The body the endpoint requires. The first version sent `{}`, and its test
+  // never looked at the body, so a 400 in production was a pass here.
+  assert.deepEqual(calls[0]?.body, { platform: "linkedin", accountId: "acct_9" });
+});
+
+test("a cancel the provider refuses for a missing field is not a cancel", async () => {
+  const { adapter } = adapterWith([{ status: 400, body: { error: "platform is required" } }]);
+  assert.deepEqual(await adapter.cancel("zpost_1", "acct_9", "x"), {
+    cancelled: false,
+    errorCode: "provider_bad_request",
+  });
+});
+
+test("a channel the unpublish endpoint does not cover is refused without a call", async () => {
+  for (const channel of ["tiktok", "instagram", "rednote"] as const) {
+    const { adapter, calls } = adapterWith([{ status: 200, body: null }]);
+    assert.deepEqual(await adapter.cancel("zpost_1", "acct_9", channel), {
+      cancelled: false,
+      errorCode: "provider_cannot_retract",
+    });
+    assert.equal(calls.length, 0, channel);
+  }
 });
 
 test("a refused cancel reports a closed code, not the provider's words", async () => {
   const { adapter } = adapterWith([
     { status: 403, body: { message: "your token lacks scope publish:write" } },
   ]);
-  const result = await adapter.cancel("zpost_1", "acct_9");
+  const result = await adapter.cancel("zpost_1", "acct_9", "linkedin");
   assert.deepEqual(result, { cancelled: false, errorCode: "provider_unauthorized" });
 });
 
