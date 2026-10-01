@@ -333,6 +333,23 @@ test("an unknown maker is not silently equated with an aggregator portfolio", ()
   assert.doesNotMatch(assessment.analysisKo, /Sonar Pro/);
 });
 
+test("a current model with an empty lineup stays in review until the catalogue has decision facts", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gpt-queue-current",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    servedModels: [],
+  });
+  assert.equal(assessment.priority, "review");
+  assert.match(
+    assessment.analysisKo,
+    /openai의 모델 목록은 이 후보의 컨텍스트·출력·모달리티·가격을 담고 있지 않습니다/
+  );
+});
+
 test("provider aliases are explained as one adoption decision", () => {
   const assessment = assessModelLifecycleItem({
     action: "add",
