@@ -25,6 +25,7 @@ if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
 
 const ownerId = `synthetic-amux-owner-${randomUUID()}`;
 const ownerEmail = "amux-v4-frontier-synthetic@example.test";
+const syntheticModelIds = new Set<string>();
 process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
@@ -44,11 +45,29 @@ const decision = (value: object) => {
 };
 
 after(async () => {
-  await prisma.$disconnect();
+  try {
+    if (syntheticModelIds.size === 0) return;
+    // This suite alone commits catalog rows to prove concurrency and read-side
+    // visibility. Remove only its synthetic rows in the dedicated loopback test
+    // database, so later shared fixtures may TRUNCATE AdminAuditLog CASCADE.
+    // Production's trigger is unchanged; the DDL and cleanup roll back together.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AmuxIdeaFrontierModelApproval" DISABLE TRIGGER "AmuxIdeaFrontierModelApproval_guard"');
+      await tx.amuxIdeaFrontierModelApproval.deleteMany({
+        where: { modelId: { in: [...syntheticModelIds] } },
+      });
+      await tx.$executeRawUnsafe(
+        'ALTER TABLE "AmuxIdeaFrontierModelApproval" ENABLE TRIGGER "AmuxIdeaFrontierModelApproval_guard"');
+    }, { maxWait: 5_000, timeout: 15_000 });
+  } finally {
+    await prisma.$disconnect();
+  }
 });
 
 test("owner Frontier approval, revocation and reapproval are atomically audited", async () => {
   const modelId = `synthetic-frontier-${randomUUID()}`;
+  syntheticModelIds.add(modelId);
   const firstId = randomUUID();
   const secondId = randomUUID();
   const beforeCards = await prisma.amuxWorkItem.count();
@@ -127,6 +146,7 @@ test("owner Frontier approval, revocation and reapproval are atomically audited"
 
 test("parallel approval for one model records exactly one version and audit", async () => {
   const modelId = `synthetic-frontier-${randomUUID()}`;
+  syntheticModelIds.add(modelId);
   const approvalIds = [randomUUID(), randomUUID()];
   const attempts = approvalIds.map((approvalId) => {
     const approve = decision({ schemaVersion: 1, action: "approve",
@@ -157,6 +177,7 @@ test("parallel approval for one model records exactly one version and audit", as
 test("an aborted owner decision leaves neither catalog row nor canonical audit", async () => {
   const approvalId = randomUUID();
   const modelId = `synthetic-frontier-${randomUUID()}`;
+  syntheticModelIds.add(modelId);
   const approve = decision({ schemaVersion: 1, action: "approve",
     approvalId, provider: "anthropic", modelId,
     allowedEfforts: ["high"], expectedPreviousVersion: 0,
