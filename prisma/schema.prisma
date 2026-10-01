@@ -6871,6 +6871,9 @@ model AmuxIdeaDraftUnit {
   actorUserId       String
   chunkIndex        Int
   unitIndex         Int
+  /// Stable, idea-scoped reference used by later analysis chunks. Legacy
+  /// dark-schema rows may be null; all new inserts require a value in SQL.
+  localRef          String?
   unitKind          String
   state             String
   expiresAt         DateTime
@@ -6889,6 +6892,7 @@ model AmuxIdeaDraftUnit {
   chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([ideaId, chunkIndex, unitIndex])
+  @@unique([ideaId, localRef])
   @@index([actorUserId, ideaId])
   /// The due/expiry partial indexes live only in the SQL migration; Prisma
   /// schema cannot express their WHERE predicates.

@@ -60,6 +60,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001102200_amux_v4_idea_submission_request_id",
   // AMUX intake v7: separately purgeable normalized draft units, still dark.
   "20261001102300_amux_v4_draft_units",
+  // AMUX intake v4: canonical references for cross-chunk draft units, still dark.
+  "20261001102400_amux_v4_draft_local_ref",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {

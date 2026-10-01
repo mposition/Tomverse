@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL("../prisma/migrations/20261001102300_amux_v4_draft_units/migration.sql", import.meta.url),
   "utf8",
 );
+const localRefMigration = readFileSync(
+  new URL("../prisma/migrations/20261001102400_amux_v4_draft_local_ref/migration.sql", import.meta.url),
+  "utf8",
+);
 const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 
 test("v4 proposal units are independently encrypted and cannot coexist with a monolithic draft body", () => {
@@ -34,4 +38,17 @@ test("unit identity, owner and independent purge state are database-bound", () =
   assert.match(migration, /"bodyPurgedAt" >= "bodyPurgeAfter"/);
   assert.match(migration, /AmuxIdeaDraftUnit_no_resurrection_check/);
   assert.match(migration, /AmuxIdeaAnalysisChunk_completion_immutable/);
+});
+
+test("v4 draft local references are idea-unique, kind- and chunk-bound, and immutable", () => {
+  assert.match(schema, /model AmuxIdeaDraftUnit \{[^}]*?localRef\s+String\?/);
+  assert.match(schema, /@@unique\(\[ideaId, localRef\]\)/);
+  assert.match(localRefMigration, /ADD COLUMN "localRef" TEXT/);
+  assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_shape_check/);
+  assert.match(localRefMigration, /length\("localRef"\) <= 128/);
+  assert.match(localRefMigration, /split_part\("localRef", ':', 1\) = 'c' \|\| "chunkIndex"::text/);
+  assert.match(localRefMigration, /split_part\(split_part\("localRef", ':', 2\), '-', 1\) = "unitKind"/);
+  assert.match(localRefMigration, /UNIQUE INDEX "AmuxIdeaDraftUnit_ideaId_localRef_key"/);
+  assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_required_check/);
+  assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_immutable_check/);
 });

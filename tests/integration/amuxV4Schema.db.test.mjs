@@ -197,23 +197,58 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
 
     const insertUnit = `INSERT INTO public."AmuxIdeaDraftUnit"
-      ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "unitKind",
+      ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef", "unitKind",
        "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
        "bodyDigest", "bodyDigestKeyId", "updatedAt")
-      VALUES ($1, $2, $3, $4, $5, 'card', 'proposed', $6, 'synthetic', 1,
+      VALUES ($1, $2, $3, $4, $5, $8, 'card', 'proposed', $6, 'synthetic', 1,
               $7, 'synthetic', CURRENT_TIMESTAMP)`;
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "not-the-owner", 1, 0, title, digest],
+      [randomUUID(), ids.idea, "not-the-owner", 1, 0, title, digest, "c1:card-0"],
       "AmuxIdeaDraftUnit_ideaId_actorUserId_fkey",
     );
     const firstUnitId = randomUUID();
     const secondUnitId = randomUUID();
-    await client.query(insertUnit, [firstUnitId, ids.idea, "synthetic-owner", 1, 0, title, digest]);
-    await client.query(insertUnit, [secondUnitId, ids.idea, "synthetic-owner", 1, 1, title, digest]);
+    await client.query(insertUnit, [firstUnitId, ids.idea, "synthetic-owner", 1, 0, title, digest, "c1:card-0"]);
+    await client.query(insertUnit, [secondUnitId, ids.idea, "synthetic-owner", 1, 1, title, digest, "c1:card-1"]);
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 1, title, digest],
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, null],
+      "AmuxIdeaDraftUnit_local_ref_required_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c01:card-2"],
+      "AmuxIdeaDraftUnit_local_ref_shape_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c0:card-2"],
+      "AmuxIdeaDraftUnit_local_ref_shape_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:node-2"],
+      "AmuxIdeaDraftUnit_local_ref_shape_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, `c1:card-${"9".repeat(122)}`],
+      "AmuxIdeaDraftUnit_local_ref_shape_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-0"],
+      "AmuxIdeaDraftUnit_ideaId_localRef_key",
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "localRef" = 'c1:card-9' WHERE "id" = $1`,
+      [firstUnitId],
+      "AmuxIdeaDraftUnit_local_ref_immutable_check",
+    );
+    await expectRejected(
+      insertUnit,
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 1, title, digest, "c1:card-9"],
       "AmuxIdeaDraftUnit_ideaId_chunkIndex_unitIndex_key",
     );
     await client.query("SELECT pg_sleep(5.5)");
@@ -224,7 +259,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest],
+      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-2"],
       "AmuxIdeaDraftUnit_insert_expired_check",
     );
     await expectRejected(
@@ -278,7 +313,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     assert.equal(second?.bodyPurgedAt, null);
 
     const currentUnitId = randomUUID();
-    await client.query(insertUnit, [currentUnitId, ids.idea, "synthetic-owner", 0, 0, title, digest]);
+    await client.query(insertUnit, [currentUnitId, ids.idea, "synthetic-owner", 0, 0, title, digest, "c0:card-0"]);
     await expectRejected(
       `UPDATE public."AmuxIdeaDraftUnit"
        SET "expiresAt" = "expiresAt" + INTERVAL '1 day' WHERE "id" = $1`,
