@@ -27,6 +27,8 @@ test("approval and revocation require distinct actor-bound audit records", () =>
   assert.match(migration, /entryHash" ~ '\^\[a-f0-9\]\{64\}\$'\) IS DISTINCT FROM TRUE/);
   assert.match(migration, /OLD\."status" <> 'approved' OR NEW\."status" <> 'revoked'/);
   assert.match(migration, /BEFORE TRUNCATE ON "AmuxIdeaFrontierModelApproval"/);
+  assert.match(migration, /current_setting\('transaction_isolation'\) <> 'read committed'/);
+  assert.match(migration, /EXISTS \(SELECT 1 FROM public\."AmuxIdeaFrontierModelApproval" LIMIT 1\)/);
   assert.match(migration, /AmuxIdeaFrontierModelApproval_one_active_model/);
   assert.match(migration, /amux_v4_frontier_duplicate_effort_refused/);
 });

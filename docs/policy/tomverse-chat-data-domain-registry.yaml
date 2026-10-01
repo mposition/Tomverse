@@ -1257,6 +1257,26 @@ domains:
   # AMUX v4 tables are inert schema only. The operational content clocks in
   # amux-intake v5-v7 do not answer account deletion or unified export. Keep
   # both axes unverified until those paths are implemented and reviewed.
+  - domain: amuxIdeaFrontierModelApproval
+    prismaModel: AmuxIdeaFrontierModelApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, AMUX v4 Frontier approval account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId and optional revokedByUserId identify the operator and
+      intentionally have no User foreign key, preserving the linked audit
+      evidence. This dark catalog contains model eligibility metadata rather
+      than prompts or user ideas. One-way revocation and audit references do
+      not settle account deletion, retention, or unified export; no approval
+      writer or live CLI call is enabled.
+
   - domain: amuxIdeaSubmission
     prismaModel: AmuxIdeaSubmission
     userLinkageRole: actor

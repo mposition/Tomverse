@@ -137,6 +137,24 @@ $$;
 CREATE TRIGGER "AmuxIdeaFrontierModelApproval_guard"
     BEFORE INSERT OR UPDATE OR DELETE ON "AmuxIdeaFrontierModelApproval"
     FOR EACH ROW EXECUTE FUNCTION amux_v4_frontier_model_approval_guard();
+
+CREATE FUNCTION amux_v4_frontier_model_no_truncate()
+RETURNS trigger LANGUAGE plpgsql VOLATILE
+SET search_path = pg_catalog, public, pg_temp
+SET row_security = off AS $$
+BEGIN
+    -- A CASCADE from an unrelated test fixture may reach this empty dark
+    -- catalog. A populated approval history must never be truncated. Under
+    -- READ COMMITTED, the volatile query takes a fresh snapshot after the
+    -- ACCESS EXCLUSIVE lock; stronger isolation cannot use this exception.
+    IF current_setting('transaction_isolation') <> 'read committed' OR
+       EXISTS (SELECT 1 FROM public."AmuxIdeaFrontierModelApproval" LIMIT 1) THEN
+        RAISE EXCEPTION 'amux_v4_frontier_truncate_refused';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
 CREATE TRIGGER "AmuxIdeaFrontierModelApproval_no_truncate"
     BEFORE TRUNCATE ON "AmuxIdeaFrontierModelApproval"
-    FOR EACH STATEMENT EXECUTE FUNCTION amux_v4_frontier_model_approval_guard();
+    FOR EACH STATEMENT EXECUTE FUNCTION amux_v4_frontier_model_no_truncate();
