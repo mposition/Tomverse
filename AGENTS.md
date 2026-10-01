@@ -1117,6 +1117,22 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(`TOMVERSE_DEPLOY_ENV`와 해석된 배포
+  환경이 둘 다 staging). `ZERNIO_WEBHOOK_SECRET`도 route에서만 읽습니다. 게시물은
+  바꾸지 않습니다 — 적용은 S2f이고 staging 서명 이후입니다.
 
 # 엔지니어링 Agent
 

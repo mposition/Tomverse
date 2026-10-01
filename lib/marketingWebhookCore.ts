@@ -1,0 +1,318 @@
+/**
+ * The Zernio webhook, as the staging shadow receiver reads it (S2 plan, S2e).
+ *
+ * Pure: no database, no request object, no credential held. The route reads the
+ * secret and the raw body and hands them here; the store writes what this
+ * decides. Everything a person could get wrong about a webhook is here, in one
+ * place that a test can reach without a server.
+ *
+ * ## What the S0 record establishes, and what follows from it
+ *
+ * - `X-Zernio-Signature` is the HMAC-SHA256 of the **raw body**, lowercase hex,
+ *   sent only when the subscription has a secret. So the signature is checked
+ *   over the exact bytes received, before anything parses them, and a missing
+ *   header is a refusal -- the receiver's subscription always has a secret.
+ * - `X-Zernio-Event-Id` equals the payload's `id` and is the same on every
+ *   retry and redelivery. It is the dedupe key, and the header and the body must
+ *   agree: a body whose id differs from its header is not one event.
+ * - The timestamp is **not** signed and has no stated tolerance, so it is not
+ *   used to decide anything. Replay is handled by the event id, not by time.
+ *
+ * ## What this is not
+ *
+ * Shadow only. Nothing here changes a post: S2f applies events, and only after
+ * the staging evidence is signed.
+ */
+
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+
+import { z } from "zod";
+
+import {
+  resolveDeploymentEnvironment,
+} from "@/lib/deploymentEnvironment";
+import type { MarketingPostStatus } from "@/lib/marketingAutomationSchema";
+
+export const MARKETING_WEBHOOK_PROVIDER = "zernio";
+
+/**
+ * The post events the shadow receiver records.
+ *
+ * Post events only: account and comment events are not about a post's status,
+ * and the shadow report is a statement about one. An event outside this list is
+ * acknowledged and not recorded, rather than refused, because refusing it would
+ * make Zernio retry something nobody wants.
+ */
+export const MARKETING_WEBHOOK_EVENT_TYPES = [
+  "post.published",
+  "post.failed",
+  "post.partial",
+  "post.cancelled",
+  "post.platform.published",
+  "post.platform.failed",
+  "post.platform.deleted",
+] as const;
+
+export type MarketingWebhookEventType = (typeof MARKETING_WEBHOOK_EVENT_TYPES)[number];
+
+/**
+ * The status a post would have if this event were applied.
+ *
+ * - `partial` is not a success: some platform did not publish, and for a post
+ *   sent to one platform that is the case the publisher records as
+ *   `outcome_unknown` too.
+ * - `cancelled` is a retraction made *through Zernio* -- by us or an operator --
+ *   so it maps to our own `deleted`, never to removal by the platform.
+ * - `post.platform.deleted` is the platform's act, reported by Zernio's own
+ *   hourly poll, and is the only event that maps to `removed_by_platform`.
+ */
+export const MARKETING_WEBHOOK_DERIVED_STATUS: Readonly<
+  Record<MarketingWebhookEventType, MarketingPostStatus>
+> = Object.freeze({
+  "post.published": "published",
+  "post.platform.published": "published",
+  "post.failed": "failed",
+  "post.platform.failed": "failed",
+  "post.partial": "outcome_unknown",
+  "post.cancelled": "deleted",
+  "post.platform.deleted": "removed_by_platform",
+});
+
+/**
+ * Whether the raw body carries the signature the subscription's secret makes.
+ *
+ * Over the bytes as received, before parsing: a body re-serialised by a parser
+ * is not the body that was signed. Exactly 64 lowercase hex characters, compared
+ * in constant time; anything else is a refusal, including a missing header or
+ * an empty secret.
+ */
+export const verifyZernioWebhookSignature = (
+  rawBody: Uint8Array,
+  signatureHeader: string | null | undefined,
+  secret: string | null | undefined,
+): boolean => {
+  if (typeof secret !== "string" || secret.length === 0) return false;
+  if (typeof signatureHeader !== "string") return false;
+  const provided = signatureHeader.trim();
+  if (!/^[0-9a-f]{64}$/.test(provided)) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest();
+  return timingSafeEqual(expected, Buffer.from(provided, "hex"));
+};
+
+/**
+ * The event's identity, as stored: `sha256` over the provider and the event id.
+ *
+ * Over a canonical two-element JSON array rather than a concatenation, so no
+ * pair of provider and id can collide with another by moving a separator.
+ */
+export const marketingWebhookEventIdDigest = (provider: string, eventId: string): string =>
+  createHash("sha256").update(JSON.stringify([provider, eventId]), "utf8").digest("hex");
+
+/** An account id as Zernio sends it: a string, or an object carrying one. */
+const accountIdSchema = z.union([
+  z.string().min(1),
+  z
+    .object({ _id: z.string().min(1).optional(), id: z.string().min(1).optional() })
+    .refine((value) => value._id !== undefined || value.id !== undefined),
+]);
+
+/**
+ * The envelope fields the receiver relies on, each checked.
+ *
+ * Not `.strict()` on Zernio's object: the provider adds fields, and refusing an
+ * event for carrying one we do not read would make a working subscription fail
+ * on the provider's next release. What is strict is everything this module
+ * *uses*: each is required and typed, and nothing it does not name is read.
+ */
+const envelopeSchema = z.object({
+  id: z.string().uuid(),
+  event: z.enum(MARKETING_WEBHOOK_EVENT_TYPES),
+  timestamp: z.string().datetime({ offset: true }),
+  post: z.object({
+    id: z.string().min(1),
+    status: z.string().min(1),
+    platforms: z
+      .array(
+        z.object({
+          platform: z.string().min(1),
+          accountId: accountIdSchema,
+        }),
+      )
+      .min(1),
+  }),
+});
+
+export type MarketingWebhookEnvelope = {
+  readonly eventId: string;
+  readonly eventType: MarketingWebhookEventType;
+  readonly zernioPostId: string;
+  /** Every account the post went to, as the platform account ids Zernio uses. */
+  readonly accountIds: readonly string[];
+};
+
+export type MarketingWebhookParseRefusal =
+  | "body_not_json"
+  | "event_not_recorded"
+  | "envelope_invalid"
+  | "event_id_header_mismatch";
+
+/**
+ * Read a signed body, or say why it cannot be read.
+ *
+ * Called only after the signature has verified. An event type outside the
+ * recorded list is `event_not_recorded` -- a reason to acknowledge without
+ * storing, not an error. The header's event id must equal the body's.
+ */
+export const parseZernioWebhookEnvelope = (
+  rawBody: Uint8Array,
+  eventIdHeader: string | null | undefined,
+):
+  | { readonly ok: true; readonly envelope: MarketingWebhookEnvelope }
+  | { readonly ok: false; readonly refusal: MarketingWebhookParseRefusal } => {
+  let json: unknown;
+  try {
+    json = JSON.parse(Buffer.from(rawBody).toString("utf8"));
+  } catch {
+    return { ok: false, refusal: "body_not_json" };
+  }
+  const event = (json as { event?: unknown } | null)?.event;
+  if (
+    typeof event === "string" &&
+    !(MARKETING_WEBHOOK_EVENT_TYPES as readonly string[]).includes(event)
+  ) {
+    return { ok: false, refusal: "event_not_recorded" };
+  }
+  const parsed = envelopeSchema.safeParse(json);
+  if (!parsed.success) return { ok: false, refusal: "envelope_invalid" };
+  if (typeof eventIdHeader !== "string" || eventIdHeader.trim() !== parsed.data.id) {
+    return { ok: false, refusal: "event_id_header_mismatch" };
+  }
+  const accountIds = parsed.data.post.platforms.map((entry) =>
+    typeof entry.accountId === "string"
+      ? entry.accountId
+      : (entry.accountId._id ?? entry.accountId.id ?? ""),
+  );
+  return {
+    ok: true,
+    envelope: {
+      eventId: parsed.data.id,
+      eventType: parsed.data.event,
+      zernioPostId: parsed.data.post.id,
+      accountIds,
+    },
+  };
+};
+
+/**
+ * Whether a status query agrees with the status an event implies.
+ *
+ * `live` agrees with `published` and with nothing else. Any other answer agrees
+ * with any status that is not `published` -- except `unknown`, which agrees with
+ * nothing: a query that could not say is not a confirmation of either.
+ */
+export const marketingWebhookStatusQueryMatch = (
+  derived: MarketingPostStatus,
+  state: "live" | "removed" | "unknown",
+): boolean => {
+  if (state === "unknown") return false;
+  return derived === "published" ? state === "live" : state !== "live";
+};
+
+/**
+ * Why a staging webhook setting was not changed.
+ *
+ * Here rather than beside the writers: the admin routes name it in `instanceof`
+ * outside the mutation runner's transaction, and this module reaches no store,
+ * so naming it there loads nothing that writes.
+ */
+export class MarketingWebhookSettingRefusedError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "MarketingWebhookSettingRefusedError";
+    this.code = code;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The environment
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether this process is staging, by both signals and nothing weaker.
+ *
+ * `TOMVERSE_DEPLOY_ENV` and the resolved deployment environment must both say
+ * `staging` -- the same two the access resolver's `webhookShadow` decision reads.
+ * Production says production, and an unlabelled build resolves to production,
+ * so neither path can reach the shadow writer or the deliberate failure.
+ */
+export const marketingWebhookIsStaging = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  String(env.TOMVERSE_DEPLOY_ENV ?? "").trim().toLowerCase() === "staging" &&
+  resolveDeploymentEnvironment(env) === "staging";
+
+// ---------------------------------------------------------------------------
+// The fault arm
+// ---------------------------------------------------------------------------
+
+export const MARKETING_WEBHOOK_FAULT_ARM_KEY = "marketingAutomation.webhookFaultArm";
+
+/** The longest an arm may stay armed. A test that is not run should not linger. */
+export const MARKETING_WEBHOOK_FAULT_ARM_MAX_MS = 24 * 60 * 60 * 1000;
+
+const isoInstant = z.string().datetime({ offset: false });
+
+/** The plan's `WebhookFaultArm`, exactly. */
+export const marketingWebhookFaultArmSchema = z
+  .object({
+    eventIdDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    state: z.enum(["armed", "consumed"]),
+    generation: z.number().int().positive(),
+    armedAt: isoInstant,
+    expiresAt: isoInstant,
+  })
+  .strict()
+  .refine((arm) => Date.parse(arm.expiresAt) > Date.parse(arm.armedAt), {
+    message: "expiresAt must be after armedAt",
+  });
+
+export type MarketingWebhookFaultArm = z.infer<typeof marketingWebhookFaultArmSchema>;
+
+/** A stored value, or null when absent or not exactly an arm. */
+export const parseMarketingWebhookFaultArm = (
+  value: string | null | undefined,
+): MarketingWebhookFaultArm | null => {
+  if (typeof value !== "string") return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  const parsed = marketingWebhookFaultArmSchema.safeParse(json);
+  return parsed.success ? parsed.data : null;
+};
+
+/** The one serialisation an arm is stored and compared in. */
+export const serializeMarketingWebhookFaultArm = (arm: MarketingWebhookFaultArm): string =>
+  JSON.stringify({
+    eventIdDigest: arm.eventIdDigest,
+    state: arm.state,
+    generation: arm.generation,
+    armedAt: arm.armedAt,
+    expiresAt: arm.expiresAt,
+  });
+
+/**
+ * Whether this signed event should trip the latch: armed, for exactly this
+ * event, and not yet expired at the database clock.
+ */
+export const marketingWebhookFaultArmMatches = (
+  arm: MarketingWebhookFaultArm | null,
+  eventIdDigest: string,
+  now: Date,
+): arm is MarketingWebhookFaultArm =>
+  arm !== null &&
+  arm.state === "armed" &&
+  arm.eventIdDigest === eventIdDigest &&
+  Date.parse(arm.expiresAt) > now.getTime();

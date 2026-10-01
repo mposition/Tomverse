@@ -31,7 +31,7 @@ import {
 } from "@/lib/marketingPublisherRunCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
-import { ZERNIO_API_BASE_URL, zernioPublishAdapter } from "@/lib/zernioPublishAdapter";
+import { buildZernioAdapterFromEnv } from "@/app/api/_marketing/zernioAdapter";
 
 // The marketing publisher's app route (S2 plan, S2d1).
 //
@@ -303,22 +303,6 @@ function publisherPlan():
   return { adapter: resolved.adapter };
 }
 
-/**
- * The Zernio adapter, built from the one credential this route reads.
- *
- * `resolveAssetUrl` answers null for every asset: the marketing image bucket
- * and its public URLs are not built, and an asset that cannot be resolved makes
- * the adapter refuse the post before anything is sent. A post with an image is
- * therefore a confirmed failure until that exists -- never a post published
- * without the image a person approved.
- */
 function buildZernioAdapter(): MarketingPublishAdapter | null {
-  const apiKey = process.env.ZERNIO_API_KEY?.trim() ?? "";
-  if (apiKey === "") return null;
-  return zernioPublishAdapter({
-    apiKey,
-    baseUrl: ZERNIO_API_BASE_URL,
-    resolveAssetUrl: async () => null,
-    callBudgetMs: MARKETING_PUBLISHER_CALL_BUDGET_MS,
-  });
+  return buildZernioAdapterFromEnv(MARKETING_PUBLISHER_CALL_BUDGET_MS);
 }
