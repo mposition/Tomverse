@@ -13,11 +13,18 @@ import {
 } from "@/lib/amux/ideaSubmissionService";
 import { prisma } from "@/lib/prisma";
 
-const testUrl = process.env.AMUX_V4_SUBMISSION_TEST_DATABASE_URL?.trim();
+const runnerTestUrl = process.env.TEST_DATABASE_URL?.trim();
+const standaloneTestUrl = process.env.AMUX_V4_SUBMISSION_TEST_DATABASE_URL?.trim();
+const testUrl = runnerTestUrl || standaloneTestUrl;
 const url = testUrl ? new URL(testUrl) : null;
-if (!url || !["127.0.0.1", "localhost"].includes(url.hostname) ||
-    url.pathname !== "/amux_v4_test" || process.env.DATABASE_URL !== testUrl) {
-  throw new Error("REFUSE: AMUX v4 submission DB test requires the dedicated loopback amux_v4_test database");
+if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
+    !["127.0.0.1", "localhost"].includes(url.hostname) ||
+    !/^\/[A-Za-z0-9_-]+(?:[_-]test[0-9]*)$/i.test(url.pathname) ||
+    url.search !== "" || url.hash !== "" ||
+    (runnerTestUrl && standaloneTestUrl && runnerTestUrl !== standaloneTestUrl) ||
+    process.env.DATABASE_URL !== testUrl ||
+    (process.env.DIRECT_DATABASE_URL && process.env.DIRECT_DATABASE_URL !== testUrl)) {
+  throw new Error("REFUSE: AMUX v4 submission DB test requires one dedicated loopback test database shared with the DB integration runner");
 }
 
 const actorUserId = `synthetic-amux-owner-${randomUUID()}`;
