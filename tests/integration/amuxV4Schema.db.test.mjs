@@ -223,7 +223,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
        ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
         "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
         "bodyDigest", "bodyDigestKeyId", "updatedAt")
-       VALUES ($1, $2, 'synthetic-owner', 0, 0, 'c0:card-0', 'card', 'proposed',
+       VALUES ($1, $2, 'synthetic-owner', 0, 99, 'c0:card-99', 'card', 'proposed',
                $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
       [decisionUnitId, ids.idea, title, digest],
     );
