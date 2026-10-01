@@ -53,7 +53,7 @@ test("idea input rejects schema expansion, malformed references and oversized te
   assert.deepEqual(inspectAmuxIdeaInput(request({ idea: "한".repeat(3000) })), { ok: false, code: "too_large" });
 });
 
-test("input preview route is owner-only, no-store and has no write or model call", () => {
+test("input preview route is owner-only, no-store and audits only a body-free result", () => {
   const route = readFileSync(path.join(root, "app/api/admin/amux/ideas/input-preview/route.ts"), "utf8");
   assert.match(route, /getAdminRole\(session\) !== "owner"/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
@@ -61,6 +61,14 @@ test("input preview route is owner-only, no-store and has no write or model call
   assert.match(route, /private, no-store/);
   assert.match(route, /transferReady: false/);
   assert.match(route, /ideaWrites: 0/);
+  assert.match(route, /writeAdminAuditLog\(\{/);
+  assert.match(route, /amux\.idea\.input_checked/);
+  assert.match(route, /amux\.idea\.input_refused/);
+  assert.match(route, /metadata: \{ inputVersion: 1, outcome: auditOutcome \}/);
+  assert.match(route, /AUDIT_REFUSAL_CODES\.has\(inspected\.code\) \? inspected\.code : "refused_other"/);
+  const auditCall = route.match(/await writeAdminAuditLog\(\{[\s\S]*?\n    \}\);/)?.[0] ?? "";
+  assert.ok(auditCall);
+  assert.doesNotMatch(auditCall, /\braw\b|inspected\.input|`|\bideaBytes\b|\brepositories\b|\bpullRequests\b/);
   assert.match(route, /notAutomaticallyCollected:/);
   assert.doesNotMatch(route, /\bexcluded:/);
   assert.doesNotMatch(route, /prisma\.|streamText\(|generateText\(|child_process|spawn\(/);
