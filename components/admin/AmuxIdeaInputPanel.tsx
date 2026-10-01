@@ -78,29 +78,35 @@ export function AmuxIdeaInputPanel() {
     : null;
 
   return (
-    <section className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4" data-testid="amux-v4-idea-input">
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
-        <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.description}</p>
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4" data-testid="amux-v4-idea-input">
+      <div className="space-y-2 border-b border-zinc-200 pb-5 dark:border-zinc-800">
+        <p className="text-xs font-semibold tracking-[0.18em] text-blue-700 uppercase dark:text-blue-300">{messages.step}</p>
+        <h2 className="text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">{messages.title}</h2>
+        <p className="max-w-2xl text-sm leading-6 text-zinc-700 dark:text-zinc-300">{messages.description}</p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.55fr)]">
-        <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-v4-idea">
-          {messages.ideaLabel}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(17rem,0.85fr)]">
+        <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm font-medium text-zinc-800 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+          <h3 className="text-base font-semibold">{messages.ideaSection}</h3>
+          <label htmlFor="amux-v4-idea">{messages.ideaLabel}</label>
           <textarea
             id="amux-v4-idea"
             value={idea}
             onChange={(event) => { setIdea(event.target.value); invalidateResult(); }}
             disabled={pending}
             maxLength={8192}
-            className="min-h-56 w-full rounded-md border border-zinc-300 bg-white p-3 text-base font-normal text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+            className="min-h-56 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-base font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             aria-describedby="amux-v4-idea-hint amux-v4-idea-count"
           />
           <span id="amux-v4-idea-count" className="text-xs font-normal text-zinc-600 dark:text-zinc-400">{messages.byteCount(ideaBytes)}</span>
           <span id="amux-v4-idea-hint" className="text-xs font-normal text-zinc-600 dark:text-zinc-400">{messages.ideaHint}</span>
-        </label>
+        </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceSection}</h3>
+            <p className="text-xs leading-5 text-zinc-600 dark:text-zinc-400">{messages.sourceSectionHint}</p>
+          </div>
           <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-v4-repositories">
             {messages.repositoriesLabel}
             <textarea
@@ -108,7 +114,7 @@ export function AmuxIdeaInputPanel() {
               value={repositories}
               onChange={(event) => { setRepositories(event.target.value); invalidateResult(); }}
               disabled={pending}
-              className="min-h-24 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm font-normal text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-100" htmlFor="amux-v4-pull-requests">
@@ -118,18 +124,33 @@ export function AmuxIdeaInputPanel() {
               value={pullRequests}
               onChange={(event) => { setPullRequests(event.target.value); invalidateResult(); }}
               disabled={pending}
-              className="min-h-24 w-full rounded-md border border-zinc-300 bg-white p-3 text-sm font-normal text-zinc-900 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-100"
+              className="min-h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm font-normal text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
         </div>
       </div>
+
+      <section className="overflow-hidden rounded-xl border border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30" aria-labelledby="amux-v4-boundary-heading">
+        <div className="h-1 bg-blue-600 dark:bg-blue-400" aria-hidden="true" />
+        <h3 id="amux-v4-boundary-heading" className="px-4 pt-4 text-sm font-semibold text-blue-900 dark:text-blue-200">{messages.boundaryTitle}</h3>
+        <div className="grid md:grid-cols-2">
+          <div className="space-y-1 p-4 md:border-r md:border-blue-200 dark:md:border-blue-900">
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{messages.boundaryCurrent}</p>
+            <p className="text-xs leading-5 text-zinc-700 dark:text-zinc-300">{messages.boundaryCurrentDetail}</p>
+          </div>
+          <div className="space-y-1 border-t border-blue-200 p-4 md:border-t-0 dark:border-blue-900">
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{messages.boundaryNext}</p>
+            <p className="text-xs leading-5 text-zinc-700 dark:text-zinc-300">{messages.boundaryNextDetail}</p>
+          </div>
+        </div>
+      </section>
 
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           onClick={checkInput}
           disabled={pending || idea.trim().length === 0 || ideaBytes > 8192}
-          className="min-h-11 rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+          className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:bg-blue-600 dark:focus-visible:outline-blue-300"
         >
           {messages.preview}
         </button>
@@ -137,7 +158,7 @@ export function AmuxIdeaInputPanel() {
           type="button"
           disabled
           aria-describedby="amux-v4-transfer-disabled"
-          className="min-h-11 rounded-md border border-zinc-300 px-4 text-sm font-medium text-zinc-900 opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          className="min-h-11 rounded-lg border border-zinc-300 px-4 text-sm font-medium text-zinc-900 opacity-50 dark:border-zinc-600 dark:text-zinc-100"
         >
           {messages.transfer}
         </button>
