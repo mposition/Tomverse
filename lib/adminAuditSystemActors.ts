@@ -24,6 +24,12 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
  */
 export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
 
+/** AMUX intake policy v12 (approved by mposition, 2026-10-01): this first
+ * active v4 actor has one action/target pair, not general audit authority. */
+export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
+export const AMUX_V4_INITIAL_SOURCE_PLAN_TARGET = "AmuxIdeaSourcePlanRevision" as const;
+export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as const;
+
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
  * orchestration v22 designs. They are deliberately NOT in the active list:
@@ -32,14 +38,19 @@ export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
  * separate review. The auto-admission actor especially needs its own gate.
  */
 export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
-  AMUX_V4_IDEA_SYSTEM_ACTOR,
   "amux-intake-supervisor",
   "amux-intake-retention",
   "amux-portfolio-scorer",
   "amux-v22-auto-admit",
 ] as const;
 
-export const SYSTEM_AUDIT_ACTORS = [AMUX_SYSTEM_AUDIT_ACTOR, AMUX_AUTO_PROMOTER_AUDIT_ACTOR] as const;
+// The v4 intake actor is limited to a scoped, dark initial source-plan writer.
+// This list entry is not a route, feature flag or permission to call a model.
+export const SYSTEM_AUDIT_ACTORS = [
+  AMUX_SYSTEM_AUDIT_ACTOR,
+  AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+] as const;
 
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -56,6 +67,16 @@ export const isSystemAuditActor = (value: unknown): value is SystemAuditActor =>
   typeof value === "string" &&
   (SYSTEM_AUDIT_ACTORS as readonly string[]).includes(value);
 
+/** Existing actors retain their established call-site contracts. The new v4
+ * identity cannot be used for any other audit action or target. */
+export const systemAuditActionAllowed = (
+  actor: unknown, action: unknown, targetType: unknown,
+): actor is SystemAuditActor =>
+  isSystemAuditActor(actor) &&
+  (actor !== AMUX_V4_IDEA_SYSTEM_ACTOR ||
+    (action === AMUX_V4_INITIAL_SOURCE_PLAN_ACTION &&
+     targetType === AMUX_V4_INITIAL_SOURCE_PLAN_TARGET));
+
 /** Whether caller-supplied metadata claims the reserved key at its top level. */
 export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
   metadata !== null &&
@@ -64,6 +85,8 @@ export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
   Object.prototype.hasOwnProperty.call(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
 
 type AuditRowActorFields = {
+  action?: string;
+  targetType?: string;
   actorUserId: string | null;
   actorEmail: string | null;
   ipAddress: string | null;
@@ -94,5 +117,12 @@ export const auditRowActorKind = (
     row.actorEmail === null &&
     row.ipAddress === null &&
     row.userAgent === null;
-  return isSystemAuditActor(actor) && sessionFieldsEmpty ? "system" : "unknown";
+  if (!sessionFieldsEmpty || !isSystemAuditActor(actor)) return "unknown";
+  if (actor === AMUX_V4_IDEA_SYSTEM_ACTOR) {
+    const metadata = row.metadata as Record<string, unknown>;
+    return systemAuditActionAllowed(actor, row.action, row.targetType) &&
+      metadata.actorScope === AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE
+      ? "system" : "unknown";
+  }
+  return "system";
 };

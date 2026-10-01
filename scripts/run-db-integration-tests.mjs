@@ -262,6 +262,9 @@ run(
     // Dark v4 submission must bind its owner, request idempotency and audit
     // atomically without opening collection, analysis or transfer.
     "tests/integration/amux-v4-idea-submission.db.test.ts",
+    // The idea-only initial source plan is derived without a model call or
+    // external excerpt, and its pointer, immutable row and audit are atomic.
+    "tests/integration/amux-v4-initial-source-plan.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
