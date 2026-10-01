@@ -96,6 +96,9 @@ test("AMUX v4 source-plan revisions enforce identity, order and plan-bound chunk
     await client.query(insertPlan,
       [planId, ideaId, owner, 1, 0, 1, [digest], digest, null, auditId]);
     await expectRejected(
+      `DELETE FROM public."AmuxIdeaSourcePlanRevision" WHERE "id" = $1`,
+      [planId], "AmuxIdeaSourcePlanRevision_no_delete_check");
+    await expectRejected(
       `UPDATE public."AmuxIdeaSourcePlanRevision" SET "unitDigests" = $2 WHERE "id" = $1`,
       [planId, [secondDigest]], "AmuxIdeaSourcePlanRevision_identity_immutable_check");
     await expectRejected(

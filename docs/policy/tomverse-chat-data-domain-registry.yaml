@@ -1319,6 +1319,28 @@ domains:
       implementation must decide child-first purge or another safe treatment;
       live analysis remains disabled until that gate is resolved.
 
+  - domain: amuxIdeaSourcePlanRevision
+    prismaModel: AmuxIdeaSourcePlanRevision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v11-v12, AMUX v4 source-plan deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      This dark revision row stores only ordered keyed digests, an actor id,
+      and audit linkage, not idea text or private source paths. A restrictive
+      foreign key and delete guard prevent idea-row deletion once a plan is
+      written. The seven-year digest/audit rule does not yet resolve account
+      deletion, legal hold, end-of-retention cleanup, or unified export.
+      No live plan writer is enabled until those paths are approved and tested.
+
   - domain: amuxIdeaDraftUnit
     prismaModel: AmuxIdeaDraftUnit
     userLinkageRole: actor

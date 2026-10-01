@@ -254,6 +254,7 @@ run(
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
+    "tests/integration/amuxV4SourcePlan.db.test.mjs",
     "tests/integration/amux-v4-frontier-model.db.test.mjs",
     // Dark Frontier owner decisions must bind model eligibility, canonical
     // audit and versioned revocation without creating executable AMUX work.
