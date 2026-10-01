@@ -11,7 +11,9 @@ import {
 import {
   consumeMarketingWebhookFaultArm,
   setMarketingWebhookFaultArm,
+  writeMarketingWebhookShadowSwitch,
 } from "@/lib/marketingWebhookSettings";
+import { MarketingWebhookSettingRefusedError } from "@/lib/marketingWebhookCore";
 import { prisma } from "@/lib/prisma";
 
 // The staging shadow receiver's two races, against PostgreSQL (S2 plan, S2e).
@@ -130,4 +132,38 @@ test("an arm against a stale generation is refused by the compare-and-set", asyn
   );
   const row = await prisma.appSetting.findUnique({ where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY } });
   assert.equal(JSON.parse(row?.value ?? "{}").eventIdDigest, DIGEST);
+});
+
+test("two first writes of an absent setting: one succeeds, one is a conflict", async () => {
+  const outcomes = await Promise.allSettled([
+    runMarketingTransaction(prisma, (tx) =>
+      writeMarketingWebhookShadowSwitch(tx, { enabled: true, expectedEnabled: false }),
+    ),
+    runMarketingTransaction(prisma, (tx) =>
+      writeMarketingWebhookShadowSwitch(tx, { enabled: true, expectedEnabled: false }),
+    ),
+  ]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+  assert.ok(
+    rejected?.status === "rejected" &&
+      rejected.reason instanceof MarketingWebhookSettingRefusedError &&
+      rejected.reason.code === "shadow_switch_conflict",
+  );
+
+  const arms = await Promise.allSettled([
+    runMarketingTransaction(prisma, (tx) =>
+      setMarketingWebhookFaultArm(tx, { eventIdDigest: DIGEST, expectedGeneration: 0, ttlMs: 60_000 }),
+    ),
+    runMarketingTransaction(prisma, (tx) =>
+      setMarketingWebhookFaultArm(tx, { eventIdDigest: OTHER_DIGEST, expectedGeneration: 0, ttlMs: 60_000 }),
+    ),
+  ]);
+  assert.equal(arms.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  const lost = arms.find((outcome) => outcome.status === "rejected");
+  assert.ok(
+    lost?.status === "rejected" &&
+      lost.reason instanceof MarketingWebhookSettingRefusedError &&
+      lost.reason.code === "fault_arm_conflict",
+  );
 });

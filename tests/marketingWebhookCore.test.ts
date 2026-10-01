@@ -81,7 +81,7 @@ test("a signed body is read for exactly the fields the receiver uses", () => {
       eventId: EVENT_ID,
       eventType: "post.published",
       zernioPostId: "zpost_1",
-      accountIds: ["acct_9"],
+      accountId: "acct_9",
     },
   });
 });
@@ -97,7 +97,7 @@ test("an account id sent as an object is read the way the S0 probe reads it", ()
     }),
     EVENT_ID,
   );
-  assert.equal(parsed.ok && parsed.envelope.accountIds[0], "acct_7");
+  assert.equal(parsed.ok && parsed.envelope.accountId, "acct_7");
 });
 
 test("the header's event id must be the body's", () => {
@@ -235,4 +235,59 @@ test("only an armed, unexpired arm for exactly this event matches", () => {
     false,
   );
   assert.equal(marketingWebhookFaultArmMatches(null, DIGEST, now), false);
+});
+
+// ---------------------------------------------------------------------------
+// Account routing: aggregate versus per-platform events (round-1 review)
+// ---------------------------------------------------------------------------
+
+const platformBody = (overrides: Record<string, unknown> = {}) =>
+  Buffer.from(
+    JSON.stringify({
+      id: EVENT_ID,
+      event: "post.platform.failed",
+      timestamp: "2026-10-02T09:00:00.000Z",
+      account: { accountId: "acct_B", platform: "linkedin" },
+      post: {
+        id: "zpost_1",
+        status: "partial",
+        // Every target, as Zernio sends it: not the one this event is about.
+        platforms: [
+          { platform: "linkedin", accountId: "acct_A" },
+          { platform: "linkedin", accountId: "acct_B" },
+        ],
+      },
+      ...overrides,
+    }),
+  );
+
+test("a per-platform event is about the account it names, not the post's first target", () => {
+  const parsed = parseZernioWebhookEnvelope(platformBody(), EVENT_ID);
+  assert.equal(parsed.ok && parsed.envelope.accountId, "acct_B");
+});
+
+test("a per-platform event without its account is not one we can attribute", () => {
+  const raw = JSON.parse(platformBody().toString("utf8"));
+  delete raw.account;
+  assert.deepEqual(parseZernioWebhookEnvelope(Buffer.from(JSON.stringify(raw)), EVENT_ID), {
+    ok: false,
+    refusal: "envelope_invalid",
+  });
+});
+
+test("an aggregate event for a post sent to several accounts is acknowledged, not attributed", () => {
+  const parsed = parseZernioWebhookEnvelope(
+    body({
+      post: {
+        id: "zpost_1",
+        status: "published",
+        platforms: [
+          { platform: "linkedin", accountId: "acct_A" },
+          { platform: "twitter", accountId: "acct_B" },
+        ],
+      },
+    }),
+    EVENT_ID,
+  );
+  assert.deepEqual(parsed, { ok: false, refusal: "multiple_targets" });
 });

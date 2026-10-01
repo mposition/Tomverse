@@ -263,3 +263,30 @@ test("another event, an expired arm, no arm, or a lost race consumes nothing", a
     assert.equal(audits.length, 0, label);
   }
 });
+
+test("two writers that both read 'absent' get one write and one conflict", async () => {
+  // The second create hits the unique key. That is the same fact as a changed
+  // value -- somebody else wrote first -- and it is answered as one, not as an
+  // unhandled database error.
+  const racing = fakeTx();
+  const original = (racing.tx as unknown as { appSetting: { create: (a: unknown) => Promise<unknown> } }).appSetting.create;
+  (racing.tx as unknown as { appSetting: { create: (a: unknown) => Promise<unknown> } }).appSetting.create =
+    async (args: unknown) => {
+      // Somebody else created it between this writer's read and its create.
+      await original({ data: { key: (args as { data: { key: string } }).data.key, value: "true" } });
+      return original(args);
+    };
+  await assert.rejects(
+    writeMarketingWebhookShadowSwitch(racing.tx, { enabled: true, expectedEnabled: false }),
+    refused("shadow_switch_conflict"),
+  );
+  const arming = fakeTx();
+  (arming.tx as unknown as { appSetting: { create: (a: unknown) => Promise<unknown> } }).appSetting.create =
+    async () => {
+      throw Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    };
+  await assert.rejects(
+    setMarketingWebhookFaultArm(arming.tx, { eventIdDigest: DIGEST, expectedGeneration: 0, ttlMs: 60_000 }),
+    refused("fault_arm_conflict"),
+  );
+});

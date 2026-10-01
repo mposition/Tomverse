@@ -36,14 +36,20 @@ export const MARKETING_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 export type MarketingWebhookReceiverDeps = {
   /** Whether this process is staging, by both signals. */
   readonly isStaging: () => boolean;
+  /**
+   * Whether the operator's kill switch is set. It stops everything but reading
+   * the record (docs/policy/marketing-automation.md §6.1): no latch consumed, no
+   * deliberate failure, no report, no status query.
+   */
+  readonly killSwitchOn: () => boolean;
   /** `ZERNIO_WEBHOOK_SECRET`, read by the route; absent means every delivery is refused. */
   readonly secret: string | undefined;
   /** For the status query a shadow report compares against; null without a key. */
   readonly adapter: MarketingPublishAdapter | null;
   readonly consumeFaultArm: (eventIdDigest: string) => Promise<{ readonly consumed: boolean }>;
   readonly shadowEnabled: () => Promise<boolean>;
-  /** The one channel whose account the event names, or null for none or several. */
-  readonly resolveChannel: (accountIds: readonly string[]) => Promise<{ readonly id: string } | null>;
+  /** The one channel holding this platform account, or null for none or several. */
+  readonly resolveChannel: (accountId: string) => Promise<{ readonly id: string } | null>;
   readonly recordShadow: (input: {
     readonly eventIdDigest: string;
     readonly eventType: string;
@@ -59,11 +65,38 @@ const json = (body: Record<string, unknown>, status: number) =>
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
 
+/**
+ * The body, read chunk by chunk and abandoned the moment it passes the limit.
+ *
+ * Not `arrayBuffer()`: that buffers the whole body before anything can count
+ * it, so a request with no length -- or a false one -- is held in memory to
+ * whatever size its sender chooses before it is refused, and the sender has not
+ * been authenticated yet. Here the stream is cancelled at the first chunk over.
+ */
 const readBody = async (request: Request): Promise<Uint8Array | null> => {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MARKETING_WEBHOOK_MAX_BODY_BYTES) return null;
-  const buffer = new Uint8Array(await request.arrayBuffer());
-  return buffer.byteLength > MARKETING_WEBHOOK_MAX_BODY_BYTES ? null : buffer;
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MARKETING_WEBHOOK_MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 };
 
 export async function handleZernioWebhook(
@@ -72,6 +105,12 @@ export async function handleZernioWebhook(
 ): Promise<Response> {
   if (!deps.isStaging()) {
     return json({ code: "not_found" }, 404);
+  }
+  // The kill switch, before the body is read: nothing is consumed, recorded or
+  // asked of the provider. A 2xx, so the provider does not spend its retries on
+  // a stop an operator chose.
+  if (deps.killSwitchOn()) {
+    return json({ status: "kill_switch" }, 200);
   }
 
   const raw = await readBody(request);
@@ -85,10 +124,10 @@ export async function handleZernioWebhook(
 
   const parsed = parseZernioWebhookEnvelope(raw, request.headers.get("x-zernio-event-id"));
   if (!parsed.ok) {
-    if (parsed.refusal === "event_not_recorded") {
-      // Signed and well-formed enough to know it is not ours to record. 2xx so
-      // the provider does not retry something nobody wants.
-      return json({ status: "ignored" }, 200);
+    if (parsed.refusal === "event_not_recorded" || parsed.refusal === "multiple_targets") {
+      // Signed, and not something a single channel of ours can answer for. 2xx
+      // so the provider does not retry something nobody wants.
+      return json({ status: "ignored", reason: parsed.refusal }, 200);
     }
     return json({ code: parsed.refusal }, 400);
   }
@@ -106,7 +145,7 @@ export async function handleZernioWebhook(
     return json({ status: "shadow_off" }, 200);
   }
 
-  const channel = await deps.resolveChannel(envelope.accountIds);
+  const channel = await deps.resolveChannel(envelope.accountId);
   if (!channel) {
     return json({ status: "channel_unknown" }, 200);
   }
@@ -115,7 +154,7 @@ export async function handleZernioWebhook(
   let state: "live" | "removed" | "unknown" = "unknown";
   if (deps.adapter) {
     try {
-      const answer = await deps.adapter.lookupStatus(envelope.zernioPostId, envelope.accountIds[0] ?? "");
+      const answer = await deps.adapter.lookupStatus(envelope.zernioPostId, envelope.accountId);
       state = answer.state;
     } catch {
       state = "unknown";

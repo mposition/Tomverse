@@ -117,44 +117,82 @@ const accountIdSchema = z.union([
 ]);
 
 /**
- * The envelope fields the receiver relies on, each checked.
+ * Two envelope families, because Zernio routes them differently.
  *
- * Not `.strict()` on Zernio's object: the provider adds fields, and refusing an
- * event for carrying one we do not read would make a working subscription fail
- * on the provider's next release. What is strict is everything this module
- * *uses*: each is required and typed, and nothing it does not name is read.
+ * Zernio's account-routing contract: an **aggregate** post event
+ * (`post.published`, `post.failed`, ...) names its targets in
+ * `post.platforms[].accountId`, one per target, with no top-level account; a
+ * **per-platform** event (`post.platform.*`) names the one target it is about in
+ * `account.accountId`, while its `post.platforms[]` still lists every target.
+ * The first version read every event as the aggregate shape and picked from
+ * `post.platforms[]` -- so a per-platform failure for account B on a post sent to
+ * A and B would have been recorded against A.
+ *
+ * Each family's schema requires and types every field this module reads. They
+ * are not `.strict()` over Zernio's whole object: the S0 record does not list
+ * every field the provider sends, and refusing an event for one we do not read
+ * would turn a provider release into a dead-lettered subscription. Nothing a
+ * schema does not name is read.
  */
-const envelopeSchema = z.object({
+const AGGREGATE_EVENT_TYPES = [
+  "post.published",
+  "post.failed",
+  "post.partial",
+  "post.cancelled",
+] as const satisfies readonly MarketingWebhookEventType[];
+
+const PLATFORM_EVENT_TYPES = [
+  "post.platform.published",
+  "post.platform.failed",
+  "post.platform.deleted",
+] as const satisfies readonly MarketingWebhookEventType[];
+
+const envelopeBase = {
   id: z.string().uuid(),
-  event: z.enum(MARKETING_WEBHOOK_EVENT_TYPES),
   timestamp: z.string().datetime({ offset: true }),
+};
+
+const aggregateEnvelopeSchema = z.object({
+  ...envelopeBase,
+  event: z.enum(AGGREGATE_EVENT_TYPES),
   post: z.object({
     id: z.string().min(1),
     status: z.string().min(1),
     platforms: z
-      .array(
-        z.object({
-          platform: z.string().min(1),
-          accountId: accountIdSchema,
-        }),
-      )
+      .array(z.object({ platform: z.string().min(1), accountId: accountIdSchema }))
       .min(1),
   }),
 });
+
+const platformEnvelopeSchema = z.object({
+  ...envelopeBase,
+  event: z.enum(PLATFORM_EVENT_TYPES),
+  account: z.object({ accountId: accountIdSchema }),
+  post: z.object({ id: z.string().min(1) }),
+});
+
+const accountIdOf = (value: z.infer<typeof accountIdSchema>): string =>
+  typeof value === "string" ? value : (value._id ?? value.id ?? "");
 
 export type MarketingWebhookEnvelope = {
   readonly eventId: string;
   readonly eventType: MarketingWebhookEventType;
   readonly zernioPostId: string;
-  /** Every account the post went to, as the platform account ids Zernio uses. */
-  readonly accountIds: readonly string[];
+  /** The one platform account this event is about. */
+  readonly accountId: string;
 };
 
 export type MarketingWebhookParseRefusal =
   | "body_not_json"
   | "event_not_recorded"
   | "envelope_invalid"
-  | "event_id_header_mismatch";
+  | "event_id_header_mismatch"
+  /**
+   * An aggregate event for a post sent to more than one account. Every post
+   * this system makes goes to one, so the event is not about one of ours in a
+   * way a single channel can answer for.
+   */
+  | "multiple_targets";
 
 /**
  * Read a signed body, or say why it cannot be read.
@@ -182,23 +220,31 @@ export const parseZernioWebhookEnvelope = (
   ) {
     return { ok: false, refusal: "event_not_recorded" };
   }
-  const parsed = envelopeSchema.safeParse(json);
+  const family = (PLATFORM_EVENT_TYPES as readonly string[]).includes(String(event))
+    ? platformEnvelopeSchema
+    : aggregateEnvelopeSchema;
+  const parsed = family.safeParse(json);
   if (!parsed.success) return { ok: false, refusal: "envelope_invalid" };
-  if (typeof eventIdHeader !== "string" || eventIdHeader.trim() !== parsed.data.id) {
+  const data = parsed.data;
+  if (typeof eventIdHeader !== "string" || eventIdHeader.trim() !== data.id) {
     return { ok: false, refusal: "event_id_header_mismatch" };
   }
-  const accountIds = parsed.data.post.platforms.map((entry) =>
-    typeof entry.accountId === "string"
-      ? entry.accountId
-      : (entry.accountId._id ?? entry.accountId.id ?? ""),
-  );
+  let accountId: string;
+  if ("account" in data) {
+    accountId = accountIdOf(data.account.accountId);
+  } else {
+    const targets = [...new Set(data.post.platforms.map((entry) => accountIdOf(entry.accountId)))];
+    if (targets.length !== 1) return { ok: false, refusal: "multiple_targets" };
+    accountId = targets[0] ?? "";
+  }
+  if (accountId === "") return { ok: false, refusal: "envelope_invalid" };
   return {
     ok: true,
     envelope: {
-      eventId: parsed.data.id,
-      eventType: parsed.data.event,
-      zernioPostId: parsed.data.post.id,
-      accountIds,
+      eventId: data.id,
+      eventType: data.event,
+      zernioPostId: data.post.id,
+      accountId,
     },
   };
 };

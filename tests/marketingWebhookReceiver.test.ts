@@ -60,6 +60,7 @@ const deps = (
   } as unknown as MarketingPublishAdapter;
   const value: MarketingWebhookReceiverDeps = {
     isStaging: () => true,
+    killSwitchOn: () => false,
     secret: SECRET,
     adapter,
     consumeFaultArm: async (digest) => {
@@ -70,8 +71,8 @@ const deps = (
       calls.push({ name: "shadowEnabled" });
       return true;
     },
-    resolveChannel: async (ids) => {
-      calls.push({ name: "resolveChannel", input: ids });
+    resolveChannel: async (accountId) => {
+      calls.push({ name: "resolveChannel", input: accountId });
       return { id: "chn_1" };
     },
     recordShadow: async (input) => {
@@ -224,7 +225,10 @@ test("a status query that cannot answer is recorded as not agreeing", async () =
 
 test("a removal by the platform is recorded with the status it implies", async () => {
   const { value, calls } = deps({}, { status: "unknown" });
-  await handleZernioWebhook(request(payload({ event: "post.platform.deleted" })), value);
+  await handleZernioWebhook(
+    request(payload({ event: "post.platform.deleted", account: { accountId: "acct_9" } })),
+    value,
+  );
   const recorded = calls.find((call) => call.name === "recordShadow")?.input as {
     derivedStatus: string;
   };
@@ -237,4 +241,73 @@ test("a body over the limit is refused without being verified", async () => {
   const { status } = await answer(await handleZernioWebhook(request(big), value));
   assert.equal(status, 413);
   assert.deepEqual(calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// Round-1 review
+// ---------------------------------------------------------------------------
+
+test("the kill switch stops everything before the body is read", async () => {
+  const { value, calls } = deps({ killSwitchOn: () => true });
+  const stream = new ReadableStream();
+  const response = await handleZernioWebhook(
+    new Request("https://staging.test/api/webhooks/zernio", {
+      method: "POST",
+      body: stream,
+      // Node's fetch needs this for a streamed body.
+      duplex: "half",
+    } as RequestInit),
+    value,
+  );
+  const { status, body } = await answer(response);
+  assert.equal(status, 200);
+  assert.equal(body.status, "kill_switch");
+  // No latch consumed, nothing resolved, queried or recorded.
+  assert.deepEqual(calls, []);
+});
+
+test("a per-platform event resolves the channel by the account it names", async () => {
+  const raw = JSON.stringify({
+    id: EVENT_ID,
+    event: "post.platform.deleted",
+    timestamp: "2026-10-02T09:00:00.000Z",
+    account: { accountId: "acct_B" },
+    post: {
+      id: "zpost_1",
+      platforms: [
+        { platform: "linkedin", accountId: "acct_A" },
+        { platform: "linkedin", accountId: "acct_B" },
+      ],
+    },
+  });
+  const { value, calls } = deps({}, { status: "unknown" });
+  await handleZernioWebhook(request(raw), value);
+  assert.equal(calls.find((call) => call.name === "resolveChannel")?.input, "acct_B");
+});
+
+test("a body with no declared length is cut off at the limit, not buffered whole", async () => {
+  // A chunked body that would go on for ever: the reader must stop pulling
+  // once the limit is passed, and the request is refused.
+  const chunk = new Uint8Array(64 * 1024);
+  let pulled = 0;
+  const endless = new ReadableStream({
+    pull(controller) {
+      pulled += 1;
+      controller.enqueue(chunk);
+    },
+  });
+  const { value, calls } = deps();
+  const response = await handleZernioWebhook(
+    new Request("https://staging.test/api/webhooks/zernio", {
+      method: "POST",
+      body: endless,
+      // Node's fetch needs this for a streamed body.
+      duplex: "half",
+    } as RequestInit),
+    value,
+  );
+  assert.equal(response.status, 413);
+  assert.deepEqual(calls, []);
+  // Four 64 KiB chunks reach the limit; the fifth passes it and stops the read.
+  assert.ok(pulled <= 6, `read ${pulled} chunks`);
 });

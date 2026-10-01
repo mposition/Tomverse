@@ -9,7 +9,10 @@ import {
   recordMarketingWebhookShadow,
   runMarketingTransaction,
 } from "@/lib/marketingStore";
-import { MARKETING_WEBHOOK_SHADOW_KEY } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_AUTOMATION_KILL_SWITCH_ENV,
+  MARKETING_WEBHOOK_SHADOW_KEY,
+} from "@/lib/marketingAutomationAccess";
 import { marketingWebhookIsStaging } from "@/lib/marketingWebhookCore";
 import { handleZernioWebhook } from "@/lib/marketingWebhookReceiver";
 import { consumeMarketingWebhookFaultArm } from "@/lib/marketingWebhookSettings";
@@ -28,6 +31,10 @@ const STATUS_QUERY_BUDGET_MS = 3_000;
 export async function POST(request: Request) {
   return handleZernioWebhook(request, {
     isStaging: () => marketingWebhookIsStaging(),
+    killSwitchOn: () => {
+      const value = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
+      return typeof value === "string" && value.trim() !== "";
+    },
     secret: process.env.ZERNIO_WEBHOOK_SECRET,
     adapter: buildZernioAdapterFromEnv(STATUS_QUERY_BUDGET_MS),
     consumeFaultArm: (eventIdDigest) =>
@@ -43,10 +50,9 @@ export async function POST(request: Request) {
       });
       return row?.value === "true";
     },
-    resolveChannel: async (accountIds) => {
-      if (accountIds.length === 0) return null;
+    resolveChannel: async (accountId) => {
       const rows = await prisma.marketingChannel.findMany({
-        where: { provider: "zernio", externalAccountRef: { in: [...accountIds] } },
+        where: { provider: "zernio", externalAccountRef: accountId },
         select: { id: true },
         take: 2,
       });

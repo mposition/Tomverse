@@ -50,6 +50,31 @@ const requireStaging = () => {
   }
 };
 
+/**
+ * Create a row that did not exist, turning a racing creator's unique violation
+ * into the conflict it is. Two writers that both read "absent" both try to
+ * create; the key refuses the second, and that is the same fact as a changed
+ * value -- somebody else wrote first.
+ */
+const createOrConflict = async (
+  tx: MarketingTransaction,
+  key: string,
+  value: string,
+  conflictCode: string,
+) => {
+  try {
+    await tx.appSetting.create({ data: { key, value } });
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "P2002") {
+      throw new MarketingWebhookSettingRefusedError(
+        conflictCode,
+        "The setting changed since the screen read it",
+      );
+    }
+    throw error;
+  }
+};
+
 const databaseNow = async (tx: MarketingTransaction): Promise<Date> => {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
     SELECT (pg_catalog.clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
@@ -109,7 +134,7 @@ export async function writeMarketingWebhookShadowSwitch(
   const value = enabled ? "true" : "false";
   if (stored === undefined) {
     // No row: the unique key is the condition, so a racing writer fails on it.
-    await tx.appSetting.create({ data: { key: MARKETING_WEBHOOK_SHADOW_KEY, value } });
+    await createOrConflict(tx, MARKETING_WEBHOOK_SHADOW_KEY, value, "shadow_switch_conflict");
   } else {
     const moved = await tx.appSetting.updateMany({
       where: { key: MARKETING_WEBHOOK_SHADOW_KEY, value: stored },
@@ -194,7 +219,7 @@ export async function setMarketingWebhookFaultArm(
   };
   const value = serializeMarketingWebhookFaultArm(next);
   if (stored === undefined) {
-    await tx.appSetting.create({ data: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY, value } });
+    await createOrConflict(tx, MARKETING_WEBHOOK_FAULT_ARM_KEY, value, "fault_arm_conflict");
   } else {
     const moved = await tx.appSetting.updateMany({
       where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY, value: stored },
