@@ -1,5 +1,5 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
-import { scanLocalIntakeInput } from "./localIntakeCore.ts";
+import { scanAmuxV4Input } from "./localIntakeCore.ts";
 
 /**
  * Structural admission for one untrusted AMUX v4 model response. This is not
@@ -29,9 +29,73 @@ export const AMUX_TASK_ROLE_PROPOSALS = [
 ] as const;
 export const AMUX_EXECUTION_GRADE_PROPOSALS = ["routine", "advanced", "frontier"] as const;
 
+/** Snapshot a bounded dense array without invoking a caller-supplied iterator. */
+export const copyBoundedAmuxArray = <T>(value: unknown, max: number): T[] | null => {
+  try {
+    if (!Array.isArray(value)) return null;
+    const length = value.length;
+    if (!Number.isSafeInteger(length) || length > max) return null;
+    const result: T[] = [];
+    for (let index = 0; index < length; index += 1) {
+      if (!Object.hasOwn(value, index)) return null;
+      result.push(value[index] as T);
+    }
+    return result;
+  } catch {
+    return null;
+  }
+};
+
+/** Trusted metadata may be read only from exact, own data properties. */
+export const amuxExactDataKeys = (value: unknown, keys: readonly string[]): boolean =>
+  value !== null && typeof value === "object" && !Array.isArray(value) &&
+  Reflect.ownKeys(value).length === keys.length && keys.every((key) =>
+    "value" in (Object.getOwnPropertyDescriptor(value, key) ?? {}));
+
 export type AmuxPermittedTargetRef =
   | { ref: string; kind: "node"; level: "initiative" | "epic" | "feature" }
   | { ref: string; kind: "card"; cardType: "story" | "task"; storyKind: "general" | "bug" | null; featureRef: string };
+
+/** One descriptor snapshot feeds both prompt admission and model-output inspection. */
+export const snapshotAmuxPermittedTarget = (value: unknown): AmuxPermittedTargetRef | null => {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const hasExact = (keys: readonly string[]) =>
+      Reflect.ownKeys(descriptors).length === keys.length && keys.every((key) =>
+        "value" in (descriptors[key] ?? {}));
+    const kind = descriptors.kind?.value;
+    if (kind === "node" && hasExact(["ref", "kind", "level"])) {
+      return { ref: descriptors.ref.value, kind, level: descriptors.level.value };
+    }
+    if (kind === "card" && hasExact(["ref", "kind", "cardType", "storyKind", "featureRef"])) {
+      return { ref: descriptors.ref.value, kind, cardType: descriptors.cardType.value,
+        storyKind: descriptors.storyKind.value, featureRef: descriptors.featureRef.value };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+export const amuxAnalysisRefSafe = (value: unknown): value is string =>
+  typeof value === "string" && REF.test(value) && scanAmuxV4Input(value).ok;
+
+export const amuxPermittedTargetRefSafe = (
+  target: AmuxPermittedTargetRef,
+  expectedChunkIndex: number,
+): boolean => {
+  if (!target || typeof target !== "object" || !amuxAnalysisRefSafe(target.ref) ||
+      !Number.isSafeInteger(expectedChunkIndex) || expectedChunkIndex < 0) return false;
+  const priorLocal = LOCAL_ID.exec(target.ref);
+  if (priorLocal && (Number(priorLocal[1]) >= expectedChunkIndex || priorLocal[2] !== target.kind)) {
+    return false;
+  }
+  if (target.kind === "node") return ["initiative", "epic", "feature"].includes(target.level);
+  return target.kind === "card" && ["story", "task"].includes(target.cardType) &&
+    (target.cardType === "story" ? ["general", "bug"].includes(target.storyKind as string) :
+      target.storyKind === null) && amuxAnalysisRefSafe(target.featureRef);
+};
 
 export type AmuxAnalysisNode = {
   kind: "node";
@@ -124,7 +188,7 @@ const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T => {
 
 const ref = (value: unknown): string => {
   if (typeof value !== "string" || !REF.test(value)) return reject("schema_rejected");
-  if (!scanLocalIntakeInput(value).ok) return reject("content_refused");
+  if (!amuxAnalysisRefSafe(value)) return reject("content_refused");
   return value;
 };
 
@@ -144,13 +208,23 @@ const wellFormedUnicode = (value: string): boolean => {
   return true;
 };
 
+/** Shared inbound/outbound content boundary for AMUX v4 model text. */
+export const amuxAnalysisTextSafe = (value: string): boolean =>
+  wellFormedUnicode(value) && !SPOOFING_CHAR.test(value) && scanAmuxV4Input(value).ok;
+
+/** Source text keeps its exact bytes; only a paired CRLF is accepted in
+ * addition to the stricter stored-output character set. */
+export const amuxAnalysisInputTextSafe = (value: string): boolean =>
+  wellFormedUnicode(value) && !SPOOFING_CHAR.test(value.replaceAll("\r\n", "\n")) &&
+  scanAmuxV4Input(value).ok;
+
 const text = (value: unknown, maxBytes: number): string => {
   if (typeof value !== "string") return reject("schema_rejected");
   if (value.length === 0 || value.trim() !== value || !/\S/u.test(value)) {
     return reject("metadata_incomplete");
   }
   if (byteLength(value) > maxBytes) reject("too_large");
-  if (!wellFormedUnicode(value) || SPOOFING_CHAR.test(value) || !scanLocalIntakeInput(value).ok) {
+  if (!amuxAnalysisTextSafe(value)) {
     reject("content_refused");
   }
   return value;
@@ -337,40 +411,52 @@ const validateUnitRefs = (units: AmuxAnalysisChunk["units"], permitted: readonly
   for (const taskId of localTasks.keys()) walk(taskId);
 };
 
-export function inspectAmuxAnalysisChunk(input: {
+type AmuxAnalysisChunkInspectionInput = {
   raw: string;
   expectedPreviewId: string;
   expectedChunkIndex: number;
   permittedSourceRefIds: readonly string[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
-}): AmuxAnalysisChunkInspection {
-  if (!input || typeof input !== "object" || typeof input.raw !== "string" ||
-      typeof input.expectedPreviewId !== "string" || !REF.test(input.expectedPreviewId) ||
-      !Number.isSafeInteger(input.expectedChunkIndex) ||
-      input.expectedChunkIndex < 0 || !Array.isArray(input.permittedSourceRefIds) ||
-      input.permittedSourceRefIds.length === 0 ||
-      input.permittedSourceRefIds.length > 256 ||
-      input.permittedSourceRefIds.some((candidate) => typeof candidate !== "string" || !REF.test(candidate)) ||
-      !Array.isArray(input.permittedTargetRefs) || input.permittedTargetRefs.length > 512 ||
-      input.permittedTargetRefs.some((target) => {
-        if (!target || typeof target !== "object" || typeof target.ref !== "string" ||
-            !REF.test(target.ref) || !scanLocalIntakeInput(target.ref).ok) return true;
-        const priorLocal = LOCAL_ID.exec(target.ref);
-        if (priorLocal && (Number(priorLocal[1]) >= input.expectedChunkIndex || priorLocal[2] !== target.kind)) {
-          return true;
-        }
-        if (target.kind === "node") return !["initiative", "epic", "feature"].includes(target.level);
-        if (target.kind === "card") return !["story", "task"].includes(target.cardType) ||
-          (target.cardType === "story" ? !["general", "bug"].includes(target.storyKind as string) : target.storyKind !== null) ||
-          typeof target.featureRef !== "string" || !REF.test(target.featureRef);
-        return true;
-      })) {
-    return { ok: false, code: "metadata_incomplete" };
+};
+
+const snapshotInspectionInput = (input: AmuxAnalysisChunkInspectionInput): {
+  raw: string;
+  expectedPreviewId: string;
+  expectedChunkIndex: number;
+  sourceRefs: string[];
+  targetRefs: AmuxPermittedTargetRef[];
+} | null => {
+  try {
+    if (!input || typeof input !== "object") return null;
+    const { raw, expectedPreviewId, expectedChunkIndex,
+      permittedSourceRefIds, permittedTargetRefs } = input;
+    if (typeof raw !== "string" || !amuxAnalysisRefSafe(expectedPreviewId) ||
+        !Number.isSafeInteger(expectedChunkIndex) || expectedChunkIndex < 0 ||
+        !Array.isArray(permittedSourceRefIds) || !Array.isArray(permittedTargetRefs)) return null;
+    const sourceRefs = copyBoundedAmuxArray<string>(permittedSourceRefIds, 256);
+    const rawTargets = copyBoundedAmuxArray<AmuxPermittedTargetRef>(permittedTargetRefs, 512);
+    if (sourceRefs === null || rawTargets === null || sourceRefs.length === 0 ||
+        sourceRefs.some((candidate) => !amuxAnalysisRefSafe(candidate))) return null;
+    const targetRefs = rawTargets.map((target) => snapshotAmuxPermittedTarget(target));
+    if (targetRefs.some((target) => target === null)) return null;
+    const verifiedTargets = targetRefs as AmuxPermittedTargetRef[];
+    if (verifiedTargets.some((target) => !amuxPermittedTargetRefSafe(target, expectedChunkIndex))) return null;
+    return { raw, expectedPreviewId, expectedChunkIndex, sourceRefs, targetRefs: verifiedTargets };
+  } catch {
+    return null;
   }
-  if (byteLength(input.raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
+};
+
+export function inspectAmuxAnalysisChunk(
+  input: AmuxAnalysisChunkInspectionInput,
+): AmuxAnalysisChunkInspection {
+  const snapshot = snapshotInspectionInput(input);
+  if (snapshot === null) return { ok: false, code: "metadata_incomplete" };
+  const { raw, expectedPreviewId, expectedChunkIndex, sourceRefs, targetRefs } = snapshot;
+  if (byteLength(raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES) return { ok: false, code: "too_large" };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(input.raw);
+    parsed = JSON.parse(raw);
   } catch {
     return { ok: false, code: "schema_rejected" };
   }
@@ -379,12 +465,12 @@ export function inspectAmuxAnalysisChunk(input: {
       "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "coveredScope", "remainingScope", "units",
     ]);
     if (data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION ||
-        data.previewId !== input.expectedPreviewId || data.chunkIndex !== input.expectedChunkIndex) {
+        data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
       reject("schema_rejected");
     }
-    const permitted = new Set(input.permittedSourceRefIds);
+    const permitted = new Set(sourceRefs);
     const units = list(data.units, AMUX_ANALYSIS_CHUNK_CARD_CAP + AMUX_ANALYSIS_CHUNK_NODE_CAP +
-      AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0, (unit) => parseUnit(unit, permitted, input.expectedChunkIndex));
+      AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0, (unit) => parseUnit(unit, permitted, expectedChunkIndex));
     const counts = {
       nodes: units.filter((unit) => unit.kind === "node").length,
       cards: units.filter((unit) => unit.kind === "card").length,
@@ -393,7 +479,7 @@ export function inspectAmuxAnalysisChunk(input: {
     if (counts.nodes > AMUX_ANALYSIS_CHUNK_NODE_CAP || counts.cards > AMUX_ANALYSIS_CHUNK_CARD_CAP ||
         counts.evidence > AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP) reject("too_large");
     if (new Set(units.map((unit) => unit.localId)).size !== units.length) reject("schema_rejected");
-    validateUnitRefs(units, input.permittedTargetRefs);
+    validateUnitRefs(units, targetRefs);
     const outcome = oneOf(data.outcome, ["propose", "needs_information", "reject"] as const);
     const coverageStatus = oneOf(data.coverageStatus, ["complete", "more", "needs_owner_input"] as const);
     const remainingScope = nullableText(data.remainingScope, 2_000);
@@ -404,8 +490,8 @@ export function inspectAmuxAnalysisChunk(input: {
         (outcome === "reject" && units.length !== 0)) reject("schema_rejected");
     const chunk: AmuxAnalysisChunk = {
       schemaVersion: AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
-      previewId: input.expectedPreviewId,
-      chunkIndex: input.expectedChunkIndex,
+      previewId: expectedPreviewId,
+      chunkIndex: expectedChunkIndex,
       outcome,
       coverageStatus,
       coveredScope: text(data.coveredScope, 2_000),

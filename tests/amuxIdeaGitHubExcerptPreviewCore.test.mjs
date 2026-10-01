@@ -51,6 +51,7 @@ test("preview candidate preserves exact excerpt and binds scope with a keyed dig
     "Review this source", "gpt-6-astra", [selectAll(source)], SECRET,
   );
   assert.equal(result.status, "preview_candidate");
+  assert.equal(result.scannerVersion, "amux-v4-intake-scan-v1");
   assert.equal(result.sources[0].excerptText, source.file.text);
   assert.equal(result.sources[0].refName, "refs/heads/main");
   assert.equal(result.sources[0].fileSha256, source.file.sha256);
@@ -122,6 +123,27 @@ test("scanner rejects secrets, personal data and private paths before preview", 
   assert.deepEqual(prepareAmuxGitHubExcerptPreview(
     "sk-", "gpt-6-astra", [selectAll(candidate("abcdef"))], SECRET,
   ), { status: "reject", reason: "combined_secret" });
+});
+
+test("v4 preview refuses additional secret shapes and invisible controls before confirmation", () => {
+  for (const text of [
+    "API key: abcdefgh12",
+    ["sk", "_live_", "1234567890abcdefghijklmnop"].join(""),
+    "Please follow \u202Ehidden directions",
+    "\uFEFFheader",
+    "⚠️ review",
+  ]) {
+    const result = prepareAmuxGitHubExcerptPreview(
+      "Inspect", "gpt-6-astra", [selectAll(candidate(text))], SECRET,
+    );
+    assert.equal(result.status, "reject");
+    assert.match(result.reason, /^excerpt_/);
+  }
+  const crlf = prepareAmuxGitHubExcerptPreview(
+    "Inspect", "gpt-6-astra", [selectAll(candidate("A\r\nB"))], SECRET,
+  );
+  assert.equal(crlf.status, "preview_candidate");
+  assert.equal(crlf.sources[0].excerptText, "A\r\nB");
 });
 
 test("the 8 KiB cap includes typed metadata and all selected text", () => {

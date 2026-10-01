@@ -117,6 +117,60 @@ test("confirmed source refs are the only model-citable refs", () => {
   });
 });
 
+test("sparse trusted allowlists fail closed instead of throwing", () => {
+  const sparseSources = Array(2);
+  sparseSources[1] = sourceRef;
+  assert.deepEqual(inspect(chunk(), { permittedSourceRefIds: sparseSources }),
+    { ok: false, code: "metadata_incomplete" });
+  const sparseTargets = Array(2);
+  sparseTargets[1] = { ref: "feature-1", kind: "node", level: "feature" };
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: sparseTargets }),
+    { ok: false, code: "metadata_incomplete" });
+  const throwingInput = {
+    raw: JSON.stringify(chunk()), expectedPreviewId: "preview-01", expectedChunkIndex: 0,
+    permittedSourceRefIds: [sourceRef], permittedTargetRefs: [],
+  };
+  Object.defineProperty(throwingInput, "permittedTargetRefs", {
+    get() { throw new Error("untrusted array accessor"); },
+  });
+  assert.deepEqual(inspectAmuxAnalysisChunk(throwingInput),
+    { ok: false, code: "metadata_incomplete" });
+  const hugeTargets = [];
+  hugeTargets.length = 1_000_000;
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: hugeTargets }),
+    { ok: false, code: "metadata_incomplete" });
+  const getterTarget = { kind: "node", level: "feature" };
+  let refReads = 0;
+  Object.defineProperty(getterTarget, "ref", {
+    enumerable: true,
+    get() { refReads += 1; return refReads === 1 ? "feature_existing_01" : "ghp_FakeSecretValue123456"; },
+  });
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: [getterTarget] }),
+    { ok: false, code: "metadata_incomplete" });
+  assert.equal(refReads, 0);
+  const unknownKind = { kind: "bogus", ref: "story_existing_01", cardType: "story",
+    storyKind: "general", featureRef: "feature_existing_01" };
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: [unknownKind] }),
+    { ok: false, code: "metadata_incomplete" });
+  const extraField = { ref: "feature_existing_01", kind: "node", level: "feature",
+    unexpected: true };
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: [extraField] }),
+    { ok: false, code: "metadata_incomplete" });
+  const hiddenField = { ref: "feature_existing_01", kind: "node", level: "feature" };
+  Object.defineProperty(hiddenField, "unexpected", { value: true });
+  assert.deepEqual(inspect(chunk(), { permittedTargetRefs: [hiddenField] }),
+    { ok: false, code: "metadata_incomplete" });
+  let proxyReads = 0;
+  const proxyTarget = new Proxy({ ref: "feature_existing_01", kind: "node", level: "feature" }, {
+    get(object, key, receiver) {
+      if (key === "ref") { proxyReads += 1; return "ghp_FakeSecretValue123456"; }
+      return Reflect.get(object, key, receiver);
+    },
+  });
+  assert.equal(inspect(chunk(), { permittedTargetRefs: [proxyTarget] }).ok, true);
+  assert.equal(proxyReads, 0);
+});
+
 test("all non-source refs are typed and confined to this chunk or a trusted target allowlist", () => {
   const unknown = story();
   unknown.featureRef = "feature_unconfirmed";

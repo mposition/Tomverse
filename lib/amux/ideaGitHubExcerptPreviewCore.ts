@@ -1,11 +1,12 @@
 import { createHash, createHmac } from "node:crypto";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { amuxAnalysisInputTextSafe } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxGitHubFileCandidateResult } from "./ideaGitHubFileCandidate.ts";
 import {
+  AMUX_V4_INPUT_SCANNER_VERSION,
   LOCAL_INTAKE_INPUT_MAX_BYTES,
-  LOCAL_INTAKE_SCANNER_VERSION,
-  scanLocalIntakeInput,
+  scanAmuxV4Input,
 } from "./localIntakeCore.ts";
 
 type Candidate = Extract<AmuxGitHubFileCandidateResult, { status: "unscanned_candidate" }>;
@@ -34,7 +35,7 @@ export type AmuxGitHubExcerptPreviewResult =
   | {
       status: "preview_candidate";
       previewDigest: string;
-      scannerVersion: typeof LOCAL_INTAKE_SCANNER_VERSION;
+      scannerVersion: typeof AMUX_V4_INPUT_SCANNER_VERSION;
       payloadBytes: number;
       model: string;
       sources: readonly AmuxGitHubExcerptPreviewSource[];
@@ -78,8 +79,9 @@ export function prepareAmuxGitHubExcerptPreview(
   if (Buffer.from(ideaText, "utf8").toString("utf8") !== ideaText) {
     return reject("invalid_utf8_input");
   }
-  const ideaScan = scanLocalIntakeInput(ideaText);
+  const ideaScan = scanAmuxV4Input(ideaText);
   if (!ideaScan.ok) return reject(`input_${ideaScan.code}`);
+  if (!amuxAnalysisInputTextSafe(ideaText)) return reject("input_spoofing");
 
   const sources: AmuxGitHubExcerptPreviewSource[] = [];
   const seen = new Map<string, { blobSha: string; sha256: string; ranges: Array<[number, number]> }>();
@@ -124,10 +126,14 @@ export function prepareAmuxGitHubExcerptPreview(
     } catch {
       return reject("invalid_utf8_boundary");
     }
-    const scan = scanLocalIntakeInput(excerptText);
+    const scan = scanAmuxV4Input(excerptText);
     if (!scan.ok) return reject(`excerpt_${scan.code}`);
-    const metadataScan = scanLocalIntakeInput(`${witness.name}\n${file.path}`);
+    // Keep displayed and digested bytes identical; paired CRLF is accepted
+    // without silently rewriting the owner's confirmed source range.
+    if (!amuxAnalysisInputTextSafe(excerptText)) return reject("excerpt_spoofing");
+    const metadataScan = scanAmuxV4Input(`${witness.name}\n${file.path}`);
     if (!metadataScan.ok) return reject(`metadata_${metadataScan.code}`);
+    if (!amuxAnalysisInputTextSafe(`${witness.name}\n${file.path}`)) return reject("metadata_spoofing");
     const source: AmuxGitHubExcerptPreviewSource = {
       repositoryId: file.repositoryId,
       refName: witness.name,
@@ -160,19 +166,19 @@ export function prepareAmuxGitHubExcerptPreview(
     sources.push(source);
   }
 
-  const payload = { ideaText, model, scannerVersion: LOCAL_INTAKE_SCANNER_VERSION, sources };
+  const payload = { ideaText, model, scannerVersion: AMUX_V4_INPUT_SCANNER_VERSION, sources };
   const canonicalPayload = amuxCanonicalJson(payload);
   const payloadBytes = Buffer.byteLength(canonicalPayload, "utf8");
   if (payloadBytes > LOCAL_INTAKE_INPUT_MAX_BYTES) return reject("chunk_input_too_large");
-  const payloadScan = scanLocalIntakeInput(canonicalPayload);
+  const payloadScan = scanAmuxV4Input(canonicalPayload);
   if (!payloadScan.ok) return reject(`payload_${payloadScan.code}`);
-  const joinedTextScan = scanLocalIntakeInput(ideaText + sources.map((source) => source.excerptText).join(""));
+  const joinedTextScan = scanAmuxV4Input(ideaText + sources.map((source) => source.excerptText).join(""));
   if (!joinedTextScan.ok) return reject(`combined_${joinedTextScan.code}`);
   return {
     status: "preview_candidate",
     previewDigest: createHmac("sha256", digestSecret)
       .update(DOMAIN, "utf8").update(canonicalPayload, "utf8").digest("hex"),
-    scannerVersion: LOCAL_INTAKE_SCANNER_VERSION,
+    scannerVersion: AMUX_V4_INPUT_SCANNER_VERSION,
     payloadBytes,
     model,
     sources,
