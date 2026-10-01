@@ -105,7 +105,7 @@ export async function commitIdeaSubmission(
     targetId: input.ideaId,
     summary: "Submitted one AMUX v4 idea for bounded analysis.",
     metadata: {
-      policyVersion: 6,
+      policyVersion: 7,
       requestId: input.inspected.requestId,
       rawDigest: sealed.digest,
       rawDigestKeyId: sealed.digestKeyId,
