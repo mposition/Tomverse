@@ -418,6 +418,11 @@ const REGISTRY = {
     reason:
       "AMUX v4 idea analysis storage is a closed lifecycle. This schema-only migration does not enable a writer; the future intake service must validate exactly these states before activation.",
   },
+  AmuxIdeaSourcePlanRevision_state_check: {
+    owner: "database",
+    reason:
+      "The dark v4 source-plan revision has a closed prepared/active/terminal lifecycle. A future single writer must own matching runtime validation before activation.",
+  },
   AmuxIdeaSourceScopeApproval_status_check: {
     owner: "database",
     reason:

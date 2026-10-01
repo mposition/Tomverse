@@ -68,6 +68,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001102600_amux_v4_unit_decisions",
   // AMUX intake v4: operator-controlled Frontier eligibility, still dark.
   "20261001111800_amux_v4_frontier_model_catalog",
+  // AMUX intake v4: immutable source-plan revision and per-revision cursor.
+  "20261002100000_amux_v4_source_plan_revision",
 ]);
 
 test("the migration is additive, later than every one before it, and holds one table, one function and one trigger", () => {

@@ -1916,6 +1916,7 @@ model AdminAuditLog {
   amuxV4UnitUnknownResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownResolvedAudit")
   amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
+  amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -6761,6 +6762,7 @@ model AmuxIdeaSubmission {
   cancelledAt         DateTime?
   rawPurgeAfter       DateTime?
   rawPurgedAt         DateTime?
+  currentSourcePlanRevisionId String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -6770,11 +6772,54 @@ model AmuxIdeaSubmission {
   chunks            AmuxIdeaAnalysisChunk[]
   draftUnits        AmuxIdeaDraftUnit[]
   unitDecisions     AmuxIdeaUnitDecision[]
+  sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
+  currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, actorUserId])
+  @@unique([currentSourcePlanRevisionId, id])
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// Immutable ordered source-unit manifest for one analysis revision. Only
+/// server-keyed digests, never idea text, GitHub paths or excerpts, are kept
+/// here. A new owner answer or source scope creates a new row under the same
+/// idea; global chunk identities and prior decisions are never reused.
+/// This table and its new nullable references are dark until a single writer
+/// verifies the manifest, current-plan pointer and owner confirmation.
+/// manifestDigestKeyId also identifies the HMAC key for unitDigests. The
+/// writer must domain-separate every digest by idea and revision.
+model AmuxIdeaSourcePlanRevision {
+  id                   String    @id
+  ideaId               String
+  actorUserId          String
+  revisionNumber       Int
+  startChunkIndex      Int
+  sourceUnitCount      Int
+  unitDigests          String[]
+  manifestDigest       String
+  manifestDigestKeyId  String
+  state                String
+  predecessorId        String?
+  creationAuditLogId   String    @unique
+  activatedAt          DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime  @default(now())
+
+  idea                 AmuxIdeaSubmission @relation("AmuxIdeaPlans", fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  currentForIdea       AmuxIdeaSubmission? @relation("AmuxCurrentIdeaPlan")
+  predecessor          AmuxIdeaSourcePlanRevision? @relation("AmuxIdeaPlanPredecessor", fields: [predecessorId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  successors           AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanPredecessor")
+  creationAudit        AdminAuditLog @relation("AmuxIdeaPlanCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previews             AmuxIdeaTransferPreview[]
+  chunks               AmuxIdeaAnalysisChunk[]
+
+  @@unique([ideaId, revisionNumber])
+  @@unique([ideaId, startChunkIndex])
+  @@unique([id, ideaId])
+  @@unique([id, ideaId, startChunkIndex])
+  @@index([ideaId, state])
 }
 
 /// Human-approved GitHub collection scope. The scope body may name a private
@@ -6816,6 +6861,8 @@ model AmuxIdeaTransferPreview {
   id                      String    @id
   ideaId                  String
   sourceScopeApprovalId   String?
+  sourcePlanRevisionId    String?
+  sourceUnitOrdinal       Int?
   chunkIndex              Int
   attempt                 Int
   state                   String
@@ -6841,13 +6888,18 @@ model AmuxIdeaTransferPreview {
   idea                AmuxIdeaSubmission             @relation("AmuxIdeaPreviews", fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   confirmedOwner      AmuxIdeaSubmission?            @relation("AmuxPreviewConfirmedOwner", fields: [ideaId, confirmedByUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   sourceScopeApproval AmuxIdeaSourceScopeApproval?   @relation(fields: [sourceScopeApprovalId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  sourcePlanRevision AmuxIdeaSourcePlanRevision? @relation(fields: [sourcePlanRevisionId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
   chunk               AmuxIdeaAnalysisChunk          @relation("AmuxChunkPreviews", fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  planBoundChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundPreview", fields: [ideaId, chunkIndex, sourcePlanRevisionId], references: [ideaId, chunkIndex, sourcePlanRevisionId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTransferPreview_chunk_plan_fkey")
   currentForChunk     AmuxIdeaAnalysisChunk?         @relation("AmuxCurrentChunkPreview")
+  planBoundCurrentForChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundCurrentPreview")
   unitDecisions       AmuxIdeaUnitDecision[]
 
   @@unique([ideaId, chunkIndex, attempt])
   @@unique([id, ideaId, chunkIndex])
+  @@unique([id, ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaTransferPreview_id_idea_chunk_plan_key")
   @@index([sourceScopeApprovalId])
+  @@index([sourcePlanRevisionId])
   @@index([state, expiresAt])
   @@index([payloadPurgeAfter, payloadPurgedAt])
 }
@@ -6864,6 +6916,13 @@ model AmuxIdeaAnalysisChunk {
   attempt                 Int
   leaseGeneration         Int
   currentPreviewId        String?   @unique
+  sourcePlanRevisionId    String?
+  planStartChunkIndex     Int?
+  revisionChunkIndex      Int?
+  coverageStatus          String?
+  continuationKind        String?
+  outputPartIndex         Int?
+  outputPending           Boolean?
   draftVersion            Int?
   draftCiphertext         Bytes?
   draftKeyId              String?
@@ -6888,11 +6947,17 @@ model AmuxIdeaAnalysisChunk {
 
   idea           AmuxIdeaSubmission        @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   currentPreview AmuxIdeaTransferPreview? @relation("AmuxCurrentChunkPreview", fields: [currentPreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  planBoundCurrentPreview AmuxIdeaTransferPreview? @relation("AmuxPlanBoundCurrentPreview", fields: [currentPreviewId, ideaId, chunkIndex, sourcePlanRevisionId], references: [id, ideaId, chunkIndex, sourcePlanRevisionId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisChunk_current_preview_plan_fkey")
   previews       AmuxIdeaTransferPreview[] @relation("AmuxChunkPreviews")
+  planBoundPreviews AmuxIdeaTransferPreview[] @relation("AmuxPlanBoundPreview")
+  sourcePlanRevision AmuxIdeaSourcePlanRevision? @relation(fields: [sourcePlanRevisionId, ideaId, planStartChunkIndex], references: [id, ideaId, startChunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisChunk_source_plan_fkey")
   draftUnits     AmuxIdeaDraftUnit[]
 
   @@id([ideaId, chunkIndex])
   @@unique([currentPreviewId, ideaId, chunkIndex])
+  @@unique([currentPreviewId, ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaAnalysisChunk_current_preview_plan_key")
+  @@unique([sourcePlanRevisionId, revisionChunkIndex], map: "AmuxIdeaAnalysisChunk_plan_chunk_key")
+  @@unique([ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaAnalysisChunk_idea_chunk_plan_key")
   @@index([state, analysisCompletedAt])
   @@index([bodyPurgeAfter, bodyPurgedAt])
   @@index([freeformPurgeAfter, freeformPurgedAt])
