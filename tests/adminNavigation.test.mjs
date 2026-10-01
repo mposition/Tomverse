@@ -310,7 +310,7 @@ test("the AMUX group holds Backlog, Promotion and Execution, with their sections
   );
   assert.deepEqual(
     adminNavItemTabs("amux-backlog").map((tab) => tab.id),
-    ["intake", "import", "reconciliation", "metadata"]
+    ["intake", "ideas", "import", "reconciliation", "metadata"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-promotion").map((tab) => tab.id),

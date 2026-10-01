@@ -7,6 +7,7 @@ import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
+import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
@@ -21,11 +22,12 @@ const TABS = adminNavItemTabs("amux-backlog");
 /**
  * The AMUX backlog: what enters it and what is recorded about each card.
  *
- * Four owner-only screens that used to be four unlisted routes
+ * The original four owner-only sections used to be unlisted routes
  * (`/admin/amux-intake`, `/admin/amux-board-import`,
  * `/admin/amux-reconciliation`, `/admin/amux-backlog-metadata`), each now a
- * section. The panels are the same components; nothing about what they send
- * or when changed. Only the open section is rendered.
+ * section. The separate Ideas section performs an input-only check: it saves
+ * no idea, collects no GitHub data, and never authorizes external transfer.
+ * Only the open section is rendered.
  *
  * Owner-only exactly as each screen was: the route table's `viewRoles` keeps
  * the entry out of other roles' navigation, and this check -- not the table --
@@ -41,7 +43,7 @@ export default async function AdminAmuxBacklogPage({
   const tab = resolveAdminTab(TABS, query.tab);
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   const chips = amuxTabChips(
-    amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
+    { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]), ideas: "read_only" },
     m.status
   );
 
@@ -60,7 +62,9 @@ export default async function AdminAmuxBacklogPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      {tab.id === "import" ? (
+      {tab.id === "ideas" ? (
+        <AmuxIdeaInputPanel />
+      ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (
         <AmuxReconciliationPanel />

@@ -1,0 +1,58 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+export const adminAmuxIdeaInputMessages = defineAdminMessages({
+  en: {
+    title: "New idea",
+    description: "Describe one idea, even if it is project-sized. This first check does not save it or send it to a model.",
+    ideaLabel: "What would you like to build or fix?",
+    ideaHint: "Do not paste credentials, personal data, complete conversations or private documents.",
+    byteCount: (count: number) => `${count} / 8192 bytes`,
+    repositoriesLabel: "Related repositories (optional, owner/name on each line)",
+    pullRequestsLabel: "Related pull requests (optional, owner/name#number on each line)",
+    preview: "Check input",
+    transfer: "Review exact external transfer",
+    transferUnavailable: "External transfer stays unavailable until the approved model, complete payload and source scope can be shown for this run.",
+    noWrite: "No draft was saved. No GitHub content was collected and no model was called.",
+    result: (bytes: number, repos: number, prs: number) =>
+      `Input checked: ${bytes} bytes · ${repos} repositories · ${prs} pull requests.`,
+    excluded: "This step does not automatically fetch or attach conversation history, private documents, user data or GitHub content. Text you pasted remains in the input check.",
+    stepUp: "Renew administrator sign-in",
+    errors: {
+      schema_rejected: "Use one repository or owner/name#number per line; remove duplicates or invalid references.",
+      too_large: "The idea is too large for this input step.",
+      content_refused: "Remove possible credentials, personal data, local paths or private URLs before retrying.",
+      metadata_incomplete: "Enter an idea before checking it.",
+      preview_failed: "The input check did not complete. Retry; no draft was saved.",
+      ADMIN_REAUTHENTICATION_REQUIRED: "Recent administrator sign-in is required before checking this input.",
+      content_type_refused: "The input format was not accepted.",
+      rate_limited: "Too many input checks. Please try again later.",
+    },
+  },
+  ko: {
+    title: "새 아이디어",
+    description: "프로젝트 규모여도 아이디어 하나를 적어 주세요. 이 첫 검사는 저장하거나 모델에 전송하지 않습니다.",
+    ideaLabel: "무엇을 만들거나 고치고 싶으신가요?",
+    ideaHint: "자격증명, 개인정보, 대화 전체 또는 비공개 문서 전체를 붙여 넣지 마세요.",
+    byteCount: (count: number) => `${count} / 8192바이트`,
+    repositoriesLabel: "관련 저장소 (선택, 한 줄에 owner/name)",
+    pullRequestsLabel: "관련 PR (선택, 한 줄에 owner/name#번호)",
+    preview: "입력 검사",
+    transfer: "정확한 외부 전송 범위 검토",
+    transferUnavailable: "이번 회차의 승인 모델·전체 전송 payload·자료 범위를 표시할 수 있을 때까지 외부 전송은 열지 않습니다.",
+    noWrite: "초안은 저장되지 않았고, GitHub 자료 수집이나 모델 호출도 하지 않았습니다.",
+    result: (bytes: number, repos: number, prs: number) =>
+      `입력 검사 완료: ${bytes}바이트 · 저장소 ${repos}개 · PR ${prs}개.`,
+    excluded: "이 단계는 대화 이력·비공개 문서·사용자 데이터·GitHub 내용을 자동으로 가져오거나 첨부하지 않습니다. 직접 붙여 넣은 문구는 그대로 입력 검사 대상입니다.",
+    stepUp: "관리자 재인증",
+    errors: {
+      schema_rejected: "저장소 또는 owner/name#번호를 한 줄씩 입력하고 중복·잘못된 참조를 지워 주세요.",
+      too_large: "이번 입력 단계의 크기 상한을 넘었습니다.",
+      content_refused: "자격증명·개인정보·로컬 경로·비공개 URL 의심 내용을 제거한 뒤 다시 시도해 주세요.",
+      metadata_incomplete: "검사할 아이디어를 입력해 주세요.",
+      preview_failed: "입력 검사가 끝나지 않았습니다. 초안은 저장되지 않았으니 다시 시도해 주세요.",
+      ADMIN_REAUTHENTICATION_REQUIRED: "입력 검사 전에 최근 관리자 인증이 필요합니다.",
+      content_type_refused: "입력 형식을 받아들이지 못했습니다.",
+      rate_limited: "입력 검사 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+    },
+  },
+});
