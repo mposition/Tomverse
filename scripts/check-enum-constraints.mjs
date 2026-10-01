@@ -423,6 +423,16 @@ const REGISTRY = {
     reason:
       "One bounded v4 analysis chunk records a normalized draft or an explicit terminal/unknown state. It cannot become a runnable AMUX Task without later owner approval.",
   },
+  AmuxIdeaDraftUnit_kind_check: {
+    owner: "database",
+    reason:
+      "The dark v4 proposal-unit schema accepts only node, card, or evidence. No non-synthetic unit writer is enabled; the future strict package parser must use the same closed vocabulary before activation.",
+  },
+  AmuxIdeaDraftUnit_state_check: {
+    owner: "type_only",
+    reason:
+      "DraftUnitRetentionState in lib/amux/ideaRetentionCore.ts has proposed, approved, rejected, and expired. The read-only cleanup planner knows these four states, but no runtime writer list or live transition route exists yet.",
+  },
   AmuxPortfolioNode_level_check: {
     owner: "database",
     reason:
