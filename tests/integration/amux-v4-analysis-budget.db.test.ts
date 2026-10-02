@@ -4,7 +4,6 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
@@ -12,6 +11,10 @@ import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewSer
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
+import { commitAmuxIdeaAnalysisPriceApproval,
+  AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
+import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -77,38 +80,65 @@ const runner = { tokenCapsEnforceable: true, billableToolsDisabled: true };
 const modelId = () => `gpt-frontier-synthetic-${randomUUID()}`;
 
 async function approvedPriceVersionId(provider: "openai" | "anthropic",
-  selectedModelId: string): Promise<string> {
+  selectedModelId: string, expiresInMs = 24 * 60 * 60_000): Promise<string> {
   const id = randomUUID();
   const verifiedAt = new Date(Date.now() - 24 * 60 * 60_000);
-  const approvedAt = new Date();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000);
+  const expiresAt = new Date(Date.now() + expiresInMs);
   const evidenceDigest = randomBytes(32).toString("hex");
-  const details = { provider, modelId: selectedModelId,
-    mode: "subscription_cli" as const, version: 1,
+  const approval = { id, provider, modelId: selectedModelId,
+    mode: "subscription_cli" as const, expectedPreviousVersion: 0,
     inputTokensCap: 1_000, outputTokensCap: 2_000,
     inputMicroUsdPerMillion: 1_000_000,
     outputMicroUsdPerMillion: 2_000_000, evidenceDigest,
-    verifiedAt: verifiedAt.toISOString(), approvedAt: approvedAt.toISOString(),
-    expiresAt: expiresAt.toISOString(), worstTierVerified: true,
-    modelCallStarted: false };
-  await prisma.$transaction(async (tx) => {
-    const approvalAuditLogId = await writeAdminAuditLog({ tx, session, request,
-      action: "amux.v4.analysis_price.approved",
-      targetType: "AmuxIdeaAnalysisPriceVersion", targetId: id,
-      summary: "Synthetic owner approval of one bounded analysis price version.",
-      metadata: details });
-    await tx.amuxIdeaAnalysisPriceVersion.create({ data: {
-      id, provider, modelId: selectedModelId, mode: details.mode,
-      version: 1, status: "approved", inputTokensCap: details.inputTokensCap,
-      outputTokensCap: details.outputTokensCap,
-      inputMicroUsdPerMillion: details.inputMicroUsdPerMillion,
-      outputMicroUsdPerMillion: details.outputMicroUsdPerMillion,
-      evidenceDigest, verifiedAt, approvedAt, expiresAt,
-      approvedByUserId: actorUserId, approvalAuditLogId,
-    } });
-  });
+    ownerConfirmedWorstTier: true as const, verifiedAt, expiresAt };
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisPriceApproval(tx, { session, request, approval }));
+  assert.equal(result.priceVersionId, id);
+  assert.equal(result.version, 1);
   return id;
 }
+
+test("price evidence needs an owner and current version before it can authorize a hold", async () => {
+  const selectedModelId = modelId();
+  const id = await approvedPriceVersionId("openai", selectedModelId);
+  const row = await prisma.amuxIdeaAnalysisPriceVersion.findUniqueOrThrow({
+    where: { id },
+  });
+  const attempted = { id: randomUUID(), provider: "openai" as const,
+    modelId: selectedModelId, mode: "subscription_cli" as const,
+    expectedPreviousVersion: 0, inputTokensCap: 1_000,
+    outputTokensCap: 2_000, inputMicroUsdPerMillion: 1_000_000,
+    outputMicroUsdPerMillion: 2_000_000,
+    evidenceDigest: randomBytes(32).toString("hex"),
+    ownerConfirmedWorstTier: true as const,
+    verifiedAt: new Date(Date.now() - 1_000),
+    expiresAt: new Date(Date.now() + 60_000) };
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisPriceApproval(tx, { session, request,
+      approval: attempted })), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisPriceApprovalError &&
+    error.code === "price_revision_changed");
+  const notOwner = { ...session, user: { ...session.user,
+    id: `other-${randomUUID()}`, email: "other@example.test" } } as Session;
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisPriceApproval(tx, { session: notOwner, request,
+      approval: { ...attempted, modelId: modelId() } })), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisPriceApprovalError &&
+    error.code === "forbidden");
+  assert.equal(await prisma.amuxIdeaAnalysisPriceVersion.count({
+    where: { provider: "openai", modelId: selectedModelId,
+      mode: "subscription_cli" },
+  }), 1);
+  assert.equal(row.status, "approved");
+  assert.ok(Math.abs(row.approvedAt.getTime() - Date.now()) < 60_000);
+  assert.ok(Math.abs(row.expiresAt.getTime() - Date.now() - 24 * 60 * 60_000) < 60_000);
+  const expired = await prisma.$transaction((tx) =>
+    readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
+      priceVersionId: id, provider: "openai", modelId: selectedModelId,
+      now: new Date(row.expiresAt.getTime() + 1),
+    }));
+  assert.deepEqual(expired, { decision: "hold", reason: "price_unverified" });
+});
 
 test("confirmed preview reserves one agent-only budget hold and one system audit atomically", async () => {
   const selectedModelId = modelId();
@@ -184,6 +214,22 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: holdId },
   })).status, "reserved");
+});
+
+test("a price expiring in one minute still reserves under the DB UTC clock", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId, 60_000);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx, {
+      holdId: randomUUID(), previewId, priceVersionId, runner, keys,
+    }));
+  assert.equal(result.reservedMicroUsd, "5000");
 });
 
 test("a price for another provider cannot reserve the confirmed model payload", async () => {

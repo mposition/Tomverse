@@ -73,17 +73,14 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     FOR UPDATE
   `;
   if (previewLock.length !== 1) refuse("not_ready");
-  const clock = await tx.$queryRaw<Array<{ persistedNow: Date; utcNow: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "persistedNow",
-           clock_timestamp() AS "utcNow"
+  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
-  // Existing AMUX timestamp columns are UTC stored as timestamp-without-zone.
-  // The Prisma adapter reads those in the host timezone, so compare like with
-  // like. Use the absolute timestamptz clock only for UTC month and price TTL.
-  const persistedNow = clock[0]?.persistedNow;
-  const now = clock[0]?.utcNow;
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
-      !(persistedNow instanceof Date) || !Number.isFinite(persistedNow.getTime())) {
+  // The raw adapter on this host misreads a returned timestamptz as local
+  // wall time. AMUX timestamps use UTC timestamp-without-zone, so normalize
+  // the DB clock to that same representation before comparing TTL or month.
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
     refuse("integrity_unavailable");
   }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: identity.ideaId } });
@@ -94,7 +91,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
   });
   if (!idea || !chunk || !preview || idea.state !== "submitted" ||
-      persistedNow >= idea.analysisDeadlineAt ||
+      now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId ||
       chunk.state !== "awaiting_preview" ||
       chunk.currentPreviewId !== preview.id ||
@@ -109,8 +106,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       preview.consumedAt !== null || preview.outcomeUnknownAt !== null ||
       !preview.payloadCiphertext || !preview.payloadKeyId ||
       !preview.payloadKeyVersion || preview.payloadPurgedAt !== null ||
-      !preview.confirmExpiresAt || persistedNow >= preview.confirmExpiresAt ||
-      persistedNow >= preview.expiresAt) {
+      !preview.confirmExpiresAt || now >= preview.confirmExpiresAt ||
+      now >= preview.expiresAt) {
     refuse("not_ready");
   }
   const plan = await tx.amuxIdeaSourcePlanRevision.findUnique({
