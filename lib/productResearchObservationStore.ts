@@ -201,3 +201,57 @@ export async function latestProductResearchSuccess(): Promise<Date | null> {
   });
   return row?.slot ?? null;
 }
+
+/**
+ * The setting that remembers when the app side was first seen switched on.
+ *
+ * The switch itself is an environment variable, so nothing in the database
+ * says when it was set. That matters because the silence check needs a
+ * reference point that outlives the rows: an agent that has never once
+ * succeeded has no last success to go stale, and an agent silent for longer
+ * than the retention period has no rows left at all. Both would be silent
+ * alarms without this.
+ */
+export const PRODUCT_RESEARCH_ENABLED_SINCE_SETTING = "productResearch.enabledSince";
+
+/**
+ * Reads the anchor, writing it the first time the switch is seen on.
+ *
+ * Written once and never moved. A switch turned off and on again keeps the
+ * original moment, which makes the window conservative rather than generous --
+ * the opposite choice would reset the clock on every toggle and an operator
+ * cycling a switch would silence the check.
+ */
+export async function readProductResearchEnabledSince(
+  now: Date = new Date(),
+): Promise<Date | null> {
+  const existing = await prisma.appSetting.findUnique({
+    where: { key: PRODUCT_RESEARCH_ENABLED_SINCE_SETTING },
+    select: { value: true },
+  });
+  if (existing !== null) {
+    const parsed = new Date(existing.value);
+    // A value that is not a time is not an anchor. Returning null makes the
+    // caller report `anchor_missing` rather than compute an hour count from
+    // NaN, and the row is left alone for a person to look at.
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+  // `create` rather than `upsert`: two maintenance runs racing should leave the
+  // earlier moment, and the loser reads it on its next pass. An upsert would
+  // let the later one overwrite the earlier.
+  try {
+    const created = await prisma.appSetting.create({
+      data: { key: PRODUCT_RESEARCH_ENABLED_SINCE_SETTING, value: now.toISOString() },
+      select: { value: true },
+    });
+    return new Date(created.value);
+  } catch {
+    const raced = await prisma.appSetting.findUnique({
+      where: { key: PRODUCT_RESEARCH_ENABLED_SINCE_SETTING },
+      select: { value: true },
+    });
+    if (raced === null) return null;
+    const parsed = new Date(raced.value);
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+}

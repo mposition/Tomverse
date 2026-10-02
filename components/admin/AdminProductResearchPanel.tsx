@@ -30,19 +30,24 @@ const SHORT_SHA = (sha: string | null) => (sha === null ? "-" : sha.slice(0, 12)
 export function AdminProductResearchPanel({ initial }: { initial: ProductResearchConsoleView }) {
   const m = useAdminMessages(adminProductResearchMessages);
 
-  // The three off-nominal states are said in words rather than shown as an
+  // The four off-nominal states are said in words rather than shown as an
   // empty table, because an empty table reads as nothing being wrong.
   const status =
     initial.silence.state === "disabled"
       ? { tone: "muted" as const, text: m.disabled }
-      : initial.silence.state === "no_observation_yet"
-        ? { tone: "warn" as const, text: m.noObservationYet }
-        : initial.silence.state === "silent"
-          ? {
-              tone: "warn" as const,
-              text: fill(m.silent, { hours: Math.round(initial.silence.sinceHours ?? 0) }),
-            }
-          : { tone: "muted" as const, text: fill(m.recent, { slot: initial.lastSuccessAt ?? "-" }) };
+      : initial.silence.state === "anchor_missing"
+        ? { tone: "warn" as const, text: m.anchorMissing }
+        : initial.silence.state === "no_observation_yet"
+          ? { tone: "warn" as const, text: m.noObservationYet }
+          : initial.silence.state === "silent"
+            ? {
+                tone: "warn" as const,
+                text: fill(m.silent, { hours: Math.round(initial.silence.sinceHours ?? 0) }),
+              }
+            : {
+                tone: "muted" as const,
+                text: fill(m.recent, { slot: initial.lastSuccessAt ?? "-" }),
+              };
 
   return (
     <div className="flex min-w-0 flex-col gap-5">

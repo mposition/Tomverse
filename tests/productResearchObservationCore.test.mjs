@@ -19,6 +19,7 @@ import {
   OBSERVATION_FAILURE_STAGES,
   OBSERVATION_LABELS,
   OBSERVATION_ROW_LIMIT,
+  OBSERVATION_RETENTION_DAYS,
   OBSERVATION_SCHEMA_VERSION,
   OBSERVATION_SILENCE_HOURS,
   OBSERVED_BRANCHES,
@@ -425,61 +426,78 @@ test("the branches this table reports are the ones the report evaluates", () => 
   assert.deepEqual(names, OBSERVED_BRANCHES);
 });
 
-test("silence has four answers, and only one of them is an incident", () => {
+test("silence is judged against an anchor that outlives the rows", () => {
   const now = Date.parse("2026-10-03T00:00:00.000Z");
   const hours = (count) => now - count * 60 * 60 * 1000;
+  const verdict = (input) => observationSilenceVerdict({ now, ...input });
 
   // An unset switch is a state an operator chose.
-  assert.deepEqual(observationSilenceVerdict({ enabled: false, lastSuccessAt: hours(100), now }), {
+  assert.deepEqual(verdict({ enabled: false, lastSuccessAt: hours(100), enabledSince: hours(200) }), {
     state: "disabled",
     sinceHours: null,
+    measuredFrom: null,
   });
 
-  // A switch just turned on has no success yet. Raising an incident for that
-  // would mean every activation pages somebody, so it is reported and not
-  // alarmed -- the Admin screen shows it rather than an empty table that reads
-  // as working.
-  for (const missing of [null, undefined]) {
-    assert.deepEqual(observationSilenceVerdict({ enabled: true, lastSuccessAt: missing, now }), {
-      state: "no_observation_yet",
-      sinceHours: null,
-    });
+  // Switched on with no anchor recorded yet. Reported rather than read as
+  // either silence or health: the caller writes the anchor on the same pass, so
+  // it lasts one run.
+  for (const missing of [null, undefined, Number.NaN]) {
+    assert.equal(
+      verdict({ enabled: true, lastSuccessAt: null, enabledSince: missing }).state,
+      "anchor_missing",
+      String(missing),
+    );
   }
 
-  // One slot a day plus its one-hour window is 25 hours, so a late-but-inside-
-  // the-window run is not an incident and a wholly missed slot is.
+  // A switch turned on a minute ago has no success and must not page anybody.
+  assert.deepEqual(verdict({ enabled: true, lastSuccessAt: null, enabledSince: hours(1) }), {
+    state: "no_observation_yet",
+    sinceHours: 1,
+    measuredFrom: "enabled_since",
+  });
+
+  // But an agent that has never once worked -- service switch never set, secret
+  // wrong, first run hung -- has no last success to go stale, and keyed on the
+  // last success alone this would never be reported at all.
   assert.equal(OBSERVATION_SILENCE_HOURS, 26);
+  const never = verdict({ enabled: true, lastSuccessAt: null, enabledSince: hours(72) });
+  assert.equal(never.state, "silent");
+  assert.equal(never.measuredFrom, "enabled_since");
+
+  // One slot a day plus its one-hour window is 25, so a late-but-inside-the-
+  // window run is not an incident and a wholly missed slot is.
   for (const [age, expected] of [
     [25, "recent"],
     [25.9, "recent"],
     [26, "silent"],
     [100, "silent"],
   ]) {
-    assert.equal(
-      observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(age), now }).state,
-      expected,
-      String(age),
-    );
+    const judged = verdict({ enabled: true, lastSuccessAt: hours(age), enabledSince: hours(500) });
+    assert.equal(judged.state, expected, String(age));
+    assert.equal(judged.measuredFrom, "last_success", String(age));
   }
 
-  // A last success in the future is the app's clock disagreeing with the
+  // An agent silent for longer than the retention period has no rows left, and
+  // the alarm must not stop exactly when the silence got long enough to matter.
+  const swept = verdict({
+    enabled: true,
+    lastSuccessAt: null,
+    enabledSince: hours(OBSERVATION_RETENTION_DAYS * 24 + 48),
+  });
+  assert.equal(swept.state, "silent");
+
+  // A reference point in the future is the app's clock disagreeing with the
   // database's. Read as `recent` it would silence the check for as long as the
   // disagreement lasted.
   assert.equal(
-    observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(-5), now }).state,
+    verdict({ enabled: true, lastSuccessAt: hours(-5), enabledSince: hours(500) }).state,
     "silent",
-  );
-
-  // A value that is not a time is not `recent` either.
-  assert.equal(
-    observationSilenceVerdict({ enabled: true, lastSuccessAt: Number.NaN, now }).state,
-    "no_observation_yet",
   );
 
   // The hours are the real figure rather than the threshold, so an incident can
   // say how long it has been.
   assert.equal(
-    Math.round(observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(31), now }).sinceHours),
+    Math.round(verdict({ enabled: true, lastSuccessAt: hours(31), enabledSince: hours(500) }).sinceHours),
     31,
   );
 });

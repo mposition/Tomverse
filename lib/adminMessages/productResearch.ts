@@ -18,6 +18,8 @@ export const adminProductResearchMessages = defineAdminMessages({
   en: {
     disabled:
       "The product-research agent is switched off here. Nothing is being recorded, and this is a state an operator chose.",
+    anchorMissing:
+      "The switch is on and this run is recording when it was first seen on. The next run judges against it.",
     noObservationYet:
       "The switch is on and no slot has been recorded yet. An empty table is not a working one.",
     silent:
@@ -55,6 +57,8 @@ export const adminProductResearchMessages = defineAdminMessages({
   ko: {
     disabled:
       "제품·리서치 Agent가 이곳에서 꺼져 있습니다. 아무것도 기록되지 않으며, 이는 운영자가 선택한 상태입니다.",
+    anchorMissing:
+      "스위치는 켜져 있고 이번 실행이 처음 켜진 시각을 기록하는 중입니다. 다음 실행부터 그 시각을 기준으로 판정합니다.",
     noObservationYet:
       "스위치는 켜져 있고 아직 기록된 회차가 없습니다. 빈 표는 정상 동작의 증거가 아닙니다.",
     silent:
