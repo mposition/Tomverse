@@ -153,11 +153,16 @@ async function daemon(config) {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   log("review-orchestrator daemon started");
+  let nextPrune = 0;
   while (!stopping) {
     try {
       orchestrator.tick();
     } catch (error) {
       log(`tick failed: ${error.message}`);
+    }
+    if (Date.now() >= nextPrune) {
+      nextPrune = Date.now() + 60 * 60 * 1000;
+      await orchestrator.prune().catch((error) => log(`prune failed: ${error.message}`));
     }
     await sleep(config.pollMs);
   }
