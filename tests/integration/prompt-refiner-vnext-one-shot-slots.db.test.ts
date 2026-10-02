@@ -29,6 +29,7 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
     // Isolated audit witness, not the product audit log or its writer.
     await client.query(`CREATE TABLE "AdminAuditLog" (
       "id" TEXT PRIMARY KEY, "actorUserId" TEXT, "action" TEXT NOT NULL,
+      "summary" TEXT NOT NULL,
       "targetType" TEXT NOT NULL, "targetId" TEXT, "metadata" JSONB,
       "entryHash" TEXT, "createdAt" TIMESTAMP(3) NOT NULL
         DEFAULT (clock_timestamp() AT TIME ZONE 'UTC')
@@ -45,15 +46,17 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
     };
     const insertAudit = async (id: string, kind: "stage" | "run", options: {
       createdAt?: string; targetId?: string; actor?: string;
-      action?: string; cost?: number; metadata?: Record<string, unknown>;
+      action?: string; summary?: string; cost?: number;
+      metadata?: Record<string, unknown>;
     } = {}) => client.query(`
       INSERT INTO "AdminAuditLog" (
-        "id", "actorUserId", "action", "targetType", "targetId",
+        "id", "actorUserId", "action", "summary", "targetType", "targetId",
         "metadata", "entryHash", "createdAt"
-      ) VALUES ($1, $2, $3, 'PromptRefinerVnextOneShotStage', $4,
-        $5::jsonb, $6, COALESCE($7::timestamp, clock_timestamp() AT TIME ZONE 'UTC'))
+      ) VALUES ($1, $2, $3, $4, 'PromptRefinerVnextOneShotStage', $5,
+        $6::jsonb, $7, COALESCE($8::timestamp, clock_timestamp() AT TIME ZONE 'UTC'))
     `, [id, options.actor ?? "synthetic-owner",
       options.action ?? `prompt_refiner.vnext_one_shot.${kind}_approved`,
+      options.summary ?? `Approved the bounded Prompt Refiner vNext one-shot ${kind}.`,
       options.targetId ?? stage,
       JSON.stringify(options.metadata ?? {
         approvalKind: kind, ...pins,
@@ -93,6 +96,9 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
       "e".repeat(40), "f".repeat(64)]), /Stage_cost_check/);
 
     await insertAudit("partial-stage-audit", "stage");
+    await insertAudit("wrong-summary-stage-audit", "stage", { summary: "Different stage approval." });
+    await assert.rejects(createStage("wrong-summary-stage-audit"),
+      /stage approval audit binding is invalid/);
     await client.query("BEGIN");
     try {
       await createStage("partial-stage-audit");
@@ -289,6 +295,27 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
              "runApprovalAuditLogId" = 'wrong-actor-run-audit'
        WHERE "id" = $1
     `, [stage]), /run approval audit binding is invalid/);
+    await insertAudit("wrong-summary-run-audit", "run", { summary: "Different run approval." });
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'run_approved',
+             "runApprovalAuditLogId" = 'wrong-summary-run-audit'
+       WHERE "id" = $1
+    `, [stage]), /run approval audit binding is invalid/);
+    await insertAudit("early-run-audit", "run");
+    await client.query(`
+      UPDATE "AdminAuditLog"
+         SET "createdAt" = (
+           SELECT "approvedAt" - INTERVAL '1 millisecond'
+             FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
+         ) WHERE "id" = 'early-run-audit'
+    `, [stage]);
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'run_approved',
+             "runApprovalAuditLogId" = 'early-run-audit'
+       WHERE "id" = $1
+    `, [stage]), /run approval must follow stage approval/);
     // A caller-owned temporary audit table must not authorize this stage.
     await client.query(`CREATE TEMP TABLE "AdminAuditLog"
       (LIKE "${schema}"."AdminAuditLog" INCLUDING DEFAULTS)`);
