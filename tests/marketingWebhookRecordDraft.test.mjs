@@ -51,7 +51,9 @@ const probe = (kind, overrides = {}) => ({
   reportsAfter: 2,
   ...overrides,
 });
+const control = probe("signed_control", { statusCode: 200, answer: "channel_unknown" });
 const probes = [
+  control,
   probe("unsigned_not_json"),
   probe("wrong_signature_not_json"),
   probe("wrong_signature_event"),
@@ -140,12 +142,14 @@ test("a pair whose status query disagreed is left out of a proved type", () => {
 
 test("condition 2 needs all three probes refused by this build, with nothing stored", () => {
   const cases = [
-    [probes.slice(0, 4), "c2_probe_missing"],
-    [[...probes.slice(0, 4), probe("signed_byte_appended", { statusCode: 200, answer: "recorded" })], "c2_probe_not_refused"],
-    [[...probes.slice(0, 4), probe("signed_byte_appended", { pipeline: "f".repeat(64) })], "c2_probe_not_refused"],
-    [[...probes.slice(0, 4), probe("signed_byte_appended", { reportsAfter: 3 })], "c2_probe_stored"],
+    [probes.slice(0, 5), "c2_probe_missing"],
+    [[...probes.slice(0, 5), probe("signed_byte_appended", { statusCode: 200, answer: "recorded" })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 5), probe("signed_byte_appended", { pipeline: "f".repeat(64) })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 5), probe("signed_byte_appended", { reportsAfter: 3 })], "c2_probe_stored"],
     // A receiver that parsed before verifying answers a non-JSON body 400.
-    [[probe("unsigned_not_json", { statusCode: 400, answer: "body_not_json" }), ...probes.slice(1)], "c2_probe_not_refused"],
+    [[control, probe("unsigned_not_json", { statusCode: 400, answer: "body_not_json" }), ...probes.slice(2)], "c2_probe_not_refused"],
+    // The script's secret is not the receiver's: the untampered control is refused too.
+    [[probe("signed_control"), ...probes.slice(1)], "c2_control_not_accepted"],
   ];
   for (const [c2Probes, problem] of cases) {
     const draft = draftMarketingWebhookVerificationRecord({ ...base, c2Probes });

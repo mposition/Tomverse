@@ -18,7 +18,10 @@
  * correctly signed event with one byte changed and with one byte appended after
  * signing (a receiver that trimmed or normalised before verifying would accept
  * the second). Each must be answered 401 by this build with the stored reports
- * unchanged.
+ * unchanged. A control comes first: the same signing, untampered, must be
+ * accepted (200, an account that is not ours, nothing stored) -- otherwise the
+ * script's secret is not the receiver's, and every signed probe was refused for
+ * that reason rather than for the change.
  */
 import {
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
@@ -66,6 +69,7 @@ export type MarketingWebhookRecordDraftInput = {
 };
 
 export const MARKETING_WEBHOOK_C2_PROBE_KINDS = [
+  "signed_control",
   "unsigned_not_json",
   "wrong_signature_not_json",
   "wrong_signature_event",
@@ -88,6 +92,7 @@ export type MarketingWebhookTypeShortfall = "c1" | "c3" | "c4" | "c5";
 
 export type MarketingWebhookRecordDraftProblem =
   | "c2_probe_missing"
+  | "c2_control_not_accepted"
   | "c2_probe_not_refused"
   | "c2_probe_stored"
   | "no_event_type_proved";
@@ -238,6 +243,20 @@ export const draftMarketingWebhookVerificationRecord = (
     const probes = input.c2Probes.filter((probe) => probe.kind === kind);
     if (probes.length === 0) {
       problems.push("c2_probe_missing");
+    } else if (kind === "signed_control") {
+      // Accepted by this build, about an account that is not ours (or with the
+      // shadow off), and nothing stored.
+      if (
+        !probes.every(
+          (probe) =>
+            probe.statusCode === 200 &&
+            (probe.answer === "channel_unknown" || probe.answer === "shadow_off") &&
+            probe.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT &&
+            probe.reportsAfter === probe.reportsBefore,
+        )
+      ) {
+        problems.push("c2_control_not_accepted");
+      }
     } else if (
       !probes.every(
         (probe) =>

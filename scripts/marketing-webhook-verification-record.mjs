@@ -124,7 +124,10 @@ const { prisma } = await import("../lib/prisma.ts");
  * well-formed event under a wrong signature; and two are signed correctly and
  * then changed by one byte, or extended by one, after signing -- a receiver
  * that trimmed or normalised the body before verifying would accept those.
- * Each must leave the stored reports as they were.
+ * Each must leave the stored reports as they were. First, a control: the same
+ * signing untampered, which must be accepted about an account that is not
+ * ours -- or the secret here is not the receiver's and the refusals prove
+ * nothing.
  *
  * The signed probes are the one place outside the receiver route that reads
  * ZERNIO_WEBHOOK_SECRET (operator approval 2026-10-02, AGENTS.md S2e): the
@@ -146,11 +149,13 @@ const sendC2Probes = async () => {
       body = `{"id":"${eventId}","event":`;
     }
     if (kind !== "unsigned_not_json") headers["x-zernio-signature"] = "0".repeat(64);
-    if (kind === "signed_byte_changed" || kind === "signed_byte_appended") {
+    if (kind === "signed_control" || kind === "signed_byte_changed" || kind === "signed_byte_appended") {
       const secret = process.env.ZERNIO_WEBHOOK_SECRET;
       if (!secret) throw new Error("ZERNIO_WEBHOOK_SECRET is not set in this environment.");
       headers["x-zernio-signature"] = createHmac("sha256", secret).update(event).digest("hex");
-      body = kind === "signed_byte_changed" ? event.replace("c2-probe", "c2-proba") : `${event} `;
+      // The control goes untampered: its acceptance shows this secret is the receiver's.
+      if (kind === "signed_byte_changed") body = event.replace("c2-probe", "c2-proba");
+      if (kind === "signed_byte_appended") body = `${event} `;
     }
     const reportsBefore = await prisma.marketingReport.count({ where: { kind: "webhook_shadow" } });
     const at = new Date().toISOString();
