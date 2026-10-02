@@ -8,6 +8,7 @@
 //   npm run merge-train -- --include-main         # also main -> production
 //   npm run merge-train -- --pr=1916 --once       # consider only this PR
 //   npm run merge-train -- --clear-latch=develop  # a person clears a stop
+//   npm run merge-train -- --break-lock           # a person removes a dead train's lock
 //
 // Run it from a local PowerShell in the repository clone. It uses the
 // operator's own `gh` login and `railway` CLI login; it holds no token of its
@@ -15,45 +16,58 @@
 //
 // Per lane, each poll:
 //   1. A latched lane does nothing until a person clears it.
-//   2. If a merge made by the train is still deploying, wait for it. A failed,
-//      skipped, crashed or unrecognised deployment latches the lane and stops
-//      the train (exit 1) -- it never retries and never merges past a broken
-//      deploy.
-//   3. If any service in the environment has a deployment waiting for CI,
+//   2. A merge the train started but never confirmed is resolved first, from
+//      GitHub's own record of the PR.
+//   3. If a merge made by the train is still deploying, wait until every
+//      service that deploys the branch has deployed it. A failed, skipped,
+//      crashed or unrecognised deployment latches the lane and stops the train
+//      (exit 1) -- it never retries and never merges past a broken deploy.
+//   4. If any service in the environment has a deployment waiting for CI,
 //      queued, building or deploying, hold.
-//   4. Otherwise merge the oldest non-draft PR whose checks all finished green,
-//      pinned to the head SHA that was checked (--match-head-commit).
+//   5. Otherwise pick the oldest non-draft PR whose checks all finished green
+//      (including at least one successful PR Fast Gate run), re-read both the
+//      PR and Railway, and merge it pinned to the head SHA that was checked.
 //
-// The merge being followed and the latch survive a restart: they live in
-// merge-train-state.json in the repository's common git directory, shared by
-// every worktree and never committed. One train runs at a time per clone
-// (merge-train.lock beside it). A dry run reads neither and writes nothing.
+// State and lock live in ~/.tomverse-merge-train/, shared by every clone and
+// worktree on this machine. Two machines running trains at once are not
+// detected: run one. A dry run reads neither and writes nothing.
 //
 // The decisions live in scripts/merge-train-core.mjs.
 
 import { execFileSync } from "node:child_process";
-import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   LANES,
+  SHA_PATTERN,
   deploymentOutcome,
   inFlightDeployments,
   laneState,
   parseTrainState,
   pickNextPullRequest,
+  refusalReason,
+  servicesDeployingBranch,
   withLane,
 } from "./merge-train-core.mjs";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
 const RAILWAY_PROJECT_ID = process.env.MERGE_TRAIN_RAILWAY_PROJECT_ID || "0c5f17ad-a42a-4fa8-a245-bcd6a3275a35";
 const REPOSITORY = process.env.MERGE_TRAIN_REPOSITORY || "mposition/Tomverse";
+// Per service. A waiting deployment older than this many newer ones would be
+// invisible to the hold; Railway queues behind it, so that many is implausible.
+const DEPLOYMENTS_PER_SERVICE = 25;
 
 const args = process.argv.slice(2);
 const flag = (name) => args.find((arg) => arg.startsWith(`--${name}=`))?.split("=").slice(1).join("=");
 const dryRun = args.includes("--dry-run");
 const once = args.includes("--once");
 const includeMain = args.includes("--include-main");
+const breakLock = args.includes("--break-lock");
 const clearLatch = flag("clear-latch");
 const onlyPr = flag("pr") === undefined ? null : Number(flag("pr"));
 const pollSeconds = Number(flag("poll-seconds") ?? 60);
@@ -63,27 +77,31 @@ const notSeenTimeoutMinutes = Number(flag("not-seen-timeout-minutes") ?? 15);
 // How long a deployment may stay in flight (CI wait included) before stopping.
 const deployTimeoutMinutes = Number(flag("deploy-timeout-minutes") ?? 120);
 
+function usage(message) {
+  console.error(message);
+  process.exit(2);
+}
+
 for (const [name, value] of [
   ["poll-seconds", pollSeconds],
   ["not-seen-timeout-minutes", notSeenTimeoutMinutes],
   ["deploy-timeout-minutes", deployTimeoutMinutes],
 ]) {
-  if (!Number.isFinite(value) || value <= 0) {
-    console.error(`--${name} must be a positive number`);
-    process.exit(2);
-  }
+  if (!Number.isFinite(value) || value <= 0) usage(`--${name} must be a positive number`);
 }
-if (onlyPr !== null && !(Number.isInteger(onlyPr) && onlyPr > 0)) {
-  console.error("--pr must be a pull request number");
-  process.exit(2);
-}
+if (onlyPr !== null && !(Number.isInteger(onlyPr) && onlyPr > 0)) usage("--pr must be a pull request number");
+// These reach a Windows shell (see useShell below), so they are checked for
+// shape rather than trusted because they came from the environment.
+if (!UUID_PATTERN.test(RAILWAY_PROJECT_ID)) usage("MERGE_TRAIN_RAILWAY_PROJECT_ID must be a UUID");
+if (!REPOSITORY_PATTERN.test(REPOSITORY)) usage("MERGE_TRAIN_REPOSITORY must look like owner/name");
 
 const lanes = LANES.filter((lane) => lane.branch !== "main" || includeMain);
 
 // `railway` is an npm shim on Windows, which execFile cannot start without a
-// shell. Every argument here is a constant, a number checked above, or an id
-// this script read back from the CLI itself, so the shell sees nothing an
-// outsider wrote.
+// shell, and cmd.exe joins the arguments unquoted. Every argument is therefore
+// a constant or a value checked against a strict pattern before it gets here:
+// project id and service ids (UUID), repository (owner/name), PR numbers
+// (integer) and head SHAs (40 hex).
 const useShell = process.platform === "win32";
 
 function runText(command, commandArgs) {
@@ -100,9 +118,9 @@ const log = (lane, message) => console.log(`${new Date().toISOString()} [${lane.
 
 // ---- state and lock -------------------------------------------------------
 
-const gitDir = resolve(runText("git", ["rev-parse", "--git-common-dir"]).trim());
-const STATE_PATH = join(gitDir, "merge-train-state.json");
-const LOCK_PATH = join(gitDir, "merge-train.lock");
+const STATE_DIR = join(homedir(), ".tomverse-merge-train");
+const STATE_PATH = join(STATE_DIR, "state.json");
+const LOCK_PATH = join(STATE_DIR, "train.lock");
 
 function readState() {
   let text = null;
@@ -136,55 +154,74 @@ function processAlive(pid) {
   }
 }
 
+/**
+ * One train per machine. A lock left by a dead train is not taken over
+ * automatically: two trains that both saw it dead could each remove the
+ * other's fresh lock. A person confirms no train is running and passes
+ * --break-lock.
+ */
 function acquireLock() {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = openSync(LOCK_PATH, "wx");
-      writeFileSync(fd, `${process.pid}\n`);
-      closeSync(fd);
-      process.on("exit", () => rmSync(LOCK_PATH, { force: true }));
-      for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.on(signal, () => process.exit(130));
-      }
-      return;
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-    }
+  mkdirSync(STATE_DIR, { recursive: true });
+  if (breakLock) rmSync(LOCK_PATH, { force: true });
+  const mine = `${process.pid}\n`;
+  try {
+    const fd = openSync(LOCK_PATH, "wx");
+    writeFileSync(fd, mine);
+    closeSync(fd);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
     const holder = Number(readFileSync(LOCK_PATH, "utf8").trim());
-    if (Number.isInteger(holder) && holder > 0 && processAlive(holder)) {
-      console.error(`another merge train is running (pid ${holder}); refusing to start a second one`);
-      process.exit(2);
-    }
-    // The holder is gone without cleaning up (killed, crashed). Its lock
-    // protects nothing now; its state file still holds what it was doing.
-    rmSync(LOCK_PATH, { force: true });
+    const alive = Number.isInteger(holder) && holder > 0 && processAlive(holder);
+    usage(
+      alive
+        ? `another merge train is running (pid ${holder}); refusing to start a second one`
+        : `${LOCK_PATH} is held by pid ${holder || "unknown"}, which is not running. ` +
+            "If no merge train is running, rerun with --break-lock.",
+    );
   }
-  console.error(`could not take ${LOCK_PATH}`);
-  process.exit(2);
+  // Removes the lock only while it is still this process's own.
+  process.on("exit", () => {
+    try {
+      if (readFileSync(LOCK_PATH, "utf8") === mine) rmSync(LOCK_PATH, { force: true });
+    } catch {
+      // Already gone.
+    }
+  });
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(130));
 }
 
 // ---- reads ----------------------------------------------------------------
 
+/**
+ * Every deployment of every service in the environment. The hold looks at all
+ * of them, not only services built from this repository: a service deploying
+ * from elsewhere still occupies the environment.
+ */
 function environmentDeployments(environment) {
   const services = runJson("railway", ["service", "list", "-p", RAILWAY_PROJECT_ID, "-e", environment, "--json"]);
-  const deployed = services.filter((service) => service.source?.repo === REPOSITORY);
-  if (deployed.length === 0) {
+  if (!services.some((service) => service.source?.repo === REPOSITORY)) {
     throw new Error(`no ${environment} service deploys from ${REPOSITORY}; refusing to treat that as an idle environment`);
   }
-  return deployed.flatMap((service) =>
-    runJson("railway", [
-      "deployment", "list", "-p", RAILWAY_PROJECT_ID, "-e", environment, "-s", service.id, "--limit", "10", "--json",
-    ]).map((deployment) => ({ ...deployment, serviceId: service.id, serviceName: service.name })),
-  );
+  return services.flatMap((service) => {
+    if (!UUID_PATTERN.test(String(service.id))) throw new Error(`Railway returned a service id that is not a UUID`);
+    return runJson("railway", [
+      "deployment", "list", "-p", RAILWAY_PROJECT_ID, "-e", environment, "-s", service.id,
+      "--limit", String(DEPLOYMENTS_PER_SERVICE), "--json",
+    ]).map((deployment) => ({ ...deployment, serviceId: service.id, serviceName: service.name }));
+  });
 }
+
+const PR_FIELDS = "number,title,state,isDraft,createdAt,baseRefName,headRefOid,mergeable,statusCheckRollup";
 
 function openPullRequests(branch) {
   const pullRequests = runJson("gh", [
-    "pr", "list", "--repo", REPOSITORY, "--state", "open", "--base", branch, "--limit", "100",
-    "--json", "number,title,isDraft,createdAt,baseRefName,headRefOid,mergeable,statusCheckRollup",
+    "pr", "list", "--repo", REPOSITORY, "--state", "open", "--base", branch, "--limit", "100", "--json", PR_FIELDS,
   ]);
   return onlyPr === null ? pullRequests : pullRequests.filter((pr) => pr.number === onlyPr);
 }
+
+const viewPullRequest = (number, fields) =>
+  runJson("gh", ["pr", "view", String(number), "--repo", REPOSITORY, "--json", fields]);
 
 const describeDeployments = (deployments) =>
   deployments.map((deployment) => `${deployment.serviceName}=${deployment.status}`).join(", ");
@@ -200,71 +237,116 @@ class TrainStop extends Error {
 
 let state = { lanes: {} };
 
+function save(branch, patch) {
+  state = withLane(state, branch, patch);
+  writeState(state);
+}
+
+/**
+ * A merge the train started and never confirmed: the process died between
+ * `gh pr merge` and recording the result. GitHub's record decides.
+ */
+function resolveUnconfirmedMerge(lane, merging) {
+  const pr = viewPullRequest(merging.number, "state,mergeCommit");
+  if (pr.state === "MERGED" && SHA_PATTERN.test(String(pr.mergeCommit?.oid))) {
+    log(lane, `#${merging.number} was merged as ${pr.mergeCommit.oid.slice(0, 9)} before the last stop; following it`);
+    save(lane.branch, {
+      merging: null,
+      awaiting: { number: merging.number, sha: pr.mergeCommit.oid, mergedAt: merging.startedAt },
+    });
+    return;
+  }
+  if (pr.state === "OPEN") {
+    log(lane, `#${merging.number} was not merged before the last stop`);
+    save(lane.branch, { merging: null });
+    return;
+  }
+  throw new TrainStop(lane.branch, `#${merging.number} is ${pr.state} after an unconfirmed merge; outcome unknown`);
+}
+
 function followAwaitedMerge(lane, awaiting, deployments) {
-  const outcome = deploymentOutcome(deployments, awaiting.sha);
+  const expected = servicesDeployingBranch(deployments, lane.branch);
+  const outcome = deploymentOutcome(deployments, awaiting.sha, expected);
   const minutes = (Date.now() - awaiting.mergedAt) / 60000;
   const label = `#${awaiting.number} (${awaiting.sha.slice(0, 9)})`;
+  const seen = outcome.deployments.length ? `: ${describeDeployments(outcome.deployments)}` : "";
 
   if (outcome.state === "succeeded") {
-    log(lane, `${label} deployed: ${describeDeployments(outcome.deployments)}`);
-    state = withLane(state, lane.branch, { awaiting: null });
-    writeState(state);
+    log(lane, `${label} deployed${seen}`);
+    save(lane.branch, { awaiting: null });
     return true;
   }
   if (outcome.state === "not_seen" && minutes < notSeenTimeoutMinutes) {
     log(lane, `${label} merged; Railway has not registered a deployment yet`);
     return false;
   }
-  if (outcome.state === "in_progress" && minutes < deployTimeoutMinutes) {
-    log(lane, `${label} deploying: ${describeDeployments(outcome.deployments)}`);
+  if ((outcome.state === "in_progress" || outcome.state === "partial") && minutes < deployTimeoutMinutes) {
+    log(lane, `${label} deploying${seen}`);
     return false;
   }
-  throw new TrainStop(
-    lane.branch,
-    `${label} deployment ${outcome.state} after ${minutes.toFixed(0)} min` +
-      (outcome.deployments.length ? `: ${describeDeployments(outcome.deployments)}` : ""),
-  );
+  throw new TrainStop(lane.branch, `${label} deployment ${outcome.state} after ${minutes.toFixed(0)} min${seen}`);
 }
 
-function mergeOne(lane, pick) {
-  if (dryRun) {
-    log(lane, `would merge #${pick.number} ${pick.title} at ${pick.headRefOid.slice(0, 9)} (dry run)`);
+function mergeOne(lane, candidate) {
+  // Re-read both sides right before merging. The pick came from a rollup and
+  // a Railway snapshot that are a poll old; a late failing check or a push
+  // that queued a deployment in between must stop this merge.
+  const pr = viewPullRequest(candidate.number, PR_FIELDS);
+  const refusal = refusalReason(pr, lane.branch);
+  if (refusal !== null || pr.headRefOid !== candidate.headRefOid) {
+    log(lane, `#${pr.number} changed before merging (${refusal ?? "new head"}); re-reading next poll`);
     return;
   }
-  log(lane, `merging #${pick.number} ${pick.title} at ${pick.headRefOid.slice(0, 9)}`);
+  const busy = inFlightDeployments(environmentDeployments(lane.environment));
+  if (busy.length > 0) {
+    log(lane, `hold (appeared before merging #${pr.number}): ${describeDeployments(busy)}`);
+    return;
+  }
+  if (dryRun) {
+    log(lane, `would merge #${pr.number} ${pr.title} at ${pr.headRefOid.slice(0, 9)} (dry run)`);
+    return;
+  }
+
+  log(lane, `merging #${pr.number} ${pr.title} at ${pr.headRefOid.slice(0, 9)}`);
+  // Recorded before the call, so a process that dies after GitHub merged and
+  // before the result is written still knows on restart to go and look.
+  save(lane.branch, { merging: { number: pr.number, headSha: pr.headRefOid, startedAt: Date.now() } });
   let mergeError = null;
   try {
-    runText("gh", ["pr", "merge", String(pick.number), "--repo", REPOSITORY, "--merge", "--match-head-commit", pick.headRefOid]);
+    runText("gh", ["pr", "merge", String(pr.number), "--repo", REPOSITORY, "--merge", "--match-head-commit", pr.headRefOid]);
   } catch (error) {
     mergeError = error;
   }
-  // Whatever gh said, ask GitHub what actually happened before going on: a
-  // timed-out merge call can still have merged.
-  const result = runJson("gh", ["pr", "view", String(pick.number), "--repo", REPOSITORY, "--json", "state,mergeCommit"]);
-  if (result.state === "MERGED" && result.mergeCommit?.oid) {
-    state = withLane(state, lane.branch, {
-      awaiting: { number: pick.number, sha: result.mergeCommit.oid, mergedAt: Date.now() },
+  // Whatever gh said, ask GitHub what actually happened: a timed-out merge
+  // call can still have merged.
+  const result = viewPullRequest(pr.number, "state,mergeCommit");
+  if (result.state === "MERGED" && SHA_PATTERN.test(String(result.mergeCommit?.oid))) {
+    save(lane.branch, {
+      merging: null,
+      awaiting: { number: pr.number, sha: result.mergeCommit.oid, mergedAt: Date.now() },
     });
-    writeState(state);
-    log(lane, `#${pick.number} merged as ${result.mergeCommit.oid.slice(0, 9)}; waiting for its deployment`);
+    log(lane, `#${pr.number} merged as ${result.mergeCommit.oid.slice(0, 9)}; waiting for its deployment`);
     return;
   }
   if (result.state === "OPEN" && mergeError) {
-    // The head moved or GitHub refused; nothing changed, so the next poll
-    // re-reads the PR from scratch.
-    log(lane, `#${pick.number} not merged: ${String(mergeError.stderr || mergeError.message).trim().split("\n")[0]}`);
+    // GitHub refused (head moved, conflict); nothing changed.
+    save(lane.branch, { merging: null });
+    log(lane, `#${pr.number} not merged: ${String(mergeError.stderr || mergeError.message).trim().split("\n")[0]}`);
     return;
   }
-  throw new TrainStop(lane.branch, `#${pick.number} is ${result.state} after the merge call; outcome unknown`);
+  throw new TrainStop(lane.branch, `#${pr.number} is ${result.state} after the merge call; outcome unknown`);
 }
 
 function tick(lane) {
-  const { awaiting, latch } = laneState(state, lane.branch);
+  const { latch, merging } = laneState(state, lane.branch);
   if (latch) {
     log(lane, `latched since ${latch.at}: ${latch.reason} -- clear with --clear-latch=${lane.branch}`);
     return;
   }
+  if (merging) resolveUnconfirmedMerge(lane, merging);
+
   const deployments = environmentDeployments(lane.environment);
+  const { awaiting } = laneState(state, lane.branch);
   if (awaiting && !followAwaitedMerge(lane, awaiting, deployments)) return;
 
   const busy = inFlightDeployments(deployments);
@@ -287,21 +369,23 @@ function tick(lane) {
 
 if (clearLatch !== undefined) {
   if (!LANES.some((lane) => lane.branch === clearLatch)) {
-    console.error(`--clear-latch takes one of: ${LANES.map((lane) => lane.branch).join(", ")}`);
-    process.exit(2);
+    usage(`--clear-latch takes one of: ${LANES.map((lane) => lane.branch).join(", ")}`);
   }
   acquireLock();
   const current = readState();
-  const { latch, awaiting } = laneState(current, clearLatch);
+  const { latch, awaiting, merging } = laneState(current, clearLatch);
+  if (!latch) {
+    // Nothing a person has looked at: a merge still being followed or
+    // confirmed is left exactly as it is.
+    console.log(`${clearLatch} was not latched; nothing changed`);
+    process.exit(0);
+  }
   // The merge the latch was about is dropped with it: a person clearing the
   // latch has looked at that deployment, and following it again would only
   // re-latch on the same failure.
-  writeState(withLane(current, clearLatch, { latch: null, awaiting: null }));
-  console.log(
-    latch
-      ? `cleared ${clearLatch} latch (${latch.reason})${awaiting ? `, no longer following #${awaiting.number}` : ""}`
-      : `${clearLatch} was not latched`,
-  );
+  writeState(withLane(current, clearLatch, { latch: null, awaiting: null, merging: null }));
+  const dropped = awaiting ?? merging;
+  console.log(`cleared ${clearLatch} latch (${latch.reason})${dropped ? `; no longer following #${dropped.number}` : ""}`);
   process.exit(0);
 }
 
@@ -315,21 +399,25 @@ console.log(
     `${dryRun ? " (dry run)" : ""}${onlyPr === null ? "" : `, only #${onlyPr}`}, poll ${pollSeconds}s`,
 );
 
+let current = null;
 try {
   for (;;) {
-    for (const lane of lanes) tick(lane);
+    for (const lane of lanes) {
+      current = lane;
+      tick(lane);
+    }
     if (once) break;
     await sleep(pollSeconds * 1000);
   }
 } catch (error) {
-  if (error instanceof TrainStop) {
-    // A deployment or merge outcome the train will not guess past. The latch
-    // outlives this process, so a restart cannot merge on top of it.
-    if (!dryRun) {
-      state = withLane(state, error.branch, { latch: { reason: error.message, at: new Date().toISOString() } });
-      writeState(state);
-    }
-    console.error(`STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${error.branch}.`);
+  const unconfirmed = current && laneState(state, current.branch).merging;
+  if (error instanceof TrainStop || unconfirmed) {
+    // An outcome the train will not guess past -- or a failure while a merge
+    // was unconfirmed, which is the same thing. The latch outlives this
+    // process, so a restart cannot merge on top of it.
+    const branch = error instanceof TrainStop ? error.branch : current.branch;
+    if (!dryRun) save(branch, { latch: { reason: error.message, at: new Date().toISOString() } });
+    console.error(`STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${branch}.`);
     process.exit(1);
   }
   // A failed read (gh, railway CLI, network) is not an outcome, so it does

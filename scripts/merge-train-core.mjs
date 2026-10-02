@@ -6,7 +6,7 @@
 // deploying, nothing is merged into the branch that environment deploys from.
 //
 // Nothing here touches the network. Every function takes the shapes `gh` and
-// the Railway API return and answers a question about them, so the whole
+// the Railway CLI return and answers a question about them, so the whole
 // decision table is testable without a token (tests/mergeTrainCore.test.mjs).
 
 // A deployment in one of these states is a deployment Railway has not finished
@@ -33,6 +33,14 @@ export const LANES = [
   { branch: "main", environment: "production" },
 ];
 
+// develop and main have no branch protection, so nothing on GitHub says which
+// checks are required. A rollup made only of SKIPPED path-filtered checks, or
+// one polled before the gate's runs were created, would otherwise read as
+// green. At least one run of each of these workflows must have succeeded.
+export const REQUIRED_WORKFLOWS = ["PR Fast Gate"];
+
+export const SHA_PATTERN = /^[0-9a-f]{40}$/;
+
 /** Deployments that keep the environment busy. Empty means the environment is free. */
 export function inFlightDeployments(deployments) {
   return deployments.filter((deployment) => IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status));
@@ -41,14 +49,16 @@ export function inFlightDeployments(deployments) {
 const PASSING_CHECK_CONCLUSIONS = new Set(["SUCCESS", "NEUTRAL", "SKIPPED"]);
 
 /**
- * Collapses a `statusCheckRollup` into one of four answers.
+ * Collapses a `statusCheckRollup` into one answer: "failed", "pending",
+ * "none", "missing_required" or "passed", in that order of precedence.
  *
- * "none" is its own answer rather than "passed": a pull request whose checks
- * have not been created yet looks exactly like one with no checks, and merging
- * it would merge something CI never saw. There is no branch protection on
- * develop or main, so this function is the only thing standing in that gap.
+ * "none" and "missing_required" are not "passed": a pull request whose gate
+ * has not been created yet looks exactly like one that has no gate, and
+ * merging it would merge something CI never saw. There is no branch
+ * protection on develop or main, so this function is the only thing standing
+ * in that gap.
  */
-export function checksVerdict(rollup) {
+export function checksVerdict(rollup, requiredWorkflows = REQUIRED_WORKFLOWS) {
   if (!Array.isArray(rollup) || rollup.length === 0) return "none";
   let pending = false;
   for (const check of rollup) {
@@ -66,16 +76,32 @@ export function checksVerdict(rollup) {
     }
     if (!PASSING_CHECK_CONCLUSIONS.has(check.conclusion)) return "failed";
   }
-  return pending ? "pending" : "passed";
+  if (pending) return "pending";
+  const satisfied = requiredWorkflows.every((workflow) =>
+    rollup.some((check) => check.workflowName === workflow && check.conclusion === "SUCCESS"),
+  );
+  return satisfied ? "passed" : "missing_required";
+}
+
+/** Why `pr` may not be merged into `branch` right now, or null if it may. */
+export function refusalReason(pr, branch) {
+  if (pr.state !== undefined && pr.state !== "OPEN") return `state_${String(pr.state).toLowerCase()}`;
+  if (pr.baseRefName !== branch) return "base_changed";
+  if (pr.isDraft) return "draft";
+  if (!SHA_PATTERN.test(String(pr.headRefOid))) return "head_unreadable";
+  const verdict = checksVerdict(pr.statusCheckRollup);
+  if (verdict !== "passed") return `checks_${verdict}`;
+  if (pr.mergeable !== "MERGEABLE") return `mergeable_${String(pr.mergeable).toLowerCase()}`;
+  return null;
 }
 
 /**
- * Chooses the oldest pull request into `branch` whose CI has finished green.
+ * Chooses the oldest pull request into `branch` that may be merged.
  *
  * Drafts are never merged. A pull request that is still running, failed, has
- * no checks, or that GitHub has not computed mergeability for is skipped with
- * its reason, and the next oldest is considered -- an older red PR must not
- * stall every PR behind it.
+ * no gate result, or that GitHub has not computed mergeability for is skipped
+ * with its reason, and the next oldest is considered -- an older red PR must
+ * not stall every PR behind it.
  */
 export function pickNextPullRequest(pullRequests, branch) {
   const ordered = pullRequests
@@ -84,27 +110,17 @@ export function pickNextPullRequest(pullRequests, branch) {
 
   const skipped = [];
   for (const pr of ordered) {
-    if (pr.isDraft) {
-      skipped.push({ number: pr.number, reason: "draft" });
-      continue;
-    }
-    const verdict = checksVerdict(pr.statusCheckRollup);
-    if (verdict !== "passed") {
-      skipped.push({ number: pr.number, reason: `checks_${verdict}` });
-      continue;
-    }
-    if (pr.mergeable !== "MERGEABLE") {
-      skipped.push({ number: pr.number, reason: `mergeable_${String(pr.mergeable).toLowerCase()}` });
-      continue;
-    }
-    return { pick: pr, skipped };
+    const reason = refusalReason(pr, branch);
+    if (reason === null) return { pick: pr, skipped };
+    skipped.push({ number: pr.number, reason });
   }
   return { pick: null, skipped };
 }
 
 /**
- * The train's memory between runs, per branch: the merge it is still
- * following, and the latch set when it stopped.
+ * The train's memory between runs, per branch: a merge it has started but not
+ * confirmed (`merging`), the merge it is following (`awaiting`), and the latch
+ * set when it stopped.
  *
  * Without it a restart forgets that the last merge's deployment failed, sees
  * an idle environment and merges the next PR on top of the broken one. So an
@@ -114,19 +130,24 @@ export function pickNextPullRequest(pullRequests, branch) {
 export function parseTrainState(text) {
   if (text === null || text === undefined) return { lanes: {} };
   const state = JSON.parse(text);
-  if (!state || typeof state !== "object" || !state.lanes || typeof state.lanes !== "object") {
-    throw new Error("merge train state has no lanes object");
-  }
+  const isRecord = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  if (!isRecord(state) || !isRecord(state.lanes)) throw new Error("merge train state has no lanes object");
   for (const [branch, lane] of Object.entries(state.lanes)) {
-    if (!lane || typeof lane !== "object") throw new Error(`merge train state for ${branch} is not an object`);
-    const { awaiting, latch } = lane;
+    if (!isRecord(lane)) throw new Error(`merge train state for ${branch} is not an object`);
+    const { awaiting, latch, merging } = lane;
     if (
       awaiting != null &&
-      !(Number.isInteger(awaiting.number) && /^[0-9a-f]{40}$/.test(awaiting.sha) && Number.isFinite(awaiting.mergedAt))
+      !(isRecord(awaiting) && Number.isInteger(awaiting.number) && SHA_PATTERN.test(awaiting.sha) && Number.isFinite(awaiting.mergedAt))
     ) {
       throw new Error(`merge train state for ${branch} has a malformed awaiting merge`);
     }
-    if (latch != null && !(typeof latch.reason === "string" && typeof latch.at === "string")) {
+    if (
+      merging != null &&
+      !(isRecord(merging) && Number.isInteger(merging.number) && SHA_PATTERN.test(merging.headSha) && Number.isFinite(merging.startedAt))
+    ) {
+      throw new Error(`merge train state for ${branch} has a malformed merge in progress`);
+    }
+    if (latch != null && !(isRecord(latch) && typeof latch.reason === "string" && typeof latch.at === "string")) {
       throw new Error(`merge train state for ${branch} has a malformed latch`);
     }
   }
@@ -134,32 +155,64 @@ export function parseTrainState(text) {
 }
 
 export function laneState(state, branch) {
-  return { awaiting: null, latch: null, ...state.lanes[branch] };
+  return { awaiting: null, latch: null, merging: null, ...state.lanes[branch] };
 }
 
 export function withLane(state, branch, patch) {
   return { ...state, lanes: { ...state.lanes, [branch]: { ...laneState(state, branch), ...patch } } };
 }
 
+const commitOf = (deployment) => String(deployment.meta?.commitHash ?? "").toLowerCase();
+
 /**
- * What happened to the deployments Railway made for one merge commit.
- *
- * "not_seen" is not success: Railway may not have registered the push yet,
- * and the caller decides how long that is allowed to last. REMOVED and any
- * status this table does not know are "unknown" -- the train stops on them
- * rather than guessing.
+ * The services that deploy `branch` in this environment: every service with a
+ * deployment of that branch in the window read. A merge has not deployed until
+ * each of them has deployed it -- the cron services finish in seconds while
+ * the web service is still waiting for CI.
  */
-export function deploymentOutcome(deployments, commitSha) {
-  const forCommit = deployments.filter((deployment) => deployment.meta?.commitHash === commitSha);
-  if (forCommit.length === 0) return { state: "not_seen", deployments: [] };
-  if (forCommit.some((deployment) => IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status))) {
-    return { state: "in_progress", deployments: forCommit };
-  }
+export function servicesDeployingBranch(deployments, branch) {
+  return [...new Set(deployments.filter((deployment) => deployment.meta?.branch === branch).map((d) => d.serviceId))];
+}
+
+/**
+ * What happened to the deployments Railway made for one merge commit, across
+ * `expectedServiceIds`.
+ *
+ * "not_seen" (no service has it yet) and "partial" (some have) are not
+ * success; the caller decides how long they may last. A failure anywhere wins
+ * over everything else. REMOVED and any status this table does not know are
+ * "unknown" -- the train stops on them rather than guessing.
+ */
+export function deploymentOutcome(deployments, commitSha, expectedServiceIds) {
+  const sha = commitSha.toLowerCase();
+  const forCommit = deployments.filter((deployment) => commitOf(deployment) === sha);
   if (forCommit.some((deployment) => FAILED_DEPLOYMENT_STATUSES.has(deployment.status))) {
     return { state: "failed", deployments: forCommit };
   }
-  if (forCommit.every((deployment) => SUCCEEDED_DEPLOYMENT_STATUSES.has(deployment.status))) {
-    return { state: "succeeded", deployments: forCommit };
+  // Railway marks a deployment REMOVED when a newer one for the same service
+  // replaces it -- someone else merged after this commit. The newer commit
+  // contains this one, so that service has moved past it; the hold covers the
+  // newer deployment. A REMOVED with nothing newer is still unexplained.
+  const superseded = (deployment) =>
+    deployment.status === "REMOVED" &&
+    deployments.some(
+      (other) =>
+        other.serviceId === deployment.serviceId &&
+        commitOf(other) !== sha &&
+        Date.parse(other.createdAt) > Date.parse(deployment.createdAt),
+    );
+  const known = (deployment) =>
+    IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status) ||
+    SUCCEEDED_DEPLOYMENT_STATUSES.has(deployment.status) ||
+    superseded(deployment);
+  if (forCommit.some((deployment) => !known(deployment))) return { state: "unknown", deployments: forCommit };
+  if (forCommit.length === 0) return { state: "not_seen", deployments: [] };
+  const deployed = new Set(forCommit.map((deployment) => deployment.serviceId));
+  if (expectedServiceIds.some((serviceId) => !deployed.has(serviceId))) {
+    return { state: "partial", deployments: forCommit };
   }
-  return { state: "unknown", deployments: forCommit };
+  if (forCommit.some((deployment) => IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status))) {
+    return { state: "in_progress", deployments: forCommit };
+  }
+  return { state: "succeeded", deployments: forCommit };
 }

@@ -250,7 +250,7 @@ test("no step in the workflow merges a pull request or arms auto-merge", () => {
     const merging = steps.filter(
         (step) =>
             typeof step.run === "string" &&
-            (/gh pr merge/.test(step.run) || /--auto/.test(step.run))
+            (/gh pr merge/.test(step.run) || /--auto\b/.test(step.run))
     );
     assert.deepEqual(merging.map((step) => step.name), []);
     assert.ok(
