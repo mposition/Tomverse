@@ -39,10 +39,14 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [state, setState] = useState<State>({ kind: "idle" });
   const mounted = useRef(false);
+  const lifecycleVersion = useRef(0);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    lifecycleVersion.current += 1;
+    return () => { mounted.current = false; lifecycleVersion.current += 1; };
   }, []);
+  const isCurrent = useCallback((version: number) =>
+    mounted.current && lifecycleVersion.current === version, []);
   const setActiveState = useCallback((next: State) => {
     if (mounted.current) setState(next);
   }, []);
@@ -52,13 +56,15 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
     previewScopeDigestKeyId: checked.scopeDigestKeyId,
   }), [ideaId, checked.ideaDigest, checked.scopeDigest, checked.scopeDigestKeyId]);
 
-  const readBack = useCallback(async (binding: ScopeApprovalBinding) => {
+  const readBack = useCallback(async (binding: ScopeApprovalBinding,
+    version = lifecycleVersion.current) => {
     try {
       const query = new URLSearchParams({ approvalId: binding.approvalId });
       const response = await adminFetch(`/api/admin/amux/ideas/source-scope-approval?${query}`,
         { cache: "no-store" });
       const decision = classifySourceScopeApprovalReply({ status: response.status,
         body: await response.json() }, binding, "read");
+      if (!isCurrent(version)) return;
       if (decision.kind === "approved") {
         setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "expired") {
@@ -72,8 +78,10 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       } else {
         setActiveState({ kind: "outcome_unknown", binding });
       }
-    } catch { setActiveState({ kind: "outcome_unknown", binding }); }
-  }, [operatorId, setActiveState]);
+    } catch {
+      if (isCurrent(version)) setActiveState({ kind: "outcome_unknown", binding });
+    }
+  }, [isCurrent, operatorId, setActiveState]);
 
   useEffect(() => {
     let active = true;
@@ -92,6 +100,7 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
 
   const approve = async () => {
     if (!available || state.kind !== "idle") return;
+    const version = lifecycleVersion.current;
     let approvalId: string;
     try { approvalId = crypto.randomUUID(); } catch {
       setActiveState({ kind: "storage_unavailable" });
@@ -102,7 +111,7 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       const prior = readSourceScopeApprovalAttempt(receiptStore(), operatorId, expected);
       if (prior.kind === "present") {
         setActiveState({ kind: "outcome_unknown", binding: prior.binding });
-        await readBack(prior.binding);
+        await readBack(prior.binding, version);
       } else {
         setActiveState({ kind: "storage_unavailable" });
       }
@@ -120,6 +129,7 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       });
       const decision = classifySourceScopeApprovalReply({ status: response.status,
         body: await response.json() }, binding, "write");
+      if (!isCurrent(version)) return;
       if (decision.kind === "approved") {
         setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "refused") {
@@ -130,11 +140,12 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         }
       } else {
         setActiveState({ kind: "outcome_unknown", binding });
-        await readBack(binding);
+        await readBack(binding, version);
       }
     } catch {
+      if (!isCurrent(version)) return;
       setActiveState({ kind: "outcome_unknown", binding });
-      await readBack(binding);
+      await readBack(binding, version);
     }
   };
 
