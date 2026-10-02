@@ -277,6 +277,9 @@ run(
     // The idea-only initial source plan is derived without a model call or
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
+    // The analysis-only USD 50 ledger migration must install its namespace,
+    // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
+    "tests/integration/amux-v4-analysis-budget.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     // Dark v22/v23 CLI receipts: server timestamp, immutable row, strict
     // content-free model detail and unknown/partial token semantics.
