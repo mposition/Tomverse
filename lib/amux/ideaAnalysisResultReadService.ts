@@ -66,13 +66,15 @@ export async function readAmuxFirstIdeaAnalysisResult(
       where: { ideaId, actorUserId, chunkIndex: 0 },
       orderBy: { unitIndex: "asc" },
     });
-    const audit = await tx.adminAuditLog.findFirst({
+    const audits = await tx.adminAuditLog.findMany({
       where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
         targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET, targetId: `${ideaId}:0` },
+      take: 2,
     });
+    const audit = audits[0];
     const metadata = audit?.metadata;
     const meta = metadata as Record<string, unknown> | undefined;
-    if (!chunk || chunk.actorUserId !== actorUserId ||
+    if (!chunk || audits.length !== 1 || chunk.actorUserId !== actorUserId ||
         chunk.state !== "draft_ready" || chunk.draftVersion !== 2 ||
         chunk.draftCiphertext !== null || !chunk.currentPreviewId ||
         !chunk.analysisCompletedAt ||
