@@ -78,6 +78,7 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261002190000_amux_cli_usage_year_insert_fence",
   // AMUX v4 idea-analysis budget ledger: additive and dark.
   "20261003100000_amux_v4_analysis_budget_ledger",
+  "20261003110000_amux_v4_analysis_budget_total_check",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

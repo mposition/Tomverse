@@ -5,16 +5,22 @@ import test from "node:test";
 const migration = new URL(
   "../prisma/migrations/20261003100000_amux_v4_analysis_budget_ledger/migration.sql",
   import.meta.url);
+const totalMigration = new URL(
+  "../prisma/migrations/20261003110000_amux_v4_analysis_budget_total_check/migration.sql",
+  import.meta.url);
 const schema = new URL("../prisma/schema.prisma", import.meta.url);
 
 test("AMUX v4 analysis budget schema is additive, dark and agent-only", async () => {
-  const [sql, prisma] = await Promise.all([
-    readFile(migration, "utf8"), readFile(schema, "utf8"),
+  const [sql, totalSql, prisma] = await Promise.all([
+    readFile(migration, "utf8"), readFile(totalMigration, "utf8"),
+    readFile(schema, "utf8"),
   ]);
   assert.match(sql, /CREATE TABLE "AmuxIdeaAnalysisBudgetWindow"/);
   assert.match(sql, /CREATE TABLE "AmuxIdeaAnalysisBudgetHold"/);
   assert.match(sql, /"namespace" = 'agent\/amux-intake'/);
   assert.match(sql, /"limitMicroUsd" = 50000000/);
+  assert.match(totalSql, /"AmuxIdeaAnalysisBudgetWindow_total_check"/);
+  assert.match(totalSql, /"spentMicroUsd" <= "limitMicroUsd" - "reservedMicroUsd"/);
   assert.match(sql, /UNIQUE INDEX "AmuxIdeaAnalysisBudgetHold_previewId_key"/);
   assert.match(sql, /FOREIGN KEY \("previewId"\) REFERENCES "AmuxIdeaTransferPreview"\("id"\)/);
   assert.match(sql, /"status" IN \('reserved', 'in_flight', 'succeeded', 'failed',/);

@@ -102,6 +102,10 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace, monthStart } },
   })).reservedMicroUsd, BigInt(5_000));
+  await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.update({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    data: { spentMicroUsd: BigInt(49_995_001) },
+  }), /AmuxIdeaAnalysisBudgetWindow_total_check/);
   const audit = await prisma.adminAuditLog.findUniqueOrThrow({
     where: { id: result.auditId },
   });
