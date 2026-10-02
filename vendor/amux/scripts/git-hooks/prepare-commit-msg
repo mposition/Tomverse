@@ -1,0 +1,458 @@
+#!/bin/sh
+# guard-features: interpret-trailers Amux-Committer
+# guard-version: 2
+# (AF-431 / MR-44. A file declaring guard-features must carry exactly ONE
+#  anchored integer version so staleness is a NUMERIC comparison, not a
+#  substring hunt. Two spellings, per mixpeek-research's dc21a0d489: hooks
+#  that self-report at runtime use `GUARD_VERSION = N`; hooks with no runtime
+#  need use this line. Bump it whenever a guard-features token is added.)
+# (Drift token for install-hooks.sh — see append-only-push-guard's header for
+#  the mechanism. A vendored copy lacking a canonical token reads STALE.)
+# amux-session-stamp — tags each commit with the originating amux session, and
+# stamps `(human)` when there is none.
+#
+# WHY THE HUMAN CASE IS STAMPED AT ALL (AMUX-2567, creative-dna's design,
+# endorsed by gtm-videos). The push guard reads a MISSING Amux-Session trailer
+# as "unclaimable by every lane" — correctly, but absence has three causes it
+# cannot tell apart: a human's own commit, a session whose AMUX_SESSION was
+# unset, and a hook-bypassing graft (`--no-verify`, cherry-pick, rebase
+# replay). It therefore takes the most restrictive reading of all three, and
+# says nothing about which.
+#
+# Measured on this checkout 2026-08-11: `git log --format="%h [%(trailers:...)]"`
+# over one day showed a dozen commits rendering as `[]`, and the deploy recipe
+# in CLAUDE.md tells you to "treat as foreign" — so a peer's ordinary work and a
+# genuine graft looked identical, and I could not answer "whose is this?"
+# without asking. Stamping the human case makes ABSENCE rare and therefore
+# genuinely suspicious: what is left unstamped is a bypass, which is exactly
+# what the guard should be loud about.
+#
+# THE EXEMPTION IS NOT WEAKENED, only spelled. A human's local commit may be
+# unshipped WIP and protecting it is the guard's whole purpose — this changes
+# nothing about whether lanes may push it, only whether the guard can SAY why
+# it refused instead of going quiet.
+msg_file="$1"
+
+# git interpret-trailers, NOT a hand-rolled append (2026-08-08, third failure
+# mode in one day). The history: an unconditional leading newline started a
+# SECOND trailer block and orphaned every trailer above it (152/152 mixpeek
+# commits, unparseable Co-Authored-By); no newline glued the stamp onto
+# trailer-LESS bodies; and the conditional case-glob that replaced them
+# matched any CONVENTIONAL-COMMIT SUBJECT ("docs(x): ..." contains ': '), so
+# a bodyless commit got the stamp glued into its subject paragraph (35c2755,
+# rendered as an untrailered '[]' in the push guard). Trailer placement has
+# comment-lines, subject-only, existing-block and dedupe cases — git ships
+# the parser that handles all four; stop reimplementing it.
+#
+# `(human)` is parenthesised so it can never collide with a real session name:
+# amux session names are [a-z0-9-] (see sanitize_session_name), so no lane can
+# ever be called "(human)" and a reader needs no lookup table to tell them
+# apart.
+#
+# MR-43: before falling all the way to "(human)", try recovering a lane's own
+# identity from the tmux pane it is actually running in — $AMUX_SESSION can go
+# missing IN-PROCESS (spawn always injects it, session_verbs.rs) without the
+# lane having stopped being a lane. Scoped to amux- prefixed panes ONLY, so
+# this cannot touch the human case above: a human's own shell is never in one,
+# so it still falls through to "(human)" exactly as before. Not weakening the
+# exemption, only correcting which of the three causes (paragraph above) this
+# commit actually was.
+stamp="$AMUX_SESSION"
+
+# AMUX-4559: RECORD WHEN PROCESS ANCESTRY CONTRADICTS THE ENVIRONMENT, because
+# the environment is what was wrong and nothing could see it.
+#
+# Four unpushed commits — 87f7adec, 2a395b8d, a86bc0de, 1010835e — carry ONE
+# `Amux-Agent: pid=1079`, proving a single agent process made all four, and
+# THREE different `Amux-Session` values: mixpeek-oss, mixpeek-frustrations
+# twice, backend. Each carries the matching `Amux-Conversation` for its wrong
+# lane, so the pair reads as corroborated. mixpeek-oss confirmed by
+# server-stamped message that it has never touched this repo; its workspace is
+# /Users/ethan/Dev/mixpeek-public.
+#
+# MR-43 below could not have caught any of them. It fires only when
+# $AMUX_SESSION is EMPTY, and in all four cases it was set — to the wrong lane.
+# An inherited-but-wrong value is the common case, not the missing one.
+#
+# The walk is the same idea `Amux-Agent` already relies on and the test already
+# pins: process ancestry is the one identity no env var can move. A tmux pane's
+# pid is the lane's own process, so the first ancestor that IS a pane pid names
+# the lane that is really committing. Measured while writing this, from a shell
+# with AMUX_SESSION unset: four hops, python -> bash -> claude -> pane 65910 =
+# `amux-amux`.
+#
+# RECORDS, DOES NOT OVERRIDE, and that boundary is deliberate.
+#
+# Making ancestry the stamp is probably the right end state, and it is NOT a
+# change to make in passing. Every lane in this shared checkout commits through
+# this hook, so getting it wrong mis-attributes everything rather than the four
+# commits it would fix. `scripts/test-commit-stamp.sh` encodes the current
+# contract in 7 cells that set $AMUX_SESSION and expect the stamp to follow it,
+# and an override makes that contract untestable from inside a pane: the
+# harness itself runs in one, so it can no longer express "a different lane
+# committed this". Rewriting that contract is a decision with its own card.
+#
+# What this does instead is make the disagreement VISIBLE and greppable, which
+# is precisely what the board audit could not do: it had to notice by hand that
+# one `Amux-Agent` pid carried three session stamps. A consumer that wants the
+# ancestry answer now has it on the commit.
+_anc_lane=""
+if command -v tmux >/dev/null 2>&1; then
+  _panes="$(tmux list-panes -a -F '#{pane_pid} #{session_name}' 2>/dev/null)"
+  if [ -n "$_panes" ]; then
+    _ap=$$
+    _ah=0
+    while [ "$_ah" -lt 12 ]; do
+      _ah=$((_ah + 1))
+      _match="$(printf '%s\n' "$_panes" | awk -v p="$_ap" '$1==p {print $2; exit}')"
+      case "$_match" in
+        amux-*)
+          # AMUX-4602: A TMUX SESSION IS NOT A LANE. An `amux-` prefix is a
+          # naming convention; the env file is what makes a lane. A server test
+          # that reached start_session once created a live `amux-client-left-fixture`
+          # on the machine's real tmux server, the fleet adopted it, and the
+          # staged guard named it as a committer: ba203699 still carries
+          # `Amux-Committer: client-left-fixture` for a session that was never a
+          # lane. Measured today: 0 of 29 live amux- sessions lack an env file,
+          # so this costs nothing and refuses the next leak by construction.
+          if [ -f "${AMUX_HOME:-$HOME/.amux}/sessions/${_match#amux-}.env" ]; then
+            _anc_lane="${_match#amux-}"
+          fi
+          break ;;
+      esac
+      _ap="$(ps -o ppid= -p "$_ap" 2>/dev/null | tr -d ' ')"
+      case "$_ap" in ''|0|1) break ;; esac
+    done
+  fi
+fi
+# `anc_disagrees` carries the ancestry answer when it contradicts the
+# environment. The stamp itself is unchanged.
+anc_disagrees=""
+if [ -n "$_anc_lane" ] && [ -n "$stamp" ] && [ "$stamp" != "$_anc_lane" ]; then
+  anc_disagrees="$_anc_lane"
+fi
+# An EMPTY $AMUX_SESSION is the one case where ancestry supplies the stamp, and
+# that is not an override: MR-43 below already does exactly this through
+# `tmux display-message`. The walk just resolves it for a process whose $TMUX
+# is missing too, which is the same lane by a sturdier route.
+if [ -z "$stamp" ] && [ -n "$_anc_lane" ]; then
+  stamp="$_anc_lane"
+fi
+
+# MR-43: before falling all the way to "(human)", try recovering a lane's own
+# identity from the tmux pane it is actually running in — $AMUX_SESSION can go
+# missing IN-PROCESS (spawn always injects it, session_verbs.rs) without the
+# lane having stopped being a lane. Scoped to amux- prefixed panes ONLY, so
+# this cannot touch the human case above: a human's own shell is never in one,
+# so it still falls through to "(human)" exactly as before. Not weakening the
+# exemption, only correcting which of the three causes (paragraph above) this
+# commit actually was.
+#
+# Still reached when the ancestry walk above found nothing: `tmux
+# display-message` resolves through $TMUX rather than the process tree, so it
+# covers a lane whose pane pid the walk could not see.
+if [ -z "$stamp" ]; then
+  _mr43_tname="$(tmux display-message -p '#S' 2>/dev/null)"
+  case "$_mr43_tname" in
+    # Same env-file requirement as the walk above (AMUX-4602): recovering a
+    # lane's lost identity is the point; inventing one for a stray tmux session
+    # is the failure this guard already produced once.
+    amux-*)
+      if [ -f "${AMUX_HOME:-$HOME/.amux}/sessions/${_mr43_tname#amux-}.env" ]; then
+        stamp="${_mr43_tname#amux-}"
+      fi ;;
+  esac
+fi
+stamp="${stamp:-(human)}"
+
+# Guarantee the final newline BEFORE handing the file to interpret-trailers.
+# On a message file whose last line lacks its terminator, git (measured on
+# 2.39) glues the trailer straight onto that line — subject and trailer
+# become ONE paragraph, the trailer is unparseable, and the push guard then
+# reads the session's own commit as foreign and blocks its push (2026-08-22:
+# a merge commit's stamp rendered as "...'origin/main' Amux-Session: amux"
+# and cost an amend-under-pin dance to ship). No-op on well-formed files;
+# empty files are left alone (nothing to stamp a paragraph onto).
+if [ -s "$msg_file" ] && [ -n "$(tail -c 1 "$msg_file")" ]; then
+  echo >> "$msg_file"
+fi
+
+# WHICH REASONING PROCESS, not merely which lane (AMUX-3780).
+#
+# mixpeek-homepage-claude was credited with a commit they did not write: two
+# distinct Claude sessions ran under that ONE lane name on 2026-08-26 and both
+# committed, and `Amux-Session` records the lane. Their framing is the sharp
+# one — a trailer that names the lane reads exactly like a trailer that names
+# the author — and a reviewer (me) routed questions about that change to the
+# wrong party as a result.
+#
+# THE FIELD HAS TO BE ONE AMUX OWNS. Their suggested fix was to promote the
+# `Claude-Session` trailer, which b1f5a478 happened to carry. Measured: only
+# 30% of commits since that field first appeared carry it at all, because it is
+# written by Claude Code's own trailer feature and not by any amux hook. A
+# discriminator present on 30% of commits cannot answer "whose is this".
+#
+# `cc_conversation_id` is amux's own: it is the lane's transcript identity, it
+# is already maintained in the session meta, and `amux fresh` rotates it — so
+# it separates reasoning processes by construction rather than by luck.
+#
+# FAIL-OPEN, and silent when absent. A hook that blocks a commit because it
+# could not read a JSON file would be a worse bug than the one it fixes, and a
+# human commit ("(human)") has no conversation to name.
+#
+# THE GRAFT PATH, which invokes no hook at all (AMUX-3782). `git commit-tree`
+# is plumbing and fires nothing, so a graft-pushed commit carries neither
+# trailer. Measured 2026-08-26, last 400 commits on each repo's origin/main:
+# amux 380/400 stamped (95%, lanes here use `git commit`), mixpeek 202/400
+# (50%, the repo where grafting past a peer's dirty worktree is routine).
+#
+# The answer is not a second producer of the trailer block. Run THIS FILE by
+# hand on the message you are about to hand to commit-tree:
+#
+#     .git/hooks/prepare-commit-msg "$MSG"
+#     SHA=$(git commit-tree -p origin/main -F "$MSG" "$TREE")
+#
+# It takes a message file and stamps it in place, so a graft gets exactly what
+# `git commit` would have given it: both fields, the final-newline guard above,
+# and an existing peer's trailer left alone. The alternative, a hand-rolled
+# `git interpret-trailers --trailer "Amux-Session: $AMUX_SESSION"` line, had
+# already drifted before it was proposed — it stamps the session and drops the
+# conversation, because a one-liner carries only the fields its author knew
+# about. `scripts/test-graft-stamp.sh` pins the recipe above cell by cell, and
+# its cell D is exactly that difference.
+#
+# A STALE vendored copy under .git/hooks stamps a graft with whatever it would
+# have stamped a commit in the same checkout — no worse than the commit path,
+# and the SessionStart freshness hook already reports that drift by name.
+# AMUX-3916: `Amux-Session` AND `Amux-Conversation` ARE ONE SIGNAL, NOT TWO.
+#
+# `conv` below is a LOOKUP OF `stamp`. It cannot corroborate it: a wrong stamp
+# produces a wrong conversation id identically, and the pair then reads as
+# DOUBLY CONFIRMED to every human and every tool that compares them. Two agents
+# made exactly that error in writing on 2026-08-30, one of them in the commit
+# that shipped the correction. Do not cite them as agreeing sources.
+#
+# Everything above reduces to ONE INHERITED ENV VAR in whatever process ran
+# `git commit`. Any child of a lane — a subagent, a script, a roaming session
+# that wandered into this checkout — writes commits indistinguishable from that
+# lane's. `Amux-Agent` below is the field that does not have that property.
+conv=""
+conv_confirmed=0
+if [ "$stamp" != "(human)" ]; then
+  _meta="${AMUX_HOME:-$HOME/.amux}/sessions/${stamp}.meta.json"
+  if [ -r "$_meta" ]; then
+    conv="$(python3 -c 'import json,sys
+try:
+    print((json.load(open(sys.argv[1])).get("cc_conversation_id") or "").strip())
+except Exception:
+    pass' "$_meta" 2>/dev/null)"
+    conv_confirmed="$(python3 -c 'import json,sys
+try:
+    print(int(json.load(open(sys.argv[1])).get("cc_conversation_confirmed_at") or 0))
+except Exception:
+    print(0)' "$_meta" 2>/dev/null)"
+  fi
+fi
+
+# A CONVERSATION ID THE LANE COULD NOT CONFIRM IS WORSE THAN NO FIELD (AMUX-3897).
+#
+# `adopt_reported_conv_id` refuses to adopt an id another lane's meta claims, and
+# until 45a83d22 that claim never expired. `desktop` went idle holding a
+# conversation that was really ts-gke's; ts-gke was refused 205 times, its meta
+# stayed pinned to a conversation it had already left, and this hook stamped that
+# stale value on every commit. When ts-gke later audited "its own transcript" it
+# read the wrong file and honestly concluded the commits were not theirs.
+#
+# An ABSENT field reads as unknown. A WRONG one reads as fact. So drop the
+# conversation trailer when the lane has not re-confirmed the id recently; the
+# stamp below is the one that still answers.
+_conv_stale_s="${AMUX_CONV_CLAIM_STALE_S:-1800}"
+if [ -n "$conv" ]; then
+  _now="$(date +%s)"
+  if [ "$conv_confirmed" -le 0 ] || [ $((_now - conv_confirmed)) -ge "$_conv_stale_s" ]; then
+    conv=""
+  fi
+fi
+
+# THE FIELD A COMMITTING PROCESS CANNOT INHERIT (AMUX-3916).
+#
+# $AMUX_SESSION is environment and travels to every child. The PROCESS TREE does
+# not: walk up from this hook and the nearest `claude` ancestor is the agent that
+# actually ran `git commit`, whoever it claims to be. A roaming session carrying
+# someone else's AMUX_SESSION has ITS OWN claude as that ancestor, so the model
+# and pid disagree with the lane it is stamped to — which is precisely the
+# 2026-08-30 case, where the contradiction was already sitting in the trailer
+# block (Co-Authored-By said Sonnet 4.6, the stamped lane runs Opus 5) and
+# nothing read it.
+#
+# Model and pid only. The full command line can carry paths and flags that are
+# nobody's business in a public repo's history.
+#
+# READ THE TWO PARTS FOR WHAT THEY ARE (ts-gke, AMUX-3916):
+#   pid   IDENTIFIES. It is the part that separates two lanes running the same
+#         model, which model alone cannot do.
+#   model DISCRIMINATES ONLY SOMETIMES. It separated the 2026-08-30 commits
+#         because the roaming session was Sonnet 4.6 and the lane it was stamped
+#         to runs Opus 5; two Sonnet lanes would be indistinguishable by it.
+#
+# AND IT IS THE ANCESTOR'S MODEL, NOT THE AUTHOR'S. A subagent launched with a
+# model override is labelled with its PARENT's flag, because that is the process
+# this walk finds. Correct for "which lane committed", wrong for "what model
+# wrote this code", and nothing should read it as the latter.
+#
+# COVERAGE IS A HOOK-PATH PROPERTY. This field exists only where a hook runs, so
+# it inherits the graft boundary already documented above: `git commit-tree`
+# fires nothing. Measured 2026-08-30 over the last 200 commits — amux
+# Amux-Session 196/200 and Claude-Session 6/200, because lanes here use
+# `git commit`; on mixpeek, where graft-push is the normal landing path, the same
+# split runs 192/200 against 36/200. A consumer must therefore treat MISSING as
+# distinct from MISMATCHED: at partial coverage, absence cannot support "this is
+# suspicious". The fix for a grafting repo is the recipe above — run THIS FILE on
+# the message before `commit-tree` — not a second producer that would drift.
+#
+# FAIL-OPEN AND SILENT WHEN UNKNOWN, like `conv`: a human's own `git commit` has
+# no claude ancestor and must not grow an empty or guessed field.
+agent=""
+_p=$$
+_hops=0
+while [ "$_hops" -lt 12 ]; do
+  _hops=$((_hops + 1))
+  _pp="$(ps -o ppid= -p "$_p" 2>/dev/null | tr -d ' ')"
+  case "$_pp" in
+    ''|0|1) break ;;
+  esac
+  _cmd="$(ps -o command= -p "$_pp" 2>/dev/null)"
+  # MATCH THE BINARY, NOT THE SUBSTRING. `*claude*` over the whole command line
+  # matched a shell whose CWD was /private/tmp/claude-501/... on the first run of
+  # this, and reported that shell's pid as the agent with model=unspecified. A
+  # path is not a program. Compare the first token's basename.
+  _exe="${_cmd%% *}"
+  case "${_exe##*/}" in
+    claude|claude-code)
+      _model="$(printf '%s' "$_cmd" | sed -n 's/.*--model[= ]\{1,\}\([^ ]\{1,\}\).*/\1/p')"
+      # NOT "unspecified" (AMUX-3939). That word reads as "the field was not
+      # populated", i.e. the measurement did not run — and the measurement DID
+      # run. The walk found the right process; that process was launched as a
+      # bare `claude` with no `--model`, so it is running the account default
+      # and the flag is simply not there to read.
+      #
+      # CONFIRMED, not guessed. ts-gke reported 9fd67b10 stamped
+      # `model=unspecified` while its own Co-Authored-By said Sonnet 4.6. Its
+      # agent was pid 5559, whose command line is the single word `claude`,
+      # while all 30+ other live claude processes on this box carry `--model`.
+      # So the walk was not stopping at the wrong process, which was the other
+      # candidate cause and the one the card asked to rule out first.
+      #
+      # THE REAL MODEL IS RECOVERABLE, AND DELIBERATELY NOT RECOVERED HERE. The
+      # session transcript records it per message
+      # (~/.claude/projects/<slug>/<conv>.jsonl; for that commit it reads
+      # claude-sonnet-4-6, matching the Co-Authored-By exactly). Reaching it
+      # needs `conv`, which is resolved from amux's session meta and therefore
+      # MOVES WITH $AMUX_SESSION. This field's entire property is that it does
+      # not: "walked from the hook's own PROCESS ANCESTRY, which no env var can
+      # move", asserted by test-commit-stamp.sh. Buying a nicer model string
+      # with that invariance would trade the field's one guarantee for a
+      # convenience, and the invariance is what the four mis-stamped commits
+      # needed.
+      #
+      # So: say what was measured. A consumer that needs the true model has the
+      # conversation id on the very next trailer and can go read it.
+      [ -n "$_model" ] || _model="argv-absent"
+      agent="pid=$_pp model=$_model"
+      break
+      ;;
+  esac
+  _p="$_pp"
+done
+
+# A TRAILER ALREADY IN THE MESSAGE OUTRANKS THE ONE THE HOOK KNOWS IS TRUE
+# (AF-479, self-traced 2026-09-04). `--if-exists doNothing` below is correct for
+# both cases it was written for: the graft recipe runs this file by hand and then
+# commits, so re-stamping would duplicate; and a cherry-pick or `git commit -c
+# <peer-sha>` carries the ORIGINAL author's stamp, which is the right provenance
+# and must survive. It also means any hand-written value wins, including a wrong
+# one, while $stamp holds the truth two lines away.
+#
+# It cost a commit. ac550324 landed stamped `amux` because that is what I typed
+# into the message; my lane is `amux-frustrations`. Nothing said anything. The
+# downstream reader is the push guard, which partitions unpushed commits by this
+# trailer — so my own commit would have been listed under a peer's name, and the
+# exit it hands you is to record THAT PEER'S CONSENT for a commit they never
+# wrote. A false author-consent record is the AMUX-3533 shape, reached by
+# following the sanctioned instruction.
+#
+# OVERWRITING IS THE WRONG FIX and stays unimplemented: it would destroy the
+# cherry-pick's true stamp to prevent a typed one. So keep the existing trailer,
+# say the disagreement out loud while the commit is still trivially amendable,
+# and record the committing lane as its own field.
+#
+# `Amux-Committer` IS STAMPED ONLY ON DISAGREEMENT, so its PRESENCE is the
+# signal — a reader grepping for it finds exactly the commits where the session
+# stamp is not the lane that ran `git commit`. An always-present field would make
+# them hunt for a comparison instead. The pre-push guard reads it and drops the
+# ask-the-author advice for those commits.
+# AMUX-4559: the SAME disagreement shape, one layer earlier. When the process
+# tree and $AMUX_SESSION named different lanes, ancestry won and this records
+# what the environment claimed, so the correction is auditable instead of
+# invisible. `grep Amux-Env-Claimed` is the index of every commit where an
+# inherited variable would have mis-attributed the work.
+if [ -n "$anc_disagrees" ]; then
+  printf '\namux commit-stamp: $AMUX_SESSION says `%s`, but this process descends from\n' "$stamp" >&2
+  printf '  the pane of `%s`. An inherited variable can be wrong and the process tree\n' "$anc_disagrees" >&2
+  printf '  cannot, so `Amux-Ancestry: %s` is added beside the stamp. The stamp is\n' "$anc_disagrees" >&2
+  printf '  UNCHANGED: which of the two should win is AMUX-4559s open question and\n' >&2
+  printf '  not something this hook decides silently. If you did not mean to commit\n' >&2
+  printf '  as `%s`, amend now. `grep Amux-Ancestry` finds every such commit.\n\n' "$stamp" >&2
+  git interpret-trailers --in-place --if-exists doNothing \
+    --trailer "Amux-Ancestry: $anc_disagrees" "$msg_file" 2>/dev/null || {
+    grep -q "^Amux-Ancestry: " "$msg_file" 2>/dev/null \
+      || printf 'Amux-Ancestry: %s\n' "$anc_disagrees" >> "$msg_file"
+  }
+fi
+
+_declared="$(git interpret-trailers --parse "$msg_file" 2>/dev/null \
+  | sed -n 's/^Amux-Session:[[:space:]]*//p' | head -1)"
+if [ -n "$_declared" ] && [ "$_declared" != "$stamp" ]; then
+  printf '\namux commit-stamp: this message already declares `Amux-Session: %s`, but this\n' "$_declared" >&2
+  printf '  commit is being made by `%s`. The declared value is KEPT (a cherry-picked\n' "$stamp" >&2
+  printf '  or grafted message legitimately carries its original author), and\n' >&2
+  printf '  `Amux-Committer: %s` is added beside it so the two facts are both readable.\n' "$stamp" >&2
+  printf '  If you TYPED that session name and meant your own, fix it now while the\n' >&2
+  printf '  commit is still cheap to amend. The push guard partitions by Amux-Session,\n' >&2
+  printf '  so it will read this commit as belonging to that other lane.\n\n' >&2
+  git interpret-trailers --in-place --if-exists doNothing \
+    --trailer "Amux-Committer: $stamp" "$msg_file" 2>/dev/null || {
+    grep -q "^Amux-Committer: " "$msg_file" 2>/dev/null \
+      || printf 'Amux-Committer: %s\n' "$stamp" >> "$msg_file"
+  }
+fi
+
+git interpret-trailers --in-place --if-exists doNothing \
+  --trailer "Amux-Session: $stamp" "$msg_file" 2>/dev/null || {
+  # Ancient git without interpret-trailers: fall back to a plain paragraph
+  # append, correct for the common subject+body shape.
+  grep -q "^Amux-Session: " "$msg_file" 2>/dev/null \
+    || printf '\nAmux-Session: %s\n' "$stamp" >> "$msg_file"
+}
+
+# Stamped SEPARATELY and only when known, so a missing conversation id can
+# never cost the session stamp above — the field that already works must not
+# become conditional on the field being added.
+if [ -n "$conv" ]; then
+  git interpret-trailers --in-place --if-exists doNothing \
+    --trailer "Amux-Conversation: $conv" "$msg_file" 2>/dev/null || {
+    grep -q "^Amux-Conversation: " "$msg_file" 2>/dev/null \
+      || printf 'Amux-Conversation: %s\n' "$conv" >> "$msg_file"
+  }
+fi
+
+# Independent of both fields above, and the only one of the three that a wrong
+# $AMUX_SESSION cannot move.
+if [ -n "$agent" ]; then
+  git interpret-trailers --in-place --if-exists doNothing \
+    --trailer "Amux-Agent: $agent" "$msg_file" 2>/dev/null || {
+    grep -q "^Amux-Agent: " "$msg_file" 2>/dev/null \
+      || printf 'Amux-Agent: %s\n' "$agent" >> "$msg_file"
+  }
+fi
+exit 0
