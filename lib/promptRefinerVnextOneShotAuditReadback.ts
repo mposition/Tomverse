@@ -49,6 +49,13 @@ type AuditEntry = {
 
 export type PromptRefinerVnextOneShotApprovalKind = "stage" | "run";
 
+export const PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES = {
+  stage: "Approved the bounded Prompt Refiner vNext one-shot stage.",
+  run: "Approved the bounded Prompt Refiner vNext one-shot run.",
+} as const;
+
+// The database fixes both cost values to these small integers before an audit
+// row can be linked, so converting them into JSON numbers is lossless.
 const auditMetadata = (stage: Stage, kind: PromptRefinerVnextOneShotApprovalKind) => ({
   approvalKind: kind,
   sourceCommitSha: stage.sourceCommitSha,
@@ -62,6 +69,29 @@ const auditMetadata = (stage: Stage, kind: PromptRefinerVnextOneShotApprovalKind
   slotCount: stage.slotCount,
   costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
 });
+
+const auditEntryHashIsValid = (entry: AuditEntry, keys: readonly string[]): boolean => {
+  if (!entry.entryHash || keys.length === 0) return false;
+  const hashInput = {
+    previousHash: entry.previousHash,
+    actorUserId: entry.actorUserId,
+    actorEmail: entry.actorEmail,
+    action: entry.action,
+    targetType: entry.targetType,
+    targetId: entry.targetId,
+    summary: entry.summary,
+    metadata: entry.metadata ?? null,
+    ipAddress: entry.ipAddress,
+    userAgent: entry.userAgent,
+    createdAt: entry.createdAt.toISOString(),
+  };
+  return keys.some((key) => {
+    const variants = adminAuditEntryHashVariants(hashInput, key);
+    return ADMIN_AUDIT_VERIFICATION_KEY_ORDERS.some(
+      (order) => variants[order] === entry.entryHash
+    );
+  });
+};
 
 /** DB triggers bind the row shape; this verifies the app-owned HMAC key. */
 export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
@@ -84,35 +114,19 @@ export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
     entry.action !== `prompt_refiner.vnext_one_shot.${kind}_approved` ||
     entry.targetType !== "PromptRefinerVnextOneShotStage" ||
     entry.targetId !== stage.id ||
+    entry.summary !== PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES[kind] ||
     (kind === "stage" && entry.createdAt.getTime() !== stage.approvedAt.getTime()) ||
+    (kind === "run" && entry.createdAt.getTime() <= stage.approvedAt.getTime()) ||
     canonicalBenchmarkJson(entry.metadata ?? null) !==
       canonicalBenchmarkJson(auditMetadata(stage, kind))
   ) {
     return false;
   }
 
-  const hashInput = {
-    previousHash: entry.previousHash,
-    actorUserId: entry.actorUserId,
-    actorEmail: entry.actorEmail,
-    action: entry.action,
-    targetType: entry.targetType,
-    targetId: entry.targetId,
-    summary: entry.summary,
-    metadata: entry.metadata ?? null,
-    ipAddress: entry.ipAddress,
-    userAgent: entry.userAgent,
-    createdAt: entry.createdAt.toISOString(),
-  };
-  return keys.some((key) => {
-    const variants = adminAuditEntryHashVariants(hashInput, key);
-    return ADMIN_AUDIT_VERIFICATION_KEY_ORDERS.some(
-      (order) => variants[order] === entry.entryHash
-    );
-  });
+  return auditEntryHashIsValid(entry, keys);
 };
 
-/** Read both approval rows and their predecessor links in the caller's transaction. */
+/** Read both approval rows and the immediate signed predecessor in one transaction. */
 export const promptRefinerVnextOneShotApprovalAuditsAreValid = async (
   tx: Prisma.TransactionClient,
   stage: Stage
@@ -132,9 +146,9 @@ export const promptRefinerVnextOneShotApprovalAuditsAreValid = async (
     if (entry.previousHash) {
       const previous = await tx.adminAuditLog.findUnique({
         where: { entryHash: entry.previousHash },
-        select: { entryHash: true },
       });
-      if (previous?.entryHash !== entry.previousHash) return false;
+      if (!previous || previous.entryHash !== entry.previousHash ||
+          !auditEntryHashIsValid(previous, keys)) return false;
     }
   }
   return true;
