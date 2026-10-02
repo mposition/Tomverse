@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -60,8 +61,10 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
   return result;
 }
 
-export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable, operatorId }: {
-  submissionAvailable: boolean; sourceScopePreviewAvailable: boolean; operatorId: string;
+export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
+  initialPlanAvailable, operatorId }: {
+  submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
+  initialPlanAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -381,6 +384,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
         </div>
       ) : null}
+      <AmuxInitialPlanPanel
+        key={submission.kind === "submitted" ? submission.ideaId : "none"}
+        ideaId={submission.kind === "submitted" ? submission.ideaId : null}
+        operatorId={operatorId} available={initialPlanAvailable}
+        declaredExternalSources={lines(repositories).length > 0 || lines(pullRequests).length > 0}
+      />
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
