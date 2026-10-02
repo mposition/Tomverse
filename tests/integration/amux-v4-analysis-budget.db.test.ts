@@ -30,6 +30,8 @@ import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
 import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
+import { readAmuxFirstIdeaAnalysisResult,
+  AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
 import { openAmuxContent } from "@/lib/amux/ideaCrypto";
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
@@ -819,6 +821,32 @@ test("a complete first result saves independent encrypted units and closes only 
   assert.equal((audit.metadata as Record<string, unknown>).actorScope,
     AMUX_V4_FIRST_DRAFT_SAVED_SCOPE);
   assert.equal(JSON.stringify(audit.metadata).includes(card.title), false);
+  const visible = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
+  assert.equal(visible.state, "ready");
+  if (visible.state !== "ready") throw new Error("analysis result not ready");
+  assert.equal(visible.outcome, "propose");
+  assert.equal(visible.coveredScope, result.coveredScope);
+  assert.equal(visible.units.length, 4);
+  assert.equal(visible.units[3]?.proposal?.kind, "card");
+  if (visible.units[3]?.proposal?.kind !== "card") throw new Error("card unavailable");
+  assert.equal(visible.units[3].proposal.title, card.title);
+  await assert.rejects(readAmuxFirstIdeaAnalysisResult({ ...session,
+    user: { ...session.user, id: randomUUID() } } as Session, ideaId, keys),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisResultReadError &&
+    error.code === "not_found");
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { freeformCiphertext: null, freeformKeyId: null,
+      freeformKeyVersion: null, freeformPurgedAt: new Date() },
+  });
+  const afterFreeformPurge = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
+  assert.equal(afterFreeformPurge.state, "ready");
+  if (afterFreeformPurge.state !== "ready") throw new Error("retained units not visible");
+  assert.equal(afterFreeformPurge.coveredScope, null);
+  if (afterFreeformPurge.units[3]?.proposal?.kind !== "card") {
+    throw new Error("retained card unavailable");
+  }
+  assert.equal(afterFreeformPurge.units[3].proposal.title, card.title);
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, input)),
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
