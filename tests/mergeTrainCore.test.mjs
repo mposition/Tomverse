@@ -203,6 +203,29 @@ test("a REMOVED deployment counts through its replacement only when that commit 
   assert.equal(deploymentOutcome(replaced("SUCCESS").slice(0, 2), commit, "develop", new Set([newer])).state, "unknown");
 });
 
+test("a serving replacement wins over newer waiting or skipped attempts beside it", () => {
+  // The staging shape of 2026-09-15: the merge's own deployment REMOVED, one
+  // later SUCCESS serving, and newer SKIPPED and WAITING attempts next to it.
+  const later = ["1", "2", "3"].map((digit) => digit.repeat(40));
+  const deployments = [
+    deployment("REMOVED", commit, "web"),
+    deployment("SUCCESS", later[0], "web"),
+    deployment("SKIPPED", later[1], "web"),
+    deployment("WAITING", later[2], "web"),
+  ];
+  assert.deepEqual(replacementCommits(deployments, commit).sort(), [...later].sort());
+  assert.equal(deploymentOutcome(deployments, commit, "develop", new Set(later)).state, "succeeded");
+  // Without the serving one, the waiting attempt is a wait, not a failure.
+  const pending = deployments.filter((d) => d.status !== "SUCCESS");
+  assert.equal(deploymentOutcome(pending, commit, "develop", new Set(later)).state, "in_progress");
+});
+
+test("a REMOVING deployment is treated as replaced, not unknown", () => {
+  const deployments = [deployment("REMOVING", commit, "web"), deployment("DEPLOYING", newer, "web")];
+  assert.deepEqual(replacementCommits(deployments, commit), [newer]);
+  assert.equal(deploymentOutcome(deployments, commit, "develop", new Set([newer])).state, "in_progress");
+});
+
 test("deploymentOutcome compares commit hashes case-insensitively", () => {
   const upper = commit.toUpperCase();
   assert.equal(deploymentOutcome([deployment("FAILED", upper, "web")], commit, "develop").state, "failed");
