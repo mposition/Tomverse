@@ -17,6 +17,9 @@ import {
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+  AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
   AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
   AMUX_V4_IDEA_AUTO_CANCEL_SCOPE,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
@@ -142,6 +145,14 @@ test("the system actor list is closed and changes only by review", () => {
     metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       actorScope: AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE },
   })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_FIRST_DRAFT_SAVED_ACTION, AMUX_V4_FIRST_DRAFT_SAVED_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+    targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_FIRST_DRAFT_SAVED_SCOPE },
+  })), "system");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_IDEA_AUTO_CANCEL_ACTION, AMUX_V4_IDEA_AUTO_CANCEL_TARGET), true);
   assert.equal(auditRowActorKind(row({
