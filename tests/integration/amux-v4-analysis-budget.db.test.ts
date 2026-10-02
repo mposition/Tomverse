@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
+import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
@@ -861,6 +862,10 @@ test("a complete first result saves independent encrypted units and closes only 
     error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 4);
 
+  const duplicateMetadata = Object.fromEntries(Object.entries(
+    audit.metadata as Record<string, Prisma.InputJsonValue>,
+  ).filter(([key]) => key !== "systemActor" && key !== "actorScope")) as
+    Prisma.InputJsonObject;
   await prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     await writeSystemAuditLog({ tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -868,7 +873,7 @@ test("a complete first result saves independent encrypted units and closes only 
       targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
       targetId: `${ideaId}:0`,
       summary: "Synthetic duplicate completion record for readback regression test.",
-      metadata: { ideaId, previewId, syntheticDuplicate: true } });
+      metadata: duplicateMetadata });
   });
   await assert.rejects(readAmuxFirstIdeaAnalysisResult(session, ideaId, keys),
     (error: unknown) => error instanceof AmuxIdeaAnalysisResultReadError &&
