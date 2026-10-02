@@ -45,7 +45,7 @@ type SourceScopeResult =
 type SubmissionState =
   | { kind: "idle" }
   | { kind: "pending"; requestId: string }
-  | { kind: "submitted"; requestId: string; ideaId: string }
+  | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean }
   | { kind: "outcome_unknown"; requestId: string }
   | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
@@ -150,7 +150,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       }, requestId);
       if (decision.kind === "submitted") {
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
-        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
+          hasExternalSources: decision.hasExternalSources });
       } else {
         setSubmission({ kind: "outcome_unknown", requestId });
       }
@@ -215,7 +216,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       }, requestId);
       if (decision.kind === "submitted") {
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
-        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
+          hasExternalSources: decision.hasExternalSources });
       } else if (decision.kind === "refused") {
         clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
         inFlight.current = false;
@@ -402,7 +404,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         key={submission.kind === "submitted" ? submission.ideaId : "none"}
         ideaId={submission.kind === "submitted" ? submission.ideaId : null}
         operatorId={operatorId} available={initialPlanAvailable}
-        declaredExternalSources={lines(repositories).length > 0 || lines(pullRequests).length > 0}
+        declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
       />
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">

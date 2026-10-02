@@ -125,7 +125,11 @@ export async function commitIdeaSubmission(
 export async function readIdeaSubmissionRequest(
   session: Session,
   requestId: string,
-): Promise<{ requestId: string; status: "committed" | "absent" | "partial"; ideaId?: string }> {
+): Promise<
+  | { requestId: string; status: "absent" }
+  | { requestId: string; status: "partial"; ideaId: string }
+  | { requestId: string; status: "committed"; ideaId: string; hasExternalSources: boolean }
+> {
   const actorUserId = actorId(session);
   const row = await prisma.amuxIdeaSubmission.findUnique({
     where: { requestId },
@@ -139,9 +143,22 @@ export async function readIdeaSubmissionRequest(
       targetId: row.id,
       actorUserId,
     },
-    select: { id: true },
+    select: { id: true, entryHash: true, metadata: true },
   });
-  return { requestId, status: audit ? "committed" : "partial", ideaId: row.id };
+  const metadata = audit?.metadata;
+  if (!audit?.entryHash || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  const values = metadata as Record<string, unknown>;
+  const repositoryCount = values.repositoryCount;
+  const pullRequestCount = values.pullRequestCount;
+  if (values.requestId !== requestId || values.transferAuthorized !== false ||
+      !Number.isSafeInteger(repositoryCount) || (repositoryCount as number) < 0 ||
+      !Number.isSafeInteger(pullRequestCount) || (pullRequestCount as number) < 0) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  return { requestId, status: "committed", ideaId: row.id,
+    hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
 }
 
 /** New v4 submission path. The hard code latch ships false. */
