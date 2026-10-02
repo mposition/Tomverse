@@ -1,5 +1,10 @@
 # 독립 검토 요청 — GitHub Actions 캐시 오염 경로 감사 (2026-10-03)
 
+> **round 0의 기록입니다. 이 문서는 갱신하지 않습니다.** 아래 주장 C1~C8은
+> 감사 **rev 1**에 대한 것이고, Codex는 reject했습니다(C1·C2·C4·C6·C7 틀림).
+> 지적은 rev 2에 반영됐으므로, 현재 판정은 대상 문서의 머리말과 9장을
+> 보십시오. rev 2에 대한 재검토는 아직 하지 않았습니다.
+
 검토자: Codex. 작성자: Claude (Opus 5).
 대상 문서: `.github/audits/actions-cache-poisoning-audit-2026-10-03.md`
 기준 commit: `2f7550a5873606fecbfeec993c398a898a69ffcb` (`origin/main` 끝).

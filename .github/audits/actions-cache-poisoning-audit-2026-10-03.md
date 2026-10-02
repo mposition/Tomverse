@@ -1,7 +1,20 @@
 # GitHub Actions 캐시 오염 경로 감사 (2026-10-03)
 
-> **상태: 조사 완료, 조치 없음.** 이 감사는 workflow를 하나도 바꾸지 않았습니다.
-> 7장의 권고는 소유자 승인 전 제안이며, 각 항목에 승인·검토 요건을 적었습니다.
+> **상태: 조사 완료, 독립 검토 1회 반영(rev 2), 조치 없음.** 이 감사는
+> workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
+> 각 항목에 승인·검토 요건을 적었습니다.
+>
+> **rev 2에서 바뀐 것**(9장의 검토 결과 반영, 초안의 판정을 뒤집은 것 포함):
+> F5는 **틀렸고** 2순위에서 3순위로 내렸습니다 — 분석기의 cache 규칙은
+> 에이전트가 심은 캐시만 묻고 그 질문에 그 기록이 정확히 답합니다. F1의 "pool
+> 하나"는 "exact 항목 하나 + exact miss 시 교차 fallback"으로, "PR job의 runtime
+> token이 `main` scope를 다시 쓴다"는 주장은 삭제했습니다. "자격증명 없음"은
+> "장기 외부 secret·repository write 자격증명 없음"으로 한정했습니다. 1장의
+> "모든 run이 복원"은 "복원 후보"로, 항목 수명은 삭제·퇴출·cache version으로
+> 고쳤습니다. 4.2에 `setup-node@v6`의 `package-manager-cache` 기본값과
+> `packageManager` 필드가 만드는 잠복 경로를 추가했습니다. P1에 `push: develop`·
+> dispatch·기존 항목 삭제·Rust 범위·조건부 save를, P3에 `POSTURE_DIGEST`가 캐시
+> 종류를 담지 않는다는 맹점을 추가했습니다.
 
 기준 commit: `2f7550a5873606fecbfeec993c398a898a69ffcb`
 (`origin/main` 끝, 2026-10-03T00:54:48+10:00, PR #1944 병합).
@@ -49,29 +62,44 @@ GitHub의 공식 규칙입니다(Actions dependency caching reference). 이 감�
 | PR run → 다른 ref | "the cache is created for the merge ref (`refs/pull/.../merge`) ... can only be restored by re-runs of the pull request." |
 | child·sibling branch → 부모 | "Workflow runs cannot restore caches created for child branches or sibling branches." |
 
-여기서 따라오는 것이 이 감사의 핵심입니다.
+여기서 따라오는 것이 이 감사의 핵심입니다. **scope는 복원의 자격 조건이지
+복원 자체가 아닙니다** — 항목이 실제로 쓰이려면 scope 안에 있고, cache
+version이 맞고, primary key가 정확히 일치하거나 restore-key prefix에 맞아야
+합니다.
 
-- **`main` scope에 쓰인 캐시 항목은 이 저장소의 모든 run이 복원합니다** — PR
+- **`main` scope 항목은 이 저장소의 모든 run에서 복원 **후보**가 됩니다** — PR
   Fast Gate를 포함해서.
-- **`develop` scope에 쓰인 항목은 base가 `develop`인 모든 PR이 복원합니다** —
-  이 저장소에서 기능 PR은 전부 `develop`을 향하므로(AGENTS.md "main으로 가는
-  PR은 release와 hotfix뿐입니다"), 실질적으로 거의 모든 PR입니다.
-- **반대 방향(PR → 다른 ref)은 닫혀 있습니다.** 이 구분이 5장 F5의 근거입니다.
+- **`develop` scope 항목은 `develop` 자신의 run과 base가 `develop`인 PR에서만
+  후보입니다.** 이 저장소의 기능 PR은 `develop`을 향하므로(AGENTS.md "main으로
+  가는 PR은 release와 hotfix뿐입니다") 그 PR 대부분이 해당되지만, **main을
+  향하는 release·hotfix PR은 해당되지 않습니다.**
+- **반대 방향(PR → 다른 ref)은 닫혀 있습니다.** 5장 F5가 이 사실을 다룹니다.
 - `schedule`은 기본 branch에서 돕니다 → **`main` scope**. `workflow_dispatch`는
   고른 ref의 scope입니다.
 
 그리고 `actions/cache`는 **이미 있는 key를 덮어쓰지 않습니다.** 그래서 어떤
-lockfile 해시에 대해 `main` scope에 먼저 도착한 writer가 그 항목을 소유하고,
-PR run의 저장은 자기 merge-ref scope로 가므로 그것을 밀어내지 못합니다. 즉
-`main` scope 항목은 **모든 PR이 복원하는 정본**으로 남습니다.
+exact key에 대해 `main` scope에 먼저 도착한 writer가 그 항목을 소유하고, PR
+run의 저장은 자기 merge-ref scope로 가므로 그것을 밀어내지 못합니다. 소유가
+끝나는 조건은 lockfile 변경이 아니라 **항목 삭제·미사용 퇴출·cache version
+변경**입니다 — lockfile이 바뀌면 key가 바뀌어 새 항목이 생기지만, 옛 항목은
+퇴출될 때까지 자기 key로 남습니다. restore-key prefix에 후보가 여럿이면 **가장
+최근 항목**이 선택됩니다.
 
 ## 2. 축 1 — `main`·`develop` scope 캐시에 쓸 수 있는 job
 
-`npm ci`는 `--ignore-scripts` 없이는 의존성의 install script를 실행합니다.
-이 저장소에서 `--ignore-scripts`를 쓰는 곳은 `pr-fast-gate.yml:684`
-(`vendor/amux`) **한 곳뿐**입니다. 아래 표의 모든 `npm ci`는 제3자 코드를
-실행하며, 그 코드는 그 job의 Actions runtime token에 닿습니다 — GitHub-hosted
-Linux runner는 passwordless sudo이므로 격리는 없습니다.
+공격자 모델은 **침해된 제3자 의존성 하나**입니다. `npm ci`는
+`--ignore-scripts` 없이는 의존성의 install script를 실행합니다. 이 저장소에서
+`--ignore-scripts`를 쓰는 곳은 `pr-fast-gate.yml:684`(`vendor/amux`) **한
+곳뿐**이고, 현재 lockfile에서 `hasInstallScript`인 패키지는 **10개**입니다
+(`@prisma/engines`, `prisma`, `esbuild`, `@sentry/cli`, `tesseract.js`,
+`unrs-resolver`, `fsevents` 3경로). 그 코드는 그 job의 Actions runtime token에
+닿습니다 — GitHub-hosted Linux runner는 passwordless sudo이므로 격리는 없습니다.
+
+**Rust 경로는 같은 모델로 설명되지 않습니다.** `orchestrator-rust.yml`의 캐시를
+쓰는 것은 `npm ci`가 아니라 `cargo`이고, 그 foothold는 침해된 **crate**의 build
+script입니다(`Cargo.lock`·`vendor/amux/Cargo.lock`이 정하는 의존성). 아래 2.1에
+함께 적지만, 그것은 npm 모델의 사례가 아니라 **별개 모델의 같은 구조**입니다 —
+7장 P1이 Rust를 범위에 넣을지 따로 판단합니다.
 
 ### 2.1 무결성 검증이 없는 캐시를 `main`·`develop` scope에 쓰는 job
 
@@ -141,9 +169,11 @@ PR scope에만 씁니다. `main` scope에 쓰는 경로는 `workflow_dispatch`�
 (`.github/audits/pr-fast-gate-performance-audit.md:355` "브라우저, 캐시 적중 시
 즉시 종료", :349 "캐시 적중 시에도 실행되는 12초는 대부분 apt").
 
-같은 감사의 :348이 수명을 측정했습니다 — "Playwright 캐시는 **매번 primary key
-적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항상 warm)". 즉 한
-항목이 lockfile이 바뀔 때까지 모든 run에 제공됩니다.
+같은 감사의 :348은 **관측**을 적었습니다 — "Playwright 캐시는 **매번 primary
+key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항상 warm)". 이것은
+규칙이 아니라 그 기간의 측정입니다. 실제 수명 상한은 1장의 조건 — 삭제·미사용
+퇴출·cache version 변경 — 이고, lockfile이 그대로인 동안 적중이 이어졌다는
+사실은 **그 항목이 길게 산다**는 것까지만 말합니다.
 
 **Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml:47-54`가
 `~/.cargo/registry`, `~/.cargo/git`, `target`, `vendor/amux/target`을 한 항목에
@@ -151,10 +181,19 @@ PR scope에만 씁니다. `main` scope에 쓰는 경로는 `workflow_dispatch`�
 `target/` 안의 build script 바이너리에는 검증이 없습니다. `push: main`과
 `push: develop` 양쪽에서 씁니다.
 
-### 3.2 키 공유 — 하나의 Playwright 항목이 5개 workflow를 지납니다
+### 3.2 키 공유 — 한 exact 항목을 6개 job이, 그리고 그 둘이 서로의 fallback
 
-`Linux-playwright-<lock>-chromium`은 **fallback이 아니라 primary key로** 아래
-여섯 job이 공유합니다.
+여기에는 서로 다른 두 사실이 있고, 섞으면 틀립니다.
+
+- **사실 A (exact 공유).** `Linux-playwright-<lock>-chromium`이라는 **하나의
+  항목**을 아래 여섯 job이 primary key로 씁니다. exact 적중이면 여섯 job이
+  같은 바이트를 받습니다.
+- **사실 B (교차 fallback).** `-chromium`과 `-chromium-webkit`은 **별개의 두
+  항목**입니다. 공통 restore-key prefix 때문에 둘은 서로의 **fallback 후보**가
+  되지만, 그 채널은 **exact key가 miss일 때만** 열립니다. 정상적인 exact 적중
+  상태에서 두 항목이 하나로 합쳐지는 것이 아닙니다.
+
+`Linux-playwright-<lock>-chromium`을 primary key로 쓰는 여섯 job:
 
 ```
 admin-console-e2e.yml:178          pr-fast-gate.yml:841   (build-and-e2e)
@@ -164,10 +203,19 @@ nightly-visual-regression.yml:88   review-parity-shadow.yml:128
 
 그리고 **모두** restore-keys `${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-`
 를 갖습니다(:180, :217, :90, :843, :1035, :130). 이 prefix는
-`daily-security-audit.yml:151`·`:297`의 `-chromium-webkit` 항목에도 맞습니다.
-따라서 **모든 Playwright 캐시가 lockfile 해시 하나당 pool 하나**이고, 그 pool의
-`main` scope writer는 `nightly-visual-regression`(schedule),
-`daily-security-audit`(schedule), `admin-console-e2e`(push main)입니다.
+`daily-security-audit.yml:151`·`:297`의 `-chromium-webkit` 항목에도 맞으므로
+사실 B가 성립합니다.
+
+`main` scope writer는 이렇게 갈립니다.
+
+- `-chromium` 항목: `nightly-visual-regression`(schedule),
+  `admin-console-e2e`(push main). **여섯 job이 공유하는 바로 그 항목**입니다.
+- `-chromium-webkit` 항목: `daily-security-audit`(schedule). 여섯 job에는
+  exact miss일 때만 닿습니다.
+
+즉 `admin-console-e2e`와 `nightly-visual-regression`은 PR Fast Gate가 exact로
+집어 쓰는 항목을 직접 씁니다. `daily-security-audit`의 항목은 한 단계 더 멀어,
+lockfile이 바뀌어 `-chromium` 항목이 아직 없는 창에서만 닿습니다.
 
 `.next/cache` 쪽은 workflow마다 namespace가 다릅니다(`-daily-`, `-visual-`,
 `-admin-e2e-`, `-main-`, `-parity-`, `-pr-`). 그런데 다섯 곳이 그 경계를 지우는
@@ -268,15 +316,30 @@ npm run report:engineering-agent-tiers
 ### 4.2 분석기의 "restores" 3건은 보수적 과대추정입니다
 
 `restoresCache`(:267-289)는 `actions/setup-*`를 "`cache`가 명시적으로 꺼져
-있지 않으면 복원한다"로 봅니다(:283-286). 실제 `actions/setup-node`는 `cache`
-입력이 없으면 캐시를 쓰지 않습니다. 아래 셋은 `cache:` 입력이 없으므로 실제
-복원자가 아닙니다 — fail-closed 설계의 의도된 과대추정입니다.
+있지 않으면 복원한다"로 봅니다(:283-286). 아래 셋은 `cache:` 입력이 없으므로
+**현재 트리에서는** 실제 복원자가 아닙니다 — fail-closed 설계의 의도된
+과대추정입니다.
 
 | job | 근거 |
 |---|---|
 | `back-merge-main-to-develop.yml # verify` | `setup-node` :281에 `cache:` 없음 |
 | `credit-finance-db-integration.yml # report-red-lane` | `setup-node` :243에 `cache:` 없음 |
 | `deployed-commit-drift.yml # drift` | `setup-node` :110에 `cache:` 없음 |
+
+**"`cache:`가 없으면 캐시가 없다"로 일반화하면 틀립니다.** `actions/setup-node`
+v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은 이렇습니다.
+
+> Set to false to disable automatic caching. By default, caching is enabled when
+> either `devEngines.packageManager` or the top-level `packageManager` field in
+> package.json specifies npm as the package manager.
+
+현재 `package.json`에는 `packageManager`도 `devEngines`도 **없습니다**(확인함).
+그래서 위 셋은 지금 캐시하지 않습니다. 그러나 `packageManager: "npm@..."`를
+추가하는 평범한 변경 하나로 **`cache:` 줄을 건드리지 않고도** 그 셋이 npm
+캐시를 복원하게 됩니다. 그 셋은 전부 자격증명을 가진 job이므로(`verify`는 Slack
+webhook, `report-red-lane`도 같음, `drift`도 같음), 그 변경은 4.3의 분리를
+조용히 넓힙니다. 분석기의 과대추정은 **이 경우에 대해서는 과대가 아닙니다** —
+7장 P3의 검사는 `cache:` 문자열이 아니라 이 기본값을 반영해야 합니다.
 
 ### 4.3 실제로 자격증명을 들고 캐시를 복원하는 11건 — 전부 `npm` cacache 하나뿐
 
@@ -296,9 +359,19 @@ npm run report:engineering-agent-tiers
 
 **이 열한 건 중 `.next/cache`나 `~/.cache/ms-playwright`를 복원하는 job은
 하나도 없습니다.** 반대로 3.3에서 무검증 캐시를 복원하는 **job 정의 아홉**은
-전부 `contents: read`이고 외부 API 자격증명을 들지 않습니다(matrix 전개가
-아니라 정의 수입니다 — `daily-security-audit # e2e`는 6 shard,
-`e2e # playwright`는 5 shard로 돕니다).
+전부 `contents: read`이고 **장기 외부 secret도 repository write 자격증명도 들지
+않습니다**(matrix 전개가 아니라 정의 수입니다 — `daily-security-audit # e2e`는
+6 shard, `e2e # playwright`는 5 shard로 돕니다).
+
+"자격증명이 없다"고 쓰면 틀립니다. 그 아홉에도 두 가지는 있습니다.
+
+- **읽기 전용 `GITHUB_TOKEN`.** `actions/checkout`이 Git 인증으로 남겨 두며,
+  권한은 그 workflow가 선언한 read scope뿐입니다.
+- **단기 Actions runtime token.** 모든 job에 있고, **자기 run의 ref scope**
+  캐시를 쓸 수 있습니다. PR job의 것은 그 PR의 merge-ref scope에만 쓰므로
+  `main` scope를 다시 오염시키지 못합니다(1장). `main` scope를 다시 쓸 수 있는
+  것은 애초에 `main`에서 도는 job — `daily-security-audit`,
+  `nightly-visual-regression`, `admin-console-e2e`(push main) — 뿐입니다.
 
 그 분리가 지금의 안전을 만들고 있습니다. 그리고 그것을 유지하는 장치는
 없습니다 — 위 열한 job 중 하나에 `actions/cache`로 `.next/cache`를 더하는 한
@@ -308,9 +381,11 @@ job에 들어옵니다. `credential_job_restores_cache` 판정은 **에이전트
 
 ### 4.4 `npm` cacache의 실제 영향 범위
 
-`npm ci`는 `package-lock.json`의 integrity와 대조하므로 내용 치환은
-`EINTEGRITY`로 **실패**합니다. 따라서 이 경로의 결과는 코드 실행이 아니라
-가용성입니다.
+`npm ci`는 `package-lock.json`의 integrity와 대조하므로 lockfile이 고정한
+것과 **다른 코드가 설치되는 일은 일어나지 않습니다.** 결과는 코드 실행이 아니라
+**가용성 영향 또는 자동 복구**입니다 — 손상이 항상 `EINTEGRITY`로 끝나는 것은
+아니고, pacote가 손상을 발견하면 registry에서 다시 내려받아 복구하는 경로도
+있습니다. 어느 쪽이든 공격자가 고른 코드가 실행되지는 않습니다.
 
 lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 — 그리고 둘 다
 이미 명시적 sha512 핀을 갖고 있습니다.
@@ -325,18 +400,21 @@ lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 
 분류 기준은 AGENTS.md "검증 범위는 되돌릴 수 없는 것에 비례합니다"입니다 —
 **무엇이 복구 불가인지 한 줄로 적을 수 없으면 차단이 아닙니다.**
 
-### F1 — Playwright 브라우저 캐시 pool 하나가 `main` scope에서 쓰이고 8개 job에서 실행됩니다
+### F1 — `main` scope에서 쓰인 Playwright 항목 하나를 6개 job이 exact key로 공유합니다
 
-근거: 3.2의 키 표, `scripts/ci/install-playwright.sh`(캐시 적중 시 무검증
+근거: 3.2의 사실 A·B, `scripts/ci/install-playwright.sh`(캐시 적중 시 무검증
 no-op), `.github/audits/pr-fast-gate-performance-audit.md:348`·`:355`.
 
 결과: CI 안의 임의 바이너리 실행, 그리고 필수 check(`pr-fast-gate # fast-gate`)의
-판정. 그 job들의 runtime token은 `main` scope에 다시 쓸 수 있으므로 오염이
-자기를 유지할 수 있습니다.
+판정. 오염이 **스스로 유지되는 것은 `main`에서 도는 writer 쪽에서만**입니다 —
+그 job의 runtime token은 `main` scope를 다시 쓸 수 있습니다. PR job에서는
+그렇지 않습니다: 그 token은 자기 merge-ref scope에만 쓰므로, 오염된 바이너리를
+실행해도 `main` 항목을 다시 쓰지는 못합니다(4.3).
 
 **되돌릴 수 있음.** 캐시 항목은 삭제할 수 있고 빌드는 다시 돌릴 수 있습니다.
-복구 불가인 것을 한 줄로 적을 수 없습니다 — 자격증명이 그 job에 없기
-때문입니다(4.3). 차단 사유가 아니며, **권고 1순위**입니다.
+복구 불가인 것을 한 줄로 적을 수 없습니다 — 그 job들에 장기 외부 secret도
+repository write 자격증명도 없기 때문입니다(4.3). 차단 사유가 아니며,
+**권고 1순위**입니다.
 
 단 분명히 해 둘 것: gate가 잘못 green이 되어 병합·배포된 변경의 가역성은 그
 변경 자신의 것이고 이 항목의 것이 아닙니다. 마이그레이션이나 가격 변경이 그
@@ -373,13 +451,17 @@ push를 막을 뿐 workflow 변경을 막지 않습니다.
 `DEEPSEEK_API_KEY`, `FAL_KEY`, `RESEND_API_KEY`가 오염된 코드와 같은 job에
 놓입니다.
 
-**지금은 되돌릴 수 있음**(가용성). **그 한 줄이 들어온 뒤에는 되돌릴 수
-없음** — AGENTS.md가 "유출처럼 회수가 성립하지 않는" 것을 복구 불가로 명시하고,
-키 회전은 미래 사용만 제한하며 유출 자체를 되돌리지 못합니다. 현재 상태가
-깨져 있다는 뜻은 아니므로 **차단 사유는 아니고**, 가장 오래 가는 조치이므로
-**권고 2순위**입니다.
+**지금은 되돌릴 수 있음**(가용성). 그 한 줄이 들어오면 **되돌릴 수 없는 결과로
+가는 노출 경로가 생깁니다** — 노출 자체가 복구 불가는 아니고, 실제 유출이
+일어났을 때 복구 불가가 됩니다. AGENTS.md가 "유출처럼 회수가 성립하지 않는"
+것을 복구 불가로 명시하고, 키 회전은 미래 사용만 제한하며 유출 자체를 되돌리지
+못합니다. 현재 상태가 깨져 있지 않으므로 **차단 사유는 아니고**, 가장 오래 가는
+조치이므로 **권고 2순위**입니다.
 
-### F5 — `cacheIsolationRecorded`가 기록하려는 방향은 이미 닫힌 방향입니다
+4.2가 이 항목을 넓힙니다: `cache:` 줄을 더하는 것만이 경로가 아니고,
+`package.json`에 `packageManager`를 추가하는 변경도 같은 일을 합니다.
+
+### F5 — `cacheIsolationRecorded` 기록은 쓸 수 있고, 문구만 한정하면 됩니다 (초안 판정 철회)
 
 근거: `lib/agentCredentialReachability.ts:369-370`이 그 설정을 "a dated record
 that **pull_request-run caches never reach other refs' runs**"로 정의합니다.
@@ -390,19 +472,30 @@ that **pull_request-run caches never reach other refs' runs**"로 정의합니�
 
 1장의 공식 규칙은 **그 방향이 이미 닫혀 있음을 확인합니다** — PR 캐시는
 `refs/pull/.../merge` scope이고 그 PR의 re-run만 복원합니다. 그러므로 그 기록은
-쓸 수 있습니다.
+사실에 부합하게 쓸 수 있습니다.
 
-**열려 있는 방향은 반대쪽입니다.** 에이전트가 일으키는 이벤트는 PR이지만, 그
-PR의 job이 복원하는 것은 `main`·`develop` scope의 항목 — 에이전트가 아닌
-누군가가, 또는 침해된 의존성이 거기에 쓴 것입니다. 기록을 "캐시는 ref 간에
-격리된다"로 뭉뚱그려 쓰면, **맞는 사실로 틀린 결론을 세워** 에이전트의 blanket
-push 금지를 풀게 됩니다.
+**이 항목의 초안은 여기서 틀렸고, 독립 검토(9장)가 그것을 잡았습니다.** 초안은
+"열려 있는 방향은 반대쪽이므로 그 기록은 맞는 사실로 틀린 결론을 세운다"고
+적었습니다. 그 추론이 틀린 이유는 이렇습니다.
 
-**되돌릴 수 없음에 가장 가까운 항목입니다.** 복구 불가인 것을 한 줄로 적을 수
-있습니다 — 잘못된 근거로 풀린 금지는 에이전트가 자격증명 옆에서 실행되는
-파일을 쓰게 하고, 그 결과는 자격증명 유출입니다. 다만 **지금 깨져 있는 것이
-아니라 선행 조건**입니다(기록이 없으므로). 그 기록을 쓰는 PR은 차단 대상이며
-contract 역할과 소유자 승인이 필요합니다.
+분석기의 cache 규칙이 막는 것은 **에이전트 자신이 심은 캐시가 자격증명 job에
+도달하는 것**입니다. 에이전트가 일으키는 이벤트는 PR이고, PR run이 쓴 캐시는
+다른 ref의 run에 도달하지 않습니다. 그러므로 그 기록은 **자기가 대답해야 할
+질문에 정확히 대답**하며, 그 근거로 cache 규칙을 푸는 것은 타당합니다.
+
+반대 방향(기본·base → PR)이 열려 있는 것은 **다른 위협**입니다 — 주체가
+에이전트가 아니라 침해된 의존성이고, 에이전트의 push 권한과 무관합니다. 그 쪽은
+cache 규칙이 아니라 F4·P3이 다룹니다. 그리고 PR에서 실제로 도는 자격증명 job은
+분석기의 trigger·path 도달 판정이 계속 따로 다룹니다.
+
+**남는 것은 작습니다.** 그 기록의 문구가 **양방향 격리를 주장하지 않도록**
+확인하는 것 — "캐시는 ref 간에 격리된다"가 아니라 "PR run의 캐시는 다른 ref의
+run에 도달하지 않는다"로 한정해 쓰는 것입니다. 기록이 아직 없으므로 현재
+결함도 아니고, 가장 높은 위험도 아닙니다.
+
+**되돌릴 수 있음** — 정책 문구 명확화 항목입니다. 그 기록을 쓰는 PR은
+`docs/policy/engineering-agent.md` 변경이므로 여전히 contract 역할과 소유자
+승인이 필요합니다.
 
 ### F6 — 복원 단계가 모두 `continue-on-error: true`입니다
 
@@ -439,9 +532,28 @@ contract 역할과 소유자 승인이 필요합니다.
 
 ### P1. `main`·`develop` scope에서 무검증 캐시 **저장**을 멈춥니다 — 1순위
 
-대상: 2.1의 다섯 workflow의 `.next/cache`·ms-playwright 단계. 방법은
-`actions/cache`를 `actions/cache/restore`로 바꾸는 것(복원은 유지, 저장만 중단)
-입니다.
+대상과 조건 다섯 가지입니다. 독립 검토(9장)가 넷을 추가했습니다.
+
+1. **막을 이벤트는 `schedule`·`push: main`만이 아닙니다.** `push: develop`
+   (`admin-console-e2e`, `orchestrator-rust`, `credit-finance-db-integration`)
+   과 `main`·`develop`에서 도는 `workflow_dispatch`(`e2e.yml` 등)도 같은
+   scope에 씁니다. 판정은 trigger 이름이 아니라 **run의 ref가 기본 branch이거나
+   `develop`인가**여야 합니다.
+2. **Rust 캐시를 범위에 넣을지 명시합니다.** 2장이 적은 대로 그 foothold는 npm이
+   아니라 crate build script입니다. 포함하면 `orchestrator-rust.yml:47-54`도
+   restore-only가 되고, 제외하면 그 이유를 적습니다. **이 감사는 결정하지
+   않습니다** — 모델이 다르므로 별개 판단입니다.
+3. **기존 항목은 전환만으로 사라지지 않습니다.** restore-only로 바꾼 뒤에도
+   이미 `main`·`develop` scope에 있는 항목은 퇴출될 때까지 복원 후보로 남습니다
+   (1장). 그러므로 **일회성 삭제**(캐시 관리 API/UI) 또는 **key namespace
+   회전**이 전환과 **한 변경에** 들어가야 합니다. 이것이 빠지면 전환은 아무것도
+   닫지 않습니다.
+4. **"PR은 저장 유지"는 action 교체 하나로 되지 않습니다.** 같은 단계가 ref에
+   따라 저장을 하고 안 하게 하려면 `actions/cache/restore`와
+   `actions/cache/save`를 나누고 save에 `if:` 조건을 달아야 합니다.
+   `actions/cache` 한 줄을 바꾸는 것보다 손이 더 갑니다.
+5. 대상 단계는 2.1의 다섯 workflow의 `.next/cache`·ms-playwright 단계이고,
+   Rust는 2번의 판단에 달립니다.
 
 효과가 가장 큰 이유: 1장의 규칙상 PR scope 항목은 **그 PR의 re-run만** 복원할
 수 있습니다. 기본·base scope에 무검증 항목을 만드는 주체가 없어지면 오염은 PR
@@ -459,9 +571,11 @@ contract 역할과 소유자 승인이 필요합니다.
   `Linux-playwright-*` 항목을 지우고 한 run을 측정하는 것이 맞습니다.
 
 판단이 필요한 지점: ms-playwright 저장을 어디서 남길지. 모든 scope에서 끄면
-첫 run 비용이 모든 PR에 걸립니다. 한 가지 중간 안은 PR workflow에서는 저장을
-유지하고(PR scope로만 감) schedule·push-main job에서만 끄는 것입니다 — 그러면
-기본 scope 항목이 사라지고 PR 비용은 그대로입니다. **이 안을 권고합니다.**
+첫 run 비용이 모든 PR에 걸립니다. 중간 안은 PR run에서는 저장을 유지하고(PR
+scope로만 감) **run의 ref가 기본 branch이거나 `develop`일 때만** 끄는 것입니다
+— 그러면 기본·base scope 항목이 더 생기지 않고 PR 비용은 그대로입니다.
+**이 안을 권고하며, 위 3번(기존 항목 삭제 또는 namespace 회전)과 한 변경으로
+묶어야 합니다.**
 
 역할: `impl`. 계약 파일이 아니지만 필수 check의 입력을 바꾸므로 독립 검토
 대상입니다.
@@ -489,23 +603,40 @@ contract 역할과 소유자 승인이 필요합니다.
 AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint 자체 API로
 셉니다. 별도 scanner를 만들어 두 숫자가 어긋나게 하지 않습니다").
 
-`tests/agentCredentialReachability.test.mjs:555`의 `POSTURE_DIGEST`가 함께
-움직입니다. 그 digest는 소유자와 함께 읽고 나서 갱신하라고 :546-548이 적습니다.
+조건 셋을 함께 지켜야 합니다. 독립 검토(9장)가 둘을 추가했습니다.
+
+1. **판정은 `cache:` 문자열이 아니라 실제 캐싱 조건을 읽어야 합니다.** 4.2가
+   보인 대로 `setup-node@v6`는 `packageManager`·`devEngines.packageManager`가
+   npm을 지정하면 `cache:` 없이도 캐시합니다. `cache:` 유무만 보는 검사는 그
+   변경을 통과시킵니다.
+2. **`POSTURE_DIGEST`에 캐시 **종류**가 들어가야 합니다.**
+   `tests/agentCredentialReachability.test.mjs:555`의 digest는 reason 이름
+   (`credential_job_restores_cache`)만 담습니다. 그래서 **이미 npm 캐시를
+   복원하는 자격증명 job에 `.next/cache`를 더하면 reason이 그대로고 digest가
+   움직이지 않습니다** — 4.3의 열한 job 전부가 그 상태이므로, 이 감사가 가장
+   걱정하는 변경이 바로 digest에 안 잡히는 변경입니다. 분석 결과와 digest
+   입력에 종류를 명시해야 검사가 성립합니다.
+3. digest를 갱신할 때는 소유자와 함께 읽으라고 :546-548이 적습니다.
 
 역할: `contract`(`lib/agentCredentialReachability.ts`는 에이전트 권한 경계).
 소유자 승인 + 독립 검토.
 
-### P4. `cacheIsolationRecorded` 기록의 선행 조건을 정책에 박습니다 — 2순위, F5의 답
+### P4. `cacheIsolationRecorded` 기록의 문구를 한정합니다 — 3순위, F5의 답
 
-기록은 **두 방향을 따로** 서술해야 합니다.
+**초안은 이 항목을 2순위이자 P3의 선행 조건으로 두었습니다. 독립 검토(9장)가
+그 판단을 뒤집었으므로 3순위로 내리고 내용을 줄입니다.**
 
-- PR → 다른 ref: 닫혀 있음. 근거는 1장의 공식 규칙.
-- 기본·base → PR: **열려 있음.** 이 방향의 근거는 격리가 아니라 P3의 검사
-  — "무검증 캐시를 복원하는 job에 자격증명이 없다"입니다.
+그 기록은 자기가 대답할 질문에 정확히 대답하므로(F5), P3을 기다릴 필요가
+없습니다. 남는 요구는 하나입니다 — **기록이 양방향 격리를 주장하지 않게
+쓰는 것.**
+
+- 쓸 수 있는 문장: "pull_request run이 만든 캐시는 다른 ref의 run에 도달하지
+  않는다." 근거는 1장의 공식 규칙.
+- 쓰면 안 되는 문장: "Actions 캐시는 ref 간에 격리된다." 기본·base → PR 방향이
+  열려 있으므로 거짓이고, 그 방향은 F4·P3이 다루는 **다른 위협**입니다.
 
 `docs/policy/engineering-agent.md:198-201` 변경이므로 역할은 `contract`이고
-**소유자 승인이 필요합니다.** P3보다 먼저 쓰면 근거가 없는 기록이 됩니다 —
-순서가 계약입니다.
+**소유자 승인이 필요합니다.** P3과의 순서 의존은 없습니다.
 
 ### P5. 복원 후 무결성 검사 — 권고하지 않음, 대안으로만 기록
 
@@ -516,10 +647,19 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 
 ### P6. 조사 항목 — 권고가 아닙니다
 
-`main` scope writer의 `npm ci --ignore-scripts`. drop-in이 아닙니다:
-`package.json`의 `postinstall`이 `prisma generate`이므로 명시적
-`npx prisma generate` 단계가 필요합니다. `sharp@0.35`가 install script를
-요구하는지는 **확인하지 않았습니다.** 확인 전에 권고하지 않습니다.
+`main` scope writer의 `npm ci --ignore-scripts`. **drop-in이 아닙니다.** 둘이
+걸립니다.
+
+- `package.json`의 `postinstall`이 `prisma generate`이므로 명시적
+  `npx prisma generate` 단계가 필요합니다.
+- 현재 lockfile에서 `hasInstallScript`인 패키지가 **10개**입니다 —
+  `@prisma/engines`, `prisma`, `esbuild`, `@sentry/cli`, `tesseract.js`,
+  `unrs-resolver`, 그리고 `fsevents` 3경로(macOS 전용이라 Linux runner에서는
+  설치되지 않습니다). 각각이 script 없이도 동작하는지는 패키지별로 달라
+  **확인하지 않았습니다.**
+
+확인 전에 권고하지 않습니다. 이 수치는 "표면이 좁다"가 아니라 "넓다"는 쪽을
+가리킵니다.
 
 ## 8. 이 감사가 증명하지 못한 것
 
@@ -533,13 +673,30 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 4. **자격증명 판정 22건의 전수 근거.** 0장 4번에 적었습니다. `pr-fast-gate #
    fast-gate`가 왜 자격증명 보유로 판정되는지는 추적하지 않았습니다 — 그 job은
    캐시를 복원하지 않으므로 세 축에 영향이 없습니다.
-5. **공격자 모델의 현실성.** 침해된 npm 의존성 하나를 전제로 합니다. 그 전제의
-   확률은 평가하지 않았습니다.
+5. **공격자 모델의 현실성.** 침해된 제3자 의존성 하나를 전제로 합니다. 그
+   전제의 확률은 평가하지 않았습니다. Rust 경로는 그 모델의 crate 판본이며,
+   2장이 그 구분을 적습니다.
+6. **install script 10개 각각이 생략 가능한지.** 7장 P6에 적었습니다.
+7. **`packageManager` 필드가 추가될 가능성.** 4.2의 잠복 경로는 구조 판정이고,
+   그 변경이 제안된 적이 있는지는 확인하지 않았습니다.
 
 ## 9. 독립 검토
 
-요청: Codex.
-프롬프트: `.github/audits/actions-cache-poisoning-audit-independent-review-prompt-2026-10-03.md`
-(이 PC에서 Codex는 명령을 실행할 수 없으므로 증거를 프롬프트에 그대로
-싣습니다).
-결과: 미기록.
+요청 경로: 먼저 AGENTS.md가 정한 검토 서버에 제출했으나
+`queue_full: 20 jobs are still pending`로 거절됐습니다. 그래서 과제가 지정한
+Codex로 직접 돌렸습니다.
+
+- reviewer: Codex CLI 0.146.0, `gpt-5.6-sol` / `model_reasoning_effort=xhigh`
+  (`.codex/agents/contract.toml`이 되돌릴 수 없는 작업에 쓰는 조합),
+  `--sandbox read-only`. Codex는 저장소를 직접 읽었고 기준 commit 일치를
+  확인했습니다.
+- 프롬프트: `.github/audits/actions-cache-poisoning-audit-independent-review-prompt-2026-10-03.md`
+  (명령 실행이 막힐 경우를 대비해 증거를 그대로 실었습니다).
+- 판정: **reject.** C1·C2·C4·C6·C7 틀림, C3·C5·C8 맞음.
+- 반영: rev 2(문서 머리말에 목록). 지적 전부를 받아들였고, 그중 **F5는 제
+  판정이 틀렸음**을 확인해 순위를 내리고 내용을 다시 썼습니다. 사실 확인이
+  가능한 두 건은 저장소에서 직접 대조했습니다 — `package.json`에
+  `packageManager`·`devEngines` 부재, lockfile의 `hasInstallScript` 10건,
+  그리고 `actions/setup-node` `action.yml`의 `package-manager-cache` 기본값.
+- 다음 round: rev 2에 대한 재검토 미실시. 검토 서버 큐가 비면 그쪽으로
+  제출하는 것이 AGENTS.md가 정한 경로입니다.
