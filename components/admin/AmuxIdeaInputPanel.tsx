@@ -540,7 +540,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800 dark:text-amber-200">
           <p>{messages.recentIdeaUnavailable}</p>
           <button type="button" onClick={() => retryRecentIdea(submission.requestId)}
-            disabled={readBackPending}
+            disabled={pending || readBackPending || sourceScopePending}
             className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium dark:border-amber-300">
             {messages.checkSubmissionStatus}
           </button>

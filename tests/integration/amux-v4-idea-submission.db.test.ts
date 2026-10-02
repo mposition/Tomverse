@@ -181,10 +181,20 @@ test("recent picker pages beyond twenty ideas without duplicates or another owne
   assert.equal(new Set(all.map((row) => row.ideaId)).size, all.length);
   for (const id of ids) assert.ok(all.some((row) => row.ideaId === id));
   assert.equal(second.nextCursor, null);
+  const unrelatedActorUserId = `synthetic-amux-other-${randomUUID()}`;
+  const unrelatedId = randomUUID();
+  await prisma.amuxIdeaSubmission.create({ data: {
+    id: unrelatedId, requestId: randomUUID(), actorUserId: unrelatedActorUserId,
+    state: "submitted", submittedAt,
+    analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000),
+    rawPurgeAfter: new Date(submittedAt.getTime() + 7 * 86_400_000),
+    rawCiphertext: Buffer.from("SYNTHETIC_OTHER"), rawKeyId: "synthetic-key", rawKeyVersion: 1,
+  } });
   const unrelatedSession = { ...session,
-    user: { ...session.user, id: `synthetic-amux-empty-${randomUUID()}` } } as Session;
-  assert.deepEqual(await listRecentIdeaSubmissions(unrelatedSession),
-    { items: [], nextCursor: null });
+    user: { ...session.user, id: unrelatedActorUserId } } as Session;
+  const unrelated = await listRecentIdeaSubmissions(unrelatedSession);
+  assert.deepEqual(unrelated.items.map((row) => row.ideaId), [unrelatedId]);
+  assert.equal(unrelated.nextCursor, null);
 });
 
 test("submission row and canonical audit roll back together", async () => {
