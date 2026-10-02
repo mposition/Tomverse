@@ -118,6 +118,29 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
        WHERE stage."id" = $1
     `, [stage]);
     assert.equal(approvalClock.rows[0].audit_owned, true);
+    await insertAudit("past-stage-audit", "stage", { createdAt: "2020-01-01" });
+    await assert.rejects(createStage("past-stage-audit"),
+      /stage approval audit is stale/);
+    await assert.rejects(client.query(`
+      INSERT INTO "PromptRefinerVnextOneShotSlot"
+        ("id", "stageId", "slotIndex", "reservedCostMicroUsd")
+      VALUES ('duplicate-index', $1, 1, 29918)
+    `, [stage]), /PromptRefinerVnextOneShotSlot_stageId_slotIndex_key/);
+    await client.query("BEGIN");
+    await client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'closed' WHERE "id" = $1
+    `, [stage]);
+    const stagedClose = await client.query(`
+      SELECT "status" FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
+    `, [stage]);
+    assert.equal(stagedClose.rows[0].status, "closed");
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotSlot"
+         SET "status" = 'consumed', "requestId" = 'closed-request',
+             "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 1
+    `, [stage]), /run approval is required/);
+    await client.query("ROLLBACK");
     await insertAudit("future-audit", "stage", { createdAt: "2099-01-01" });
     await assert.rejects(client.query(`
       INSERT INTO "PromptRefinerVnextOneShotStage" (
@@ -315,6 +338,23 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
       DELETE FROM "PromptRefinerVnextOneShotSlot"
        WHERE "stageId" = $1 AND "slotIndex" = 0
     `, [stage]), /slots cannot be deleted/);
+    await client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'closed' WHERE "id" = $1
+    `, [stage]);
+    const runApprovedClose = await client.query(`
+      SELECT "status" FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
+    `, [stage]);
+    assert.equal(runApprovedClose.rows[0].status, "closed");
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'run_approved' WHERE "id" = $1
+    `, [stage]), /stage transition is not permitted/);
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotSlot"
+         SET "status" = 'consumed', "requestId" = 'after-close',
+             "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 1
+    `, [stage]), /run approval is required/);
     await assert.rejects(client.query(`
       TRUNCATE TABLE "PromptRefinerVnextOneShotSlot"
     `), /stage and slots cannot be truncated/);
