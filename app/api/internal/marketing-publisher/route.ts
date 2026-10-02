@@ -8,10 +8,19 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { MARKETING_AUTOMATION_KILL_SWITCH_ENV } from "@/lib/marketingAutomationAccess";
-import { resolveMarketingPublishAdapter } from "@/lib/marketingPublishAdapter";
+import {
+  resolveMarketingPublishAdapter,
+  type MarketingPublishAdapter,
+} from "@/lib/marketingPublishAdapter";
+import {
+  MARKETING_PUBLISHER_CALL_BUDGET_MS,
+  runMarketingPublisherBatch,
+  type MarketingPublisherBatchResult,
+} from "@/lib/marketingPublisherBatch";
 import {
   finishMarketingPublisherRun,
   marketingPublisherDatabaseNow,
+  marketingPublisherOperations,
   heartbeatMarketingPublisherRun,
   startMarketingPublisherRun,
 } from "@/lib/marketingPublisherRun";
@@ -22,6 +31,7 @@ import {
 } from "@/lib/marketingPublisherRunCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
+import { buildZernioAdapterFromEnv } from "@/app/api/_marketing/zernioAdapter";
 
 // The marketing publisher's app route (S2 plan, S2d1).
 //
@@ -30,12 +40,21 @@ import { prisma } from "@/lib/prisma";
 // credential and no platform credential; it is a clock and an HTTP client, and
 // this route is where the work happens.
 //
-// What the work is, in this build: nothing yet, on purpose. There is no
-// publishing adapter until S2d2, so a run opens its row, establishes that there
-// is nothing it can do and why, and closes. That is still worth running every
-// five minutes -- it proves the service, the secret, the route, the run row and
-// its deadline trigger end to end before anything is able to publish, and the
-// silence monitor learns what a healthy run looks like.
+// What the work is (S2d2): for each account in a publishing mode, observe its
+// health, claim and dispatch its next due post, make one vendor call and record
+// what came back; then confirm a few published posts are live. The batch is
+// `lib/marketingPublisherBatch.ts` and every transaction it runs is a bounded
+// operation from `lib/marketingPublisherRun.ts`.
+//
+// **This route is where the Zernio credential is read, and the only place.** The
+// plan puts `ZERNIO_API_KEY` on the app and nowhere else -- not on the cron
+// service, which holds only this route's secret and URL, and not in `lib/`,
+// which receives a built adapter. Without the key a run says `no_credential`
+// and does nothing, which is every run until an operator sets it.
+//
+// Even with the key, nothing publishes in this build: the admission resolver
+// refuses while the recovery contract and the platform budget are unreadable,
+// and those are decisions for a person before activation.
 
 /**
  * Only `MARKETING_PUBLISH_SECRET`. Not the maintenance secret as a fallback, the
@@ -166,7 +185,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const skipped = whyNothingToDo();
+    const plan = publisherPlan();
+    let summary: MarketingPublisherBatchResult | null = null;
+    if (plan.adapter) {
+      summary = await runMarketingPublisherBatch(
+        {
+          operations: marketingPublisherOperations(prisma),
+          adapter: plan.adapter,
+          databaseNow: () => marketingPublisherDatabaseNow(prisma),
+          heartbeat: async () => (await heartbeatMarketingPublisherRun(prisma, runId)).beat,
+        },
+        { runId, deadlineAt },
+      );
+    }
+    const skipped = plan.adapter ? undefined : plan.skipped;
     const beat = await heartbeatMarketingPublisherRun(prisma, runId);
     if (!beat.beat) {
       // The run is not this request's to finish: either something closed the
@@ -188,8 +220,10 @@ export async function POST(request: Request) {
     }
     const closed = await finishMarketingPublisherRun(prisma, runId, {
       status: "succeeded",
-      processedCount: 0,
-      result: { skipped },
+      processedCount: summary ? summary.claimed + summary.verified : 0,
+      // Counts and closed codes only: no post text, account reference or
+      // provider response reaches the run row.
+      result: summary ? { summary } : { skipped },
     });
     if (closed.status === "not_running") {
       // The row was closed by something else while this request held it --
@@ -216,7 +250,9 @@ export async function POST(request: Request) {
         { status: 500 },
       );
     }
-    return NextResponse.json({ runId, status: closed.status, skipped });
+    return NextResponse.json(
+      summary ? { runId, status: closed.status, summary } : { runId, status: closed.status, skipped },
+    );
   } catch (error) {
     // Recorded before anything else, and not conditional on the close
     // succeeding. If the database is the thing that broke, the close fails too,
@@ -249,22 +285,24 @@ export async function POST(request: Request) {
 }
 
 /**
- * Why this run has nothing to publish, in the order an operator would check.
+ * The adapter this run publishes through, or why it has none.
  *
  * The kill switch first, because it is the operator's own stop and a run
  * should say it was obeyed rather than that something else happened to be
- * true as well. Then the adapter, which is the reason in every run until S2d2.
+ * true as well. Then the credential.
  */
-function whyNothingToDo(): string {
+function publisherPlan():
+  | { readonly adapter: MarketingPublishAdapter }
+  | { readonly adapter: null; readonly skipped: string } {
   const killSwitch = process.env[MARKETING_AUTOMATION_KILL_SWITCH_ENV];
   if (typeof killSwitch === "string" && killSwitch.trim() !== "") {
-    return "kill_switch";
+    return { adapter: null, skipped: "kill_switch" };
   }
-  const adapter = resolveMarketingPublishAdapter("zernio");
-  if (!adapter.available) return adapter.reason;
-  // Unreachable in this build: resolveMarketingPublishAdapter answers
-  // unavailable for every provider until S2d2 adds one. Stated rather than
-  // left to fall through, so the day it becomes reachable is a compile-visible
-  // change here and not a run that silently does nothing.
-  return "dispatch_not_built";
+  const resolved = resolveMarketingPublishAdapter("zernio", buildZernioAdapter);
+  if (!resolved.available) return { adapter: null, skipped: resolved.reason };
+  return { adapter: resolved.adapter };
+}
+
+function buildZernioAdapter(): MarketingPublishAdapter | null {
+  return buildZernioAdapterFromEnv(MARKETING_PUBLISHER_CALL_BUDGET_MS);
 }

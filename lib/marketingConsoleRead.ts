@@ -3,7 +3,16 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
-import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  marketingWebhookApplyScopeStatus,
+} from "@/lib/marketingAutomationAccess";
+import { parseMarketingReportPayload } from "@/lib/marketingAutomationSchema";
+import {
+  MARKETING_WEBHOOK_FAULT_ARM_KEY,
+  marketingWebhookIsStaging,
+  parseMarketingWebhookFaultArm,
+} from "@/lib/marketingWebhookCore";
 import {
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
@@ -55,6 +64,53 @@ export type MarketingSwitchStates = {
   webhookApplyScope: MarketingSwitchState;
 };
 
+/**
+ * What the staging webhook exercise needs on screen (S2e), or nothing at all.
+ *
+ * Only in staging -- the same test the receiver and the writers use -- so a
+ * production console never reads or draws any of it. The shadow switch's own
+ * state is already in `switches.webhookShadow`; this adds the latch and the
+ * newest shadow reports, whose event digests are what an operator arms.
+ */
+export type MarketingWebhookStagingView = {
+  /** False when the arm or the reports could not be read; the screen says so. */
+  readable: boolean;
+  /**
+   * The shadow switch as its writer reads it: absent or "false" is off, "true"
+   * is on, anything else is unreadable -- the writer refuses that value, so the
+   * screen must not offer a toggle the writer will certainly refuse. (The
+   * generic switch strip folds every non-"true" value to off.)
+   */
+  shadow: "on" | "off" | "unreadable";
+  /** False when a stored report does not parse as the strict shadow payload. */
+  reportsReadable: boolean;
+  /** How many reports the list holds at most; the screen states this number. */
+  reportLimit: number;
+  /** Null when nothing has ever been armed or the stored value is not an arm. */
+  faultArm: {
+    eventIdDigest: string;
+    state: "armed" | "consumed";
+    generation: number;
+    armedAt: string;
+    expiresAt: string;
+  } | null;
+  /** A stored value that is not an arm: arming would be refused, so say why. */
+  faultArmUnreadable: boolean;
+  /** An armed latch whose expiry had passed when this was read. */
+  faultArmExpired: boolean;
+  /** Newest first, at most `MARKETING_READ_PAGE_SIZE`. */
+  shadowReports: Array<{
+    id: string;
+    createdAt: string;
+    eventIdDigest: string;
+    eventType: string;
+    channel: string | null;
+    accountSlug: string | null;
+    derivedStatus: string;
+    statusQueryMatch: boolean;
+  }>;
+};
+
 export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
@@ -84,6 +140,8 @@ export type MarketingConsolePayload = {
    * a new generation would save against a state nobody saw.
    */
   configGeneration: number | null;
+  /** Null outside staging; see `MarketingWebhookStagingView`. */
+  webhookStaging: MarketingWebhookStagingView | null;
 };
 
 const state = (
@@ -186,12 +244,114 @@ async function readSwitches(): Promise<{
   }
 }
 
+async function readWebhookStaging(): Promise<MarketingWebhookStagingView | null> {
+  if (!marketingWebhookIsStaging()) return null;
+  try {
+    const [armRow, shadowRow, reports] = await Promise.all([
+      prisma.appSetting.findUnique({
+        where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY },
+        select: { value: true },
+      }),
+      prisma.appSetting.findUnique({
+        where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
+        select: { value: true },
+      }),
+      prisma.marketingReport.findMany({
+        where: { kind: "webhook_shadow" },
+        orderBy: { createdAt: "desc" },
+        take: MARKETING_READ_PAGE_SIZE,
+        select: { id: true, payload: true, createdAt: true },
+      }),
+    ]);
+    const arm = parseMarketingWebhookFaultArm(armRow?.value);
+    const shadowValue = shadowRow?.value;
+    const shadow =
+      shadowValue === undefined || shadowValue === "false"
+        ? ("off" as const)
+        : shadowValue === "true"
+          ? ("on" as const)
+          : ("unreadable" as const);
+    // Each payload through the strict schema it was written with. One that does
+    // not parse makes the list unreadable rather than a row of defaults: a
+    // missing `statusQueryMatch` is not a disagreement.
+    type ShadowPayload = {
+      eventIdDigest: string;
+      eventType: string;
+      channelId: string;
+      derivedStatus: string;
+      statusQueryMatch: boolean;
+    };
+    let reportsReadable = true;
+    const parsed: Array<{ id: string; createdAt: Date; payload: ShadowPayload }> = [];
+    for (const report of reports) {
+      try {
+        parsed.push({
+          id: report.id,
+          createdAt: report.createdAt,
+          payload: parseMarketingReportPayload("webhook_shadow", report.payload) as ShadowPayload,
+        });
+      } catch {
+        reportsReadable = false;
+      }
+    }
+    const channelIds = [...new Set(parsed.map((report) => report.payload.channelId))];
+    const channels =
+      channelIds.length === 0
+        ? []
+        : await prisma.marketingChannel.findMany({
+            where: { id: { in: channelIds } },
+            select: { id: true, channel: true, accountSlug: true },
+          });
+    const channelById = new Map(channels.map((channel) => [channel.id, channel]));
+    return {
+      readable: true,
+      shadow,
+      reportsReadable,
+      reportLimit: MARKETING_READ_PAGE_SIZE,
+      faultArm: arm,
+      faultArmUnreadable: armRow !== null && arm === null,
+      faultArmExpired:
+        arm !== null && arm.state === "armed" && Date.parse(arm.expiresAt) <= Date.now(),
+      shadowReports: reportsReadable
+        ? parsed.map((report) => {
+            const channel = channelById.get(report.payload.channelId);
+            return {
+              id: report.id,
+              createdAt: report.createdAt.toISOString(),
+              eventIdDigest: report.payload.eventIdDigest,
+              eventType: report.payload.eventType,
+              channel: channel?.channel ?? null,
+              accountSlug: channel?.accountSlug ?? null,
+              derivedStatus: report.payload.derivedStatus,
+              statusQueryMatch: report.payload.statusQueryMatch,
+            };
+          })
+        : [],
+    };
+  } catch {
+    // Unreadable is its own answer: an empty list would claim nothing arrived.
+    return {
+      readable: false,
+      shadow: "unreadable",
+      reportsReadable: false,
+      reportLimit: MARKETING_READ_PAGE_SIZE,
+      faultArm: null,
+      faultArmUnreadable: false,
+      faultArmExpired: false,
+      shadowReports: [],
+    };
+  }
+}
+
 export async function readMarketingConsole(
   section: MarketingConsoleSection,
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
-  const { switches, configGeneration } = await readSwitches();
+  const [{ switches, configGeneration }, webhookStaging] = await Promise.all([
+    readSwitches(),
+    readWebhookStaging(),
+  ]);
 
   if (!availability.available) {
     return {
@@ -202,6 +362,7 @@ export async function readMarketingConsole(
       rows: [],
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
     };
   }
@@ -237,6 +398,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
         id: post.id,
@@ -300,6 +462,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
         id: post.id,
@@ -365,6 +528,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: channels.map((channel) => ({
         ...channel,
@@ -394,6 +558,7 @@ export async function readMarketingConsole(
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
     configGeneration,
+    webhookStaging,
     canWrite,
     rows: reports.map((report) => ({
       ...report,

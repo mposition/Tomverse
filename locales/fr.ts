@@ -20,7 +20,6 @@ export const fr = {
         accountTooltipGuest: "Se connecter ou s'inscrire",
         guestMenuTitle: "Mode invité",
         guestMenuDescription: "Connectez-vous pour retrouver vos conversations et projets sur tous vos appareils.",
-        guestMenuCreateAccount: "Créer un compte gratuit",
         guestMenuViewPlans: "Voir les forfaits",
         languageAndDisplay: "Langue et affichage",
         newChat: "Nouveau chat",

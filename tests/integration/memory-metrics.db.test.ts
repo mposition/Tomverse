@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import { getMemoryReport, recordMemoryCounter } from "@/lib/memoryMetrics";
+import type { MemoryCounterKind } from "@/lib/memoryMetricsCore";
 import { createManualMemory } from "@/lib/memoryService";
 import { prisma } from "@/lib/prisma";
 
@@ -35,6 +36,29 @@ const createUser = () =>
     prisma.user.create({
         data: { email: `memory-metrics-${randomUUID()}@example.test` },
     });
+
+/**
+ * Polls the report until a fire-and-forget counter reaches `expected`, with a
+ * bounded deadline. Returns the report that first showed it, so the caller
+ * asserts on a real read rather than on the loop's exit condition.
+ */
+const waitForCounter = async (
+    kind: MemoryCounterKind,
+    expected: number,
+    { timeoutMs = 2_000, intervalMs = 25 } = {}
+) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+        const report = await getMemoryReport();
+        if (report.counters[kind] >= expected) return report;
+        if (Date.now() > deadline) {
+            throw new Error(
+                `expected ${kind} to reach ${expected} within ${timeoutMs}ms, saw ${report.counters[kind]}`
+            );
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+};
 
 const SECRET_STATEMENT = "사용자는 자바스크립트 프로젝트를 진행한다";
 
@@ -76,13 +100,21 @@ test("a validator rejection is counted even though it stores no row", async () =
             groundsText: "근거",
         })
     );
-    // The counter write is fire-and-forget, so give it the tick it needs
-    // before reading — a metric must never make the caller wait.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    const report = await getMemoryReport();
+    // The counter write is fire-and-forget — a metric must never make the
+    // caller wait — so the test polls for it instead of guessing how long the
+    // upsert takes. A fixed 50ms sleep read 0 on a slow CI runner.
+    const report = await waitForCounter("validator_rejected", 1);
     assert.equal(report.memories.total, 0, "nothing was stored");
     assert.equal(report.counters.validator_rejected, 1);
+
+    // Reaching 1 is not enough: a double-counted rejection would pass the
+    // poll and land a moment later. Read again after a settle interval.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(
+        (await getMemoryReport()).counters.validator_rejected,
+        1,
+        "the rejection is counted exactly once"
+    );
 });
 
 test("counters accumulate within a day and are read back per kind", async () => {
