@@ -117,3 +117,28 @@ test("the submission transaction's limits are the policy's values, in the order 
   assert.equal(t.transactionMs, (3 * t.statements + 5) * 1000);
   assert.ok(t.prismaMs > t.transactionMs && t.transactionMs > t.statementMs && t.statementMs > t.idleMs);
 });
+
+test("the prepared row holds an independent snapshot, not the caller's object", () => {
+  const payload = { gates: { pending: 1 } };
+  const result = prepareAgentDigestItem(submission({ payload }));
+  assert.equal(result.ok, true);
+  payload.gates.pending = 999;
+  payload.token = `ghp_${"A".repeat(36)}`;
+  assert.deepEqual(result.row.payload, { gates: { pending: 1 } });
+  assert.notEqual(result.row.payload, payload);
+});
+
+test("a body that is not a JSON object is refused before any transaction", () => {
+  for (const payload of [null, [], [1], "text", 7, true]) {
+    assert.deepEqual(prepareAgentDigestItem(submission({ payload })), { ok: false, reason: "payload_not_canonical" }, JSON.stringify(payload));
+  }
+});
+
+test("the writer's setup statement takes the audit chain's own lock key", async () => {
+  const { readFileSync } = await import("node:fs");
+  const store = readFileSync(new URL("../lib/agentDigestStore.ts", import.meta.url), "utf8");
+  const audit = readFileSync(new URL("../lib/adminAudit.ts", import.meta.url), "utf8");
+  const key = /pg_advisory_xact_lock\(hashtext\('([^']+)'\)\)/;
+  assert.equal(store.match(key)?.[1], audit.match(key)?.[1]);
+  assert.equal(store.match(key)?.[1], "tomverse-admin-audit-chain");
+});
