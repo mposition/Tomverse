@@ -43,13 +43,14 @@ const actorId = (session: Session): string => {
   return id;
 };
 
-const databaseNow = async (tx: Prisma.TransactionClient): Promise<Date> => {
+const databaseNow = async (tx: Prisma.TransactionClient,
+  invalidClock: () => Error = () => new IdeaSubmissionError("audit_unavailable", 503)): Promise<Date> => {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
   const now = rows[0]?.now;
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
-    throw new IdeaSubmissionError("audit_unavailable", 503);
+    throw invalidClock();
   }
   return now;
 };
@@ -173,7 +174,8 @@ export async function listRecentIdeaSubmissions(session: Session,
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
              set_config('idle_in_transaction_session_timeout', '3000', true) AS idle_limit
     `;
-    const now = await databaseNow(tx);
+    const now = await databaseNow(tx,
+      () => new Error("AMUX v4 recent idea DB clock unavailable"));
     return tx.amuxIdeaSubmission.findMany({
       where: { actorUserId, analysisDeadlineAt: { gt: now },
         cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null },

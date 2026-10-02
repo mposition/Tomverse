@@ -54,8 +54,8 @@ test("the card list reads identifiers and state only", async () => {
   assert.match(loader, /FROM "AmuxRouteDecision"/);
   assert.match(loader, /claimVerified: amuxLegacyTodoClaimVerified\(card, routeByTask\.get\(card\.id\) \?\? null\)/);
   assert.match(loader, /amuxHumanEscalation\.findMany\(/);
-  assert.match(loader, /row\.reason !== "human_review_required"/);
-  assert.match(loader, /hasOwnerAttentionEscalation: openEscalationTaskIds\.has\(card\.id\)/);
+  assert.match(loader, /reasons\.push\(row\.reason\)/);
+  assert.match(loader, /hasOwnerAttentionEscalation: amuxHasOwnerAttentionEscalation\(card\.status,/);
 });
 
 test("the panel states how many rows it shows out of how many", async () => {

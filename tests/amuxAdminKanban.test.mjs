@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { AMUX_ADMIN_KANBAN_LANES, amuxLegacyTodoClaimVerified, projectAmuxAdminKanban,
+import { AMUX_ADMIN_KANBAN_LANES, amuxHasOwnerAttentionEscalation,
+  amuxLegacyTodoClaimVerified, projectAmuxAdminKanban,
   amuxAdminKanbanLane } from "../lib/amux/adminKanbanCore.ts";
 
 const card = (status, owner = null, hasOwnerAttentionEscalation = false, claimVerified = false) => ({
@@ -47,4 +48,12 @@ test("a review requirement alone stays In Review; an open escalation needs atten
   assert.equal(amuxAdminKanbanLane({ ...card("review"), requiresHumanReview: true }), "in_review");
   assert.equal(amuxAdminKanbanLane(card("review", null, true)), "owner_attention");
   assert.equal(amuxAdminKanbanLane(card("doing", "worker-1", true)), "owner_attention");
+});
+
+test("normal review escalation stays In Review, while another open reason needs owner attention", () => {
+  assert.equal(amuxHasOwnerAttentionEscalation("review", []), false);
+  assert.equal(amuxHasOwnerAttentionEscalation("review", ["human_review_required"]), false);
+  assert.equal(amuxHasOwnerAttentionEscalation("review", ["human_review_required", "policy_blocked"]), true);
+  assert.equal(amuxHasOwnerAttentionEscalation("doing", ["human_review_required"]), true);
+  assert.equal(amuxHasOwnerAttentionEscalation("review", ["policy_blocked"]), true);
 });

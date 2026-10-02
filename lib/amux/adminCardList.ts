@@ -4,7 +4,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { encodeAmuxAdminCardCursor,
   type AmuxAdminCardCursor } from "./adminCardCursorCore.ts";
-import { amuxLegacyTodoClaimVerified } from "./adminKanbanCore.ts";
+import { amuxHasOwnerAttentionEscalation,
+  amuxLegacyTodoClaimVerified } from "./adminKanbanCore.ts";
 
 /**
  * Read-only card list for the owner console.
@@ -110,10 +111,12 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
   const countByTask = new Map(counts.map((row) => [row.taskId, row._count._all]));
   const latestByTask = new Map(latest.map((row) => [row.taskId, row]));
   const routeByTask = new Map(routes.map((row) => [row.taskId, row]));
-  const openEscalationTaskIds = new Set(escalations.map((row) => row.taskId));
-  const exceptionalEscalationTaskIds = new Set(escalations
-    .filter((row) => row.reason !== "human_review_required")
-    .map((row) => row.taskId));
+  const escalationReasonsByTask = new Map<string, string[]>();
+  for (const row of escalations) {
+    const reasons = escalationReasonsByTask.get(row.taskId) ?? [];
+    reasons.push(row.reason);
+    escalationReasonsByTask.set(row.taskId, reasons);
+  }
   const rank = (status: string) => {
     const index = STATUS_ORDER.indexOf(status);
     return index === -1 ? STATUS_ORDER.length : index;
@@ -130,8 +133,8 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
       revision: card.revision,
       briefPresent: card.executionBriefDigest !== null,
       requiresHumanReview: card.requiresHumanReview,
-      hasOwnerAttentionEscalation: openEscalationTaskIds.has(card.id) &&
-        (card.status !== "review" || exceptionalEscalationTaskIds.has(card.id)),
+      hasOwnerAttentionEscalation: amuxHasOwnerAttentionEscalation(card.status,
+        escalationReasonsByTask.get(card.id) ?? []),
       reviewPrNumber: card.reviewPrNumber,
       attemptCount: countByTask.get(card.id) ?? 0,
       lastAttemptOutcome: latestByTask.get(card.id)?.outcome ?? null,

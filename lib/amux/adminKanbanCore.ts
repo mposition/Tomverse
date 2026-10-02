@@ -17,6 +17,14 @@ export function amuxLegacyTodoClaimVerified(card: {
     route?.worker === card.owner && route.taskRevision === card.revision - 1;
 }
 
+/** A normal review obligation is not an exceptional owner-attention event.
+ * Any other open escalation remains visible in the attention lane. */
+export function amuxHasOwnerAttentionEscalation(status: string,
+  reasons: readonly string[]): boolean {
+  return reasons.length > 0 &&
+    (status !== "review" || reasons.some((reason) => reason !== "human_review_required"));
+}
+
 type CardState = {
   status: string;
   owner: string | null;
