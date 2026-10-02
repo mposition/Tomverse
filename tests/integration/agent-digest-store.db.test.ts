@@ -125,3 +125,20 @@ test("the transaction runs under the policy's database limits and Prisma timeout
   assert.deepEqual(seen, { statement: "2s", idle: "1s" });
   assert.equal(options?.timeout, 37_000);
 });
+
+test("a caller's admission refusal inside the transaction writes no row and no audit entry", async () => {
+  const input = submission({ admit: true });
+  const auditsBefore = await prisma.adminAuditLog.count();
+  let sawTransaction = false;
+  const result = await recordAgentDigestItem(input, prisma, async (tx) => {
+    // Runs after the audit chain lock: the lock is held by this transaction.
+    const held = await tx.$queryRaw<{ held: boolean }[]>`SELECT EXISTS (
+      SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted) AS held`;
+    sawTransaction = held[0].held;
+    return "control_revision_mismatch";
+  });
+  assert.deepEqual(result, { status: "not_admitted", reason: "control_revision_mismatch" });
+  assert.equal(sawTransaction, true);
+  assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 0);
+  assert.equal(await prisma.adminAuditLog.count(), auditsBefore);
+});
