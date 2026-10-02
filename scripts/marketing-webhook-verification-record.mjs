@@ -1,8 +1,9 @@
 // Draft the staging webhook verification record from what staging stored and
-// what Zernio delivered (S2 plan, S2e-verification; policy §8.1.1).
+// what Zernio delivered (S2 plan, S2e-verification; docs/policy/marketing-automation.md §8.1.1).
 //
 //   npm run marketing:webhook-record -- --record-id 2026-10-03__zernio-shadow
 //     --executor staging-operator --commit <deployed staging sha>
+//     --receiver-url https://staging.tomverse.app/api/webhooks/zernio
 //     --c2 <tampered-body probe ref> [--evidence <ref>]... [--write]
 //
 // Run against staging (railway run, staging environment). Reads the shadow
@@ -13,6 +14,9 @@
 // draft and its digest; with --write it creates the record file, refusing to
 // overwrite one that exists (a record is immutable once written).
 //
+// Only attempts made to --receiver-url exactly are read, and only those whose
+// answer names this build's pipeline fingerprint and this staging snapshot
+// count as evidence (the receiver stamps both on what it answers).
 // Conditions 1, 3 and 4 are judged per event type from the delivery order;
 // condition 2 needs a refused delivery in the log and the executor's reference
 // for the tampered-body probe, which Zernio cannot send.
@@ -20,16 +24,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import {
-  MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
-  MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
-  MARKETING_WEBHOOK_SCHEMA_VERSION,
-  MARKETING_WEBHOOK_SHADOW_KEY,
-  computeMarketingWebhookConfigSnapshotDigest,
-  marketingWebhookEnvDigests,
-} from "../lib/marketingAutomationAccess.ts";
+import { MARKETING_WEBHOOK_SHADOW_KEY } from "../lib/marketingAutomationAccess.ts";
 import { parseMarketingReportPayload } from "../lib/marketingAutomationSchema.ts";
-import { marketingWebhookIsStaging } from "../lib/marketingWebhookCore.ts";
+import {
+  marketingWebhookIsStaging,
+  marketingWebhookStagingConfigSnapshotDigest,
+} from "../lib/marketingWebhookCore.ts";
 import { draftMarketingWebhookVerificationRecord } from "../lib/marketingWebhookRecordDraft.ts";
 import { marketingWebhookVerificationRecordPath } from "../lib/marketingWebhookVerification.ts";
 import { ZERNIO_API_BASE_URL } from "../lib/zernioPublishAdapter.ts";
@@ -51,6 +51,11 @@ const one = (name) => {
 const recordId = one("record-id");
 const executor = one("executor");
 const stagingCommitSha = one("commit");
+const receiverUrl = one("receiver-url");
+if (new URL(receiverUrl).pathname !== RECEIVER_PATH || new URL(receiverUrl).protocol !== "https:") {
+  console.error(`--receiver-url must be the https receiver URL ending in ${RECEIVER_PATH}.`);
+  process.exit(64);
+}
 const write = args.includes("--write");
 
 if (!marketingWebhookIsStaging(process.env)) {
@@ -70,21 +75,23 @@ const readDeliveries = async () => {
     if (!response.ok) throw new Error(`Zernio webhook log answered ${response.status}.`);
     const page = await response.json();
     for (const log of page.logs ?? []) {
-      if (new URL(log.url).pathname !== RECEIVER_PATH) continue;
-      let answer = null;
+      // This receiver exactly: another deployment's attempts never join this record.
+      if (log.url !== receiverUrl) continue;
+      let body = null;
       try {
-        const body = JSON.parse(log.responseBody ?? "");
-        if (typeof body?.status === "string") answer = body.status;
-        else if (typeof body?.code === "string") answer = body.code;
+        body = JSON.parse(log.responseBody ?? "");
       } catch {
-        answer = null;
+        body = null;
       }
+      const text = (value) => (typeof value === "string" ? value : null);
       deliveries.push({
         eventId: log.eventId,
         event: log.event,
         at: log.createdAt,
         statusCode: log.statusCode,
-        answer,
+        answer: text(body?.status) ?? text(body?.code),
+        pipeline: text(body?.pipeline),
+        config: text(body?.config),
       });
     }
     if (!page.pagination?.hasMore) return deliveries;
@@ -106,12 +113,11 @@ try {
   ]);
   const reports = rows.map((row) => parseMarketingReportPayload("webhook_shadow", row.payload));
 
-  const stagingConfigSnapshotDigest = computeMarketingWebhookConfigSnapshotDigest({
-    appSettings: { [MARKETING_WEBHOOK_SHADOW_KEY]: shadowSetting?.value ?? null },
-    acceptedEventTypes: [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
-    envDigests: marketingWebhookEnvDigests(process.env, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames),
-    schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
-  });
+  // The same function the receiver stamps its signed answers with.
+  const stagingConfigSnapshotDigest = marketingWebhookStagingConfigSnapshotDigest(
+    process.env,
+    shadowSetting?.value ?? null,
+  );
 
   const draft = draftMarketingWebhookVerificationRecord({
     recordId,

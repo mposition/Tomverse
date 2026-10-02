@@ -1,6 +1,6 @@
 /**
  * Drafting a staging webhook verification record from what staging stored and
- * what Zernio delivered (S2 plan, S2e-verification; policy §8.1.1).
+ * what Zernio delivered (S2 plan, S2e-verification; docs/policy/marketing-automation.md §8.1.1).
  *
  * Pure. The caller reads the shadow reports from the database and the delivery
  * attempts from Zernio's webhook log; this decides, **per event type**, which of
@@ -41,6 +41,10 @@ export type MarketingWebhookDelivery = {
   readonly statusCode: number;
   /** The receiver's `status` or `code` from the response body, or null if it had none. */
   readonly answer: string | null;
+  /** The build that answered, as the response body names it; null when it names none. */
+  readonly pipeline: string | null;
+  /** The configuration a signed answer ran under; null when unsigned or unreadable. */
+  readonly config: string | null;
 };
 
 export type MarketingWebhookRecordDraftInput = {
@@ -102,9 +106,24 @@ export const draftMarketingWebhookVerificationRecord = (
   input: MarketingWebhookRecordDraftInput,
 ): MarketingWebhookRecordDraft => {
   const refs = new Set<string>();
+  // Positive evidence is only what this build answered under this configuration
+  // (docs/policy/marketing-automation.md §8.1.1: a change re-opens
+  // verification). Earlier observations stay in the order checks -- an event
+  // recorded by an older build is still not unprocessed.
+  const current = (attempt: MarketingWebhookDelivery) =>
+    attempt.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT &&
+    attempt.config === input.stagingConfigSnapshotDigest;
+  const recordedNow = new Set(
+    input.deliveries
+      .filter((attempt) => current(attempt) && attempt.statusCode === 200 && attempt.answer === "recorded")
+      .map((attempt) => marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, attempt.eventId)),
+  );
+  // Rows count only for events this build recorded under this configuration.
+  const reports = input.reports.filter((row) => recordedNow.has(row.eventIdDigest));
 
   const reportsByDigest = new Map<string, MarketingWebhookShadowRow[]>();
   for (const row of input.reports) {
+    // Every stored row, so a second row of the event is seen whatever stored it.
     reportsByDigest.set(row.eventIdDigest, [...(reportsByDigest.get(row.eventIdDigest) ?? []), row]);
   }
   /** Exactly one stored report of this event, and of this type. */
@@ -129,18 +148,19 @@ export const draftMarketingWebhookVerificationRecord = (
     const c1 = events.find(
       ([eventId, attempts]) =>
         storedOnce(eventId, eventType) &&
-        attempts.some((attempt) => attempt.statusCode === 200 && attempt.answer === "recorded"),
+        attempts.some((attempt) => current(attempt) && attempt.statusCode === 200 && attempt.answer === "recorded"),
     );
     if (c1) used.push(...c1[1].filter((attempt) => attempt.answer === "recorded"));
 
     // 3: after it was recorded, a later delivery of the same event changed nothing.
     const c3 = events.find(([eventId, attempts]) => {
       if (!storedOnce(eventId, eventType)) return false;
-      const recorded = attempts.find((attempt) => attempt.answer === "recorded");
+      const recorded = attempts.find((attempt) => current(attempt) && attempt.answer === "recorded");
       return (
         recorded !== undefined &&
         attempts.some(
           (attempt) =>
+            current(attempt) &&
             attempt.answer === "duplicate" &&
             attempt.statusCode === 200 &&
             time(attempt.at) > time(recorded.at),
@@ -154,7 +174,7 @@ export const draftMarketingWebhookVerificationRecord = (
     const c4 = events.find(([eventId, attempts]) => {
       if (!storedOnce(eventId, eventType)) return false;
       const failure = attempts.findIndex(
-        (attempt) => attempt.statusCode === 503 && attempt.answer === "deliberate_fault",
+        (attempt) => current(attempt) && attempt.statusCode === 503 && attempt.answer === "deliberate_fault",
       );
       if (failure < 0) return false;
       const before = attempts.slice(0, failure);
@@ -162,14 +182,17 @@ export const draftMarketingWebhookVerificationRecord = (
       return (
         !before.some((attempt) => PROCESSED.has(attempt.answer ?? "")) &&
         after.filter((attempt) => attempt.answer === "recorded").length === 1 &&
-        after.some((attempt) => attempt.answer === "recorded" && time(attempt.at) > time(attempts[failure]!.at))
+        after.some(
+          (attempt) =>
+            current(attempt) && attempt.answer === "recorded" && time(attempt.at) > time(attempts[failure]!.at),
+        )
       );
     });
     if (c4) used.push(...c4[1]);
 
     // 5: at least one pair of this type agreed with the status query throughout.
     const pairs = new Map<string, boolean>();
-    for (const row of input.reports.filter((report) => report.eventType === eventType)) {
+    for (const row of reports.filter((report) => report.eventType === eventType)) {
       const key = row.channelId;
       pairs.set(key, (pairs.get(key) ?? true) && row.statusQueryMatch);
     }
@@ -186,7 +209,10 @@ export const draftMarketingWebhookVerificationRecord = (
 
   const problems: MarketingWebhookRecordDraftProblem[] = [];
   const refused = input.deliveries.filter(
-    (delivery) => delivery.statusCode === 401 && delivery.answer === "signature_invalid",
+    (delivery) =>
+      delivery.statusCode === 401 &&
+      delivery.answer === "signature_invalid" &&
+      delivery.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   );
   if (refused.length === 0) problems.push("c2_no_refused_delivery");
   if (input.c2EvidenceRefs.length === 0) problems.push("c2_evidence_missing");
@@ -198,14 +224,14 @@ export const draftMarketingWebhookVerificationRecord = (
   for (const eventType of types) {
     // Deliveries Zernio sends that the receiver never records (its test event)
     // have no stored rows and cannot be in scope; they are not reported as shortfalls.
-    if (!input.reports.some((report) => report.eventType === eventType)) continue;
+    if (!reports.some((report) => report.eventType === eventType)) continue;
     const missing = proveType(eventType);
     if (missing.length > 0) {
       excludedTypes.push({ eventType, missing });
       continue;
     }
     const channels = new Map<string, boolean>();
-    for (const row of input.reports.filter((report) => report.eventType === eventType)) {
+    for (const row of reports.filter((report) => report.eventType === eventType)) {
       channels.set(row.channelId, (channels.get(row.channelId) ?? true) && row.statusQueryMatch);
     }
     for (const [channelId, agreed] of channels) {

@@ -31,6 +31,14 @@ import { z } from "zod";
 import {
   resolveDeploymentEnvironment,
 } from "@/lib/deploymentEnvironment";
+import {
+  MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
+  MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
+  MARKETING_WEBHOOK_SCHEMA_VERSION,
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  computeMarketingWebhookConfigSnapshotDigest,
+  marketingWebhookEnvDigests,
+} from "@/lib/marketingAutomationAccess";
 import type { MarketingPostStatus } from "@/lib/marketingAutomationSchema";
 
 export const MARKETING_WEBHOOK_PROVIDER = "zernio";
@@ -300,6 +308,24 @@ export class MarketingWebhookSettingRefusedError extends Error {
 export const marketingWebhookIsStaging = (env: NodeJS.ProcessEnv = process.env): boolean =>
   String(env.TOMVERSE_DEPLOY_ENV ?? "").trim().toLowerCase() === "staging" &&
   resolveDeploymentEnvironment(env) === "staging";
+
+/**
+ * The staging configuration snapshot digest (S1 r7 amendment 1): the shadow
+ * switch's stored value, the accepted event list, the schema version and the
+ * hashes of the declared environment values. One function for the receiver,
+ * which stamps it on every signed answer, and the record drafter, which keeps
+ * only attempts stamped with the digest it records.
+ */
+export const marketingWebhookStagingConfigSnapshotDigest = (
+  env: Readonly<Record<string, string | undefined>>,
+  shadowValue: string | null,
+): string =>
+  computeMarketingWebhookConfigSnapshotDigest({
+    appSettings: { [MARKETING_WEBHOOK_SHADOW_KEY]: shadowValue },
+    acceptedEventTypes: [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
+    envDigests: marketingWebhookEnvDigests(env, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames),
+    schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
+  });
 
 // ---------------------------------------------------------------------------
 // The fault arm

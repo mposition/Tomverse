@@ -11,9 +11,13 @@ import {
 } from "@/lib/marketingStore";
 import {
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
+  MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_SHADOW_KEY,
 } from "@/lib/marketingAutomationAccess";
-import { marketingWebhookIsStaging } from "@/lib/marketingWebhookCore";
+import {
+  marketingWebhookIsStaging,
+  marketingWebhookStagingConfigSnapshotDigest,
+} from "@/lib/marketingWebhookCore";
 import { handleZernioWebhook } from "@/lib/marketingWebhookReceiver";
 import { consumeMarketingWebhookFaultArm } from "@/lib/marketingWebhookSettings";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +40,14 @@ export async function POST(request: Request) {
       return typeof value === "string" && value.trim() !== "";
     },
     secret: process.env.ZERNIO_WEBHOOK_SECRET,
+    pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+    configSnapshotDigest: async () => {
+      const row = await prisma.appSetting.findUnique({
+        where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
+        select: { value: true },
+      });
+      return marketingWebhookStagingConfigSnapshotDigest(process.env, row?.value ?? null);
+    },
     adapter: buildZernioAdapterFromEnv(STATUS_QUERY_BUDGET_MS),
     consumeFaultArm: (eventIdDigest) =>
       // Read committed, its own transaction: of two deliveries racing for one

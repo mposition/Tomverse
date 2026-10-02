@@ -20,12 +20,16 @@ const report = (n, eventType = PUBLISHED, overrides = {}) => ({
   ...overrides,
 });
 const at = (minute) => `2026-10-03T01:${String(minute).padStart(2, "0")}:00.000Z`;
-const delivery = (n, minute, statusCode, answer, event = PUBLISHED) => ({
+const CONFIG = "b".repeat(64);
+const delivery = (n, minute, statusCode, answer, event = PUBLISHED, stamp = {}) => ({
   eventId: id(n),
   event,
   at: at(minute),
   statusCode,
   answer,
+  pipeline: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  config: statusCode === 401 ? null : CONFIG,
+  ...stamp,
 });
 
 // Event 1: recorded, then redelivered (condition 3). Event 2: delivered while
@@ -41,7 +45,7 @@ const base = {
   recordId: "2026-10-03__zernio-shadow",
   executor: "staging-operator",
   stagingCommitSha: "a".repeat(40),
-  stagingConfigSnapshotDigest: "b".repeat(64),
+  stagingConfigSnapshotDigest: CONFIG,
   reports: [report(1), report(2)],
   deliveries: [delivery(9, 0, 401, "signature_invalid", "webhook.test"), ...provedPublished],
   c2EvidenceRefs: ["probe:tampered-body:401"],
@@ -123,4 +127,41 @@ test("condition 2 needs a refused delivery and the executor's tampered-body refe
   assert.deepEqual(noRefusal.problems, ["c2_no_refused_delivery"]);
   const noProbe = draftMarketingWebhookVerificationRecord({ ...base, c2EvidenceRefs: [] });
   assert.deepEqual(noProbe.problems, ["c2_evidence_missing"]);
+});
+
+test("only what this build answered under this configuration is evidence", () => {
+  const olderBuild = { pipeline: "f".repeat(64) };
+  const otherConfig = { config: "c".repeat(64) };
+  for (const stamp of [olderBuild, otherConfig, { pipeline: null, config: null }]) {
+    const draft = draftMarketingWebhookVerificationRecord({
+      ...base,
+      deliveries: [
+        base.deliveries[0],
+        ...provedPublished.map((attempt) => ({ ...attempt, ...stamp })),
+      ],
+    });
+    assert.equal(draft.ok, false, JSON.stringify(stamp));
+    assert.deepEqual(draft.problems, ["no_event_type_proved"]);
+  }
+  // A refusal answered by another build does not prove condition 2 for this one.
+  const oldRefusal = draftMarketingWebhookVerificationRecord({
+    ...base,
+    deliveries: [delivery(9, 0, 401, "signature_invalid", "webhook.test", olderBuild), ...provedPublished],
+  });
+  assert.deepEqual(oldRefusal.problems, ["c2_no_refused_delivery"]);
+});
+
+test("an event an older build already recorded is not unprocessed for condition 4", () => {
+  const draft = draftMarketingWebhookVerificationRecord({
+    ...base,
+    deliveries: [
+      base.deliveries[0],
+      ...provedPublished.slice(0, 2),
+      delivery(2, 3, 200, "recorded", PUBLISHED, { pipeline: "f".repeat(64) }),
+      delivery(2, 5, 503, "deliberate_fault"),
+      delivery(2, 6, 200, "duplicate"),
+    ],
+  });
+  assert.equal(draft.ok, false);
+  assert.deepEqual(draft.excludedTypes, [{ eventType: PUBLISHED, missing: ["c4"] }]);
 });

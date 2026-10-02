@@ -44,6 +44,9 @@ const request = (
   return new Request("https://staging.test/api/webhooks/zernio", { method: "POST", headers, body });
 };
 
+const PIPELINE = "a".repeat(64);
+const CONFIG = "b".repeat(64);
+
 type Calls = { name: string; input?: unknown }[];
 
 const deps = (
@@ -62,6 +65,8 @@ const deps = (
     isStaging: () => true,
     killSwitchOn: () => false,
     secret: SECRET,
+    pipelineFingerprint: PIPELINE,
+    configSnapshotDigest: async () => CONFIG,
     adapter,
     consumeFaultArm: async (digest) => {
       calls.push({ name: "consumeFaultArm", input: digest });
@@ -108,6 +113,49 @@ test("a signed event in staging is recorded in shadow, after the latch and the s
     derivedStatus: "published",
     statusQueryMatch: true,
   });
+});
+
+test("every staging answer names its build, and a signed one its configuration", async () => {
+  const signedAnswer = await answer(await handleZernioWebhook(request(payload()), deps().value));
+  assert.equal(signedAnswer.body.pipeline, PIPELINE);
+  assert.equal(signedAnswer.body.config, CONFIG);
+
+  // Refused before the signature: the build only, no configuration read.
+  let configRead = false;
+  const refused = await answer(
+    await handleZernioWebhook(
+      request(payload(), { signature: "0".repeat(64) }),
+      deps({
+        configSnapshotDigest: async () => {
+          configRead = true;
+          return CONFIG;
+        },
+      }).value,
+    ),
+  );
+  assert.equal(refused.status, 401);
+  assert.equal(refused.body.pipeline, PIPELINE);
+  assert.equal("config" in refused.body, false);
+  assert.equal(configRead, false);
+
+  // An unreadable configuration is stated as null, never guessed.
+  const unreadable = await answer(
+    await handleZernioWebhook(
+      request(payload()),
+      deps({
+        configSnapshotDigest: async () => {
+          throw new Error("down");
+        },
+      }).value,
+    ),
+  );
+  assert.equal(unreadable.body.config, null);
+
+  // Outside staging nothing is said, not even the build.
+  const outside = await answer(
+    await handleZernioWebhook(request(payload()), deps({ isStaging: () => false }).value),
+  );
+  assert.equal("pipeline" in outside.body, false);
 });
 
 test("outside staging nothing is read, nothing is consumed and nothing is recorded", async () => {
