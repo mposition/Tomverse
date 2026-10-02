@@ -59,8 +59,27 @@ function fixture(overrides = {}, mode = "accept") {
     git(work, "commit", "-q", "-m", `change ${file}`);
     return git(work, "rev-parse", "HEAD");
   };
-  return { root, work, config: validateConfig(raw), client, commit, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, work, origin, config: validateConfig(raw), client, commit, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+test("--base names the branch the work left: its fork point is used even after that branch moved on", () => {
+  const f = fixture();
+  try {
+    const forkPoint = git(f.work, "rev-parse", "HEAD");
+    f.commit("a.txt", "two\n");
+    // develop moves ahead after the branch was cut.
+    writeFileSync(join(f.origin, "b.txt"), "later\n");
+    git(f.origin, "add", ".");
+    git(f.origin, "commit", "-q", "-m", "develop moves on");
+    git(f.work, "fetch", "-q", "origin");
+    const submitted = f.client("submit", "--author", "codex", "--repo", "demo", "--base", "origin/develop");
+    assert.equal(submitted.code, 3, submitted.stderr);
+    const { jobId } = JSON.parse(submitted.stdout);
+    assert.equal(new Store(f.config.stateDir).readJob(jobId).job.base, forkPoint);
+  } finally {
+    f.cleanup();
+  }
+});
 
 test("a base pushed to an unprotected branch is refused, so it cannot supply the reviewer's instructions", () => {
   const f = fixture();

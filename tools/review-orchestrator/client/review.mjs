@@ -6,12 +6,15 @@
  *
  *   node tools/review-orchestrator/client/review.mjs submit --author codex [--base <rev>] [--head <rev>]
  *                                          [--reviewers 2] [--scope "..."] [--author-vendor xai]
+ *                                          [--focus <rev>]   review only <rev>..HEAD
  *   node tools/review-orchestrator/client/review.mjs wait <jobId> [--timeout 540]
  *   node tools/review-orchestrator/client/review.mjs status [jobId]
  *   node tools/review-orchestrator/client/review.mjs report <jobId> [--slot 0]
  *
  * Environment:
- *   REVIEW_ORCH_HOST     SSH destination (user@host or a ~/.ssh/config alias). Required.
+ *   REVIEW_ORCH_HOST     SSH destination (user@host or a ~/.ssh/config alias),
+ *                        default "review-orch" -- the alias the README sets up, so
+ *                        an app needs no environment variable (and no restart).
  *   REVIEW_ORCH_REMOTE   remote command, default "review-orchestrator"
  *   REVIEW_ORCH_BASE     default base ref, default "origin/develop"
  *
@@ -25,6 +28,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 const USAGE = 64;
+export const DEFAULT_HOST = "review-orch";
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -86,8 +90,7 @@ function transport(token, stdinPath) {
     command = process.execPath;
     args = [local, "rpc", token];
   } else {
-    const host = process.env.REVIEW_ORCH_HOST;
-    if (!host) throw new Error("REVIEW_ORCH_HOST is not set");
+    const host = process.env.REVIEW_ORCH_HOST || DEFAULT_HOST;
     command = process.env.REVIEW_ORCH_SSH || "ssh";
     args = ["-o", "BatchMode=yes", host, process.env.REVIEW_ORCH_REMOTE || "review-orchestrator", "rpc", token];
   }
@@ -110,10 +113,15 @@ async function submit(options) {
   if (!author) throw new Error("--author is required (claude, codex, cursor, ...)");
   const head = git(["rev-parse", "--verify", `${options.head ?? "HEAD"}^{commit}`]);
   const baseRef = options.base ?? process.env.REVIEW_ORCH_BASE ?? "origin/develop";
-  const base = options.base
-    ? git(["rev-parse", "--verify", `${baseRef}^{commit}`])
-    : git(["merge-base", head, baseRef]);
+  // Always the fork point: `--base origin/main` means "where this branch left
+  // main", not main's tip, which is no ancestor once main has moved on. For a
+  // base that already is an ancestor, the merge-base is that commit itself.
+  git(["rev-parse", "--verify", `${baseRef}^{commit}`]);
+  const base = git(["merge-base", head, baseRef]);
   if (base === head) throw new Error("nothing to review: head equals base");
+  // --focus <rev>: show the reviewer only <rev>..HEAD (say, what changed since
+  // the last review round). The server checks it lies between base and HEAD.
+  const focus = options.focus ? git(["rev-parse", "--verify", `${options.focus}^{commit}`]) : undefined;
   if (git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
     process.stderr.write("warning: uncommitted changes are not part of the review; only committed work is sent\n");
   }
@@ -129,6 +137,7 @@ async function submit(options) {
       authorVendor: options["author-vendor"],
       reviewers: options.reviewers ? Number(options.reviewers) : 1,
       scope: options.scope,
+      focus,
       bundleRef: bundle.ref,
     };
     return await transport(encodeRpc(request), bundle.path);

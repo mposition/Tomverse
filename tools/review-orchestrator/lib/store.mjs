@@ -107,6 +107,7 @@ export function summarise({ job, slots }) {
     repo: job.repo,
     base: job.base,
     head: job.head,
+    focus: job.focus ?? null,
     author: job.author,
     authorVendor: job.authorVendor,
     touchesContract: job.touchesContract,
