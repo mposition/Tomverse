@@ -178,7 +178,11 @@ export async function readProductResearchConsole(
   // heading asks.
   const newestSuccess = rows.find((row) => row.outcome === "ok") ?? null;
   const displayable = displayableObservationSlot(series, {
-    everRecorded: newestSuccess !== null,
+    // Any row, not just a successful one. Keyed on successes, a table holding
+    // nothing but failures would be captioned "nothing was ever recorded" --
+    // which contradicts the failures printed above it, and the two absences
+    // exist precisely so the screen can tell them apart.
+    everRecorded: rows.length > 0,
   });
 
   // Reads the anchor, and writes it the first time the switch is seen on.

@@ -653,6 +653,15 @@ test("a failed or missing slot does not get an earlier success's rows", () => {
   assert.equal(never.slot, null);
   assert.equal(never.omitted, "never_recorded");
 
+  // `everRecorded` is any row, not a successful one. A table holding nothing
+  // but failures must not be captioned "nothing was ever recorded": that
+  // contradicts the failures printed above it.
+  const failuresOnly = displayableObservationSlot(seriesFromPattern("fff"), {
+    everRecorded: true,
+  });
+  assert.equal(failuresOnly.slot, null);
+  assert.equal(failuresOnly.omitted, "current_slot_not_recorded");
+
   // An empty series answers rather than throwing: a screen rendered before any
   // slot exists must not be a crash.
   assert.deepEqual(displayableObservationSlot([], {}), {
