@@ -19,8 +19,8 @@ BEGIN
         END IF;
         first_completion :=
             (OLD."analysisCompletedAt" IS NULL AND NEW."analysisCompletedAt" IS NOT NULL) OR
-            (OLD."state" <> 'draft_ready' AND NEW."state" = 'draft_ready' AND
-             OLD."state" NOT IN ('partially_decided', 'decided'));
+            (OLD."state" NOT IN ('draft_ready', 'partially_decided', 'decided') AND
+             NEW."state" IN ('draft_ready', 'partially_decided', 'decided'));
     ELSE
         first_completion := NEW."analysisCompletedAt" IS NOT NULL;
     END IF;

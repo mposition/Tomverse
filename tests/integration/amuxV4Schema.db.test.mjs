@@ -155,6 +155,14 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       "AmuxIdeaAnalysisChunk_completion_deadline_check",
     );
     await expectRejected(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "state" = 'partially_decided',
+           "analysisCompletedAt" = (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '2 days'
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [expiredIdeaId],
+      "AmuxIdeaAnalysisChunk_completion_deadline_check",
+    );
+    await expectRejected(
       `INSERT INTO public."AmuxIdeaAnalysisChunk"
        ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
         "leaseGeneration", "analysisCompletedAt", "updatedAt")
