@@ -40,3 +40,20 @@ test("AMUX v4 sandbox refuses shell or path escape as the executable", () => {
   assert.throws(() => amuxV4SandboxArgs("/tmp/amux-v4-test-abc",
     ["/usr/bin/node", "x".repeat(8_193)]), TypeError);
 });
+
+test("AMUX v4 CLI requires a digest-pinned private staged executable", () => {
+  const socket = "/tmp/amux-v4-socket-abc";
+  const path = "/tmp/amux-v4-cli-stage-abc/codex";
+  const mount = { path, sha256: "a".repeat(64) };
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex", "--version"]), TypeError);
+  const args = amuxV4SandboxArgs(socket, ["/run/amux-cli/codex", "--version"], mount);
+  const bindAt = args.findIndex((value, index) => value === "--ro-bind" && args[index + 1] === path);
+  assert.ok(bindAt > 0);
+  assert.equal(args[bindAt + 2], "/run/amux-cli/codex");
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/claude", "--version"], mount), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/usr/bin/node"], mount), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex"],
+    { path: "/home/tommy/.local/bin/codex", sha256: "a".repeat(64) }), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex"],
+    { path, sha256: "not-a-digest" }), TypeError);
+});
