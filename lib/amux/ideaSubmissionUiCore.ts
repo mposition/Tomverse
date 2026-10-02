@@ -5,19 +5,26 @@ type PostDecision =
   | { kind: "refused"; code: string }
   | { kind: "verify" };
 
+type SubmissionUiState = "idle" | "pending" | "submitted" | "outcome_unknown" |
+  "recovery_unavailable" | "refused" | "selection_pending" | "selection_unavailable";
+
+/** A failed read-back of a selected, already-saved idea is not a new-idea
+ * state. The operator must retry that read-back or explicitly start another. */
+export function canCreateIdeaFromState(state: SubmissionUiState): boolean {
+  return state === "idle" || state === "refused";
+}
+
 /** A new request ID is safe only after the previous write is definitively
  * confirmed. Unknown outcomes must be read back, never silently reset. */
 export function canStartAnotherIdea(
-  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" |
-    "refused" | "selection_pending" | "selection_unavailable",
+  state: SubmissionUiState,
   busy: boolean,
 ): boolean {
   return (state === "submitted" || state === "selection_unavailable") && !busy;
 }
 
 export function canSelectRecentIdea(
-  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" |
-    "refused" | "selection_pending" | "selection_unavailable",
+  state: SubmissionUiState,
   busy: boolean,
 ): boolean {
   return !busy && (state === "idle" || state === "submitted" || state === "refused" ||

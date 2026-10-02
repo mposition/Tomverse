@@ -10,6 +10,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
+  canCreateIdeaFromState,
   canStartAnotherIdea,
   canSelectRecentIdea,
   classifyIdeaSubmissionPost,
@@ -134,6 +135,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setRepositories("");
     setPullRequests("");
     setResult(null);
+    setPlanReadyIdeaId(null);
     setSourceRepository("");
     setSourceKind("repository_file");
     setSourceCommitSha("");
@@ -281,8 +283,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const submit = async () => {
     if (!submissionAvailable || !recoveryChecked || inFlight.current ||
         result?.outcome !== "input_checked" ||
-        submission.kind === "pending" || submission.kind === "outcome_unknown" ||
-        submission.kind === "submitted" || submission.kind === "selection_pending") return;
+        !canCreateIdeaFromState(submission.kind)) return;
     const refs = parsePullRequests(pullRequests);
     if (!refs) return;
     const requestId = crypto.randomUUID();
@@ -350,9 +351,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     (sourceKind === "repository_file" ? !!sourceCommitSha.trim() :
       /^[1-9]\d*$/.test(sourcePrNumber) && Number.isSafeInteger(Number(sourcePrNumber)) &&
       !!sourceBaseSha.trim() && !!sourceHeadSha.trim());
-  const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
-    submission.kind === "submitted" || submission.kind === "recovery_unavailable" ||
-    submission.kind === "selection_pending";
+  const frozen = !canCreateIdeaFromState(submission.kind);
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
     (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED") ||
     (sourceScopeResult.kind === "error" && sourceScopeResult.code === "ADMIN_REAUTHENTICATION_REQUIRED");

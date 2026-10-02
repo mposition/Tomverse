@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  canCreateIdeaFromState,
   canStartAnotherIdea,
   canSelectRecentIdea,
   classifyIdeaSubmissionPost,
@@ -14,6 +15,22 @@ import {
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestId = "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0";
+
+test("a failed recent-idea read-back requires retry or explicit reset before a new write", () => {
+  for (const state of ["idle", "refused"]) {
+    assert.equal(canCreateIdeaFromState(state), true);
+  }
+  for (const state of ["pending", "submitted", "outcome_unknown",
+    "recovery_unavailable", "selection_pending", "selection_unavailable"]) {
+    assert.equal(canCreateIdeaFromState(state), false);
+  }
+  assert.equal(canStartAnotherIdea("selection_unavailable", false), true);
+  assert.equal(canSelectRecentIdea("selection_unavailable", false), true);
+  const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const submit = panel.split("const submit = async () => {")[1]?.split("const checkInput = async")[0] ?? "";
+  assert.match(submit, /!canCreateIdeaFromState\(submission\.kind\)/);
+  assert.match(panel, /const frozen = !canCreateIdeaFromState\(submission\.kind\)/);
+});
 
 test("another idea starts only after a definitive save and no pending check", () => {
   assert.equal(canStartAnotherIdea("submitted", false), true);
