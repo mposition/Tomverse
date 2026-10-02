@@ -13,7 +13,7 @@ const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const UNFINISHED_STATES = ["submitted", "collecting", "awaiting_preview", "analyzing"];
 
 export class AmuxIdeaAutoCancellationError extends Error {
-  constructor(readonly code: "not_due" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "not_due" | "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaAutoCancellationError";
   }
@@ -21,12 +21,14 @@ export class AmuxIdeaAutoCancellationError extends Error {
 
 /** Dark transaction body for the approved seven-day retention tick. It
  * terminates analysis eligibility but neither erases the idea nor releases
- * an in-flight/unknown budget hold. A caller must not blindly retry an
+ * an in-flight/unknown budget hold. Child attempts retain their evidence;
+ * any status projection must give this parent cancellation precedence over
+ * non-terminal child states. A caller must not blindly retry an
  * uncertain COMMIT; the idea and audit row require a read-back first. */
 export async function commitAmuxOverdueIdeaAnalysisCancellation(
   tx: Prisma.TransactionClient, ideaId: string,
 ): Promise<{ ideaId: string; cancelledAt: string; auditId: string }> {
-  if (!ID.test(ideaId)) throw new AmuxIdeaAutoCancellationError("not_due");
+  if (!ID.test(ideaId)) throw new AmuxIdeaAutoCancellationError("not_found");
   await tx.$queryRaw`
     SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
@@ -35,7 +37,7 @@ export async function commitAmuxOverdueIdeaAnalysisCancellation(
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission" WHERE "id" = ${ideaId} FOR UPDATE
   `;
-  if (locked.length !== 1) throw new AmuxIdeaAutoCancellationError("not_due");
+  if (locked.length !== 1) throw new AmuxIdeaAutoCancellationError("not_found");
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId } });
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
