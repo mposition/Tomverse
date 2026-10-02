@@ -12,9 +12,9 @@ import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmat
 import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { commitAmuxIdeaAnalysisPriceApproval,
+  commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
-import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -267,19 +267,15 @@ test("revoked price evidence cannot authorize another reservation", async () => 
   const selectedModelId = modelId();
   const previewId = await confirmedPreviewId(selectedModelId);
   const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
-  await prisma.$transaction(async (tx) => {
-    const revokedAt = new Date();
-    const revocationAuditLogId = await writeAdminAuditLog({ tx, session, request,
-      action: "amux.v4.analysis_price.revoked",
-      targetType: "AmuxIdeaAnalysisPriceVersion", targetId: priceVersionId,
-      summary: "Synthetic owner revocation of one analysis price version.",
-      metadata: { revokedAt: revokedAt.toISOString(), modelCallStarted: false },
-    });
-    await tx.amuxIdeaAnalysisPriceVersion.update({
-      where: { id: priceVersionId },
-      data: { status: "revoked", revokedAt, revocationAuditLogId },
-    });
-  });
+  const revoked = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisPriceRevocation(tx, { session, request,
+      priceVersionId, expectedVersion: 1 }));
+  assert.equal(revoked.priceVersionId, priceVersionId);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisPriceRevocation(tx, { session, request,
+      priceVersionId, expectedVersion: 1 })), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisPriceApprovalError &&
+    error.code === "price_revision_changed");
   const holdId = randomUUID();
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx,

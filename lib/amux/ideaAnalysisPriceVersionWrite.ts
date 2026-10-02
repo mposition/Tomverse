@@ -36,6 +36,26 @@ export class AmuxIdeaAnalysisPriceApprovalError extends Error {
   }
 }
 
+async function requireOwnerAndStepUp(session: Session): Promise<string> {
+  const actorUserId = session.user?.id;
+  if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner") {
+    throw new AmuxIdeaAnalysisPriceApprovalError("forbidden");
+  }
+  await assertRecentAdminAuthentication(session);
+  return actorUserId;
+}
+
+async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {
+  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxIdeaAnalysisPriceApprovalError("price_unavailable");
+  }
+  return now;
+}
+
 function requireValidApproval(input: AmuxIdeaAnalysisPriceApproval): void {
   const positiveInt = (value: unknown): value is number =>
     typeof value === "number" && Number.isSafeInteger(value) &&
@@ -66,12 +86,7 @@ export async function commitAmuxIdeaAnalysisPriceApproval(
   tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; approval: AmuxIdeaAnalysisPriceApproval },
 ): Promise<{ priceVersionId: string; version: number; auditId: string }> {
-  const actorUserId = input.session.user?.id;
-  if (!actorUserId || !isAdminSession(input.session) ||
-      getAdminRole(input.session) !== "owner") {
-    throw new AmuxIdeaAnalysisPriceApprovalError("forbidden");
-  }
-  await assertRecentAdminAuthentication(input.session);
+  const actorUserId = await requireOwnerAndStepUp(input.session);
   requireValidApproval(input.approval);
   const price = input.approval;
   await tx.$queryRaw`
@@ -79,13 +94,7 @@ export async function commitAmuxIdeaAnalysisPriceApproval(
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
-  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
-  `;
-  const now = clock[0]?.now;
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
-    throw new AmuxIdeaAnalysisPriceApprovalError("price_unavailable");
-  }
+  const now = await databaseNow(tx);
   if (price.verifiedAt > now || price.expiresAt <= now ||
       price.verifiedAt >= price.expiresAt) {
     throw new AmuxIdeaAnalysisPriceApprovalError("invalid_price_evidence");
@@ -131,4 +140,57 @@ export async function commitAmuxIdeaAnalysisPriceApproval(
     approvedByUserId: actorUserId, approvalAuditLogId: auditId,
   } });
   return { priceVersionId: price.id, version, auditId };
+}
+
+/** Revocation is one-way; a replacement price is a new version with a new
+ * owner audit. Existing reservations keep their immutable price snapshot. */
+export async function commitAmuxIdeaAnalysisPriceRevocation(
+  tx: Prisma.TransactionClient,
+  input: { session: Session; request: Request; priceVersionId: string;
+    expectedVersion: number },
+): Promise<{ priceVersionId: string; version: number; auditId: string }> {
+  const actorUserId = await requireOwnerAndStepUp(input.session);
+  if (!ID.test(input.priceVersionId) ||
+      !Number.isSafeInteger(input.expectedVersion) ||
+      input.expectedVersion <= 0 || input.expectedVersion > MAX_INT) {
+    throw new AmuxIdeaAnalysisPriceApprovalError("invalid_price_evidence");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaAnalysisPriceVersion"
+    WHERE "id" = ${input.priceVersionId} FOR UPDATE
+  `;
+  if (locked.length !== 1) {
+    throw new AmuxIdeaAnalysisPriceApprovalError("price_revision_changed");
+  }
+  const row = await tx.amuxIdeaAnalysisPriceVersion.findUnique({
+    where: { id: input.priceVersionId },
+  });
+  if (!row || row.status !== "approved" || row.version !== input.expectedVersion ||
+      row.revokedAt !== null || row.revocationAuditLogId !== null) {
+    throw new AmuxIdeaAnalysisPriceApprovalError("price_revision_changed");
+  }
+  const now = await databaseNow(tx);
+  if (now < row.approvedAt) {
+    throw new AmuxIdeaAnalysisPriceApprovalError("price_unavailable");
+  }
+  const auditId = await writeAdminAuditLog({
+    tx, session: input.session, request: input.request,
+    action: "amux.v4.analysis_price.revoked",
+    targetType: "AmuxIdeaAnalysisPriceVersion", targetId: row.id,
+    summary: "Owner revoked one AMUX analysis price version; no model was called.",
+    metadata: { provider: row.provider, modelId: row.modelId, mode: row.mode,
+      version: row.version, priceVersionId: row.id,
+      revokedAt: now.toISOString(), revokedByUserId: actorUserId,
+      modelCallStarted: false },
+  });
+  await tx.amuxIdeaAnalysisPriceVersion.update({
+    where: { id: row.id },
+    data: { status: "revoked", revokedAt: now, revocationAuditLogId: auditId },
+  });
+  return { priceVersionId: row.id, version: row.version, auditId };
 }
