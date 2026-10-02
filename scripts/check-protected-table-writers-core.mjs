@@ -263,6 +263,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/engineering-agent.md §11",
   },
   {
+    table: "AmuxCliUsageInvocation",
+    delegate: "amuxCliUsageInvocation",
+    writers: [],
+    contract: "docs/policy/development-agent-orchestration.md v22 §5, v25",
+  },
+  {
     table: "AmuxCliUsageAggregateFinalization",
     delegate: "amuxCliUsageAggregateFinalization",
     writers: [],
@@ -387,6 +393,30 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261002150000_amux_cli_usage_invocation/migration.sql",
+    table: "AmuxCliUsageInvocation",
+    tableMentions: 6,
+    writeVerbs: 2,
+    reason:
+      "The dark receipt migration creates an empty table and guard triggers. It contains no DML that inserts, updates or deletes a usage receipt. A future application writer still requires a reviewed exact module allowlist.",
+  },
+  {
+    path: "prisma/migrations/20261002170000_amux_cli_usage_role_snapshot/migration.sql",
+    table: "AmuxCliUsageInvocation",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason:
+      "The dark role-snapshot migration only adds a required column and CHECK constraints to the empty receipt table. There is no DEFAULT, backfill or DML; pre-existing rows make it fail closed.",
+  },
+  {
+    path: "prisma/migrations/20261002180000_amux_cli_aggregate_role_vocabulary/migration.sql",
+    table: "AmuxCliUsageAggregateCell",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "This dark migration adds only a closed role CHECK to final aggregate cells. It neither creates cells nor changes any existing row and contains no DML.",
+  },
   {
     path: "prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
     table: "AmuxCliUsageAggregateFinalization",

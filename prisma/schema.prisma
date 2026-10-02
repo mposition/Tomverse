@@ -7201,6 +7201,10 @@ model AmuxCostLedgerEntry {
 model AmuxCliUsageInvocation {
   invocationId                   String   @id @db.Uuid
   contextKind                    String
+  /// Snapshot the server-approved Task role while binding the leased attempt;
+  /// the CLI/worker cannot self-report it and aggregation cannot read a later card.
+  /// Idea analysis uses the separate idea_analysis bucket.
+  workerRole                     String   @db.VarChar(32)
   cardId                         String?  @db.VarChar(160)
   taskId                         String?  @db.VarChar(160)
   runId                          String?  @db.VarChar(160)
