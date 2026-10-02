@@ -144,6 +144,14 @@ test("aggregate: pending, then any reject, then any unknown, then accept", () =>
   assert.equal(aggregate([{ status: "done", verdict: "accept" }]), "accept");
 });
 
+test("the shipped example config validates and names the repository the client derives", async () => {
+  const { readFileSync: read } = await import("node:fs");
+  const raw = JSON.parse(read("tools/review-orchestrator/config.example.json", "utf8"));
+  const config = validateConfig(raw);
+  assert.ok(config.repos[repoNameFromRemote(config.repos.tomverse.url)]);
+  assert.equal(config.providers.find((p) => p.id === "devin").enabled, false);
+});
+
 test("config fails closed on an enabled provider without a measured vendor", () => {
   const base = { stateDir: "/x", repos: { demo: { url: "u", mirror: "m" } } };
   assert.throws(
@@ -173,7 +181,7 @@ test("reviewers get an allowlisted environment, not the daemon's", () => {
 });
 
 test("repo name comes from the origin URL", () => {
-  assert.equal(repoNameFromRemote("https://github.com/mposition/ai-chat-hub.git"), "ai-chat-hub");
+  assert.equal(repoNameFromRemote("https://github.com/mposition/Tomverse.git"), "tomverse");
   assert.equal(repoNameFromRemote("git@github.com:mposition/ai-chat-hub.git"), "ai-chat-hub");
 });
 

@@ -3,9 +3,9 @@
   "timeoutSeconds": 2400,
   "waitMaxSeconds": 540,
   "repos": {
-    "ai-chat-hub": {
-      "url": "https://github.com/mposition/ai-chat-hub.git",
-      "mirror": "/var/lib/review-orchestrator/mirrors/ai-chat-hub.git"
+    "tomverse": {
+      "url": "https://github.com/mposition/Tomverse.git",
+      "mirror": "/var/lib/review-orchestrator/mirrors/tomverse.git"
     }
   },
   "contractPaths": [
