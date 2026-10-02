@@ -123,6 +123,11 @@ export type MarketingPublishResult =
 /** What the platform says about an object we believe exists. */
 export type MarketingObjectStatus =
   | { readonly state: "live"; readonly externalUrl: string }
+  /**
+   * The provider says this account's copy was not published: it failed, or it
+   * was retracted through the provider. Not removal by the platform.
+   */
+  | { readonly state: "not_live" }
   | { readonly state: "removed" }
   | { readonly state: "unknown" };
 
