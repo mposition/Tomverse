@@ -13,8 +13,12 @@
  * import, so both sides can load it.
  *
  * Bounded-schema rules of the shared contract: no `z.record`, union, `z.lazy`,
- * transform, refine, `any`, `unknown` or `custom`; every number an integer
- * with a minimum and maximum; every object strict; depth at most four.
+ * transform, `any`, `unknown` or `custom` *type*; every number an integer
+ * with a minimum and maximum; every object strict; depth at most four. The
+ * only refinements are cross-field checks that can refuse a document but
+ * never change or widen what it may contain: a CI or release-lane job
+ * belongs to its workflow, a CI row carries a class exactly when its job
+ * failed, and no not-checked code appears twice.
  */
 import { z } from "zod";
 
@@ -130,7 +134,7 @@ export const QA_RELEASE_DIGEST_ARRAY_LIMITS = {
   issuesBlocked: 30,
   issuesLandedButUnverified: 30,
   checks: 12,
-  ci: 24,
+  ci: 16,
   releaseLane: 10,
   // Every code at once: each closed condition can occur together.
   notChecked: QA_RELEASE_NOT_CHECKED_CODES.length,

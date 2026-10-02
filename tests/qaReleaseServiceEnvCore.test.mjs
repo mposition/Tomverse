@@ -93,7 +93,7 @@ test("the merge lane runs only on a declared, empty kill switch; unset is unread
   delete unset.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
   assert.equal(decideQaReleaseServiceStart("mergeLane", unset), "disabled");
   assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: undefined })), "disabled");
-  for (const value of ["1", "true", "false", "off", "0", " x "]) {
+  for (const value of ["1", "true", "false", "off", "0", " x ", " ", "\t"]) {
     assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: value })), "disabled", value);
   }
   // The enable flag is just as required: unset stops the lane.
