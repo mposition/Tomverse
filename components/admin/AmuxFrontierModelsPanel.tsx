@@ -282,7 +282,14 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         setFailure(await readAdminApiFailure(refusalResponse, {
           fallback: m.transferPreviewUnknown, locale,
         }));
-        setPreview({ kind: previous?.kind === "present" ? "expired" : "idle" });
+        if (previous?.kind === "present") {
+          // The refused replacement proves nothing about the old preview's
+          // current state; restore its receipt and read that exact ID back.
+          setPreview({ kind: "pending" });
+          await readBack(previous.previewId, previous.model, previous.effort);
+        } else {
+          setPreview({ kind: "idle" });
+        }
         return;
       }
       await readBack(previewId, model, effort);

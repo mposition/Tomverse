@@ -130,6 +130,7 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
   assert.match(panel, /readPreviewWriteReply\(response\)/);
   assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId\)/);
+  assert.match(panel, /if \(previous\?\.kind === "present"\) \{[\s\S]*?await readBack\(previous\.previewId, previous\.model, previous\.effort\);/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);
