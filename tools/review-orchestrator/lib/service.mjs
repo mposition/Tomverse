@@ -52,13 +52,16 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
   if (statSync(bundlePath).size > config.maxBundleBytes) throw new UsageError("bundle_too_large");
 
   const store = new Store(config.stateDir);
-  const pending = store.listJobs().filter(({ slots }) => slots.some((slot) => slot.status !== "done")).length;
-  if (pending >= config.maxPendingJobs) {
-    throw new UsageError("queue_full", `${pending} jobs are still pending; wait for one to finish`);
-  }
   const id = newJobId(now);
-  try {
-    const files = await withLock(mirrorLock(config), () => {
+  // Counting pending jobs and publishing this one happen under one lock, so
+  // concurrent submits cannot all read the same count and all pass the cap.
+  return withLock(mirrorLock(config), () => {
+    const pending = store.listJobs().filter(({ slots }) => slots.some((slot) => slot.status !== "done")).length;
+    if (pending >= config.maxPendingJobs) {
+      throw new UsageError("queue_full", `${pending} jobs are still pending; wait for one to finish`);
+    }
+    let imported = false;
+    try {
       ensureMirror(repo);
       importBundle({
         mirror: repo.mirror,
@@ -70,36 +73,39 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         trustedBaseRefs: config.trustedBaseRefs,
         maxChangeBytes: config.maxChangeBytes,
       });
-      return changedFiles(repo.mirror, base, head);
-    });
-    if (files.length === 0) throw new UsageError("empty_change");
-    const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
-    const available = independentVendorCount(config.providers, authorVendor);
-    if (available < reviewers) {
-      throw new UsageError(
-        "insufficient_independent_reviewers",
-        `needs ${reviewers} vendors other than ${authorVendor}, ${available} configured`,
-      );
+      imported = true;
+      const files = changedFiles(repo.mirror, base, head);
+      if (files.length === 0) throw new UsageError("empty_change");
+      const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
+      const available = independentVendorCount(config.providers, authorVendor);
+      if (available < reviewers) {
+        throw new UsageError(
+          "insufficient_independent_reviewers",
+          `needs ${reviewers} vendors other than ${authorVendor}, ${available} configured`,
+        );
+      }
+      const job = {
+        id,
+        repo: repoName,
+        base,
+        head,
+        author,
+        authorVendor,
+        reviewers,
+        touchesContract,
+        scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
+        fileCount: files.length,
+        submittedAt: now.getTime(),
+      };
+      store.publish(job);
+      return { jobId: id, reviewers, touchesContract, fileCount: files.length };
+    } catch (error) {
+      store.discardStaging(id);
+      // A refused job leaves no review ref behind either.
+      if (imported) deleteReviewRef(repo.mirror, id);
+      throw error;
     }
-    const job = {
-      id,
-      repo: repoName,
-      base,
-      head,
-      author,
-      authorVendor,
-      reviewers,
-      touchesContract,
-      scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
-      fileCount: files.length,
-      submittedAt: now.getTime(),
-    };
-    store.publish(job);
-    return { jobId: id, reviewers, touchesContract, fileCount: files.length };
-  } catch (error) {
-    store.discardStaging(id);
-    throw error;
-  }
+  });
 }
 
 /** Environment a reviewer process gets: an allowlist, never the daemon's own. */
@@ -142,7 +148,13 @@ export class Orchestrator {
     const cutoff = this.now() - this.config.retentionDays * 24 * 60 * 60 * 1000;
     const expired = this.store
       .listJobs()
-      .filter(({ job, slots }) => job.submittedAt < cutoff && slots.every((slot) => slot.status === "done"));
+      // Retention runs from when the last review finished, not from submission:
+      // a job that waited long must not vanish the moment it completes.
+      .filter(
+        ({ job, slots }) =>
+          slots.every((slot) => slot.status === "done") &&
+          Math.max(job.submittedAt, ...slots.map((slot) => slot.endedAt ?? job.submittedAt)) < cutoff,
+      );
     for (const { job } of expired) {
       const repo = this.config.repos[job.repo];
       if (repo) await withLock(mirrorLock(this.config), () => deleteReviewRef(repo.mirror, job.id));
