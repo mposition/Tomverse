@@ -1,0 +1,32 @@
+# Standalone AMUX server workspace
+
+This is an independent Cargo workspace for the Ubuntu AMUX server. It is not a
+member of the Tomverse root workspace. `crates/amux-core` here is the server's
+own sibling crate, separate from the product integration at
+`/crates/amux-core`. The four original Cargo members (`amux-core`,
+`amux-server`, `amux-dashboard`, and `amux-cli`) and their lockfile stay
+together. The copied cloud Dockerfile is a build-input reference; this import
+does not deploy a cloud image.
+
+The WSL `tomverse/cursor-provider` source at
+`8ad716bf983274a9f86733be17b5f608bdcca67b` contributed Cursor commits
+`0cb02264`, `c7947c20`, and `8ad716bf`. These were ported onto the Ubuntu
+server's existing `9e4be636f6656c4c49391ac1fc089d2bbd6eb34f` source so
+later server fixes and Devin support remain present. The imported tree is the
+tested port at `1765cbf98f0201501388dfb2cdcb266db1d76fb8`, including a
+small fix for the pre-existing missing Devin usage row. The original remote
+is `https://github.com/mixpeek/amux.git`; its Git history was not merged into
+Tomverse. `LICENSE` retains the upstream MIT terms.
+
+Build and focused test from this directory:
+
+```bash
+cargo check -p amux-server --locked
+cargo test -p amux-server --lib cursor --locked
+cargo test -p amux-server --test dockerfile_build_inputs --locked
+```
+
+The running Ubuntu service is not changed by this source import. Compare its
+current build and preserve its later fixes before deploying a binary from this
+workspace. Product verified-provider admission and bridge/claim switches are
+separate decisions.
