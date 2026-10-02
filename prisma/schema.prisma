@@ -8879,25 +8879,25 @@ model AmuxPortfolioNodeRevision {
 /// payload, which is what keeps a failure from showing an earlier success's
 /// content.
 model ProductResearchObservation {
-  id String @id
+  id            String   @id
   /// The scheduled UTC instant this row answers for, on a whole minute.
-  slot DateTime @unique
+  slot          DateTime @unique
   /// ok | failed
-  outcome String
+  outcome       String
   /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
-  failureStage String?
+  failureStage  String?
   schemaVersion Int
   /// The commits the report was computed from. Present on a successful slot.
-  developSha String?
-  mainSha    String?
-  issueCount Int?
+  developSha    String?
+  mainSha       String?
+  issueCount    Int?
   /// The observation rows and the counts recomputed from them.
-  payload Json?
+  payload       Json?
   /// sha256 of the canonical payload, computed by the route from what it
   /// stored -- never the digest the submitter sent.
   payloadDigest String?
   /// The database's own clock, set by the insert trigger.
-  submittedAt DateTime @default(now())
+  submittedAt   DateTime @default(now())
 
   @@index([outcome, slot])
   @@index([submittedAt])
