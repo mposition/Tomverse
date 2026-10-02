@@ -199,7 +199,7 @@ export const admitObservationSubmission = (
   if (problems.length > 0) return refuse("payload_invalid", problems[0]);
 
   // Public issue titles are external text, and the policy scans them before
-  // they are stored (docs/policy/product-research-agent.md §2.7). The agent
+  // they are stored (docs/policy/product-research-agent.md §2, condition 7). The agent
   // reads whatever anyone opened an issue about; a title holding a token is
   // unlikely and the cost of storing one is a credential sitting in a table
   // an operator reads every morning.

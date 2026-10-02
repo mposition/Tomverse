@@ -38,7 +38,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 1. **LLM 없음.** 실행 경로·route·화면 어디에도 LLM 호출이나 키가 없습니다.
 2. **GitHub에 쓰지 않습니다.** issue·label·comment·artifact·commit status·check·branch·PR 전부. GitHub 토큰은 읽기
-   전용이며, GitHub를 상태 저장소나 승인 증거로 쓰지 않습니다(공통 기반 §6.6).
+   전용이며, GitHub를 상태 저장소나 승인 증거로 쓰지 않습니다(공통 기반의 상태 저장 위치 규칙).
 3. **추천하지 않습니다.** payload 스키마에 추천·순위·우선도·"완료 확정" 필드가 없고, 검증기가 알 수 없는 key를 거절합니다.
 4. **원천 enum을 합치거나 이름을 바꿔 저장하지 않습니다.** 사람이 보는 label은 고정 표에서만 바뀌고, 그 표에 "추천"·
    "우선"·"다음 작업"·"착수"·"미완료"·"완료 확정"이 들어가면 테스트가 실패합니다(예외는 "미완료 증거 아님"과 섹션 머리
@@ -51,7 +51,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 9. **결과를 모르면 재시도하지 않습니다.** 제출이 타임아웃·연결 실패로 끝나면 같은 회차를 다시 보내지 않습니다.
 10. **registry·가격·크레딧·출력 상한·release gate registry·`GATE_EVIDENCE`·`AGENTS.md`·backlog branch에 쓰지 않습니다.**
 
-## 3. 실행 위치와 자격증명 (공통 기반 §6.2·§6.3)
+## 3. 실행 위치와 자격증명
 
 - 실행은 **Agent 전용 Railway project**의 cron 서비스입니다. GitHub Actions를 쓰지 않습니다. 그 project에는 제품 DB
   서비스와 공유 변수가 없고, IaC 파일 하나가 project 전체를 소유합니다.
@@ -76,7 +76,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 - 제품 상태는 본 앱 내부 route로만 바꿉니다. 인증은 32자 이상 secret, Bearer, SHA-256 후 constant-time 비교, POST,
   `no-store`, 타임아웃입니다(마케팅 정책 §4와 같은 규율).
 
-## 4. 저장과 보존 (공통 기반 §6.6)
+## 4. 저장과 보존
 
 - 관측 회차는 본 앱 테이블 하나에 **insert만** 합니다. update는 DB가 거절합니다.
 - 같은 예정 slot에는 한 행만 들어갑니다. 중복·선점·거절 요청은 어떤 테이블에도 쓰지 않습니다.
@@ -85,7 +85,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
   지웁니다. 최신 행 예외는 없습니다.
 - 사람이 보는 곳은 Admin 공통 Agent digest 영역의 이 Agent 섹션 하나입니다. 승인·거절 버튼이 없습니다(결정할 항목이 없음).
 
-## 5. 감사 (공통 기반 §2)
+## 5. 감사
 
 시스템 행위는 `writeSystemAuditLog`로 상태 변경과 **같은 트랜잭션**에 남깁니다. actor 이름은 닫힌 목록에 등재해야 생기고,
 감사 테이블 직접 쓰기는 금지입니다. 기록되는 action은 둘입니다 — 관측 회차 저장, 보존 기간 지난 행 삭제. 감사 metadata에

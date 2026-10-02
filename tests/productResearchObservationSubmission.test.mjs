@@ -224,7 +224,7 @@ test("a credential in an issue title refuses the whole slot", () => {
   // Public issue titles are external text: the agent reads whatever anyone
   // opened an issue about. A title holding a token is unlikely, and the cost of
   // storing one is a credential sitting in a table an operator reads every
-  // morning (docs/policy/product-research-agent.md §2.7).
+  // morning (docs/policy/product-research-agent.md §2, condition 7).
   //
   // Synthetic values, shaped to match the rules and belonging to nothing.
   for (const [label, title] of [
