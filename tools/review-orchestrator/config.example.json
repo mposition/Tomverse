@@ -1,0 +1,64 @@
+{
+  "stateDir": "/var/lib/review-orchestrator",
+  "timeoutSeconds": 2400,
+  "waitMaxSeconds": 540,
+  "repos": {
+    "tomverse": {
+      "url": "https://github.com/mposition/Tomverse.git",
+      "mirror": "/var/lib/review-orchestrator/mirrors/tomverse.git"
+    }
+  },
+  "contractPaths": [
+    "prisma/**",
+    "lib/modelPricing.ts",
+    "lib/credit*",
+    "lib/chatCostGuardrails.ts",
+    "lib/models.ts",
+    "lib/billingPriceCatalog.ts",
+    "lib/conversationProduct.ts",
+    "docs/policy/**",
+    "docs/ui-contracts/**"
+  ],
+  "providers": [
+    {
+      "id": "claude",
+      "vendor": "anthropic",
+      "enabled": true,
+      "maxConcurrent": 1,
+      "command": "claude",
+      "args": [
+        "-p",
+        "--strict-mcp-config",
+        "--output-format", "text",
+        "--allowedTools", "Read,Grep,Glob",
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent,Task"
+      ]
+    },
+    {
+      "id": "codex",
+      "vendor": "openai",
+      "enabled": true,
+      "maxConcurrent": 1,
+      "command": "codex",
+      "args": ["exec", "--sandbox", "read-only", "-C", "{workdir}", "-"],
+      "passEnv": ["CODEX_HOME"]
+    },
+    {
+      "id": "cursor",
+      "vendor": "xai",
+      "enabled": true,
+      "maxConcurrent": 1,
+      "model": "grok-4.7-xhigh",
+      "command": "cursor-agent",
+      "args": ["--print", "--mode", "ask", "--trust", "--model", "{model}"]
+    },
+    {
+      "id": "devin",
+      "vendor": "unknown",
+      "enabled": false,
+      "maxConcurrent": 1,
+      "command": "devin",
+      "args": []
+    }
+  ]
+}

@@ -119,26 +119,19 @@ test("the workflow filter and the module agree on the marker", () => {
     );
     assert.match(workflow, /node scripts\/auto-pr-branch-policy\.mjs "\$BRANCH"/);
 
-    // Every step that can create or merge a pull request is gated on the
-    // module's answer, not only on the glob. The two that read it directly
-    // are the diff check and the step that creates the pull request; the
-    // arming step reads the create step's output, which is the same gate one
-    // link further along -- it cannot be `true` on a run where the create
-    // step did not run.
+    // Every step that can create a pull request is gated on the module's
+    // answer, not only on the glob: the diff check and the create step read
+    // it directly. Nothing in the workflow merges or arms auto-merge any more
+    // (tests/autoPrAutoMergeArming.test.mjs pins that).
     const names = [...workflow.matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1]);
     assert.ok(names.includes("Create PR to develop if missing"));
     assert.ok(
-        names.some((name) => /auto-merge/i.test(name)),
-        "the arming step still exists"
+        !names.some((name) => /auto-merge/i.test(name)),
+        "no auto-merge step"
     );
     assert.equal(
         (workflow.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length,
         2,
         "the diff check and the PR-creating step are gated on the module"
-    );
-    assert.match(
-        workflow,
-        /if: steps\.create-pr\.outputs\.created == 'true'/,
-        "the arming step is gated on this run having created the PR"
     );
 });

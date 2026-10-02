@@ -102,6 +102,11 @@ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 /tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs text eol=lf
 /tests/promptRefinerQualityEvaluationVnextOneShotManifestRubricsClosure.test.mjs text eol=lf
 
+# CHAT-01 one-shot development-only manifest envelope closure reads exact bytes.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs text eol=lf
+
 # The approved consent copy and the test that holds it to the record must be
 # byte-identical on every platform: the test reads the document, and a CRLF
 # checkout used to fail three of its comparisons on Windows.

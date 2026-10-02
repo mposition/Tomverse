@@ -497,12 +497,14 @@ export const relationshipDormantAt = (lastSeen: Date, now: Date): Date | null =>
  * (docs/policy/email-double-opt-in.md §14.1).
  *
  * A consent ticked in a session that proved the address is recorded as
- * confirmed at once; anything else takes the confirmation mail. Two sources
- * only: this app's own code or link, and a Google sign-in whose raw profile
- * says `email_verified`. Microsoft is not a source -- an Entra tenant sets the
- * email value itself, which proves no mailbox.
+ * confirmed at once; anything else takes the confirmation mail. Three sources:
+ * this app's own code or link, a Google sign-in whose raw profile says
+ * `email_verified`, and a Microsoft sign-in. The last proves a mailbox for a
+ * personal account only -- an Entra tenant sets a work or school account's
+ * email itself -- and the owner accepted that risk on 2026-10-01
+ * (docs/policy/email-double-opt-in.md §14.7).
  */
-export const ADDRESS_PROOF_METHODS = ["email_code", "google_verified"] as const;
+export const ADDRESS_PROOF_METHODS = ["email_code", "google_verified", "microsoft_signin"] as const;
 export type AddressProofMethod = (typeof ADDRESS_PROOF_METHODS)[number];
 
 export type AddressProof = {
@@ -542,6 +544,13 @@ export const addressProofForSignIn = (input: {
     if (!profile || profile.email_verified !== true) return null;
     if (proofAddress(profile.email) !== userAddress) return null;
     return { method: "google_verified", address: userAddress, provenAt: input.now.toISOString() };
+  }
+  if (input.provider === "azure-ad") {
+    // Its raw profile's address, which NextAuth also made the account's; a
+    // provider linked to another account's session proves that account nothing.
+    const profile = input.profile as { email?: unknown } | null;
+    if (!profile || proofAddress(profile.email) !== userAddress) return null;
+    return { method: "microsoft_signin", address: userAddress, provenAt: input.now.toISOString() };
   }
   return null;
 };

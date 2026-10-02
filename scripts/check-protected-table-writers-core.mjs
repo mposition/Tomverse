@@ -327,6 +327,12 @@ export const EXCLUDED_PREFIXES = [
     reason: "Documentation. Nothing here is imported or executed.",
   },
   {
+    prefix: "vendor/amux/",
+    extension: ".sql",
+    reason:
+      "The independent AMUX workspace uses local SQLite. Only its SQL is excluded; JS/TS files remain scanned for product database writes.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
@@ -386,18 +392,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
-    tableMentions: 2,
-    writeVerbs: 8,
+    tableMentions: 3,
+    writeVerbs: 12,
     reason:
-      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do.",
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do. S2d2 adds the ninth, in the dispatch path's prose: the sentence saying an account can be paused underneath a claim between the claim and the call, which is why the dispatch re-runs the whole resolver rather than trusting the claim's answer. S2d2 also adds the third mention and the tenth verb in the unknown-outcome path: the prose naming the UPDATE that stops an autonomous account, which is a delegate call setting status and pauseReasonCode only -- the trigger writes pausedFromMode and pausedAt from the transition, because a field a caller could set is a field a caller could set wrongly. The eleventh and twelfth verbs belong to the unknown-outcome pause prose and to the polling writers naming the channel they read for their audit entries; no writer here touches MarketingChannel except that one delegate update, which sets status and pauseReasonCode and leaves pausedFromMode and pausedAt to the trigger.",
   },
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 11,
-    writeVerbs: 8,
+    tableMentions: 19,
+    writeVerbs: 12,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable.",
   },
   {
     path: "lib/amux/intakeRegistration.ts",
@@ -898,10 +904,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "43acecfde4250aad7a230a2219cf58863858636105c0e9d115607f49f7ff3b31",
+    sha256: "81081dade66bed12ba79a57cace76956629ac58506c39c92ad8205ae12c824d5",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
@@ -965,7 +971,7 @@ const isDatabaseDriverModule = (specifier) =>
 
 export const isExcluded = (path) =>
   EXCLUDED_PREFIXES.some((entry) =>
-    entry.path ? path === entry.path : path.startsWith(entry.prefix)
+    entry.path ? path === entry.path : path.startsWith(entry.prefix) && (!entry.extension || path.endsWith(entry.extension))
   );
 
 /** The repository paths this check reads, from a list of candidate paths. */
