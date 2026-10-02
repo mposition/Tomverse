@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -38,6 +38,14 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [state, setState] = useState<State>({ kind: "idle" });
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const setActiveState = useCallback((next: State) => {
+    if (mounted.current) setState(next);
+  }, []);
   const expected = useMemo(() => ({
     ideaId, ideaDigest: checked.ideaDigest,
     previewScopeDigest: checked.scopeDigest,
@@ -52,20 +60,20 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       const decision = classifySourceScopeApprovalReply({ status: response.status,
         body: await response.json() }, binding, "read");
       if (decision.kind === "approved") {
-        setState({ kind: "approved", binding, expiresAt: decision.expiresAt });
+        setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "expired") {
         if (!clearSourceScopeApprovalAttempt(receiptStore(), operatorId, binding)) {
-          setState({ kind: "storage_unavailable" });
+          setActiveState({ kind: "storage_unavailable" });
         } else {
-          setState({ kind: "expired" });
+          setActiveState({ kind: "expired" });
         }
       } else if (decision.kind === "reauth_required") {
-        setState({ kind: "outcome_unknown", binding, reauthRequired: true });
+        setActiveState({ kind: "outcome_unknown", binding, reauthRequired: true });
       } else {
-        setState({ kind: "outcome_unknown", binding });
+        setActiveState({ kind: "outcome_unknown", binding });
       }
-    } catch { setState({ kind: "outcome_unknown", binding }); }
-  }, [operatorId]);
+    } catch { setActiveState({ kind: "outcome_unknown", binding }); }
+  }, [operatorId, setActiveState]);
 
   useEffect(() => {
     let active = true;
@@ -86,21 +94,21 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
     if (!available || state.kind !== "idle") return;
     let approvalId: string;
     try { approvalId = crypto.randomUUID(); } catch {
-      setState({ kind: "storage_unavailable" });
+      setActiveState({ kind: "storage_unavailable" });
       return;
     }
     const binding = { ...expected, approvalId };
     if (!reserveSourceScopeApprovalAttempt(receiptStore(), operatorId, binding)) {
       const prior = readSourceScopeApprovalAttempt(receiptStore(), operatorId, expected);
       if (prior.kind === "present") {
-        setState({ kind: "outcome_unknown", binding: prior.binding });
+        setActiveState({ kind: "outcome_unknown", binding: prior.binding });
         await readBack(prior.binding);
       } else {
-        setState({ kind: "storage_unavailable" });
+        setActiveState({ kind: "storage_unavailable" });
       }
       return;
     }
-    setState({ kind: "pending", binding });
+    setActiveState({ kind: "pending", binding });
     try {
       const response = await adminFetch("/api/admin/amux/ideas/source-scope-approval", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -113,19 +121,19 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       const decision = classifySourceScopeApprovalReply({ status: response.status,
         body: await response.json() }, binding, "write");
       if (decision.kind === "approved") {
-        setState({ kind: "approved", binding, expiresAt: decision.expiresAt });
+        setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "refused") {
         if (clearSourceScopeApprovalAttempt(receiptStore(), operatorId, binding)) {
-          setState({ kind: "refused", code: decision.code });
+          setActiveState({ kind: "refused", code: decision.code });
         } else {
-          setState({ kind: "storage_unavailable" });
+          setActiveState({ kind: "storage_unavailable" });
         }
       } else {
-        setState({ kind: "outcome_unknown", binding });
+        setActiveState({ kind: "outcome_unknown", binding });
         await readBack(binding);
       }
     } catch {
-      setState({ kind: "outcome_unknown", binding });
+      setActiveState({ kind: "outcome_unknown", binding });
       await readBack(binding);
     }
   };

@@ -106,6 +106,7 @@ test("Admin action is separately dark and reads back the same approval ID", () =
   assert.match(panel, /new URLSearchParams\(\{ approvalId: binding\.approvalId \}\)/);
   assert.match(panel, /classifySourceScopeApprovalReply/);
   assert.match(panel, /state\.reauthRequired[\s\S]*adminRecentAuthenticationHref/);
+  assert.match(panel, /if \(mounted\.current\) setState\(next\)/);
   assert.match(proxy, /requiresMutationOriginCheck\(request\.method, request\.nextUrl\.pathname\)\s*&&\s*!hasValidMutationOrigin\(request\)/);
   const path = "/api/admin/amux/ideas/source-scope-approval";
   assert.equal(requiresMutationOriginCheck("POST", path), true);

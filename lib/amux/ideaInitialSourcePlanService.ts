@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import {
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
@@ -28,6 +28,7 @@ export async function createInitialIdeaOnlySourcePlan(
   tx: Prisma.TransactionClient,
   input: { ideaId: string; actorUserId: string; keys: AmuxContentKeys },
 ): Promise<{ revisionId: string; manifestDigest: string; auditId: string }> {
+  await takeAuditChainLock(tx);
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${input.ideaId} AND "actorUserId" = ${input.actorUserId}

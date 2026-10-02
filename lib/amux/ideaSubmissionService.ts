@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
@@ -68,6 +68,7 @@ export async function commitIdeaSubmission(
   },
 ): Promise<CommittedIdeaSubmission> {
   const actorUserId = actorId(input.session);
+  await takeAuditChainLock(tx);
   const existing = await tx.amuxIdeaSubmission.findUnique({
     where: { requestId: input.inspected.requestId },
     select: { id: true },

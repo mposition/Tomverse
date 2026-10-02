@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
@@ -84,6 +84,7 @@ export async function commitFrontierCatalogDecision(
 ): Promise<FrontierCatalogWriteResult> {
   const actorUserId = requireOwner(input.session);
   await setDatabaseTimeouts(tx);
+  await takeAuditChainLock(tx);
   const decision = input.decision;
   if (decision.action === "approve") {
     await lockModel(tx, decision.provider, decision.modelId);

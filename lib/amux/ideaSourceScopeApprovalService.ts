@@ -46,6 +46,7 @@ export async function commitAmuxSourceScopeApproval(tx: Prisma.TransactionClient
   const actorUserId = ownerId(input.session);
   const { choice } = input;
   await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  await takeAuditChainLock(tx);
   const locked = await tx.$queryRaw<Array<{ id: string; analysisDeadlineAt: Date }>>`
     SELECT "id", "analysisDeadlineAt" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
@@ -82,8 +83,12 @@ export async function commitAmuxSourceScopeApproval(tx: Prisma.TransactionClient
   if (expiresAt <= now) throw new AmuxSourceScopeApprovalError("not_ready");
   const scopeBytes = Buffer.from(preview.canonicalScopeJson, "utf8");
   try {
-    const sealed = sealAmuxContent(scopeBytes, "source_scope", choice.approvalId, input.keys);
-    await takeAuditChainLock(tx);
+    let sealed: ReturnType<typeof sealAmuxContent>;
+    try {
+      sealed = sealAmuxContent(scopeBytes, "source_scope", choice.approvalId, input.keys);
+    } catch {
+      throw new AmuxSourceScopeApprovalError("integrity_unavailable");
+    }
     const auditId = await writeAdminAuditLog({ tx, session: input.session,
       request: input.request, action: "amux.v4.source_scope.approved",
       targetType: "AmuxIdeaSourceScopeApproval", targetId: choice.approvalId,
