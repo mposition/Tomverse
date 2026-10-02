@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { AMUX_TASK_ROLE_PROPOSALS } from "../lib/amux/ideaAnalysisChunkCore.ts";
+import { AMUX_CLI_USAGE_WORKER_ROLES } from "../lib/amux/cliUsageRoleCore.ts";
+
 const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL(
   "../prisma/migrations/20261002150000_amux_cli_usage_invocation/migration.sql",
+  import.meta.url,
+), "utf8");
+const roleMigration = readFileSync(new URL(
+  "../prisma/migrations/20261002170000_amux_cli_usage_role_snapshot/migration.sql",
   import.meta.url,
 ), "utf8");
 
@@ -49,4 +56,18 @@ test("the migration is additive and has no collection or runtime enablement", ()
   assert.match(migration, /RETURN usage_completeness = 'reported_partial'/);
   assert.ok(migration.includes(String.raw`model_name ~ '(^/|/$|//|(^|/)\.{1,2}(/|$))'`));
   assert.ok(migration.includes(String.raw`"selectedModelId" !~ '(^/|/$|//|(^|/)\.{1,2}(/|$))'`));
+});
+
+test("the dark role snapshot requires an empty receipt table and has no default", () => {
+  assert.match(schema, /workerRole\s+String\s+@db\.VarChar\(32\)/);
+  assert.match(roleMigration, /ADD COLUMN "workerRole" VARCHAR\(32\) NOT NULL/);
+  assert.doesNotMatch(roleMigration, /ADD COLUMN "workerRole"[^\n]*\bDEFAULT\b|INSERT INTO|UPDATE\s+"AmuxCliUsageInvocation"/i);
+  assert.match(roleMigration, /"contextKind" = 'idea_analysis' AND "workerRole" = 'idea_analysis'/);
+  assert.match(roleMigration, /"AmuxCliUsageInvocation_workerRole_context_check" CHECK/);
+});
+
+test("the usage role vocabulary tracks approved Task roles plus idea analysis", () => {
+  assert.deepEqual(AMUX_CLI_USAGE_WORKER_ROLES.filter((role) => role !== "idea_analysis"),
+    AMUX_TASK_ROLE_PROPOSALS);
+  assert.equal(AMUX_CLI_USAGE_WORKER_ROLES.at(-1), "idea_analysis");
 });

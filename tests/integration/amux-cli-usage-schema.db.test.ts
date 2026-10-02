@@ -24,6 +24,8 @@ after(async () => { await prisma.$disconnect(); });
 
 type UsageRow = {
   invocationId: string;
+  contextKind: "worker" | "idea_analysis";
+  workerRole: string;
   cli: "codex" | "claude";
   selectedModelId: string;
   status: "succeeded" | "failed";
@@ -41,6 +43,8 @@ type UsageRow = {
 
 const unknownRow = (overrides: Partial<UsageRow> = {}): UsageRow => ({
   invocationId: randomUUID(),
+  contextKind: "worker",
+  workerRole: "review",
   cli: "codex",
   selectedModelId: "gpt-6-sol",
   status: "failed",
@@ -60,14 +64,23 @@ const unknownRow = (overrides: Partial<UsageRow> = {}): UsageRow => ({
 async function insertUsage(tx: Prisma.TransactionClient, row: UsageRow): Promise<void> {
   await tx.$executeRaw`
     INSERT INTO "AmuxCliUsageInvocation" (
-      "invocationId", "contextKind", "cardId", "taskId", "runId", "attemptId", "workerId",
+      "invocationId", "contextKind", "workerRole", "cardId", "taskId", "runId", "attemptId", "workerId",
+      "ideaId", "chunkIndex", "agentId",
       "cli", "cliVersion", "authKind", "selectedModelId", "startedAt", "endedAt",
       "status", "completeness", "completedTurns", "inputTokens", "outputTokens",
       "cacheReadInputTokens", "cacheCreationInputTokens", "inputTokensIncludeCacheRead",
       "inputTokensIncludeCacheWrite", "reasoningOutputIncludedInOutput", "modelsJson",
       "receiptDigest", "recordedAt"
     ) VALUES (
-      ${row.invocationId}::uuid, 'worker', 'card_1', 'task_1', 'run_1', 'attempt_1', 'worker_1',
+      ${row.invocationId}::uuid, ${row.contextKind}, ${row.workerRole},
+      ${row.contextKind === "worker" ? "card_1" : null},
+      ${row.contextKind === "worker" ? "task_1" : null},
+      ${row.contextKind === "worker" ? "run_1" : null},
+      ${row.contextKind === "worker" ? "attempt_1" : null},
+      ${row.contextKind === "worker" ? "worker_1" : null},
+      ${row.contextKind === "idea_analysis" ? "idea_1" : null},
+      ${row.contextKind === "idea_analysis" ? 0 : null},
+      ${row.contextKind === "idea_analysis" ? "amux-intake" : null},
       ${row.cli}, '1.2.3', 'subscription', ${row.selectedModelId}, now(), now(),
       ${row.status}, ${row.completeness}, ${row.completedTurns}, ${row.inputTokens},
       ${row.outputTokens}, ${row.cacheReadInputTokens}, ${row.cacheCreationInputTokens},
@@ -83,11 +96,13 @@ test("DB owns the immutable clock and retains unknown as NULL", async () => {
     await insertUsage(tx, row);
     const stored = await tx.$queryRaw<Array<{
       inputTokens: bigint | null; recordedAt: Date; modelsJson: unknown;
-    }>>`SELECT "inputTokens", "recordedAt", "modelsJson"
+      workerRole: string;
+    }>>`SELECT "inputTokens", "recordedAt", "modelsJson", "workerRole"
        FROM "AmuxCliUsageInvocation" WHERE "invocationId" = ${row.invocationId}::uuid`;
     assert.equal(stored.length, 1);
     assert.equal(stored[0].inputTokens, null);
     assert.deepEqual(stored[0].modelsJson, []);
+    assert.equal(stored[0].workerRole, "review");
     assert.ok(stored[0].recordedAt.getTime() > Date.parse("2026-01-01T00:00:00Z"));
     await assert.rejects(tx.$executeRaw`
       UPDATE "AmuxCliUsageInvocation" SET "inputTokens" = 0
@@ -98,6 +113,35 @@ test("DB owns the immutable clock and retains unknown as NULL", async () => {
     SELECT count(*) AS count FROM "AmuxCliUsageInvocation"
     WHERE "invocationId" = ${row.invocationId}::uuid`;
   assert.equal(count[0].count, BigInt(0));
+});
+
+test("the DB refuses rewriting an invocation-time role snapshot", async () => {
+  const row = unknownRow();
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await insertUsage(tx, row);
+    await tx.$executeRaw`
+      UPDATE "AmuxCliUsageInvocation" SET "workerRole" = 'implement'
+      WHERE "invocationId" = ${row.invocationId}::uuid`;
+  }), /immutable/i);
+});
+
+test("DB binds the invocation-time role to its worker or idea context", async () => {
+  await assert.rejects(insertUsage(prisma, unknownRow({ workerRole: "idea_analysis" })),
+    /AmuxCliUsageInvocation_workerRole_context_check/);
+  await assert.rejects(insertUsage(prisma, unknownRow({ workerRole: "super_admin" })),
+    /AmuxCliUsageInvocation_workerRole_check/);
+  const idea = unknownRow({ contextKind: "idea_analysis", workerRole: "idea_analysis" });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await insertUsage(tx, idea);
+    const stored = await tx.$queryRaw<Array<{ workerRole: string; contextKind: string }>>`
+      SELECT "workerRole", "contextKind" FROM "AmuxCliUsageInvocation"
+      WHERE "invocationId" = ${idea.invocationId}::uuid`;
+    assert.deepEqual(stored, [{ workerRole: "idea_analysis", contextKind: "idea_analysis" }]);
+    throw new Error("synthetic rollback");
+  }), /synthetic rollback/);
+  await assert.rejects(insertUsage(prisma, unknownRow({
+    contextKind: "idea_analysis", workerRole: "review",
+  })), /AmuxCliUsageInvocation_workerRole_context_check/);
 });
 
 test("DB rejects path-like model IDs and unknown usage with model detail", async () => {

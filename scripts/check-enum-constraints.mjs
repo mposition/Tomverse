@@ -641,6 +641,20 @@ const REGISTRY = {
     reason:
       "The usage source has a closed complete, partial or unknown vocabulary. Unknown token fields stay nullable until the approved read-back or budget hold path exists.",
   },
+  AmuxCliUsageInvocation_workerRole_check: {
+    owner: "list",
+    module: "lib/amux/cliUsageRoleCore.ts",
+    list: "AMUX_CLI_USAGE_WORKER_ROLES",
+    reason:
+      "The immutable invocation-time role snapshot must use the approved Task roles or idea_analysis, not the mutable current card role at 13-month aggregation time.",
+  },
+  AmuxCliUsageAggregateCell_workerRole_check: {
+    owner: "list",
+    module: "lib/amux/cliUsageRoleCore.ts",
+    list: "AMUX_CLI_USAGE_WORKER_ROLES",
+    reason:
+      "A final aggregate cell preserves an approved invocation-time role or NULL only when a parent fold removes that dimension.",
+  },
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",
     reason:
