@@ -1,0 +1,113 @@
+// The runner script, run as a process.
+//
+// The core's tests cover the decisions; these cover the wiring around them,
+// which is the part a unit test cannot see: whether the process actually exits,
+// with which code, and whether anything it prints carries a credential.
+
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import process from "node:process";
+import test from "node:test";
+
+const RUNNER = join(process.cwd(), "scripts", "agents", "product-research-observation.mjs");
+
+const SECRET = "s".repeat(32);
+const TOKEN = "github_pat_secret_value";
+
+/** A deliberately bare environment: the point is that nothing leaks in. */
+const run = (env = {}, argv = []) =>
+  spawnSync(process.execPath, [RUNNER, ...argv], {
+    encoding: "utf8",
+    timeout: 60_000,
+    env: {
+      PATH: process.env.PATH,
+      // Windows needs these for node to start at all.
+      SystemRoot: process.env.SystemRoot,
+      TEMP: process.env.TEMP,
+      ...env,
+    },
+  });
+
+test("an unset switch exits 0 without doing anything", () => {
+  const result = run();
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /switch unset; nothing to do/);
+  // Dark means dark: no slot is claimed and no plan is announced.
+  assert.equal(/planned for slot/.test(result.stdout), false);
+});
+
+test("a switch with nothing behind it exits 1 and names only variables", () => {
+  const result = run({ PRODUCT_RESEARCH_AGENT_ENABLED: "true" });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /config: PRODUCT_RESEARCH_INGEST_URL is not set/);
+  assert.match(result.stdout, /config: PRODUCT_RESEARCH_INGEST_SECRET is not set/);
+});
+
+test("nothing the run prints carries a secret's value", () => {
+  // Every path: a complete environment, a broken one, and the probe. A problem
+  // report is printed to the deploy log and read by whoever opens it.
+  const complete = {
+    PRODUCT_RESEARCH_AGENT_ENABLED: "true",
+    PRODUCT_RESEARCH_INGEST_URL: "https://tomverse.app/api/internal/product-research/observations",
+    PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
+    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+    RAILPACK_DEPLOY_APT_PACKAGES: "git",
+  };
+  for (const [label, env, argv] of [
+    ["complete", complete, []],
+    ["short secret", { ...complete, PRODUCT_RESEARCH_INGEST_SECRET: "short" }, []],
+    ["undeclared", { ...complete, DATABASE_URL: `postgresql://u:${SECRET}@h/db` }, []],
+    ["probe", { PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN }, ["--probe"]],
+  ]) {
+    const result = run(env, argv);
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(output.includes(SECRET), false, `${label}: the secret was printed`);
+    assert.equal(output.includes(TOKEN), false, `${label}: the token was printed`);
+  }
+});
+
+test("an undeclared variable stops the run before it plans a slot", () => {
+  const result = run({
+    PRODUCT_RESEARCH_AGENT_ENABLED: "true",
+    PRODUCT_RESEARCH_INGEST_URL: "https://tomverse.app/api/internal/product-research/observations",
+    PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
+    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+    RAILPACK_DEPLOY_APT_PACKAGES: "git",
+    DATABASE_URL: "postgresql://user:pw@host:5432/db",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /DATABASE_URL is not a variable this service declares/);
+  assert.equal(/planned for slot/.test(result.stdout), false);
+});
+
+test("a planned run exits 1 while the observation step does not exist", () => {
+  // The honest outcome for now. Exiting 0 here would make every slot look
+  // answered, and the silence check would then never fire on a run that writes
+  // nothing.
+  const result = run({
+    PRODUCT_RESEARCH_AGENT_ENABLED: "true",
+    PRODUCT_RESEARCH_INGEST_URL: "https://tomverse.app/api/internal/product-research/observations",
+    PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
+    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+    RAILPACK_DEPLOY_APT_PACKAGES: "git",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /no observation step built yet/);
+  // And it exits rather than sitting on its 15-minute timer: a process kept
+  // alive by its own watchdog is the hang the watchdog exists to end.
+  assert.equal(result.signal, null);
+});
+
+test("the probe reports what the image can do and submits nothing", () => {
+  const result = run({ PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN }, ["--probe"]);
+  assert.match(result.stdout, /git available: (true|false)/);
+  assert.match(result.stdout, /node version: v/);
+  assert.match(result.stdout, /slot this run would answer for: \d{4}-\d{2}-\d{2}T21:30:00\.000Z/);
+  // It never reaches the planning path, so it cannot announce a planned slot
+  // and cannot submit; the probe service has no submission variables anyway.
+  assert.equal(/planned for slot/.test(result.stdout), false);
+  // The switch is irrelevant to the probe: an operator measuring a dark staging
+  // service is the normal case.
+  assert.equal(/switch unset/.test(result.stdout), false);
+});

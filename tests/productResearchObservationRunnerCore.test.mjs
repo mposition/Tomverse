@@ -14,10 +14,13 @@ import {
   SLOT_WINDOW_MS,
   createRunState,
   environmentProblems,
+  gitSupportsPartialClone,
   isSecretVariableName,
+  parseGitVersion,
   planRun,
   runTimingProblems,
   slotForInstant,
+  systemNamesForPlatform,
   withinSlotWindow,
 } from "../lib/productResearchObservationRunnerCore.mjs";
 
@@ -238,4 +241,48 @@ test("a run belongs to the slot it was scheduled for, and may submit for an hour
   assert.equal(withinSlotWindow(slot + SLOT_WINDOW_MS - 1, slotIso), true);
   assert.equal(withinSlotWindow(slot + SLOT_WINDOW_MS, slotIso), false);
   assert.equal(withinSlotWindow(slot - 1, slotIso), false);
+});
+
+test("partial clone support is read from the version, not from an exit status", () => {
+  // `git clone --filter=... --help` exits on whether a manual page opened, so
+  // the image probe would report a capable git as incapable -- which is a hold
+  // on the phase for a reason that is not true.
+  assert.deepEqual(parseGitVersion("git version 2.55.0.windows.3"), [2, 55, 0]);
+  assert.deepEqual(parseGitVersion("git version 2.19"), [2, 19, 0]);
+  assert.equal(parseGitVersion(""), null);
+  assert.equal(parseGitVersion(undefined), null);
+
+  for (const capable of ["git version 2.19.0", "git version 2.19", "git version 2.20.1", "git version 3.0.0"]) {
+    assert.equal(gitSupportsPartialClone(capable), true, capable);
+  }
+  // Unknown fails closed: an image whose git cannot be identified is one the
+  // run must not assume can make the clone it depends on.
+  for (const incapable of ["git version 2.18.9", "git version 1.9.5", "", "command not found"]) {
+    assert.equal(gitSupportsPartialClone(incapable), false, incapable);
+  }
+});
+
+test("the Windows names are allowed on Windows and nowhere else", () => {
+  // The deployed service is Linux. These exist so the runner can be exercised
+  // on a developer machine, where Node adds them to a child even when the
+  // environment was built from nothing -- not to widen what the service may
+  // hold.
+  const linux = systemNamesForPlatform("linux");
+  assert.equal(linux.includes("USERPROFILE"), false);
+  assert.deepEqual(
+    environmentProblems({ PATH: "/usr/bin", USERPROFILE: "C:/Users/x" }, { systemNames: linux }),
+    ["USERPROFILE is not a variable this service declares"]
+  );
+
+  const windows = systemNamesForPlatform("win32");
+  assert.ok(windows.includes("USERPROFILE"));
+  assert.deepEqual(
+    environmentProblems({ PATH: "C:/bin", USERPROFILE: "C:/Users/x" }, { systemNames: windows }),
+    []
+  );
+  // A connection string is still a connection string, on either platform.
+  assert.deepEqual(
+    environmentProblems({ USERPROFILE: "postgres://u:p@h/db" }, { systemNames: windows }),
+    ["USERPROFILE holds what looks like a database connection string"]
+  );
 });
