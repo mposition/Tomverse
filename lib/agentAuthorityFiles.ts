@@ -53,6 +53,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "tests",
   "tools",
   "types",
+  "vendor",
 ] as const;
 
 /**
@@ -137,6 +138,8 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "apps/**",
   "app/api/internal/**",
   "docs/ops/amux/**",
+  // The independent Ubuntu AMUX server is still agent execution code, never tier one.
+  "vendor/amux/**",
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",

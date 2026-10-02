@@ -1,0 +1,30 @@
+# Harnesses that exist and are invoked by no workflow and no git-hook.
+#
+# Recorded, not blessed. scripts/test-harness-wired.sh fails on any UNWIRED
+# harness that is not listed here, so this file is the ratchet's memory: the set
+# may shrink, never grow silently. One reason per line, after the filename.
+#
+# VERIFIABILITY TAG, field 2 (AMUX-4747). `[local]` = a sweep on a dev box can
+# run this and get a real verdict. `[device]` / `[identity]` = it cannot be
+# automated anywhere we have, so no sweep may imply it is green.
+#
+# Recorded here rather than in the sweep so there is ONE list. A second list of
+# "which are runnable" would be the same fact in two spellings, which is how
+# this file's own siblings have drifted before (AF-161).
+#
+# WHY THE TAG EXISTS AT ALL: of the 3 `[local]` entries, 3 of 3 were BROKEN on
+# main when first exercised (AMUX-4747). A declared exemption was never a claim
+# that the file still works, and nothing was asking.
+#
+# Seeded 2026-09-09 from a measurement of 80 harnesses, 48 wired, 32 not.
+# AF-677 (2026-09-10) is the decision this file asked for: each of the 31 named
+# here at the time was run standalone and given a real verdict rather than
+# left as "owner to confirm or wire" (ethos rule 8 — the decision was made,
+# not skipped). 28 were CI-safe and are now wired into checks.yml. The 3 that
+# remain here each have a checked, specific reason, not a placeholder.
+test-target-clause.sh          [local]     AF-346's own harness. Every cell compiles for real, so wiring it into the required `checks` gate adds minutes to every lane's push. Its cheap half is scripts/test-selector-clauses.sh, which IS wired.
+test-unstamped-ledger.sh       [local]     AF-677: needs a live `/api/history` to prove the ledger reconciles against the real endpoint rather than a synthetic fixture; self-reports SKIP when nothing is listening on :8824, which a hosted runner never has. (Its former sibling test-lineage-render.sh was retired in AMUX-4771 when the renderer it tested was deleted.)
+test-ios-board.mjs             [device]    AF-741/AF-745: native local acceptance requires a booted Xcode iOS Simulator, the supervised Appium/XCTest driver, and an isolated amux API; the script refuses production. Run node scripts/test-ios-board.mjs on the Mac after mobile board changes. Six native journeys were exercised in scratch/ios-simulator-review/mobile-board-final; Linux checks has none of these device prerequisites.
+test-ios-browser.mjs           [device]    AF-732/AF-745: exercises native Safari taps, software keyboard and real receipt recovery against a booted local Simulator plus isolated API and configured driver. Run node scripts/test-ios-browser.mjs on the Mac after browser/receipt changes; this is device acceptance, not a Linux-hosted CI test.
+test-tailnet-owner.py          [identity]  AF-734/AF-745: deliberately uses the real owner Tailscale daemon and its bound interface with an isolated token-protected server. Run AMUX_AUTH_TEST_PORT=<isolated-port> python3 scripts/test-tailnet-owner.py locally; hosted CI has no owner tailnet identity and must not receive its credentials.
+test-ios-session-recovery.mjs  [device]    AF-732: native acceptance needs a booted local Xcode Simulator, Appium/XCTest, an isolated amux server and its explicitly named driver journal. npm run test:ios:recovery checks native input, hidden-tab refusal, 65-second idle survival and dead-session recovery without replay. Four checks passed on the local Mac; Linux checks cannot provide the device or owner-scoped driver.

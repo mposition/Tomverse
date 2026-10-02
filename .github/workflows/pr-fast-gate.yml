@@ -678,6 +678,12 @@ jobs:
         timeout-minutes: 10
         run: npx eslint . --max-warnings=0
 
+      - name: AMUX dashboard SPA lint
+        timeout-minutes: 10
+        run: |
+          npm ci --prefix vendor/amux --ignore-scripts --no-audit --no-fund
+          npm run lint:spa --prefix vendor/amux
+
   # The unit and API policy suite, in its own job so it runs beside the static
   # checks instead of after them. scripts/run-unit-tests.mjs runs one test file
   # per core here (Windows stays serial) and runs the few files that write into
