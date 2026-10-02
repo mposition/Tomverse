@@ -163,7 +163,7 @@ codex/to-develop/fix-picker          자동 PR
 docs/to-develop/release-policy       자동 PR
 to-develop/ime-submit                자동 PR
 
-claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+claude/to-main/dependabot-hold       없음 — main PR도 열 수 없습니다(아래 절)
 release/**, hotfix/**                없음 — production에 닿습니다
 dependabot/**, autofix/**,
 feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
@@ -186,6 +186,33 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
+
+## main으로 가는 PR은 release와 hotfix뿐입니다
+
+**기능은 develop으로 보내고, main에는 release가 가져갑니다.**
+`.github/RELEASE_CHECKLIST.md` 7.9절의 세 경로 — `develop`(release),
+`release/**`(선택 release), `hotfix/**`(사고·보안 권고) — 만 main에 닿습니다.
+`to-main`이라는 이름은 경로가 아닙니다. 2026-10-02부터 PR Fast Gate가 이를
+검사하며(`scripts/main-pr-source-policy.mjs`,
+`tests/mainPrSourcePolicy.test.mjs`), 그 밖의 head는 필수 check가 실패합니다.
+
+```
+develop                              통과 — release
+release/2026-10-02-consent           통과 — 선택 release (체크리스트 7.9.1)
+hotfix/stripe-timeout                통과 — 체크리스트 7.9.2의 여섯 항목이 필요합니다
+claude/hotfix/stripe-timeout         통과 — `hotfix`는 경로 조각
+dependabot/**, autofix/**,
+feedback-autofix-main/**             통과 — 각자의 승인 게이트가 있습니다
+claude/to-main/..., codex/...        거부 — `gh pr edit <번호> --base develop`
+```
+
+근거는 수치입니다. 2026-09-20~10-02에 main에 병합된 PR 80건 중 78건이 기능
+브랜치였고, 각각 CI를 두 번 돌았으며(PR과 main push), develop으로 되돌아오는
+back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 손으로 필요했습니다.
+
+규칙 이전에 main으로 열려 있던 PR 4건(#1798, #1858, #1880, #1882)은
+`scripts/main-pr-source-policy.mjs`의 예외 목록으로 통과시킵니다. 이 목록은 줄기만 하고,
+테스트가 새 항목 추가를 막습니다.
 
 ## workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다
 
