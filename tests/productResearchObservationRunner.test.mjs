@@ -111,3 +111,72 @@ test("the probe reports what the image can do and submits nothing", () => {
   // service is the normal case.
   assert.equal(/switch unset/.test(result.stdout), false);
 });
+
+const SERVICE_ENV = {
+  PRODUCT_RESEARCH_AGENT_ENABLED: "true",
+  PRODUCT_RESEARCH_INGEST_URL:
+    "https://tomverse.app/api/internal/product-research/observations",
+  PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
+  PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+  RAILPACK_DEPLOY_APT_PACKAGES: "git",
+};
+
+const runThroughNpm = (env) =>
+  spawnSync(
+    process.platform === "win32" ? "npm.cmd" : "npm",
+    ["run", "--silent", "agent:product-research-observation"],
+    {
+      encoding: "utf8",
+      timeout: 120_000,
+      shell: process.platform === "win32",
+      env,
+    },
+  );
+
+/** The names a run reported as undeclared, from its own output. */
+const reportedNames = (output) => [
+  ...String(output ?? "").matchAll(
+    /^config: (\S+) is not a variable this service declares$/gm,
+  ),
+].map((match) => match[1]);
+
+test("npm's own variables are not what stops a run", () => {
+  // The IaC starts this service with `npm run`, and npm puts twenty-odd of its
+  // own variables into the child. Spawning node directly -- as every test above
+  // does -- cannot see that: a run that refused them would refuse every
+  // correctly configured production run before it planned anything, at 21:30,
+  // with `config: npm_lifecycle_event is not a variable this service declares`
+  // in a log nobody is reading.
+  //
+  // This runs with the whole developer environment, which is itself full of
+  // undeclared names, so the claim is narrow and exact: whatever else a run
+  // reports, none of it is npm's.
+  const result = runThroughNpm({ ...process.env, ...SERVICE_ENV });
+  const names = reportedNames(`${result.stdout ?? ""}${result.stderr ?? ""}`);
+  // A pattern that matches nothing would pass this test while proving nothing,
+  // so the developer environment's own undeclared names are the proof that the
+  // run reported anything at all.
+  assert.ok(names.length > 0, "the run reported no undeclared names to filter");
+  const npmNames = names.filter(
+    (name) =>
+      name.startsWith("npm_") ||
+      ["INIT_CWD", "NODE", "COLOR", "EDITOR", "_"].includes(name),
+  );
+  assert.deepEqual(npmNames, [], npmNames.join(" | "));
+});
+
+test("the deployed start command plans its slot", { skip: process.platform === "win32" }, () => {
+  // The container has a short environment and npm adds to it, which is the
+  // whole combination production runs. Skipped on Windows, where the shell
+  // needs APPDATA, SystemRoot and a dozen more that Linux genuinely does not
+  // have -- declaring those to make this pass here would widen the check for
+  // the platform that actually runs it. The Linux CI runner is where it holds.
+  const result = runThroughNpm({
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    ...SERVICE_ENV,
+  });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  assert.deepEqual(reportedNames(output), [], output);
+  assert.match(output, /no observation step built yet/);
+});
