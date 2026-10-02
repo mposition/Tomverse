@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
@@ -64,9 +64,11 @@ function ownerId(session: Session): string {
 export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; choice: IdeaOnlyTransferPreviewRequest;
   keys: AmuxContentKeys; browserNonce: string;
-}): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload }> {
+}): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload;
+  payloadDigest: string; payloadDigestKeyId: string }> {
   const actorUserId = ownerId(input.session);
   const { choice } = input;
+  await takeAuditChainLock(tx);
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
@@ -207,7 +209,8 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
         browserBindingDigest,
         transferAuthorized: false },
     });
-    return { previewId: choice.previewId, expiresAt, payload };
+    return { previewId: choice.previewId, expiresAt, payload,
+      payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId };
   } finally {
     payloadBytes?.fill(0);
     raw.fill(0);
@@ -218,7 +221,8 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
 export async function readIdeaOnlyTransferPreview(session: Session, previewId: string): Promise<
   | { state: "not_visible" | "unavailable" | "expired"; transferAuthorized: false }
   | { state: "prepared"; previewId: string; expiresAt: Date;
-      payload: PreviewPayload; transferAuthorized: false }
+      payload: PreviewPayload; payloadDigest: string; payloadDigestKeyId: string;
+      transferAuthorized: false }
 > {
   const actorUserId = ownerId(session);
   const row = await prisma.amuxIdeaTransferPreview.findUnique({
@@ -285,7 +289,8 @@ export async function readIdeaOnlyTransferPreview(session: Session, previewId: s
       return { state: "unavailable", transferAuthorized: false };
     }
     return { state: "prepared", previewId: row.id, expiresAt: row.expiresAt,
-      payload, transferAuthorized: false };
+      payload, payloadDigest: row.payloadDigest,
+      payloadDigestKeyId: row.payloadDigestKeyId, transferAuthorized: false };
   } catch { return { state: "unavailable", transferAuthorized: false }; }
   finally { raw.fill(0); }
 }

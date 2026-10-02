@@ -8,6 +8,8 @@ export type PreparedIdeaTransferPreview = {
   provider: string;
   modelId: string;
   reasoningEffort: string;
+  payloadDigest: string;
+  payloadDigestKeyId: string;
 };
 
 export function readPreparedIdeaTransferPreview(
@@ -19,6 +21,10 @@ export function readPreparedIdeaTransferPreview(
   const reply = body as Record<string, unknown>;
   if (reply.state !== "prepared" || reply.transferAuthorized !== false ||
       reply.previewId !== expectedPreviewId || typeof reply.expiresAt !== "string" ||
+      typeof reply.payloadDigest !== "string" ||
+      !/^[a-f0-9]{64}$/.test(reply.payloadDigest) ||
+      typeof reply.payloadDigestKeyId !== "string" ||
+      !/^[A-Za-z0-9_-]{1,64}$/.test(reply.payloadDigestKeyId) ||
       !Number.isFinite(Date.parse(reply.expiresAt)) ||
       Date.parse(reply.expiresAt) <= Date.now()) return null;
   const payload = reply.payload;
@@ -37,7 +43,8 @@ export function readPreparedIdeaTransferPreview(
       model.approvalVersion !== selected.approvalVersion) return null;
   return { previewId: expectedPreviewId, expiresAt: reply.expiresAt,
     prompt: record.prompt, provider: selected.provider, modelId: selected.modelId,
-    reasoningEffort: effort };
+    reasoningEffort: effort, payloadDigest: reply.payloadDigest,
+    payloadDigestKeyId: reply.payloadDigestKeyId };
 }
 
 export function previewReceiptKey(operatorId: string, ideaId: string): string {

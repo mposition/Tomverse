@@ -269,6 +269,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
           <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
             {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
           <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
+          <p className="break-all text-xs">{m.transferPreviewDigest}: {preview.value.payloadDigest}</p>
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
             {preview.value.prompt}
           </pre>
