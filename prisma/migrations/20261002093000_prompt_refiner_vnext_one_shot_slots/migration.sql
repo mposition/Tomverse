@@ -122,6 +122,7 @@ RETURNS trigger SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
     audit_actor TEXT;
     audit_action TEXT;
+    audit_summary TEXT;
     audit_target_type TEXT;
     audit_target_id TEXT;
     audit_metadata JSONB;
@@ -135,10 +136,10 @@ BEGIN
             RAISE EXCEPTION 'one-shot stage must start staged';
         END IF;
         EXECUTE pg_catalog.format(
-            'SELECT "actorUserId", "action", "targetType", "targetId",'
+            'SELECT "actorUserId", "action", "summary", "targetType", "targetId",'
             || ' "metadata", "entryHash", "createdAt" FROM %I."AdminAuditLog"'
             || ' WHERE "id" = $1 FOR KEY SHARE', TG_TABLE_SCHEMA
-        ) INTO audit_actor, audit_action, audit_target_type, audit_target_id,
+        ) INTO audit_actor, audit_action, audit_summary, audit_target_type, audit_target_id,
                audit_metadata, audit_entry_hash, audit_created_at
           USING NEW."stageApprovalAuditLogId";
         GET DIAGNOSTICS audit_row_count = ROW_COUNT;
@@ -152,6 +153,7 @@ BEGIN
         END IF;
         IF audit_actor IS DISTINCT FROM NEW."approvedBy" OR
            audit_action IS DISTINCT FROM 'prompt_refiner.vnext_one_shot.stage_approved' OR
+           audit_summary IS DISTINCT FROM 'Approved the bounded Prompt Refiner vNext one-shot stage.' OR
            audit_target_type IS DISTINCT FROM 'PromptRefinerVnextOneShotStage' OR
            audit_target_id IS DISTINCT FROM NEW."id" OR
            audit_entry_hash IS NULL OR audit_entry_hash !~ '^[a-f0-9]{64}$' OR
@@ -206,10 +208,10 @@ BEGIN
             RAISE EXCEPTION 'one-shot run approval requires a distinct audit';
         END IF;
         EXECUTE pg_catalog.format(
-            'SELECT "actorUserId", "action", "targetType", "targetId",'
+            'SELECT "actorUserId", "action", "summary", "targetType", "targetId",'
             || ' "metadata", "entryHash", "createdAt" FROM %I."AdminAuditLog"'
             || ' WHERE "id" = $1 FOR KEY SHARE', TG_TABLE_SCHEMA
-        ) INTO audit_actor, audit_action, audit_target_type, audit_target_id,
+        ) INTO audit_actor, audit_action, audit_summary, audit_target_type, audit_target_id,
                audit_metadata, audit_entry_hash, audit_created_at
           USING NEW."runApprovalAuditLogId";
         GET DIAGNOSTICS audit_row_count = ROW_COUNT;
@@ -221,8 +223,12 @@ BEGIN
            audit_created_at > observed_at + INTERVAL '1 minute' THEN
             RAISE EXCEPTION 'one-shot run approval audit is stale';
         END IF;
+        IF audit_created_at <= OLD."approvedAt" THEN
+            RAISE EXCEPTION 'one-shot run approval must follow stage approval';
+        END IF;
         IF audit_actor IS DISTINCT FROM NEW."approvedBy" OR
            audit_action IS DISTINCT FROM 'prompt_refiner.vnext_one_shot.run_approved' OR
+           audit_summary IS DISTINCT FROM 'Approved the bounded Prompt Refiner vNext one-shot run.' OR
            audit_target_type IS DISTINCT FROM 'PromptRefinerVnextOneShotStage' OR
            audit_target_id IS DISTINCT FROM NEW."id" OR
            audit_entry_hash IS NULL OR audit_entry_hash !~ '^[a-f0-9]{64}$' OR

@@ -30,6 +30,10 @@ export const adminMarketingMessages = defineAdminMessages({
     webhookArmDone: "Armed (generation {generation}). Redeliver this event from Zernio's webhook log.",
     fieldTtlMinutes: "Expires after (minutes)",
     hintTtl: "From 1 to 1440.",
+    webhookArmByEventId: "Arm a fault for a Zernio event id",
+    fieldZernioEventId: "Zernio event id",
+    hintZernioEventId:
+      "From Zernio's webhook log: an event delivered while the shadow was off, so it has not been processed yet.",
     loadFailed: "Could not refresh marketing data.",
     writesNote:
       "Every control here writes, and every write compares against the version this screen read. A refusal means the row moved, not that the control is broken.",
@@ -207,6 +211,10 @@ export const adminMarketingMessages = defineAdminMessages({
     webhookArmDone: "arm했습니다(세대 {generation}). Zernio webhook 로그에서 이 이벤트를 redeliver하세요.",
     fieldTtlMinutes: "유효 시간(분)",
     hintTtl: "1에서 1440 사이.",
+    webhookArmByEventId: "Zernio event id로 fault arm",
+    fieldZernioEventId: "Zernio event id",
+    hintZernioEventId:
+      "Zernio webhook 로그에서 shadow가 꺼져 있을 때 전달된 이벤트(아직 처리되지 않은 이벤트)의 id를 넣습니다.",
     loadFailed: "마케팅 데이터를 새로 가져오지 못했습니다.",
     writesNote:
       "여기의 모든 조작은 쓰기이며, 화면이 읽은 버전과 대조해 저장합니다. 거절은 행이 그 사이에 바뀌었다는 뜻이지 조작이 고장 났다는 뜻이 아닙니다.",

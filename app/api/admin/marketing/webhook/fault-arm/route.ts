@@ -4,20 +4,36 @@ import { z } from "zod";
 
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import { MARKETING_S2E_ACTIONS } from "@/lib/marketingStore";
-import { MARKETING_WEBHOOK_FAULT_ARM_KEY } from "@/lib/marketingWebhookCore";
-import { MarketingWebhookSettingRefusedError } from "@/lib/marketingWebhookCore";
+import {
+  MARKETING_WEBHOOK_FAULT_ARM_KEY,
+  MARKETING_WEBHOOK_PROVIDER,
+  MarketingWebhookSettingRefusedError,
+  marketingWebhookEventIdDigest,
+} from "@/lib/marketingWebhookCore";
 import { setMarketingWebhookFaultArm } from "@/lib/marketingWebhookSettings";
 
 const schema = z
   .object({
     /** The one event this arm fails, as `sha256(provider, eventId)`, lowercase hex. */
-    eventIdDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    eventIdDigest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    /**
+     * Or Zernio's own event id, as its webhook log shows it. Condition 4 needs an
+     * event that was delivered but never processed (the shadow was off), and such
+     * an event has no shadow report to arm from; the digest is computed here.
+     */
+    eventId: z.string().uuid().optional(),
     /** The arm generation the screen read; 0 when none has ever been set. */
     expectedGeneration: z.number().int().nonnegative(),
     /** How long the arm stays armed, at most a day. */
     ttlMinutes: z.number().int().min(1).max(24 * 60),
   })
-  .strict();
+  .strict()
+  .refine((body) => (body.eventIdDigest === undefined) !== (body.eventId === undefined), {
+    message: "Name the event by exactly one of eventIdDigest or eventId.",
+  });
+
+const digestOf = (body: z.infer<typeof schema>): string =>
+  body.eventIdDigest ?? marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, body.eventId ?? "");
 
 const REFUSAL_STATUS: Record<string, number> = {
   environment_not_staging: 409,
@@ -48,7 +64,7 @@ export async function POST(req: Request) {
     bucket: "admin-marketing-webhook-fault-arm",
     schema,
     metadata: (body) => ({
-      eventIdDigest: body.eventIdDigest,
+      eventIdDigest: digestOf(body),
       expectedGeneration: body.expectedGeneration,
       ttlMinutes: body.ttlMinutes,
     }),
@@ -58,7 +74,7 @@ export async function POST(req: Request) {
         : null,
     run: async (tx, { body }) =>
       setMarketingWebhookFaultArm(tx, {
-        eventIdDigest: body.eventIdDigest,
+        eventIdDigest: digestOf(body),
         expectedGeneration: body.expectedGeneration,
         ttlMs: body.ttlMinutes * 60 * 1000,
       }),
