@@ -392,8 +392,10 @@ const compilerOptions = parsedConfig.options;
 // fingerprint repin in `marketingAutomationAccess.ts` extended that record and
 // pushed its seven accesses down again. A commit that touches no listed file
 // can therefore still be the one that repins this, which is the sequencing to
-// watch: only a comment that moves an inventory access's line or column moves
-// this digest, and the check belongs at the end of a change, not the start.
+// watch. What moves the digest is anything that changes an inventory access's
+// line or column -- a declaration above one, as here, or a comment above one.
+// Text added *below* every access in a file moves nothing. The check belongs
+// at the end of a change, not the start.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";

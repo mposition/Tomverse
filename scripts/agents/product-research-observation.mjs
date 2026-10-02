@@ -110,13 +110,18 @@ const main = () => {
   };
 
   hardTimer = setTimeout(() => {
+    // `watchdogAction` ends the run as it answers, so nothing after this can
+    // begin a submission -- a request started past the deadline is cut off
+    // mid-flight, and that is the one case where the run cannot know whether
+    // its row exists.
     if (state.watchdogAction("hard") !== "exit") return;
     say("hard deadline reached; ending the run");
-    finish(1);
-    // Nothing is in flight that can be waited for: whatever the run was doing,
-    // its outcome is unknown and a second answer for this slot is worse than
-    // none.
-    process.exit(1);
+    clearTimeout(hardTimer);
+    clearTimeout(prepareTimer);
+    process.exitCode = state.exitCode ?? 1;
+    // Nothing in flight can be waited for: whatever the run was doing, its
+    // outcome is unknown and a second answer for this slot is worse than none.
+    process.exit(process.exitCode);
   }, DEFAULT_RUN_TIMINGS.hardMs);
   prepareTimer = setTimeout(() => {
     if (state.watchdogAction("prepare") !== "submit-timeout") return;

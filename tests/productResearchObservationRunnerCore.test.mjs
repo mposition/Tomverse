@@ -6,6 +6,7 @@
 // run with it because its deadlines do not relate to the route's own limit.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -184,13 +185,37 @@ test("only one of the run and its watchdog may submit", () => {
   assert.equal(state.watchdogAction("hard"), "exit");
 });
 
-test("a watchdog that fires while preparing submits the timeout once", () => {
+test("whichever deadline fires first takes the one permission to submit", () => {
   const state = createRunState();
+  // The watchdog that gives up on preparation is the one that submits the
+  // timeout envelope, so it takes the permission the run was competing for.
   assert.equal(state.watchdogAction("prepare"), "submit-timeout");
-  assert.equal(state.beginSubmit(), true);
+  assert.equal(state.beginSubmit(), false);
+  // And it is idempotent: read twice, it submits once.
   assert.equal(state.watchdogAction("prepare"), "nothing");
 });
 
+test("nothing may begin a submission after the hard deadline", () => {
+  // Left observational, the hard watchdog would return "exit" and
+  // `beginSubmit()` would still return true -- a request started past the
+  // deadline is cut off mid-flight, which is the one case where the run cannot
+  // know whether its row exists.
+  const state = createRunState();
+  assert.equal(state.watchdogAction("hard"), "exit");
+  assert.equal(state.state, "DONE");
+  assert.equal(state.exitCode, 1);
+  assert.equal(state.beginSubmit(), false);
+  assert.equal(state.watchdogAction("prepare"), "nothing");
+  assert.equal(state.watchdogAction("hard"), "nothing");
+
+  // A hard deadline during a submission already under way does not rewrite the
+  // exit code of a run that had finished.
+  const finished = createRunState();
+  finished.beginSubmit();
+  finished.finish(0);
+  assert.equal(finished.watchdogAction("hard"), "nothing");
+  assert.equal(finished.exitCode, 0);
+});
 test("a finished run leaves both watchdogs with nothing to do", () => {
   const state = createRunState();
   state.beginSubmit();
@@ -284,5 +309,91 @@ test("the Windows names are allowed on Windows and nowhere else", () => {
   assert.deepEqual(
     environmentProblems({ USERPROFILE: "postgres://u:p@h/db" }, { systemNames: windows }),
     ["USERPROFILE holds what looks like a database connection string"]
+  );
+});
+
+test("a connection string with no scheme is still a connection string", () => {
+  // libpq keyword form has nothing for the scheme pattern to match, and is as
+  // much a credential as the URL form.
+  for (const value of [
+    "host=db.internal port=5432 dbname=app user=app password=hunter22",
+    "dbname=app password=hunter22",
+    "  user=app  passfile=/run/secrets/pg  host=db  ",
+  ]) {
+    const problems = environmentProblems(serviceEnv({ RAILWAY_SOMETHING: value }));
+    assert.deepEqual(
+      problems,
+      ["RAILWAY_SOMETHING holds what looks like a database connection string"],
+      value,
+    );
+    assert.equal(problems.join("").includes("hunter22"), false);
+  }
+
+  // One keyword alone is an ordinary sentence, not a finding.
+  for (const innocent of [
+    "host=db.internal",
+    "the host= part of the error message",
+    "password=",
+  ]) {
+    assert.deepEqual(
+      environmentProblems(serviceEnv({ RAILWAY_SOMETHING: innocent })),
+      [],
+      innocent,
+    );
+  }
+});
+
+test("IPv6 loopback is accepted however its hostname was spelled", () => {
+  // Node's URL keeps the brackets; a hostname from elsewhere is bare. Five
+  // other modules in this repository compare only the bare form and so never
+  // match, which is why both are accepted here.
+  for (const url of ["http://[::1]:3000/api/internal/x", "http://[::1]/api"]) {
+    assert.equal(planRun(serviceEnv({ PRODUCT_RESEARCH_INGEST_URL: url })).mode, "run", url);
+  }
+  assert.equal(new URL("http://[::1]:3000/x").hostname, "[::1]");
+  // A remote IPv6 address is not loopback.
+  assert.equal(
+    planRun(serviceEnv({ PRODUCT_RESEARCH_INGEST_URL: "http://[2606:4700::1111]/api" })).mode,
+    "config",
+  );
+});
+
+test("the slot is computed from milliseconds, whatever the caller passes", () => {
+  const slot = Date.parse("2026-10-02T21:30:00.000Z");
+  assert.equal(slotForInstant(slot), "2026-10-02T21:30:00.000Z");
+  // A Date and an ISO string answer the same as the number. Compared as a
+  // string, `instant < slot.getTime()` is false and the run would be labelled
+  // as answering for a slot that has not happened.
+  assert.equal(slotForInstant(new Date(slot - 1)), "2026-10-01T21:30:00.000Z");
+  assert.equal(slotForInstant("2026-10-02T21:29:59.999Z"), "2026-10-01T21:30:00.000Z");
+  assert.equal(slotForInstant("2026-10-02T21:30:00.000Z"), "2026-10-02T21:30:00.000Z");
+
+  // Anything that is not a moment is refused rather than answered: a row under
+  // a slot nobody scheduled would be a row with no identity, and the slot is
+  // the only identity the table has.
+  for (const bad of ["not a time", "", null, undefined, Number.NaN, {}]) {
+    assert.throws(() => slotForInstant(bad), /needs a moment/, String(bad));
+  }
+});
+
+test("the runner gives up strictly after the route may still be answering", () => {
+  // Equal is a race: the runner aborts in the same instant the route is still
+  // allowed to be serving, and a slow healthy run is recorded as a failure.
+  assert.match(
+    runTimingProblems({ ...DEFAULT_RUN_TIMINGS, submitAbortMs: DEFAULT_RUN_TIMINGS.routeMaxDurationMs }).join(),
+    /give up before the route/,
+  );
+  // And the submission route's own declared limit is the figure the default
+  // was chosen against.
+  const route = readFileSync(
+    new URL("../app/api/internal/product-research/observations/route.ts", import.meta.url),
+    "utf8",
+  );
+  const declared = /export const maxDuration = (\d+);/.exec(route);
+  assert.ok(declared, "the route declares no maxDuration");
+  assert.equal(
+    DEFAULT_RUN_TIMINGS.routeMaxDurationMs,
+    Number(declared[1]) * 1000,
+    "the runner's figure for the route limit is not the route's own",
   );
 });
