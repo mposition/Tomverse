@@ -6,6 +6,7 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AgentDigestAgentKey } from "@/lib/agentDigestContract";
 import {
+  AGENT_DIGEST_STORE_TIMEOUTS as LIMITS,
   classifyAgentDigestRepeat,
   prepareAgentDigestItem,
   type AgentDigestRefusal,
@@ -54,6 +55,15 @@ export async function recordAgentDigestItem(
 
   return db.$transaction(
     async (tx) => {
+      // First statement: the database-enforced limits, local to this
+      // transaction. transaction_timeout exists only on PostgreSQL 17+, so it
+      // is set only where the server has it.
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+        END`;
       const inserted = await tx.agentDigestItem.createMany({
         data: [
           {
@@ -105,7 +115,8 @@ export async function recordAgentDigestItem(
         payloadSha256: row.payloadSha256,
       } as const;
     },
-    // Explicit budget: the audit chain lock queues every other audit write.
-    { maxWait: 5_000, timeout: 10_000 },
+    // Policy section 10: Prisma's timeout is the transaction maximum plus five
+    // seconds, never its default.
+    { maxWait: 5_000, timeout: LIMITS.prismaMs },
   );
 }

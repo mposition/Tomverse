@@ -32,6 +32,11 @@
 -- The DB integration suite runs on the migration history, which is where the
 -- triggers are tested.
 --
+-- The trigger functions pin search_path to pg_catalog, pg_temp and call no
+-- function of this schema, so no object a session puts first on its path can
+-- stand in for them -- the retention period in particular is a CASE in the
+-- first trigger function below, not a lookup by name.
+--
 -- Rollback: drop the three triggers, the three functions, then the table.
 -- That discards every agent's stored digests.
 
@@ -83,18 +88,15 @@ CREATE INDEX "AgentDigestItem_agentKey_createdAt_idx"
 CREATE INDEX "AgentDigestItem_retentionUntil_idx"
   ON "AgentDigestItem"("retentionUntil");
 
--- Each agent's body-retention period. An agent without one cannot insert.
-CREATE FUNCTION agent_digest_body_retention(agent_key TEXT) RETURNS INTERVAL
-LANGUAGE sql IMMUTABLE AS $$
-  SELECT CASE agent_key
-    WHEN 'qa-release' THEN INTERVAL '90 days'
-  END
-$$;
-
 CREATE FUNCTION agent_digest_item_before_insert() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 DECLARE
-  retention INTERVAL := agent_digest_body_retention(NEW."agentKey");
+  -- Each agent's body-retention period. An agent without one cannot insert.
+  retention INTERVAL := CASE NEW."agentKey"
+    WHEN 'qa-release' THEN INTERVAL '90 days'
+  END;
 BEGIN
   IF NEW."payload" IS NULL OR NEW."bodyDeletedAt" IS NOT NULL OR NEW."sizeBytes" <= 0 THEN
     RAISE EXCEPTION 'AgentDigestItem rows are inserted with their body'
@@ -111,7 +113,9 @@ END;
 $$;
 
 CREATE FUNCTION agent_digest_item_before_update() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 BEGIN
   IF NEW."id" IS DISTINCT FROM OLD."id"
      OR NEW."agentKey" IS DISTINCT FROM OLD."agentKey"
@@ -137,7 +141,9 @@ END;
 $$;
 
 CREATE FUNCTION agent_digest_item_before_delete() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
 BEGIN
   IF OLD."bodyDeletedAt" IS NOT NULL
      AND OLD."createdAt" < clock_timestamp() - INTERVAL '365 days' THEN

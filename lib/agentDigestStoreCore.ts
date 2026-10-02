@@ -24,6 +24,21 @@ import {
 } from "./agentDigestContract.ts";
 import { detectSecrets, type SecretRuleId } from "./engineeringAgentSecretPatterns.ts";
 
+/**
+ * The digest-submission transaction's limits (docs/policy/qa-release-agent.md
+ * section 10, "timeout"). The database enforces the statement and idle limits
+ * and re-arms them for every statement and idle gap; the transaction maximum
+ * is the application value 3A + 5 seconds for A statements; Prisma's own
+ * timeout is five seconds longer, never its 5-second default.
+ */
+export const AGENT_DIGEST_STORE_TIMEOUTS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 9,
+  transactionMs: (3 * 9 + 5) * 1_000,
+  prismaMs: (3 * 9 + 5) * 1_000 + 5_000,
+});
+
 /** Same limit as AgentDigestItem_idempotency_length_check. */
 export const AGENT_DIGEST_IDEMPOTENCY_KEY_MAX_LENGTH = 200;
 
@@ -64,7 +79,12 @@ export type AgentDigestPreparation =
 const isAgentKey = (value: string): value is AgentDigestAgentKey =>
   (AGENT_DIGEST_AGENT_KEYS as readonly string[]).includes(value);
 
-/** Every key and string leaf, raw -- scanning the escaped JSON text could split a pattern at an escape. */
+/**
+ * The texts the secret scan reads. Raw keys and string leaves, because the
+ * escaped JSON text can split a pattern at an escape; and each key joined to
+ * its scalar value, because the assignment rules ("API_TOKEN=...") need the
+ * name and the value together and neither matches alone.
+ */
 function collectStrings(value: unknown, into: string[]): void {
   if (typeof value === "string") {
     into.push(value);
@@ -73,6 +93,7 @@ function collectStrings(value: unknown, into: string[]): void {
   } else if (value !== null && typeof value === "object") {
     for (const [key, item] of Object.entries(value)) {
       into.push(key);
+      if (typeof item === "string" || typeof item === "number") into.push(`${key}=${item}`);
       collectStrings(item, into);
     }
   }
@@ -105,7 +126,9 @@ export function prepareAgentDigestItem(input: AgentDigestSubmission): AgentDiges
   // The DB also refuses an empty body; a canonical value is never zero bytes.
   if (bytes.sizeBytes > AGENT_DIGEST_MAX_PAYLOAD_BYTES) return { ok: false, reason: "payload_too_large" };
 
-  const strings: string[] = [];
+  // The idempotency key is stored and copied into the audit chain, which
+  // nothing ever expires, so it is scanned like the body.
+  const strings: string[] = [key];
   collectStrings(input.payload, strings);
   const found = new Set<SecretRuleId>();
   for (const text of strings) for (const id of detectSecrets(text)) found.add(id);

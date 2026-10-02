@@ -495,7 +495,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,
-    writeVerbs: 3,
+    writeVerbs: 4,
     reason:
       "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
   },

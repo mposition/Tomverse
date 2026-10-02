@@ -162,3 +162,47 @@ test("the only delete is of an expired body more than 365 days old", async () =>
   );
   assert.equal(Number(remaining[0].n), 0);
 });
+
+test("every identity, hash, size and clock column is frozen, one by one", async () => {
+  const id = await insert();
+  const changes: [string, string, unknown][] = [
+    ["id", "$2::uuid", randomUUID()],
+    // The BEFORE trigger runs ahead of the CHECKs, so even a value the CHECK
+    // would also refuse is refused by the trigger first.
+    ["agentKey", "$2", "sre-ops"],
+    ["kind", "$2", "page"],
+    ["schemaVersion", "$2::int", 2],
+    ["idempotencyKey", "$2", `qa-release:${randomUUID()}`],
+    ["payloadSha256", "$2", "b".repeat(64)],
+    ["sizeBytes", "$2::int", 8],
+    ["createdAt", "$2::timestamptz", "2026-01-01T00:00:00Z"],
+    ["retentionUntil", "$2::timestamptz", "2027-01-01T00:00:00Z"],
+  ];
+  for (const [column, cast, value] of changes) {
+    await assert.rejects(
+      prisma.$executeRawUnsafe(`UPDATE "AgentDigestItem" SET "${column}" = ${cast} WHERE "id" = $1::uuid`, id, value),
+      /immutable/,
+      column,
+    );
+  }
+});
+
+test("schemaVersion and the idempotency key length are range-checked", async () => {
+  const at = async (schemaVersion: number) => {
+    const id = randomUUID();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
+       VALUES ($1::uuid, 'qa-release', 'daily_digest', $2, $3, '{}'::jsonb, $4, 2)`,
+      id,
+      schemaVersion,
+      `qa-release:${id}`,
+      SHA,
+    );
+    insertedIds.push(id);
+  };
+  await assert.rejects(at(0), /schema_version/);
+  await assert.rejects(at(1001), /schema_version/);
+  await at(1000);
+  await assert.rejects(insert({ idempotencyKey: `qa-release:${"x".repeat(190)}` }), /idempotency_length/);
+  await insert({ idempotencyKey: `qa-release:${randomUUID()}${"x".repeat(153)}` });
+});

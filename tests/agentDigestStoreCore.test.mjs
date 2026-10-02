@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { agentDigestCanonicalBytes } from "../lib/agentDigestCanonicalJson.ts";
-import { classifyAgentDigestRepeat, prepareAgentDigestItem } from "../lib/agentDigestStoreCore.ts";
+import {
+  AGENT_DIGEST_STORE_TIMEOUTS,
+  classifyAgentDigestRepeat,
+  prepareAgentDigestItem,
+} from "../lib/agentDigestStoreCore.ts";
 
 const submission = (overrides = {}) => ({
   agentKey: "qa-release",
@@ -82,4 +86,26 @@ test("a repeat under the same key is a replay only when the bytes, kind and vers
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored }), "replayed");
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored, payloadSha256: "b".repeat(64) }), "conflict");
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored, schemaVersion: 2 }), "conflict");
+});
+
+test("an assignment-shaped secret split across a key and its value is refused", () => {
+  for (const payload of [{ API_TOKEN: "A1b2C3d4E5f6G7h8I9j0" }, { nested: [{ client_secret: "Zz9Yy8Xx7Ww6Vv5Uu4" }] }]) {
+    const result = prepareAgentDigestItem(submission({ payload }));
+    assert.equal(result.ok, false, JSON.stringify(payload));
+    assert.equal(result.reason, "payload_contains_secret");
+  }
+});
+
+test("a credential in the idempotency key is refused before it can reach the audit chain", () => {
+  const result = prepareAgentDigestItem(submission({ idempotencyKey: `qa-release:ghp_${"A".repeat(36)}` }));
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "payload_contains_secret");
+  assert.deepEqual(result.secretRuleIds, ["github-token"]);
+});
+
+test("the submission transaction's limits are the policy's values, in the order Prisma > transaction > statement > idle", () => {
+  const t = AGENT_DIGEST_STORE_TIMEOUTS;
+  assert.deepEqual({ ...t }, { statementMs: 2000, idleMs: 1000, statements: 9, transactionMs: 32_000, prismaMs: 37_000 });
+  assert.equal(t.transactionMs, (3 * t.statements + 5) * 1000);
+  assert.ok(t.prismaMs > t.transactionMs && t.transactionMs > t.statementMs && t.statementMs > t.idleMs);
 });

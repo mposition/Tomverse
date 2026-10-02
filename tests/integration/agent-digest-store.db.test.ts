@@ -103,3 +103,25 @@ test("a refused submission writes nothing", async () => {
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 0);
   assert.equal(await prisma.adminAuditLog.count(), before);
 });
+
+test("the transaction runs under the policy's database limits and Prisma timeout", async () => {
+  let seen: { statement: string; idle: string } | null = null;
+  let options: { timeout?: number } | undefined;
+  const db = {
+    $transaction: (work: (tx: typeof prisma) => Promise<unknown>, opts?: { timeout?: number }) => {
+      options = opts;
+      return prisma.$transaction(async (tx) => {
+        const result = await work(tx as unknown as typeof prisma);
+        const rows = await tx.$queryRaw<{ statement: string; idle: string }[]>`SELECT
+          current_setting('statement_timeout') AS statement,
+          current_setting('idle_in_transaction_session_timeout') AS idle`;
+        seen = rows[0];
+        return result;
+      }, opts);
+    },
+  } as unknown as Pick<typeof prisma, "$transaction">;
+  const result = await recordAgentDigestItem(submission({ limits: true }), db);
+  if (result.status === "created") createdIds.push(result.id);
+  assert.deepEqual(seen, { statement: "2s", idle: "1s" });
+  assert.equal(options?.timeout, 37_000);
+});
