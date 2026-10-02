@@ -8,14 +8,14 @@ name: Nightly Visual Regression
 # in signal.
 #
 # Excluding it from the PR gate does not reduce coverage: it still runs on
-# every main push (Main Chromium Regression) and inside the full nightly
+# every pull request into main (Main Chromium Regression) and inside the full nightly
 # suite (Daily Security Audit). This workflow adds a third, isolated run
 # whose only job is that suite, so a golden that starts drifting produces a
 # standalone red check with the actual/expected/diff PNGs attached, instead
 # of one line inside a twelve-check audit report.
 #
 # It does mean a broken golden no longer blocks a merge and can be found up
-# to a day later, on this schedule or on the next main push -- an accepted
+# to a day later, on this schedule or on the next release PR -- an accepted
 # trade for taking ~82s (30%) off every PR. The zero-retry bar that made the
 # PR-tier run meaningful moved here with it; see the test step below.
 #

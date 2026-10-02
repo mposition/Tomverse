@@ -452,7 +452,12 @@ export async function confirmConsent(input: {
 
 export type VerifiedSessionGrant = {
   confirmation: VerifiedSessionConfirmation;
-  /** Queues Korea's result notice in the transaction that records the grant. */
+  /**
+   * Queues Korea's result notice in the transaction that records the grant --
+   * once per transaction, however many purposes it grants. One answer is one
+   * consent, and the notice names marketing email rather than a purpose
+   * (docs/policy/email-double-opt-in.md §14.8).
+   */
   onConsentRecorded: ConsentRecordedHook;
   jurisdiction: { countryCode: string; source: string };
   /** The active policy version, resolved before the caller's transaction. */
@@ -516,9 +521,17 @@ export async function prepareVerifiedSessionGrant(input: {
     jurisdiction: resolved,
   });
   if (!confirmation) return { ok: false, reason: "disabled" };
-  const onConsentRecorded = await prepareProcessingResultNotice(input.userId, {
+  const queueNotice = await prepareProcessingResultNotice(input.userId, {
     jurisdiction: resolved,
   });
+  // Keyed by the transaction rather than a flag: a rolled-back attempt queued
+  // nothing, and another transaction with this grant must still queue one.
+  const noticeQueued = new WeakSet<object>();
+  const onConsentRecorded: ConsentRecordedHook = async (tx, record) => {
+    if (noticeQueued.has(tx)) return;
+    noticeQueued.add(tx);
+    await queueNotice(tx, record);
+  };
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
   return {

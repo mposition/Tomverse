@@ -1,6 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { SERIAL_UNIT_TEST_FILES } from "./unit-test-serial-files.mjs";
 
 /**
  * Test files reach `node --test` as glob patterns rather than as a list of
@@ -118,7 +120,7 @@ function discover(lane) {
  * Nothing parses this output: the workflows and this script only use the exit
  * code, which is unchanged.
  */
-function run(lane, patterns) {
+function run(lane, patterns, concurrency) {
   const result = spawnSync(
     process.execPath,
     [
@@ -126,12 +128,7 @@ function run(lane, patterns) {
       "--import",
       "tsx",
       "--test",
-      // PDF worker tests spawn their own parser process. On high-core Windows
-      // hosts, running every test file concurrently intermittently terminates
-      // that file before it can report an assertion. Serial file execution
-      // keeps the mandatory gate deterministic; individual tests inside each
-      // file are still free to exercise their own concurrency.
-      "--test-concurrency=1",
+      `--test-concurrency=${concurrency}`,
       "--test-reporter=spec",
       "--test-reporter-destination=stdout",
       ...patterns,
@@ -169,6 +166,51 @@ function run(lane, patterns) {
   return result.status ?? 1;
 }
 
+/**
+ * How many test files run at once.
+ *
+ * Files ran one at a time from 2026-08-03 (#283) because PDF worker tests,
+ * which spawn their own parser process, were intermittently terminated when
+ * every file ran concurrently on high-core *Windows* hosts. The setting applied
+ * everywhere, so CI's Linux runners also ran serially; at ~90 files that cost
+ * little, at ~940 it was 14 of the PR gate's 20 minutes.
+ *
+ * Windows keeps the serial behaviour that fixed it. Elsewhere files run one per
+ * available core. `UNIT_TEST_CONCURRENCY` overrides both, for reproducing a
+ * suspected ordering problem (`=1`) or for stress-testing isolation on Windows.
+ */
+function fileConcurrency() {
+  const override = process.env.UNIT_TEST_CONCURRENCY;
+  if (override !== undefined && override !== "") {
+    if (!/^[1-9][0-9]*$/.test(override)) {
+      console.error(
+        `UNIT_TEST_CONCURRENCY must be a positive integer; received "${override}".`
+      );
+      process.exit(1);
+    }
+    return Number(override);
+  }
+  return process.platform === "win32" ? 1 : availableParallelism();
+}
+
+/**
+ * The lane's patterns with the serial files cut out, using an extglob
+ * (`tests/!(a|b).test.mjs`). `discover()` has already refused any name outside
+ * GLOB_SAFE_NAME, so a stem cannot carry `|`, `(` or `)` into the pattern.
+ */
+function concurrentPatterns(lane, serialNames) {
+  return lane.suffixes.map((suffix) => {
+    const stems = serialNames
+      .filter((name) => name.endsWith(suffix))
+      .map((name) => name.slice(0, -suffix.length));
+    return stems.length === 0
+      ? `${lane.directory}/*${suffix}`
+      : `${lane.directory}/!(${stems.join("|")})${suffix}`;
+  });
+}
+
+const concurrency = fileConcurrency();
+
 for (const lane of LANES) {
   const names = discover(lane);
 
@@ -177,17 +219,43 @@ for (const lane of LANES) {
     continue;
   }
 
+  // Only the server lane lives in `tests/` itself, which is where the list's
+  // bare names point. A listed name that no longer exists fails
+  // tests/unitTestSerialFiles.test.mjs rather than being silently dropped here.
+  const serialNames =
+    lane.directory === "tests"
+      ? names.filter((name) => SERIAL_UNIT_TEST_FILES.includes(name))
+      : [];
+
   // Built from the same fields `discover()` read, so the pattern and the count
   // printed next to it cannot drift apart. A suffix that matches nothing --
   // `tests/client/*.test.ts` today -- is harmless: node ignores a pattern with
   // no matches as long as the run has files overall, which the guard above
   // establishes.
-  const patterns = lane.suffixes.map((suffix) => `${lane.directory}/*${suffix}`);
+  const patterns = concurrentPatterns(lane, serialNames);
 
-  console.log(`Running ${names.length} ${lane.label} unit test file(s).`);
+  console.log(
+    `Running ${names.length - serialNames.length} ${lane.label} unit test file(s), ` +
+      `${concurrency} at a time.`
+  );
 
-  const status = run(lane, patterns);
+  const status = run(lane, patterns, concurrency);
   if (status !== 0) process.exit(status);
+
+  // After the concurrent pass, so nothing else is running while these files
+  // touch the working tree. A handful of explicit paths fits any command line.
+  if (serialNames.length > 0) {
+    console.log(
+      `Running ${serialNames.length} ${lane.label} unit test file(s) that write ` +
+        "to the working tree, one at a time."
+    );
+    const serialStatus = run(
+      lane,
+      serialNames.map((name) => `${lane.directory}/${name}`),
+      1
+    );
+    if (serialStatus !== 0) process.exit(serialStatus);
+  }
 }
 
 process.exit(0);

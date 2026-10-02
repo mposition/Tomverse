@@ -1,0 +1,927 @@
+//! Board hygiene: age-based sweeps for needsyou and stale cards.
+//!
+//! Two sweeps in one job, at different cadences:
+//!
+//! 1. NEEDSYOU AGING (daily). Cards in `needsyou` for 14+ days get a
+//!    desc_append noting the age. Cards there for 30+ days are auto-discarded.
+//!    The 445-card needsyou pile (CLAUDE.md) is what happens when nothing
+//!    enforces a time bound on "waiting for a human".
+//!
+//! 2. STALE CARD SWEEP (every 6 hours). Autofix-created todo cards older than
+//!    72h are discarded (autofix files freely and most are addressed or
+//!    irrelevant within a day). Backlog cards older than 30 days that were
+//!    never promoted get a desc_append flagging them for review. A per-session
+//!    status summary is logged each pass.
+
+use crate::api::AppState;
+use crate::db::board_store as bs;
+
+const JOB: &str = "board-hygiene";
+const TICK_SECS: u64 = 6 * 3600; // 6 hours; the needsyou sweep skips if < 24h since last run
+
+const NEEDSYOU_WARN_DAYS: i64 = 14;
+const NEEDSYOU_DISCARD_DAYS: i64 = 30;
+const AUTOFIX_STALE_HOURS: i64 = 72;
+const BACKLOG_STALE_DAYS: i64 = 30;
+
+static LAST_NEEDSYOU_RUN: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+struct NeedsyouCard {
+    id: String,
+    title: String,
+    age_days: i64,
+    /// Non-empty means a TYPED ask naming a specific human (the
+    /// `needsyou_requires_typed_ask` gate, AF-318/AMUX-3929). AF-702: this
+    /// sweep used to age-out a typed ask exactly like an untyped one, so a
+    /// card correctly waiting on Ethan for 46 days was penalised for HIS
+    /// response time and discarded with "no resolution" — a sentence that
+    /// reads as the lane's failure when the lane did everything it could.
+    /// A typed ask is a decision only a human can make; the sweep cannot
+    /// manufacture that decision by discarding the question.
+    ask_actor: String,
+}
+
+struct StaleAutofixCard {
+    id: String,
+    title: String,
+    age_hours: i64,
+}
+
+struct StaleBacklogCard {
+    id: String,
+    title: String,
+    age_days: i64,
+}
+
+struct StatusCount {
+    session: String,
+    status: String,
+    count: i64,
+}
+
+/// Prepare a sweep query, and SAY SO when it fails.
+///
+/// Every sweep below returns a `Vec`, and the `let Ok(..) else { return out }`
+/// form turns a broken query into an EMPTY one with no log line at all. Empty
+/// is a legitimate answer here ("nothing is stale"), so the failure is
+/// indistinguishable from the healthy case at every call site and in every
+/// downstream count.
+///
+/// That is not hypothetical. A second, duplicate copy of the autofix sweep in
+/// `runtime_jobs::autofix` selected `issues.updated_at`, a column `issues` has
+/// never had, and failed on every tick for a week (AMUX-4740). It was only ever
+/// found because it used `?` and logged 680 errors. These four sites would have
+/// made the same defect completely silent.
+fn prepare_or_warn<'c>(
+    conn: &'c rusqlite::Connection,
+    probe: &'static str,
+    sql: &str,
+) -> Option<rusqlite::Statement<'c>> {
+    match conn.prepare(sql) {
+        Ok(st) => Some(st),
+        Err(e) => {
+            tracing::warn!(
+                probe = probe,
+                err = %e,
+                measured = false,
+                verdict = "board_hygiene_query_unprepared",
+                "board-hygiene sweep query did not prepare, so this sweep reports EMPTY. Read that as unmeasured, not as nothing being stale"
+            );
+            None
+        }
+    }
+}
+
+fn find_needsyou_cards(conn: &rusqlite::Connection, now_secs: i64) -> Vec<NeedsyouCard> {
+    let cutoff = now_secs - (NEEDSYOU_WARN_DAYS * 86_400);
+    let mut out = Vec::new();
+    let Some(mut st) = prepare_or_warn(
+        conn,
+        "needsyou_aging",
+        "SELECT id, title, created, COALESCE(ask_actor, '') FROM issues \
+         WHERE status = 'needsyou' AND deleted IS NULL \
+         AND COALESCE(archived, 0) = 0 AND created < ?1 \
+         ORDER BY created ASC",
+    ) else {
+        return out;
+    };
+    if let Ok(rows) = st.query_map(rusqlite::params![cutoff], |r| {
+        let created: i64 = r.get(2)?;
+        Ok(NeedsyouCard {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            age_days: (now_secs - created) / 86_400,
+            ask_actor: r.get(3)?,
+        })
+    }) {
+        out.extend(rows.flatten());
+    }
+    out
+}
+
+fn find_stale_autofix_cards(conn: &rusqlite::Connection, now_secs: i64) -> Vec<StaleAutofixCard> {
+    let cutoff = now_secs - (AUTOFIX_STALE_HOURS * 3600);
+    let mut out = Vec::new();
+    let Some(mut st) = prepare_or_warn(
+        conn,
+        "stale_autofix",
+        "SELECT id, title, created FROM issues \
+         WHERE status = 'todo' AND creator = 'autofix' AND deleted IS NULL \
+         AND COALESCE(archived, 0) = 0 AND created < ?1 \
+         ORDER BY created ASC",
+    ) else {
+        return out;
+    };
+    if let Ok(rows) = st.query_map(rusqlite::params![cutoff], |r| {
+        let created: i64 = r.get(2)?;
+        Ok(StaleAutofixCard {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            age_hours: (now_secs - created) / 3600,
+        })
+    }) {
+        out.extend(rows.flatten());
+    }
+    out
+}
+
+fn find_stale_backlog_cards(conn: &rusqlite::Connection, now_secs: i64) -> Vec<StaleBacklogCard> {
+    let cutoff = now_secs - (BACKLOG_STALE_DAYS * 86_400);
+    let mut out = Vec::new();
+    // Cards that have been in backlog for 30+ days and were never moved to
+    // doing or done. We check the log column for evidence of a status transition;
+    // if the log is empty or NULL, the card was never worked.
+    let Some(mut st) = prepare_or_warn(
+        conn,
+        "stale_backlog",
+        "SELECT id, title, created FROM issues \
+         WHERE status = 'backlog' AND deleted IS NULL \
+         AND COALESCE(archived, 0) = 0 AND created < ?1 \
+         AND (log IS NULL OR (log NOT LIKE '%doing%' AND log NOT LIKE '%done%')) \
+         ORDER BY created ASC",
+    ) else {
+        return out;
+    };
+    if let Ok(rows) = st.query_map(rusqlite::params![cutoff], |r| {
+        let created: i64 = r.get(2)?;
+        Ok(StaleBacklogCard {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            age_days: (now_secs - created) / 86_400,
+        })
+    }) {
+        out.extend(rows.flatten());
+    }
+    out
+}
+
+fn count_by_session_status(conn: &rusqlite::Connection) -> Vec<StatusCount> {
+    let mut out = Vec::new();
+    let Some(mut st) = prepare_or_warn(
+        conn,
+        "count_by_session_status",
+        "SELECT COALESCE(session, '(unowned)'), status, COUNT(*) FROM issues \
+         WHERE deleted IS NULL AND COALESCE(archived, 0) = 0 \
+         GROUP BY session, status ORDER BY session, status",
+    ) else {
+        return out;
+    };
+    if let Ok(rows) = st.query_map([], |r| {
+        Ok(StatusCount {
+            session: r.get(0)?,
+            status: r.get(1)?,
+            count: r.get(2)?,
+        })
+    }) {
+        out.extend(rows.flatten());
+    }
+    out
+}
+
+/// Drop every line starting with the auto-aged marker, so the daily sweep
+/// SUPERSEDES its previous stamp instead of stacking a new one on top
+/// (reported by mixpeek-orchestrator/gtm-engine, GE-610: a card that sat in
+/// needsyou for weeks grew 20+ consecutive copies of this line, burying the
+/// actual ask underneath its own age history). Prefix match, not exact-line
+/// match, so a stale line still gets removed even if the AGE NUMBER in it
+/// differs from today's.
+///
+/// Collapses any run of blank lines the removal leaves behind, so a card
+/// whose only content was this stamp does not end up with dangling empty
+/// lines once it is replaced.
+fn strip_prior_auto_aged_lines(desc: &str) -> String {
+    const MARKER: &str = "Auto-aged: this card has been in needsyou for";
+    let kept: Vec<&str> = desc.lines().filter(|line| !line.starts_with(MARKER)).collect();
+    let mut out = String::new();
+    let mut prev_blank = true; // suppress leading blank lines too
+    for line in kept {
+        let blank = line.trim().is_empty();
+        if blank && prev_blank {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+        prev_blank = blank;
+    }
+    out
+}
+
+/// Run the needsyou aging sweep. Returns (warned, discarded).
+async fn needsyou_sweep(state: &AppState, now_secs: i64) -> (usize, usize) {
+    let last = LAST_NEEDSYOU_RUN.load(std::sync::atomic::Ordering::Relaxed);
+    if last > 0 && (now_secs - last) < 23 * 3600 {
+        return (0, 0);
+    }
+    LAST_NEEDSYOU_RUN.store(now_secs, std::sync::atomic::Ordering::Relaxed);
+
+    let cards = {
+        let Ok(conn) = state.store.read() else { return (0, 0) };
+        find_needsyou_cards(&conn, now_secs)
+    };
+
+    let mut warned = 0usize;
+    let mut discarded = 0usize;
+
+    for card in &cards {
+        let typed_ask = !card.ask_actor.trim().is_empty();
+        if card.age_days >= NEEDSYOU_DISCARD_DAYS && typed_ask {
+            // AF-702: a typed ask names a specific human and the age is HIS
+            // response time, not the lane's. GE-408 was auto-discarded at 46
+            // days waiting on Ethan, worded as though the lane had failed to
+            // resolve something it had no power to resolve. Falls through to
+            // the warn branch below instead — same aging note every other
+            // needsyou card gets, deduplicated by strip_prior_auto_aged_lines
+            // so it does not accumulate. No discard ceiling for a typed ask:
+            // the exit is an answer, not a clock.
+            let id = card.id.clone();
+            let age = card.age_days;
+            let actor = card.ask_actor.clone();
+            let note = format!(
+                "Auto-aged: this card has been in needsyou for {age} days, waiting on {actor} \
+                 (typed ask — exempt from auto-discard, AF-702)"
+            );
+            let hhmm = chrono::Utc::now().format("%H:%M").to_string();
+            let _ = state
+                .store
+                .write_async(move |conn| {
+                    let old_desc: String = conn
+                        .query_row(
+                            "SELECT COALESCE(\"desc\", '') FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or_default();
+                    let stripped = strip_prior_auto_aged_lines(&old_desc);
+                    let new_desc = if stripped.trim().is_empty() {
+                        note.clone()
+                    } else {
+                        format!("{}\n{note}", stripped.trim_end())
+                    };
+                    let old_log: Option<String> = conn
+                        .query_row(
+                            "SELECT log FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    let new_log = bs::append_log(old_log.as_deref(), &hhmm, &note);
+                    conn.execute(
+                        "UPDATE issues SET \"desc\" = ?1, log = ?2, updated = ?3 WHERE id = ?4",
+                        rusqlite::params![new_desc, new_log, now_secs, &id],
+                    )?;
+                    Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                })
+                .await;
+            tracing::info!(
+                card_id = %card.id,
+                age_days = card.age_days,
+                ask_actor = %card.ask_actor,
+                title = %card.title,
+                "board_hygiene: typed-ask needsyou card exempted from auto-discard"
+            );
+            warned += 1;
+        } else if card.age_days >= NEEDSYOU_DISCARD_DAYS {
+            let id = card.id.clone();
+            let age = card.age_days;
+            let note = format!(
+                "Auto-discarded: {age} days in needsyou with no resolution"
+            );
+            let hhmm = chrono::Utc::now().format("%H:%M").to_string();
+            let _ = state
+                .store
+                .write_async(move |conn| {
+                    let old_desc: String = conn
+                        .query_row(
+                            "SELECT COALESCE(\"desc\", '') FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or_default();
+                    let new_desc = if old_desc.trim().is_empty() {
+                        note.clone()
+                    } else {
+                        format!("{}\n{note}", old_desc.trim_end())
+                    };
+                    let old_log: Option<String> = conn
+                        .query_row(
+                            "SELECT log FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    let new_log = bs::append_log(old_log.as_deref(), &hhmm, &note);
+                    conn.execute(
+                        "UPDATE issues SET status = 'discarded', \"desc\" = ?1, log = ?2, \
+                         updated = ?3 WHERE id = ?4",
+                        rusqlite::params![new_desc, new_log, now_secs, &id],
+                    )?;
+                    Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                })
+                .await;
+            tracing::info!(
+                card_id = %card.id,
+                age_days = card.age_days,
+                title = %card.title,
+                "board_hygiene: auto-discarded needsyou card"
+            );
+            discarded += 1;
+        } else {
+            let id = card.id.clone();
+            let age = card.age_days;
+            let note = format!(
+                "Auto-aged: this card has been in needsyou for {age} days"
+            );
+            let hhmm = chrono::Utc::now().format("%H:%M").to_string();
+            let _ = state
+                .store
+                .write_async(move |conn| {
+                    let old_desc: String = conn
+                        .query_row(
+                            "SELECT COALESCE(\"desc\", '') FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or_default();
+                    // SUPERSEDE, not accumulate (reported by mixpeek-orchestrator/
+                    // gtm-engine, GE-610): this sweep runs at most once per 23h per
+                    // card, so a card sitting in needsyou for weeks previously grew
+                    // one "Auto-aged: ... N days" line per pass, 20+ deep, burying
+                    // the actual ask underneath its own age history.
+                    let stripped = strip_prior_auto_aged_lines(&old_desc);
+                    let new_desc = if stripped.trim().is_empty() {
+                        note.clone()
+                    } else {
+                        format!("{}\n{note}", stripped.trim_end())
+                    };
+                    let old_log: Option<String> = conn
+                        .query_row(
+                            "SELECT log FROM issues WHERE id = ?1",
+                            rusqlite::params![&id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    let new_log = bs::append_log(old_log.as_deref(), &hhmm, &note);
+                    conn.execute(
+                        "UPDATE issues SET \"desc\" = ?1, log = ?2, updated = ?3 WHERE id = ?4",
+                        rusqlite::params![new_desc, new_log, now_secs, &id],
+                    )?;
+                    Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                })
+                .await;
+            tracing::info!(
+                card_id = %card.id,
+                age_days = card.age_days,
+                title = %card.title,
+                "board_hygiene: warned needsyou card"
+            );
+            warned += 1;
+        }
+    }
+
+    (warned, discarded)
+}
+
+/// Run the stale card sweep. Returns (autofix_discarded, backlog_flagged).
+async fn stale_sweep(state: &AppState, now_secs: i64) -> (usize, usize) {
+    let (autofix_cards, backlog_cards, status_counts) = {
+        let Ok(conn) = state.store.read() else { return (0, 0) };
+        (
+            find_stale_autofix_cards(&conn, now_secs),
+            find_stale_backlog_cards(&conn, now_secs),
+            count_by_session_status(&conn),
+        )
+    };
+
+    let mut autofix_discarded = 0usize;
+    for card in &autofix_cards {
+        let id = card.id.clone();
+        let age = card.age_hours;
+        let note = format!("Auto-discarded: autofix todo card stale for {age}h");
+        let hhmm = chrono::Utc::now().format("%H:%M").to_string();
+        let _ = state
+            .store
+            .write_async(move |conn| {
+                let old_log: Option<String> = conn
+                    .query_row(
+                        "SELECT log FROM issues WHERE id = ?1",
+                        rusqlite::params![&id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let new_log = bs::append_log(old_log.as_deref(), &hhmm, &note);
+                conn.execute(
+                    "UPDATE issues SET status = 'discarded', log = ?1, updated = ?2 WHERE id = ?3",
+                    rusqlite::params![new_log, now_secs, &id],
+                )?;
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .await;
+        tracing::info!(
+            card_id = %card.id,
+            age_hours = card.age_hours,
+            title = %card.title,
+            "board_hygiene: discarded stale autofix card"
+        );
+        autofix_discarded += 1;
+    }
+
+    let mut backlog_flagged = 0usize;
+    for card in &backlog_cards {
+        let id = card.id.clone();
+        let age = card.age_days;
+        let note = format!(
+            "Stale review: this card has been in backlog for {age} days and was never promoted"
+        );
+        let hhmm = chrono::Utc::now().format("%H:%M").to_string();
+        let _ = state
+            .store
+            .write_async(move |conn| {
+                let old_desc: String = conn
+                    .query_row(
+                        "SELECT COALESCE(\"desc\", '') FROM issues WHERE id = ?1",
+                        rusqlite::params![&id],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or_default();
+                // Only append if we haven't already flagged this card
+                if old_desc.contains("Stale review:") {
+                    return Ok(crate::db::WriteOutcome { applied: false, events: vec![] });
+                }
+                let new_desc = if old_desc.trim().is_empty() {
+                    note.clone()
+                } else {
+                    format!("{}\n{note}", old_desc.trim_end())
+                };
+                let old_log: Option<String> = conn
+                    .query_row(
+                        "SELECT log FROM issues WHERE id = ?1",
+                        rusqlite::params![&id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let new_log = bs::append_log(old_log.as_deref(), &hhmm, &note);
+                conn.execute(
+                    "UPDATE issues SET \"desc\" = ?1, log = ?2, updated = ?3 WHERE id = ?4",
+                    rusqlite::params![new_desc, new_log, now_secs, &id],
+                )?;
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .await;
+        tracing::info!(
+            card_id = %card.id,
+            age_days = card.age_days,
+            title = %card.title,
+            "board_hygiene: flagged stale backlog card"
+        );
+        backlog_flagged += 1;
+    }
+
+    // Log the per-session status summary
+    if !status_counts.is_empty() {
+        use std::collections::BTreeMap;
+        let mut by_session: BTreeMap<String, Vec<(String, i64)>> = BTreeMap::new();
+        for sc in &status_counts {
+            by_session
+                .entry(sc.session.clone())
+                .or_default()
+                .push((sc.status.clone(), sc.count));
+        }
+        let total_sessions = by_session.len();
+        let total_cards: i64 = status_counts.iter().map(|s| s.count).sum();
+        let summary: Vec<String> = by_session
+            .iter()
+            .map(|(s, counts)| {
+                let parts: Vec<String> = counts.iter().map(|(st, c)| format!("{st}={c}")).collect();
+                format!("{s}: {}", parts.join(" "))
+            })
+            .collect();
+        tracing::info!(
+            sessions = total_sessions,
+            total_cards = total_cards,
+            "board_hygiene: status summary: {}",
+            summary.join("; ")
+        );
+    }
+
+    (autofix_discarded, backlog_flagged)
+}
+
+pub async fn tick(state: AppState) {
+    let now_secs = crate::config::now_f64() as i64;
+
+    let (ny_warned, ny_discarded) = needsyou_sweep(&state, now_secs).await;
+    let (af_discarded, bl_flagged) = stale_sweep(&state, now_secs).await;
+
+    if ny_warned > 0 || ny_discarded > 0 || af_discarded > 0 || bl_flagged > 0 {
+        tracing::info!(
+            needsyou_warned = ny_warned,
+            needsyou_discarded = ny_discarded,
+            autofix_discarded = af_discarded,
+            backlog_flagged = bl_flagged,
+            "board_hygiene: sweep complete"
+        );
+    }
+}
+
+pub fn spawn(state: AppState) -> super::PeriodicTask {
+    super::spawn_periodic(JOB, TICK_SECS, move || {
+        let state = state.clone();
+        async move {
+            tick(state).await;
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    /// Serialises the three tests that drive `needsyou_sweep`, because it reads
+    /// and writes the process-global `LAST_NEEDSYOU_RUN` (AMUX-4713). Async, so
+    /// the guard can be held across the `.await` without tripping
+    /// `clippy::await_holding_lock`.
+    static SWEEP_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    use super::*;
+
+    #[test]
+    fn needsyou_constants_are_sane() {
+        const { assert!(NEEDSYOU_WARN_DAYS < NEEDSYOU_DISCARD_DAYS) };
+        const { assert!(NEEDSYOU_DISCARD_DAYS > 0) };
+        const { assert!(AUTOFIX_STALE_HOURS > 0) };
+        const { assert!(BACKLOG_STALE_DAYS > 0) };
+    }
+
+    /// GE-610: a card that sat in needsyou for weeks grew one "Auto-aged"
+    /// line per daily pass, 20+ deep. The fix must SUPERSEDE, so the
+    /// original ask stays adjacent to the (single) current age line rather
+    /// than scrolling off beneath a stack of historical ones.
+    #[test]
+    fn strip_prior_auto_aged_lines_removes_only_the_stamp() {
+        let desc = "the real ask: which pricing tier?\n\
+                     Auto-aged: this card has been in needsyou for 14 days";
+        assert_eq!(strip_prior_auto_aged_lines(desc), "the real ask: which pricing tier?");
+    }
+
+    #[test]
+    fn strip_prior_auto_aged_lines_collapses_a_long_stack() {
+        let mut desc = "the real ask: which pricing tier?".to_string();
+        for n in [14, 15, 16, 17, 20, 21] {
+            desc.push('\n');
+            desc.push_str(&format!("Auto-aged: this card has been in needsyou for {n} days"));
+        }
+        let stripped = strip_prior_auto_aged_lines(&desc);
+        assert_eq!(stripped, "the real ask: which pricing tier?");
+        assert_eq!(stripped.matches("Auto-aged").count(), 0, "every historical stamp must be gone");
+    }
+
+    #[test]
+    fn strip_prior_auto_aged_lines_is_a_noop_on_a_desc_with_no_stamp() {
+        let desc = "just an ordinary description with no age stamp at all";
+        assert_eq!(strip_prior_auto_aged_lines(desc), desc);
+    }
+
+    #[test]
+    fn strip_prior_auto_aged_lines_handles_an_all_stamp_desc() {
+        assert_eq!(
+            strip_prior_auto_aged_lines("Auto-aged: this card has been in needsyou for 14 days"),
+            ""
+        );
+    }
+
+    #[test]
+    fn find_needsyou_uses_correct_cutoff() {
+        let conn = crate::db::migrate::test_memdb();
+
+        let now = 1_000_000i64;
+        // Card at 15 days: should be found (>= 14 day cutoff)
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["NY-1", "old needsyou", "needsyou", now - 15 * 86_400, now],
+        )
+        .unwrap();
+        // Card at 5 days: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["NY-2", "fresh needsyou", "needsyou", now - 5 * 86_400, now],
+        )
+        .unwrap();
+        // Card at 35 days: should be found (and will be discarded)
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["NY-3", "ancient needsyou", "needsyou", now - 35 * 86_400, now],
+        )
+        .unwrap();
+        // Deleted card at 20 days: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, deleted, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'agent')",
+            rusqlite::params!["NY-4", "deleted needsyou", "needsyou", now - 20 * 86_400, now, 1],
+        )
+        .unwrap();
+
+        let cards = find_needsyou_cards(&conn, now);
+        assert_eq!(cards.len(), 2, "expected 2 cards, got {}", cards.len());
+        assert_eq!(cards[0].id, "NY-3"); // oldest first
+        assert_eq!(cards[0].age_days, 35);
+        assert_eq!(cards[1].id, "NY-1");
+        assert_eq!(cards[1].age_days, 15);
+    }
+
+    #[test]
+    fn find_stale_autofix_uses_correct_cutoff() {
+        let conn = crate::db::migrate::test_memdb();
+
+        let now = 1_000_000i64;
+        // Autofix card at 80h: should be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, creator, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'agent')",
+            rusqlite::params!["AF-1", "old autofix", "todo", "autofix", now - 80 * 3600, now],
+        )
+        .unwrap();
+        // Autofix card at 24h: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, creator, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'agent')",
+            rusqlite::params!["AF-2", "fresh autofix", "todo", "autofix", now - 24 * 3600, now],
+        )
+        .unwrap();
+        // Non-autofix card at 80h: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, creator, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'agent')",
+            rusqlite::params!["AF-3", "old human card", "todo", "human", now - 80 * 3600, now],
+        )
+        .unwrap();
+
+        let cards = find_stale_autofix_cards(&conn, now);
+        assert_eq!(cards.len(), 1, "expected 1 card, got {}", cards.len());
+        assert_eq!(cards[0].id, "AF-1");
+        assert_eq!(cards[0].age_hours, 80);
+    }
+
+    /// The guard has to be able to FAIL, or it is decoration (ethos rule 7).
+    ///
+    /// This is the exact SELECT that ran in `runtime_jobs::autofix` and failed
+    /// on every tick for a week: `issues` has `updated`/`created`, never
+    /// `updated_at` (AMUX-4740). Pin it against the REAL migrated schema, so
+    /// this asserts something about the shipped table rather than about a
+    /// fixture built to agree with the query.
+    #[test]
+    fn prepare_or_warn_reports_a_column_that_does_not_exist() {
+        let conn = crate::db::migrate::test_memdb();
+
+        let bad = prepare_or_warn(
+            &conn,
+            "amux_4740_specimen",
+            "SELECT id, title FROM issues WHERE COALESCE(updated_at, created_at) < ?1",
+        );
+        assert!(
+            bad.is_none(),
+            "a SELECT on issues.updated_at must not prepare: the column does not exist"
+        );
+
+        // The positive control. Without it this test passes just as happily
+        // against a connection with no `issues` table at all, which would make
+        // it a test of the fixture rather than of the column name.
+        let good = prepare_or_warn(
+            &conn,
+            "amux_4740_control",
+            "SELECT id, title FROM issues WHERE COALESCE(updated, created) < ?1",
+        );
+        assert!(
+            good.is_some(),
+            "the corrected column names must prepare, or this test is measuring a missing table"
+        );
+    }
+
+    /// `count_by_session_status` was the one sweep query with no test, so a
+    /// rename under it would have produced an empty rollup that reads exactly
+    /// like a quiet board.
+    #[test]
+    fn count_by_session_status_prepares_and_counts() {
+        let conn = crate::db::migrate::test_memdb();
+        for (id, session, status) in [
+            ("CB-1", "amux", "todo"),
+            ("CB-2", "amux", "todo"),
+            ("CB-3", "amux", "doing"),
+        ] {
+            conn.execute(
+                "INSERT INTO issues (id, title, status, session, creator, created, updated, owner_type) \
+                 VALUES (?1, ?2, ?3, ?4, 'human', 1, 1, 'agent')",
+                rusqlite::params![id, "t", status, session],
+            )
+            .unwrap();
+        }
+
+        let counts = count_by_session_status(&conn);
+        assert!(
+            !counts.is_empty(),
+            "empty here would be indistinguishable from a query that failed to prepare"
+        );
+        let todo = counts
+            .iter()
+            .find(|c| c.session == "amux" && c.status == "todo")
+            .expect("amux/todo row");
+        assert_eq!(todo.count, 2);
+    }
+
+    #[test]
+    fn find_stale_backlog_excludes_promoted_cards() {
+        let conn = crate::db::migrate::test_memdb();
+
+        let now = 1_000_000i64;
+        // Old backlog card, never promoted: should be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["BL-1", "stale backlog", "backlog", now - 35 * 86_400, now],
+        )
+        .unwrap();
+        // Old backlog card with "doing" in log: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, log, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'agent')",
+            rusqlite::params!["BL-2", "promoted backlog", "backlog", now - 35 * 86_400, now, "`12:00` moved to doing"],
+        )
+        .unwrap();
+        // Young backlog card: should NOT be found
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) VALUES (?1, ?2, ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["BL-3", "fresh backlog", "backlog", now - 5 * 86_400, now],
+        )
+        .unwrap();
+
+        let cards = find_stale_backlog_cards(&conn, now);
+        assert_eq!(cards.len(), 1, "expected 1 card, got {}", cards.len());
+        assert_eq!(cards[0].id, "BL-1");
+        assert_eq!(cards[0].age_days, 35);
+    }
+
+    #[test]
+    fn find_needsyou_cards_carries_ask_actor_through() {
+        let conn = crate::db::migrate::test_memdb();
+        let now = 1_000_000i64;
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, ask_actor, owner_type) \
+             VALUES (?1, ?2, 'needsyou', ?3, ?4, ?5, 'agent')",
+            rusqlite::params!["NY-5", "typed", now - 20 * 86_400, now, "ethan"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO issues (id, title, status, created, updated, owner_type) \
+             VALUES (?1, ?2, 'needsyou', ?3, ?4, 'agent')",
+            rusqlite::params!["NY-6", "untyped legacy", now - 20 * 86_400, now],
+        )
+        .unwrap();
+        let cards = find_needsyou_cards(&conn, now);
+        let typed = cards.iter().find(|c| c.id == "NY-5").expect("NY-5 found");
+        assert_eq!(typed.ask_actor, "ethan");
+        let untyped = cards.iter().find(|c| c.id == "NY-6").expect("NY-6 found");
+        assert_eq!(untyped.ask_actor, "", "a NULL ask_actor must read as empty, not error");
+    }
+
+    fn hygiene_state() -> (AppState, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(crate::db::Store::open(&dir.path().join("t.db")).unwrap());
+        (
+            AppState {
+                store,
+                started: std::time::Instant::now(),
+                build_hash: "test".into(),
+                auth_token: None,
+                reconciled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            },
+            dir,
+        )
+    }
+
+    fn seed_needsyou(state: &AppState, id: &str, age_days: i64, ask_actor: Option<&str>, now: i64) {
+        let id = id.to_string();
+        let ask_actor = ask_actor.map(str::to_string);
+        state
+            .store
+            .write(move |conn| {
+                conn.execute(
+                    "INSERT INTO issues (id, title, status, created, updated, ask_actor, owner_type) \
+                     VALUES (?1, 'fixture', 'needsyou', ?2, ?2, ?3, 'agent')",
+                    rusqlite::params![id, now - age_days * 86_400, ask_actor],
+                )?;
+                Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+    }
+
+    fn card_status(state: &AppState, id: &str) -> String {
+        state
+            .store
+            .read()
+            .unwrap()
+            .query_row("SELECT status FROM issues WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn card_desc(state: &AppState, id: &str) -> String {
+        state
+            .store
+            .read()
+            .unwrap()
+            .query_row("SELECT COALESCE(\"desc\",'') FROM issues WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// AF-702, the GE-408 specimen: a card correctly waiting 46 days on a
+    /// NAMED human must not be auto-discarded just because a discard-age
+    /// clock ran out. The clock measures the lane's inaction; here the lane
+    /// has none to answer for.
+    ///
+    /// AMUX-4713: this test and the two below hold `SWEEP_LOCK` for their whole
+    /// body, and that is load-bearing. `needsyou_sweep` does a check-then-act on
+    /// the process-global `LAST_NEEDSYOU_RUN`, returning (0, 0) when the last
+    /// run was under 23h ago, so `store(0)` at the top of one test can be
+    /// overwritten by another's `store(now)` before its own `load`. The sweep
+    /// then returns having done nothing and the reader sees `warned: 0`, which
+    /// is indistinguishable from "it ran and found nothing to warn about".
+    ///
+    /// Measured 2026-09-16: a_typed_ask_under_the_discard_age_gets_the_ordinary_warn
+    /// failed in a full run (left 0, right 1) while passing alone and passing
+    /// with all 13 `needsyou` neighbours.
+    ///
+    /// SPACING THE CLOCKS WAS TRIED FIRST AND IS WRONG, which is worth recording
+    /// because it looks right. Giving each test a `now` more than 23h apart only
+    /// helps if they run in ASCENDING order: if the later-clock test runs first,
+    /// the earlier one loads a `last` GREATER than its own `now`, the delta goes
+    /// negative, and `delta < 23h` suppresses it just the same. Measured over 6
+    /// parallel runs: 1 of 6 still failed with the clocks spaced, against 4 of 6
+    /// with them collapsed. Reduced, not fixed, which is the most dangerous
+    /// shape a fix can have.
+    ///
+    /// The lock removes the interleaving instead of trying to survive it.
+    #[tokio::test]
+    async fn a_typed_ask_past_the_discard_age_is_exempted_not_discarded() {
+        let _serial = SWEEP_LOCK.lock().await;
+        let (state, _dir) = hygiene_state();
+        LAST_NEEDSYOU_RUN.store(0, std::sync::atomic::Ordering::Relaxed);
+        let now = 2_000_000i64;
+        seed_needsyou(&state, "GE-408", 46, Some("ethan"), now);
+
+        let (warned, discarded) = needsyou_sweep(&state, now).await;
+        assert_eq!(discarded, 0, "a typed ask must never be counted as discarded");
+        assert_eq!(warned, 1);
+        assert_eq!(card_status(&state, "GE-408"), "needsyou", "must stay open, not discarded");
+        let desc = card_desc(&state, "GE-408");
+        assert!(desc.contains("waiting on ethan"), "{desc}");
+        assert!(desc.contains("AF-702"), "{desc}");
+        assert!(!desc.contains("no resolution"), "must not blame the lane: {desc}");
+    }
+
+    /// CONTROL: an untyped legacy ask (predates the needsyou_requires_typed_ask
+    /// gate) must still discard at the same age as before this change — the
+    /// exemption is for a NAMED human waiting, not a blanket amnesty.
+    #[tokio::test]
+    async fn an_untyped_legacy_ask_past_the_discard_age_is_still_discarded() {
+        let _serial = SWEEP_LOCK.lock().await;
+        let (state, _dir) = hygiene_state();
+        LAST_NEEDSYOU_RUN.store(0, std::sync::atomic::Ordering::Relaxed);
+        let now = 2_000_000i64;
+        seed_needsyou(&state, "OLD-1", 35, None, now);
+
+        let (warned, discarded) = needsyou_sweep(&state, now).await;
+        assert_eq!(discarded, 1);
+        assert_eq!(warned, 0);
+        assert_eq!(card_status(&state, "OLD-1"), "discarded");
+    }
+
+    /// A typed ask well under the discard age still gets the ordinary warn
+    /// note — this fix must not change behavior for the common case.
+    #[tokio::test]
+    async fn a_typed_ask_under_the_discard_age_gets_the_ordinary_warn() {
+        let _serial = SWEEP_LOCK.lock().await;
+        let (state, _dir) = hygiene_state();
+        LAST_NEEDSYOU_RUN.store(0, std::sync::atomic::Ordering::Relaxed);
+        let now = 2_000_000i64;
+        seed_needsyou(&state, "NY-7", 20, Some("ethan"), now);
+
+        let (warned, discarded) = needsyou_sweep(&state, now).await;
+        assert_eq!(discarded, 0);
+        assert_eq!(warned, 1);
+        assert_eq!(card_status(&state, "NY-7"), "needsyou");
+        let desc = card_desc(&state, "NY-7");
+        assert!(desc.contains("Auto-aged: this card has been in needsyou for 20 days"), "{desc}");
+    }
+}

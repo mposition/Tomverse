@@ -15,6 +15,8 @@ import { resolve } from "node:path";
   export list on every runtime.
 */
 import * as aiModule from "ai";
+// The provider-only fake for the ART-FORMAT-01 tests, which drive the real SDK.
+import { MockLanguageModelV4 } from "ai/test";
 
 /**
  * What POST /api/chat leaves behind when a file was begun and the answer ran
@@ -1000,3 +1002,229 @@ test("a manual turn on an unverified model keeps the plain remedy, with no menti
   assert.match(promptText(), /choosing a different model/);
   assert.doesNotMatch(promptText(), /instead of Auto/);
 });
+
+/* -------------------------------------------------------------------------- */
+/* ART-FORMAT-01: a .txt request answered with "txt is not supported"           */
+/* -------------------------------------------------------------------------- */
+
+/*
+  Reported on staging: a user asked for a short memo as a .txt file, the
+  answer said .txt was not supported, tried Markdown, and delivered a .docx.
+  The logs held one `generated_artifact_created` (docx) and nothing about the
+  calls before it.
+
+  The format table puts `txt` and `md` in the `document` kind, so they are made
+  by `create_document`; `create_text_file`'s `format` enum does not list them.
+  The unconfirmed hypothesis is that the model called `create_text_file` with
+  `txt`, then `md`, was refused both times by a message that never named the
+  right tool, and fell back to a format it could make -- the substitution
+  docs/policy/generated-artifacts.md section 4 forbids ("the format the user
+  names is the format you produce").
+
+  These tests pin what the application does on each step of that path. They do
+  not choose the fix. The one test that states the outcome a fix must reach is
+  marked `todo` (expected to fail) and passes under any of the candidate fixes.
+
+  The existing tests above feed the route hand-written invalid frames. The
+  ones below take the frames from the REAL SDK validating the REAL registered
+  tool, which is the only way to show which refusal channel production
+  actually takes: the SDK checks `inputSchema` before `execute`, so a `txt`
+  call to `create_text_file` never reaches the collector's own admission.
+*/
+
+
+type RegisteredTool = {
+  description?: string;
+  inputSchema?: unknown;
+  execute?: (input: unknown, meta: unknown) => unknown;
+};
+
+/** The artifact tools exactly as the route registers them for a verified model. */
+const registeredArtifactTools = async (): Promise<Record<string, RegisteredTool>> => {
+  await ask({});
+  assert.ok(lastStreamTextOptions, "streamText was never called");
+  return lastStreamTextOptions!.tools as Record<string, RegisteredTool>;
+};
+
+/**
+ * One provider tool call run through the real SDK against a registered tool.
+ *
+ * Only the provider is fake. The schema check, the invalid-call frame and the
+ * error text are the SDK's own, so what comes back is what a real turn would
+ * hand both the route's `onChunk` and the model's next step.
+ */
+const callThroughRealSdk = async (
+  registered: RegisteredTool,
+  toolName: string,
+  input: Record<string, unknown>
+) => {
+  const chunks: Array<Record<string, unknown>> = [];
+  let executions = 0;
+  const model = new MockLanguageModelV4({
+    doStream: {
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            type: "tool-call",
+            toolCallId: `sdk_${toolName}_${String(input.format)}`,
+            toolName,
+            input: JSON.stringify(input),
+          });
+          controller.enqueue({
+            type: "finish",
+            finishReason: { unified: "tool-calls", raw: "tool_use" },
+            usage: {
+              inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 },
+              outputTokens: { total: 0, text: 0, reasoning: 0 },
+            },
+          });
+          controller.close();
+        },
+      }),
+    },
+  });
+  const result = aiModule.streamText({
+    model,
+    prompt: "fixture",
+    tools: {
+      [toolName]: {
+        ...registered,
+        // Counted, then forwarded: the schema stays the registered one.
+        execute: async (toolInput: unknown, meta: unknown) => {
+          executions += 1;
+          return registered.execute?.(toolInput, meta);
+        },
+      } as never,
+    },
+    onChunk: ({ chunk }) => {
+      chunks.push(chunk as Record<string, unknown>);
+    },
+  });
+  for await (const part of result.fullStream) assert.ok(part);
+
+  const invalidCalls = chunks.filter(
+    (chunk) => chunk.type === "tool-call" && chunk.invalid === true
+  );
+  const toolErrors = chunks.filter((chunk) => chunk.type === "tool-error");
+  const refusalText = toolErrors
+    .map((chunk) => {
+      const error = chunk.error as { message?: unknown } | string | undefined;
+      return typeof error === "string" ? error : String(error?.message ?? "");
+    })
+    .join("\n");
+  return { chunks, executions, invalidCalls, toolErrors, refusalText };
+};
+
+test("ART-FORMAT-01 (a): a .txt request made through create_document is delivered as a ready .txt file", async () => {
+  const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+    ask({
+      begins: [{ toolCallId: "doc_txt", toolName: "create_document" }],
+      executes: ["doc_txt"],
+      executeInput: {
+        filename: "memo.txt",
+        format: "txt",
+        title: "Memo",
+        blocks: [{ type: "paragraph", text: "Team lunch moves to Friday." }],
+      },
+    })
+  );
+
+  assert.deepEqual(logs, [], "a valid txt document must not log a rejection");
+  assert.equal(world.artifactRows.length, 1);
+  assert.equal(world.artifactRows[0]?.format, "txt");
+  assert.equal(world.artifactRows[0]?.status, "ready");
+  assert.match(world.artifactRows[0]?.filename ?? "", /\.txt$/);
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]?.format, "txt");
+  assert.equal(trailer?.artifacts?.[0]?.status, "ready");
+  assert.equal(networkCalls, 0);
+});
+
+test("ART-FORMAT-01 (b, c): the real SDK refuses txt and md for create_text_file before execute, the route logs each refusal, and nothing is produced in their place", async () => {
+  const secret = "SECRET_ART_FORMAT_01";
+
+  for (const format of ["txt", "md"]) {
+    const tools = await registeredArtifactTools();
+    assert.ok(tools.create_text_file, "the text-file tool was not registered");
+
+    const sdk = await callThroughRealSdk(tools.create_text_file, "create_text_file", {
+      filename: `${secret}.${format}`,
+      format,
+      content: secret,
+    });
+
+    // Production takes the SDK channel, not the collector's admission: the
+    // registered schema is checked first and execute never runs.
+    assert.equal(sdk.executions, 0, `${format}: execute ran for a refused call`);
+    assert.equal(sdk.invalidCalls.length, 1, `${format}: expected one invalid tool-call frame`);
+    assert.equal(sdk.toolErrors.length, 1, `${format}: expected one tool-error frame`);
+
+    // Those exact frames, through the route's own onChunk.
+    const { logs, result: { trailer } } = await captureArtifactRejections(() =>
+      ask({ chunks: sdk.chunks, executes: [] })
+    );
+
+    assert.deepEqual(logs, [{
+      event: "generated_artifact_tool_rejected",
+      toolName: "create_text_file",
+      requestedFormat: format,
+      rejectionCode: "input_schema_rejected",
+    }], `${format}: the route did not log the SDK refusal exactly once`);
+    assert.doesNotMatch(JSON.stringify(logs), new RegExp(secret));
+
+    // (c) The application substitutes nothing: no row and no card of any
+    // format. Whatever the user receives next is a new model decision, and
+    // it is a new, separately logged call.
+    assert.deepEqual(world.artifactRows, [], `${format}: a refused call produced a file`);
+    assert.equal(trailer?.artifacts, undefined, `${format}: a refused call produced a card`);
+    assert.equal(networkCalls, 0);
+  }
+});
+
+/*
+  EXPECTED TO FAIL until a fix is chosen -- the outcome, not the fix.
+
+  A `txt` call that reaches `create_text_file` must leave the model a way to a
+  .txt file. Any ONE of the candidate fixes satisfies this test, and it does
+  not prefer between them:
+
+    A. `create_text_file` accepts `txt` (and `md`);
+    B. the refusal the model receives names `create_document`;
+    C. the `create_text_file` description tells the model that `txt` and `md`
+       belong to `create_document`.
+
+  Today none holds: the SDK's refusal is a bare enum error, and the
+  description lists only source, markup and config formats. The artifact
+  system block does place txt and md under `create_document`, and the staging
+  turn went to `create_text_file` regardless, so that line alone is not
+  counted here.
+
+  Whoever lands a fix removes `todo` so this becomes a regression test.
+*/
+test(
+  "ART-FORMAT-01 (outcome): a txt call to create_text_file leaves the model a route to a .txt file",
+  { todo: "fix undecided (ART-FORMAT-01): accept txt/md, name create_document in the refusal, or say so in the tool description" },
+  async () => {
+    const tools = await registeredArtifactTools();
+    const textTool = tools.create_text_file;
+    assert.ok(textTool, "the text-file tool was not registered");
+
+    const sdk = await callThroughRealSdk(textTool, "create_text_file", {
+      filename: "memo.txt",
+      format: "txt",
+      content: "Team lunch moves to Friday.",
+    });
+
+    const accepted = sdk.invalidCalls.length === 0 && sdk.executions === 1;
+    const refusalNamesDocumentTool = /\bcreate_document\b/.test(sdk.refusalText);
+    const descriptionNamesDocumentTool = /\bcreate_document\b/.test(textTool.description ?? "");
+
+    assert.ok(
+      accepted || refusalNamesDocumentTool || descriptionNamesDocumentTool,
+      "no route to a .txt file: create_text_file refused txt " +
+        `(accepted=${accepted}), the refusal did not name create_document ` +
+        `(refusal=${JSON.stringify(sdk.refusalText.slice(0, 600))}), and the ` +
+        "tool description does not either"
+    );
+  }
+);
