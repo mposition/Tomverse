@@ -22,8 +22,10 @@ export class AmuxIdeaAnalysisSettlementError extends Error {
 }
 
 /** Dark transaction body for one measured, already-dispatched invocation.
- * A caller must prove the usage came from this fenced CLI attempt; this body
- * does not dispatch, accept model output or complete the analysis chunk.
+ * A caller must prove usage came from this fenced attempt; this body does
+ * not dispatch, accept model output or complete the analysis chunk. A known
+ * success leaves its preview in flight until the separate result writer
+ * atomically stores the output and closes the preview.
  * Unknown usage leaves the full reservation occupied for read-back/owner
  * resolution, never a zero-cost settlement. */
 export async function commitAmuxKnownIdeaAnalysisSettlement(
@@ -132,6 +134,16 @@ export async function commitAmuxKnownIdeaAnalysisSettlement(
   });
   if (window.count !== 1 || updated.count !== 1) {
     throw new AmuxIdeaAnalysisSettlementError("integrity_unavailable");
+  }
+  if (decision.status === "failed") {
+    const closedPreview = await tx.amuxIdeaTransferPreview.updateMany({
+      where: { id: preview.id, state: "in_flight", consumedAt: { not: null },
+        outcomeUnknownAt: null },
+      data: { state: "provider_failed" },
+    });
+    if (closedPreview.count !== 1) {
+      throw new AmuxIdeaAnalysisSettlementError("integrity_unavailable");
+    }
   }
   return { holdId: hold.id, status: decision.status,
     settledMicroUsd: decision.settledMicroUsd,

@@ -196,6 +196,15 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   });
   assert.equal(created.previewId, previewId);
   assert.equal(created.priceVersionId, priceVersionId);
+  for (const refusedId of [holdId, "not a valid hold ID"]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxKnownIdeaAnalysisSettlement(tx, {
+        holdId: refusedId, outcome: "verified_success",
+        inputTokens: 10, outputTokens: 10,
+      })), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisSettlementError &&
+      error.code === "not_settleable");
+  }
   await assert.rejects(prisma.amuxIdeaAnalysisPriceVersion.update({
     where: { id: priceVersionId },
     data: { inputMicroUsdPerMillion: 1 },
@@ -569,31 +578,41 @@ async function syntheticDispatchedHold(): Promise<{ holdId: string; previewId: s
     where: { id: previewId },
     data: { state: "in_flight", consumedAt: preview.confirmedAt },
   });
+  const clock = await prisma.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
   await prisma.amuxIdeaAnalysisBudgetHold.update({
     where: { id: holdId },
-    data: { status: "in_flight", dispatchedAt: new Date() },
+    data: { status: "in_flight", dispatchedAt: clock[0]!.now },
   });
   return { holdId, previewId };
 }
 
 test("known CLI usage settles an in-flight Agent hold once and releases the remainder", async () => {
-  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const afterReservation = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace, monthStart } },
   });
-  const { holdId } = await syntheticDispatchedHold();
-  for (const input of [
-    { holdId, outcome: "outcome_unknown" as const,
-      inputTokens: null, outputTokens: null },
-    { holdId, outcome: "verified_success" as const,
-      inputTokens: 1_001, outputTokens: 1 },
+  const reservedBefore = afterReservation.reservedMicroUsd - BigInt(5_000);
+  const spentBefore = afterReservation.spentMicroUsd;
+  for (const { input, reason } of [
+    { input: { holdId, outcome: "outcome_unknown" as const,
+      inputTokens: null, outputTokens: null }, reason: "usage_unknown" },
+    { input: { holdId, outcome: "verified_success" as const,
+      inputTokens: 1_001, outputTokens: 1 }, reason: "usage_exceeds_cap" },
+    { input: { holdId, outcome: "verified_success" as const,
+      inputTokens: 1, outputTokens: 2_001 }, reason: "usage_exceeds_cap" },
+    { input: { holdId, outcome: "invocation_failed" as const,
+      inputTokens: 0, outputTokens: 0 }, reason: "basis_invalid" },
   ]) {
     await assert.rejects(prisma.$transaction((tx) =>
       commitAmuxKnownIdeaAnalysisSettlement(tx, input)), (error: unknown) =>
-      error instanceof AmuxIdeaAnalysisSettlementError && error.code === "usage_hold");
+      error instanceof AmuxIdeaAnalysisSettlementError && error.code === "usage_hold" &&
+      error.reason === reason);
   }
   assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace, monthStart } },
-  })).reservedMicroUsd, before.reservedMicroUsd + BigInt(5_000));
+  })).reservedMicroUsd, afterReservation.reservedMicroUsd);
   assert.equal(await prisma.adminAuditLog.count({ where: {
     action: "AMUX_V4_ANALYSIS_BUDGET_SETTLED", targetId: holdId,
   } }), 0);
@@ -615,8 +634,11 @@ test("known CLI usage settles an in-flight Agent hold once and releases the rema
   assert.equal(hold.settledMicroUsd, BigInt(200));
   assert.equal(hold.inputTokens, 100);
   assert.equal(hold.outputTokens, 50);
-  assert.equal(window.spentMicroUsd, before.spentMicroUsd + BigInt(200));
-  assert.equal(window.reservedMicroUsd, before.reservedMicroUsd);
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId },
+  })).state, "in_flight", "the later result writer owns successful preview completion");
+  assert.equal(window.spentMicroUsd, spentBefore + BigInt(200));
+  assert.equal(window.reservedMicroUsd, reservedBefore);
   assert.equal(auditRowActorKind(audit), "system");
   assert.equal((audit.metadata as Record<string, unknown>).actorScope,
     AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE);
@@ -629,7 +651,7 @@ test("known CLI usage settles an in-flight Agent hold once and releases the rema
 });
 
 test("a failed CLI invocation with known usage still records Agent provider cost", async () => {
-  const { holdId } = await syntheticDispatchedHold();
+  const { holdId, previewId } = await syntheticDispatchedHold();
   const result = await prisma.$transaction((tx) =>
     commitAmuxKnownIdeaAnalysisSettlement(tx,
       { holdId, outcome: "invocation_failed", inputTokens: 12, outputTokens: 0 }));
@@ -638,6 +660,9 @@ test("a failed CLI invocation with known usage still records Agent provider cost
   assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: holdId },
   })).settledMicroUsd, BigInt(12));
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId },
+  })).state, "provider_failed");
 });
 
 test("unknown CLI outcome holds the full budget and refuses admission and settlement", async () => {
