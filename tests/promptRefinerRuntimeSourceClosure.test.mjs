@@ -391,24 +391,32 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory are unchanged.
 // 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
-// (docs/policy/product-research-agent.md §5), and two dated notes are added to
-// `lib/marketingAutomationAccess.ts` above that file's accesses (its pipeline
-// fingerprint is repinned twice in the same change: once for the new Prisma
-// model, once for the column alignment). Both files are already listed, so the
-// file set stays 190.
+// (docs/policy/product-research-agent.md §5), and one dated record is added to
+// `lib/marketingAutomationAccess.ts` above that file's accesses. Both files are
+// listed, so the file set stays 190.
 //
-// What the unchanged count and position-free digest establish is that the
-// multiset of (path, access text) is the same -- no access was added, removed
-// or rewritten. They do not say which nodes moved, so that part is read from
-// the diff: the new array sits above the one value-position access in
-// `adminAuditSystemActors.ts` (the metadata read in `auditRowActorKind()`,
-// which it does not rebind), and the notes sit above five accesses in
-// `marketingAutomationAccess.ts`. The `(typeof ...)[number]` in the new code is
-// an indexed access TYPE and never enters the inventory. This repins positions
-// only.
+// What the unchanged count and position-free digest establish -- both asserted
+// separately, just below -- is that the multiset of (path, access text) is the
+// same: no access was added, removed or rewritten. They do not say which nodes
+// moved, and no prose can determine the position-sensitive hash; that value is
+// a measurement, and the assertion below is what verifies it. What the record
+// is for is saying why a change of it is a reposition rather than a new access.
 //
-// Worth knowing for the next change: a comment added to any listed file moves
-// this digest, so this test is the last thing to run, not the first.
+// Here the two listed files that moved are: `adminAuditSystemActors.ts`, where
+// the new array is declared above the file's one non-static element access (the
+// metadata read in `auditRowActorKind()`, which it does not rebind), and
+// `marketingAutomationAccess.ts`, where the record sits above that file's seven
+// (`env[name]` twice on one line, `right[index]`, `snapshot.envDigests[name]`,
+// `snapshot.appSettings[name]`, `result[feature]` twice). The
+// `(typeof ...)[number]` in the new code is an indexed access TYPE and never
+// enters the inventory.
+//
+// The value below moved twice within this one change, because the second
+// fingerprint repin in `marketingAutomationAccess.ts` extended that record and
+// pushed its seven accesses down again. A commit that touches no listed file
+// can therefore still be the one that repins this, which is the sequencing to
+// watch: only a comment that moves an inventory access's line or column moves
+// this digest, and the check belongs at the end of a change, not the start.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
