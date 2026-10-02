@@ -293,7 +293,6 @@
      status-success on purpose: same value today, a control's state is not a
      verification. */
   --color-status-switch-on-500: var(--color-emerald-500);
-  --color-status-switch-on-600: var(--color-emerald-600);
 }
 
 body {
