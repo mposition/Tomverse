@@ -186,29 +186,28 @@ try {
   { // Board editing is a baseline native regression, including keyboard occlusion.
     mode='plain';
     const coverage=[];
-    const visible=selector=>{
-      assert.match(selector,/^#[a-z-]+$/);
-      return `(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'})()`;
-    };
+    const visibleIds='Array.from(document.querySelectorAll("[id]")).filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=="hidden").map(e=>e.id)';
     for (const surface of (process.env.AMUX_IOS_LIFECYCLE === '1' ? ['sessions','board','groups','calendar','scheduler','files','mdai','proxies','email','connectors','logs','messages','skills','sql','map','metrics','cost','torrents','terminal','browser'] : [])) {
       try {
         assert.match(surface,/^[a-z]+$/);
         await api('start',{udid,url:origin+'/#view=sessions'});await until('!!window.__amuxState && !document.querySelector("#peek-overlay").classList.contains("active")',v=>v);
         const tab='#tab-'+surface;
-        if (!await evaluate(visible(tab))) {
+        if (!(await evaluate(visibleIds)).includes(tab.slice(1))) {
           await api('action',{action:'click',selector:'.tab-customize-wrap > .tab-customize-btn'});
           await api('action',{action:'click',selector:`#tab-customizer-menu [data-tab-id="${surface}"] input[type=checkbox]`});
           await api('action',{action:'click',selector:'.tab-customize-wrap > .tab-customize-btn'});
         }
         await api('action',{action:'click',selector:tab});
         const view=surface==='sessions'?'#session-view':'#'+surface+'-view';
-        await until(visible(view),v=>v);
-        const inventory=await evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(view)});return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,headerClipped:_headerLayoutCheck(),controls:Array.from(root.querySelectorAll('button,input,select,textarea,a')).filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,id:e.id,label:(e.getAttribute('aria-label')||e.title||e.innerText||e.placeholder||'').slice(0,120),width:r.width,height:r.height,disabled:!!e.disabled}})}})()`);
+        await until(visibleIds,ids=>ids.includes(view.slice(1)));
+        const inventories=await evaluate(`(()=>{const out={};for(const root of document.querySelectorAll('[id$="-view"]')){if(!root.getClientRects().length||getComputedStyle(root).visibility==='hidden')continue;out[root.id]={width:innerWidth,scrollWidth:document.documentElement.scrollWidth,headerClipped:_headerLayoutCheck(),controls:Array.from(root.querySelectorAll('button,input,select,textarea,a')).filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,id:e.id,label:(e.getAttribute('aria-label')||e.title||e.innerText||e.placeholder||'').slice(0,120),width:r.width,height:r.height,disabled:!!e.disabled}})};}return out})()`);
+        const inventory=inventories[view.slice(1)];
+        assert(inventory,'visible view inventory missing');
         await shot('lifecycle-view-'+surface);
         assert(inventory.scrollWidth<=inventory.width,'horizontal page overflow');assert.deepEqual(inventory.headerClipped,[]);
         coverage.push({case:'LC-VIEW:'+surface,verdict:'passed',scope:'native navigation, visible panel, control inventory, overflow; aesthetics requires screenshot review',...inventory});
         pass('native lifecycle view '+surface);
-      }catch(error){await shot('lifecycle-failed-'+surface).catch(()=>{});console.log('HIT TARGET',await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify('#tab-'+surface)});if(!e)return null;const r=e.getBoundingClientRect();const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {rect:r.toJSON(),hit:h?.outerHTML.slice(0,200)}})()`));coverage.push({case:'LC-VIEW:'+surface,verdict:'failed',error:String(error)});console.log('FAIL native lifecycle view '+surface+': '+error);}
+      }catch(error){await shot('lifecycle-failed-'+surface).catch(()=>{});const tabs=await evaluate(`Array.from(document.querySelectorAll('[id^="tab-"]')).map(e=>{const r=e.getBoundingClientRect(),h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {id:e.id,rect:r.toJSON(),hit:h?.outerHTML.slice(0,200)}})`);console.log('HIT TARGET',tabs.find(t=>t.id==='tab-'+surface));coverage.push({case:'LC-VIEW:'+surface,verdict:'failed',error:String(error)});console.log('FAIL native lifecycle view '+surface+': '+error);}
       await fs.writeFile(path.join(output,'native-lifecycle.json'),JSON.stringify(coverage,null,2));
     }
     try {
