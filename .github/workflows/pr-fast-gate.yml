@@ -627,6 +627,12 @@ jobs:
         timeout-minutes: 10
         run: npx eslint . --max-warnings=0
 
+      - name: AMUX dashboard SPA lint
+        timeout-minutes: 10
+        run: |
+          npm ci --prefix vendor/amux --ignore-scripts --no-audit --no-fund
+          npm run lint:spa --prefix vendor/amux
+
   build-and-e2e:
     name: Production build and Chromium smoke tests
     runs-on: ubuntu-latest

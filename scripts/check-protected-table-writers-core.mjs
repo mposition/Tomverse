@@ -327,6 +327,12 @@ export const EXCLUDED_PREFIXES = [
     reason: "Documentation. Nothing here is imported or executed.",
   },
   {
+    prefix: "vendor/amux/",
+    extension: ".sql",
+    reason:
+      "The independent AMUX workspace uses local SQLite. Only its SQL is excluded; JS/TS files remain scanned for product database writes.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
@@ -965,7 +971,7 @@ const isDatabaseDriverModule = (specifier) =>
 
 export const isExcluded = (path) =>
   EXCLUDED_PREFIXES.some((entry) =>
-    entry.path ? path === entry.path : path.startsWith(entry.prefix)
+    entry.path ? path === entry.path : path.startsWith(entry.prefix) && (!entry.extension || path.endsWith(entry.extension))
   );
 
 /** The repository paths this check reads, from a list of candidate paths. */
