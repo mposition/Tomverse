@@ -66,6 +66,23 @@ function checkFocus(mirror, base, head, focus) {
   return focus;
 }
 
+/**
+ * Has a finished job on this server reviewed exactly up to `head`? Finished
+ * means every slot returned a verdict (accept or reject): an unknown, a
+ * cancellation or a pending slot is not a review.
+ */
+function reviewedHead(store, repoName, head) {
+  return store
+    .listJobs()
+    .some(
+      ({ job, slots }) =>
+        job.repo === repoName &&
+        job.head === head &&
+        slots.length > 0 &&
+        slots.every((slot) => slot.status === "done" && (slot.verdict === "accept" || slot.verdict === "reject")),
+    );
+}
+
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
   const { repo: repoName, base, head, author, authorVendor: statedVendor, scope } = request;
   const repo = config.repos[repoName];
@@ -112,7 +129,12 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       if (files.length === 0) throw new UsageError("empty_change");
       const focusFiles = focus ? changedFiles(repo.mirror, focus, head) : files;
       if (focusFiles.length === 0) throw new UsageError("empty_focus", "focus..head changes no file");
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
+      // The contract-path floor counts from the focus only when this server has
+      // itself finished reviewing up to it. A focus nobody reviewed could hide a
+      // contract change before it, so then the whole base..head range counts.
+      const focusReviewed = focus !== null && reviewedHead(store, repoName, focus);
+      const contractFiles = focusReviewed ? focusFiles : files;
+      const { reviewers, touchesContract } = requiredReviewers(config, requested, contractFiles);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
         throw new UsageError(
@@ -133,6 +155,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
         focusFileCount: focusFiles.length,
+        focusReviewed,
         submittedAt: now.getTime(),
       };
       store.publish(job);
@@ -200,6 +223,25 @@ export class Orchestrator {
     }
     if (expired.length > 0) this.log(`pruned ${expired.length} job(s) older than ${this.config.retentionDays} days`);
     return expired.length;
+  }
+
+  /**
+   * Operator cancel: close every queued slot of a job as unknown. A running
+   * slot is left to finish -- killing it would be an unknown outcome of its
+   * own. Returns how many slots were closed.
+   */
+  cancel(jobId) {
+    const entry = this.store.readJob(jobId);
+    if (!entry) throw new UsageError("job_not_found");
+    let closed = 0;
+    for (const listed of entry.slots) {
+      // Re-read right before writing: the daemon may have just started it.
+      const slot = this.store.readSlot(jobId, listed.index);
+      if (slot.status !== "queued") continue;
+      this.store.writeSlot(jobId, { ...slot, status: "done", verdict: "unknown", reason: "cancelled_by_operator", findings: [], endedAt: this.now() });
+      closed += 1;
+    }
+    return closed;
   }
 
   recoverOrphans() {
