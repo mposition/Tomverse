@@ -161,3 +161,77 @@ test("deployments baseline a pre-existing database before applying migrations", 
     "the baseline guard must run before the deploy step"
   );
 });
+
+// ---------------------------------------------------------------------------
+// Migrations `migrate diff` cannot see (2026-10-02)
+// ---------------------------------------------------------------------------
+//
+// The first migration to ship on its own with nothing schema.prisma describes
+// -- a partial expression index -- was refused by the guard on staging: the
+// database "matched" schema.prisma before it was applied, which is what the
+// guard reads as a restore that already holds it. Such a migration now declares
+// a presence probe, and the guard proceeds only when every probe proves absence.
+
+test("a presence probe is one SELECT on one header line, or nothing", async () => {
+  const { presenceProbeIn } = await import("../scripts/baseline-presence-core.mjs");
+  assert.equal(
+    presenceProbeIn(
+      `-- intro\n-- baseline-check: present-if SELECT to_regclass('public."X"') IS NOT NULL\nCREATE INDEX x;`,
+    ),
+    `SELECT to_regclass('public."X"') IS NOT NULL`,
+  );
+  assert.equal(
+    presenceProbeIn("-- baseline-check: present-if SELECT 1 IS NULL;\r\n"),
+    "SELECT 1 IS NULL",
+  );
+  for (const sql of [
+    "CREATE INDEX x;",
+    "-- baseline-check: present-if DELETE FROM \"User\"",
+    "-- baseline-check: present-if SELECT 1; DROP TABLE \"User\"",
+    "SELECT 1 -- baseline-check: present-if SELECT 1",
+    null,
+  ]) {
+    assert.equal(presenceProbeIn(sql), null, String(sql));
+  }
+});
+
+test("the guard proceeds only when every pending migration proves absence", async () => {
+  const { pendingProbes, presenceVerdict } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = {
+    a: "-- baseline-check: present-if SELECT false\nCREATE INDEX a;",
+    b: "-- baseline-check: present-if SELECT false\nCREATE INDEX b;",
+    c: "CREATE INDEX c;",
+  };
+  assert.deepEqual(pendingProbes(["a", "c"], (name) => sql[name]).undeclared, ["c"]);
+  assert.deepEqual(pendingProbes(["a", "b"], (name) => sql[name]).undeclared, []);
+
+  assert.equal(presenceVerdict(["a", "b"], new Map([["a", false], ["b", false]])).proceed, true);
+  for (const answer of [true, null, undefined, "f", 0]) {
+    const verdict = presenceVerdict(["a", "b"], new Map([["a", false], ["b", answer]]));
+    assert.equal(verdict.proceed, false, String(answer));
+    assert.deepEqual(verdict.notProvenAbsent, ["b"]);
+  }
+});
+
+test("the guard reads probes only on the refusal path, read-only and rolled back", () => {
+  const guard = readFileSync(join(ROOT, "scripts", "baseline-existing-database.mjs"), "utf8");
+  const match = guard.indexOf("schemaMatchesPrisma()) {");
+  const probe = guard.indexOf("pendingProbes(", match);
+  const readOnly = guard.indexOf('"BEGIN READ ONLY"', probe);
+  const rollback = guard.indexOf('"ROLLBACK"', readOnly);
+  assert.ok(match > 0 && probe > match && readOnly > probe && rollback > readOnly);
+  // An undeclared migration still meets the original refusal.
+  assert.ok(guard.includes("undeclared,"));
+});
+
+test("the webhook shadow index migration declares a probe that names its own index", async () => {
+  const { presenceProbeIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261002120000_marketing_webhook_shadow_event_unique", "migration.sql"),
+    "utf8",
+  );
+  const probe = presenceProbeIn(sql);
+  assert.ok(probe, "the migration must declare a presence probe");
+  const index = /CREATE UNIQUE INDEX "([^"]+)"/.exec(sql)?.[1];
+  assert.ok(index && probe.includes(`"${index}"`), "the probe must ask about the index the migration creates");
+});

@@ -1,12 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import pg from "pg";
 
 import {
   CONNECT_RETRY_COUNT,
   connectWithRetry,
 } from "./direct-database-connect-core.mjs";
+import { pendingProbes, presenceVerdict } from "./baseline-presence-core.mjs";
 
 /**
  * Reconciles a database that already holds the schema with a migration history
@@ -59,6 +60,16 @@ import {
  * migrations *and* a schema that already matches `schema.prisma` exactly --
  * and refuses with the commands to resolve it. Refusing leaves the database
  * untouched; proceeding would not.
+ *
+ * ## Migrations the diff cannot see
+ *
+ * "Matches `schema.prisma`" is evidence only about what `migrate diff`
+ * compares. A migration that adds only a partial or expression index, a CHECK
+ * constraint, a trigger or a function matches before it is applied as well as
+ * after, so on its own it would always be refused. Such a migration declares a
+ * presence probe (`-- baseline-check: present-if SELECT ...`); when every
+ * pending migration has one and every probe proves absence, the deploy goes on.
+ * See `scripts/baseline-presence-core.mjs`.
  */
 
 const BASELINE_MIGRATION = "00000000000000_baseline";
@@ -189,14 +200,51 @@ try {
     (name) => name !== BASELINE_MIGRATION && !recordedSet.has(name)
   );
   if (pending.length > 0 && schemaMatchesPrisma()) {
-    fail(
-      "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
-      {
-        pending,
-        recordedMigrations: recorded.length,
-        command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
-      }
+    // The match is no evidence about a migration the diff cannot see. Each one
+    // may say how to tell whether its objects are already here; only an answer
+    // of absence from every pending migration lets the deploy go on.
+    const { probes, undeclared } = pendingProbes(pending, (name) =>
+      readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8")
     );
+    if (undeclared.length === 0) {
+      const answers = new Map();
+      for (const { name, probe } of probes) {
+        // Read-only, and rolled back whatever it answers: a probe cannot change
+        // the database it is asking about.
+        await client.query("BEGIN READ ONLY");
+        try {
+          const { rows } = await client.query(probe);
+          const first = rows[0] ? Object.values(rows[0])[0] : undefined;
+          answers.set(name, first);
+        } catch {
+          answers.set(name, undefined);
+        } finally {
+          await client.query("ROLLBACK").catch(() => undefined);
+        }
+      }
+      const verdict = presenceVerdict(pending, answers);
+      if (verdict.proceed) {
+        log(
+          "Pending migrations change nothing schema.prisma describes, and each one's presence probe says its objects are absent. Letting migrate deploy apply them.",
+          { pending }
+        );
+      } else {
+        fail(
+          "This database already matches schema.prisma, and these pending migrations' presence probes did not prove their objects absent. They may already be in place. Nothing has been changed.",
+          { pending, notProvenAbsent: verdict.notProvenAbsent }
+        );
+      }
+    } else {
+      fail(
+        "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
+        {
+          pending,
+          recordedMigrations: recorded.length,
+          command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
+          undeclared,
+        }
+      );
+    }
   }
 } catch (error) {
   const message =

@@ -1,5 +1,11 @@
 -- Marketing S2e: one shadow report per webhook event.
 --
+-- baseline-check: present-if SELECT to_regclass('public."MarketingReport_webhook_shadow_event_key"') IS NOT NULL
+--
+-- schema.prisma cannot express this index, so the deploy guard cannot tell from
+-- `migrate diff` whether it is already in place; the line above is how it asks
+-- (scripts/baseline-presence-core.mjs).
+--
 -- Zernio retries a delivery up to seven times and redelivers by hand, always
 -- with the same event id, so the staging shadow receiver will see the same
 -- event more than once. The receiver asks nothing before inserting; this index
