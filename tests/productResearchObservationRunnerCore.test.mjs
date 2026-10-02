@@ -323,6 +323,8 @@ test("a connection string with no scheme is still a connection string", () => {
     "host=db.internal port=5432 dbname=app user=app password=hunter22",
     "dbname=app password=hunter22",
     "  user=app  passfile=/run/secrets/pg  host=db  ",
+    // No host keyword at all: libpq defaults the host, so this connects.
+    "port=5432 password=hunter22",
   ]) {
     const problems = environmentProblems(serviceEnv({ RAILWAY_SOMETHING: value }));
     assert.deepEqual(
