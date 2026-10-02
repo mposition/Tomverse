@@ -56,7 +56,8 @@ function git(args) {
 
 export function repoNameFromRemote(url) {
   const match = /([^/:\\]+?)(?:\.git)?\/?$/.exec(url.trim());
-  return match ? match[1] : null;
+  // Config keys are lower-case names; GitHub repository names are not.
+  return match ? match[1].toLowerCase() : null;
 }
 
 /**

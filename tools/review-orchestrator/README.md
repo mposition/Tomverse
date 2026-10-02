@@ -65,7 +65,7 @@ reviewer CLI(`claude`, `codex`, `cursor-agent`)가 그 계정으로 로그인돼
 
 ```bash
 sudo useradd --create-home --shell /bin/bash review
-sudo git clone https://github.com/mposition/ai-chat-hub.git /opt/review-orchestrator
+sudo git clone https://github.com/mposition/Tomverse.git /opt/review-orchestrator
 sudo install -d -o review /var/lib/review-orchestrator /etc/review-orchestrator
 sudo cp /opt/review-orchestrator/tools/review-orchestrator/config.example.json /etc/review-orchestrator/config.json
 sudo cp /opt/review-orchestrator/tools/review-orchestrator/deploy/review-orchestrator.service /etc/systemd/system/
