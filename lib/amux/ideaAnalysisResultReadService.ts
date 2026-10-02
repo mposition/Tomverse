@@ -8,8 +8,10 @@ import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxAnalysisTextSafe, inspectAmuxAnalysisChunk,
-  inspectAmuxStoredAnalysisUnit, type AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
+  inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import type { AmuxIdeaAnalysisResultView, AmuxVisibleAnalysisUnit } from
+  "./ideaAnalysisResultReadCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
@@ -20,21 +22,12 @@ export class AmuxIdeaAnalysisResultReadError extends Error {
   }
 }
 
-type VisibleUnit = { id: string; localRef: string; bodyDigest: string;
-  bodyDigestKeyId: string; decisionState: "proposed" | "approved" | "rejected" | "expired";
-  proposal: AmuxAnalysisChunk["units"][number] | null };
-type Result =
-  | { state: "pending" | "cancelled" }
-  | { state: "ready"; ideaId: string; previewId: string;
-      completedAt: string; outcome: AmuxAnalysisChunk["outcome"];
-      coveredScope: string | null; units: VisibleUnit[] };
-
 /** Owner-only, exact-idea read. No writes, external calls or card admission.
  * Expired unit bodies are explicit metadata-only rows, never silently omitted;
  * the 24-hour freeform expiry does not hide 30-day unit proposals. */
 export async function readAmuxFirstIdeaAnalysisResult(
   session: Session, ideaId: string, keys: AmuxContentKeys,
-): Promise<Result> {
+): Promise<AmuxIdeaAnalysisResultView> {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
@@ -126,7 +119,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
         }
       }
       const proposalUnits: unknown[] = [];
-      const visibleUnits: VisibleUnit[] = [];
+      const visibleUnits: AmuxVisibleAnalysisUnit[] = [];
       for (const [index, unit] of units.entries()) {
         if (unit.unitIndex !== index || unit.ideaId !== ideaId ||
             unit.actorUserId !== actorUserId || !unit.localRef ||
@@ -139,7 +132,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
         if (bodyUnavailable) {
           visibleUnits.push({ id: unit.id, localRef: unit.localRef,
             bodyDigest: unit.bodyDigest, bodyDigestKeyId: unit.bodyDigestKeyId,
-            decisionState: unit.state as VisibleUnit["decisionState"], proposal: null });
+            decisionState: unit.state as AmuxVisibleAnalysisUnit["decisionState"],
+            proposal: null });
           continue;
         }
         if (!unit.bodyCiphertext || !unit.bodyKeyId || !unit.bodyKeyVersion) {
@@ -164,7 +158,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
         proposalUnits.push(inspectedUnit.unit);
         visibleUnits.push({ id: unit.id, localRef: unit.localRef,
           bodyDigest: unit.bodyDigest, bodyDigestKeyId: unit.bodyDigestKeyId,
-          decisionState: unit.state as VisibleUnit["decisionState"],
+          decisionState: unit.state as AmuxVisibleAnalysisUnit["decisionState"],
           proposal: inspectedUnit.unit });
       }
       if (freeformValue && proposalUnits.length === units.length) {
@@ -182,7 +176,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
       }
       return { state: "ready", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
-        outcome: meta!.outcome as AmuxAnalysisChunk["outcome"],
+        outcome: meta!.outcome as "propose" | "reject",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         units: visibleUnits };
     } catch {

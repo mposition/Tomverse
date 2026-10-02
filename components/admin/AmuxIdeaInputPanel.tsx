@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
+import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -67,10 +68,11 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, operatorId }: {
+  transferConfirmAvailable, analysisResultAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean; operatorId: string;
+  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
+  analysisResultAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -424,6 +426,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         operatorId={operatorId}
       />
+      {analysisResultAvailable && submission.kind === "submitted" ?
+        <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
