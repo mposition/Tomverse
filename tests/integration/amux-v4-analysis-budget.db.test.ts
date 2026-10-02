@@ -12,6 +12,9 @@ import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewSer
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
+import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
+import { parseAmuxV4AnalysisQueueCursor,
+  type AmuxV4AnalysisQueueCursor } from "@/lib/amux/ideaAnalysisQueueCursorCore";
 import { commitAmuxIdeaAnalysisUnusedReservationCancellation,
   AmuxIdeaAnalysisCancellationError } from "@/lib/amux/ideaAnalysisBudgetCancellationService";
 import { commitAmuxIdeaAnalysisPriceApproval,
@@ -75,6 +78,27 @@ async function confirmedPreviewId(modelId: string): Promise<string> {
       payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys }));
   return choice.previewId;
 }
+
+test("analysis queue lists confirmed preview metadata without exposing payload", async () => {
+  const previewId = await confirmedPreviewId(`gpt-frontier-synthetic-${randomUUID()}`);
+  let cursor: AmuxV4AnalysisQueueCursor | null = null;
+  let found = false;
+  for (let page = 0; page < 10; page += 1) {
+    const result = await listAmuxV4AnalysisCandidates(cursor);
+    assert.equal(Object.keys(result).sort().join(","),
+      "candidates,hasMore,nextCursor");
+    for (const candidate of result.candidates) {
+      assert.deepEqual(Object.keys(candidate).sort(),
+        ["attempt", "chunkIndex", "expiresAt", "ideaId", "modelId", "previewId"]);
+      if (candidate.previewId === previewId) found = true;
+    }
+    if (found || !result.hasMore) break;
+    assert.ok(result.nextCursor);
+    cursor = parseAmuxV4AnalysisQueueCursor(result.nextCursor);
+    assert.ok(cursor);
+  }
+  assert.equal(found, true);
+});
 
 const namespace = "agent/amux-intake";
 const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(),
