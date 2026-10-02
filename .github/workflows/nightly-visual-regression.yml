@@ -66,7 +66,13 @@ jobs:
 
       - name: Restore Next.js build cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore but never save. This workflow runs on the default branch, and
+        # an entry written there is restorable by every run in the repository --
+        # including the required pull-request gate. The job runs third-party npm
+        # install scripts, so writing that entry is the one step that turns a
+        # compromised dependency into something every later run executes.
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-v2-visual-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
@@ -88,7 +94,13 @@ jobs:
 
       - name: Restore Playwright Chromium cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore but never save. This workflow runs on the default branch, and
+        # an entry written there is restorable by every run in the repository --
+        # including the required pull-request gate. The job runs third-party npm
+        # install scripts, so writing that entry is the one step that turns a
+        # compromised dependency into something every later run executes.
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-v2-visual-${{ hashFiles('package-lock.json') }}-chromium

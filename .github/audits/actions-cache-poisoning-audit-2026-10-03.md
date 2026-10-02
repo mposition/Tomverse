@@ -559,6 +559,18 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 
 ### P1. `main`·`develop` scope에서 무검증 캐시 **저장**을 멈춥니다 — 1순위
 
+> **구현 완료.** schedule 전용 둘은 `actions/cache/restore`로 바꿔 아예 쓰지
+> 않고, 혼합 trigger 셋은 restore + `if: github.event_name == 'pull_request'`
+> 조건부 `actions/cache/save`로 나눴습니다. Rust 캐시도 포함했습니다(아래 2번의
+> 판단). PR 전용 둘(`pr-fast-gate`, `review-parity-shadow`)은 그대로 둡니다 —
+> 그 run은 자기 merge ref에만 씁니다.
+>
+> 불변식은 `reachesWidelyReadableScope()`가 판정하고 같은 검사가 강제합니다:
+> **기본 branch나 `develop`에 닿을 수 있는 run은 캐시를 쓰지 못하며**, 조건부
+> save는 `github.event_name`이나 `github.ref`를 이름 대야 합니다. 읽을 수 없는
+> trigger는 "닿는다"로 봅니다(fail-closed). 쓰기가 허용된 workflow 목록도
+> 테스트가 고정하므로 새 writer는 조용히 생기지 않습니다.
+
 대상과 조건 다섯 가지입니다. 독립 검토(9장)가 넷을 추가했습니다.
 
 1. **막을 이벤트는 `schedule`·`push: main`만이 아닙니다.** `push: develop`
@@ -567,9 +579,13 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
    scope에 씁니다. 판정은 trigger 이름이 아니라 **run의 ref가 기본 branch이거나
    `develop`인가**여야 합니다.
 2. **Rust 캐시를 범위에 넣을지 명시합니다.** 2장이 적은 대로 그 foothold는 npm이
-   아니라 crate build script입니다. 포함하면 `orchestrator-rust.yml:47-54`도
-   restore-only가 되고, 제외하면 그 이유를 적습니다. **이 감사는 결정하지
-   않습니다** — 모델이 다르므로 별개 판단입니다.
+   아니라 crate build script입니다. **포함했습니다** — 구조가 같기 때문입니다:
+   `target/`의 build script 바이너리에 무결성 검증이 없고, 그 workflow는 `push`
+   로 `main`·`develop`에 모두 닿으며, 복원한 것을 `cargo`가 실행합니다. 모델이
+   다른 것은 **누가 심는가**이고, 바뀌지 않는 것은 **쓰인 곳이 모든 run에서
+   읽힌다**는 점입니다. 키 namespace 규칙은 Rust에 적용하지 않습니다 — 그 캐시는
+   한 workflow만 쓰고 restore-keys가 없어서 공유 규칙이 잡을 것이 없고, 키를
+   고치는 것은 얻는 것 없는 변경입니다. 쓰기 규칙은 모든 경로에 적용됩니다.
 3. **기존 항목은 전환만으로 사라지지 않습니다.** restore-only로 바꾼 뒤에도
    이미 `main`·`develop` scope에 있는 항목은 퇴출될 때까지 복원 후보로 남습니다
    (1장). 그러므로 **일회성 삭제**(캐시 관리 API/UI) 또는 **key namespace

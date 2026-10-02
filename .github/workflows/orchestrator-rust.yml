@@ -44,7 +44,14 @@ jobs:
           cargo --version
 
       - name: Restore Rust build cache
-        uses: actions/cache@v5
+        # Restore always, save only on a pull-request run. This workflow can also
+        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
+        # release branch -- and an entry written in the default-branch or develop
+        # scope is restorable by every run that can see it, the required gate
+        # included. A pull-request run writes to its own merge ref, which only that
+        # pull request can restore, so it keeps the cache warm without widening
+        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
@@ -70,6 +77,19 @@ jobs:
       - name: Test vendored AMUX server library
         working-directory: vendor/amux
         run: cargo test -p amux-server --lib --locked
+
+      - name: Save the Rust build cache
+        # Only the pull-request scope. See the restore step above.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            vendor/amux/target
+          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
 
       - name: Check vendored AMUX Docker build inputs
         working-directory: vendor/amux

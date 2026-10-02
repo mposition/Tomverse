@@ -14,6 +14,20 @@
  *
  * Pure: it takes workflow sources and returns findings. The runner is
  * scripts/check-ci-cache-keys.mjs.
+ *
+ * What this deliberately does NOT govern: `actions/setup-node`'s own npm cache.
+ * It is read through the same backend, but `npm ci` verifies every tarball
+ * against the integrity in package-lock.json, so a tampered entry fails or is
+ * refetched rather than installing different code
+ * (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.4). Suppressing
+ * it would slow every install for no change in what can execute. The entries
+ * that have no such check -- build output and browser binaries -- are the ones
+ * these rules are about, and they all arrive through `actions/cache`.
+ *
+ * One latent path that check does not cover is recorded in the audit's 4.2:
+ * setup-node v6 defaults `package-manager-cache` to true, so adding a
+ * `packageManager` field to package.json would start caching in steps that
+ * declare no `cache:` input at all.
  */
 
 import { parse as parseYaml } from "yaml";
@@ -30,6 +44,15 @@ export const CACHE_FAMILIES = [
 ];
 
 const RUNNER_OS = "${{ runner.os }}";
+
+/**
+ * The scopes whose entries every run in the repository can reach.
+ *
+ * `main` is the default branch, so its entries are restorable everywhere.
+ * `develop` is the base of every feature pull request, so its entries are
+ * restorable by all of them. A cache written in either is shared state.
+ */
+export const WIDELY_READABLE_BRANCHES = ["main", "develop"];
 
 const isObj = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -48,6 +71,75 @@ const stringList = (value) => {
     return value.map((item) => item.trim()).filter((item) => item.length > 0);
   }
   return null;
+};
+
+/**
+ * Whether a workflow can run with `GITHUB_REF` on a widely readable branch.
+ *
+ * `schedule` runs on the default branch. `workflow_dispatch` runs on whatever
+ * ref the operator picks, which includes those branches. A `push` reaches them
+ * when its branch filter names one, and when it has no branch filter at all.
+ *
+ * Unreadable triggers answer "yes": this decides whether a *write* is allowed,
+ * so the uncertain answer has to be the restrictive one.
+ */
+export const reachesWidelyReadableScope = (document) => {
+  const on = document?.on ?? document?.true; // YAML 1.1 parses a bare `on:` as true
+  if (on === undefined || on === null) return true;
+  const events = Array.isArray(on)
+    ? Object.fromEntries(on.map((name) => [name, null]))
+    : typeof on === "string"
+      ? { [on]: null }
+      : isObj(on)
+        ? on
+        : null;
+  if (events === null) return true;
+
+  for (const [event, filter] of Object.entries(events)) {
+    if (event === "schedule" || event === "workflow_dispatch" || event === "workflow_call") return true;
+    if (event !== "push") continue;
+    if (!isObj(filter)) return true;
+    const branches = filter.branches;
+    const ignored = filter["branches-ignore"];
+    if (branches === undefined && ignored === undefined) {
+      // Tags only still never puts GITHUB_REF on a branch.
+      if (filter.tags !== undefined || filter["tags-ignore"] !== undefined) continue;
+      return true;
+    }
+    if (branches !== undefined) {
+      const list = stringList(branches);
+      if (list === null) return true;
+      if (list.some((pattern) => WIDELY_READABLE_BRANCHES.some((branch) => patternCouldMatch(pattern, branch)))) {
+        return true;
+      }
+      continue;
+    }
+    // `branches-ignore` without `branches`: everything not named is reached.
+    const list = stringList(ignored);
+    if (list === null) return true;
+    if (WIDELY_READABLE_BRANCHES.some((branch) => !list.some((pattern) => patternCouldMatch(pattern, branch)))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Conservatively, whether a branch-filter pattern could match a branch name.
+ *
+ * Only the shapes this repository uses are modelled; anything else answers
+ * "could match", because a pattern this cannot read must not be read as safe.
+ */
+const patternCouldMatch = (pattern, branch) => {
+  if (typeof pattern !== "string") return true;
+  if (pattern.startsWith("!")) return false; // a negation never adds a branch
+  if (pattern === branch) return true;
+  if (pattern === "**" || pattern === "*") return true;
+  if (/^[A-Za-z0-9._\/-]+$/.test(pattern)) return false; // a plain name that is not this branch
+  if (pattern.endsWith("/**") || pattern.endsWith("/*")) {
+    return branch.startsWith(pattern.slice(0, pattern.lastIndexOf("/") + 1));
+  }
+  return true;
 };
 
 /**
@@ -85,10 +177,11 @@ export const readCacheSteps = (text) => {
         paths,
         key: typeof withBlock.key === "string" ? withBlock.key.trim() : null,
         restoreKeys,
+        condition: typeof step.if === "string" ? step.if.trim() : step.if === undefined ? null : "",
       });
     }
   }
-  return { steps };
+  return { steps, widelyReadable: reachesWidelyReadableScope(document) };
 };
 
 /** The family row a step's paths fall under, or null when none is governed. */
@@ -120,6 +213,16 @@ const familyPrefix = (family) => `${RUNNER_OS}-${family}-`;
  *   files is one entry those workflows share, so whichever writes it first in a
  *   scope every run can see owns what the others execute (F1). Sharing inside
  *   one workflow is fine: its jobs are one unit of trust.
+ * - `unguarded_save_in_widely_readable_scope` -- a workflow that can run on the
+ *   default branch or on `develop` must not use the combined `actions/cache`,
+ *   whose post step writes, and a `save` step there must state the condition
+ *   that keeps it to a pull-request run. Restoring is not the write; the write
+ *   is what makes one run's output every later run's input (P1).
+ *
+ * The prefix and sharing rules apply to every cached path. The family rule
+ * needs CACHE_FAMILIES because only a listed family has a namespace to require,
+ * and the save rule applies to every path for the same reason as sharing: the
+ * scope is a property of the run, not of what is being cached.
  */
 export const judgeCacheKeys = (sources) => {
   const findings = [];
@@ -134,12 +237,28 @@ export const judgeCacheKeys = (sources) => {
     }
     for (const step of read.steps) {
       const family = familyFor(step.paths);
-      if (family === null) continue;
-      const prefix = familyPrefix(family.family);
 
       if (step.mode !== "save" && step.key === null) {
         problems.push({ workflowPath: source.path, problem: `${step.jobId}: key_missing` });
         continue;
+      }
+
+      if (read.widelyReadable && step.mode !== "restore") {
+        // A combined step cannot be guarded: its post step decides on its own.
+        // A split save can be, and `github.event_name` or `github.ref` is how
+        // the condition names the scope rather than something unrelated.
+        const guarded =
+          step.mode === "save" &&
+          typeof step.condition === "string" &&
+          /github\.(event_name|ref)\b/.test(step.condition);
+        if (!guarded) {
+          findings.push({
+            rule: "unguarded_save_in_widely_readable_scope",
+            workflowPath: source.path,
+            jobId: step.jobId,
+            detail: step.mode === "save" ? `save if: ${step.condition ?? "(none)"}` : `actions/cache (combined)`,
+          });
+        }
       }
 
       for (const restoreKey of step.restoreKeys) {
@@ -151,13 +270,16 @@ export const judgeCacheKeys = (sources) => {
             detail: restoreKey,
           });
         }
-        if (restoreKey.length <= prefix.length && prefix.startsWith(restoreKey)) {
-          findings.push({
-            rule: "restore_key_names_only_the_family",
-            workflowPath: source.path,
-            jobId: step.jobId,
-            detail: restoreKey,
-          });
+        if (family !== null) {
+          const prefix = familyPrefix(family.family);
+          if (restoreKey.length <= prefix.length && prefix.startsWith(restoreKey)) {
+            findings.push({
+              rule: "restore_key_names_only_the_family",
+              workflowPath: source.path,
+              jobId: step.jobId,
+              detail: restoreKey,
+            });
+          }
         }
       }
 
@@ -197,6 +319,8 @@ export const describeFinding = (finding) => {
       return `${where}: restore-key "${finding.detail}" names the cache family and nothing else, so it matches every workflow's entry in it. Keep the namespace segment.`;
     case "key_shared_across_workflows":
       return `${where}: these workflows declare the same cache key "${finding.detail}", so they share one entry. Give each its own namespace segment.`;
+    case "unguarded_save_in_widely_readable_scope":
+      return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")}, where a written entry is restorable by every run that can see that scope — ${finding.detail}. Use actions/cache/restore, and if a save is needed give it an if: on github.event_name or github.ref.`;
     default:
       return `${where}: ${finding.rule} (${finding.detail})`;
   }

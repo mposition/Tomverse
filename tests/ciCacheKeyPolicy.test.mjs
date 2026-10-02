@@ -3,7 +3,15 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { CACHE_FAMILIES, judgeCacheKeys, readCacheSteps } from "../scripts/ci-cache-key-policy.mjs";
+import { parse as parseYaml } from "yaml";
+
+import {
+  CACHE_FAMILIES,
+  WIDELY_READABLE_BRANCHES,
+  judgeCacheKeys,
+  reachesWidelyReadableScope,
+  readCacheSteps,
+} from "../scripts/ci-cache-key-policy.mjs";
 
 const wf = (name, body) => ({ path: `.github/workflows/${name}.yml`, text: body });
 
@@ -202,4 +210,187 @@ test("every governed cache step in this repository carries a namespace segment",
     }
   }
   assert.ok(seen.length >= 16, `expected the governed steps to be found, saw ${seen.length}`);
+});
+
+/* ------------------------------------------------------------------------- */
+/* The write rule: who may put an entry where every run can read it           */
+/* ------------------------------------------------------------------------- */
+
+const onBlock = (yaml) => parseYaml(`${yaml}\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps: []\n`);
+
+test("a run that can land on main or develop is treated as widely readable", () => {
+  const wide = [
+    "on:\n  schedule:\n    - cron: '0 1 * * *'",
+    "on:\n  workflow_dispatch: {}",
+    "on:\n  push:\n    branches: [main]",
+    "on:\n  push:\n    branches: [develop]",
+    "on:\n  push:\n    branches: ['**']",
+    "on:\n  push: {}",
+    "on:\n  push:\n    branches-ignore: ['feature/**']",
+    "on: push",
+  ];
+  for (const yaml of wide) {
+    assert.equal(reachesWidelyReadableScope(onBlock(yaml)), true, yaml);
+  }
+});
+
+test("a pull-request-only or feature-branch-only run is not widely readable", () => {
+  const narrow = [
+    "on:\n  pull_request:\n    types: [opened]",
+    "on:\n  push:\n    branches: ['to-develop/**', '**/to-develop/**']",
+    "on:\n  push:\n    branches: [release-notes]",
+    "on:\n  push:\n    tags: ['v*']",
+  ];
+  for (const yaml of narrow) {
+    assert.equal(reachesWidelyReadableScope(onBlock(yaml)), false, yaml);
+  }
+});
+
+test("a trigger block that cannot be read is treated as widely readable", () => {
+  // Deciding whether a write is allowed, so the unreadable answer has to be
+  // the restrictive one.
+  assert.equal(reachesWidelyReadableScope({}), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: 7")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['feat*ure']")), true);
+});
+
+const scheduled = (step) =>
+  [
+    "on:",
+    "  schedule:",
+    "    - cron: '0 1 * * *'",
+    "jobs:",
+    "  j:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    ...step,
+    "",
+  ].join("\n");
+
+test("the combined cache action is refused in a widely readable workflow", () => {
+  const found = rules([
+    wf(
+      "nightly",
+      scheduled([
+        "      - uses: actions/cache@v5",
+        "        with:",
+        "          path: .next/cache",
+        `          key: ${OS}-next-v2-x-${LOCK}-a`,
+      ]),
+    ),
+  ]);
+  assert.deepEqual(found, ["unguarded_save_in_widely_readable_scope"]);
+});
+
+test("restore-only is accepted in a widely readable workflow", () => {
+  const found = rules([
+    wf(
+      "nightly",
+      scheduled([
+        "      - uses: actions/cache/restore@v5",
+        "        with:",
+        "          path: .next/cache",
+        `          key: ${OS}-next-v2-x-${LOCK}-a`,
+      ]),
+    ),
+  ]);
+  assert.deepEqual(found, []);
+});
+
+test("a save needs a condition naming the scope, and an unrelated one does not count", () => {
+  const save = (condition) =>
+    wf(
+      "nightly",
+      scheduled([
+        "      - uses: actions/cache/save@v5",
+        ...(condition === null ? [] : [`        if: ${condition}`]),
+        "        with:",
+        "          path: .next/cache",
+        `          key: ${OS}-next-v2-x-${LOCK}-a`,
+      ]),
+    );
+  assert.deepEqual(rules([save("github.event_name == 'pull_request'")]), []);
+  assert.deepEqual(rules([save("github.ref != 'refs/heads/main'")]), []);
+  assert.deepEqual(rules([save(null)]), ["unguarded_save_in_widely_readable_scope"]);
+  assert.deepEqual(rules([save("success()")]), ["unguarded_save_in_widely_readable_scope"]);
+  assert.deepEqual(rules([save("steps.scope.outputs.code == 'true'")]), [
+    "unguarded_save_in_widely_readable_scope",
+  ]);
+});
+
+test("the write rule covers every cached path, not only the namespaced families", () => {
+  const found = rules([
+    wf(
+      "nightly",
+      scheduled([
+        "      - uses: actions/cache@v5",
+        "        with:",
+        "          path: |",
+        "            ~/.cargo/registry",
+        "            target",
+        `          key: ${OS}-rust-${LOCK}`,
+      ]),
+    ),
+  ]);
+  assert.deepEqual(found, ["unguarded_save_in_widely_readable_scope"]);
+});
+
+test("a pull-request-only workflow may still use the combined action", () => {
+  const found = rules([
+    wf("gate", oneStep({ key: `${OS}-next-v2-pr-${LOCK}-abc`, restoreKeys: [`${OS}-next-v2-pr-${LOCK}-`] })),
+  ]);
+  assert.deepEqual(found, []);
+});
+
+test("setup-node's own npm cache is out of scope for these rules", () => {
+  // npm ci verifies every tarball against the lockfile, so a tampered entry
+  // cannot install different code. Suppressing it would cost every install for
+  // no change in what can execute.
+  const found = rules([
+    wf(
+      "nightly",
+      scheduled([
+        "      - uses: actions/setup-node@v6",
+        "        with:",
+        "          node-version: 22",
+        "          cache: npm",
+      ]),
+    ),
+  ]);
+  assert.deepEqual(found, []);
+});
+
+test("the widely readable branches are the default branch and the pull-request base", () => {
+  assert.deepEqual(WIDELY_READABLE_BRANCHES, ["main", "develop"]);
+});
+
+test("no committed workflow writes a cache from a widely readable scope", () => {
+  const dir = ".github/workflows";
+  const offenders = [];
+  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
+    const text = readFileSync(join(dir, name), "utf8");
+    const read = readCacheSteps(text);
+    assert.ok(read.steps, `${name} must parse`);
+    if (!read.widelyReadable) continue;
+    for (const step of read.steps) {
+      if (step.mode === "restore") continue;
+      const guarded =
+        step.mode === "save" && typeof step.condition === "string" && /github\.(event_name|ref)\b/.test(step.condition);
+      if (!guarded) offenders.push(`${name} # ${step.jobId} (${step.mode})`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("the workflows that may still write are the pull-request-only ones", () => {
+  const dir = ".github/workflows";
+  const writers = new Set();
+  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
+    const read = readCacheSteps(readFileSync(join(dir, name), "utf8"));
+    if (read.widelyReadable) continue;
+    if (read.steps.some((step) => step.mode === "cache")) writers.add(name);
+  }
+  // Pinned so that making another workflow a cache writer is a visible change
+  // rather than a silent one.
+  assert.deepEqual([...writers].sort(), ["pr-fast-gate.yml", "review-parity-shadow.yml"]);
 });

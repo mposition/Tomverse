@@ -190,7 +190,14 @@ jobs:
 
       - name: Restore Next.js build cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore always, save only on a pull-request run. This workflow can also
+        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
+        # release branch -- and an entry written in the default-branch or develop
+        # scope is restorable by every run that can see it, the required gate
+        # included. A pull-request run writes to its own merge ref, which only that
+        # pull request can restore, so it keeps the cache warm without widening
+        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: .next/cache
           key: ${{ runner.os }}-next-v2-main-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
@@ -213,9 +220,25 @@ jobs:
       - name: Build once for the Chromium test server
         run: npm run build
 
+      - name: Save the Next.js build cache
+        # Only the pull-request scope. See the restore step above.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-v2-main-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+
       - name: Restore Playwright Chromium cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore always, save only on a pull-request run. This workflow can also
+        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
+        # release branch -- and an entry written in the default-branch or develop
+        # scope is restorable by every run that can see it, the required gate
+        # included. A pull-request run writes to its own merge ref, which only that
+        # pull request can restore, so it keeps the cache warm without widening
+        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-v2-main-${{ hashFiles('package-lock.json') }}-chromium
@@ -230,6 +253,15 @@ jobs:
 
       - name: Install Chromium
         run: scripts/ci/install-playwright.sh chromium
+
+      - name: Save the Playwright Chromium cache
+        # Only the pull-request scope. See the restore step above.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-v2-main-${{ hashFiles('package-lock.json') }}-chromium
 
       - name: Run Chromium desktop and mobile E2E tests
         run: npm run test:e2e:chromium -- --shard=${{ matrix.shard }}/${{ matrix.shards }}

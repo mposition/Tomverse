@@ -9,7 +9,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describeFinding, judgeCacheKeys } from "./ci-cache-key-policy.mjs";
+import {
+  CACHE_FAMILIES,
+  WIDELY_READABLE_BRANCHES,
+  describeFinding,
+  judgeCacheKeys,
+} from "./ci-cache-key-policy.mjs";
 
 const WORKFLOW_DIR = ".github/workflows";
 
@@ -41,6 +46,7 @@ if (findings.length > 0) {
 }
 
 console.log(
-  `Cache key check passed: ${sources.length} workflow(s), governed cache families ` +
-    `${JSON.stringify([".next/cache", "~/.cache/ms-playwright"])}. No shared keys and no family-wide restore-keys.`,
+  `Actions cache check passed across ${sources.length} workflow(s): no key is declared by two of them, ` +
+    `no restore-key names only its family (${CACHE_FAMILIES.map((entry) => entry.family).join(", ")}), ` +
+    `and nothing writes a cache from a run that can land on ${WIDELY_READABLE_BRANCHES.join(" or ")}.`,
 );
