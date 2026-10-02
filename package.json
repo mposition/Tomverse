@@ -38,6 +38,7 @@
     "capture:amux-staging-evidence": "node --conditions=react-server --import tsx scripts/capture-amux-staging-evidence.mjs",
     "local:amux-intake": "node --import tsx scripts/local-amux-intake.mjs",
     "build:amux-v4-egress-s0": "esbuild scripts/amux-v4-egress-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-egress-s0.mjs",
+    "build:amux-v4-local-analysis-s0": "esbuild scripts/amux-v4-local-analysis-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-local-analysis-s0.mjs",
     "build:assistant-knowledge-tutorial-media": "node scripts/build-assistant-knowledge-tutorial-media.mjs",
     "capture:week1-marketing-kit:en": "node scripts/capture-week1-marketing-kit-en.mjs",
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",
