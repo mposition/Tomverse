@@ -27,6 +27,10 @@ import {
   initialPlanReadbackPermitted,
   initialPlanWritePermitted,
 } from "@/lib/amux/ideaInitialSourcePlanCore";
+import {
+  AMUX_V4_FRONTIER_CATALOG_READ_ENV,
+  frontierCatalogReadPermitted,
+} from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -90,7 +94,9 @@ export default async function AdminAmuxBacklogPage({
       {tab.id === "ideas" ? (
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
-          initialPlanAvailable={initialPlanAvailable} operatorId={session.user.id} />
+          initialPlanAvailable={initialPlanAvailable}
+          frontierModelsAvailable={frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV])}
+          operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (

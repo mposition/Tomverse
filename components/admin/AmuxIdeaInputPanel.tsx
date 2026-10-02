@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
+import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -65,9 +66,9 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 }
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
-  initialPlanAvailable, operatorId }: {
+  initialPlanAvailable, frontierModelsAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
-  initialPlanAvailable: boolean; operatorId: string;
+  initialPlanAvailable: boolean; frontierModelsAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -423,6 +424,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         operatorId={operatorId} available={initialPlanAvailable}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
       />
+      <AmuxFrontierModelsPanel available={frontierModelsAvailable} />
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
