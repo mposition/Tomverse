@@ -10,8 +10,8 @@ import {
 } from "@/lib/adminAuditIntegrityCore";
 import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
-  AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  amuxV4SystemAuditScope,
   isSystemAuditActor,
   metadataClaimsSystemActor,
   systemAuditActionAllowed,
@@ -301,7 +301,8 @@ export async function writeSystemAuditLogEntry({
     metadata: {
       ...(metadata || {}),
       [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor,
-      ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR ? { actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE } : {}),
+      ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR
+        ? { actorScope: amuxV4SystemAuditScope(action, targetType) } : {}),
     },
     ipAddress: null,
     userAgent: null,
