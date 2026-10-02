@@ -2269,6 +2269,8 @@ model AdminAuditLog {
   amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
+  amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
+  amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8979,6 +8981,39 @@ model AmuxIdeaAnalysisBudgetWindow {
   @@id([namespace, monthStart])
 }
 
+/// Owner-approved, versioned API-equivalent ceiling for one exact analysis
+/// CLI provider/model. A row is only price evidence, never call permission.
+/// No active version or expired evidence means reservation must stop.
+model AmuxIdeaAnalysisPriceVersion {
+  id                       String    @id
+  provider                 String
+  modelId                  String
+  mode                     String
+  version                  Int
+  status                   String
+  inputTokensCap           Int
+  outputTokensCap          Int
+  inputMicroUsdPerMillion  Int
+  outputMicroUsdPerMillion Int
+  evidenceDigest           String
+  verifiedAt               DateTime  @db.Timestamptz(3)
+  expiresAt                DateTime  @db.Timestamptz(3)
+  approvedAt               DateTime  @db.Timestamptz(3)
+  approvedByUserId         String
+  approvalAuditLogId       String    @unique
+  revokedAt                DateTime? @db.Timestamptz(3)
+  revocationAuditLogId     String?   @unique
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime  @updatedAt @db.Timestamptz(3)
+
+  approvalAudit   AdminAuditLog  @relation("AmuxV4AnalysisPriceApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revocationAudit AdminAuditLog? @relation("AmuxV4AnalysisPriceRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  budgetHolds     AmuxIdeaAnalysisBudgetHold[]
+
+  @@unique([provider, modelId, mode, version])
+  @@index([provider, modelId, mode, status])
+}
+
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown
 /// usage keeps the hold occupied; it is never settled as zero. No writer or
 /// model dispatch is enabled by this schema-only addition.
@@ -8991,6 +9026,7 @@ model AmuxIdeaAnalysisBudgetHold {
   provider                 String
   modelId                  String
   pricingVersion           String
+  priceVersionId           String?
   inputTokensCap           Int
   outputTokensCap          Int
   inputMicroUsdPerMillion  Int
@@ -9006,8 +9042,10 @@ model AmuxIdeaAnalysisBudgetHold {
 
   window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict)
   preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([namespace, monthStart, status])
+  @@index([priceVersionId])
 }
 
 /// One bounded normalized analysis chunk. Raw provider output and normalized
