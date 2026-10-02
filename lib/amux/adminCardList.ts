@@ -1,6 +1,9 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { encodeAmuxAdminCardCursor,
+  type AmuxAdminCardCursor } from "./adminCardCursorCore.ts";
 
 /**
  * Read-only card list for the owner console.
@@ -33,17 +36,25 @@ export type AmuxAdminCardRow = {
   updatedAt: string;
 };
 
-export async function listAmuxCardsForAdmin(): Promise<{
+export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null = null): Promise<{
   rows: AmuxAdminCardRow[];
   total: number;
   limit: number;
+  nextCursor: string | null;
 }> {
-  const [total, cards] = await Promise.all([
+  const where: Prisma.AmuxWorkItemWhereInput = cursor ? {
+    archivedAt: null,
+    OR: [
+      { updatedAt: { lt: cursor.updatedAt } },
+      { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
+    ],
+  } : { archivedAt: null };
+  const [total, fetched] = await Promise.all([
     prisma.amuxWorkItem.count({ where: { archivedAt: null } }),
     prisma.amuxWorkItem.findMany({
-      where: { archivedAt: null },
-      orderBy: [{ updatedAt: "desc" }],
-      take: AMUX_ADMIN_CARD_LIST_LIMIT,
+      where,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: AMUX_ADMIN_CARD_LIST_LIMIT + 1,
       select: {
         id: true,
         sourceKey: true,
@@ -59,6 +70,10 @@ export async function listAmuxCardsForAdmin(): Promise<{
       },
     }),
   ]);
+  const cards = fetched.slice(0, AMUX_ADMIN_CARD_LIST_LIMIT);
+  const last = cards.at(-1);
+  const nextCursor = fetched.length > AMUX_ADMIN_CARD_LIST_LIMIT && last
+    ? encodeAmuxAdminCardCursor({ updatedAt: last.updatedAt, id: last.id }) : null;
   const ids = cards.map((card) => card.id);
   // Two set queries for the whole page, not one per card: a nested `take` on
   // a to-many relation is loaded per parent row.
@@ -106,5 +121,5 @@ export async function listAmuxCardsForAdmin(): Promise<{
         rank(left.status) - rank(right.status) ||
         (left.sourceKey ?? left.id).localeCompare(right.sourceKey ?? right.id),
     );
-  return { rows, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT };
+  return { rows, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT, nextCursor };
 }

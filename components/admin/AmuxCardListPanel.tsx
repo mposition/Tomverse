@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AmuxAdminCardRow } from "@/lib/amux/adminCardList";
@@ -14,10 +15,12 @@ export function AmuxCardListPanel({
   rows,
   total,
   limit,
+  nextCursor,
 }: {
   rows: AmuxAdminCardRow[];
   total: number;
   limit: number;
+  nextCursor: string | null;
 }) {
   const messages = useAdminMessages(adminAmuxCardsMessages);
   const [view, setView] = useState<"board" | "list">("board");
@@ -51,7 +54,9 @@ export function AmuxCardListPanel({
         <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.empty}</p>
       ) : view === "board" ? (
         <>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">{messages.boardScope(rows.length, total)}</p>
+          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+            {messages.boardScope(rows.length, total, nextCursor !== null)}
+          </p>
           {board.terminalCount > 0 ? (
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
               {messages.terminalInList(board.terminalCount)}
@@ -124,6 +129,12 @@ export function AmuxCardListPanel({
           </table>
         </div>
       )}
+      {nextCursor ? (
+        <Link href={`/admin/amux-execution?tab=cards&cursor=${encodeURIComponent(nextCursor)}`}
+          prefetch={false} className="self-start rounded border border-zinc-400 px-3 py-1 text-sm text-zinc-800 dark:text-zinc-100">
+          {messages.nextPage(limit)}
+        </Link>
+      ) : null}
     </section>
   );
 }

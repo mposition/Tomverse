@@ -17,7 +17,8 @@ test("the AMUX card list is an owner-only section that is not advertised to othe
   // the old address redirects there.
   const page = await read("app/(site)/(application)/admin/amux-execution/page.tsx");
   assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
-  assert.match(page, /await listAmuxCardsForAdmin\(\)/);
+  assert.match(page, /await listAmuxCardsForAdmin\(cursor\)/);
+  assert.match(page, /query\.cursor !== undefined && cursor === null\) notFound\(\)/);
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], "/admin/amux-execution?tab=cards");
   const meta = resolveAdminPageMeta("/admin/amux-execution");
   assert.equal(meta.isKnown, true);
@@ -38,7 +39,10 @@ test("the card list reads identifiers and state only", async () => {
     assert.equal(select.includes(forbidden), false, forbidden);
   }
   assert.match(select, /executionBriefDigest: true/);
-  assert.match(loader, /take: AMUX_ADMIN_CARD_LIST_LIMIT/);
+  assert.match(loader, /take: AMUX_ADMIN_CARD_LIST_LIMIT \+ 1/);
+  assert.match(loader, /updatedAt: \{ lt: cursor\.updatedAt \}/);
+  assert.match(loader, /id: \{ lt: cursor\.id \}/);
+  assert.match(loader, /nextCursor/);
   assert.doesNotMatch(loader, /\.(update|updateMany|create|createMany|upsert|delete|deleteMany)\(/);
   // One set query per page for the latest attempt and one for the counts.
   assert.doesNotMatch(loader, /executionAttempts: \{/);
@@ -53,5 +57,6 @@ test("the panel states how many rows it shows out of how many", async () => {
   assert.match(panel, /messages\.shown\(rows\.length, total, limit\)/);
   assert.match(panel, /projectAmuxAdminKanban\(rows\)/);
   assert.match(panel, /data-testid="amux-kanban-board"/);
+  assert.match(panel, /messages\.nextPage\(limit\)/);
   assert.doesNotMatch(panel, /adminFetch|fetch\(/);
 });

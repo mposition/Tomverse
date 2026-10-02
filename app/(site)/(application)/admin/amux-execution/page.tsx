@@ -16,6 +16,7 @@ import {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
   countAwaitingAmuxEscalations,
 } from "@/lib/adminNavigationCounts";
+import { parseAmuxAdminCardCursor } from "@/lib/amux/adminCardCursorCore";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
@@ -87,11 +88,13 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const { rows, total, limit } = await listAmuxCardsForAdmin();
+    const cursor = parseAmuxAdminCardCursor(query.cursor);
+    if (query.cursor !== undefined && cursor === null) notFound();
+    const { rows, total, limit, nextCursor } = await listAmuxCardsForAdmin(cursor);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+        <AmuxCardListPanel rows={rows} total={total} limit={limit} nextCursor={nextCursor} />
       </div>
     );
   }
