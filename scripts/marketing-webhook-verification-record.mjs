@@ -4,13 +4,15 @@
 //   npm run marketing:webhook-record -- --record-id 2026-10-03__zernio-shadow
 //     --executor staging-operator --commit <deployed staging sha>
 //     --receiver-url https://staging.tomverse.app/api/webhooks/zernio
-//     [--evidence <ref>]... [--write]
+//     [--config <digest>] [--evidence <ref>]... [--write]
 //
 // Run against staging (railway run, staging environment). Reads the shadow
-// reports and the shadow switch from the database and the delivery attempts
-// from Zernio's webhook log (read only, with ZERNIO_API_KEY); writes nothing to
-// either. The staging configuration snapshot hashes the declared environment
-// values in this process -- no value is printed. Without --write it prints the
+// reports from the database and the delivery attempts from Zernio's webhook
+// log (read only, with ZERNIO_API_KEY); writes nothing to either. The staging
+// configuration snapshot is the one the receiver stamped on the evidence: the
+// configuration the events were handled under, not one recomputed here (only
+// the receiver route reads the webhook secret). If the evidence carries more
+// than one, --config chooses which to certify. Without --write it prints the
 // draft and its digest; with --write it creates the record file, refusing to
 // overwrite one that exists (a record is immutable once written).
 //
@@ -18,22 +20,17 @@
 // answer names this build's pipeline fingerprint and this staging snapshot
 // count as evidence (the receiver stamps both on what it answers).
 // Conditions 1, 3 and 4 are judged per event type from the delivery order.
-// For condition 2 the script itself sends three refused requests to the
-// receiver (no signature, a wrong one, a signed body with one byte changed):
-// the only writes it makes, to staging, and each must leave the reports as
-// they were.
+// For condition 2 the script itself sends three requests the receiver must
+// refuse (see sendC2Probes): the only requests it makes to staging.
 
 import { spawnSync } from "node:child_process";
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { MARKETING_WEBHOOK_SHADOW_KEY } from "../lib/marketingAutomationAccess.ts";
+import { MARKETING_WEBHOOK_PIPELINE_FINGERPRINT } from "../lib/marketingAutomationAccess.ts";
 import { parseMarketingReportPayload } from "../lib/marketingAutomationSchema.ts";
-import {
-  marketingWebhookIsStaging,
-  marketingWebhookStagingConfigSnapshotDigest,
-} from "../lib/marketingWebhookCore.ts";
+import { marketingWebhookIsStaging } from "../lib/marketingWebhookCore.ts";
 import {
   MARKETING_WEBHOOK_C2_PROBE_KINDS,
   draftMarketingWebhookVerificationRecord,
@@ -122,34 +119,29 @@ const readDeliveries = async () => {
 const { prisma } = await import("../lib/prisma.ts");
 
 /**
- * Condition 2, sent by this script: Zernio only ever signs. Each probe is a
- * well-formed post event under a fresh random id; the receiver must refuse it
- * 401 before parsing, and the stored reports must not change.
+ * Condition 2, sent by this script without the secret (only the receiver route
+ * reads it). Two bodies are not JSON, so a receiver that parsed before it
+ * verified would answer 400 rather than 401; the third is a well-formed event
+ * under a wrong signature. Each must leave the stored reports as they were.
  */
 const sendC2Probes = async () => {
-  const secret = process.env.ZERNIO_WEBHOOK_SECRET;
-  if (!secret) throw new Error("ZERNIO_WEBHOOK_SECRET is not set in this environment.");
   const results = [];
   for (const kind of MARKETING_WEBHOOK_C2_PROBE_KINDS) {
     const eventId = randomUUID();
-    const body = JSON.stringify({
-      id: eventId,
-      event: "post.published",
-      timestamp: new Date().toISOString(),
-      post: { id: "c2-probe", status: "published", platforms: [{ platform: "linkedin", accountId: "c2-probe" }] },
-    });
-    const signature = createHmac("sha256", secret).update(body).digest("hex");
+    const body =
+      kind === "wrong_signature_event"
+        ? JSON.stringify({
+            id: eventId,
+            event: "post.published",
+            timestamp: new Date().toISOString(),
+            post: { id: "c2-probe", status: "published", platforms: [{ platform: "linkedin", accountId: "c2-probe" }] },
+          })
+        : `{"id":"${eventId}","event":`;
     const headers = { "content-type": "application/json", "x-zernio-event-id": eventId };
-    let sent = body;
-    if (kind === "wrong_signature") headers["x-zernio-signature"] = "0".repeat(64);
-    if (kind === "tampered_body") {
-      headers["x-zernio-signature"] = signature;
-      // One byte changed after signing.
-      sent = body.replace("c2-probe", "c2-proba");
-    }
+    if (kind !== "unsigned_not_json") headers["x-zernio-signature"] = "0".repeat(64);
     const reportsBefore = await prisma.marketingReport.count({ where: { kind: "webhook_shadow" } });
     const at = new Date().toISOString();
-    const response = await fetch(receiverUrl, { method: "POST", headers, body: sent });
+    const response = await fetch(receiverUrl, { method: "POST", headers, body });
     let answerBody = null;
     try {
       answerBody = await response.json();
@@ -173,16 +165,7 @@ const sendC2Probes = async () => {
 
 try {
   const c2Probes = await sendC2Probes();
-  const [shadowSetting, channels, rows, deliveries] = await Promise.all([
-    prisma.appSetting.findUnique({
-      where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
-      select: { value: true },
-    }),
-    // The same read the receiver makes for its stamp.
-    prisma.marketingChannel.findMany({
-      where: { provider: "zernio", externalAccountRef: { not: null } },
-      select: { id: true, externalAccountRef: true },
-    }),
+  const [rows, deliveries] = await Promise.all([
     prisma.marketingReport.findMany({
       where: { kind: "webhook_shadow" },
       select: { payload: true },
@@ -191,20 +174,38 @@ try {
   ]);
   const reports = rows.map((row) => parseMarketingReportPayload("webhook_shadow", row.payload));
 
-  // The same function the receiver stamps its signed answers with.
-  const stagingConfigSnapshotDigest = marketingWebhookStagingConfigSnapshotDigest(
-    process.env,
-    shadowSetting?.value ?? null,
-    channels.flatMap((channel) =>
-      channel.externalAccountRef ? [{ id: channel.id, externalAccountRef: channel.externalAccountRef }] : [],
+  // The configurations this build stamped on processed answers.
+  const stamped = [
+    ...new Set(
+      deliveries
+        .filter(
+          (attempt) =>
+            attempt.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT &&
+            attempt.config !== null &&
+            ["recorded", "duplicate", "deliberate_fault"].includes(attempt.answer ?? ""),
+        )
+        .map((attempt) => attempt.config),
     ),
-  );
+  ].sort();
+  const chosen = values("config");
+  let stagingConfigSnapshotDigest = null;
+  if (chosen.length === 1) {
+    stagingConfigSnapshotDigest = stamped.includes(chosen[0]) ? chosen[0] : null;
+    if (!stagingConfigSnapshotDigest) console.error("--config is not a configuration this build stamped on evidence.");
+  } else if (stamped.length === 1) {
+    stagingConfigSnapshotDigest = stamped[0];
+  } else if (stamped.length > 1) {
+    console.error(`The evidence carries ${stamped.length} configurations; choose one with --config:`);
+    for (const digest of stamped) console.error(`  ${digest}`);
+  }
 
   const draft = draftMarketingWebhookVerificationRecord({
     recordId,
+    // No stamped configuration: nothing this build processed can be evidence,
+    // and the drafter will say so per type.
+    stagingConfigSnapshotDigest: stagingConfigSnapshotDigest ?? "0".repeat(64),
     executor,
     stagingCommitSha,
-    stagingConfigSnapshotDigest,
     reports: reports.map((report) => ({
       eventIdDigest: report.eventIdDigest,
       eventType: report.eventType,
