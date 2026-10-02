@@ -70,13 +70,26 @@ export async function receiveQaReleaseDigest(
     throw error;
   }
 
-  const result = await recordAgentDigestItem({
-    agentKey: "qa-release",
-    kind: "daily_digest",
-    schemaVersion: digest.schemaVersion,
-    idempotencyKey: `qa-release:daily:${digest.digestDate}`,
-    payload: digest,
-  });
+  // The first check above answers early; this one decides. It runs inside
+  // the write transaction after the audit chain lock, which the operator
+  // control writer also takes first, so a revision recorded while the body
+  // was still arriving is seen here and the digest is not stored under it.
+  const admittedRevision = admission.revision;
+  const result = await recordAgentDigestItem(
+    {
+      agentKey: "qa-release",
+      kind: "daily_digest",
+      schemaVersion: digest.schemaVersion,
+      idempotencyKey: `qa-release:daily:${digest.digestDate}`,
+      payload: digest,
+    },
+    undefined,
+    async (tx) => {
+      const newest = await readLatestQaReleaseOperatorControl(tx);
+      if (newest?.revision !== admittedRevision) return "control_revision_mismatch";
+      return newest.digestEnabled ? null : "digest_disabled";
+    },
+  );
   switch (result.status) {
     case "created":
       return answer(201, { status: "created", id: result.id, payloadSha256: result.payloadSha256 });
@@ -86,5 +99,7 @@ export async function receiveQaReleaseDigest(
       return answer(409, { error: "digest_conflict" });
     case "refused":
       return answer(422, { error: result.reason });
+    case "not_admitted":
+      return answer(409, { error: result.reason });
   }
 }

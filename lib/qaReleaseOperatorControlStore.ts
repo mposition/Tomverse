@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
@@ -56,7 +57,7 @@ export class QaReleaseOperatorControlRefusedError extends Error {
 
 /** The newest revision, or null when none has been recorded. */
 export async function readLatestQaReleaseOperatorControl(
-  db: Pick<typeof prisma, "qaReleaseOperatorControl"> = prisma,
+  db: Pick<Prisma.TransactionClient, "qaReleaseOperatorControl"> = prisma,
 ): Promise<QaReleaseOperatorControlRecord | null> {
   return db.qaReleaseOperatorControl.findFirst({ orderBy: { revision: "desc" } });
 }

@@ -125,3 +125,32 @@ test("anything outside the closed schema is refused without echoing it", async (
   assert.deepEqual(await call("{not json"), { status: 400, body: { error: "invalid_digest" } });
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-03" } }), 0);
 });
+
+test("a revision recorded while the body is still arriving stops the digest from being stored", async () => {
+  const digest = JSON.stringify(digestFor("2026-10-04"));
+  const startRevision = revision;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      // The operator switches the digest off after the early check has
+      // passed and before the body is complete.
+      await recordQaReleaseOperatorControl({ session: session as never, control: control(false) });
+      controller.enqueue(new TextEncoder().encode(digest));
+      controller.close();
+    },
+  });
+  const result = await receiveQaReleaseDigest(
+    new Request("https://staging.tomverse.app/api/internal/agents/qa-release/digest", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${SECRET}`,
+        "x-qa-release-control-revision": String(startRevision),
+      },
+      body,
+      duplex: "half",
+    } as RequestInit),
+    env,
+  );
+  assert.deepEqual(result, { status: 409, body: { error: "control_revision_mismatch" } });
+  assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-04" } }), 0);
+});
