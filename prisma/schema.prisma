@@ -7236,6 +7236,55 @@ model AmuxCliUsageInvocation {
   @@index([contextKind, ideaId, chunkIndex])
 }
 
+/// Dark v24/v25 provider-year seal. One immutable row prevents publishing a
+/// second partition after a small cell was folded. No writer or reader is
+/// enabled by this schema. Empty and omitted-small are internal outcomes only.
+model AmuxCliUsageAggregateFinalization {
+  id                 String   @id @default(cuid())
+  year               Int
+  providerScopeKey   String   @db.VarChar(64)
+  outcome            String
+  rawInvocationCount Int?
+  creationXid        BigInt   @default(dbgenerated("txid_current()"))
+  finalizedAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  cells AmuxCliUsageAggregateCell[]
+
+  @@unique([year, providerScopeKey])
+  @@index([finalizedAt])
+}
+
+/// A final cell, whose disjointness the future writer must prove; never an
+/// intermediate under-five bucket. Token sums are NULL unless five distinct
+/// invocations reported that field. A leaf uses actualModelUnknown rather than
+/// NULL; NULL is reserved for a final parent whose model dimension was folded.
+model AmuxCliUsageAggregateCell {
+  id                           String   @id @default(cuid())
+  finalizationId               String
+  granularity                  String
+  period                       String   @db.VarChar(7)
+  actualModelId                String?  @db.VarChar(160)
+  workerRole                   String?  @db.VarChar(32)
+  invocationCount              Int
+  inputTokens                  BigInt?
+  outputTokens                 BigInt?
+  cacheReadInputTokens         BigInt?
+  cacheCreationInputTokens     BigInt?
+  unknownInputCount            Int
+  unknownOutputCount           Int
+  unknownCacheReadCount        Int
+  unknownCacheCreationCount    Int
+  firstRecordedAt              DateTime @default(now()) @db.Timestamptz(3)
+
+  finalization AmuxCliUsageAggregateFinalization @relation(fields: [finalizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([finalizationId])
+  @@index([firstRecordedAt])
+  /// The matching migration strengthens this index with NULLS NOT DISTINCT.
+  /// Keep the schema declaration so Prisma diff never proposes dropping it.
+  @@unique([finalizationId, granularity, period, actualModelId, workerRole], map: "AmuxCliUsageAggregateCell_final_dimensions_key")
+}
+
 model AmuxHumanEscalation {
   id                  String    @id @default(cuid())
   taskId              String

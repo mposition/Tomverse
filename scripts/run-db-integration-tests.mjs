@@ -281,6 +281,9 @@ run(
     // Dark v22/v23 CLI receipts: server timestamp, immutable row, strict
     // content-free model detail and unknown/partial token semantics.
     "tests/integration/amux-cli-usage-schema.db.test.ts",
+    // Dark v24/v25 final cells: one provider-year seal, same-transaction
+    // population, immutability, and field-level five-call suppression.
+    "tests/integration/amux-cli-aggregate-schema.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
