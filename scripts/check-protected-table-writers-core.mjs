@@ -262,6 +262,18 @@ export const PROTECTED_TABLES = [
     writers: ["lib/engineeringAgentStore.ts"],
     contract: "docs/policy/engineering-agent.md §11",
   },
+  {
+    table: "AmuxCliUsageAggregateFinalization",
+    delegate: "amuxCliUsageAggregateFinalization",
+    writers: [],
+    contract: "docs/policy/development-agent-orchestration.md §v25",
+  },
+  {
+    table: "AmuxCliUsageAggregateCell",
+    delegate: "amuxCliUsageAggregateCell",
+    writers: [],
+    contract: "docs/policy/development-agent-orchestration.md §v25",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -375,6 +387,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
+    table: "AmuxCliUsageAggregateFinalization",
+    tableMentions: 10,
+    writeVerbs: 12,
+    reason:
+      "This dark migration creates an empty provider-year finalization table, constraints, indexes and guard triggers. Its two dynamic statements only SELECT fixed tables in the trigger schema; it contains no INSERT/UPDATE/DELETE of finalization rows. No application writer is approved yet.",
+  },
+  {
+    path: "prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
+    table: "AmuxCliUsageAggregateCell",
+    tableMentions: 10,
+    writeVerbs: 12,
+    reason:
+      "The same dark migration creates an empty final-cell table and immutable guard triggers. Its only dynamic statements SELECT fixed tables in the trigger schema; it contains no INSERT/UPDATE/DELETE of cells. No application writer is approved yet.",
+  },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
@@ -824,6 +852,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
+    count: 2,
+    reason:
+      "The aggregate cell insert trigger reads its provider-year seal FOR KEY SHARE, and the deferred seal trigger counts its final cells. Both EXECUTE statements are SELECT-only, use the trigger's own TG_TABLE_SCHEMA quoted with %I and fixed table names, and bind the row id with USING. They cannot name or write a protected table; dynamic schema qualification avoids unqualified or hard-coded public resolution under ?schema=.",
+  },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
