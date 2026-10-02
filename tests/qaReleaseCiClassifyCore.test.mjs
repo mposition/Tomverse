@@ -74,3 +74,38 @@ test("infra wins over test evidence", () => {
     "infra",
   );
 });
+
+test("a passing retry is flaky even when the previous run failed", () => {
+  assert.equal(
+    classify({ failingTests: [{ retriedThenPassed: true, recentOutcomes: history("fail") }] }),
+    "flaky_suspected",
+  );
+});
+
+test("one test's evidence never relabels another test's unexplained failure", () => {
+  const unexplained = { retriedThenPassed: false, recentOutcomes: history() };
+  for (const other of [
+    { retriedThenPassed: true, recentOutcomes: [] },
+    { retriedThenPassed: false, recentOutcomes: history("fail") },
+  ]) {
+    assert.equal(classify({ failingTests: [unexplained, other] }), "undetermined");
+    assert.equal(classify({ failingTests: [other, unexplained] }), "undetermined");
+  }
+  // Tests that disagree with each other leave the job undetermined too.
+  assert.equal(
+    classify({
+      failingTests: [
+        { retriedThenPassed: false, recentOutcomes: history("fail") },
+        { retriedThenPassed: true, recentOutcomes: [] },
+      ],
+    }),
+    "undetermined",
+  );
+  // Agreement keeps the label.
+  const repro = { retriedThenPassed: false, recentOutcomes: history("fail") };
+  assert.equal(classify({ failingTests: [repro, repro] }), "consecutive_repro");
+});
+
+test("a job the runner never started is infra", () => {
+  assert.equal(classify({ jobConclusion: "startup_failure", steps: [] }), "infra");
+});

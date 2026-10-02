@@ -138,12 +138,13 @@ export function decideQaReleaseServiceStart(
   const value = (name: string) => (env[name] ?? "").trim();
   if (service === "digest" && value("QA_RELEASE_DIGEST_ENABLED") !== "true") return "disabled";
   if (service === "mergeLane") {
-    // Policy section 8 item 6: the kill switch stops on any value and is off
-    // only when empty -- the chatStarterKillSwitchEngaged() judgement, where an
-    // unset variable reads as empty. An environment variable has no
-    // "unreadable" state in-process; that clause bites where a read can fail,
-    // such as the operator control record the app route reads.
-    if (value("QA_RELEASE_MERGE_LANE_KILL_SWITCH") !== "") return "disabled";
+    // Policy section 8 item 6: the lane runs only while the kill switch is
+    // empty, stops on any value, and stops when the switch cannot be read.
+    // An undeclared variable is the unreadable case -- a deployment that lost
+    // its kill switch must not run as if nobody had pulled it -- so the
+    // operator declares it empty to run and fills it to stop.
+    const killSwitch = env.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
+    if (killSwitch === undefined || killSwitch.trim() !== "") return "disabled";
     if (value("QA_RELEASE_MERGE_LANE_ENABLED") !== "true") return "disabled";
   }
   if (REQUIRED[service].some((name) => value(name) === "")) return "refuse";

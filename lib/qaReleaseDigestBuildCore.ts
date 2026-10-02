@@ -59,20 +59,28 @@ const countBy = <K extends string>(keys: readonly K[], values: readonly string[]
  * Sections replaced, in this order, when the document is still too large.
  * Each step empties one list and records its overflow code.
  */
-const SHRINK_ORDER: { code: NotCheckedCode; empty: (digest: QaReleaseDigest) => void }[] = [
-  { code: "hypothetical_overflow", empty: (d) => void (d.hypothetical = []) },
-  { code: "ci_overflow", empty: (d) => void (d.ci = []) },
-  { code: "gates_changed_overflow", empty: (d) => void (d.gates.changed = []) },
-  {
-    code: "issues_overflow",
-    empty: (d) => {
-      d.issues.candidates = [];
-      d.issues.blocked = [];
-      d.issues.landedButUnverified = [];
-    },
-  },
-  { code: "release_lane_overflow", empty: (d) => void (d.releaseLane = []) },
-  { code: "checks_overflow", empty: (d) => void (d.checks = []) },
+type Section = {
+  code: NotCheckedCode;
+  size: (digest: QaReleaseDigest) => number;
+  limit: number;
+  empty: (digest: QaReleaseDigest) => void;
+};
+
+/**
+ * Every capped list, in the order the size pass empties them. The three issue
+ * lists are separate sections sharing one code, so one list over its cap does
+ * not take the other two with it.
+ */
+const SECTIONS: Section[] = [
+  { code: "hypothetical_overflow", size: (d) => d.hypothetical.length, limit: LIMITS.hypothetical, empty: (d) => void (d.hypothetical = []) },
+  { code: "ci_overflow", size: (d) => d.ci.length, limit: LIMITS.ci, empty: (d) => void (d.ci = []) },
+  { code: "gates_changed_overflow", size: (d) => d.gates.changed.length, limit: LIMITS.gatesChanged, empty: (d) => void (d.gates.changed = []) },
+  { code: "applicability_unknown_overflow", size: (d) => d.gates.applicabilityUnknown.length, limit: LIMITS.applicabilityUnknown, empty: (d) => void (d.gates.applicabilityUnknown = []) },
+  { code: "issues_overflow", size: (d) => d.issues.candidates.length, limit: LIMITS.issuesCandidates, empty: (d) => void (d.issues.candidates = []) },
+  { code: "issues_overflow", size: (d) => d.issues.blocked.length, limit: LIMITS.issuesBlocked, empty: (d) => void (d.issues.blocked = []) },
+  { code: "issues_overflow", size: (d) => d.issues.landedButUnverified.length, limit: LIMITS.issuesLandedButUnverified, empty: (d) => void (d.issues.landedButUnverified = []) },
+  { code: "release_lane_overflow", size: (d) => d.releaseLane.length, limit: LIMITS.releaseLane, empty: (d) => void (d.releaseLane = []) },
+  { code: "checks_overflow", size: (d) => d.checks.length, limit: LIMITS.checks, empty: (d) => void (d.checks = []) },
 ];
 
 function addCode(digest: QaReleaseDigest, code: NotCheckedCode): void {
@@ -106,7 +114,8 @@ export function buildQaReleaseDigest(input: QaReleaseDigestBuildInput): QaReleas
     gates: {
       byVerdict: countBy(QA_RELEASE_GATE_VERDICTS, gates.map((row) => row.verdict)),
       byStatus: countBy(QA_RELEASE_GATE_STATUSES, gates.map((row) => row.status)),
-      // The service keeps no state; the app compares stored rows to find changes.
+      // The service keeps no state; the app compares stored rows to find
+      // changes, and the code below says this list is not that comparison.
       changed: [],
       applicabilityUnknown: gates.filter((row) => row.verdict === "applicability_unknown").map((row) => row.id),
     },
@@ -126,37 +135,37 @@ export function buildQaReleaseDigest(input: QaReleaseDigestBuildInput): QaReleas
 
   for (const code of input.notChecked) addCode(digest, code);
   if (issues === null) addCode(digest, "issue_backlog_unavailable");
+  addCode(digest, "gates_changed_not_compared");
+
+  // Hypothetical rows count only as a complete pair: every applicability-
+  // unknown gate under both assumptions. Anything less is not coverage.
+  const unknownIds = digest.gates.applicabilityUnknown;
+  const coveredUnder = (assumed: boolean) =>
+    input.hypotheticalReports.filter((r) => r.assumed === assumed).length === 1 &&
+    unknownIds.every((id) => hypothetical.some((row) => row.assumed === assumed && row.id === id));
+  if (unknownIds.length > 0 && !(coveredUnder(true) && coveredUnder(false))) {
+    addCode(digest, "memory_condition_unknown");
+  }
 
   // A list over its own maximum is replaced, never truncated.
-  const over: Record<NotCheckedCode, boolean> = {
-    hypothetical_overflow: digest.hypothetical.length > LIMITS.hypothetical,
-    ci_overflow: digest.ci.length > LIMITS.ci,
-    gates_changed_overflow: digest.gates.changed.length > LIMITS.gatesChanged,
-    issues_overflow:
-      digest.issues.candidates.length > LIMITS.issuesCandidates ||
-      digest.issues.blocked.length > LIMITS.issuesBlocked ||
-      digest.issues.landedButUnverified.length > LIMITS.issuesLandedButUnverified,
-    release_lane_overflow: digest.releaseLane.length > LIMITS.releaseLane,
-    checks_overflow: digest.checks.length > LIMITS.checks,
-  } as Record<NotCheckedCode, boolean>;
-  for (const step of SHRINK_ORDER) {
-    if (over[step.code]) {
-      step.empty(digest);
-      addCode(digest, step.code);
+  for (const section of SECTIONS) {
+    if (section.size(digest) > section.limit) {
+      section.empty(digest);
+      addCode(digest, section.code);
     }
   }
-  if (digest.gates.applicabilityUnknown.length > LIMITS.applicabilityUnknown) {
-    throw new RangeError("more applicability-unknown gates than the registry can hold");
-  }
 
-  // Then the whole document must fit the contract.
-  for (const step of SHRINK_ORDER) {
+  // Then the whole document must fit the contract. Only a section that still
+  // holds something is emptied, so a code always names a list that lost rows.
+  for (const section of SECTIONS) {
     if (qaReleaseDigestByteLength(digest) <= QA_RELEASE_DIGEST_MAX_BYTES) break;
-    step.empty(digest);
-    addCode(digest, step.code);
+    if (section.size(digest) === 0) continue;
+    section.empty(digest);
+    addCode(digest, section.code);
   }
   if (qaReleaseDigestByteLength(digest) > QA_RELEASE_DIGEST_MAX_BYTES) {
-    addCode(digest, "digest_too_large");
+    // Unreachable while the schema's worst case fits; never submit over the cap.
+    throw new RangeError("digest_too_large");
   }
 
   if (digest.notChecked.length > LIMITS.notChecked) {

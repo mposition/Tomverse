@@ -67,6 +67,21 @@ export const QA_RELEASE_CI_WORKFLOWS = [
   "back-merge-main-to-develop.yml",
 ] as const;
 
+/**
+ * Each workflow's job ids, as its file names them under `jobs:`. A row names
+ * the job, not only the run: e2e.yml runs matrix shards and a rollup, and
+ * back-merge-main-to-develop.yml runs back-merge and verify.
+ */
+export const QA_RELEASE_CI_JOBS = {
+  "e2e.yml": ["playwright", "regression"],
+  "nightly-visual-regression.yml": ["visual-regression"],
+  "admin-console-e2e.yml": ["admin-console-e2e"],
+  "deployed-commit-drift.yml": ["drift"],
+  "back-merge-main-to-develop.yml": ["back-merge", "verify"],
+} as const satisfies Record<(typeof QA_RELEASE_CI_WORKFLOWS)[number], readonly string[]>;
+
+const CI_JOB_IDS = [...new Set(Object.values(QA_RELEASE_CI_JOBS).flat())] as [string, ...string[]];
+
 /** GitHub's job conclusions. */
 export const QA_RELEASE_JOB_CONCLUSIONS = [
   "success",
@@ -79,6 +94,12 @@ export const QA_RELEASE_JOB_CONCLUSIONS = [
   "stale",
   "startup_failure",
 ] as const;
+
+/**
+ * The conclusions that are a failure and therefore carry a class; every other
+ * conclusion carries `label: null`, so a clean run is stored as a clean run.
+ */
+export const QA_RELEASE_FAILED_CONCLUSIONS = ["failure", "cancelled", "timed_out", "startup_failure"] as const;
 
 /** CI failure classes: digest enum values, not GitHub labels. */
 export const QA_RELEASE_CI_CLASSES = ["infra", "undetermined", "flaky_suspected", "consecutive_repro"] as const;
@@ -95,6 +116,9 @@ export const QA_RELEASE_NOT_CHECKED_CODES = [
   "issues_overflow",
   "release_lane_overflow",
   "checks_overflow",
+  "applicability_unknown_overflow",
+  // The builder had no previous snapshot, so gates.changed is not a diff.
+  "gates_changed_not_compared",
   "digest_too_large",
 ] as const;
 
@@ -108,7 +132,8 @@ export const QA_RELEASE_DIGEST_ARRAY_LIMITS = {
   checks: 12,
   ci: 24,
   releaseLane: 10,
-  notChecked: 10,
+  // Every code at once: each closed condition can occur together.
+  notChecked: QA_RELEASE_NOT_CHECKED_CODES.length,
 } as const;
 
 const count = z.number().int().min(0).max(9999);
@@ -150,7 +175,8 @@ export const qaReleaseDigestSchema = z
             condition: z.literal("memory-release-b-enabled"),
             assumed: z.boolean(),
             id: gateId,
-            verdict: z.enum(["hypothetical_if_enabled", "hypothetical_if_disabled", ...QA_RELEASE_GATE_VERDICTS]),
+            // What classifyGate produces under the assumed condition.
+            verdict: z.enum(QA_RELEASE_GATE_VERDICTS),
           })
           .strict(),
       )
@@ -173,10 +199,22 @@ export const qaReleaseDigestSchema = z
           .object({
             workflow: z.enum(QA_RELEASE_CI_WORKFLOWS),
             runId,
+            job: z.enum(CI_JOB_IDS),
+            /** The matrix shard, or null for a job without a matrix. */
+            shard: z.number().int().min(1).max(32).nullable(),
             jobConclusion: z.enum(QA_RELEASE_JOB_CONCLUSIONS),
-            label: z.enum(QA_RELEASE_CI_CLASSES),
+            label: z.enum(QA_RELEASE_CI_CLASSES).nullable(),
           })
-          .strict(),
+          .strict()
+          .superRefine((row, ctx) => {
+            if (!(QA_RELEASE_CI_JOBS[row.workflow] as readonly string[]).includes(row.job)) {
+              ctx.addIssue({ code: "custom", path: ["job"], message: "job not in workflow" });
+            }
+            const failed = (QA_RELEASE_FAILED_CONCLUSIONS as readonly string[]).includes(row.jobConclusion);
+            if (failed !== (row.label !== null)) {
+              ctx.addIssue({ code: "custom", path: ["label"], message: "label iff failed" });
+            }
+          }),
       )
       .max(QA_RELEASE_DIGEST_ARRAY_LIMITS.ci),
     releaseLane: z
@@ -185,15 +223,25 @@ export const qaReleaseDigestSchema = z
           .object({
             workflow: z.enum(["drift", "back-merge"]),
             runId,
+            job: z.enum(["drift", "back-merge", "verify"]),
             jobConclusion: z.enum(QA_RELEASE_JOB_CONCLUSIONS),
             existingNotifierStepRan: z.boolean(),
           })
           .strict(),
       )
       .max(QA_RELEASE_DIGEST_ARRAY_LIMITS.releaseLane),
-    notChecked: z.array(z.enum(QA_RELEASE_NOT_CHECKED_CODES)).max(QA_RELEASE_DIGEST_ARRAY_LIMITS.notChecked),
+    notChecked: z
+      .array(z.enum(QA_RELEASE_NOT_CHECKED_CODES))
+      .max(QA_RELEASE_DIGEST_ARRAY_LIMITS.notChecked)
+      .refine((codes) => new Set(codes).size === codes.length, "duplicate code"),
   })
-  .strict();
+  .strict()
+  .superRefine((digest, ctx) => {
+    for (const [index, row] of digest.releaseLane.entries()) {
+      const allowed = row.workflow === "drift" ? ["drift"] : ["back-merge", "verify"];
+      if (!allowed.includes(row.job)) ctx.addIssue({ code: "custom", path: ["releaseLane", index, "job"], message: "job not in workflow" });
+    }
+  });
 
 export type QaReleaseDigest = z.infer<typeof qaReleaseDigestSchema>;
 

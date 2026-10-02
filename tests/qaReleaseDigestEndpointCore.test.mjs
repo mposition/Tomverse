@@ -37,6 +37,13 @@ test("the environment comes from Railway's name only", () => {
   ]) {
     assert.throws(() => qaReleaseDigestEndpoint(env), /qa_release_digest_environment_unknown/, JSON.stringify(env));
   }
+  // When the other signals disagree with Railway's name, Railway's name wins.
+  for (const [name, other] of [["staging", "production"], ["production", "staging"]]) {
+    assert.equal(
+      qaReleaseDigestEndpoint({ RAILWAY_ENVIRONMENT_NAME: name, APP_ENV: other, NODE_ENV: other }),
+      EXPECTED[name],
+    );
+  }
 });
 
 test("only the exact fixed URLs pass the final check", () => {

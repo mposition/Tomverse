@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   QA_RELEASE_CHECK_NAMES,
   QA_RELEASE_CI_CLASSES,
+  QA_RELEASE_CI_JOBS,
   QA_RELEASE_CI_WORKFLOWS,
   QA_RELEASE_DIGEST_ARRAY_LIMITS,
   QA_RELEASE_DIGEST_MAX_BYTES,
@@ -30,7 +31,7 @@ const counts = (keys) => Object.fromEntries(keys.map((key) => [key, 9999]));
 function worstCaseDigest() {
   const L = QA_RELEASE_DIGEST_ARRAY_LIMITS;
   const longestStatus = longest(QA_RELEASE_GATE_STATUSES);
-  const longestVerdict = longest(["hypothetical_if_enabled", "hypothetical_if_disabled", ...QA_RELEASE_GATE_VERDICTS]);
+  const longestVerdict = longest(QA_RELEASE_GATE_VERDICTS);
   const longGateId = "ABCDEFGHIJKLM-99"; // 16 characters, the schema's maximum
   return {
     schemaVersion: 1,
@@ -59,18 +60,21 @@ function worstCaseDigest() {
     },
     checks: repeat(L.checks, () => ({ name: longest(QA_RELEASE_CHECK_NAMES), result: "pass" })),
     ci: repeat(L.ci, () => ({
-      workflow: longest(QA_RELEASE_CI_WORKFLOWS),
+      workflow: "nightly-visual-regression.yml",
       runId: "9".repeat(16),
-      jobConclusion: longest(QA_RELEASE_JOB_CONCLUSIONS),
+      job: "visual-regression",
+      shard: 32,
+      jobConclusion: "startup_failure",
       label: longest(QA_RELEASE_CI_CLASSES),
     })),
     releaseLane: repeat(L.releaseLane, () => ({
       workflow: "back-merge",
       runId: "9".repeat(16),
+      job: "back-merge",
       jobConclusion: longest(QA_RELEASE_JOB_CONCLUSIONS),
       existingNotifierStepRan: false,
     })),
-    notChecked: repeat(L.notChecked, () => longest(QA_RELEASE_NOT_CHECKED_CODES)),
+    notChecked: [...QA_RELEASE_NOT_CHECKED_CODES],
   };
 }
 
@@ -84,14 +88,22 @@ test("the enums match their sources", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   for (const name of QA_RELEASE_CHECK_NAMES) assert.ok(pkg.scripts[name], `npm script ${name}`);
   for (const workflow of QA_RELEASE_CI_WORKFLOWS) {
-    assert.ok(readFileSync(new URL(`../.github/workflows/${workflow}`, import.meta.url), "utf8").length > 0, workflow);
+    const text = readFileSync(new URL(`../.github/workflows/${workflow}`, import.meta.url), "utf8");
+    const jobsBlock = text.split(/^jobs:s*$/m)[1] ?? "";
+    const jobIds = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):s*$/gm)].map((m) => m[1]);
+    assert.deepEqual([...QA_RELEASE_CI_JOBS[workflow]].sort(), jobIds.sort(), workflow);
   }
+  // The worst case uses the longest workflow-job pair and conclusion; keep it honest.
+  const pairs = Object.entries(QA_RELEASE_CI_JOBS).flatMap(([w, jobs]) => jobs.map((j) => w.length + j.length));
+  assert.equal(Math.max(...pairs), "nightly-visual-regression.yml".length + "visual-regression".length);
+  assert.equal(longest(QA_RELEASE_JOB_CONCLUSIONS).length, "startup_failure".length);
 });
 
-test("the worst-case document passes the schema and fits the 16 KiB contract", () => {
+test("the worst-case document passes the schema and fits the 16 KiB contract", (t) => {
   const digest = worstCaseDigest();
   assert.equal(qaReleaseDigestSchema.safeParse(digest).success, true);
   const bytes = qaReleaseDigestByteLength(digest);
+  t.diagnostic(`worst case ${bytes} bytes`);
   assert.ok(bytes <= QA_RELEASE_DIGEST_MAX_BYTES, `worst case is ${bytes} bytes`);
 });
 
@@ -144,4 +156,40 @@ test("counts and numbers stay inside their bounds", () => {
   const missingKey = worstCaseDigest();
   delete missingKey.issues.byVerdict.blocked;
   assert.equal(qaReleaseDigestSchema.safeParse(missingKey).success, false);
+});
+
+test("a CI row names its job, and carries a class exactly when the job failed", () => {
+  const row = (overrides) => {
+    const digest = worstCaseDigest();
+    digest.ci = [{ workflow: "e2e.yml", runId: "1", job: "playwright", shard: 3, jobConclusion: "failure", label: "infra", ...overrides }];
+    return qaReleaseDigestSchema.safeParse(digest).success;
+  };
+  assert.equal(row({}), true);
+  assert.equal(row({ jobConclusion: "success", label: null }), true);
+  assert.equal(row({ job: "regression", shard: null }), true);
+  assert.equal(row({ jobConclusion: "success", label: "undetermined" }), false);
+  assert.equal(row({ label: null }), false);
+  assert.equal(row({ job: "verify" }), false);
+  assert.equal(row({ shard: 0 }), false);
+});
+
+test("a release-lane row names a job of its own workflow", () => {
+  const digest = worstCaseDigest();
+  digest.releaseLane = [{ workflow: "drift", runId: "1", job: "verify", jobConclusion: "failure", existingNotifierStepRan: false }];
+  assert.equal(qaReleaseDigestSchema.safeParse(digest).success, false);
+  digest.releaseLane[0].job = "drift";
+  assert.equal(qaReleaseDigestSchema.safeParse(digest).success, true);
+});
+
+test("every not-checked code can be carried at once, each at most once", () => {
+  const digest = worstCaseDigest();
+  assert.equal(digest.notChecked.length, QA_RELEASE_NOT_CHECKED_CODES.length);
+  digest.notChecked = ["ci_overflow", "ci_overflow"];
+  assert.equal(qaReleaseDigestSchema.safeParse(digest).success, false);
+});
+
+test("a hypothetical row carries a gate verdict, not a label of its own", () => {
+  const digest = worstCaseDigest();
+  digest.hypothetical[0].verdict = "hypothetical_if_enabled";
+  assert.equal(qaReleaseDigestSchema.safeParse(digest).success, false);
 });

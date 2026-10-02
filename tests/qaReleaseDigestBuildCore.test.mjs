@@ -41,8 +41,8 @@ const baseInput = () => ({
     ],
   },
   checks: [{ name: "check:release-records", result: "pass" }],
-  ci: [{ workflow: "e2e.yml", runId: "123", jobConclusion: "failure", label: "undetermined" }],
-  releaseLane: [{ workflow: "drift", runId: "456", jobConclusion: "success", existingNotifierStepRan: false }],
+  ci: [{ workflow: "e2e.yml", runId: "123", job: "playwright", shard: 2, jobConclusion: "failure", label: "undetermined" }],
+  releaseLane: [{ workflow: "drift", runId: "456", job: "drift", jobConclusion: "success", existingNotifierStepRan: false }],
   notChecked: [],
 });
 
@@ -81,7 +81,7 @@ test("hypothetical results cover only the gates whose applicability is unknown",
 test("an unavailable backlog says so instead of reading as an empty one", () => {
   const digest = buildQaReleaseDigest({ ...baseInput(), issueReport: null });
   assert.equal(digest.issues.status, "unavailable");
-  assert.deepEqual(digest.notChecked, ["issue_backlog_unavailable"]);
+  assert.deepEqual(digest.notChecked, ["issue_backlog_unavailable", "gates_changed_not_compared"]);
   assert.deepEqual(digest.issues.candidates, []);
 });
 
@@ -90,6 +90,8 @@ test("a list over its maximum is replaced by its overflow code, never truncated"
   input.ci = Array.from({ length: 25 }, (_, i) => ({
     workflow: "e2e.yml",
     runId: String(i + 1),
+    job: "playwright",
+    shard: 1,
     jobConclusion: "failure",
     label: "infra",
   }));
@@ -97,7 +99,7 @@ test("a list over its maximum is replaced by its overflow code, never truncated"
   const digest = buildQaReleaseDigest(input);
   assert.deepEqual(digest.ci, []);
   assert.deepEqual(digest.issues.candidates, []);
-  assert.deepEqual(digest.notChecked, ["ci_overflow", "issues_overflow"]);
+  assert.deepEqual(digest.notChecked, ["gates_changed_not_compared", "ci_overflow", "issues_overflow"]);
   // Counts survive: the owner still sees how many there were.
   assert.equal(digest.issues.byVerdict.open_work, 41);
 });
@@ -107,7 +109,7 @@ test("caller codes are kept once", () => {
     ...baseInput(),
     notChecked: ["github_read_unavailable", "github_read_unavailable"],
   });
-  assert.deepEqual(digest.notChecked, ["github_read_unavailable"]);
+  assert.deepEqual(digest.notChecked, ["github_read_unavailable", "gates_changed_not_compared"]);
 });
 
 test("an unknown verdict or status is refused rather than dropped", () => {
@@ -122,8 +124,10 @@ test("an unknown verdict or status is refused rather than dropped", () => {
 test("every document it returns fits the 16 KiB contract", () => {
   const input = baseInput();
   input.ci = Array.from({ length: 24 }, (_, i) => ({
-    workflow: "back-merge-main-to-develop.yml",
+    workflow: "nightly-visual-regression.yml",
     runId: String(1e15 + i),
+    job: "visual-regression",
+    shard: 32,
     jobConclusion: "startup_failure",
     label: "consecutive_repro",
   }));
@@ -136,4 +140,44 @@ test("every document it returns fits the 16 KiB contract", () => {
   assert.ok(qaReleaseDigestByteLength(digest) <= QA_RELEASE_DIGEST_MAX_BYTES);
   assert.equal(digest.ci.length, 24);
   assert.equal(digest.issues.candidates.length, 40);
+});
+
+test("one issue list over its cap does not take the lists still inside theirs", () => {
+  const input = baseInput();
+  input.issueReport.classified = [
+    ...Array.from({ length: 41 }, (_, i) => ({ number: i + 1, verdict: "open_work" })),
+    { number: 500, verdict: "blocked" },
+    { number: 600, verdict: "landed_but_unverified" },
+  ];
+  const digest = buildQaReleaseDigest(input);
+  assert.deepEqual(digest.issues.candidates, []);
+  assert.deepEqual(digest.issues.blocked, [500]);
+  assert.deepEqual(digest.issues.landedButUnverified, [600]);
+  assert.ok(digest.notChecked.includes("issues_overflow"));
+});
+
+test("a missing or one-sided hypothetical run is not read as coverage", () => {
+  assert.equal(buildQaReleaseDigest(baseInput()).notChecked.includes("memory_condition_unknown"), false);
+  for (const reports of [[], [baseInput().hypotheticalReports[0]], [baseInput().hypotheticalReports[1]]]) {
+    const digest = buildQaReleaseDigest({ ...baseInput(), hypotheticalReports: reports });
+    assert.ok(digest.notChecked.includes("memory_condition_unknown"), String(reports.length));
+  }
+  // No applicability-unknown gate: nothing to cover.
+  const input = baseInput();
+  input.gateReport.classified = input.gateReport.classified.filter((row) => row.verdict !== "applicability_unknown");
+  assert.equal(buildQaReleaseDigest({ ...input, hypotheticalReports: [] }).notChecked.includes("memory_condition_unknown"), false);
+});
+
+test("the changed list is always marked as not a comparison", () => {
+  assert.ok(buildQaReleaseDigest(baseInput()).notChecked.includes("gates_changed_not_compared"));
+});
+
+test("more applicability-unknown gates than the cap become an overflow code", () => {
+  const input = baseInput();
+  input.gateReport.classified = Array.from({ length: 41 }, (_, i) => gate(`MEMORY-${String(i).padStart(2, "0")}`, "pending", "applicability_unknown"));
+  input.hypotheticalReports = [];
+  const digest = buildQaReleaseDigest(input);
+  assert.deepEqual(digest.gates.applicabilityUnknown, []);
+  assert.equal(digest.gates.byVerdict.applicability_unknown, 41);
+  assert.ok(digest.notChecked.includes("applicability_unknown_overflow"));
 });

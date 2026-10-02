@@ -43,8 +43,26 @@ export type QaReleaseCiClassifyInput = {
   failingTests: readonly QaReleaseFailingTest[] | null;
 };
 
+/** Job conclusions GitHub reports when the runner, not the product, ended the job. */
+const INFRA_CONCLUSIONS = new Set(["cancelled", "timed_out", "startup_failure"]);
+
+/**
+ * One failing test's class. A passing retry is checked first: a test that
+ * failed last run but passed on retry now is flaky evidence, not a
+ * reproduction.
+ */
+function classifyTest(test: QaReleaseFailingTest): QaReleaseCiClass {
+  if (test.retriedThenPassed) return "flaky_suspected";
+  if (test.recentOutcomes.length < QA_RELEASE_CI_HISTORY_RUNS) return "undetermined";
+  const window = test.recentOutcomes.slice(0, QA_RELEASE_CI_HISTORY_RUNS);
+  // Failed this run (it is in the failing list) and the run before it.
+  if (window[0] === "fail") return "consecutive_repro";
+  if (window.includes("pass") && window.includes("fail")) return "flaky_suspected";
+  return "undetermined";
+}
+
 export function classifyQaReleaseCiFailure(input: QaReleaseCiClassifyInput): QaReleaseCiClass {
-  if (input.jobConclusion === "cancelled" || input.jobConclusion === "timed_out") return "infra";
+  if (INFRA_CONCLUSIONS.has(input.jobConclusion)) return "infra";
 
   const firstFailed = input.steps.find((step) => step.conclusion === "failure");
   if (firstFailed && NON_TEST_STEP.test(firstFailed.name.trim())) return "infra";
@@ -52,23 +70,10 @@ export function classifyQaReleaseCiFailure(input: QaReleaseCiClassifyInput): QaR
   const tests = input.failingTests;
   if (tests === null || tests.length === 0) return "undetermined";
 
-  const enoughHistory = (test: QaReleaseFailingTest) => test.recentOutcomes.length >= QA_RELEASE_CI_HISTORY_RUNS;
-
-  // Failed this run and the run before it.
-  if (tests.some((test) => enoughHistory(test) && test.recentOutcomes[0] === "fail")) {
-    return "consecutive_repro";
-  }
-  // Passed on retry now, or both passed and failed within the window.
-  if (
-    tests.some(
-      (test) =>
-        test.retriedThenPassed ||
-        (enoughHistory(test) &&
-          test.recentOutcomes.slice(0, QA_RELEASE_CI_HISTORY_RUNS).includes("pass") &&
-          test.recentOutcomes.slice(0, QA_RELEASE_CI_HISTORY_RUNS).includes("fail")),
-    )
-  ) {
-    return "flaky_suspected";
-  }
-  return "undetermined";
+  // One label describes the whole job, so it is given only when every failing
+  // test has the same evidence. One test without an explanation, or tests
+  // that disagree, leave the job undetermined -- another test's retry must
+  // never relabel an unexplained failure.
+  const classes = new Set(tests.map(classifyTest));
+  return classes.size === 1 ? [...classes][0] : "undetermined";
 }

@@ -25,6 +25,7 @@ const laneEnv = (overrides = {}) => ({
   QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY: "k",
   QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN: "r",
   QA_RELEASE_MERGE_LANE_ENABLED: "true",
+  QA_RELEASE_MERGE_LANE_KILL_SWITCH: "",
   QA_RELEASE_CONTROL_REVISION: "3",
   ...overrides,
 });
@@ -86,13 +87,16 @@ test("Railway variables are admitted by exact name only, never by prefix", () =>
   assert.deepEqual(checkQaReleaseServiceEnv("digest", ["RAILWAY_GIT_COMMIT_SHA", "RAILWAY_SERVICE_ID", "PORT"]), { ok: true });
 });
 
-test("an unset or whitespace kill switch reads as empty, as policy section 8 item 6 defines it", () => {
+test("the merge lane runs only on a declared, empty kill switch; unset is unreadable and stops it", () => {
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv()), "run");
   const unset = laneEnv();
   delete unset.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
-  assert.equal(decideQaReleaseServiceStart("mergeLane", unset), "run");
-  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: undefined })), "run");
-  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: "  " })), "run");
-  // The other two inputs are not optional: an unset enable flag stops the lane.
+  assert.equal(decideQaReleaseServiceStart("mergeLane", unset), "disabled");
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: undefined })), "disabled");
+  for (const value of ["1", "true", "false", "off", "0", " x "]) {
+    assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: value })), "disabled", value);
+  }
+  // The enable flag is just as required: unset stops the lane.
   const noFlag = laneEnv();
   delete noFlag.QA_RELEASE_MERGE_LANE_ENABLED;
   assert.equal(decideQaReleaseServiceStart("mergeLane", noFlag), "disabled");
