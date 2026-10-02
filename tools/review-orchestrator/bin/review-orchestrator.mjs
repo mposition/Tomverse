@@ -7,9 +7,11 @@
  *   review-orchestrator daemon                 the scheduling loop (systemd)
  *   review-orchestrator status [jobId]         local inspection
  *
- * Exit codes: 0 accept, 1 reject, 2 unknown, 3 pending, 64 usage, 65 error.
+ * Exit codes for submit and wait: 0 accept, 1 reject, 2 unknown, 3 pending.
+ * report and the queue overview exit 0 on success. 64 usage, 65 error.
  */
-import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";
@@ -17,6 +19,8 @@ import { computeLoad } from "../lib/assign.mjs";
 import { loadConfig } from "../lib/config.mjs";
 import { Orchestrator, UsageError, submitJob } from "../lib/service.mjs";
 import { Store, isJobId, summarise } from "../lib/store.mjs";
+import { release, tryAcquire } from "../lib/fsutil.mjs";
+import { Transform } from "node:stream";
 
 const EXIT = { accept: 0, reject: 1, unknown: 2, pending: 3, usage: 64, error: 65 };
 const COMMANDS = new Set(["submit", "wait", "status", "report"]);
@@ -52,7 +56,21 @@ async function readStdinToFile(config) {
   const dir = join(config.stateDir, "incoming");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${randomBytes(8).toString("hex")}.bundle`);
-  await pipeline(process.stdin, createWriteStream(path));
+  // Count while writing: a forced-command key must not be able to fill the disk.
+  let size = 0;
+  const cap = new Transform({
+    transform(chunk, _encoding, callback) {
+      size += chunk.length;
+      if (size > config.maxBundleBytes) callback(new UsageError("bundle_too_large"));
+      else callback(null, chunk);
+    },
+  });
+  try {
+    await pipeline(process.stdin, cap, createWriteStream(path));
+  } catch (error) {
+    rmSync(path, { force: true });
+    throw error;
+  }
   return path;
 }
 
@@ -113,25 +131,17 @@ async function handle(config, request) {
   return EXIT[summary.status];
 }
 
+/** Exclusive: a second daemon on the same state directory refuses to start. */
 function acquireDaemonLock(config) {
-  const path = join(config.stateDir, "daemon.pid");
   mkdirSync(config.stateDir, { recursive: true });
-  if (existsSync(path)) {
-    const pid = Number(readFileSync(path, "utf8"));
-    try {
-      if (pid > 0) {
-        process.kill(pid, 0);
-        throw new Error(`daemon_already_running: pid ${pid}`);
-      }
-    } catch (error) {
-      if (error.code !== "ESRCH") throw error;
-    }
-  }
-  writeFileSync(path, String(process.pid));
+  const path = join(config.stateDir, "daemon.lock");
+  const token = tryAcquire(path);
+  if (token === null) throw new Error("daemon_already_running");
+  return () => release(path, token);
 }
 
 async function daemon(config) {
-  acquireDaemonLock(config);
+  const releaseLock = acquireDaemonLock(config);
   const log = (line) => process.stdout.write(`${new Date().toISOString()} ${line}\n`);
   const orchestrator = new Orchestrator(config, { log });
   const recovered = orchestrator.recoverOrphans();
@@ -155,7 +165,8 @@ async function daemon(config) {
   // daemon. Kill them; the next start closes their slots as unknown.
   log(`stopping with ${orchestrator.inflight.size} review(s) in flight; they will be closed as unknown`);
   orchestrator.killAll();
-  rmSync(join(config.stateDir, "daemon.pid"), { force: true });
+  await Promise.race([orchestrator.idle(), sleep(10_000)]);
+  releaseLock();
   process.exit(0);
 }
 
@@ -169,7 +180,14 @@ async function main(argv) {
   throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon or status");
 }
 
-const isEntry = process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop());
+// Compare real paths: a symlinked launcher must still run main, not exit 0 silently.
+const isEntry = (() => {
+  try {
+    return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
 if (isEntry) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code ?? 0),

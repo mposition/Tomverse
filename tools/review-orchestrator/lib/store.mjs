@@ -82,6 +82,10 @@ export class Store {
       .filter(Boolean);
   }
 
+  readSlot(jobId, index) {
+    return readJson(join(this.jobDir(jobId), "slots", `${index}.json`));
+  }
+
   writeSlot(jobId, slot) {
     writeJsonAtomic(join(this.jobDir(jobId), "slots", `${slot.index}.json`), slot);
   }
