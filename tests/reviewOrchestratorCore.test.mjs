@@ -14,7 +14,7 @@ import { encodeRpc, repoNameFromRemote } from "../tools/review-orchestrator/clie
 import { reviewerEnv } from "../tools/review-orchestrator/lib/service.mjs";
 import { isInstructionPath } from "../tools/review-orchestrator/lib/git.mjs";
 import { release, tryAcquire } from "../tools/review-orchestrator/lib/fsutil.mjs";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -189,6 +189,9 @@ test("instruction paths cover the files reviewer CLIs load on their own", () => 
   for (const p of ["AGENTS.md", "apps/x/AGENTS.md", "CLAUDE.md", ".claude/agents/r.md", ".codex/agents/a.toml", ".cursor/rules/x.mdc", ".cursorrules", ".github/copilot-instructions.md"]) {
     assert.equal(isInstructionPath(p), true, p);
   }
+  // The directory itself counts: it may be replaced by a symlink.
+  assert.equal(isInstructionPath(".claude"), true);
+  assert.equal(isInstructionPath("sub/.Cursor"), true);
   for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt"]) {
     assert.equal(isInstructionPath(p), false, p);
   }
@@ -204,10 +207,20 @@ test("a lock is taken over only from a dead owner, and released only by its owne
     release(path, "not-mine");
     assert.equal(tryAcquire(path), null);
     release(path, token);
-    writeFileSync(path, "999999999 deadbeefdeadbeef\n"); // a pid that cannot exist
+    writeFileSync(path, "999999999 - deadbeefdeadbeef\n"); // a pid that cannot exist
     const taken = tryAcquire(path);
     assert.ok(taken);
     assert.match(readFileSync(path, "utf8"), new RegExp(taken));
+    // The lock file is never visible without its owner record.
+    assert.match(readFileSync(path, "utf8"), /^\d+ \S+ [0-9a-f]{16}\n$/);
+    // No private owner or stale files are left behind.
+    assert.deepEqual(readdirSync(dir), ["x.lock"]);
+    release(path, taken);
+    // A live pid whose recorded start time is not its own is a recycled pid.
+    if (process.platform === "linux") {
+      writeFileSync(path, `${process.pid} 1 cafecafecafecafe\n`);
+      assert.ok(tryAcquire(path));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export class GitError extends Error {
@@ -70,13 +70,13 @@ export function importBundle({ mirror, bundlePath, bundleRef, jobId, base, head 
 }
 
 export function changedFiles(mirror, base, head) {
-  return git(["diff", "--name-only", "-z", base, head], { cwd: mirror })
+  return git(["diff", "--no-renames", "--name-only", "-z", base, head], { cwd: mirror })
     .stdout.split("\0")
     .filter(Boolean);
 }
 
 export function diffText(mirror, base, head) {
-  return git(["diff", "--no-color", "--no-ext-diff", base, head], { cwd: mirror }).stdout;
+  return git(["diff", "--no-renames", "--no-color", "--no-ext-diff", base, head], { cwd: mirror }).stdout;
 }
 
 export function addWorktree(mirror, dir, head) {
@@ -85,9 +85,14 @@ export function addWorktree(mirror, dir, head) {
 
 /**
  * Files the reviewer CLIs load on their own as instructions. The author must
- * not be able to instruct the reviewer, so these are reset to the base
- * version in the reviewer's checkout; their changes reach the reviewer only as
- * quoted diff.
+ * not be able to instruct the reviewer, so the reviewer's checkout carries the
+ * base versions of these and nothing else; their edits reach the reviewer only
+ * as quoted diff.
+ *
+ * The checkout is rebuilt from the two trees, not from the diff: a diff hides
+ * rename sources, and an instruction directory replaced by a symlink is one
+ * path that names no file inside it. Every write goes to a literal path from
+ * `ls-tree`, never through a pathspec.
  */
 const INSTRUCTION_NAMES = new Set([
   "agents.md", "agents.override.md", "claude.md", "claude.local.md", "gemini.md",
@@ -98,18 +103,73 @@ const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".d
 export function isInstructionPath(path) {
   const segments = path.split("/");
   if (INSTRUCTION_NAMES.has(segments[segments.length - 1].toLowerCase())) return true;
-  return segments.slice(0, -1).some((segment) => INSTRUCTION_DIRS.has(segment.toLowerCase()));
+  // Any segment, the last included: `.claude` itself may be a symlink.
+  return segments.some((segment) => INSTRUCTION_DIRS.has(segment.toLowerCase()));
 }
 
-export function restoreInstructionFiles(worktree, base, files) {
-  const restored = [];
-  for (const file of files.filter(isInstructionPath)) {
-    const atBase = git(["cat-file", "-e", `${base}:${file}`], { cwd: worktree, allowFailure: true }).ok;
-    if (atBase) git(["checkout", base, "--", file], { cwd: worktree });
-    else rmSync(join(worktree, file), { force: true });
-    restored.push(file);
+/** The shortest prefix of `path` that is an instruction directory, or the path itself. */
+function instructionRoot(path) {
+  const segments = path.split("/");
+  const at = segments.findIndex((segment) => INSTRUCTION_DIRS.has(segment.toLowerCase()));
+  return at === -1 ? path : segments.slice(0, at + 1).join("/");
+}
+
+function lsTree(cwd, commit) {
+  const out = git(["ls-tree", "-r", "-z", "--full-tree", commit], { cwd }).stdout;
+  return out
+    .split("\0")
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.indexOf("\t");
+      const [mode, type, sha] = line.slice(0, tab).split(" ");
+      return { mode, type, sha, path: line.slice(tab + 1) };
+    });
+}
+
+function blob(cwd, sha) {
+  const result = spawnSync("git", ["cat-file", "blob", sha], { cwd, maxBuffer: 64 * 1024 * 1024 });
+  if (result.status !== 0) throw new GitError("git_failed", "cat-file");
+  return result.stdout;
+}
+
+/** Make every directory on the way to `rel` a real directory inside `root`. */
+function realParents(root, rel) {
+  const segments = rel.split("/").slice(0, -1);
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    let stat = null;
+    try {
+      stat = lstatSync(current);
+    } catch {
+      // missing
+    }
+    if (stat && !stat.isDirectory()) rmSync(current, { force: true });
+    if (!stat || !stat.isDirectory()) mkdirSync(current);
   }
-  return restored;
+}
+
+export function isolateInstructionFiles(worktree, base, head) {
+  const roots = new Set(lsTree(worktree, head).filter((e) => isInstructionPath(e.path)).map((e) => instructionRoot(e.path)));
+  for (const root of roots) rmSync(join(worktree, root), { recursive: true, force: true });
+  for (const entry of lsTree(worktree, base)) {
+    if (!isInstructionPath(entry.path)) continue;
+    // Regular files only: a base symlink or submodule is not recreated.
+    if (entry.type !== "blob" || (entry.mode !== "100644" && entry.mode !== "100755")) continue;
+    realParents(worktree, entry.path);
+    writeFileSync(join(worktree, entry.path), blob(worktree, entry.sha));
+  }
+}
+
+/** The diff of instruction paths only, so it can be shown in full and first. */
+export function instructionDiff(mirror, base, head, files) {
+  const paths = files.filter(isInstructionPath);
+  if (paths.length === 0) return { paths, text: "" };
+  const text = git(
+    ["--literal-pathspecs", "diff", "--no-renames", "--no-color", "--no-ext-diff", base, head, "--", ...paths],
+    { cwd: mirror },
+  ).stdout;
+  return { paths, text };
 }
 
 export function removeWorktree(mirror, dir) {
