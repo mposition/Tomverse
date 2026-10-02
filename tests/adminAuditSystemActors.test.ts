@@ -5,6 +5,9 @@ import test from "node:test";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
@@ -81,7 +84,7 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
-  // Only the initial source-plan writer uses the v4 intake identity. The
+  // Only explicitly scoped v4 actions use the intake identity. The
   // remaining candidate actors have no audit-writer authority.
   assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
     "amux-intake-supervisor",
@@ -109,6 +112,21 @@ test("the system actor list is closed and changes only by review", () => {
     metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       actorScope: AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE },
   })), "system");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE },
+  })), "unknown");
   assert.equal(auditRowActorKind(row({
     action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
     targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
