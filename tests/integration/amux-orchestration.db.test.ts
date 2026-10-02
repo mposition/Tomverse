@@ -5117,6 +5117,57 @@ test("the admin board requires matching claim evidence before showing assigned T
   }
 });
 
+test("the admin board distinguishes review obligation from open escalation", async () => {
+  const { listAmuxCardsForAdmin } = await import("@/lib/amux/adminCardList");
+  const taskId = await createTodo("amux-admin-escalation");
+  const escalationId = randomUUID();
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { status: "review", requiresHumanReview: true, reviewSpecialty: "code-review" },
+    });
+    const review = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(review);
+    assert.equal(review.requiresHumanReview, true);
+    assert.equal(review.hasOpenEscalation, false);
+
+    await prisma.amuxHumanEscalation.create({
+      data: { id: escalationId, taskId, reason: "synthetic_review_needed", openedBy: "synthetic-test" },
+    });
+    const escalated = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(escalated);
+    assert.equal(escalated.hasOpenEscalation, true);
+
+    await prisma.amuxHumanEscalation.update({
+      where: { id: escalationId },
+      data: {
+        status: "acknowledged",
+        acknowledgedAt: new Date(),
+        acknowledgedById: "synthetic-test",
+      },
+    });
+    const acknowledged = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(acknowledged);
+    assert.equal(acknowledged.hasOpenEscalation, true);
+
+    await prisma.amuxHumanEscalation.update({
+      where: { id: escalationId },
+      data: {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedById: "synthetic-test",
+        resolution: "synthetic_resolved",
+        resolutionOutcome: "approve",
+      },
+    });
+    const resolved = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(resolved);
+    assert.equal(resolved.hasOpenEscalation, false);
+  } finally {
+    await prisma.amuxWorkItem.update({ where: { id: taskId }, data: { status: "done" } });
+  }
+});
+
 const runPromotedCardToSettle = async (
   label: string,
   settle: (input: {

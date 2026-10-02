@@ -4,8 +4,8 @@ import test from "node:test";
 import { AMUX_ADMIN_KANBAN_LANES, amuxLegacyTodoClaimVerified, projectAmuxAdminKanban,
   amuxAdminKanbanLane } from "../lib/amux/adminKanbanCore.ts";
 
-const card = (status, owner = null, requiresHumanReview = false, claimVerified = false) => ({
-  status, owner, requiresHumanReview, claimVerified,
+const card = (status, owner = null, hasOpenEscalation = false, claimVerified = false) => ({
+  status, owner, hasOpenEscalation, claimVerified,
 });
 
 test("AMUX board separates Tomverse backlog from unassigned and assigned todo", () => {
@@ -41,4 +41,10 @@ test("AMUX board keeps attention and unexpected active states visible once", () 
   assert.equal(projected.lanes.owner_attention.length, 3);
   assert.equal(projected.terminalCount, 2);
   assert.equal(Object.values(projected.lanes).flat().length + projected.terminalCount, rows.length);
+});
+
+test("a review requirement alone stays In Review; an open escalation needs attention", () => {
+  assert.equal(amuxAdminKanbanLane({ ...card("review"), requiresHumanReview: true }), "in_review");
+  assert.equal(amuxAdminKanbanLane(card("review", null, true)), "owner_attention");
+  assert.equal(amuxAdminKanbanLane(card("doing", "worker-1", true)), "owner_attention");
 });

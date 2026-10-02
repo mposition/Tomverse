@@ -79,6 +79,8 @@ export function AmuxCardListPanel({
                       <p>{messages.columnOwner}: {row.owner ?? messages.none}</p>
                       {row.status === "todo" && row.owner !== null && !row.claimVerified
                         ? <p className="text-amber-700 dark:text-amber-300">{messages.assignmentUnverified}</p> : null}
+                      {row.hasOpenEscalation
+                        ? <p className="text-amber-700 dark:text-amber-300">{messages.escalationOpen}</p> : null}
                     </article>
                   ))}
                 </div>
@@ -120,6 +122,7 @@ export function AmuxCardListPanel({
                   <td className={cellClass}>{row.briefPresent ? messages.briefPresent : messages.briefAbsent}</td>
                   <td className={cellClass}>
                     {row.requiresHumanReview ? messages.reviewRequired : messages.none}
+                    {row.hasOpenEscalation ? ` · ${messages.escalationOpen}` : ""}
                     {row.reviewPrNumber !== null ? ` · ${messages.pr(row.reviewPrNumber)}` : ""}
                   </td>
                   <td className={cellClass}>

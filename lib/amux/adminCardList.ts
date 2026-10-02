@@ -31,6 +31,7 @@ export type AmuxAdminCardRow = {
   revision: number;
   briefPresent: boolean;
   requiresHumanReview: boolean;
+  hasOpenEscalation: boolean;
   reviewPrNumber: number | null;
   attemptCount: number;
   lastAttemptOutcome: string | null;
@@ -80,8 +81,8 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
   const ids = cards.map((card) => card.id);
   // Set queries for the whole page, not one per card: a nested `take` on
   // a to-many relation is loaded per parent row.
-  const [counts, latest, routes] = ids.length === 0
-    ? [[], [], []]
+  const [counts, latest, routes, escalations] = ids.length === 0
+    ? [[], [], [], []]
     : await Promise.all([
         prisma.amuxExecutionAttempt.groupBy({
           by: ["taskId"],
@@ -101,10 +102,16 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
           WHERE "taskId" = ANY(${ids}::text[])
           ORDER BY "taskId", "createdAt" DESC, "id" DESC
         `,
+        prisma.amuxHumanEscalation.groupBy({
+          by: ["taskId"],
+          where: { taskId: { in: ids }, status: { in: ["open", "acknowledged"] } },
+          _count: { _all: true },
+        }),
       ]);
   const countByTask = new Map(counts.map((row) => [row.taskId, row._count._all]));
   const latestByTask = new Map(latest.map((row) => [row.taskId, row]));
   const routeByTask = new Map(routes.map((row) => [row.taskId, row]));
+  const escalatedTaskIds = new Set(escalations.map((row) => row.taskId));
   const rank = (status: string) => {
     const index = STATUS_ORDER.indexOf(status);
     return index === -1 ? STATUS_ORDER.length : index;
@@ -121,6 +128,7 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
       revision: card.revision,
       briefPresent: card.executionBriefDigest !== null,
       requiresHumanReview: card.requiresHumanReview,
+      hasOpenEscalation: escalatedTaskIds.has(card.id),
       reviewPrNumber: card.reviewPrNumber,
       attemptCount: countByTask.get(card.id) ?? 0,
       lastAttemptOutcome: latestByTask.get(card.id)?.outcome ?? null,
