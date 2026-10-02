@@ -24,6 +24,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     submitBoundary: "Saving records the idea in Admin only. It does not authorize external transfer, run analysis or register cards.",
     submitUnavailable: "Idea saving is not enabled. Input checks remain read-only.",
     submitted: (ideaId: string) => `Idea saved (${ideaId}). Analysis and external transfer have not started.`,
+    startAnotherIdea: "Start another idea",
     outcomeUnknown: (requestId: string) =>
       `Save outcome is unknown. Request ID: ${requestId}. Do not submit this idea again; ask an operator to verify the record.`,
     checkSubmissionStatus: "Check this request again",
@@ -82,6 +83,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     submitBoundary: "저장은 Admin에 아이디어만 기록합니다. 외부 전송·분석 실행·카드 등록을 승인하지 않습니다.",
     submitUnavailable: "아이디어 저장은 아직 열리지 않았습니다. 입력 검사는 읽기 전용으로 사용할 수 있습니다.",
     submitted: (ideaId: string) => `아이디어가 저장되었습니다 (${ideaId}). 분석과 외부 전송은 시작되지 않았습니다.`,
+    startAnotherIdea: "다른 아이디어 입력",
     outcomeUnknown: (requestId: string) =>
       `저장 결과를 확인할 수 없습니다. 요청 ID: ${requestId}. 다시 제출하지 말고 운영 기록을 확인해 주세요.`,
     checkSubmissionStatus: "같은 요청 상태 다시 확인",

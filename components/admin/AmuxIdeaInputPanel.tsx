@@ -7,6 +7,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
+  canStartAnotherIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
 } from "@/lib/amux/ideaSubmissionUiCore";
@@ -70,6 +71,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, operatorId }: {
 
   const invalidateResult = () => {
     inputRevision.current += 1;
+    setResult(null);
+    setSubmission({ kind: "idle" });
+  };
+
+  const startAnotherIdea = () => {
+    if (!canStartAnotherIdea(submission.kind, pending || readBackPending)) return;
+    inputRevision.current += 1;
+    inFlight.current = false;
+    setIdea("");
+    setRepositories("");
+    setPullRequests("");
     setResult(null);
     setSubmission({ kind: "idle" });
   };
@@ -299,9 +311,19 @@ export function AmuxIdeaInputPanel({ submissionAvailable, operatorId }: {
         </p>
       ) : null}
       {submission.kind === "submitted" ? (
-        <p role="status" className="text-sm text-zinc-800 dark:text-zinc-100">
-          {messages.submitted(submission.ideaId)}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" className="text-sm text-zinc-800 dark:text-zinc-100">
+            {messages.submitted(submission.ideaId)}
+          </p>
+          <button
+            type="button"
+            onClick={startAnotherIdea}
+            disabled={!canStartAnotherIdea(submission.kind, pending || readBackPending)}
+            className="min-h-11 rounded-lg border border-zinc-400 px-4 text-sm font-medium text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-100"
+          >
+            {messages.startAnotherIdea}
+          </button>
+        </div>
       ) : null}
       {submission.kind === "outcome_unknown" ? (
         <div role="alert" className="space-y-2 text-sm text-amber-800 dark:text-amber-200">
