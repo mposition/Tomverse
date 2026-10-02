@@ -35,8 +35,8 @@
 
 ## The navigation
 
-Seven groups, twenty-six entries. One page, one job. The owner sees all
-twenty-six; every other role sees twenty-four, because two AMUX entries are
+Seven groups, twenty-seven entries. One page, one job. The owner sees all
+twenty-seven; every other role sees twenty-five, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
@@ -59,6 +59,7 @@ owner-only (rule 14).
 | Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
+| Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
@@ -87,6 +88,15 @@ record that both dead-man monitors alert. It carries no badge in
 this slice. Reading takes ordinary admin authentication; every control takes
 `engineering-agent:write` and a recent sign-in, checked by its own route, and
 `t1` is not a mode this screen can set.
+
+**Agent digests** is the common area where agent teams' daily digests are
+read (`docs/policy/qa-release-agent.md` section 4), one section per agent
+that stores them; QA and release is the first. It shows the newest operator
+control revision and the recent digests as counts and codes, says how many
+it lists, and shows an expired or unreadable body as such rather than
+drawing a digest that is not there. It carries no badge and no control in
+this slice: recording a revision and clearing a latch arrive with their own
+routes, each taking owner or ops and a recent sign-in.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

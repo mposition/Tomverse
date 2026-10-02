@@ -248,6 +248,9 @@ run(
     // The Monitor silence check: its own secret, the control revision, then
     // the freshness verdict over the database clock.
     "tests/integration/qa-release-monitor.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
