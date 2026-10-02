@@ -56,7 +56,11 @@ test("the card list reads identifiers and state only", async () => {
   assert.match(loader, /amuxHumanEscalation\.findMany\(/);
   assert.match(loader, /reasons\.push\(row\.reason\)/);
   assert.match(loader, /hasOwnerAttentionEscalation: amuxHasOwnerAttentionEscalation\(card\.status,/);
-  const ancestorSelects = [...loader.matchAll(/prisma\.amuxPortfolioNode\.findMany\(\{[\s\S]*?select:\s*\{([^}]*)\}/g)];
+  const ancestorSelects = [...loader.matchAll(
+    /prisma\.amuxPortfolioNode\.findMany\(\{\s*where: \{ id: \{ in: \w+ \} \},\s*select: \{([^}]*)\},\s*\}\)/g,
+  )];
+  assert.equal([...loader.matchAll(/prisma\.amuxPortfolioNode\.findMany\(/g)].length,
+    ancestorSelects.length, "every ancestor read must have its own structural-only select");
   assert.equal(ancestorSelects.length, 3, "feature, epic, and initiative reads must all stay constrained");
   for (const [, fields] of ancestorSelects) {
     assert.deepEqual(fields.split(",").map((field) => field.trim()).filter(Boolean),

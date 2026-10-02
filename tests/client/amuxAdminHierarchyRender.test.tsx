@@ -27,7 +27,10 @@ test("hierarchy render identifies page scope, direct tasks, off-page Story, and 
   assert.match(html, /Unlinked or incomplete hierarchy/);
   assert.match(html, /Level 4: <\/span><span class="font-medium">task · task-direct/);
   assert.match(html, /Level 5: <\/span><span class="font-medium">task · task-child/);
-  assert.equal((html.match(/<li /g) ?? []).length, 8);
+  assert.match(html, /<ol class="ms-5 mt-1 space-y-1">/);
+  assert.match(html, /<section aria-label="Unlinked or incomplete hierarchy">/);
+  assert.doesNotMatch(html, /Level 2: <\/span><span class="font-medium">unknown · legacy/);
+  assert.equal((html.match(/<li /g) ?? []).length, 7);
 });
 
 test("Korean hierarchy render keeps the same explicit page scope and level labels", () => {
