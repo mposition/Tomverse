@@ -47,9 +47,6 @@ export type MarketingWebhookReceiverDeps = {
   /** For the status query a shadow report compares against; null without a key. */
   readonly adapter: MarketingPublishAdapter | null;
   readonly consumeFaultArm: (eventIdDigest: string) => Promise<{ readonly consumed: boolean }>;
-  readonly shadowEnabled: () => Promise<boolean>;
-  /** The one channel holding this platform account, or null for none or several. */
-  readonly resolveChannel: (accountId: string) => Promise<{ readonly id: string } | null>;
   /**
    * This build's webhook pipeline fingerprint. Every answer carries it, so
    * Zernio's delivery log -- which keeps each response body -- shows which
@@ -58,11 +55,17 @@ export type MarketingWebhookReceiverDeps = {
    */
   readonly pipelineFingerprint: string;
   /**
-   * The staging configuration snapshot digest at the time of a signed delivery,
-   * or null when it cannot be read. Hashes only; carried by every answer after
-   * the signature verified, so a record binds attempts to one configuration.
+   * One read of the configuration a signed delivery is handled under: the
+   * shadow switch's stored value, the Zernio channels and the digest of both
+   * (with the environment). The stamp, the shadow decision and the channel
+   * lookup all come from this one read, so an answer can never name a
+   * configuration other than the one that decided it.
    */
-  readonly configSnapshotDigest: () => Promise<string | null>;
+  readonly readSnapshot: () => Promise<{
+    readonly shadowValue: string | null;
+    readonly channels: ReadonlyArray<{ readonly id: string; readonly externalAccountRef: string }>;
+    readonly configDigest: string;
+  }>;
   readonly recordShadow: (input: {
     readonly eventIdDigest: string;
     readonly eventType: string;
@@ -140,20 +143,22 @@ export async function handleZernioWebhook(
     return unsigned({ code: "signature_invalid" }, 401);
   }
 
-  // Signed from here, so the answer also carries the configuration it ran under.
-  const config = await deps.configSnapshotDigest().catch(() => null);
-  const signed = (answer: Record<string, unknown>, status: number) =>
-    json({ ...answer, pipeline, config }, status);
-
   const parsed = parseZernioWebhookEnvelope(raw, request.headers.get("x-zernio-event-id"));
   if (!parsed.ok) {
     if (parsed.refusal === "event_not_recorded" || parsed.refusal === "multiple_targets") {
       // Signed, and not something a single channel of ours can answer for. 2xx
       // so the provider does not retry something nobody wants.
-      return signed({ status: "ignored", reason: parsed.refusal }, 200);
+      return unsigned({ status: "ignored", reason: parsed.refusal }, 200);
     }
-    return signed({ code: parsed.refusal }, 400);
+    return unsigned({ code: parsed.refusal }, 400);
   }
+
+  // A signed event of ours from here, so the answer also carries the
+  // configuration it ran under -- read once, before the latch, and used for
+  // every decision below.
+  const snapshot = await deps.readSnapshot();
+  const signed = (answer: Record<string, unknown>, status: number) =>
+    json({ ...answer, pipeline, config: snapshot.configDigest }, status);
   const envelope = parsed.envelope;
   const eventIdDigest = marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, envelope.eventId);
 
@@ -164,11 +169,15 @@ export async function handleZernioWebhook(
     return signed({ code: "deliberate_fault", eventIdDigest }, 503);
   }
 
-  if (!(await deps.shadowEnabled())) {
+  if (snapshot.shadowValue !== "true") {
     return signed({ status: "shadow_off" }, 200);
   }
 
-  const channel = await deps.resolveChannel(envelope.accountId);
+  // One account, one channel. None is not ours; several is not one answer.
+  const holders = snapshot.channels.filter(
+    (candidate) => candidate.externalAccountRef === envelope.accountId,
+  );
+  const channel = holders.length === 1 ? holders[0] : null;
   if (!channel) {
     return signed({ status: "channel_unknown" }, 200);
   }

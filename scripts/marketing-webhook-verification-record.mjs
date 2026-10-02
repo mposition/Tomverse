@@ -100,10 +100,15 @@ const readDeliveries = async () => {
 
 const { prisma } = await import("../lib/prisma.ts");
 try {
-  const [shadowSetting, rows, deliveries] = await Promise.all([
+  const [shadowSetting, channels, rows, deliveries] = await Promise.all([
     prisma.appSetting.findUnique({
       where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
       select: { value: true },
+    }),
+    // The same read the receiver makes for its stamp.
+    prisma.marketingChannel.findMany({
+      where: { provider: "zernio", externalAccountRef: { not: null } },
+      select: { id: true, externalAccountRef: true },
     }),
     prisma.marketingReport.findMany({
       where: { kind: "webhook_shadow" },
@@ -117,6 +122,9 @@ try {
   const stagingConfigSnapshotDigest = marketingWebhookStagingConfigSnapshotDigest(
     process.env,
     shadowSetting?.value ?? null,
+    channels.flatMap((channel) =>
+      channel.externalAccountRef ? [{ id: channel.id, externalAccountRef: channel.externalAccountRef }] : [],
+    ),
   );
 
   const draft = draftMarketingWebhookVerificationRecord({

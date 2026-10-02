@@ -51,7 +51,12 @@ type Calls = { name: string; input?: unknown }[];
 
 const deps = (
   overrides: Partial<MarketingWebhookReceiverDeps> = {},
-  options: { status?: "live" | "removed" | "unknown" | Error; record?: "recorded" | "duplicate" } = {},
+  options: {
+    status?: "live" | "removed" | "unknown" | Error;
+    record?: "recorded" | "duplicate";
+    shadow?: string | null;
+    channels?: { id: string; externalAccountRef: string }[];
+  } = {},
 ) => {
   const calls: Calls = [];
   const adapter = {
@@ -66,19 +71,21 @@ const deps = (
     killSwitchOn: () => false,
     secret: SECRET,
     pipelineFingerprint: PIPELINE,
-    configSnapshotDigest: async () => CONFIG,
+    readSnapshot: async () => {
+      calls.push({ name: "readSnapshot" });
+      return {
+        shadowValue: options.shadow === undefined ? "true" : options.shadow,
+        channels: options.channels ?? [
+          { id: "chn_1", externalAccountRef: "acct_9" },
+          { id: "chn_B", externalAccountRef: "acct_B" },
+        ],
+        configDigest: CONFIG,
+      };
+    },
     adapter,
     consumeFaultArm: async (digest) => {
       calls.push({ name: "consumeFaultArm", input: digest });
       return { consumed: false };
-    },
-    shadowEnabled: async () => {
-      calls.push({ name: "shadowEnabled" });
-      return true;
-    },
-    resolveChannel: async (accountId) => {
-      calls.push({ name: "resolveChannel", input: accountId });
-      return { id: "chn_1" };
     },
     recordShadow: async (input) => {
       calls.push({ name: "recordShadow", input });
@@ -100,9 +107,8 @@ test("a signed event in staging is recorded in shadow, after the latch and the s
   assert.equal(status, 200);
   assert.equal(body.status, "recorded");
   assert.deepEqual(names(), [
+    "readSnapshot",
     "consumeFaultArm",
-    "shadowEnabled",
-    "resolveChannel",
     "lookupStatus",
     "recordShadow",
   ]);
@@ -126,9 +132,9 @@ test("every staging answer names its build, and a signed one its configuration",
     await handleZernioWebhook(
       request(payload(), { signature: "0".repeat(64) }),
       deps({
-        configSnapshotDigest: async () => {
+        readSnapshot: async () => {
           configRead = true;
-          return CONFIG;
+          throw new Error("not reached");
         },
       }).value,
     ),
@@ -138,18 +144,15 @@ test("every staging answer names its build, and a signed one its configuration",
   assert.equal("config" in refused.body, false);
   assert.equal(configRead, false);
 
-  // An unreadable configuration is stated as null, never guessed.
-  const unreadable = await answer(
-    await handleZernioWebhook(
-      request(payload()),
-      deps({
-        configSnapshotDigest: async () => {
-          throw new Error("down");
-        },
-      }).value,
-    ),
-  );
-  assert.equal(unreadable.body.config, null);
+  // An unreadable configuration is not guessed: nothing is consumed or recorded,
+  // and the delivery fails so Zernio retries it.
+  const unreadable = deps({
+    readSnapshot: async () => {
+      throw new Error("down");
+    },
+  });
+  await assert.rejects(handleZernioWebhook(request(payload()), unreadable.value));
+  assert.deepEqual(unreadable.names(), []);
 
   // Outside staging nothing is said, not even the build.
   const outside = await answer(
@@ -215,7 +218,9 @@ test("a consumed latch answers 5xx once, before the switch or any storage", asyn
   const { status, body } = await answer(await handleZernioWebhook(request(payload()), value));
   assert.equal(status, 503);
   assert.equal(body.code, "deliberate_fault");
-  assert.deepEqual(names(), []);
+  // The configuration was read (the answer carries it); nothing else ran.
+  assert.equal(body.config, CONFIG);
+  assert.deepEqual(names(), ["readSnapshot"]);
 });
 
 test("the retry after a consumed latch goes on normally and is recorded", async () => {
@@ -243,17 +248,28 @@ test("a duplicate delivery is answered as already recorded", async () => {
 });
 
 test("with the shadow off nothing is resolved or recorded", async () => {
-  const { value, names } = deps({ shadowEnabled: async () => false });
-  const { body } = await answer(await handleZernioWebhook(request(payload()), value));
-  assert.equal(body.status, "shadow_off");
-  assert.deepEqual(names(), ["consumeFaultArm"]);
+  for (const shadow of [null, "false", "TRUE"]) {
+    const { value, names } = deps({}, { shadow });
+    const { body } = await answer(await handleZernioWebhook(request(payload()), value));
+    assert.equal(body.status, "shadow_off", String(shadow));
+    assert.deepEqual(names(), ["readSnapshot", "consumeFaultArm"]);
+  }
 });
 
 test("an account this system does not have is acknowledged, not recorded", async () => {
-  const { value, names } = deps({ resolveChannel: async () => null });
-  const { body } = await answer(await handleZernioWebhook(request(payload()), value));
-  assert.equal(body.status, "channel_unknown");
-  assert.equal(names().includes("recordShadow"), false);
+  // None holds the account, and two hold it: neither is one channel.
+  for (const channels of [
+    [],
+    [
+      { id: "chn_1", externalAccountRef: "acct_9" },
+      { id: "chn_2", externalAccountRef: "acct_9" },
+    ],
+  ]) {
+    const { value, names } = deps({}, { channels });
+    const { body } = await answer(await handleZernioWebhook(request(payload()), value));
+    assert.equal(body.status, "channel_unknown");
+    assert.equal(names().includes("recordShadow"), false);
+  }
 });
 
 test("a status query that cannot answer is recorded as not agreeing", async () => {
@@ -330,7 +346,10 @@ test("a per-platform event resolves the channel by the account it names", async 
   });
   const { value, calls } = deps({}, { status: "unknown" });
   await handleZernioWebhook(request(raw), value);
-  assert.equal(calls.find((call) => call.name === "resolveChannel")?.input, "acct_B");
+  assert.equal(
+    (calls.find((call) => call.name === "recordShadow")?.input as { channelId?: string })?.channelId,
+    "chn_B",
+  );
 });
 
 test("a body with no declared length is cut off at the limit, not buffered whole", async () => {
