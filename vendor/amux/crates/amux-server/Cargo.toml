@@ -2,7 +2,7 @@
 name = "amux-server"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "amux server binary: HTTP API, SQLite store, orchestrator runtime, backends."
 
 [dependencies]

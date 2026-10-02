@@ -630,7 +630,7 @@ jobs:
       - name: AMUX dashboard SPA lint
         timeout-minutes: 10
         run: |
-          npm ci --prefix vendor/amux --no-audit --no-fund
+          npm ci --prefix vendor/amux --ignore-scripts --no-audit --no-fund
           npm run lint:spa --prefix vendor/amux
 
   build-and-e2e:

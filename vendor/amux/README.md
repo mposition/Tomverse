@@ -16,7 +16,14 @@ later server fixes and Devin support remain present. The imported tree is the
 tested port at `1765cbf98f0201501388dfb2cdcb266db1d76fb8`, including a
 small fix for the pre-existing missing Devin usage row. The original remote
 is `https://github.com/mixpeek/amux.git`; its Git history was not merged into
-Tomverse. `LICENSE` retains the upstream MIT terms.
+Tomverse. `LICENSE` retains the upstream MIT + Commons Clause terms. The clause
+restricts selling a product or service whose value derives entirely or
+substantially from AMUX. This source import does not grant separate
+commercial rights. The Tomverse operator confirmed on 2026-10-02 that
+this server is solely an internal development and operations tool: its
+functionality is not offered to customers or sold as a service. A change
+to that use requires a license review and any needed permission before
+customer exposure or paid provision.
 
 Subsequent Tomverse commits harden the imported dashboard and local iOS test
 transport; the vendored tree is therefore no longer byte-identical to that

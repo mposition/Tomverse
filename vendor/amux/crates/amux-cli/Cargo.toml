@@ -2,7 +2,7 @@
 name = "amux-cli"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "The `amux` command-line interface."
 
 [[bin]]
