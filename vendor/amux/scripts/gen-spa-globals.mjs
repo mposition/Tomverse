@@ -70,7 +70,7 @@ for (const f of fs.readdirSync(staticDir).filter(f => f.endsWith('.js')).sort())
 //    declared by hand in eslint.config.mjs where each name is documented)
 const html = fs.readFileSync(path.join(staticDir, 'index.html'), 'utf8');
 let i = 0;
-for (const m of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi)) {
+for (const m of html.matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi)) {
   i++;
   if (m[1] && /\bsrc\s*=/i.test(m[1])) continue;
   if (!m[2].trim()) continue;

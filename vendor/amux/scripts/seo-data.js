@@ -1343,7 +1343,7 @@ ${CTA}`
 // ═══════════════════════════════════════════════════════════════════
 const faqItems = [
   ['What is amux?', 'amux is an open-source agent multiplexer that runs dozens of Claude Code sessions in parallel from a web dashboard. It adds self-healing, task coordination, and mobile access on top of Claude Code + tmux.'],
-  ['What do I need to run amux?', 'Python 3, tmux, and Claude Code (the <code>claude</code> CLI) installed and authenticated. That\'s it.'],
+  ['What do I need to run amux?', 'Python 3, tmux, and Claude Code (the <code>claude</code> CLI) installed and authenticated. That\'s it.', 'Python 3, tmux, and Claude Code (the claude CLI) installed and authenticated. That\'s it.'],
   ['How many agents can I run?', 'As many as your machine can handle. Each agent uses ~200-400MB RAM. On a 32GB machine, 50+ agents is practical.'],
   ['Does amux modify Claude Code?', 'No. amux manages Claude Code sessions externally via tmux. It parses terminal output to detect status — no hooks, patches, or modifications.'],
   ['What happens when an agent crashes?', 'amux\'s self-healing watchdog detects crashes and recovers automatically. Context exhaustion triggers auto-compaction. Thinking-block corruption triggers restart with message replay. Stuck prompts get auto-answered in YOLO mode.'],
@@ -1351,8 +1351,8 @@ const faqItems = [
   ['How do agents coordinate?', 'Via REST API. Every agent gets the API reference in global memory. They can send messages to peers, claim tasks from the board, and peek at each other\'s output.'],
   ['What does it cost?', 'amux is free and open source (MIT). You pay only for Claude API tokens. Running 10 agents typically costs $20-100/day depending on task complexity.'],
   ['Is it secure?', 'amux is local-first with no auth built in. Use Tailscale or bind to localhost. Never expose port 8824 to the internet.'],
-  ['Can I use it with models other than Claude?', 'amux is specifically built for Claude Code (the <code>claude</code> CLI). It relies on Claude Code\'s specific terminal output patterns for status detection and self-healing.'],
-  ['How is amux different from Claude Code Agent Teams?', 'Agent Teams spawns short-lived sub-agents from a parent. amux manages long-running independent sessions with a web dashboard, self-healing, and shared task board. <a href="/compare/amux-vs-claude-code-agent-teams/">See detailed comparison</a>.'],
+  ['Can I use it with models other than Claude?', 'amux is specifically built for Claude Code (the <code>claude</code> CLI). It relies on Claude Code\'s specific terminal output patterns for status detection and self-healing.', 'amux is specifically built for Claude Code (the claude CLI). It relies on Claude Code\'s specific terminal output patterns for status detection and self-healing.'],
+  ['How is amux different from Claude Code Agent Teams?', 'Agent Teams spawns short-lived sub-agents from a parent. amux manages long-running independent sessions with a web dashboard, self-healing, and shared task board. <a href="/compare/amux-vs-claude-code-agent-teams/">See detailed comparison</a>.', 'Agent Teams spawns short-lived sub-agents from a parent. amux manages long-running independent sessions with a web dashboard, self-healing, and shared task board. See detailed comparison.'],
   ['Can I self-host it?', 'Yes — that\'s the only way to run it. amux runs on your own machine or server. No cloud service, no account needed.'],
 ];
 
@@ -1368,9 +1368,9 @@ ${CTA}`,
   schema: {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: faqItems.map(([q, a]) => ({
+    mainEntity: faqItems.map(([q, a, plain]) => ({
       '@type': 'Question', name: q,
-      acceptedAnswer: { '@type': 'Answer', text: a.replace(/<[^>]+>/g, '') }
+      acceptedAnswer: { '@type': 'Answer', text: plain || a }
     }))
   }
 };

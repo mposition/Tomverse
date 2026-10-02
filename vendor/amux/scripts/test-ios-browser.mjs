@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Real Safari Simulator tests through amux's shipped browser API. No fleet writes.
+// AMUX_IOS_TEST_CA selects the isolated server certificate when it differs from ~/.amux/tls/cert.pem.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
@@ -7,17 +8,17 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { messageScenarios } from '../e2e/ios-message-scenarios.mjs';
+import { isolatedTestBase, localRequestOptions, trustedTestCa } from './ios-test-transport.mjs';
 const messages=messageScenarios();
-const base = new URL(process.env.AMUX_IOS_TEST_URL || 'https://localhost:18854');
-assert(['localhost','127.0.0.1','[::1]'].includes(base.hostname) && Number(base.port) >= 18000,
-  'Use an isolated local test server on a port >=18000; production is refused');
+const base = isolatedTestBase(process.env.AMUX_IOS_TEST_URL);
+const testCa = await trustedTestCa(base);
 const output = path.resolve(process.env.AMUX_IOS_TEST_OUTPUT || 'scratch/ios-simulator-review');
 await fs.mkdir(output,{recursive:true});
 function request(url, method='GET', body, headers={}) {
   return new Promise((resolve,reject)=>{
     const bytes=body===undefined ? undefined : Buffer.from(JSON.stringify(body));
-    const req=(url.protocol==='https:' ? https : http).request(url,{method,rejectUnauthorized:false,
-      headers:{...(bytes?{'content-type':'application/json','content-length':bytes.length}:{}),...headers}},res=>{
+    const req=(base.protocol==='https:' ? https : http).request(localRequestOptions(url,base,{method,ca:testCa,
+      headers:{...(bytes?{'content-type':'application/json','content-length':bytes.length}:{}),...headers}}),res=>{
       const chunks=[];res.on('data',b=>chunks.push(b));res.on('end',()=>resolve({status:res.statusCode,bytes:Buffer.concat(chunks),headers:res.headers}));res.on('error',reject);
     });
     const timer=setTimeout(()=>req.destroy(new Error('Test HTTP operation exceeded 200s')),200000);
@@ -68,7 +69,7 @@ const proxy=http.createServer(async(req,res)=>{
     if(req.method==='POST'&&req.url==='/api/prefs')prefPosts++;
     const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=Buffer.concat(chunks);
     if(req.url==='/api/client-debug'){try{beacons.push(JSON.parse(body))}catch{}}
-    const upstream=https.request(new URL(req.url,base),{method:req.method,rejectUnauthorized:false,headers:{...req.headers,host:base.host,'accept-encoding':'identity'}},up=>{
+    const upstream=(base.protocol==='https:' ? https : http).request(localRequestOptions(req.url,base,{method:req.method,ca:testCa,headers:{...req.headers,host:base.host,'accept-encoding':'identity'}}),up=>{
       if((req.url==='/' || req.url.startsWith('/?')) && up.statusCode===200){
 
         const parts=[];up.on('data',b=>parts.push(b));up.on('end',async()=>{
@@ -83,9 +84,9 @@ const proxy=http.createServer(async(req,res)=>{
         });
       }else{res.writeHead(up.statusCode,up.headers);up.pipe(res);}
     });
-    upstream.on('error',e=>{if(!res.headersSent)res.writeHead(502);res.end(String(e));});
+    upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end('Test proxy upstream failed');});
     res.on('close',()=>upstream.destroy());upstream.end(body);
-  } catch(e){res.writeHead(500);res.end(String(e));}
+  } catch(e){console.error('Test proxy failure',e);res.writeHead(500);res.end('Test fixture proxy failed');}
 });
 await new Promise(r=>proxy.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+proxy.address().port;
 let browser;
@@ -185,9 +186,13 @@ try {
   { // Board editing is a baseline native regression, including keyboard occlusion.
     mode='plain';
     const coverage=[];
-    const visible=selector=>`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'})()`;
+    const visible=selector=>{
+      assert.match(selector,/^#[a-z-]+$/);
+      return `(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e&&!!e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'})()`;
+    };
     for (const surface of (process.env.AMUX_IOS_LIFECYCLE === '1' ? ['sessions','board','groups','calendar','scheduler','files','mdai','proxies','email','connectors','logs','messages','skills','sql','map','metrics','cost','torrents','terminal','browser'] : [])) {
       try {
+        assert.match(surface,/^[a-z]+$/);
         await api('start',{udid,url:origin+'/#view=sessions'});await until('!!window.__amuxState && !document.querySelector("#peek-overlay").classList.contains("active")',v=>v);
         const tab='#tab-'+surface;
         if (!await evaluate(visible(tab))) {
@@ -203,7 +208,7 @@ try {
         assert(inventory.scrollWidth<=inventory.width,'horizontal page overflow');assert.deepEqual(inventory.headerClipped,[]);
         coverage.push({case:'LC-VIEW:'+surface,verdict:'passed',scope:'native navigation, visible panel, control inventory, overflow; aesthetics requires screenshot review',...inventory});
         pass('native lifecycle view '+surface);
-      }catch(error){await shot('lifecycle-failed-'+surface).catch(()=>{});console.log('HIT TARGET',await evaluate(`(()=>{const e=document.querySelector('#tab-${surface}');if(!e)return null;const r=e.getBoundingClientRect();const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {rect:r.toJSON(),hit:h?.outerHTML.slice(0,200)}})()`));coverage.push({case:'LC-VIEW:'+surface,verdict:'failed',error:String(error)});console.log('FAIL native lifecycle view '+surface+': '+error);}
+      }catch(error){await shot('lifecycle-failed-'+surface).catch(()=>{});console.log('HIT TARGET',await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify('#tab-'+surface)});if(!e)return null;const r=e.getBoundingClientRect();const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {rect:r.toJSON(),hit:h?.outerHTML.slice(0,200)}})()`));coverage.push({case:'LC-VIEW:'+surface,verdict:'failed',error:String(error)});console.log('FAIL native lifecycle view '+surface+': '+error);}
       await fs.writeFile(path.join(output,'native-lifecycle.json'),JSON.stringify(coverage,null,2));
     }
     try {

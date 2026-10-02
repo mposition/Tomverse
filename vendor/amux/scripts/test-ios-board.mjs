@@ -4,21 +4,22 @@
 // Seeds 36 persistent test cards ONLY on that local high-port server; no worker
 // commands. Run from repo root: node scripts/test-ios-board.mjs.
 // AMUX_IOS_TEST_OUTPUT selects evidence; AMUX_IOS_CASE selects a case substring.
+// AMUX_IOS_TEST_CA selects the isolated server certificate when it differs from ~/.amux/tls/cert.pem.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-const base = new URL(process.env.AMUX_IOS_TEST_URL || 'https://localhost:18854');
-assert(['localhost','127.0.0.1','[::1]'].includes(base.hostname) && Number(base.port) >= 18000,
-  'Use an isolated local test server on a port >=18000; production is refused');
+import { isolatedTestBase, localRequestOptions, trustedTestCa } from './ios-test-transport.mjs';
+const base = isolatedTestBase(process.env.AMUX_IOS_TEST_URL);
+const testCa = await trustedTestCa(base);
 const output = path.resolve(process.env.AMUX_IOS_TEST_OUTPUT || 'scratch/ios-simulator-review');
 await fs.mkdir(output,{recursive:true});
 function request(url, method='GET', body, headers={}) {
   return new Promise((resolve,reject)=>{
     const bytes=body===undefined ? undefined : Buffer.from(JSON.stringify(body));
-    const req=(url.protocol==='https:' ? https : http).request(url,{method,rejectUnauthorized:false,
-      headers:{...(bytes?{'content-type':'application/json','content-length':bytes.length}:{}),...headers}},res=>{
+    const req=(base.protocol==='https:' ? https : http).request(localRequestOptions(url,base,{method,ca:testCa,
+      headers:{...(bytes?{'content-type':'application/json','content-length':bytes.length}:{}),...headers}}),res=>{
       const chunks=[];res.on('data',b=>chunks.push(b));res.on('end',()=>resolve({status:res.statusCode,bytes:Buffer.concat(chunks),headers:res.headers}));res.on('error',reject);
     });
     const timer=setTimeout(()=>req.destroy(new Error('Test HTTP operation exceeded 200s')),200000);
@@ -48,7 +49,7 @@ const proxy=http.createServer(async(req,res)=>{
     if(['/app.js','/app.css','/state/kernel.js'].includes(req.url)) {res.setHeader('cache-control','no-store');res.setHeader('content-type',req.url.endsWith('.css')?'text/css':'text/javascript');res.end(await fs.readFile(new URL(req.url.slice(1),staticRoot)));return;}
     const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=Buffer.concat(chunks);
     if(req.url==='/api/client-debug'){try{beacons.push(JSON.parse(body))}catch{}}
-    const upstream=https.request(new URL(req.url,base),{method:req.method,rejectUnauthorized:false,headers:{...req.headers,host:base.host,'accept-encoding':'identity'}},up=>{
+    const upstream=(base.protocol==='https:' ? https : http).request(localRequestOptions(req.url,base,{method:req.method,ca:testCa,headers:{...req.headers,host:base.host,'accept-encoding':'identity'}}),up=>{
       if((req.url==='/' || req.url.startsWith('/?')) && up.statusCode===200){
 
         const parts=[];up.on('data',b=>parts.push(b));up.on('end',async()=>{
@@ -62,9 +63,9 @@ const proxy=http.createServer(async(req,res)=>{
         });
       }else{res.writeHead(up.statusCode,up.headers);up.pipe(res);}
     });
-    upstream.on('error',e=>{if(!res.headersSent)res.writeHead(502);res.end(String(e));});
+    upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end('Test proxy upstream failed');});
     res.on('close',()=>upstream.destroy());upstream.end(body);
-  } catch(e){res.writeHead(500);res.end(String(e));}
+  } catch(e){console.error('Test proxy failure',e);res.writeHead(500);res.end('Test fixture proxy failed');}
 });
 await new Promise(r=>proxy.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+proxy.address().port;
 const before=JSON.parse((await request(new URL('/health',base))).bytes);
