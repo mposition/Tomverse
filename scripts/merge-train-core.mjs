@@ -24,9 +24,16 @@ export const IN_FLIGHT_DEPLOYMENT_STATUSES = new Set([
 // SLEEPING is a deployment that succeeded and was then scaled to zero.
 const SUCCEEDED_DEPLOYMENT_STATUSES = new Set(["SUCCESS", "SLEEPING"]);
 
-// SKIPPED is a failure here, not a no-op: Railway skips a "Wait for CI"
-// deployment when a check run on the commit failed.
-const FAILED_DEPLOYMENT_STATUSES = new Set(["FAILED", "CRASHED", "SKIPPED"]);
+// A build or runtime failure. SKIPPED is not here: Railway skips a "Wait for
+// CI" deployment when a check run on the commit did not pass, and that run is
+// often one a later push cancelled (cancel-in-progress) rather than one that
+// failed. See SKIPPED_RUN_FAILURE.
+const FAILED_DEPLOYMENT_STATUSES = new Set(["FAILED", "CRASHED"]);
+
+// SKIPPED deployments in a row, among the merge's own and the later ones that
+// contain it, that count as a failure (operator decision 2026-10-03). Fewer
+// is a wait for the next deployment that contains the merge.
+export const SKIPPED_RUN_FAILURE = 3;
 
 export const LANES = [
   { branch: "develop", environment: "staging" },
@@ -204,17 +211,50 @@ export function replacementCommits(deployments, commitSha) {
   const sha = commitSha.toLowerCase();
   const commits = new Set();
   for (const deployment of deployments) {
-    if (commitOf(deployment) !== sha || !REPLACED_DEPLOYMENT_STATUSES.has(deployment.status)) continue;
+    if (commitOf(deployment) !== sha) continue;
+    if (!REPLACED_DEPLOYMENT_STATUSES.has(deployment.status) && deployment.status !== "SKIPPED") continue;
     for (const replacement of replacementsOf(deployments, deployment)) commits.add(commitOf(replacement));
   }
   return [...commits];
 }
 
-function serviceState(status) {
-  if (FAILED_DEPLOYMENT_STATUSES.has(status)) return "failed";
-  if (IN_FLIGHT_DEPLOYMENT_STATUSES.has(status)) return "in_progress";
-  if (SUCCEEDED_DEPLOYMENT_STATUSES.has(status)) return "done";
-  return "unknown";
+const oldestFirst = (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt);
+
+/**
+ * One service's answer for the merge, from `newest` -- the newest deployment
+ * of the merge commit on that service.
+ *
+ * A SKIPPED or replaced (REMOVED/REMOVING) deployment is followed through the
+ * later deployments of the service whose commit is in `containing`, oldest
+ * first: any success means the merge is serving; a build or runtime failure is
+ * a failure; SKIPPED_RUN_FAILURE SKIPPED in a row is a failure (REMOVED
+ * neither extends nor breaks the run); one in flight, or a SKIPPED run still
+ * short of it, is a wait. A replaced deployment with nothing after it that
+ * contains the merge -- a rollback, or a replacement GitHub could not place --
+ * is "unknown".
+ */
+function serviceState(deployments, newest, containing) {
+  if (SUCCEEDED_DEPLOYMENT_STATUSES.has(newest.status)) return "done";
+  if (IN_FLIGHT_DEPLOYMENT_STATUSES.has(newest.status)) return "in_progress";
+  if (FAILED_DEPLOYMENT_STATUSES.has(newest.status)) return "failed";
+  const skipped = newest.status === "SKIPPED";
+  if (!skipped && !REPLACED_DEPLOYMENT_STATUSES.has(newest.status)) return "unknown";
+
+  const later = replacementsOf(deployments, newest).filter((deployment) => containing.has(commitOf(deployment)));
+  const sequence = [newest, ...later].sort(oldestFirst);
+  if (sequence.some((deployment) => SUCCEEDED_DEPLOYMENT_STATUSES.has(deployment.status))) return "done";
+  if (sequence.some((deployment) => FAILED_DEPLOYMENT_STATUSES.has(deployment.status))) return "failed";
+  let run = 0;
+  for (const deployment of sequence) {
+    if (deployment.status === "SKIPPED") {
+      run += 1;
+      if (run >= SKIPPED_RUN_FAILURE) return "failed";
+    } else if (!REPLACED_DEPLOYMENT_STATUSES.has(deployment.status)) {
+      run = 0;
+    }
+  }
+  if (sequence.some((deployment) => IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status))) return "in_progress";
+  return skipped || later.length > 0 ? "in_progress" : "unknown";
 }
 
 // Worst first: the outcome is the worst state any expected service is in.
@@ -225,13 +265,9 @@ const OUTCOME_ORDER = ["failed", "unknown", "missing", "in_progress", "done"];
  * branch (plus any service that has a deployment of the commit).
  *
  * Per service only the newest deployment of the commit counts, so a redeploy
- * of the same commit replaces the earlier attempt. A deployment REMOVED (or
- * REMOVING) counts through the later deployments of that service whose commit
- * is in `containing` (it includes this merge): any one that succeeded means
- * the merge is serving, whatever newer attempts are waiting or skipped beside
- * it; otherwise one in flight is a wait, and otherwise one that failed is a
- * failure. A rollback to an older commit, or a replacement nobody could place,
- * is "unknown". The train stops on
+ * of the same commit replaces the earlier attempt; serviceState says how a
+ * SKIPPED or replaced one is followed through later deployments that contain
+ * the merge. The train stops on
  * "failed" and "unknown"; "not_seen" and "partial" are waits whose length the
  * caller decides.
  */
@@ -247,19 +283,7 @@ export function deploymentOutcome(deployments, commitSha, branch, containing = n
   let worst = "done";
   for (const serviceId of expected) {
     const newest = forCommit.filter((deployment) => deployment.serviceId === serviceId).sort(newestFirst)[0];
-    let state;
-    if (!newest) {
-      state = "missing";
-    } else if (REPLACED_DEPLOYMENT_STATUSES.has(newest.status)) {
-      const states = new Set(
-        replacementsOf(deployments, newest)
-          .filter((replacement) => containing.has(commitOf(replacement)))
-          .map((replacement) => serviceState(replacement.status)),
-      );
-      state = ["done", "in_progress", "failed"].find((candidate) => states.has(candidate)) ?? "unknown";
-    } else {
-      state = serviceState(newest.status);
-    }
+    const state = newest ? serviceState(deployments, newest, containing) : "missing";
     if (OUTCOME_ORDER.indexOf(state) < OUTCOME_ORDER.indexOf(worst)) worst = state;
   }
   const outcome = { failed: "failed", unknown: "unknown", missing: "partial", in_progress: "in_progress", done: "succeeded" };
