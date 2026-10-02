@@ -10,8 +10,8 @@
 // reports from the database and the delivery attempts from Zernio's webhook
 // log (read only, with ZERNIO_API_KEY); writes nothing to either. The staging
 // configuration snapshot is the one the receiver stamped on the evidence: the
-// configuration the events were handled under, not one recomputed here (only
-// the receiver route reads the webhook secret). If the evidence carries more
+// configuration the events were handled under, not one recomputed here. If the
+// evidence carries more
 // than one, --config chooses which to certify. Without --write it prints the
 // draft and its digest; with --write it creates the record file, refusing to
 // overwrite one that exists (a record is immutable once written).
@@ -24,7 +24,7 @@
 // refuse (see sendC2Probes): the only requests it makes to staging.
 
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -119,26 +119,39 @@ const readDeliveries = async () => {
 const { prisma } = await import("../lib/prisma.ts");
 
 /**
- * Condition 2, sent by this script without the secret (only the receiver route
- * reads it). Two bodies are not JSON, so a receiver that parsed before it
- * verified would answer 400 rather than 401; the third is a well-formed event
- * under a wrong signature. Each must leave the stored reports as they were.
+ * Condition 2, sent by this script. Two bodies are not JSON, so a receiver
+ * that parsed before it verified would answer 400 rather than 401; one is a
+ * well-formed event under a wrong signature; and two are signed correctly and
+ * then changed by one byte, or extended by one, after signing -- a receiver
+ * that trimmed or normalised the body before verifying would accept those.
+ * Each must leave the stored reports as they were.
+ *
+ * The signed probes are the one place outside the receiver route that reads
+ * ZERNIO_WEBHOOK_SECRET (operator approval 2026-10-02, AGENTS.md S2e): the
+ * value is used for the HMAC and nothing else, never printed or stored.
  */
 const sendC2Probes = async () => {
   const results = [];
   for (const kind of MARKETING_WEBHOOK_C2_PROBE_KINDS) {
     const eventId = randomUUID();
-    const body =
-      kind === "wrong_signature_event"
-        ? JSON.stringify({
-            id: eventId,
-            event: "post.published",
-            timestamp: new Date().toISOString(),
-            post: { id: "c2-probe", status: "published", platforms: [{ platform: "linkedin", accountId: "c2-probe" }] },
-          })
-        : `{"id":"${eventId}","event":`;
+    const event = JSON.stringify({
+      id: eventId,
+      event: "post.published",
+      timestamp: new Date().toISOString(),
+      post: { id: "c2-probe", status: "published", platforms: [{ platform: "linkedin", accountId: "c2-probe" }] },
+    });
     const headers = { "content-type": "application/json", "x-zernio-event-id": eventId };
+    let body = event;
+    if (kind === "unsigned_not_json" || kind === "wrong_signature_not_json") {
+      body = `{"id":"${eventId}","event":`;
+    }
     if (kind !== "unsigned_not_json") headers["x-zernio-signature"] = "0".repeat(64);
+    if (kind === "signed_byte_changed" || kind === "signed_byte_appended") {
+      const secret = process.env.ZERNIO_WEBHOOK_SECRET;
+      if (!secret) throw new Error("ZERNIO_WEBHOOK_SECRET is not set in this environment.");
+      headers["x-zernio-signature"] = createHmac("sha256", secret).update(event).digest("hex");
+      body = kind === "signed_byte_changed" ? event.replace("c2-probe", "c2-proba") : `${event} `;
+    }
     const reportsBefore = await prisma.marketingReport.count({ where: { kind: "webhook_shadow" } });
     const at = new Date().toISOString();
     const response = await fetch(receiverUrl, { method: "POST", headers, body });

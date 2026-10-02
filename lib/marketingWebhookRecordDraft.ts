@@ -12,13 +12,13 @@
  *
  * Condition 2 (unsigned or tampered requests refused before parsing) is not
  * about an event type. Zernio only ever sends signed requests, so it is proved
- * by probes the drafting script sends itself, without the secret (which only
- * the receiver route reads): no signature and a wrong one, each on a body that
- * is not JSON -- a receiver that parsed before verifying would answer 400, not
- * 401 -- and a wrong signature on a well-formed event. Each must be answered
- * 401 by this build with the stored reports unchanged. A body changed by one
- * byte after signing is, to the receiver, a wrong signature; that it covers
- * every byte is pinned by the unit test the record cites.
+ * by probes the drafting script sends itself: no signature and a wrong one,
+ * each on a body that is not JSON -- a receiver that parsed before verifying
+ * would answer 400, not 401 -- a wrong signature on a well-formed event, and a
+ * correctly signed event with one byte changed and with one byte appended after
+ * signing (a receiver that trimmed or normalised before verifying would accept
+ * the second). Each must be answered 401 by this build with the stored reports
+ * unchanged.
  */
 import {
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
@@ -69,11 +69,9 @@ export const MARKETING_WEBHOOK_C2_PROBE_KINDS = [
   "unsigned_not_json",
   "wrong_signature_not_json",
   "wrong_signature_event",
+  "signed_byte_changed",
+  "signed_byte_appended",
 ] as const;
-
-/** Where the one-byte change is proved at byte level; cited by every record. */
-export const MARKETING_WEBHOOK_C2_BYTE_TEST_REF =
-  "unit-test:tests/marketingWebhookCore.test.ts:a body changed by one byte";
 
 export type MarketingWebhookC2Probe = {
   readonly kind: (typeof MARKETING_WEBHOOK_C2_PROBE_KINDS)[number];
@@ -278,7 +276,6 @@ export const draftMarketingWebhookVerificationRecord = (
   if (observedScope.length === 0) problems.push("no_event_type_proved");
   if (problems.length > 0) return { ok: false, problems: [...new Set(problems)], excludedTypes };
 
-  refs.add(MARKETING_WEBHOOK_C2_BYTE_TEST_REF);
   for (const probe of input.c2Probes) {
     refs.add(`probe:${probe.kind}:${probe.at}:${probe.statusCode}:${probe.answer ?? "-"}`);
   }

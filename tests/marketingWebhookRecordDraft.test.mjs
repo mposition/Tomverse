@@ -51,7 +51,13 @@ const probe = (kind, overrides = {}) => ({
   reportsAfter: 2,
   ...overrides,
 });
-const probes = [probe("unsigned_not_json"), probe("wrong_signature_not_json"), probe("wrong_signature_event")];
+const probes = [
+  probe("unsigned_not_json"),
+  probe("wrong_signature_not_json"),
+  probe("wrong_signature_event"),
+  probe("signed_byte_changed"),
+  probe("signed_byte_appended"),
+];
 const base = {
   recordId: "2026-10-03__zernio-shadow",
   executor: "staging-operator",
@@ -71,7 +77,7 @@ test("a type that proved every condition is in a strict record", () => {
   assert.equal(record.pipelineFingerprint, MARKETING_WEBHOOK_PIPELINE_FINGERPRINT);
   assert.deepEqual(record.observedScope, [{ eventType: PUBLISHED, channelId: "channel-li" }]);
   assert.equal(draft.recordDigest, digestMarketingWebhookVerificationRecord(draft.fileText));
-  assert.ok(record.evidenceRefs.some((ref) => ref.startsWith("probe:wrong_signature_event:")));
+  assert.ok(record.evidenceRefs.some((ref) => ref.startsWith("probe:signed_byte_appended:")));
   assert.ok(record.evidenceRefs.some((ref) => ref.includes(":503:deliberate_fault")));
 });
 
@@ -134,10 +140,10 @@ test("a pair whose status query disagreed is left out of a proved type", () => {
 
 test("condition 2 needs all three probes refused by this build, with nothing stored", () => {
   const cases = [
-    [probes.slice(0, 2), "c2_probe_missing"],
-    [[...probes.slice(0, 2), probe("wrong_signature_event", { statusCode: 200, answer: "recorded" })], "c2_probe_not_refused"],
-    [[...probes.slice(0, 2), probe("wrong_signature_event", { pipeline: "f".repeat(64) })], "c2_probe_not_refused"],
-    [[...probes.slice(0, 2), probe("wrong_signature_event", { reportsAfter: 3 })], "c2_probe_stored"],
+    [probes.slice(0, 4), "c2_probe_missing"],
+    [[...probes.slice(0, 4), probe("signed_byte_appended", { statusCode: 200, answer: "recorded" })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 4), probe("signed_byte_appended", { pipeline: "f".repeat(64) })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 4), probe("signed_byte_appended", { reportsAfter: 3 })], "c2_probe_stored"],
     // A receiver that parsed before verifying answers a non-JSON body 400.
     [[probe("unsigned_not_json", { statusCode: 400, answer: "body_not_json" }), ...probes.slice(1)], "c2_probe_not_refused"],
   ];
