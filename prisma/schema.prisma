@@ -7194,6 +7194,48 @@ model AmuxCostLedgerEntry {
   @@index([taskId, createdAt])
 }
 
+/// Content-free, per-invocation CLI usage receipt for v22/v23. This table is
+/// dark until a leased-attempt-bound writer, 13-month purge plus aggregate,
+/// and backup/export deletion proof are approved. It is not a user credit or
+/// provider invoice ledger. The selected model is not a served-model claim.
+model AmuxCliUsageInvocation {
+  invocationId                   String   @id @db.Uuid
+  contextKind                    String
+  cardId                         String?  @db.VarChar(160)
+  taskId                         String?  @db.VarChar(160)
+  runId                          String?  @db.VarChar(160)
+  attemptId                      String?  @db.VarChar(160)
+  workerId                       String?  @db.VarChar(160)
+  ideaId                         String?  @db.VarChar(160)
+  chunkIndex                     Int?
+  agentId                        String?  @db.VarChar(32)
+  cli                            String
+  cliVersion                     String   @db.VarChar(64)
+  authKind                       String
+  selectedModelId                String   @db.VarChar(160)
+  startedAt                      DateTime @db.Timestamptz(3)
+  endedAt                        DateTime @db.Timestamptz(3)
+  status                         String
+  completeness                   String
+  completedTurns                 Int
+  inputTokens                    BigInt?
+  outputTokens                   BigInt?
+  cacheReadInputTokens           BigInt?
+  cacheCreationInputTokens       BigInt?
+  reasoningOutputTokens          BigInt?
+  inputTokensIncludeCacheRead    Boolean?
+  inputTokensIncludeCacheWrite   Boolean?
+  reasoningOutputIncludedInOutput Boolean?
+  /// Strict DB-checked array of {modelId, observed token counts}; no free text.
+  modelsJson                     Json
+  receiptDigest                  String   @db.Char(64)
+  recordedAt                     DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([recordedAt, invocationId])
+  @@index([contextKind, attemptId])
+  @@index([contextKind, ideaId, chunkIndex])
+}
+
 model AmuxHumanEscalation {
   id                  String    @id @default(cuid())
   taskId              String
