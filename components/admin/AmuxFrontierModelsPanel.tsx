@@ -23,18 +23,23 @@ export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
         { cache: "no-store", signal });
       if (!response.ok) {
         const reason = await readAdminApiFailure(response, { fallback: m.frontierModelsUnavailable, locale });
-        if (!signal?.aborted) setFailure(reason);
+        if (!signal?.aborted) { setModels(null); setFailure(reason); }
         return;
       }
       const parsed = readAvailableFrontierModels(response.status, await response.json());
       if (!signal?.aborted) {
-        if (parsed === null) setFailure({ message: m.frontierModelsInvalid, tone: "error",
-          requiresReauthentication: false, approvalId: null });
-        else setModels(parsed);
+        if (parsed === null) {
+          setModels(null);
+          setFailure({ message: m.frontierModelsInvalid, tone: "error",
+            requiresReauthentication: false, approvalId: null });
+        } else { setFailure(null); setModels(parsed); }
       }
     } catch {
-      if (!signal?.aborted) setFailure({ message: m.frontierModelsUnavailable, tone: "error",
-        requiresReauthentication: false, approvalId: null });
+      if (!signal?.aborted) {
+        setModels(null);
+        setFailure({ message: m.frontierModelsUnavailable, tone: "error",
+          requiresReauthentication: false, approvalId: null });
+      }
     } finally { if (!signal?.aborted) setLoading(false); }
   }, [available, locale, m.frontierModelsUnavailable, m.frontierModelsInvalid]);
 
