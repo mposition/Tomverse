@@ -15,6 +15,10 @@ import {
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import {
+  ideaTransferBrowserCookieName,
+  newIdeaTransferBrowserNonce,
+} from "@/lib/amux/ideaTransferBrowserCore";
+import {
   AMUX_V4_TRANSFER_PREVIEW_MAX_BYTES,
   AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
   AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV,
@@ -88,15 +92,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: inspected.code, transferAuthorized: false },
         { status: inspected.code === "too_large" ? 413 : 400, headers: noStore });
     }
+    const browserNonce = newIdeaTransferBrowserNonce();
+    const attachBrowserCookie = (response: NextResponse) => {
+      response.cookies.set(ideaTransferBrowserCookieName(inspected.request.previewId),
+        browserNonce, { httpOnly: true, secure: true, sameSite: "strict",
+          path: "/api/admin/amux/ideas", maxAge: 15 * 60 });
+      return response;
+    };
     try {
-      const result = await prepareIdeaOnlyTransferPreview(session, request, inspected.request);
-      return NextResponse.json({ state: "prepared", ...result, transferAuthorized: false },
-        { status: 201, headers: noStore });
+      const result = await prepareIdeaOnlyTransferPreview(session, request, inspected.request,
+        browserNonce);
+      return attachBrowserCookie(NextResponse.json(
+        { state: "prepared", ...result, transferAuthorized: false },
+        { status: 201, headers: noStore }));
     } catch (error) {
       if (error instanceof IdeaTransferPreviewError && error.code === "outcome_unknown") {
-        return NextResponse.json({ error: "outcome_unknown",
+        return attachBrowserCookie(NextResponse.json({ error: "outcome_unknown",
           previewId: inspected.request.previewId, retryWrite: false,
-          transferAuthorized: false }, { status: 503, headers: noStore });
+          transferAuthorized: false }, { status: 503, headers: noStore }));
       }
       throw error;
     }

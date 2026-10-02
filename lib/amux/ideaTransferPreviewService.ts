@@ -8,6 +8,7 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { ideaTransferBrowserDigest } from "./ideaTransferBrowserCore.ts";
 import {
   openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys,
@@ -62,7 +63,7 @@ function ownerId(session: Session): string {
  * that a future, separately approved runner would have to verify and use. */
 export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; choice: IdeaOnlyTransferPreviewRequest;
-  keys: AmuxContentKeys;
+  keys: AmuxContentKeys; browserNonce: string;
 }): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload }> {
   const actorUserId = ownerId(input.session);
   const { choice } = input;
@@ -172,6 +173,10 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
     };
     payloadBytes = Buffer.from(amuxCanonicalJson(payload), "utf8");
     const sealed = sealAmuxContent(payloadBytes, "transfer_payload", choice.previewId, input.keys);
+    const browserBindingDigest = ideaTransferBrowserDigest({
+      previewId: choice.previewId, nonce: input.browserNonce,
+      authenticatedAt: input.session.user?.authenticatedAt, key: input.keys,
+    });
     const expiresAt = new Date(Math.min(now.getTime() + 15 * 60_000,
       idea.analysisDeadlineAt.getTime()));
     if (expiresAt <= now) throw new IdeaTransferPreviewError("not_ready");
@@ -199,6 +204,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       metadata: { ideaId: idea.id, chunkIndex: 0, sourcePlanRevisionId: plan.id,
         modelApprovalId: choice.approvalId, modelApprovalVersion: choice.approvalVersion,
         payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId,
+        browserBindingDigest,
         transferAuthorized: false },
     });
     return { previewId: choice.previewId, expiresAt, payload };
@@ -247,6 +253,8 @@ export async function readIdeaOnlyTransferPreview(session: Session, previewId: s
       Array.isArray(auditMetadata) ||
       (auditMetadata as Record<string, unknown>).payloadDigest !== row.payloadDigest ||
       (auditMetadata as Record<string, unknown>).payloadDigestKeyId !== row.payloadDigestKeyId ||
+      typeof (auditMetadata as Record<string, unknown>).browserBindingDigest !== "string" ||
+      !/^[a-f0-9]{64}$/.test((auditMetadata as Record<string, string>).browserBindingDigest) ||
       (auditMetadata as Record<string, unknown>).sourcePlanRevisionId !== row.sourcePlanRevisionId ||
       (auditMetadata as Record<string, unknown>).transferAuthorized !== false) {
     return { state: "unavailable", transferAuthorized: false };
@@ -284,6 +292,7 @@ export async function readIdeaOnlyTransferPreview(session: Session, previewId: s
 
 export async function prepareIdeaOnlyTransferPreview(
   session: Session, request: Request, choice: IdeaOnlyTransferPreviewRequest,
+  browserNonce: string,
 ) {
   ownerId(session);
   if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV])) {
@@ -306,7 +315,9 @@ export async function prepareIdeaOnlyTransferPreview(
   try {
     return await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
-      const result = await commitIdeaOnlyTransferPreview(tx, { session, request, choice, keys });
+      const result = await commitIdeaOnlyTransferPreview(tx, {
+        session, request, choice, keys, browserNonce,
+      });
       callbackReturned = true;
       return result;
     }, { maxWait: 5_000, timeout: 15_000 });

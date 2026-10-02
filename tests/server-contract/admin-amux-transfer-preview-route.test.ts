@@ -10,6 +10,9 @@ const ideaId = "123e4567-e89b-42d3-a456-426614174002";
 const approvalId = "123e4567-e89b-42d3-a456-426614174003";
 const choice = { version: 1, previewId, ideaId, provider: "openai",
   modelId: "gpt-frontier", reasoningEffort: "high", approvalId, approvalVersion: 1 };
+class FakeIdeaTransferPreviewError extends Error {
+  constructor(readonly code: string) { super(code); }
+}
 const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
   role: "owner",
@@ -18,6 +21,7 @@ const world = {
   writeOn: true,
   catalogOn: true,
   writes: 0,
+  unknown: false,
   reads: 0,
   body: JSON.stringify(choice),
 };
@@ -61,9 +65,10 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
       transferPreviewWritePermitted: () => world.writeOn,
     } });
     mock.module(mod("lib/amux/ideaTransferPreviewService.ts"), { namedExports: {
-      IdeaTransferPreviewError: class extends Error { code = "not_ready"; },
+      IdeaTransferPreviewError: FakeIdeaTransferPreviewError,
       prepareIdeaOnlyTransferPreview: async () => {
         world.writes += 1;
+        if (world.unknown) throw new FakeIdeaTransferPreviewError("outcome_unknown");
         return { previewId, expiresAt: new Date("2026-10-02T10:00:00Z"), payload: { prompt: "synthetic" } };
       },
       readIdeaOnlyTransferPreview: async () => {
@@ -84,7 +89,8 @@ const reset = () => {
   world.session = { user: { id: "owner-1" } };
   world.role = "owner"; world.recent = true;
   world.readOn = true; world.writeOn = true; world.catalogOn = true;
-  world.writes = 0; world.reads = 0; world.body = JSON.stringify(choice);
+  world.writes = 0; world.reads = 0; world.unknown = false;
+  world.body = JSON.stringify(choice);
 };
 
 test("preview write and read refuse unauthenticated, stale, or disabled callers", async () => {
@@ -115,6 +121,11 @@ test("prepared preview is no-store and never represents transfer permission", as
   const response = await POST(post());
   assert.equal(response.status, 201);
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  const cookie = response.headers.get("set-cookie") || "";
+  assert.match(cookie, new RegExp(`amux-v4-preview-${previewId}=`));
+  assert.match(cookie, /HttpOnly/i);
+  assert.match(cookie, /Secure/i);
+  assert.match(cookie, /SameSite=Strict/i);
   assert.equal((await response.json()).transferAuthorized, false);
   assert.equal(world.writes, 1);
   const read = await GET(get());
@@ -127,4 +138,15 @@ test("prepared preview is no-store and never represents transfer permission", as
     const malformed = query.startsWith("?") ? query : `?${query}`;
     assert.equal((await GET(get(malformed))).status, 400);
   }
+});
+
+test("unknown write keeps the same browser receipt for exact-ID read-back", async () => {
+  const { POST } = await route();
+  reset(); world.unknown = true;
+  const response = await POST(post());
+  assert.equal(response.status, 503);
+  assert.match(response.headers.get("set-cookie") || "", new RegExp(`amux-v4-preview-${previewId}=`));
+  assert.deepEqual(await response.json(), { error: "outcome_unknown", previewId,
+    retryWrite: false, transferAuthorized: false });
+  assert.equal(world.writes, 1);
 });
