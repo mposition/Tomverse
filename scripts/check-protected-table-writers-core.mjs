@@ -898,10 +898,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "43acecfde4250aad7a230a2219cf58863858636105c0e9d115607f49f7ff3b31",
+    sha256: "a3db47908c097928fca7524ef67dcd5b2afbcc1f387f9fd1efa3a3c4984ce2d1",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: it also runs a pending migration's declared presence probe -- a single SELECT taken from that migration's own header -- inside BEGIN READ ONLY and ROLLBACK, so a probe cannot write; the only new statements are those two and the probe.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
