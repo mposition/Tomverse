@@ -100,13 +100,16 @@ export async function runQaReleaseMonitor(
     env,
   });
   if (!admission.ok) {
+    if (admission.reason === "unauthorized") return answer(401, { error: "unauthorized" });
     return answer(admission.reason === "control_revision_unavailable" ? 503 : 409, { error: admission.reason });
   }
 
   let verdict: QaReleaseFreshnessVerdict;
   try {
     verdict = judgeQaReleaseFreshness({
-      digestSecretConfigured: (env.QA_RELEASE_DIGEST_SECRET ?? "").length > 0,
+      // Configured means usable: the same 32-character floor the route's own
+      // authentication applies, so a short secret reads as a mismatch.
+      digestSecretConfigured: (env.QA_RELEASE_DIGEST_SECRET ?? "").length >= 32,
       desiredEnabled: read.digestEnabled,
       latestDigestCreatedAtMs: read.latestDigestCreatedAtMs,
       dbNowMs: read.dbNowMs,

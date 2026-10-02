@@ -23,13 +23,23 @@ const gateJson = JSON.stringify({
   ],
 });
 
+const conditionedJson = JSON.stringify({
+  classified: [
+    { id: "ROUTE-01", status: "pending", verdict: "implemented_unmeasured" },
+    { id: "MEMORY-01", status: "pending", verdict: "not_applicable" },
+  ],
+});
+
 function ports(overrides = {}) {
   const calls = { scripts: [], posts: [] };
   const value = {
     calls,
     runScript: async (name, args, extraEnv) => {
       calls.scripts.push({ name, args: [...args], extraEnv });
-      if (name === "report:release-gate-evidence") return { exitCode: 0, stdout: gateJson };
+      if (name === "report:release-gate-evidence") {
+        // Under an assumed condition the report classifies the memory gate.
+        return { exitCode: 0, stdout: args.includes("--condition") ? conditionedJson : gateJson };
+      }
       if (name === "report:issue-backlog") {
         return { exitCode: 0, stdout: JSON.stringify({ classified: [{ number: 7, verdict: "open_work", title: "t" }] }) };
       }
@@ -131,4 +141,21 @@ test("a partial CI read is submitted with its rows and marked incomplete", async
   const whole = ports();
   await runQaReleaseDigestService(env(), whole);
   assert.equal(JSON.parse(whole.calls.posts[0].body).notChecked.includes("ci_collection_incomplete"), false);
+});
+
+test("no known destination stops the run before any script; a report the builder cannot read fails it cleanly", async () => {
+  const nowhere = ports();
+  const withoutName = env();
+  delete withoutName.RAILWAY_ENVIRONMENT_NAME;
+  assert.deepEqual(await runQaReleaseDigestService(withoutName, nowhere), { exitCode: 1, outcome: "destination_unknown" });
+  assert.equal(nowhere.calls.scripts.length, 0);
+
+  const odd = ports();
+  const original = odd.runScript;
+  odd.runScript = async (name, args, extraEnv) =>
+    name === "report:release-gate-evidence" && args.length === 1
+      ? { exitCode: 0, stdout: JSON.stringify({ classified: [{ id: "NEW-01", status: "pending", verdict: "a_new_verdict" }] }) }
+      : original(name, args, extraEnv);
+  assert.deepEqual(await runQaReleaseDigestService(env(), odd), { exitCode: 1, outcome: "digest_build_failed" });
+  assert.equal(odd.calls.posts.length, 0);
 });

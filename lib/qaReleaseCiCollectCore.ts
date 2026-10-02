@@ -10,7 +10,8 @@
  * templates from the files), so a renamed job stops matching and is counted
  * rather than guessed.
  *
- * Any failed read answers null: the digest then says GitHub could not be
+ * Each job contributes one row, from the newest run in the window that ran
+ * it. Any failed read answers null: the digest then says GitHub could not be
  * read, instead of presenting an empty list as "no failures".
  *
  * Pure apart from the injected `fetchJson`.
@@ -91,6 +92,10 @@ export async function collectQaReleaseCi(input: {
   const releaseLane: QaReleaseDigest["releaseLane"] = [];
   let unrecognizedJobs = 0;
   let truncated = false;
+  // One row per job: the newest run's. Runs are read newest first, so the
+  // first row seen for a job is its latest conclusion; an hourly workflow
+  // would otherwise fill the list with yesterday's repeats and overflow it.
+  const seen = new Set<string>();
 
   const page = async <T>(path: string, key: "workflow_runs" | "jobs"): Promise<Page<T>> => {
     const body = (await input.fetchJson(path)) as Record<string, unknown> | null;
@@ -144,6 +149,10 @@ export async function collectQaReleaseCi(input: {
             unrecognizedJobs += 1;
             continue;
           }
+          const shard = match.found?.[1] ? Number(match.found[1]) : null;
+          const jobKey = `${workflow}|${match.entry.job}|${shard ?? ""}`;
+          if (seen.has(jobKey)) continue;
+          seen.add(jobKey);
           const steps = (apiJob.steps ?? []).map((step) => ({ name: step.name, conclusion: step.conclusion }));
           const lane = RELEASE_LANE[workflow];
           if (lane) {
@@ -158,7 +167,6 @@ export async function collectQaReleaseCi(input: {
             });
             continue;
           }
-          const shard = match.found?.[1] ? Number(match.found[1]) : null;
           ci.push({
             workflow,
             runId: String(run.id),

@@ -87,9 +87,14 @@ export async function receiveQaReleaseDigest(
     async (tx) => {
       const newest = await readLatestQaReleaseOperatorControl(tx);
       if (newest?.revision !== admittedRevision) return "control_revision_mismatch";
-      if (!newest.digestEnabled) return "digest_disabled";
-      // A run past its own hard deadline is not recorded as a success
-      // (policy section 3): the database clock decides, in this transaction.
+      return newest.digestEnabled ? null : "digest_disabled";
+    },
+    // The transaction's last statement, after the row and its audit entry: a
+    // run past its own hard deadline is not recorded as a success (policy
+    // section 3). The database clock decides, and a late answer rolls both
+    // writes back. Admission and this check keep the created path at the
+    // policy's nine statements (AGENT_DIGEST_CREATED_STATEMENTS).
+    async (tx) => {
       const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${new Date(digest.runDeadline)}::timestamptz AS late`;
       return clock[0]?.late === false ? null : "run_deadline_passed";
     },

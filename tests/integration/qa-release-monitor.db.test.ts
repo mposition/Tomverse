@@ -91,6 +91,10 @@ test("recorded off is quiet; recorded on with no digest is stale; a stale revisi
     status: 200,
     body: { verdict: "control_mismatch" },
   });
+  assert.deepEqual(await call({ env: { QA_RELEASE_MONITOR_SECRET: MONITOR, QA_RELEASE_DIGEST_SECRET: "short" } }), {
+    status: 200,
+    body: { verdict: "control_mismatch" },
+  });
 });
 
 test("a digest just stored is fresh, and the same digest 28 hours later is stale", async () => {

@@ -44,7 +44,9 @@ export type QaReleaseDigestRunOutcome =
       outcome:
         | "refused_to_start"
         | "base_sha_unknown"
+        | "destination_unknown"
         | "gate_report_failed"
+        | "digest_build_failed"
         | "submission_refused"
         | "submission_outcome_unknown";
       status?: number;
@@ -82,6 +84,16 @@ export async function runQaReleaseDigestService(
   const baseSha = (env.RAILWAY_GIT_COMMIT_SHA ?? "").trim();
   if (!/^[0-9a-f]{40}$/.test(baseSha)) return { exitCode: 1, outcome: "base_sha_unknown" };
 
+  // The destination is decided before any work: an environment that cannot
+  // name one stops here rather than after every report has run.
+  let url: string;
+  try {
+    url = qaReleaseDigestEndpoint(env);
+    assertQaReleaseDigestEndpoint(url);
+  } catch {
+    return { exitCode: 1, outcome: "destination_unknown" };
+  }
+
   const startedAt = ports.now();
   const readToken = env.QA_RELEASE_GITHUB_READ_TOKEN ?? "";
 
@@ -117,22 +129,27 @@ export async function runQaReleaseDigestService(
   // a renamed job or a window past the page cap must not read as "no failures".
   else if (ci.unrecognizedJobs > 0 || ci.truncated) notChecked.push("ci_collection_incomplete");
 
-  const digest = buildQaReleaseDigest({
-    digestDate: startedAt.toISOString().slice(0, 10),
-    baseSha,
-    generatedAt: ports.now().toISOString(),
-    runDeadline: new Date(startedAt.getTime() + QA_RELEASE_DIGEST_HARD_TIMEOUT_MS).toISOString(),
-    gateReport: gates,
-    hypotheticalReports,
-    issueReport,
-    checks,
-    ci: ci?.ci ?? [],
-    releaseLane: ci?.releaseLane ?? [],
-    notChecked,
-  });
+  let digest: QaReleaseDigest;
+  try {
+    digest = buildQaReleaseDigest({
+      digestDate: startedAt.toISOString().slice(0, 10),
+      baseSha,
+      generatedAt: ports.now().toISOString(),
+      runDeadline: new Date(startedAt.getTime() + QA_RELEASE_DIGEST_HARD_TIMEOUT_MS).toISOString(),
+      gateReport: gates,
+      hypotheticalReports,
+      issueReport,
+      checks,
+      ci: ci?.ci ?? [],
+      releaseLane: ci?.releaseLane ?? [],
+      notChecked,
+    });
+  } catch {
+    // An unknown verdict or a document that cannot fit: a report changed
+    // under the digest, which a person has to look at.
+    return { exitCode: 1, outcome: "digest_build_failed" };
+  }
 
-  const url = qaReleaseDigestEndpoint(env);
-  assertQaReleaseDigestEndpoint(url);
   let status: number;
   try {
     ({ status } = await ports.postJson(

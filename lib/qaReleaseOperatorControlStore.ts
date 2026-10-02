@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -21,8 +21,20 @@ import { prisma } from "@/lib/prisma";
 
 export const QA_RELEASE_CONTROL_AUDIT_ACTION = "qa_release.control_recorded";
 
-/** Read and write limits, the same shape as the digest store's (policy section 10). */
-const LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 20_000 });
+/**
+ * The write's limits, derived the way policy section 10 derives the digest
+ * store's: seven statements (setup with the chain lock, newest revision, the
+ * four of the audit append, the insert), so 3A + 5 = 26 s, and Prisma five
+ * seconds more.
+ */
+export const QA_RELEASE_CONTROL_WRITE_LIMITS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 7,
+  transactionMs: (3 * 7 + 5) * 1_000,
+  prismaMs: (3 * 7 + 5) * 1_000 + 5_000,
+});
+const LIMITS = QA_RELEASE_CONTROL_WRITE_LIMITS;
 
 export const QA_RELEASE_SECRET_ROTATION_FIELDS = [
   "digestSecretRotatedAt",
@@ -74,13 +86,17 @@ export async function recordQaReleaseOperatorControl(
   try {
     return await db.$transaction(
       async (tx) => {
+        // The limits, and the audit chain's lock before the read: the lock
+        // serializes every audit write, so a second operator saving at once
+        // reads the first one's revision instead of computing the same number.
+        // The key is lib/adminAudit.ts's (tests/qaReleaseOperatorControlStore.test.mjs).
         await tx.$executeRaw`SELECT
           set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
-          set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true)`;
-        // The audit chain's lock before the read: it serializes every audit
-        // write, so a second operator saving at once reads the first one's
-        // revision instead of computing the same number.
-        await takeAuditChainLock(tx);
+          set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+          CASE WHEN current_setting('server_version_num')::int >= 170000
+            THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+          END,
+          pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
         const newest = await tx.qaReleaseOperatorControl.findFirst({
           orderBy: { revision: "desc" },
           select: { revision: true },

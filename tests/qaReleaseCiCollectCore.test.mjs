@@ -125,6 +125,26 @@ test("jobs are read across pages by their total count", async () => {
     ["/runs?", { total_count: 0, workflow_runs: [] }],
   ]);
   const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
-  assert.equal(result.ci.length, 101);
+  assert.equal(result.ci.length, 2, "one row per job; the second job is on page 2");
   assert.equal(result.ci.at(-1).job, "regression");
+});
+
+test("each job contributes one row, from the newest run that ran it", async () => {
+  const drift = (id, hoursAgo, conclusion) => [`runs/${id}/jobs`, { total_count: 1, jobs: [{ name: "Deployed commit vs branch head", conclusion, steps: [] }] }];
+  const gh = github([
+    ["workflows/deployed-commit-drift.yml/runs", { total_count: 3, workflow_runs: [run(31, 1), run(32, 2), run(33, 3)] }],
+    drift(31, 1, "success"),
+    drift(32, 2, "failure"),
+    drift(33, 3, "failure"),
+    ["workflows/e2e.yml/runs", { total_count: 2, workflow_runs: [run(41, 1), run(42, 5)] }],
+    ["runs/41/jobs", { total_count: 1, jobs: [{ name: "Chromium regression (shard 1/5)", conclusion: "success", steps: [] }] }],
+    ["runs/42/jobs", { total_count: 2, jobs: [
+      { name: "Chromium regression (shard 1/5)", conclusion: "failure", steps: [] },
+      { name: "Chromium regression (shard 2/5)", conclusion: "failure", steps: [] },
+    ] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
+  ]);
+  const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
+  assert.deepEqual(result.releaseLane.map((row) => [row.runId, row.jobConclusion]), [["31", "success"]]);
+  assert.deepEqual(result.ci.map((row) => [row.runId, row.shard, row.jobConclusion]), [["41", 1, "success"], ["42", 2, "failure"]]);
 });
