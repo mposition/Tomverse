@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import ts from "typescript";
+
 import {
   MARKETING_AUTOMATION_FEATURES,
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
@@ -555,13 +557,11 @@ test("the accepted event list is the receiver's recorded list", () => {
   );
 });
 
-// The receiver route's local import closure: every static, side-effect,
-// re-export and literal dynamic import or require that names a repository
-// file. A comment that looks like an import only adds a file; it can never
-// hide one, so the comparison below errs towards listing too much.
+// The receiver route's local import closure, from the TypeScript syntax tree:
+// static imports and re-exports, `import x = require()`, and `import()` /
+// `require()` calls. A call whose argument is not a plain string literal is a
+// failure, not a skip -- a dependency nobody can name cannot be fingerprinted.
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const IMPORT_SPECIFIER =
-  /\b(?:import|export)\s[^;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g;
 const isFile = (candidate) => {
   try {
     return statSync(candidate).isFile();
@@ -575,9 +575,35 @@ const resolveLocal = (fromPath, specifier) => {
   else if (specifier.startsWith(".")) base = path.join(repositoryRoot, path.dirname(fromPath), specifier);
   else return null;
   for (const candidate of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
-    if (isFile(candidate)) return path.relative(repositoryRoot, candidate).replaceAll("\\", "/");
+    if (isFile(candidate)) return path.relative(repositoryRoot, candidate).split(path.sep).join("/");
   }
   throw new Error(`${fromPath}: cannot resolve ${specifier}`);
+};
+const moduleSpecifiers = (filePath, source) => {
+  const file = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  const found = [];
+  const literal = (node, what) => {
+    if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
+      found.push(node.text);
+      return;
+    }
+    throw new Error(`${filePath}: ${what} with a specifier that is not a plain string`);
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier) literal(node.moduleSpecifier, "import/export");
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      literal(node.moduleReference.expression, "import = require");
+    } else if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(callee) && callee.text === "require";
+      if (isDynamicImport || isRequire) literal(node.arguments[0], isDynamicImport ? "import()" : "require()");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
 };
 const localImportClosure = (rootPath) => {
   const seen = new Set();
@@ -587,13 +613,26 @@ const localImportClosure = (rootPath) => {
     if (seen.has(current)) continue;
     seen.add(current);
     const source = readFileSync(path.join(repositoryRoot, current), "utf8");
-    for (const match of source.matchAll(IMPORT_SPECIFIER)) {
-      const resolved = resolveLocal(current, match[1] ?? match[2] ?? match[3]);
+    for (const specifier of moduleSpecifiers(current, source)) {
+      const resolved = resolveLocal(current, specifier);
       if (resolved) pending.push(resolved);
     }
   }
   return seen;
 };
+
+test("the closure scanner names commented and template imports and refuses computed ones", () => {
+  assert.deepEqual(
+    moduleSpecifiers(
+      "x.ts",
+      'const a = import(/* why */ "@/lib/a"); const b = import(`@/lib/b`); export * from "./c"; import d = require("./d");',
+    ),
+    ["@/lib/a", "@/lib/b", "./c", "./d"],
+  );
+  for (const source of ["import(name);", "require(`@/lib/${name}`);", "const m = require(base + \"x\");"]) {
+    assert.throws(() => moduleSpecifiers("x.ts", source), /not a plain string/, source);
+  }
+});
 
 test("the pipeline file list is the receiver route's whole import closure", () => {
   const closure = localImportClosure(MARKETING_WEBHOOK_PIPELINE_ROOT);

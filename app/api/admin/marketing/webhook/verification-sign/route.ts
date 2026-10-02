@@ -2,7 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 
-import { MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION } from "@/lib/marketingAuditEvidence";
+import {
+  MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
+  marketingWebhookSignatureAuditRequirement,
+  verifyMarketingAuditEvidence,
+} from "@/lib/marketingAuditEvidence";
 import { runMarketingAdminMutation } from "@/lib/marketingAdminMutations";
 import {
   MARKETING_WEBHOOK_RECORD_ID_PATTERN,
@@ -27,6 +31,7 @@ const REFUSAL_STATUS: Record<string, number> = {
   record_id_mismatch: 422,
   record_digest_mismatch: 409,
   record_pipeline_stale: 409,
+  signature_audit_unverifiable: 503,
 };
 
 /**
@@ -53,17 +58,32 @@ export async function POST(req: Request) {
       error instanceof MarketingWebhookVerificationRefusedError
         ? { code: error.code, status: REFUSAL_STATUS[error.code] ?? 409, message: error.message }
         : null,
-    run: async (_tx, { body, auditLogId }): Promise<MarketingWebhookVerificationSignature> => {
+    run: async (tx, { body, auditLogId }): Promise<MarketingWebhookVerificationSignature> => {
       checkMarketingWebhookRecordForSigning({
         recordId: body.recordId,
         recordDigest: body.recordDigest,
         fileText: await readMarketingWebhookVerificationRecordFile(body.recordId),
       });
-      return {
+      const signature = {
         recordId: body.recordId,
         recordDigest: body.recordDigest,
         signatureAuditLogId: auditLogId,
       };
+      // The row just written, read back through the verifier the apply decision
+      // uses. Without an audit integrity key the row is stored unhashed, and the
+      // verifier refuses it for ever -- so a signature that "succeeded" here would
+      // be one no apply could accept. Refusing rolls the row back with it.
+      const verdict = await verifyMarketingAuditEvidence(
+        tx,
+        marketingWebhookSignatureAuditRequirement(signature),
+      );
+      if (!verdict.ok) {
+        throw new MarketingWebhookVerificationRefusedError(
+          "signature_audit_unverifiable",
+          `The signing audit entry does not verify (${verdict.problem}).`,
+        );
+      }
+      return signature;
     },
   });
 }
