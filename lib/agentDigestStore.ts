@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AgentDigestAgentKey } from "@/lib/agentDigestContract";
 import {
@@ -41,11 +41,17 @@ export type AgentDigestRecordResult =
   | { status: "not_admitted"; reason: string };
 
 /**
- * A caller's last check, run inside the transaction after the audit chain
- * lock and before anything is written. Every writer of state the caller
- * depends on (an operator control revision, for one) takes the same lock
- * first, so the check and the write cannot interleave with a change to it.
- * It returns a refusal code, or null to proceed.
+ * A caller's check inside the transaction, returning a refusal code or null
+ * to proceed.
+ *
+ * As `admit` it runs after the audit chain lock and before anything is
+ * written. Every writer of state the caller depends on (an operator control
+ * revision, for one) takes the same lock first, so the check and the write
+ * cannot interleave with a change to it.
+ *
+ * As `confirm` it runs last, after the row and its audit entry, and only
+ * when a row was created (a replay or a conflict writes nothing to roll
+ * back); a refusal rolls both writes back.
  */
 export type AgentDigestAdmission = (tx: Prisma.TransactionClient) => Promise<string | null>;
 
@@ -57,15 +63,6 @@ class AgentDigestNotAdmitted extends Error {
 }
 
 type Db = Pick<typeof prisma, "$transaction">;
-
-/**
- * Statements of a created record, which the policy's transaction budget
- * counts (docs/policy/qa-release-agent.md section 10, digest submission
- * A = 9): setup with the chain lock, the caller's admission, insert, read
- * back, the four of the audit append (lock, clock, previous entry, insert),
- * and the caller's confirmation as the last statement.
- */
-export const AGENT_DIGEST_CREATED_STATEMENTS = 9;
 
 export async function recordAgentDigestItem(
   submission: AgentDigestSubmission,
@@ -84,27 +81,35 @@ export async function recordAgentDigestItem(
   try {
     return await db.$transaction(
       async (tx) => {
-        // First statement: the database-enforced limits, local to this
-        // transaction (transaction_timeout only where PostgreSQL 17+ has it),
-        // and the audit chain's lock before any row lock -- a transaction that
-        // holds the chain and then touches this row must never wait on one
-        // that holds the row and waits for the chain. The lock key is
-        // lib/adminAudit.ts's, which tests/agentDigestStoreCore.test.mjs pins.
+        // A created record is LIMITS.statements (policy section 10, A = 9)
+        // statements: these limits, the chain lock, the caller's admission,
+        // the insert, the four of the audit append (lock, clock, previous
+        // entry, insert) and the caller's confirmation.
+        //
+        // First the database-enforced limits, local to this transaction
+        // (transaction_timeout only where PostgreSQL 17+ has it). They arm
+        // for the statements after this one, which is why the lock is not
+        // folded in here.
         await tx.$executeRaw`SELECT
           set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
           set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
           CASE WHEN current_setting('server_version_num')::int >= 170000
             THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
-          END,
-          pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+          END`;
+        // The audit chain's lock before any row lock, under the 2 s statement
+        // limit: a transaction that holds the chain and then touches this row
+        // must never wait on one that holds the row and waits for the chain.
+        await takeAuditChainLock(tx);
         if (admit) {
           const refusal = await admit(tx);
           if (refusal !== null) return { status: "not_admitted", reason: refusal } as const;
         }
+        // The id is chosen here, so a created row needs no read back.
+        const id = crypto.randomUUID();
         const inserted = await tx.agentDigestItem.createMany({
           data: [
             {
-              id: crypto.randomUUID(),
+              id,
               agentKey: row.agentKey,
               kind: row.kind,
               schemaVersion: row.schemaVersion,
@@ -116,12 +121,12 @@ export async function recordAgentDigestItem(
           ],
           skipDuplicates: true,
         });
-        const stored = await tx.agentDigestItem.findUniqueOrThrow({
-          where: { agentKey_idempotencyKey: { agentKey: row.agentKey, idempotencyKey: row.idempotencyKey } },
-          select: { id: true, kind: true, schemaVersion: true, payloadSha256: true },
-        });
-
         if (inserted.count === 0) {
+          // Another submission holds the key: read it to tell a replay from a conflict.
+          const stored = await tx.agentDigestItem.findUniqueOrThrow({
+            where: { agentKey_idempotencyKey: { agentKey: row.agentKey, idempotencyKey: row.idempotencyKey } },
+            select: { id: true, kind: true, schemaVersion: true, payloadSha256: true },
+          });
           return classifyAgentDigestRepeat(stored, row) === "replayed"
             ? ({ status: "replayed", id: stored.id, payloadSha256: stored.payloadSha256 } as const)
             : ({ status: "conflict", id: stored.id } as const);
@@ -132,7 +137,7 @@ export async function recordAgentDigestItem(
           systemActor: INTAKE_ACTOR[row.agentKey],
           action: "agent_digest.recorded",
           targetType: "AgentDigestItem",
-          targetId: stored.id,
+          targetId: id,
           summary: "Recorded an agent digest item.",
           // Identity, size and hash only: the payload stays in its own row.
           metadata: {
@@ -152,7 +157,7 @@ export async function recordAgentDigestItem(
         }
         return {
           status: "created",
-          id: stored.id,
+          id,
           auditLogId,
           sizeBytes: row.sizeBytes,
           payloadSha256: row.payloadSha256,

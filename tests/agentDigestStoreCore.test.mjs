@@ -134,11 +134,15 @@ test("a body that is not a JSON object is refused before any transaction", () =>
   }
 });
 
-test("the writer's setup statement takes the audit chain's own lock key", async () => {
+test("the writer takes the audit chain lock as its own statement, after the limits are armed", async () => {
   const { readFileSync } = await import("node:fs");
   const store = readFileSync(new URL("../lib/agentDigestStore.ts", import.meta.url), "utf8");
-  const audit = readFileSync(new URL("../lib/adminAudit.ts", import.meta.url), "utf8");
-  const key = /pg_advisory_xact_lock\(hashtext\('([^']+)'\)\)/;
-  assert.equal(store.match(key)?.[1], audit.match(key)?.[1]);
-  assert.equal(store.match(key)?.[1], "tomverse-admin-audit-chain");
+  // set_config arms statement_timeout for the statements after it, so a lock
+  // folded into that same statement would wait without the 2 s limit.
+  const setup = store.slice(store.indexOf("set_config('statement_timeout'"), store.indexOf("END`;"));
+  assert.equal(setup.includes("pg_advisory"), false);
+  const limitsAt = store.indexOf("set_config('statement_timeout'");
+  const lockAt = store.indexOf("await takeAuditChainLock(tx);");
+  const insertAt = store.indexOf("tx.agentDigestItem.createMany(");
+  assert.ok(limitsAt > 0 && limitsAt < lockAt && lockAt < insertAt);
 });
