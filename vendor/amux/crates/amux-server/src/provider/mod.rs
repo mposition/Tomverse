@@ -296,8 +296,9 @@ mod tests {
         }
 
         let mut reg = default_registry();
+        let previous_count = reg.len();
         reg.register(Arc::new(FutureAdapter));
-        assert_eq!(reg.len(), 6);
+        assert_eq!(reg.len(), previous_count + 1);
         let got = reg.get(&ProviderId::new("a-provider-from-2031")).unwrap();
         assert_eq!(got.id().as_str(), "a-provider-from-2031");
     }

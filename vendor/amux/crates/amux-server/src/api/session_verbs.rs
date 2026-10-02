@@ -4001,6 +4001,10 @@ fn cursor_cmd_bin() -> String {
     if custom.is_empty() { launch_base_binary("cursor").to_string() } else { custom }
 }
 
+fn cursor_shell_command(bin: &str, opts: &str) -> String {
+    format!("{}{opts}", sh_quote(bin))
+}
+
 fn provider_label(provider: &str) -> &str {
     match provider {
         "claude" => "Claude Code",
@@ -6248,7 +6252,15 @@ async fn pane_has_live_child(name: &str) -> Option<bool> {
         return None;
     }
     let ch = run_cmd("pgrep", &["-P", &pid], OP_TIMEOUT).await?;
-    Some(!ch.stdout.iter().all(|b| b.is_ascii_whitespace()))
+    let children: Vec<String> = String::from_utf8_lossy(&ch.stdout)
+        .split_whitespace().map(str::to_owned).collect();
+    if children.is_empty() { return Some(false); }
+    let ids = children.join(",");
+    let ps = run_cmd("ps", &["-o", "stat=", "-p", &ids], OP_TIMEOUT).await?;
+    // A killed child can remain as a zombie until its shell reaps it. It is
+    // no longer running and must not make a stopped worker appear active.
+    Some(String::from_utf8_lossy(&ps.stdout).lines()
+        .any(|line| !line.trim().is_empty() && !line.trim_start().starts_with('Z')))
 }
 
 pub(crate) async fn is_running(name: &str) -> bool {
@@ -9462,7 +9474,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             if !opts.contains(&logs) {
                 opts += &format!(" --add-dir {}", sh_quote(&logs));
             }
-            format!("{}{opts}", cursor_cmd_bin())
+            cursor_shell_command(&cursor_cmd_bin(), &opts)
         }
         _ => build_claude_cmd(&cfg, &flags, &default_flags, &session_flag, extra_flags),
     };
@@ -28195,13 +28207,14 @@ CLAUDE-POSTFIX-COMPLETE
     }
 
     #[test]
+    fn cursor_override_is_one_shell_word() {
+        let command = cursor_shell_command("/tmp/cursor agent; touch /tmp/unwanted", " --trust");
+        assert_eq!(command, "'/tmp/cursor agent; touch /tmp/unwanted' --trust");
+    }
+
+    #[test]
     fn resolve_session_provider_falls_back_to_claude_for_anything_unknown() {
-        // "devin" here is just an arbitrary string this function does not
-        // recognize, exercising the fallback branch — not a claim about
-        // what the real `devin-worker` session runs (it does not run
-        // through amux-server's launch arm at all; see the function's doc
-        // comment).
-        for raw in ["", "devin", "  ", "not-a-provider", "DEVIN"] {
+        for raw in ["", "  ", "not-a-provider", "DEVIN-NOT-REGISTERED"] {
             assert_eq!(
                 resolve_session_provider(raw),
                 "claude",

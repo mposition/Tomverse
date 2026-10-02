@@ -65,9 +65,9 @@ jobs:
         working-directory: vendor/amux
         run: cargo build -p amux-server --locked
 
-      - name: Test vendored AMUX Cursor integration
+      - name: Test vendored AMUX server library
         working-directory: vendor/amux
-        run: cargo test -p amux-server --lib cursor --locked
+        run: cargo test -p amux-server --lib --locked
 
       - name: Check vendored AMUX Docker build inputs
         working-directory: vendor/amux
