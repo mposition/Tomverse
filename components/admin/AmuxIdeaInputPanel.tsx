@@ -13,8 +13,11 @@ import {
   classifyIdeaSubmissionReadBack,
 } from "@/lib/amux/ideaSubmissionUiCore";
 import {
+  clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  readConfirmedIdeaRequest,
   readPendingIdeaRequest,
+  rememberConfirmedIdeaRequest,
   reservePendingIdeaRequest,
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
@@ -91,6 +94,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const startAnotherIdea = () => {
     if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
+    if (submission.kind === "submitted") {
+      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    }
     inputRevision.current += 1;
     inFlight.current = false;
     setIdea("");
@@ -141,7 +147,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: await response.json(),
       }, requestId);
       if (decision.kind === "submitted") {
-        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
+        rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
       } else {
         setSubmission({ kind: "outcome_unknown", requestId });
@@ -156,6 +162,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   useEffect(() => {
     let active = true;
     const recovered = readPendingIdeaRequest(receiptStore(), operatorId);
+    const confirmed = recovered.kind === "none"
+      ? readConfirmedIdeaRequest(receiptStore(), operatorId) : null;
     queueMicrotask(() => {
       if (!active) return;
       if (recovered.kind === "unavailable") {
@@ -164,6 +172,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         inFlight.current = true;
         setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
         void readBack(recovered.requestId);
+      } else if (confirmed?.kind === "confirmed") {
+        inFlight.current = true;
+        setSubmission({ kind: "outcome_unknown", requestId: confirmed.requestId });
+        void readBack(confirmed.requestId);
+      } else if (confirmed?.kind === "unavailable") {
+        setSubmission({ kind: "recovery_unavailable" });
       }
       setRecoveryChecked(true);
     });
@@ -198,7 +212,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: await response.json(),
       }, requestId);
       if (decision.kind === "submitted") {
-        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
+        rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
       } else if (decision.kind === "refused") {
         clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
