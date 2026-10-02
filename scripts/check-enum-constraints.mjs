@@ -621,6 +621,26 @@ const REGISTRY = {
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
   // --- AMUX development-agent orchestration ------------------------------
+  AmuxCliUsageInvocation_cli_check: {
+    owner: "database",
+    reason:
+      "The dark v22/v23 usage receipt accepts only the two currently instrumented local CLIs. A future CLI needs a policy, parser and migration change before collection.",
+  },
+  AmuxCliUsageInvocation_authKind_check: {
+    owner: "database",
+    reason:
+      "Subscription observations and later API-key calls are separate billing facts. The dark receipt cannot invent another authentication category.",
+  },
+  AmuxCliUsageInvocation_status_check: {
+    owner: "database",
+    reason:
+      "Failed, timed-out and outcome-unknown invocations remain observable rather than being dropped or represented as successful zero-token calls.",
+  },
+  AmuxCliUsageInvocation_completeness_check: {
+    owner: "database",
+    reason:
+      "The usage source has a closed complete, partial or unknown vocabulary. Unknown token fields stay nullable until the approved read-back or budget hold path exists.",
+  },
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",
     reason:
