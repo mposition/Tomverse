@@ -70,6 +70,9 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
     where: { id: result.revisionId },
   });
   const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
+  const chunk = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+  });
   const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditId } });
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
   assert.equal(row.ideaId, ideaId);
@@ -82,6 +85,13 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   assert.equal(row.state, "active");
   assert.ok(row.activatedAt);
   assert.equal(idea.currentSourcePlanRevisionId, result.revisionId);
+  assert.equal(chunk.actorUserId, actorUserId);
+  assert.equal(chunk.state, "pending");
+  assert.equal(chunk.attempt, 0);
+  assert.equal(chunk.leaseGeneration, 0);
+  assert.equal(chunk.sourcePlanRevisionId, result.revisionId);
+  assert.equal(chunk.planStartChunkIndex, 0);
+  assert.equal(chunk.revisionChunkIndex, 0);
   assert.equal(audit.action, "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED");
   assert.equal(audit.actorUserId, null);
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, AMUX_V4_IDEA_SYSTEM_ACTOR);
@@ -104,6 +114,7 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
     createInitialIdeaOnlySourcePlan(tx, { ideaId, actorUserId, keys })),
   (error: unknown) => error instanceof InitialSourcePlanError && error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 1);
+  assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 1);
 });
 
 test("read-back reports absence and never discloses another owner's plan", async () => {
@@ -155,6 +166,7 @@ test("two initial-plan writers serialize to one revision and one creation audit"
   assert.ok(failure.reason instanceof InitialSourcePlanError);
   assert.equal(failure.reason.code, "not_ready");
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 1);
+  assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 1);
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED",
       targetId: success.value.revisionId },
@@ -173,6 +185,7 @@ test("unreviewed GitHub scope and mismatched owner cannot create an initial plan
     createInitialIdeaOnlySourcePlan(tx, { ideaId, actorUserId, keys })),
   (error: unknown) => error instanceof InitialSourcePlanError && error.code === "external_scope_required");
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 0);
+  assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 0);
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" },
   }), beforePlanAudits);
@@ -193,6 +206,7 @@ test("source-plan row, idea pointer and canonical audit roll back together", asy
   const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
   assert.equal(idea.currentSourcePlanRevisionId, null);
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 0);
+  assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 0);
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED", targetId: revisionId },
   }), 0);
