@@ -4,8 +4,8 @@ import test from "node:test";
 import {
   QA_RELEASE_STALE_AFTER_MS,
   judgeQaReleaseFreshness,
-  planQaReleaseFreshnessBudget,
   qaReleaseStaleReferenceId,
+  qaReleaseTransactionFits,
   qaReleaseUtcDateKey,
 } from "../lib/qaReleaseDigestFreshnessCore.ts";
 
@@ -25,15 +25,24 @@ test("the stale threshold is the policy's 28 hours", () => {
   assert.equal(QA_RELEASE_STALE_AFTER_MS, 28 * HOUR);
 });
 
-test("without the digest secret the environment is dark unless recorded as enabled", () => {
-  for (const desiredEnabled of [null, false]) {
-    for (const latestDigestCreatedAtMs of [null, NOW - HOUR, NOW - 100 * HOUR]) {
+test("recorded off is quiet whatever else is true", () => {
+  for (const digestSecretConfigured of [true, false]) {
+    for (const latestDigestCreatedAtMs of [null, NOW - HOUR, NOW - 100 * HOUR, NOW + HOUR]) {
       assert.equal(
-        judge({ digestSecretConfigured: false, desiredEnabled, latestDigestCreatedAtMs }),
-        "dark_not_configured",
-        `desiredEnabled=${desiredEnabled} latest=${latestDigestCreatedAtMs}`,
+        judge({ desiredEnabled: false, digestSecretConfigured, latestDigestCreatedAtMs }),
+        "operator_disabled",
+        `secret=${digestSecretConfigured} latest=${latestDigestCreatedAtMs}`,
       );
     }
+  }
+});
+
+test("no secret and never recorded as enabled is dark", () => {
+  for (const latestDigestCreatedAtMs of [null, NOW - HOUR, NOW - 100 * HOUR]) {
+    assert.equal(
+      judge({ digestSecretConfigured: false, desiredEnabled: null, latestDigestCreatedAtMs }),
+      "dark_not_configured",
+    );
   }
 });
 
@@ -46,44 +55,75 @@ test("a missing secret while recorded as enabled is reported, not silent", () =>
 });
 
 test("a configured environment with no digest row at all is stale, not quiet", () => {
-  // Covers a fresh activation and the day the last row is purged: neither may
-  // fall silent for want of a baseline.
   assert.equal(judge({ latestDigestCreatedAtMs: null }), "stale");
   assert.equal(judge({ latestDigestCreatedAtMs: null, desiredEnabled: null }), "stale");
 });
 
-test("a row turns stale exactly at 28 hours", () => {
+test("a row turns stale exactly at an age of 28 hours", () => {
   assert.equal(judge({ latestDigestCreatedAtMs: NOW - QA_RELEASE_STALE_AFTER_MS + 1 }), "fresh");
   assert.equal(judge({ latestDigestCreatedAtMs: NOW - QA_RELEASE_STALE_AFTER_MS }), "stale");
   assert.equal(judge({ latestDigestCreatedAtMs: NOW - 400 * 24 * HOUR }), "stale");
+  assert.equal(judge({ latestDigestCreatedAtMs: NOW }), "fresh");
 });
 
-test("a row dated in the future reads as fresh -- the named residual, not a crash", () => {
-  assert.equal(judge({ latestDigestCreatedAtMs: NOW + HOUR }), "fresh");
+test("a row dated after the database clock is stale, not healthy", () => {
+  assert.equal(judge({ latestDigestCreatedAtMs: NOW + 1 }), "stale");
+  assert.equal(judge({ latestDigestCreatedAtMs: NOW + 30 * 24 * HOUR }), "stale");
+});
+
+test("an unreadable clock throws instead of reading as fresh", () => {
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => judge({ dbNowMs: bad }), RangeError);
+    assert.throws(() => judge({ latestDigestCreatedAtMs: bad }), RangeError);
+  }
 });
 
 test("the alert key is the database clock's UTC date", () => {
   assert.equal(qaReleaseUtcDateKey(NOW), "2026-10-03");
-  // 23:59:59.999 UTC is still the same day even where the local date has moved on.
   assert.equal(qaReleaseUtcDateKey(Date.parse("2026-10-02T23:59:59.999Z")), "2026-10-02");
   assert.equal(qaReleaseUtcDateKey(Date.parse("2026-10-03T00:00:00.000Z")), "2026-10-03");
   assert.equal(qaReleaseStaleReferenceId(NOW), "stale:2026-10-03");
   assert.throws(() => qaReleaseUtcDateKey(Number.NaN), RangeError);
 });
 
-test("the budget gates match the policy's numbers at their edges", () => {
-  // remaining = 300,000 - elapsed; read needs 11 s, stale write 32 s, failure write 26 s.
-  assert.deepEqual(planQaReleaseFreshnessBudget(289_001), { kind: "skipped_no_budget" });
-  assert.deepEqual(planQaReleaseFreshnessBudget(289_000), { kind: "read_only", failureWriteFits: false });
-  assert.deepEqual(planQaReleaseFreshnessBudget(288_000), { kind: "read_only", failureWriteFits: false });
-  assert.deepEqual(planQaReleaseFreshnessBudget(274_000), { kind: "read_only", failureWriteFits: true });
-  assert.deepEqual(planQaReleaseFreshnessBudget(268_001), { kind: "read_only", failureWriteFits: true });
-  assert.deepEqual(planQaReleaseFreshnessBudget(268_000), { kind: "full" });
-  assert.deepEqual(planQaReleaseFreshnessBudget(0), { kind: "full" });
+test("each transaction is judged on the budget left at the moment it opens", () => {
+  const budget = 300_000;
+  assert.equal(qaReleaseTransactionFits("read", 289_000, budget), true);
+  assert.equal(qaReleaseTransactionFits("read", 289_001, budget), false);
+  assert.equal(qaReleaseTransactionFits("stale_write", 268_000, budget), true);
+  assert.equal(qaReleaseTransactionFits("stale_write", 268_001, budget), false);
+  assert.equal(qaReleaseTransactionFits("failure_write", 274_000, budget), true);
+  assert.equal(qaReleaseTransactionFits("failure_write", 274_001, budget), false);
 });
 
-test("an impossible elapsed time is refused rather than read as a budget", () => {
+test("the budget is spent in sequence: a full read leaves less for the write after it", () => {
+  const budget = 300_000;
+  // Starting at 268 s the stale write would fit on its own, but not after an 11 s read.
+  let elapsed = 268_000;
+  assert.equal(qaReleaseTransactionFits("read", elapsed, budget), true);
+  elapsed += 11_000;
+  assert.equal(qaReleaseTransactionFits("stale_write", elapsed, budget), false);
+  assert.equal(qaReleaseTransactionFits("failure_write", elapsed, budget), false);
+  // The policy's 69 s worst case fits exactly when the round starts with 69 s left.
+  elapsed = budget - 69_000;
+  assert.equal(qaReleaseTransactionFits("read", elapsed, budget), true);
+  elapsed += 11_000;
+  assert.equal(qaReleaseTransactionFits("stale_write", elapsed, budget), true);
+  elapsed += 32_000;
+  assert.equal(qaReleaseTransactionFits("failure_write", elapsed, budget), true);
+});
+
+test("the budget is the caller's own deadline, not a constant", () => {
+  // The Monitor caller aborts at 120 s: a stale write at 100 s does not fit there.
+  assert.equal(qaReleaseTransactionFits("stale_write", 100_000, 120_000), false);
+  assert.equal(qaReleaseTransactionFits("stale_write", 88_000, 120_000), true);
+});
+
+test("an impossible elapsed time or budget is refused", () => {
   for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.throws(() => planQaReleaseFreshnessBudget(bad), RangeError, String(bad));
+    assert.throws(() => qaReleaseTransactionFits("read", bad, 300_000), RangeError, String(bad));
+  }
+  for (const bad of [0, -1, Number.NaN]) {
+    assert.throws(() => qaReleaseTransactionFits("read", 0, bad), RangeError, String(bad));
   }
 });

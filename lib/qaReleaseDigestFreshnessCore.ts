@@ -1,31 +1,32 @@
 /**
  * Pure decisions for the QA-release digest silence check.
  *
- * docs/policy/qa-release-agent.md (version 1) is the contract: the app, not the
- * digest service, decides whether the daily digest has gone quiet, and it does
- * so with nothing but the facts read inside one database transaction. This
+ * docs/policy/qa-release-agent.md is the contract: the app, not the digest
+ * service, decides whether the daily digest has gone quiet, and it does so
+ * with nothing but the facts read inside one database transaction. This
  * module turns those facts into a verdict. It reads no clock of its own, no
  * environment and no database -- every input is passed in, so the whole table
  * is covered by fixed-clock unit tests.
  */
 
-/** A digest older than this is stale. Policy section 10: 28 hours. */
+/** A digest whose age is 28 hours or more is stale. Policy section 10. */
 export const QA_RELEASE_STALE_AFTER_MS = 28 * 60 * 60 * 1000;
 
 /**
- * The route budget the silence step runs inside, and the most each of its
- * transactions may take. Section 10 of the policy names these: the judgement
- * read is 11 s, the stale alert write 32 s and the monitor-failure write 26 s.
- * These are application figures derived from the statement and idle timeouts,
- * not database bounds.
+ * The most each transaction of one silence round may take (policy section 10:
+ * `3A + 5` seconds for A statements). Application figures derived from the
+ * statement and idle timeouts, not database bounds.
  */
-export const QA_RELEASE_ROUTE_BUDGET_MS = 300_000;
 export const QA_RELEASE_READ_TX_MAX_MS = 11_000;
 export const QA_RELEASE_STALE_WRITE_TX_MAX_MS = 32_000;
 export const QA_RELEASE_FAILURE_WRITE_TX_MAX_MS = 26_000;
 
 export type QaReleaseFreshnessVerdict =
+  /** No secret and no record of being enabled: this environment cannot record a digest. */
   | "dark_not_configured"
+  /** The operator recorded the agent as off: silence is expected. */
+  | "operator_disabled"
+  /** No secret while recorded as enabled: removed outside the audit trail. */
   | "control_mismatch"
   | "stale"
   | "fresh";
@@ -44,31 +45,43 @@ export type QaReleaseFreshnessInput = {
   dbNowMs: number;
 };
 
+function assertClock(value: number, name: string): void {
+  if (!Number.isFinite(value)) throw new RangeError(`${name} must be a finite number`);
+}
+
 /**
- * The four answers, in the order the policy states them.
+ * The verdict, in the order the policy states it.
  *
- * - No secret and nothing recorded as enabled: the environment cannot record a
- *   digest, and silence is expected (`dark_not_configured`).
- * - No secret while the operator recorded the agent as enabled: something
- *   removed it outside the audit trail, so it is reported, not hidden.
- * - A secret and no row at all: there is nothing to be fresh against.
- * - A secret and a row: stale once the newest row is 28 hours old.
+ * - Recorded off: quiet, whatever else is true.
+ * - No secret: quiet if never recorded as enabled, a mismatch if it was.
+ * - A secret and no row at all: there is nothing to be fresh against, so stale.
+ * - A secret and a row: stale once the newest row is 28 hours old, and stale
+ *   when the newest row is dated after the database clock -- a clock set
+ *   backwards or a write from outside the app must not read as healthy.
  *
- * A row dated after `dbNowMs` reads as fresh. That happens only through a
- * write outside the app or a clock set backwards, both named residuals.
+ * A clock that is not a finite number throws: the caller records that as a
+ * monitor failure rather than as a verdict.
  */
 export function judgeQaReleaseFreshness(input: QaReleaseFreshnessInput): QaReleaseFreshnessVerdict {
+  assertClock(input.dbNowMs, "dbNowMs");
+  if (input.latestDigestCreatedAtMs !== null) {
+    assertClock(input.latestDigestCreatedAtMs, "latestDigestCreatedAtMs");
+  }
+
+  if (input.desiredEnabled === false) return "operator_disabled";
   if (!input.digestSecretConfigured) {
     return input.desiredEnabled === true ? "control_mismatch" : "dark_not_configured";
   }
-  if (input.latestDigestCreatedAtMs === null) return "stale";
-  if (input.dbNowMs - input.latestDigestCreatedAtMs >= QA_RELEASE_STALE_AFTER_MS) return "stale";
+  const latest = input.latestDigestCreatedAtMs;
+  if (latest === null) return "stale";
+  if (latest > input.dbNowMs) return "stale";
+  if (input.dbNowMs - latest >= QA_RELEASE_STALE_AFTER_MS) return "stale";
   return "fresh";
 }
 
 /** `YYYY-MM-DD` of the database clock in UTC -- the key one alert per day hangs on. */
 export function qaReleaseUtcDateKey(dbNowMs: number): string {
-  if (!Number.isFinite(dbNowMs)) throw new RangeError("dbNowMs must be a finite number");
+  assertClock(dbNowMs, "dbNowMs");
   return new Date(dbNowMs).toISOString().slice(0, 10);
 }
 
@@ -77,31 +90,34 @@ export function qaReleaseStaleReferenceId(dbNowMs: number): string {
   return `stale:${qaReleaseUtcDateKey(dbNowMs)}`;
 }
 
-export type QaReleaseBudgetPlan =
-  /** Not even the read fits: touch nothing. */
-  | { kind: "skipped_no_budget" }
-  /**
-   * The read fits but the stale-alert write would not: read, and defer that
-   * write. Whether a failed read could still be recorded depends on the
-   * smaller failure-write maximum.
-   */
-  | { kind: "read_only"; failureWriteFits: boolean }
-  /** The read and both writes fit. */
-  | { kind: "full" };
+export type QaReleaseRoundTransaction = "read" | "stale_write" | "failure_write";
+
+const TRANSACTION_MAX_MS: Record<QaReleaseRoundTransaction, number> = {
+  read: QA_RELEASE_READ_TX_MAX_MS,
+  stale_write: QA_RELEASE_STALE_WRITE_TX_MAX_MS,
+  failure_write: QA_RELEASE_FAILURE_WRITE_TX_MAX_MS,
+};
 
 /**
- * What the silence step may open, given how much of the route's budget the
- * steps before it already spent. A transaction is opened only when the budget
- * left is at least its maximum.
+ * Whether one transaction of the silence round may be opened now.
+ *
+ * Asked immediately before each transaction with the time spent so far,
+ * including any transaction this round already ran: the budget is spent in
+ * sequence, so a read that took its full 11 s leaves 11 s less for the write
+ * after it. `budgetMs` is the caller's own deadline -- the route's when the
+ * step runs inside the credit-reconciliation route, the Monitor caller's when
+ * it runs on its own -- never a constant assumed here.
  */
-export function planQaReleaseFreshnessBudget(elapsedMs: number): QaReleaseBudgetPlan {
+export function qaReleaseTransactionFits(
+  transaction: QaReleaseRoundTransaction,
+  elapsedMs: number,
+  budgetMs: number,
+): boolean {
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
     throw new RangeError("elapsedMs must be a non-negative finite number");
   }
-  const remaining = QA_RELEASE_ROUTE_BUDGET_MS - elapsedMs;
-  if (remaining < QA_RELEASE_READ_TX_MAX_MS) return { kind: "skipped_no_budget" };
-  if (remaining < QA_RELEASE_STALE_WRITE_TX_MAX_MS) {
-    return { kind: "read_only", failureWriteFits: remaining >= QA_RELEASE_FAILURE_WRITE_TX_MAX_MS };
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    throw new RangeError("budgetMs must be a positive finite number");
   }
-  return { kind: "full" };
+  return budgetMs - elapsedMs >= TRANSACTION_MAX_MS[transaction];
 }
