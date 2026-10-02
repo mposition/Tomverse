@@ -278,6 +278,9 @@ run(
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // Dark v22/v23 CLI receipts: server timestamp, immutable row, strict
+    // content-free model detail and unknown/partial token semantics.
+    "tests/integration/amux-cli-usage-schema.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
