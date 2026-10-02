@@ -7,6 +7,8 @@ import { auditRowActorKind,
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET } from "@/lib/adminAuditSystemActors";
+import { openAmuxContent, verifyAmuxContentDigest,
+  type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
   AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
   AMUX_V4_ANALYSIS_NAMESPACE,
@@ -46,6 +48,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   /** Never sourced from the Agent request. The future caller must load the
    * approved price and runner-capability snapshots inside this transaction. */
   pricing: AmuxIdeaAnalysisReservationPricing;
+  keys: AmuxContentKeys;
 }): Promise<{ holdId: string; previewId: string; reservedMicroUsd: string;
   auditId: string }> {
   if (!ID.test(input.holdId) || !ID.test(input.previewId)) refuse("not_ready");
@@ -109,7 +112,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       preview.state !== "confirmed" || !preview.confirmedAt ||
       !preview.confirmedByUserId || !preview.confirmationAuditLogId ||
       preview.consumedAt !== null || preview.outcomeUnknownAt !== null ||
-      !preview.payloadCiphertext || preview.payloadPurgedAt !== null ||
+      !preview.payloadCiphertext || !preview.payloadKeyId ||
+      !preview.payloadKeyVersion || preview.payloadPurgedAt !== null ||
       !preview.confirmExpiresAt || persistedNow >= preview.confirmExpiresAt ||
       persistedNow >= preview.expiresAt || preview.modelId !== input.pricing.modelId) {
     refuse("not_ready");
@@ -119,6 +123,12 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   });
   const confirmation = await tx.adminAuditLog.findUnique({
     where: { id: preview.confirmationAuditLogId },
+  });
+  const preparedRows = await tx.adminAuditLog.findMany({
+    where: { action: "amux.v4.transfer_preview.prepared",
+      targetType: "AmuxIdeaTransferPreview", targetId: preview.id,
+      actorUserId: idea.actorUserId },
+    take: 2,
   });
   const confirmationMetadata = confirmation?.metadata;
   if (!plan || plan.state !== "active" || plan.ideaId !== idea.id ||
@@ -137,6 +147,59 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       (confirmationMetadata as Record<string, unknown>).modelId !== preview.modelId) {
     refuse("integrity_unavailable");
   }
+  const prepared = preparedRows[0];
+  const preparedMetadata = prepared?.metadata;
+  if (preparedRows.length !== 1 || !prepared?.entryHash ||
+      auditRowActorKind(prepared) !== "human" ||
+      !preparedMetadata || typeof preparedMetadata !== "object" ||
+      Array.isArray(preparedMetadata) ||
+      (preparedMetadata as Record<string, unknown>).ideaId !== idea.id ||
+      (preparedMetadata as Record<string, unknown>).chunkIndex !== 0 ||
+      (preparedMetadata as Record<string, unknown>).sourcePlanRevisionId !==
+        preview.sourcePlanRevisionId ||
+      (preparedMetadata as Record<string, unknown>).payloadDigest !== preview.payloadDigest ||
+      (preparedMetadata as Record<string, unknown>).payloadDigestKeyId !==
+        preview.payloadDigestKeyId ||
+      (preparedMetadata as Record<string, unknown>).transferAuthorized !== false) {
+    refuse("integrity_unavailable");
+  }
+  let raw: Buffer;
+  try {
+    raw = openAmuxContent({ ciphertext: Buffer.from(preview.payloadCiphertext),
+      keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
+    "transfer_payload", preview.id, input.keys);
+  } catch { refuse("integrity_unavailable"); }
+  try {
+    if (!verifyAmuxContentDigest(raw, "transfer_payload", preview.id,
+      preview.payloadDigest, preview.payloadDigestKeyId, input.keys)) {
+      refuse("integrity_unavailable");
+    }
+    const payload: unknown = JSON.parse(raw.toString("utf8"));
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      refuse("integrity_unavailable");
+    }
+    const record = payload as Record<string, unknown>;
+    const selection = record.selection;
+    if (record.version !== 1 || record.previewId !== preview.id ||
+        record.ideaId !== idea.id || record.templateVersion !== preview.templateVersion ||
+        typeof record.prompt !== "string" ||
+        !record.prompt.includes(`"previewId":"${preview.id}"`) ||
+        !selection || typeof selection !== "object" || Array.isArray(selection)) {
+      refuse("integrity_unavailable");
+    }
+    const choice = selection as Record<string, unknown>;
+    if (choice.provider !== input.pricing.provider ||
+        choice.modelId !== input.pricing.modelId ||
+        choice.modelId !== preview.modelId ||
+        choice.approvalId !==
+          (preparedMetadata as Record<string, unknown>).modelApprovalId ||
+        choice.approvalVersion !==
+          (preparedMetadata as Record<string, unknown>).modelApprovalVersion) {
+      refuse("integrity_unavailable");
+    }
+  } catch {
+    refuse("integrity_unavailable");
+  } finally { raw.fill(0); }
   if (await tx.amuxIdeaAnalysisBudgetHold.findUnique({
     where: { previewId: preview.id }, select: { id: true },
   })) refuse("already_reserved");
