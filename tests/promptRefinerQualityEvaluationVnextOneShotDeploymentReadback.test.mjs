@@ -4,16 +4,25 @@ import { observePromptRefinerVnextOneShotDeployment } from
     "../lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback.ts";
 
 const deploymentId = "12345678-1234-1234-1234-123456789abc";
+const projectId = "22345678-1234-1234-1234-123456789abc";
+const serviceId = "32345678-1234-1234-1234-123456789abc";
+const environmentId = "42345678-1234-1234-1234-123456789abc";
 const commitSha = "a".repeat(40);
 const environment = {
     RAILWAY_ENVIRONMENT_NAME: "staging",
     RAILWAY_DEPLOYMENT_ID: deploymentId,
     RAILWAY_GIT_COMMIT_SHA: commitSha,
+    RAILWAY_PROJECT_ID: projectId,
+    RAILWAY_SERVICE_ID: serviceId,
+    RAILWAY_ENVIRONMENT_ID: environmentId,
     RAILWAY_API_TOKEN: "test-token-not-a-secret",
 };
-const response = (deployment, errors) => ({
+const response = (deployment, errors, active = { id: deploymentId, status: "SUCCESS" }) => ({
     ok: true,
-    json: async () => ({ data: { deployment }, ...(errors ? { errors } : {}) }),
+    json: async () => ({
+        data: { deployment, deployments: { edges: active ? [{ node: active }] : [] } },
+        ...(errors ? { errors } : {}),
+    }),
 });
 
 test("reads the exact deployment from Railway without granting admission", async () => {
@@ -25,13 +34,19 @@ test("reads the exact deployment from Railway without granting admission", async
             assert.equal(init.cache, "no-store");
             assert.equal(init.redirect, "error");
             assert.ok(init.signal instanceof AbortSignal);
-            assert.deepEqual(JSON.parse(init.body).variables, { id: deploymentId });
+            assert.deepEqual(JSON.parse(init.body).variables, {
+                id: deploymentId,
+                input: {
+                    projectId, serviceId, environmentId,
+                    status: { successfulOnly: true },
+                },
+            });
             return response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } });
         },
     });
     assert.deepEqual(result, {
         deploymentId, commitSha, runtimeAndRailwayAgree: true,
-        activeDeploymentConfirmed: false, stageApprovalMatched: false,
+        activeDeploymentConfirmed: true, stageApprovalMatched: false,
         dispatchAuthorized: false, problems: [],
     });
     assert.equal(JSON.stringify(result).includes(environment.RAILWAY_API_TOKEN), false);
@@ -71,6 +86,9 @@ test("missing runtime identity or credentials stops before a network request", a
     for (const [changed, expectedProblem] of [
         [{ RAILWAY_DEPLOYMENT_ID: "" }, "runtime_identity_unavailable"],
         [{ RAILWAY_GIT_COMMIT_SHA: "short" }, "runtime_identity_unavailable"],
+        [{ RAILWAY_PROJECT_ID: "" }, "runtime_identity_unavailable"],
+        [{ RAILWAY_SERVICE_ID: "" }, "runtime_identity_unavailable"],
+        [{ RAILWAY_ENVIRONMENT_ID: "" }, "runtime_identity_unavailable"],
         [{ RAILWAY_ENVIRONMENT_NAME: "production" }, "runtime_environment_not_staging"],
         [{ RAILWAY_ENVIRONMENT_NAME: "staging", APP_ENV: "production" }, "runtime_environment_not_staging"],
         [{ RAILWAY_API_TOKEN: "" }, "railway_read_credentials_unavailable"],
@@ -123,6 +141,20 @@ test("pending, replaced, mismatched and malformed remote facts fail closed", asy
             ["railway_deployment_unavailable"]],
         [response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } }, [{}]),
             ["railway_deployment_unavailable"]],
+        [response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } },
+            null, { id: "52345678-1234-1234-1234-123456789abc", status: "SUCCESS" }),
+            ["railway_active_deployment_mismatch"]],
+        [response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } },
+            null, null), ["railway_active_deployment_unavailable"]],
+        [response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } },
+            null, { id: "not-a-uuid", status: "SUCCESS" }),
+            ["railway_active_deployment_unavailable"]],
+        [response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } },
+            null, { id: deploymentId, status: "REMOVED" }),
+            ["railway_active_deployment_unavailable"]],
+        [{ ok: true, json: async () => ({ data: {
+            deployment: { id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } },
+        } }) }, ["railway_active_deployment_unavailable"]],
     ]) {
         const result = await observePromptRefinerVnextOneShotDeployment({
             environment, fetchImpl: async () => remote,
