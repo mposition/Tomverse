@@ -391,11 +391,24 @@ const compilerOptions = parsedConfig.options;
 // position-free inventory are unchanged.
 // 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
-// (docs/policy/product-research-agent.md §5), above `auditRowActorKind()`.
-// That file is already listed, so the file set stays 190, and the inventory
-// and its position-free digest are unchanged -- the declaration only pushes
-// the one computed access in that file further down. This repins positions
+// (docs/policy/product-research-agent.md §5), and two dated notes are added to
+// `lib/marketingAutomationAccess.ts` above that file's accesses (its pipeline
+// fingerprint is repinned twice in the same change: once for the new Prisma
+// model, once for the column alignment). Both files are already listed, so the
+// file set stays 190.
+//
+// What the unchanged count and position-free digest establish is that the
+// multiset of (path, access text) is the same -- no access was added, removed
+// or rewritten. They do not say which nodes moved, so that part is read from
+// the diff: the new array sits above the one value-position access in
+// `adminAuditSystemActors.ts` (the metadata read in `auditRowActorKind()`,
+// which it does not rebind), and the notes sit above five accesses in
+// `marketingAutomationAccess.ts`. The `(typeof ...)[number]` in the new code is
+// an indexed access TYPE and never enters the inventory. This repins positions
 // only.
+//
+// Worth knowing for the next change: a comment added to any listed file moves
+// this digest, so this test is the last thing to run, not the first.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
@@ -404,6 +417,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
   "0c096082e9afc3bb75be1ebfa98ee7f7",
   "1e6323108c2fd270698393a462a8c608",
   "567cdae347e7643067cee2dbb26b91e7",
+  "773179541adadd88c0f0ca8aa61ec8c7",
+  "3f5cd53d3e353d276f10acd3c707d7d2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

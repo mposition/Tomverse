@@ -125,7 +125,11 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminMessages/productResearch*",
   "docs/ops/product-research-agent*",
   "tests/productResearch*",
-  "tests/issueBacklog*",
+  // The two backlog tests this agent owns, named one by one:
+  // tests/issueBacklog.test.mjs is the existing report's own product test, and
+  // a glob would take it too.
+  "tests/issueBacklogShaMode.test.mjs",
+  "tests/issueBacklogPartialClone.test.mjs",
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/**/engineering-agent*",
