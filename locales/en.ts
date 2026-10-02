@@ -19,7 +19,6 @@ export const en = {
         accountTooltipGuest: "Log in or sign up",
         guestMenuTitle: "Guest mode",
         guestMenuDescription: "Log in to use your conversations and projects across devices.",
-        guestMenuCreateAccount: "Create a free account",
         guestMenuViewPlans: "View plans",
         languageAndDisplay: "Language & display",
         newChat: "New Chat",

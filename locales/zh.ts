@@ -37,7 +37,6 @@ export const zh = {
         accountTooltipGuest: "登录或注册",
         guestMenuTitle: "访客模式",
         guestMenuDescription: "登录后可在多台设备上使用你的对话和项目。",
-        guestMenuCreateAccount: "创建免费账户",
         guestMenuViewPlans: "查看套餐",
         languageAndDisplay: "语言与显示设置",
         newChat: "新建对话",
