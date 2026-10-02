@@ -155,3 +155,19 @@ test("a refusal from the caller's last-statement confirmation rolls back the row
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 0);
   assert.equal(await prisma.adminAuditLog.count(), auditsBefore);
 });
+
+test("a confirmation returning null commits; on a replay or conflict it is not asked", async () => {
+  const input = submission({ confirmCommit: true });
+  let asked = 0;
+  const confirm = async () => {
+    asked += 1;
+    return null;
+  };
+  const first = await recordAgentDigestItem(input, prisma, undefined, confirm);
+  assert.equal(first.status, "created");
+  if (first.status === "created") createdIds.push(first.id);
+  assert.equal(asked, 1);
+  assert.equal((await recordAgentDigestItem(input, prisma, undefined, confirm)).status, "replayed");
+  assert.equal((await recordAgentDigestItem({ ...input, payload: { other: 1 } }, prisma, undefined, confirm)).status, "conflict");
+  assert.equal(asked, 1);
+});
