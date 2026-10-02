@@ -12,12 +12,15 @@ import test from "node:test";
 import {
   DECLARED_SERVICE_VARIABLES,
   DEFAULT_RUN_TIMINGS,
+  PROBE_SERVICE_VARIABLES,
   SLOT_WINDOW_MS,
   createRunState,
   environmentProblems,
   gitSupportsPartialClone,
+  childEnvironment,
   isSecretVariableName,
   parseGitVersion,
+  planProbe,
   planRun,
   runTimingProblems,
   slotForInstant,
@@ -26,6 +29,7 @@ import {
 } from "../lib/productResearchObservationRunnerCore.mjs";
 
 const SECRET = "s".repeat(32);
+const TOKEN = "github_pat_example";
 
 const serviceEnv = (overrides = {}) => ({
   PRODUCT_RESEARCH_AGENT_ENABLED: "true",
@@ -396,4 +400,67 @@ test("the runner gives up strictly after the route may still be answering", () =
     Number(declared[1]) * 1000,
     "the runner's figure for the route limit is not the route's own",
   );
+});
+
+test("the probe is checked too, against its own shorter list", () => {
+  // The probe cannot use planRun(): that planner requires the submission URL
+  // and secret the probe must not have. Skipping the check entirely would have
+  // left one service in this project unchecked, which is what it did.
+  assert.deepEqual(PROBE_SERVICE_VARIABLES, [
+    "PRODUCT_RESEARCH_AGENT_ENABLED",
+    "PRODUCT_RESEARCH_GITHUB_READ_TOKEN",
+    "RAILPACK_DEPLOY_APT_PACKAGES",
+  ]);
+  // Nothing unexpected: a complete probe environment.
+  assert.deepEqual(
+    planProbe({
+      PRODUCT_RESEARCH_AGENT_ENABLED: "true",
+      PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+      RAILPACK_DEPLOY_APT_PACKAGES: "git",
+      PATH: "/usr/bin",
+    }),
+    { mode: "run" },
+  );
+  // The probe has no business holding either submission variable, so one being
+  // present is a misconfigured service rather than a richer probe.
+  for (const extra of ["PRODUCT_RESEARCH_INGEST_URL", "PRODUCT_RESEARCH_INGEST_SECRET"]) {
+    const plan = planProbe({ PATH: "/usr/bin", [extra]: "anything" });
+    assert.equal(plan.mode, "config", extra);
+    assert.match(plan.problems.join(" "), new RegExp(`${extra} is not a variable`));
+  }
+  // And the credential shape check reaches it, which was the point.
+  const leaked = planProbe({
+    PATH: "/usr/bin",
+    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: "postgresql://user:pw@host/db",
+  });
+  assert.equal(leaked.mode, "config");
+  assert.match(leaked.problems.join(" "), /connection string/);
+  assert.equal(leaked.problems.join(" ").includes("pw@host"), false);
+});
+
+test("a child process gets what a binary needs to start and nothing else", () => {
+  // `git --version` has no reason to see the service's token, and a child that
+  // inherits everything is a child that can print anything.
+  const full = {
+    PATH: "/usr/bin",
+    HOME: "/root",
+    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
+    PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
+    RAILWAY_DEPLOYMENT_ID: "x",
+  };
+  const child = childEnvironment(full);
+  assert.deepEqual(Object.keys(child).sort(), ["HOME", "PATH"]);
+  assert.equal(JSON.stringify(child).includes(TOKEN), false);
+  assert.equal(JSON.stringify(child).includes(SECRET), false);
+
+  // Windows needs more names to start a binary at all, and still not those two.
+  const windows = childEnvironment(
+    { ...full, SystemRoot: "C:/Windows", COMSPEC: "C:/Windows/cmd.exe" },
+    { platform: "win32" },
+  );
+  assert.ok(Object.keys(windows).includes("SystemRoot"));
+  assert.equal(Object.keys(windows).includes("PRODUCT_RESEARCH_INGEST_SECRET"), false);
+  // A name the environment does not have is absent rather than undefined: an
+  // `undefined` value in a spawn env becomes the string "undefined".
+  assert.equal(Object.hasOwn(childEnvironment({ PATH: "/usr/bin" }), "HOME"), false);
 });
