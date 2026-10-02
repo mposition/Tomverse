@@ -67,6 +67,10 @@ test("a replacement receipt changes only the expected preview id", () => {
   });
   assert.equal(replacePreviewReceipt(storage, "operator", ideaId,
     previewId, previewId, model, "high"), false);
+  assert.equal(replacePreviewReceipt(storage, "operator", ideaId,
+    nextId, previewId, model, "high"), true,
+  "a definitive refusal restores the exact prior receipt for read-back");
+  assert.equal(readPreviewReceipt(storage, "operator", ideaId).previewId, previewId);
 });
 
 test("definite pre-write refusals release only their exact receipt; unknown outcomes stay fenced", () => {
@@ -76,8 +80,13 @@ test("definite pre-write refusals release only their exact receipt; unknown outc
     removeItem: (key) => { values.delete(key); } };
   assert.equal(reservePreviewReceipt(storage, "operator", ideaId, previewId, model, "high"), true);
   for (const [status, body] of [
+    [400, { error: "schema_rejected" }],
+    [403, { error: "Forbidden." }],
+    [404, { error: "not_found" }],
+    [413, { code: "REQUEST_BODY_TOO_LARGE" }],
+    [415, { error: "content_type_refused" }],
     [428, { error: "ADMIN_REAUTHENTICATION_REQUIRED" }],
-    [429, { error: "RATE_LIMITED" }],
+    [429, { code: "API_RATE_LIMITED" }],
     [409, { error: "not_ready" }],
     [409, { error: "model_changed" }],
     [503, { error: "preview_disabled" }],
@@ -86,6 +95,8 @@ test("definite pre-write refusals release only their exact receipt; unknown outc
     [503, { error: "outcome_unknown" }],
     [503, { error: "preview_unavailable" }],
     [409, { error: "outcome_unknown" }],
+    [400, null], [404, null], [429, null],
+    [404, { error: "some_future_postwrite_error" }],
     [200, { state: "prepared" }],
   ]) assert.equal(definitivePreviewPrewriteRefusal(status, body), false);
   assert.equal(clearRefusedPreviewReceipt(storage, "operator", ideaId, ideaId), false);
@@ -104,6 +115,7 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
   assert.match(panel, /definitivePreviewPrewriteRefusal\(response\.status, body\)/);
   assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId\)/);
+  assert.match(panel, /const refusalResponse = response\.clone\(\);\s*const body: unknown = await response\.json\(\)/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);

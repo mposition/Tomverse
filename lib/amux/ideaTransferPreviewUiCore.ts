@@ -125,11 +125,18 @@ export function replacePreviewReceipt(
 
 /** Only a response known to precede the writer may release the same-tab fence. */
 export function definitivePreviewPrewriteRefusal(status: number, body: unknown): boolean {
-  if ([400, 401, 403, 404, 413, 415, 428, 429].includes(status)) return true;
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
-  const error = (body as Record<string, unknown>).error;
-  return status === 409 && (error === "not_ready" || error === "model_changed") ||
-    status === 503 && error === "preview_disabled";
+  const { error, code } = body as Record<string, unknown>;
+  if (status === 400) return error === "schema_rejected" || error === "too_large" ||
+    code === "INVALID_JSON";
+  if (status === 403) return error === "Forbidden.";
+  if (status === 404) return error === "Not found." || error === "not_found";
+  if (status === 413) return error === "too_large" || code === "REQUEST_BODY_TOO_LARGE";
+  if (status === 415) return error === "content_type_refused";
+  if (status === 428) return error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  if (status === 429) return code === "API_RATE_LIMITED";
+  if (status === 409) return error === "not_ready" || error === "model_changed";
+  return status === 503 && error === "preview_disabled";
 }
 
 /** A generic 503 or lost response is never proof that the write did not land. */

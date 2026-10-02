@@ -258,6 +258,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           reasoningEffort: effort, approvalId: model.approvalId,
           approvalVersion: model.approvalVersion }),
       });
+      const refusalResponse = response.clone();
       const body: unknown = await response.json();
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
         previewId, ideaId, model, effort);
@@ -271,7 +272,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           setPreview({ kind: "unknown" });
           return;
         }
-        setFailure(await readAdminApiFailure(response.clone(), {
+        setFailure(await readAdminApiFailure(refusalResponse, {
           fallback: m.transferPreviewUnknown, locale,
         }));
         setPreview({ kind: previous?.kind === "present" ? "expired" : "idle" });

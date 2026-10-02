@@ -70,8 +70,11 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
     remainingScope: chunk.remainingScope,
   }), "utf8");
   try {
+    // Preview IDs are globally unique and already bound to this idea/chunk by
+    // the checked response. Binding the envelope to the exact preview also
+    // prevents a retry's freeform body from being swapped into this attempt.
     const freeform = sealAmuxContent(freeformBytes, "analysis_freeform",
-      `${input.ideaId}:${chunk.chunkIndex}`, input.keys);
+      chunk.previewId, input.keys);
     const units = chunk.units.map((unit, unitIndex): SealedAmuxDraftUnit => {
       const id = randomUUID();
       const bytes = Buffer.from(amuxCanonicalJson(unit), "utf8");
