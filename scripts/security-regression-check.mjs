@@ -3430,9 +3430,13 @@ const checks = [
         // Which spec runs in which tier is documented, and the document is
         // the thing reviewers read -- so it has to exist.
         read(".github/audits/ui-test-tiers.md").includes("@ui-risk") &&
-        // Everything the PR tier stopped running still runs here, unfiltered.
-        mainWorkflow.includes("push:") &&
-        !mainWorkflow.includes("pull_request:") &&
+        // Everything the PR tier stopped running still runs here, unfiltered,
+        // on every pull request into main (before 2026-10-02: on every main
+        // push, where it held Railway's production deployment for ~36 min).
+        mainWorkflow.includes(
+          "\non:\n  pull_request:\n    branches:\n      - main\n"
+        ) &&
+        !/^  push:/m.test(mainWorkflow) &&
         mainWorkflow.includes("npm run build") &&
         mainWorkflow.includes("npm run test:e2e:chromium") &&
         !mainWorkflow.includes("--grep") &&
@@ -3455,26 +3459,23 @@ const checks = [
         !prWorkflow.includes("chat-state-visual-regression") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
         !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
-        // Every push to main is a release and needs its own verdict, so this
-        // run must not cancel its predecessor. `cancel-in-progress: false` is
-        // half of it: the default group still holds only one pending run, and
-        // a third arrival evicts it, so a release burst loses the middle of
-        // the sequence. `queue: max` is the half that preserves a verdict per
-        // SHA. Asserted together because either alone is a silent regression
-        // -- nothing fails at the time, the runs simply stop existing.
+        // On a pull request only the latest head can merge, so a run is
+        // grouped by pull request and a newer head cancels the older run.
+        // Grouped by ref alone, every pull request into main would share one
+        // group and cancel each other's verdicts.
         //
         // Read from the workflow-level `concurrency:` block rather than from
-        // the file, because the header comment above it quotes the forbidden
-        // combination in prose; a whole-file match reads that as the setting.
+        // the file, because the header comment above it quotes the old
+        // settings in prose; a whole-file match reads that as the setting.
         workflowConcurrencyBlock(mainWorkflow).includes(
-          "cancel-in-progress: false"
+          "github.event.pull_request.number"
         ) &&
-        workflowConcurrencyBlock(mainWorkflow).includes("queue: max") &&
-        // Not merely wrong together: GitHub rejects the workflow outright,
-        // which would take the canonical run offline rather than weaken it.
-        !workflowConcurrencyBlock(mainWorkflow).includes(
+        workflowConcurrencyBlock(mainWorkflow).includes(
           "cancel-in-progress: true"
-        )
+        ) &&
+        // GitHub rejects `queue: max` with `cancel-in-progress: true`,
+        // which would take the canonical run offline rather than weaken it.
+        !workflowConcurrencyBlock(mainWorkflow).includes("queue: max")
       );
     },
   },
