@@ -7,6 +7,7 @@ import {
   MARKETING_AUTOMATION_FEATURES,
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
   MARKETING_PRICE_FALLBACK_ALERT_READY,
+  MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
   MARKETING_WEBHOOK_PIPELINE_COMPLETE,
   MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
   MARKETING_WEBHOOK_PIPELINE_FILES,
@@ -24,6 +25,7 @@ import {
   MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
   marketingWebhookSignatureAuditRequirement,
 } from "../lib/marketingAuditEvidence.ts";
+import { MARKETING_WEBHOOK_EVENT_TYPES } from "../lib/marketingWebhookCore.ts";
 
 const readable = (value) => ({ ok: true, value });
 const unreadable = { ok: false };
@@ -36,14 +38,14 @@ const configSnapshot = {
   appSettings: {
     "marketingAutomation.webhookShadowEnabled": "true",
   },
-  acceptedEventTypes: [],
+  acceptedEventTypes: [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
   envDigests: marketingWebhookEnvDigests(
     rawWebhookEnvironment,
     MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
   ),
   schemaVersion: "marketing-webhook-shadow-v1",
 };
-const configSnapshotDigest =
+const stagingConfigSnapshotDigest =
   computeMarketingWebhookConfigSnapshotDigest(configSnapshot);
 
 const record = {
@@ -60,7 +62,7 @@ const record = {
   },
   evidenceRefs: ["artifact://marketing-webhook/c1-c5"],
   pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
-  configSnapshotDigest,
+  stagingConfigSnapshotDigest,
 };
 const recordText = `${JSON.stringify(record, null, 2)}\n`;
 const recordDigest = digestMarketingWebhookVerificationRecord(recordText);
@@ -373,7 +375,7 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
   const baseline = resolveMarketingAutomationAccess(completeInputs()).webhookApply;
   assert.deepEqual(baseline, {
     enabled: false,
-    reasons: ["webhook_pipeline_incomplete"],
+    reasons: ["webhook_pipeline_incomplete", "webhook_production_config_unsigned"],
   });
 
   const cases = [
@@ -398,17 +400,6 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
         verified: false,
       }),
       "webhook_audit_invalid",
-    ],
-    [
-      "webhookConfigSnapshot",
-      readable({
-        ...configSnapshot,
-        envDigests: marketingWebhookEnvDigests(
-          { TOMVERSE_DEPLOY_ENV: "production" },
-          MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
-        ),
-      }),
-      "webhook_config_snapshot_stale",
     ],
     [
       "webhookEvent",
@@ -460,6 +451,33 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
   assert.ok(
     resolveMarketingAutomationAccess(stalePipeline).webhookApply.reasons.includes(
       "webhook_pipeline_fingerprint_stale",
+    ),
+  );
+
+  // S1 r7 amendment 1: a live snapshot that differs from the staging one the
+  // record carries (here, production identity) is expected, not a refusal. What
+  // still refuses is the missing production generation, which S2f adds.
+  const productionSnapshot = completeInputs();
+  productionSnapshot.webhookConfigSnapshot = readable({
+    ...configSnapshot,
+    envDigests: marketingWebhookEnvDigests(
+      { TOMVERSE_DEPLOY_ENV: "production" },
+      MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
+    ),
+  });
+  assert.deepEqual(
+    resolveMarketingAutomationAccess(productionSnapshot).webhookApply,
+    baseline,
+  );
+
+  const oldRecordShape = completeInputs();
+  const { stagingConfigSnapshotDigest: digestValue, ...withoutStaging } = record;
+  oldRecordShape.webhookVerificationRecordText = readable(
+    JSON.stringify({ ...withoutStaging, configSnapshotDigest: digestValue }),
+  );
+  assert.ok(
+    resolveMarketingAutomationAccess(oldRecordShape).webhookApply.reasons.includes(
+      "webhook_record_invalid",
     ),
   );
 
@@ -526,6 +544,14 @@ test("record digest strips BOM and normalises CRLF without changing the record",
   );
 });
 
+test("the accepted event list is the receiver's recorded list", () => {
+  // Written out in the access module because the receiver's core imports it.
+  assert.deepEqual(
+    [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
+    [...MARKETING_WEBHOOK_EVENT_TYPES],
+  );
+});
+
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
   const files = MARKETING_WEBHOOK_PIPELINE_FILES.map((path) => ({
     path,
@@ -562,6 +588,8 @@ test("configuration digest accepts only caller-hashed environment values", () =>
       RAILWAY_ENVIRONMENT_NAME:
         configSnapshot.envDigests.RAILWAY_ENVIRONMENT_NAME,
       APP_ENV: configSnapshot.envDigests.APP_ENV,
+      ZERNIO_WEBHOOK_SECRET: configSnapshot.envDigests.ZERNIO_WEBHOOK_SECRET,
+      ZERNIO_API_KEY: configSnapshot.envDigests.ZERNIO_API_KEY,
     },
     acceptedEventTypes: [...configSnapshot.acceptedEventTypes].reverse(),
     appSettings: {
@@ -575,6 +603,8 @@ test("configuration digest accepts only caller-hashed environment values", () =>
     TOMVERSE_DEPLOY_ENV: createHash("sha256")
       .update("staging", "utf8")
       .digest("hex"),
+    ZERNIO_API_KEY: null,
+    ZERNIO_WEBHOOK_SECRET: null,
   });
 
   const canonicalSnapshot = canonicalMarketingWebhookJson({
@@ -587,9 +617,9 @@ test("configuration digest accepts only caller-hashed environment values", () =>
   });
   assert.equal(
     canonicalSnapshot,
-    '{"acceptedEventTypes":[],"appSettings":{"marketingAutomation.webhookShadowEnabled":"true"},"envDigests":{"APP_ENV":null,"RAILWAY_ENVIRONMENT_NAME":null,"TOMVERSE_DEPLOY_ENV":"e919a75364398a449f860aeadddc57fa0502145a4e63959ddb33c417a48dc0da"},"schemaVersion":"marketing-webhook-shadow-v1"}',
+    '{"acceptedEventTypes":[],"appSettings":{"marketingAutomation.webhookShadowEnabled":"true"},"envDigests":{"APP_ENV":null,"RAILWAY_ENVIRONMENT_NAME":null,"TOMVERSE_DEPLOY_ENV":"e919a75364398a449f860aeadddc57fa0502145a4e63959ddb33c417a48dc0da","ZERNIO_API_KEY":null,"ZERNIO_WEBHOOK_SECRET":null},"schemaVersion":"marketing-webhook-shadow-v1"}',
   );
-  assert.equal(first, "a0edae0675b3d90bb1087fa1fbb4b6189525dd9b24f8b94f714341fc235e1f73");
+  assert.equal(first, "cb02916e4097920c4655ad02f34d428daacc40fdb0f87b59b6053b77138678bc");
   assert.notEqual(
     first,
     computeMarketingWebhookConfigSnapshotDigest({

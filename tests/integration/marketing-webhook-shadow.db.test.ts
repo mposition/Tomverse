@@ -3,11 +3,11 @@ import { after, beforeEach, test } from "node:test";
 
 import { MARKETING_WEBHOOK_SHADOW_KEY } from "@/lib/marketingAutomationAccess";
 import { MARKETING_WEBHOOK_FAULT_ARM_KEY } from "@/lib/marketingWebhookCore";
+import { runMarketingTransaction } from "@/lib/marketingStore";
 import {
   marketingWebhookShadowExists,
   recordMarketingWebhookShadow,
-  runMarketingTransaction,
-} from "@/lib/marketingStore";
+} from "@/lib/marketingWebhookShadowStore";
 import {
   consumeMarketingWebhookFaultArm,
   setMarketingWebhookFaultArm,
