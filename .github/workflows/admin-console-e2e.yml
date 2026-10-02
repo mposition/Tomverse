@@ -49,6 +49,7 @@ name: Admin Console E2E
 # request. This job finishes well inside the existing critical path.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches:
       - develop
@@ -64,6 +65,7 @@ concurrency:
 
 jobs:
   admin-console-e2e:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main'
     name: Admin Console E2E (PostgreSQL)
     runs-on: ubuntu-latest
     # Measured ~3 minutes of Playwright plus a production build. 25 minutes

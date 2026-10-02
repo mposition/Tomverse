@@ -22,6 +22,7 @@ name: Review Parity (shadow)
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -32,6 +33,7 @@ concurrency:
 
 jobs:
   review-parity:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main'
     name: Review parity baseline (shadow, non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 20
