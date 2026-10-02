@@ -87,8 +87,9 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 - 각 CLI가 **헤드리스로, stdin 프롬프트를 받아, 파일을 쓰지 않고** 끝나는지.
   `codex exec --sandbox read-only -`와 `cursor-agent --print --mode ask --trust`는
   Windows에서 쓰던 형태입니다. `claude -p`는 Read·Grep·Glob만 허용하고 Bash를 막습니다
-  (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). 이 조합은
-  새로 적은 것이라 아직 검증되지 않았습니다. 셋 다 Linux 버전에서 확인합니다.
+  (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). subagent
+  도구(`Agent`, `Task`)도 막습니다. 2026-10-02 Ubuntu 서버에서 세 CLI 모두 쓰기 요청을
+  거절하고 json 블록으로 끝나는 것을 확인했고, Codex는 stdout에 최종 답만 냅니다.
 - Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
   `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
 

@@ -30,7 +30,7 @@
         "-p",
         "--output-format", "text",
         "--allowedTools", "Read,Grep,Glob",
-        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent,Task"
       ]
     },
     {
