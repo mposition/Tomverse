@@ -103,6 +103,45 @@ export function pickNextPullRequest(pullRequests, branch) {
 }
 
 /**
+ * The train's memory between runs, per branch: the merge it is still
+ * following, and the latch set when it stopped.
+ *
+ * Without it a restart forgets that the last merge's deployment failed, sees
+ * an idle environment and merges the next PR on top of the broken one. So an
+ * unreadable state is an error, not an empty state: a corrupt file must not
+ * be the thing that clears a latch.
+ */
+export function parseTrainState(text) {
+  if (text === null || text === undefined) return { lanes: {} };
+  const state = JSON.parse(text);
+  if (!state || typeof state !== "object" || !state.lanes || typeof state.lanes !== "object") {
+    throw new Error("merge train state has no lanes object");
+  }
+  for (const [branch, lane] of Object.entries(state.lanes)) {
+    if (!lane || typeof lane !== "object") throw new Error(`merge train state for ${branch} is not an object`);
+    const { awaiting, latch } = lane;
+    if (
+      awaiting != null &&
+      !(Number.isInteger(awaiting.number) && /^[0-9a-f]{40}$/.test(awaiting.sha) && Number.isFinite(awaiting.mergedAt))
+    ) {
+      throw new Error(`merge train state for ${branch} has a malformed awaiting merge`);
+    }
+    if (latch != null && !(typeof latch.reason === "string" && typeof latch.at === "string")) {
+      throw new Error(`merge train state for ${branch} has a malformed latch`);
+    }
+  }
+  return state;
+}
+
+export function laneState(state, branch) {
+  return { awaiting: null, latch: null, ...state.lanes[branch] };
+}
+
+export function withLane(state, branch, patch) {
+  return { ...state, lanes: { ...state.lanes, [branch]: { ...laneState(state, branch), ...patch } } };
+}
+
+/**
  * What happened to the deployments Railway made for one merge commit.
  *
  * "not_seen" is not success: Railway may not have registered the push yet,

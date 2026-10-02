@@ -5,7 +5,10 @@ import {
   checksVerdict,
   deploymentOutcome,
   inFlightDeployments,
+  laneState,
+  parseTrainState,
   pickNextPullRequest,
+  withLane,
 } from "../scripts/merge-train-core.mjs";
 
 const run = (status, conclusion = null, name = "check") => ({ __typename: "CheckRun", name, status, conclusion });
@@ -106,4 +109,31 @@ test("deploymentOutcome follows only the merge commit's deployments", () => {
   assert.equal(deploymentOutcome([deployment("SUCCESS"), deployment("CRASHED")], "abc").state, "failed");
   assert.equal(deploymentOutcome([deployment("REMOVED")], "abc").state, "unknown");
   assert.equal(deploymentOutcome([deployment("SOMETHING_NEW")], "abc").state, "unknown");
+});
+
+const sha = "a".repeat(40);
+
+test("a missing state file is an empty state, a corrupt one is an error", () => {
+  assert.deepEqual(parseTrainState(null), { lanes: {} });
+  // A corrupt file must never be what clears a latch.
+  assert.throws(() => parseTrainState("{"));
+  assert.throws(() => parseTrainState("{}"));
+  assert.throws(() => parseTrainState(JSON.stringify({ lanes: { develop: { awaiting: { number: 1, sha: "short", mergedAt: 1 } } } })));
+  assert.throws(() => parseTrainState(JSON.stringify({ lanes: { develop: { latch: { reason: 1 } } } })));
+  const valid = { lanes: { develop: { awaiting: { number: 1, sha, mergedAt: 1 }, latch: { reason: "x", at: "t" } } } };
+  assert.deepEqual(parseTrainState(JSON.stringify(valid)), valid);
+});
+
+test("lane updates keep the other lane and the untouched fields", () => {
+  let state = withLane({ lanes: {} }, "develop", { awaiting: { number: 7, sha, mergedAt: 1 } });
+  state = withLane(state, "main", { latch: { reason: "failed", at: "t" } });
+  state = withLane(state, "develop", { latch: { reason: "deploy failed", at: "t" } });
+  assert.deepEqual(laneState(state, "develop"), {
+    awaiting: { number: 7, sha, mergedAt: 1 },
+    latch: { reason: "deploy failed", at: "t" },
+  });
+  assert.deepEqual(laneState(state, "main"), { awaiting: null, latch: { reason: "failed", at: "t" } });
+  assert.deepEqual(laneState({ lanes: {} }, "develop"), { awaiting: null, latch: null });
+  // What is written must read back through the same validation.
+  assert.deepEqual(parseTrainState(JSON.stringify(state)), state);
 });
