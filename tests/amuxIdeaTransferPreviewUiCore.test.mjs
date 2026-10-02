@@ -64,3 +64,16 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(page, /transferPreviewWritePermitted\(process\.env\[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV\]\)/);
   assert.match(page, /transferPreviewReadPermitted\(process\.env\[AMUX_V4_TRANSFER_PREVIEW_READ_ENV\]\)/);
 });
+
+test("Admin confirmation uses a separate dark gate and a one-shot browser receipt", () => {
+  const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
+  const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /transferConfirmWritePermitted\(process\.env\[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV\]\)/);
+  assert.match(page, /transferConfirmReadPermitted\(process\.env\[AMUX_V4_TRANSFER_CONFIRM_READ_ENV\]\)/);
+  assert.match(input, /confirmAvailable=\{transferConfirmAvailable\}/);
+  assert.match(panel, /reserveConfirmationAttempt\(receiptStore\(\), operatorId, value\.previewId/);
+  assert.match(panel, /readConfirmationAttempt\(receiptStore\(\), operatorId, pendingId/);
+  assert.match(panel, /await readConfirmation\(value\.previewId, ideaId/);
+  assert.match(panel, /payloadDigestKeyId: value\.payloadDigestKeyId/);
+});
