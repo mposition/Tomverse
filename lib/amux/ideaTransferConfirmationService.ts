@@ -42,7 +42,8 @@ const sameDigest = (left: string, right: string) =>
 export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClient, input: {
   session: Session; request: Request; choice: IdeaTransferConfirmationRequest;
   browserNonce: string; keys: AmuxContentKeys;
-}): Promise<{ previewId: string; confirmExpiresAt: Date; auditId: string }> {
+}): Promise<{ previewId: string; ideaId: string; payloadDigest: string;
+  payloadDigestKeyId: string; confirmExpiresAt: Date; auditId: string }> {
   const actorUserId = ownerId(input.session);
   const { choice } = input;
   await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
@@ -173,7 +174,9 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       confirmationAuditLogId: auditId },
   });
   if (updated.count !== 1) throw new IdeaTransferConfirmationError("not_ready");
-  return { previewId: row.id, confirmExpiresAt: row.expiresAt, auditId };
+  return { previewId: row.id, ideaId: idea.id,
+    payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
+    confirmExpiresAt: row.expiresAt, auditId };
 }
 
 export async function confirmIdeaTransferPreview(session: Session, request: Request,
@@ -210,8 +213,15 @@ export async function readIdeaTransferConfirmation(session: Session, previewId: 
     where: { id: row.ideaId, actorUserId }, select: { id: true },
   });
   if (!idea) return { state: "not_visible", modelCallStarted: false } as const;
+  const nowRows = await prisma.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  if (!(nowRows[0]?.now instanceof Date)) {
+    return { state: "unavailable", modelCallStarted: false } as const;
+  }
   if (row.state === "prepared" && !row.confirmationAuditLogId) {
-    return { state: "not_confirmed", modelCallStarted: false } as const;
+    return { state: nowRows[0].now >= row.expiresAt ? "expired" : "not_confirmed",
+      modelCallStarted: false } as const;
   }
   if (row.state !== "confirmed" || !row.confirmedAt || !row.confirmExpiresAt ||
       row.confirmedByUserId !== actorUserId || !row.confirmationAuditLogId ||
@@ -233,15 +243,10 @@ export async function readIdeaTransferConfirmation(session: Session, previewId: 
       (audit.metadata as Record<string, unknown>).modelCallStarted !== false) {
     return { state: "unavailable", modelCallStarted: false } as const;
   }
-  const nowRows = await prisma.$queryRaw<Array<{ now: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
-  `;
-  if (!(nowRows[0]?.now instanceof Date)) {
-    return { state: "unavailable", modelCallStarted: false } as const;
-  }
   if (nowRows[0].now >= row.confirmExpiresAt) {
     return { state: "expired", modelCallStarted: false } as const;
   }
-  return { state: "confirmed", previewId: row.id,
+  return { state: "confirmed", previewId: row.id, ideaId: row.ideaId,
+    payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
     confirmExpiresAt: row.confirmExpiresAt, modelCallStarted: false } as const;
 }

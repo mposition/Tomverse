@@ -62,12 +62,17 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
       confirmIdeaTransferPreview: async () => {
         world.writes += 1;
         if (world.unknown) throw new FakeConfirmationError("outcome_unknown");
-        return { previewId, confirmExpiresAt: new Date("2026-10-02T10:00:00Z"),
+        return { previewId, ideaId,
+          payloadDigest: choice.payloadDigest,
+          payloadDigestKeyId: choice.payloadDigestKeyId,
+          confirmExpiresAt: new Date("2026-10-02T10:00:00Z"),
           auditId: "synthetic-audit" };
       },
       readIdeaTransferConfirmation: async () => {
         world.reads += 1;
-        return { state: "confirmed", previewId, modelCallStarted: false };
+        return { state: "confirmed", previewId, ideaId,
+          payloadDigest: choice.payloadDigest,
+          payloadDigestKeyId: choice.payloadDigestKeyId, modelCallStarted: false };
       },
     } });
   }
@@ -118,12 +123,17 @@ test("confirmation requires one same-preview browser receipt and exact request",
   const response = await POST(post());
   assert.equal(response.status, 201);
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
-  assert.equal((await response.json()).modelCallStarted, false);
+  const result = await response.json();
+  assert.equal(result.modelCallStarted, false);
+  assert.equal(result.ideaId, ideaId);
+  assert.equal(result.payloadDigest, choice.payloadDigest);
   assert.equal(world.writes, 1);
   const read = await GET(get());
   assert.equal(read.status, 200);
   assert.equal(read.headers.get("cache-control"), "private, no-store, max-age=0");
-  assert.equal((await read.json()).modelCallStarted, false);
+  const readResult = await read.json();
+  assert.equal(readResult.modelCallStarted, false);
+  assert.equal(readResult.payloadDigestKeyId, choice.payloadDigestKeyId);
   assert.equal(world.reads, 1);
   assert.equal((await GET(get(`?previewId=${previewId}&extra=1`))).status, 400);
 });

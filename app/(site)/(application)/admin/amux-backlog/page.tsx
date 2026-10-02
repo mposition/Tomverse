@@ -37,6 +37,12 @@ import {
   transferPreviewReadPermitted,
   transferPreviewWritePermitted,
 } from "@/lib/amux/ideaTransferPreviewInputCore";
+import {
+  AMUX_V4_TRANSFER_CONFIRM_READ_ENV,
+  AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
+  transferConfirmReadPermitted,
+  transferConfirmWritePermitted,
+} from "@/lib/amux/ideaTransferConfirmationCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -81,6 +87,9 @@ export default async function AdminAmuxBacklogPage({
   const transferPreviewAvailable = initialPlanAvailable && frontierModelsAvailable &&
     transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV]) &&
     transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV]);
+  const transferConfirmAvailable = transferPreviewAvailable &&
+    transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV]) &&
+    transferConfirmReadPermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV]);
   const chips = amuxTabChips(
     { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
       ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
@@ -108,6 +117,7 @@ export default async function AdminAmuxBacklogPage({
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
           transferPreviewAvailable={transferPreviewAvailable}
+          transferConfirmAvailable={transferConfirmAvailable}
           operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
