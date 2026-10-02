@@ -1,13 +1,18 @@
 /**
- * Drafting a staging webhook verification record from what staging stored
- * (S2 plan, S2e-verification: "Generate the strict record field-by-field").
+ * Drafting a staging webhook verification record from what staging stored and
+ * what Zernio delivered (S2 plan, S2e-verification; policy §8.1.1).
  *
- * Pure. The caller reads the shadow reports, the fault arm and the staging
- * configuration snapshot; this decides which conditions the stored rows prove
- * and refuses to write a record whose conditions they do not. c1 and c2 are
- * delivery facts (a signed delivery accepted, an unsigned one refused) that
- * live in request logs, not in the database, so they arrive as evidence
- * references the executor observed -- never as a default.
+ * Pure. The caller reads the shadow reports from the database and the delivery
+ * attempts from Zernio's webhook log; this decides, **per event type**, which of
+ * conditions 1-5 those facts prove, and puts in the scope only the
+ * `event type x channel` pairs whose type proved all of them. Order is
+ * evidence: condition 3 needs a redelivery *after* the event was recorded, and
+ * condition 4 needs the deliberate failure to come *before* the event was ever
+ * processed -- final rows alone cannot tell either from a first delivery.
+ *
+ * Condition 2 (unsigned or tampered requests refused before parsing) is not
+ * about an event type. It needs one refused delivery in the log and the
+ * executor's reference for the tampered-body probe, which Zernio cannot send.
  */
 import {
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
@@ -15,6 +20,10 @@ import {
   digestMarketingWebhookVerificationRecord,
   marketingWebhookVerificationRecordSchema,
 } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_WEBHOOK_PROVIDER,
+  marketingWebhookEventIdDigest,
+} from "@/lib/marketingWebhookCore";
 
 export type MarketingWebhookShadowRow = {
   readonly eventIdDigest: string;
@@ -23,9 +32,15 @@ export type MarketingWebhookShadowRow = {
   readonly statusQueryMatch: boolean;
 };
 
-export type MarketingWebhookConsumedArm = {
-  readonly eventIdDigest: string;
-  readonly state: "armed" | "consumed";
+/** One attempt from Zernio's webhook log, reduced to what the receiver answered. */
+export type MarketingWebhookDelivery = {
+  readonly eventId: string;
+  readonly event: string;
+  /** When Zernio made the attempt, as its log states it. */
+  readonly at: string;
+  readonly statusCode: number;
+  /** The receiver's `status` or `code` from the response body, or null if it had none. */
+  readonly answer: string | null;
 };
 
 export type MarketingWebhookRecordDraftInput = {
@@ -34,82 +49,180 @@ export type MarketingWebhookRecordDraftInput = {
   readonly stagingCommitSha: string;
   readonly stagingConfigSnapshotDigest: string;
   readonly reports: readonly MarketingWebhookShadowRow[];
-  readonly faultArm: MarketingWebhookConsumedArm | null;
-  /** What the executor observed for c1 and c2, as references; required, never inferred. */
-  readonly c1EvidenceRefs: readonly string[];
+  readonly deliveries: readonly MarketingWebhookDelivery[];
+  /** The executor's reference for the tampered-body probe; required, never inferred. */
   readonly c2EvidenceRefs: readonly string[];
-  /** Any further references (log exports, screenshots) to carry. */
   readonly evidenceRefs: readonly string[];
 };
 
+export type MarketingWebhookTypeShortfall = "c1" | "c3" | "c4" | "c5";
+
 export type MarketingWebhookRecordDraftProblem =
-  | "c1_evidence_missing"
+  | "c2_no_refused_delivery"
   | "c2_evidence_missing"
-  | "c3_no_reports"
-  | "c3_duplicate_event"
-  | "c4_fault_not_consumed"
-  | "c4_fault_event_not_recorded_once"
-  | "c5_no_matching_pair";
+  | "no_event_type_proved";
 
 export type MarketingWebhookRecordDraft =
   | {
       readonly ok: true;
       readonly fileText: string;
       readonly recordDigest: string;
-      /** Pairs left out because a status query did not agree for every event of the pair. */
+      /** Event types seen but left out, with the conditions each did not prove. */
+      readonly excludedTypes: ReadonlyArray<{ eventType: string; missing: MarketingWebhookTypeShortfall[] }>;
+      /** Pairs of a proved type left out because a status query disagreed. */
       readonly excludedPairs: ReadonlyArray<{ eventType: string; channelId: string }>;
     }
-  | { readonly ok: false; readonly problems: readonly MarketingWebhookRecordDraftProblem[] };
+  | {
+      readonly ok: false;
+      readonly problems: readonly MarketingWebhookRecordDraftProblem[];
+      readonly excludedTypes: ReadonlyArray<{ eventType: string; missing: MarketingWebhookTypeShortfall[] }>;
+    };
 
-const pairKey = (row: { eventType: string; channelId: string }) =>
-  JSON.stringify([row.eventType, row.channelId]);
+const PROCESSED = new Set(["recorded", "duplicate"]);
+
+const time = (value: string): number => {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new Error(`Unreadable delivery time: ${value}`);
+  return parsed;
+};
+
+const deliveryRef = (delivery: MarketingWebhookDelivery) =>
+  `zernio-webhook-log:${delivery.eventId}:${delivery.at}:${delivery.statusCode}:${delivery.answer ?? "-"}`;
+
+const comparePairs = (
+  left: { eventType: string; channelId: string },
+  right: { eventType: string; channelId: string },
+) => {
+  const a = JSON.stringify([left.eventType, left.channelId]);
+  const b = JSON.stringify([right.eventType, right.channelId]);
+  return a < b ? -1 : a > b ? 1 : 0;
+};
 
 export const draftMarketingWebhookVerificationRecord = (
   input: MarketingWebhookRecordDraftInput,
 ): MarketingWebhookRecordDraft => {
+  const refs = new Set<string>();
+
+  const reportsByDigest = new Map<string, MarketingWebhookShadowRow[]>();
+  for (const row of input.reports) {
+    reportsByDigest.set(row.eventIdDigest, [...(reportsByDigest.get(row.eventIdDigest) ?? []), row]);
+  }
+  /** Exactly one stored report of this event, and of this type. */
+  const storedOnce = (eventId: string, eventType: string) => {
+    const rows = reportsByDigest.get(marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, eventId)) ?? [];
+    return rows.length === 1 && rows[0]?.eventType === eventType;
+  };
+
+  const attemptsByEvent = new Map<string, MarketingWebhookDelivery[]>();
+  for (const delivery of input.deliveries) {
+    attemptsByEvent.set(delivery.eventId, [...(attemptsByEvent.get(delivery.eventId) ?? []), delivery]);
+  }
+  for (const attempts of attemptsByEvent.values()) attempts.sort((a, b) => time(a.at) - time(b.at));
+
+  const proveType = (eventType: string): MarketingWebhookTypeShortfall[] => {
+    const events = [...attemptsByEvent.entries()].filter(([, attempts]) =>
+      attempts.every((attempt) => attempt.event === eventType),
+    );
+    const used: MarketingWebhookDelivery[] = [];
+
+    // 1: a signed delivery of this type was accepted and stored.
+    const c1 = events.find(
+      ([eventId, attempts]) =>
+        storedOnce(eventId, eventType) &&
+        attempts.some((attempt) => attempt.statusCode === 200 && attempt.answer === "recorded"),
+    );
+    if (c1) used.push(...c1[1].filter((attempt) => attempt.answer === "recorded"));
+
+    // 3: after it was recorded, a later delivery of the same event changed nothing.
+    const c3 = events.find(([eventId, attempts]) => {
+      if (!storedOnce(eventId, eventType)) return false;
+      const recorded = attempts.find((attempt) => attempt.answer === "recorded");
+      return (
+        recorded !== undefined &&
+        attempts.some(
+          (attempt) =>
+            attempt.answer === "duplicate" &&
+            attempt.statusCode === 200 &&
+            time(attempt.at) > time(recorded.at),
+        )
+      );
+    });
+    if (c3) used.push(...c3[1].filter((attempt) => PROCESSED.has(attempt.answer ?? "")));
+
+    // 4: the deliberate failure came before the event was ever processed, and a
+    // later delivery then processed it exactly once.
+    const c4 = events.find(([eventId, attempts]) => {
+      if (!storedOnce(eventId, eventType)) return false;
+      const failure = attempts.findIndex(
+        (attempt) => attempt.statusCode === 503 && attempt.answer === "deliberate_fault",
+      );
+      if (failure < 0) return false;
+      const before = attempts.slice(0, failure);
+      const after = attempts.slice(failure + 1);
+      return (
+        !before.some((attempt) => PROCESSED.has(attempt.answer ?? "")) &&
+        after.filter((attempt) => attempt.answer === "recorded").length === 1 &&
+        after.some((attempt) => attempt.answer === "recorded" && time(attempt.at) > time(attempts[failure]!.at))
+      );
+    });
+    if (c4) used.push(...c4[1]);
+
+    // 5: at least one pair of this type agreed with the status query throughout.
+    const pairs = new Map<string, boolean>();
+    for (const row of input.reports.filter((report) => report.eventType === eventType)) {
+      const key = row.channelId;
+      pairs.set(key, (pairs.get(key) ?? true) && row.statusQueryMatch);
+    }
+    const c5 = [...pairs.values()].some(Boolean);
+
+    const missing: MarketingWebhookTypeShortfall[] = [];
+    if (!c1) missing.push("c1");
+    if (!c3) missing.push("c3");
+    if (!c4) missing.push("c4");
+    if (!c5) missing.push("c5");
+    if (missing.length === 0) for (const attempt of used) refs.add(deliveryRef(attempt));
+    return missing;
+  };
+
   const problems: MarketingWebhookRecordDraftProblem[] = [];
-  if (input.c1EvidenceRefs.length === 0) problems.push("c1_evidence_missing");
+  const refused = input.deliveries.filter(
+    (delivery) => delivery.statusCode === 401 && delivery.answer === "signature_invalid",
+  );
+  if (refused.length === 0) problems.push("c2_no_refused_delivery");
   if (input.c2EvidenceRefs.length === 0) problems.push("c2_evidence_missing");
 
-  // c3: each event stored exactly once.
-  const perDigest = new Map<string, number>();
-  for (const row of input.reports) {
-    perDigest.set(row.eventIdDigest, (perDigest.get(row.eventIdDigest) ?? 0) + 1);
+  const types = [...new Set(input.deliveries.map((delivery) => delivery.event))].sort();
+  const excludedTypes: Array<{ eventType: string; missing: MarketingWebhookTypeShortfall[] }> = [];
+  const observedScope: Array<{ eventType: string; channelId: string }> = [];
+  const excludedPairs: Array<{ eventType: string; channelId: string }> = [];
+  for (const eventType of types) {
+    // Deliveries Zernio sends that the receiver never records (its test event)
+    // have no stored rows and cannot be in scope; they are not reported as shortfalls.
+    if (!input.reports.some((report) => report.eventType === eventType)) continue;
+    const missing = proveType(eventType);
+    if (missing.length > 0) {
+      excludedTypes.push({ eventType, missing });
+      continue;
+    }
+    const channels = new Map<string, boolean>();
+    for (const row of input.reports.filter((report) => report.eventType === eventType)) {
+      channels.set(row.channelId, (channels.get(row.channelId) ?? true) && row.statusQueryMatch);
+    }
+    for (const [channelId, agreed] of channels) {
+      (agreed ? observedScope : excludedPairs).push({ eventType, channelId });
+    }
   }
-  if (input.reports.length === 0) problems.push("c3_no_reports");
-  if ([...perDigest.values()].some((count) => count !== 1)) problems.push("c3_duplicate_event");
+  if (observedScope.length === 0) problems.push("no_event_type_proved");
+  if (problems.length > 0) return { ok: false, problems, excludedTypes };
 
-  // c4: one deliberate failure was spent, and its event was then stored once --
-  // the retry after the 5xx landed, and was not stored twice.
-  if (input.faultArm?.state !== "consumed") {
-    problems.push("c4_fault_not_consumed");
-  } else if (perDigest.get(input.faultArm.eventIdDigest) !== 1) {
-    problems.push("c4_fault_event_not_recorded_once");
-  }
-
-  // c5: a pair is observed only when every stored event of it agreed with
-  // the status query. One disagreement leaves the pair out of the scope.
-  const agreed = new Map<string, { eventType: string; channelId: string }>();
-  const disagreed = new Map<string, { eventType: string; channelId: string }>();
-  for (const row of input.reports) {
-    const pair = { eventType: row.eventType, channelId: row.channelId };
-    (row.statusQueryMatch ? agreed : disagreed).set(pairKey(pair), pair);
-  }
-  for (const key of disagreed.keys()) agreed.delete(key);
-  if (agreed.size === 0) problems.push("c5_no_matching_pair");
-
-  if (problems.length > 0) return { ok: false, problems };
-
-  const observedScope = [...agreed.values()].sort((left, right) =>
-    pairKey(left) < pairKey(right) ? -1 : pairKey(left) > pairKey(right) ? 1 : 0,
-  );
+  refs.add(deliveryRef(refused[0]!));
   const record = {
     recordId: input.recordId,
     executor: input.executor,
     stagingCommitSha: input.stagingCommitSha,
-    observedScope,
+    observedScope: observedScope.sort(comparePairs),
     conditions: { c1: "pass", c2: "pass", c3: "pass", c4: "pass", c5: "pass" },
-    evidenceRefs: [...new Set([...input.c1EvidenceRefs, ...input.c2EvidenceRefs, ...input.evidenceRefs])],
+    evidenceRefs: [...new Set([...input.c2EvidenceRefs, ...input.evidenceRefs, ...[...refs].sort()])],
     pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
     stagingConfigSnapshotDigest: input.stagingConfigSnapshotDigest,
   };
@@ -120,6 +233,7 @@ export const draftMarketingWebhookVerificationRecord = (
     ok: true,
     fileText,
     recordDigest: digestMarketingWebhookVerificationRecord(fileText),
-    excludedPairs: [...disagreed.values()],
+    excludedTypes,
+    excludedPairs: excludedPairs.sort(comparePairs),
   };
 };
