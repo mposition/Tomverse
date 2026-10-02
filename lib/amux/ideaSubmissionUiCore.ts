@@ -8,17 +8,20 @@ type PostDecision =
 /** A new request ID is safe only after the previous write is definitively
  * confirmed. Unknown outcomes must be read back, never silently reset. */
 export function canStartAnotherIdea(
-  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" | "refused",
+  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" |
+    "refused" | "selection_pending" | "selection_unavailable",
   busy: boolean,
 ): boolean {
-  return state === "submitted" && !busy;
+  return (state === "submitted" || state === "selection_unavailable") && !busy;
 }
 
 export function canSelectRecentIdea(
-  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" | "refused",
+  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" |
+    "refused" | "selection_pending" | "selection_unavailable",
   busy: boolean,
 ): boolean {
-  return !busy && (state === "idle" || state === "submitted" || state === "refused");
+  return !busy && (state === "idle" || state === "submitted" || state === "refused" ||
+    state === "selection_unavailable");
 }
 
 export type RecentIdea = { ideaId: string; requestId: string;

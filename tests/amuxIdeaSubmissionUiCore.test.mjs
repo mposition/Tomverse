@@ -17,18 +17,20 @@ const requestId = "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0";
 
 test("another idea starts only after a definitive save and no pending check", () => {
   assert.equal(canStartAnotherIdea("submitted", false), true);
+  assert.equal(canStartAnotherIdea("selection_unavailable", false), true);
   assert.equal(canStartAnotherIdea("submitted", true), false);
-  for (const state of ["idle", "pending", "outcome_unknown", "recovery_unavailable", "refused"]) {
+  for (const state of ["idle", "pending", "outcome_unknown", "recovery_unavailable", "refused",
+    "selection_pending"]) {
     assert.equal(canStartAnotherIdea(state, false), false);
   }
 });
 
 test("recent idea selection cannot bypass an unresolved submission", () => {
-  for (const state of ["idle", "submitted", "refused"]) {
+  for (const state of ["idle", "submitted", "refused", "selection_unavailable"]) {
     assert.equal(canSelectRecentIdea(state, false), true);
     assert.equal(canSelectRecentIdea(state, true), false);
   }
-  for (const state of ["pending", "outcome_unknown", "recovery_unavailable"]) {
+  for (const state of ["pending", "outcome_unknown", "recovery_unavailable", "selection_pending"]) {
     assert.equal(canSelectRecentIdea(state, false), false);
   }
 });
@@ -118,9 +120,11 @@ test("recent picker stays behind read-back and never treats a list row as confir
   const get = route.split("export async function GET")[1] ?? "";
   assert.match(get, /!ideaSubmissionReadBackPermitted\(/);
   assert.match(get, /params\.get\("view"\) === "recent"/);
+  assert.match(get, /recent \? "admin-amux-v4-idea-recent" : "admin-amux-v4-idea-readback"/);
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
   const select = panel.split("const selectRecentIdea =")[1]?.split("useEffect(() => {")[0] ?? "";
-  assert.match(select, /void readBack\(requestId\)/);
-  assert.match(select, /setSubmission\(\{ kind: "outcome_unknown", requestId \}\)/);
+  assert.match(select, /void readBack\(requestId, "selection"\)/);
+  assert.match(select, /setSubmission\(\{ kind: "selection_pending", requestId \}\)/);
   assert.doesNotMatch(select, /setSubmission\(\{ kind: "submitted"/);
+  assert.match(panel, /purpose === "selection"[\s\S]*?selection_unavailable/);
 });

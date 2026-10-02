@@ -53,6 +53,8 @@ type SubmissionState =
   | { kind: "pending"; requestId: string }
   | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean }
   | { kind: "outcome_unknown"; requestId: string }
+  | { kind: "selection_pending"; requestId: string }
+  | { kind: "selection_unavailable"; requestId: string }
   | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
 
@@ -120,6 +122,11 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
     if (submission.kind === "submitted") {
       clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    } else if (submission.kind === "selection_unavailable") {
+      const previous = readConfirmedIdeaRequest(receiptStore(), operatorId);
+      if (previous.kind === "confirmed") {
+        clearConfirmedIdeaRequest(receiptStore(), operatorId, previous.requestId);
+      }
     }
     inputRevision.current += 1;
     inFlight.current = false;
@@ -168,8 +175,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     }
   };
 
-  const readBack = useCallback(async (requestId: string) => {
+  const readBack = useCallback(async (requestId: string,
+    purpose: "submission" | "selection" = "submission") => {
     setReadBackPending(true);
+    const unavailable = () => {
+      if (purpose === "selection") {
+        inFlight.current = false;
+        setSubmission({ kind: "selection_unavailable", requestId });
+      } else {
+        setSubmission({ kind: "outcome_unknown", requestId });
+      }
+    };
     try {
       const query = new URLSearchParams({ requestId }).toString();
       const response = await adminFetch(
@@ -182,13 +198,14 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       }, requestId);
       if (decision.kind === "submitted") {
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+        inFlight.current = true;
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
           hasExternalSources: decision.hasExternalSources });
       } else {
-        setSubmission({ kind: "outcome_unknown", requestId });
+        unavailable();
       }
     } catch {
-      setSubmission({ kind: "outcome_unknown", requestId });
+      unavailable();
     } finally {
       setReadBackPending(false);
     }
@@ -216,9 +233,6 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       (submission.kind !== "submitted" &&
         (!!idea.trim() || !!repositories.trim() || !!pullRequests.trim())) ||
       !recentIdeas?.some((row) => row.requestId === requestId)) return;
-    if (submission.kind === "submitted") {
-      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
-    }
     inputRevision.current += 1;
     setIdea("");
     setRepositories("");
@@ -235,8 +249,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
     inFlight.current = true;
-    setSubmission({ kind: "outcome_unknown", requestId });
-    void readBack(requestId);
+    setSubmission({ kind: "selection_pending", requestId });
+    void readBack(requestId, "selection");
   };
 
   useEffect(() => {
@@ -268,7 +282,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     if (!submissionAvailable || !recoveryChecked || inFlight.current ||
         result?.outcome !== "input_checked" ||
         submission.kind === "pending" || submission.kind === "outcome_unknown" ||
-        submission.kind === "submitted") return;
+        submission.kind === "submitted" || submission.kind === "selection_pending") return;
     const refs = parsePullRequests(pullRequests);
     if (!refs) return;
     const requestId = crypto.randomUUID();
@@ -337,7 +351,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       /^[1-9]\d*$/.test(sourcePrNumber) && Number.isSafeInteger(Number(sourcePrNumber)) &&
       !!sourceBaseSha.trim() && !!sourceHeadSha.trim());
   const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
-    submission.kind === "submitted" || submission.kind === "recovery_unavailable";
+    submission.kind === "submitted" || submission.kind === "recovery_unavailable" ||
+    submission.kind === "selection_pending";
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
     (submission.kind === "refused" && submission.code === "ADMIN_REAUTHENTICATION_REQUIRED") ||
     (sourceScopeResult.kind === "error" && sourceScopeResult.code === "ADMIN_REAUTHENTICATION_REQUIRED");
@@ -479,6 +494,22 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             {messages.checkSubmissionStatus}
           </button>
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
+        </div>
+      ) : null}
+      {submission.kind === "selection_pending" ? <p role="status">{messages.recentIdeaChecking}</p> : null}
+      {submission.kind === "selection_unavailable" ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800 dark:text-amber-200">
+          <p>{messages.recentIdeaUnavailable}</p>
+          <button type="button" onClick={() => selectRecentIdea(submission.requestId)}
+            disabled={readBackPending || recentPending}
+            className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium dark:border-amber-300">
+            {messages.checkSubmissionStatus}
+          </button>
+          <button type="button" onClick={startAnotherIdea}
+            disabled={!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)}
+            className="min-h-11 rounded-lg border border-zinc-400 px-3 font-medium dark:border-zinc-600">
+            {messages.startAnotherIdea}
+          </button>
         </div>
       ) : null}
       {recentAvailable ? (

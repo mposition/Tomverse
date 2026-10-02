@@ -133,6 +133,33 @@ test("read-back preserves whether the saved idea declared external sources", asy
   assert.deepEqual(await listRecentIdeaSubmissions(otherOwner), []);
 });
 
+test("recent picker omits expired, cancelled and purged ideas", async () => {
+  const now = new Date();
+  const recentAt = new Date(now.getTime() - 60_000);
+  const expiredAt = new Date(now.getTime() - 8 * 86_400_000);
+  const rows = [
+    { id: randomUUID(), requestId: randomUUID(), actorUserId, state: "submitted",
+      submittedAt: expiredAt,
+      analysisDeadlineAt: new Date(expiredAt.getTime() + 7 * 86_400_000),
+      rawPurgeAfter: new Date(expiredAt.getTime() + 7 * 86_400_000),
+      rawCiphertext: Buffer.from("SYNTHETIC_EXPIRED"), rawKeyId: "synthetic-key",
+      rawKeyVersion: 1 },
+    { id: randomUUID(), requestId: randomUUID(), actorUserId, state: "cancelled",
+      submittedAt: recentAt,
+      analysisDeadlineAt: new Date(recentAt.getTime() + 7 * 86_400_000),
+      cancelledAt: now, rawPurgeAfter: now,
+      rawCiphertext: Buffer.from("SYNTHETIC_CANCELLED"),
+      rawKeyId: "synthetic-key", rawKeyVersion: 1 },
+    { id: randomUUID(), requestId: randomUUID(), actorUserId, state: "submitted",
+      submittedAt: recentAt,
+      analysisDeadlineAt: new Date(recentAt.getTime() + 7 * 86_400_000),
+      rawPurgedAt: now },
+  ] as const;
+  for (const row of rows) await prisma.amuxIdeaSubmission.create({ data: row });
+  const recent = await listRecentIdeaSubmissions(session);
+  for (const row of rows) assert.equal(recent.some((item) => item.ideaId === row.id), false);
+});
+
 test("submission row and canonical audit roll back together", async () => {
   const rollbackRequestId = randomUUID();
   const rollbackIdeaId = randomUUID();

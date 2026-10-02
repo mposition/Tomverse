@@ -108,12 +108,14 @@ export async function GET(request: Request) {
     if (!ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])) {
       return NextResponse.json({ error: "submission_disabled" }, { status: 503, headers: noStore });
     }
-    await consumeApiRateLimit(request, session.user!.id!, "admin-amux-v4-idea-readback", {
-      minute: 10,
+    const params = new URL(request.url).searchParams;
+    const recent = params.get("view") === "recent" && params.size === 1;
+    await consumeApiRateLimit(request, session.user!.id!,
+      recent ? "admin-amux-v4-idea-recent" : "admin-amux-v4-idea-readback", {
+      minute: recent ? 6 : 10,
       day: 100,
     });
-    const params = new URL(request.url).searchParams;
-    if (params.get("view") === "recent" && params.size === 1) {
+    if (recent) {
       return NextResponse.json({ status: "recent", items: await listRecentIdeaSubmissions(session) },
         { headers: noStore });
     }
