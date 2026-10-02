@@ -10,6 +10,8 @@ import { prisma } from "@/lib/prisma";
 import { amuxAnalysisTextSafe, inspectAmuxAnalysisChunk,
   inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import { matchesAmuxIdeaAnalysisUnitCommitments } from
+  "./ideaAnalysisResultReadCore.ts";
 import type { AmuxIdeaAnalysisResultView, AmuxVisibleAnalysisUnit } from
   "./ideaAnalysisResultReadCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
@@ -79,6 +81,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||
         meta.unitCount !== units.length ||
+        !matchesAmuxIdeaAnalysisUnitCommitments(meta.unitCommitments, units) ||
         meta.cardRegistrationStarted !== false ||
         !["propose", "reject"].includes(String(meta.outcome)) ||
         units.length > 40) {

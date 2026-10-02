@@ -820,6 +820,10 @@ test("a complete first result saves independent encrypted units and closes only 
   assert.equal(auditRowActorKind(audit), "system");
   assert.equal((audit.metadata as Record<string, unknown>).actorScope,
     AMUX_V4_FIRST_DRAFT_SAVED_SCOPE);
+  assert.deepEqual((audit.metadata as Record<string, unknown>).unitCommitments,
+    units.map((unit) => ({ id: unit.id, localRef: unit.localRef,
+      kind: unit.unitKind, digest: unit.bodyDigest,
+      digestKeyId: unit.bodyDigestKeyId })));
   assert.equal(JSON.stringify(audit.metadata).includes(card.title), false);
   const visible = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
   assert.equal(visible.state, "ready");

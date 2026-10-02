@@ -33,6 +33,25 @@ const text = (value: unknown, max = 2_000): value is string =>
 const textList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 12 && value.every((item) => text(item, 500));
 
+/** The append-only analysis audit binds every stored proposal, including
+ * units whose body has since been purged. No proposal text enters the audit. */
+export function matchesAmuxIdeaAnalysisUnitCommitments(
+  commitments: unknown,
+  units: readonly { id: string; localRef: string | null; unitKind: string;
+    bodyDigest: string; bodyDigestKeyId: string }[],
+): boolean {
+  return Array.isArray(commitments) && commitments.length === units.length &&
+    units.length <= 40 && units.every((unit, index) => {
+      const commitment: unknown = commitments[index];
+      return record(commitment) && keys(commitment,
+        ["id", "localRef", "kind", "digest", "digestKeyId"]) &&
+        unit.localRef !== null && commitment.id === unit.id &&
+        commitment.localRef === unit.localRef &&
+        commitment.kind === unit.unitKind && commitment.digest === unit.bodyDigest &&
+        commitment.digestKeyId === unit.bodyDigestKeyId;
+    });
+}
+
 /** Strictly shape the same-origin response before rendering model-derived text.
  * This is a UI guard only; the app DB reader performs ownership and HMAC checks. */
 export function parseAmuxIdeaAnalysisResultView(
