@@ -239,130 +239,30 @@ review-parity-shadow.yml:108    visual-baseline-record.yml:68
 - :355 "`npx playwright install chromium` (브라우저, 캐시 적중 시 즉시 종료)"
 - :115 `.next/cache` miss 시 추가 비용 "**~6초 이하** `[로컬 측정]`"
 
-## 5. 원자료 C — 저장소 자신의 분석기 출력
+## 5~6. 원자료 C·D — §16에 따라 삭제됨
 
-`lib/agentCredentialReachability.ts`를 기준 commit의 실제 27개 workflow에 대해
-실행했습니다(`exclusions: []`, `cacheIsolationRecorded: false` — 운영 호출자
-둘 다 이 값입니다).
+> **이 두 절은 삭제됐습니다**(`docs/policy/engineering-agent.md` §16).
+> 원래 담았던 것은 (C) 자격증명 도달 분석기가 지목한 job 전수와 그중
+> `credential_job_restores_cache` 대상 목록, (D) 캐시를 복원하는 job별
+> secret·권한 매핑이었습니다. 이 저장소는 공개이므로 "고쳐지지 않은 경로를
+> 이름과 줄 번호로 적는 것은 그 자체가 공개"이고, 해소된 것만 저장소 기록에
+> 남습니다.
+>
+> **round 0에 보낸 프롬프트에는 그 목록이 있었고, 공개 저장소에 push됐습니다.**
+> 경위와 조치는 대상 문서(`actions-cache-poisoning-audit-2026-10-03.md`)
+> 10장에 적습니다.
 
-```
-forbidsAll: true
+재현은 저장소 clone에서 읽기 전용으로 가능하며, 출력은 대상 이름을 담으므로
+공개 문서에 붙이지 않습니다:
 
---- credentialed jobs (22) ---
-auto-pr-to-develop.yml # auto-pr                 back-merge-main-to-develop.yml # back-merge
-back-merge-main-to-develop.yml # verify          codeql.yml # analyze
-credit-finance-db-integration.yml # report-red-lane
-credit-finance-db-integration.yml # credit-finance-db-result
-cron-auto-fix.yml # discover                     cron-auto-fix.yml # attempt-fix
-daily-security-audit.yml # report                deployed-commit-drift.yml # drift
-engineering-agent-image.yml # image              fal-price-drift.yml # price-drift
-feedback-autofix-promotion-pr.yml # promotion-pr feedback-autofix.yml # discover
-feedback-autofix.yml # attempt-fix               memory-eval-decision-grade.yml # run
-memory-eval-development-probe.yml # run          pr-fast-gate.yml # fast-gate
-router-eval-pilot.yml # run                      router-judge-cap-probe.yml # probe
-visual-baseline-record.yml # record              voice-price-reverification-notice.yml # notice
-
---- reasons (17) ---
-credential_job_restores_cache  <-  back-merge-main-to-develop.yml # verify
-credential_job_restores_cache  <-  credit-finance-db-integration.yml # report-red-lane
-credential_job_restores_cache  <-  cron-auto-fix.yml # attempt-fix
-credential_job_restores_cache  <-  daily-security-audit.yml # report
-credential_job_restores_cache  <-  deployed-commit-drift.yml # drift
-credential_job_restores_cache  <-  fal-price-drift.yml # price-drift
-credential_job_restores_cache  <-  feedback-autofix-promotion-pr.yml # promotion-pr
-credential_job_restores_cache  <-  feedback-autofix.yml # attempt-fix
-credential_job_restores_cache  <-  memory-eval-decision-grade.yml # run
-credential_job_restores_cache  <-  memory-eval-development-probe.yml # run
-credential_job_restores_cache  <-  router-eval-pilot.yml # run
-credential_job_restores_cache  <-  router-judge-cap-probe.yml # probe
-credential_job_restores_cache  <-  visual-baseline-record.yml # record
-credential_job_restores_cache  <-  voice-price-reverification-notice.yml # notice
-credential_job_reached_without_path_filter  <-  auto-pr-to-develop.yml # -
-credential_job_reached_without_path_filter  <-  feedback-autofix-promotion-pr.yml # -
-credential_job_reached_without_path_filter  <-  pr-fast-gate.yml # -
+```bash
+npm run report:engineering-agent-tiers
 ```
 
-관련 소스:
-
-- `lib/agentCredentialReachability.ts:61` — `credential_job_restores_cache` 정의
-- `:267-289` — `restoresCache`. `:283-286`이 `actions/setup-*`를 "`cache`가
-  명시적으로 false가 아니면 복원"으로 봅니다.
-- `:369-370` — `cacheIsolationRecorded`의 정의 주석: "A dated record that
-  pull_request-run caches never reach other refs' runs."
-- `:493-497` — 그 설정만이 cache 규칙을 풀며, job별 exclusion은 못 푼다.
-- 호출자 둘, 둘 다 `false`: `tests/agentCredentialReachability.test.mjs:13`·`:561`,
-  `scripts/report-engineering-agent-tiers.mjs:144`
-- `docs/policy/engineering-agent.md:198-201` — 계약 원문:
-
-> **cache 경로**: 자격증명을 가진 job이 Actions cache를 복원하면, 그 job은
-> trigger·path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push
-> 금지**다. 이 가정을 푸는 방법은 job별 제외가 아니라, cache의 ref 간 공유
-> 범위에 대한 날짜 있는 확인 기록 하나를 분석기 설정에 고정하는 것뿐이다.
-
-## 6. 원자료 D — secret과 권한
-
-workflow-level `permissions`:
-
-```
-contents: read 만            : admin-console-e2e, back-merge-main-to-develop,
-                               credit-finance-db-integration, deployed-commit-drift,
-                               e2e, fal-price-drift, feedback-autofix,
-                               feedback-autofix-promotion-pr, memory-eval-*,
-                               nightly-visual-regression, orchestrator-rust,
-                               review-parity-shadow, router-*
-actions: read + contents: read : daily-security-audit (:9-11)
-actions,contents,pull-requests: read : pr-fast-gate (:64-67)
-contents: read + pull-requests: write : auto-pr-to-develop (:33-35)
-contents: write + pull-requests: write : cron-auto-fix (:57-59)
-contents: read + packages: write : engineering-agent-image (:27-29)
-contents: write             : visual-baseline-record (:38-39)
-contents: read + issues: write : voice-price-reverification-notice (:34-38)
-security-events: write 등 (job-level) : codeql (:33-42)
-```
-
-secret 참조 — 캐시를 **복원하는** job만 추려서:
-
-```
-cron-auto-fix # attempt-fix        GH_AUTOMATION_PAT :182, ANTHROPIC_API_KEY :238,
-                                   AUTO_FIX_SYNC_SECRET :277,:288,:333,:354
-daily-security-audit # report      RESEND_API_KEY :373, SECURITY_AUDIT_SLACK_WEBHOOK_URL :367,
-                                   SECURITY_AUDIT_EMAILS :368
-fal-price-drift # price-drift      FAL_KEY :78, :93
-voice-price-... # notice           GITHUB_TOKEN :66 (+ issues: write)
-feedback-autofix # attempt-fix     FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY :161,
-                                   GH_AUTOMATION_PAT :303, FEEDBACK_AUTOFIX_SYNC_SECRET
-feedback-autofix-promotion-pr      GH_AUTOMATION_PAT :149, :191, sync secret :89
-memory-eval-decision-grade # run   OPENAI_API_KEY :199
-memory-eval-development-probe # run OPENAI_API_KEY :125
-router-eval-pilot # run            OPENAI_API_KEY/DEEPSEEK_API_KEY/ANTHROPIC_API_KEY
-                                   :199-201, :234, :276-277, :342-344
-router-judge-cap-probe # probe     ANTHROPIC_API_KEY :167, :177
-visual-baseline-record # record    (secret 없음, contents: write)
-```
-
-이 열한 job이 복원하는 캐시는 **전부 `cache: npm` 하나뿐**입니다(3.4 참조).
-`.next/cache`나 ms-playwright를 복원하는 job 정의(아래 아홉)는 전부
-`contents: read`이고 외부 API 자격증명이 없습니다.
-
-```
-admin-console-e2e # admin-console-e2e    daily-security-audit # audit
-daily-security-audit # e2e (6 shard)     e2e # playwright (5 shard)
-nightly-visual-regression # visual-regression
-pr-fast-gate # build-and-e2e             pr-fast-gate # ui-risk
-review-parity-shadow # review-parity     orchestrator-rust # workspace
-```
-
-(`daily-security-audit # audit`은 `gitleaks` step에서 `secrets.GITHUB_TOKEN`
-:59를 쓰지만, 그 step은 `setup-node` :65와 캐시 복원 :73 **앞**이고
-workflow 권한은 `actions: read, contents: read`입니다.)
-
-캐시를 복원하지 않고 Playwright를 매 run 새로 내려받는 자격증명 job 둘:
-`cron-auto-fix.yml:320`, `visual-baseline-record.yml:74`.
-
-lockfile 밖 설치에 명시적 sha512 핀이 걸린 곳 둘:
-`cron-auto-fix.yml:218-225`, `feedback-autofix.yml:146-154`.
-
----
+수치만 남깁니다 — 자격증명 보유 job 22건, 이유 17건, 그중
+`credential_job_restores_cache` 14건, 그 14건 중 `cache:` 입력이 없어 실제
+복원자가 아닌 것 3건, 남는 11건이 복원하는 캐시는 `npm` cacache 하나뿐.
+무검증 캐시를 복원하는 job 정의는 9건이고 그 교집합은 0건입니다.
 
 ## 7. 검토해 주실 주장
 
@@ -406,8 +306,8 @@ restore-keys prefix 하나를 공유하므로, 사실상 하나의 pool이다. �
 
 ### C5. 분석기의 "restores" 3건은 과대추정이다
 
-`back-merge # verify`, `credit-finance # report-red-lane`,
-`deployed-commit-drift # drift`는 `setup-node`에 `cache:` 입력이 없으므로 실제
+`credential_job_restores_cache` 14건 중 **3건**(§16에 따라 이름 생략)은
+`setup-node`에 `cache:` 입력이 없으므로 실제
 복원자가 아니다. **맞습니까?** `actions/setup-node`의 `cache` 기본값이 정말
 "없음"입니까?
 

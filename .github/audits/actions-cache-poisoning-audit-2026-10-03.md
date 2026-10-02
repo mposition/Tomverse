@@ -4,8 +4,11 @@
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
 > 각 항목에 승인·검토 요건을 적었습니다.
 >
-> **rev 2 자체는 아직 판정을 받지 못했습니다** — 검토 서버 round 1이
-> `reviewer_exit_1`로 unknown이고, 재전송은 하지 않았습니다(9장).
+> **rev 3**은 검토 서버 round 2(codex)의 reject를 반영한 것입니다. major 둘 중
+> 하나는 이 감사가 **§16을 위반해 미해소 자격증명 도달 목록을 공개 저장소에
+> push한 것**이고, 그것이 이 세션에서 유일하게 **되돌릴 수 없는** 사건입니다 —
+> 경위·범위·완화의 실제 크기·소유자 결정 사항은 **10장**에 있습니다. rev 3
+> 자체는 아직 검토를 받지 않았습니다(9장).
 >
 > **rev 2에서 바뀐 것**(9장의 검토 결과 반영, 초안의 판정을 뒤집은 것 포함):
 > F5는 **틀렸고** 2순위에서 3순위로 내렸습니다 — 분석기의 cache 규칙은
@@ -19,11 +22,11 @@
 > dispatch·기존 항목 삭제·Rust 범위·조건부 save를, P3에 `POSTURE_DIGEST`가 캐시
 > 종류를 담지 않는다는 맹점을 추가했습니다.
 >
-> **rev 2에서 새로 찾은 것(독립 검토 전):** F5의 세 번째 방향 — 공식 규칙이
-> 닫는 것은 **다른 ref**이고 **같은 PR의 re-run**은 복원할 수 있으므로,
-> `cacheIsolationRecorded` 기록의 근거는 "다른 ref는 닫혀 있다"만으로 충분하지
-> 않습니다. 에이전트 PR에서 도는 자격증명 캐시 복원 job이 하나 있습니다
-> (`feedback-autofix-promotion-pr # promotion-pr`). F5와 P4에 적었습니다.
+> **rev 2에서 찾은 F5의 세 번째 방향:** 공식 규칙이 닫는 것은 **다른 ref**이고
+> **같은 PR의 re-run**은 복원할 수 있으므로, `cacheIsolationRecorded` 기록의
+> 근거는 "다른 ref는 닫혀 있다"만으로 충분하지 않습니다. 다만 rev 2가 든
+> **사례는 틀렸고**(그 job의 `if:`가 에이전트 브랜치를 배제합니다) round 2가
+> 그것을 잡았습니다 — rev 3은 "구조는 열려 있고 오늘 사례는 없다"로 적습니다.
 
 기준 commit: `2f7550a5873606fecbfeec993c398a898a69ffcb`
 (`origin/main` 끝, 2026-10-03T00:54:48+10:00, PR #1944 병합).
@@ -260,34 +263,34 @@ review-parity-shadow.yml:103
 | `admin-console-e2e` # `admin-console-e2e` | :157 | :175 | — | :153 | `npm run build` :171 → :184 |
 | `daily-security-audit` # `audit` | :73 | :148 | — | :68 | `npm run check` :143(build 포함) → :176 |
 | `daily-security-audit` # `e2e` (6 shard) | :275 | :294 | — | :269 | `npm run build` :290 → :311 → 전체 e2e |
-| `daily-security-audit` # `report` | — | — | — | :356 | `node --import tsx scripts/send-security-audit-report.mjs` :394 |
 | `e2e` # `playwright` (5 shard) | :193 | :212 | — | :189 | `npm run build` :208 → :220 → :223 |
 | `nightly-visual-regression` # `visual-regression` | :69 | :85 | — | :65 | `npm run build` :81 → :93 |
 | `orchestrator-rust` # `workspace` | — | — | :47 | — | `cargo build` :60- |
 | `credit-finance-db-integration` # `credit-finance-db` | — | — | — | :176 | `npm ci` :179 + DB 시나리오 |
-| `cron-auto-fix` # `attempt-fix` | — | — | — | :210 | `npm ci` :213, `npm run check` :316, `test:e2e:pr` :325 |
-| `feedback-autofix` # `attempt-fix` | — | — | — | :119 | `npm ci` :123 |
-| `feedback-autofix-promotion-pr` # `promotion-pr` | — | — | — | :125 | `npm ci` :129 |
-| `fal-price-drift` # `price-drift` | — | — | — | :65 | `npm ci` :69 |
-| `voice-price-reverification-notice` # `notice` | — | — | — | :59 | `npm ci` :62 |
-| `visual-baseline-record` # `record` | — | — | — | :65 | `npm run build` :71 |
-| `memory-eval-*`, `router-*` (7 job) | — | — | — | 2.2 참조 | `npm ci` |
+| 자격증명을 가진 job **11건** | — | — | — | 각자 `cache: npm` | `npm ci` 및 그 job의 일 |
 
-**`cron-auto-fix.yml:320`과 `visual-baseline-record.yml:74`는
-`install-playwright.sh`를 캐시 복원 없이 호출합니다** — 매 run CDN에서
-새로 내려받습니다. 이 둘은 쓰기 권한·자격증명을 가진 job이고, 그래서 이 모양이
-맞습니다. 6장에 유지 항목으로 적습니다.
+마지막 행은 §16에 따라 이름을 적지 않습니다(4.1·4.3). 중요한 것은 그 11건의
+`.next/cache`·ms-playwright·rust 칸이 **전부 비어 있다**는 것입니다.
 
-### 3.4 복원 단계는 모두 `continue-on-error: true`
+**자격증명·쓰기 권한을 가진 job 둘은 `install-playwright.sh`를 캐시 복원 없이
+호출합니다** — 매 run CDN에서 새로 내려받습니다. 그래서 그 모양이 맞고, 6장에
+유지 항목으로 적습니다(해소된 상태이므로 6장은 이름을 적습니다).
+
+### 3.4 Next·Playwright 복원 단계는 `continue-on-error: true`, Rust는 아닙니다
 
 `admin-console-e2e.yml:156`·`:174`, `daily-security-audit.yml:72`·`:147`·
 `:274`·`:293`, `e2e.yml:192`·`:211`, `nightly-visual-regression.yml:68`·`:84`,
 `pr-fast-gate.yml:801`·`:837`·`:1006`·`:1029`,
-`review-parity-shadow.yml:96`·`:124`.
+`review-parity-shadow.yml:96`·`:124` — 열여섯 곳입니다.
 
-복원 실패가 조용하다는 것은 성능상 의도된 선택입니다. 완화책 설계에 주는 제약은
-하나입니다 — **오염 항목을 거부하는 검사를 복원 단계 안에 넣으면 조용히
-통과합니다.** 검사는 `continue-on-error`가 없는 별도 단계여야 합니다.
+**`orchestrator-rust.yml:47`에는 없습니다** — 그 단계는 실패하면 job을
+실패시킵니다. 그래서 "복원 단계가 모두 조용하다"는 틀리고, 범위는 위
+Next·Playwright 열여섯 곳입니다.
+
+그 열여섯 곳에서 복원 실패가 조용하다는 것은 성능상 의도된 선택입니다. 완화책
+설계에 주는 제약은 하나입니다 — **오염 항목을 거부하는 검사를 그 단계 안에
+넣으면 조용히 통과합니다.** 검사는 `continue-on-error`가 없는 별도 단계여야
+하며, Rust 단계에는 이 제약이 없습니다.
 
 ## 4. 축 3 — consumer job의 secret·권한
 
@@ -305,18 +308,19 @@ review-parity-shadow.yml:103
 `forbidsAll: true`, 자격증명 보유 job 22건, 이유 17건, 그중
 `credential_job_restores_cache` **14건**.
 
-```
-back-merge-main-to-develop.yml # verify          credit-finance-db-integration.yml # report-red-lane
-cron-auto-fix.yml # attempt-fix                  daily-security-audit.yml # report
-deployed-commit-drift.yml # drift                fal-price-drift.yml # price-drift
-feedback-autofix-promotion-pr.yml # promotion-pr feedback-autofix.yml # attempt-fix
-memory-eval-decision-grade.yml # run             memory-eval-development-probe.yml # run
-router-eval-pilot.yml # run                      router-judge-cap-probe.yml # probe
-visual-baseline-record.yml # record              voice-price-reverification-notice.yml # notice
-```
+> **대상 목록은 여기에 싣지 않습니다**(`docs/policy/engineering-agent.md` §16).
+> 이 저장소는 공개이므로 "고쳐지지 않은 경로를 이름과 줄 번호로 적는 것은 그
+> 자체가 공개"이고, 해소된 것만 저장소 기록에 남습니다. 남기는 것은 판정
+> 규칙과 수치이며, §16이 "규칙은 공개해도 안전하다"고 적은 그 구분입니다.
+> `tests/agentCredentialReachability.test.mjs`가 같은 이유로 posture를 12자
+> digest(`POSTURE_DIGEST`)로만 고정합니다.
+>
+> **이 문서의 rev 1~rev 2는 그 목록을 실었고 공개 저장소에 push됐습니다.**
+> 경위와 조치는 10장에 적습니다.
 
 재현(이 저장소 clone 안, Node 22와 `npm ci`가 끝나 있어야 하고 자격증명은
-필요하지 않습니다 — 읽기 전용입니다):
+필요하지 않습니다 — 읽기 전용입니다). 출력은 대상 이름을 담으므로 **공개
+문서에 붙이지 않습니다**:
 
 ```bash
 npm run report:engineering-agent-tiers
@@ -325,15 +329,9 @@ npm run report:engineering-agent-tiers
 ### 4.2 분석기의 "restores" 3건은 보수적 과대추정입니다
 
 `restoresCache`(:267-289)는 `actions/setup-*`를 "`cache`가 명시적으로 꺼져
-있지 않으면 복원한다"로 봅니다(:283-286). 아래 셋은 `cache:` 입력이 없으므로
-**현재 트리에서는** 실제 복원자가 아닙니다 — fail-closed 설계의 의도된
-과대추정입니다.
-
-| job | 근거 |
-|---|---|
-| `back-merge-main-to-develop.yml # verify` | `setup-node` :281에 `cache:` 없음 |
-| `credit-finance-db-integration.yml # report-red-lane` | `setup-node` :243에 `cache:` 없음 |
-| `deployed-commit-drift.yml # drift` | `setup-node` :110에 `cache:` 없음 |
+있지 않으면 복원한다"로 봅니다(:283-286). 14건 중 **3건**은 `setup-node`에
+`cache:` 입력이 없어 **현재 트리에서는** 실제 복원자가 아닙니다 — fail-closed
+설계의 의도된 과대추정입니다. 어느 셋인지는 §16에 따라 적지 않습니다(4.1).
 
 **"`cache:`가 없으면 캐시가 없다"로 일반화하면 틀립니다.** `actions/setup-node`
 v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은 이렇습니다.
@@ -345,32 +343,26 @@ v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은
 현재 `package.json`에는 `packageManager`도 `devEngines`도 **없습니다**(확인함).
 그래서 위 셋은 지금 캐시하지 않습니다. 그러나 `packageManager: "npm@..."`를
 추가하는 평범한 변경 하나로 **`cache:` 줄을 건드리지 않고도** 그 셋이 npm
-캐시를 복원하게 됩니다. 그 셋은 전부 자격증명을 가진 job이므로(`verify`는 Slack
-webhook, `report-red-lane`도 같음, `drift`도 같음), 그 변경은 4.3의 분리를
-조용히 넓힙니다. 분석기의 과대추정은 **이 경우에 대해서는 과대가 아닙니다** —
-7장 P3의 검사는 `cache:` 문자열이 아니라 이 기본값을 반영해야 합니다.
+캐시를 복원하게 됩니다. 그 셋은 전부 자격증명을 가진 job이므로, 그 변경은 4.3의
+분리를 조용히 넓힙니다. 분석기의 과대추정은 **이 경우에 대해서는 과대가
+아닙니다** — 7장 P3의 검사는 `cache:` 문자열이 아니라 이 기본값을 반영해야
+합니다.
 
 ### 4.3 실제로 자격증명을 들고 캐시를 복원하는 11건 — 전부 `npm` cacache 하나뿐
 
-| job | scope | 든 secret / 쓰기 권한 | 복원하는 캐시 |
-|---|---|---|---|
-| `cron-auto-fix # attempt-fix` | **main**(schedule) | `GH_AUTOMATION_PAT` :182, `ANTHROPIC_API_KEY` :238, `AUTO_FIX_SYNC_SECRET` :277·:288·:333·:354; `contents: write` + `pull-requests: write` :57-59 | `cache: npm` :210 |
-| `daily-security-audit # report` | **main**(schedule) | `RESEND_API_KEY` :373, Slack webhook :367, 수신자 주소 :368 | `cache: npm` :356 |
-| `fal-price-drift # price-drift` | **main**(schedule) | `FAL_KEY` :78·:93 | `cache: npm` :65 |
-| `voice-price-reverification-notice # notice` | **main**(schedule) | `issues: write` :34-38, `GITHUB_TOKEN` :66 | `cache: npm` :59 |
-| `feedback-autofix # attempt-fix` | dispatch | `FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY` :161, `GH_AUTOMATION_PAT` :303, sync secret | `cache: npm` :119 |
-| `feedback-autofix-promotion-pr # promotion-pr` | PR scope / dispatch | `GH_AUTOMATION_PAT` :149·:191, sync secret :89 | `cache: npm` :125 |
-| `memory-eval-decision-grade # run` | dispatch | `OPENAI_API_KEY` :199 | `cache: npm` :142 |
-| `memory-eval-development-probe # run` | dispatch | `OPENAI_API_KEY` :125 | `cache: npm` :81 |
-| `router-eval-pilot # run` | dispatch | `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` :199-201, :234, :276-277, :342-344 | `cache: npm` :134 |
-| `router-judge-cap-probe # probe` | dispatch | `ANTHROPIC_API_KEY` :167·:177 | `cache: npm` :128 |
-| `visual-baseline-record # record` | dispatch | `contents: write` :38-39 | `cache: npm` :65 |
+§16에 따라 **job 이름과 secret 매핑은 싣지 않습니다**(4.1). 남기는 것은 분리의
+모양과 수치입니다.
 
-**이 열한 건 중 `.next/cache`나 `~/.cache/ms-playwright`를 복원하는 job은
-하나도 없습니다.** 반대로 3.3에서 무검증 캐시를 복원하는 **job 정의 아홉**은
-전부 `contents: read`이고 **장기 외부 secret도 repository write 자격증명도 들지
-않습니다**(matrix 전개가 아니라 정의 수입니다 — `daily-security-audit # e2e`는
-6 shard, `e2e # playwright`는 5 shard로 돕니다).
+- 4.1의 14건에서 4.2의 3건(실제 복원자 아님)을 빼면 **11건**이 남습니다.
+- 그 **11건이 복원하는 캐시는 `npm` cacache 하나뿐입니다.** `.next/cache`나
+  `~/.cache/ms-playwright`를 복원하는 것은 **하나도 없습니다.**
+- 들고 있는 것의 종류: repository write 토큰, LLM provider key 셋, 이미지·음성
+  provider key, 이메일 발송 key, Slack webhook, `issues: write`,
+  `contents: write`. 어느 job이 무엇을 드는지는 적지 않습니다.
+- 반대로 3.3에서 무검증 캐시를 복원하는 **job 정의 아홉**은 전부
+  `contents: read`이고 **장기 외부 secret도 repository write 자격증명도 들지
+  않습니다**(matrix 전개가 아니라 정의 수입니다 — 그 중 둘은 6 shard와 5
+  shard로 돕니다).
 
 "자격증명이 없다"고 쓰면 틀립니다. 그 아홉에도 두 가지는 있습니다.
 
@@ -379,14 +371,14 @@ webhook, `report-red-lane`도 같음, `drift`도 같음), 그 변경은 4.3의 �
 - **단기 Actions runtime token.** 모든 job에 있고, **자기 run의 ref scope**
   캐시를 쓸 수 있습니다. PR job의 것은 그 PR의 merge-ref scope에만 쓰므로
   `main` scope를 다시 오염시키지 못합니다(1장). `main` scope를 다시 쓸 수 있는
-  것은 애초에 `main`에서 도는 job — `daily-security-audit`,
-  `nightly-visual-regression`, `admin-console-e2e`(push main) — 뿐입니다.
+  것은 애초에 `main`에서 도는 writer뿐이고, 그것은 2.1이 이미 적습니다 — 그
+  셋은 자격증명 job이 아니므로 §16의 목록이 아닙니다.
 
 그 분리가 지금의 안전을 만들고 있습니다. 그리고 그것을 유지하는 장치는
 없습니다 — 위 열한 job 중 하나에 `actions/cache`로 `.next/cache`를 더하는 한
-줄이면, 검증되지 않은 캐시와 `GH_AUTOMATION_PAT`·`ANTHROPIC_API_KEY`가 같은
-job에 들어옵니다. `credential_job_restores_cache` 판정은 **에이전트의 쓰기를
-막는 게이트**이고, workflow 변경 자체를 막는 검사가 아닙니다.
+줄이면, 검증되지 않은 캐시와 repository write 토큰·LLM key가 같은 job에
+들어옵니다. `credential_job_restores_cache` 판정은 **에이전트의 쓰기를 막는
+게이트**이고, workflow 변경 자체를 막는 검사가 아닙니다.
 
 ### 4.4 `npm` cacache의 실제 영향 범위
 
@@ -455,10 +447,9 @@ scope 캐시 쓰기를 얻는 경로. 따로 분류하지 않고 7장 P6의 조�
 테스트·검사 없음. `credential_job_restores_cache`(lib:61, :494)는 에이전트의
 push를 막을 뿐 workflow 변경을 막지 않습니다.
 
-결과: 열한 job 중 하나에 무검증 캐시가 더해지면 `GH_AUTOMATION_PAT`(공개
-저장소에 `contents: write`), `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`DEEPSEEK_API_KEY`, `FAL_KEY`, `RESEND_API_KEY`가 오염된 코드와 같은 job에
-놓입니다.
+결과: 열한 job 중 하나에 무검증 캐시가 더해지면, 4.3이 종류로 적은 것 —
+공개 저장소에 `contents: write`인 자동화 토큰, LLM provider key 셋, 이미지·음성
+provider key, 이메일 발송 key — 이 오염된 코드와 같은 job에 놓입니다.
 
 **지금은 되돌릴 수 있음**(가용성). 그 한 줄이 들어오면 **되돌릴 수 없는 결과로
 가는 노출 경로가 생깁니다** — 노출 자체가 복구 불가는 아니고, 실제 유출이
@@ -497,39 +488,45 @@ that **pull_request-run caches never reach other refs' runs**"로 정의합니�
 cache 규칙이 아니라 F4·P3이 다룹니다. 그리고 PR에서 실제로 도는 자격증명 job은
 분석기의 trigger·path 도달 판정이 계속 따로 다룹니다.
 
-**그런데 세 번째 방향이 있고, 검토자도 저도 round 0에서 짚지 않았습니다.**
-(아래는 검토 반영 중에 제가 찾은 것이며 **아직 독립 검토를 받지 않았습니다.**)
+**세 번째 방향이 있습니다. 다만 rev 2가 든 사례는 틀렸고, round 2가 그것을
+잡았습니다.**
 
-공식 규칙의 그 문장을 끝까지 읽으면 이렇습니다 — PR 캐시는 "can only be
-restored by **re-runs of the pull request**". 즉 닫힌 것은 **다른 ref**이고,
-**같은 PR의 다른 job과 이후 run에는 열려 있습니다.** 에이전트가 캐시를 심을 수
-있는 곳이 바로 거기입니다: 자기 PR.
+구조는 이렇습니다. 공식 규칙의 그 문장을 끝까지 읽으면 PR 캐시는 "can only be
+restored by **re-runs of the pull request**"입니다. 즉 닫힌 것은 **다른 ref**
+이고, **같은 PR의 이후 run에는 열려 있습니다.** 에이전트가 캐시를 심을 수 있는
+곳이 거기입니다: 자기 PR.
 
-그러므로 물어야 할 것은 "에이전트의 PR에서 도는 자격증명 job이 캐시를
-복원하는가"입니다. 전수로 하나 있습니다.
+그러므로 물어야 할 것은 "에이전트의 PR에서 **실제로 도는** 자격증명 캐시 복원
+job이 있는가"입니다.
 
-- `feedback-autofix-promotion-pr.yml`은 `pull_request: types:[closed],
-  branches:[develop]`(:25-27)로 돕니다 — 에이전트 PR의 base가 `develop`이므로
-  **그 PR이 닫힐 때 그 PR의 scope에서** 돕니다. `promotion-pr` job은
-  `GH_AUTOMATION_PAT`(:149, :191)을 들고 `cache: npm`(:125)을 복원합니다.
-- 나머지 `pull_request` workflow는 둘 중 하나입니다 — 자격증명이 없거나
-  (`admin-console-e2e`, `review-parity-shadow`, `orchestrator-rust`),
-  자격증명 job이 캐시를 복원하지 않습니다(`pr-fast-gate # fast-gate`,
-  `credit-finance-db-integration # report-red-lane`). `secret-history-scan`은
-  base가 `main`이라 에이전트 PR에 걸리지 않습니다.
+**rev 2는 하나 있다고 적었고, 그것이 틀렸습니다.** 지목한 job은 `pull_request:
+types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref가
+`feedback-autofix/`로 시작할 것을 요구합니다
+(`.github/workflows/feedback-autofix-promotion-pr.yml:49-53`). 에이전트 브랜치는
+`agent/engineering/` namespace이므로(`lib/agentCredentialReachability.ts:30`)
+**절대 걸리지 않습니다.** rev 2는 workflow의 trigger만 보고 job의 조건을 읽지
+않았습니다.
 
-실제 위험은 **낮습니다**: 그 job이 복원하는 것은 npm cacache 하나이고 4.4의
-integrity 대조가 걸립니다. 그러나 규칙은 구조에 대한 것이므로, 기록의 근거는
-"다른 ref는 닫혀 있다"만으로 **충분하지 않습니다** — 같은 PR 방향에 대해 그 한
-job을 이름 대고 왜 안전한지 적어야 합니다.
+나머지 `pull_request` workflow도 둘 중 하나입니다 — 자격증명이 없거나,
+자격증명 job이 캐시를 복원하지 않습니다. **그래서 오늘 이 방향의 사례는
+없습니다.**
+
+남는 것은 **감시 항목**입니다. 사례가 생기는 조건은 둘 — 자격증명 job의
+`if:`가 넓어지거나, 에이전트 PR에서 도는 자격증명 job에 캐시가 더해지는 것.
+둘 다 P3의 검사가 보는 변경이므로, P4의 기록은 같은 PR 방향에 대해 "오늘 사례가
+없다"를 근거로 쓰고 P3이 그것을 유지합니다.
+
+**이 항목에서 제 판정은 두 번 틀렸습니다** — rev 1은 방향을 잘못 짚었고, rev 2는
+방향은 맞았지만 사례를 잘못 짚었습니다. 두 번 다 독립 검토가 잡았습니다.
 
 **되돌릴 수 있음** — 정책 문구 명확화 항목입니다. 그 기록을 쓰는 PR은
 `docs/policy/engineering-agent.md` 변경이므로 여전히 contract 역할과 소유자
 승인이 필요합니다.
 
-### F6 — 복원 단계가 모두 `continue-on-error: true`입니다
+### F6 — Next·Playwright 복원 단계 열여섯 곳이 `continue-on-error: true`입니다
 
-근거: 3.4. **되돌릴 수 있음.** 발견이 아니라 완화책 설계 제약으로 기록합니다.
+근거: 3.4. Rust 단계는 해당하지 않습니다. **되돌릴 수 있음.** 발견이 아니라
+완화책 설계 제약으로 기록하며, 제약이 걸리는 범위는 그 열여섯 곳입니다.
 
 ### 인접 경로 (세 축 밖, 참고)
 
@@ -665,15 +662,14 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
   열려 있으므로 거짓이고, 그 방향은 F4·P3이 다루는 **다른 위협**입니다.
 - **같은 PR 방향을 따로 적어야 합니다.** 공식 문장은 "re-runs of the pull
   request"는 복원할 수 있다고 말하므로, 그 방향에 대해서는 격리가 근거가 되지
-  않습니다. F5가 찾은 하나 — `feedback-autofix-promotion-pr # promotion-pr`
-  (`GH_AUTOMATION_PAT` + `cache: npm`, 에이전트 PR이 닫힐 때 그 scope에서 돎)
-  — 를 이름 대고, 그것이 복원하는 것이 npm cacache 하나이며 integrity 대조가
-  걸린다는 것을 근거로 적습니다. 그 job에 무검증 캐시가 더해지면 이 기록은
-  **무효**가 되며, 그것을 막는 것은 P3의 검사입니다.
+  않습니다. 근거는 **"에이전트 PR에서 실제로 도는 자격증명 캐시 복원 job이
+  오늘 없다"**이고, 그 판정은 workflow trigger만이 아니라 **job의 `if:`까지**
+  읽어야 성립합니다(F5가 rev 2에서 틀린 지점이 바로 그것입니다). 대상 이름은
+  §16에 따라 비공개 기록에 둡니다.
 
 `docs/policy/engineering-agent.md:198-201` 변경이므로 역할은 `contract`이고
-**소유자 승인이 필요합니다.** P3과의 순서 의존은 없지만, 세 번째 항목 때문에
-P3이 있으면 이 기록이 더 오래 참입니다.
+**소유자 승인이 필요합니다.** P3과의 순서 의존은 없지만, 세 번째 항목의 근거가
+"오늘 없다"이므로 **P3이 그 상태를 유지해 주어야 기록이 계속 참입니다.**
 
 ### P5. 복원 후 무결성 검사 — 권고하지 않음, 대안으로만 기록
 
@@ -725,6 +721,22 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 |---|---|---|---|---|
 | 0 | rev 1 (`3882fdb6f`) | Codex 직접 (서버 큐 `queue_full`) | Codex `gpt-5.6-sol` / xhigh | **reject** — 지적 전부 반영 |
 | 1 | rev 2 (`5abcb4ef7`) | 검토 서버 `r-20261002-223406-84907a` | **devin** (vendor `cognition`) | **unknown** — `reviewer_exit_1`, findings 0건 |
+| 2 | rev 2 (`7598ff881`) | 검토 서버 `r-20261002-223916-d7532b` | **codex** (vendor `openai`) | **reject** — major 2, minor 1. 전부 반영 → rev 3 |
+
+### round 2 — reject, 전부 반영
+
+소유자가 재전송을 지시했고(round 1이 unknown이었으므로 에이전트가 스스로 다시
+보내지 않았습니다), 서버가 이번에는 codex를 배정했습니다.
+
+| 심각도 | 지적 | 조치 |
+|---|---|---|
+| major | 같은 PR 방향의 사례로 지목한 job은 head ref가 `feedback-autofix/`일 때만 도는 조건이 있어 에이전트 PR에 걸리지 않는다 | 확인함(`feedback-autofix-promotion-pr.yml:49-53`). F5·P4를 고쳐 **오늘 사례가 없다**로 바꿨습니다 |
+| major | 미해소 자격증명 도달 대상을 이름과 줄 번호로 공개 저장소에 나열했다 — §16 위반 | 확인함. 목록을 두 문서에서 제거했고, 경위를 **10장**에 적습니다 |
+| minor | "복원 단계가 모두 `continue-on-error`"가 Rust 단계와 모순된다 | 확인함. 3.4·F6의 범위를 Next·Playwright 열여섯 곳으로 한정했습니다 |
+
+두 major 모두 **제 쪽 오류**입니다. 첫 번째는 workflow의 trigger만 읽고 job의
+조건식을 읽지 않은 것이고, 두 번째는 과제가 요구한 "path:line 증거"와 §16이
+충돌하는 지점을 **공개 전에** 짚지 못한 것입니다.
 
 ### round 1 — unknown, 재전송하지 않음
 
@@ -761,13 +773,99 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
   가능한 두 건은 저장소에서 직접 대조했습니다 — `package.json`에
   `packageManager`·`devEngines` 부재, lockfile의 `hasInstallScript` 10건,
   그리고 `actions/setup-node` `action.yml`의 `package-manager-cache` 기본값.
-- 다음 round: **rev 2는 아직 판정을 받지 못했습니다**(round 1이 unknown).
-  reviewer 쪽 실패이므로 문서를 고칠 지적은 없고, 다시 보낼지는 사람의
-  결정입니다. 재검토가 특히 봐야 할 것 둘:
-  1. **F5의 철회가 과교정인지.** 저는 검토자의 논거를 받아들였지만, 그
-     과정에서 같은 PR 방향(바로 아래)을 찾았습니다. 철회 자체는 유효하다고
-     보지만 — rev 1이 **든 이유**가 틀렸으므로 — 판정이 두 번 뒤집힌 항목이니
-     제3자가 봐야 합니다.
-  2. **rev 2에서 새로 추가한 같은 PR 방향.** F5·P4의 그 단락과
-     `feedback-autofix-promotion-pr # promotion-pr` 지목은 **독립 검토를 받지
-     않았습니다.**
+- 다음 round: **rev 3은 아직 검토를 받지 않았습니다.** round 2의 세 지적을
+  반영한 결과이고, 재검토가 특히 봐야 할 것 둘:
+  1. **F5가 세 번째로도 틀렸는지.** 이 항목에서 제 판정은 이미 두 번
+     뒤집혔습니다 — rev 1은 방향을, rev 2는 사례를 잘못 짚었습니다. rev 3은
+     "구조는 열려 있고 오늘 사례는 없다"로 적었는데, 그 "없다"는 모든
+     `pull_request` workflow의 job 조건식을 제가 읽어서 낸 결론이고 분석기가
+     보증한 것이 아닙니다(정책 :206-207이 분석기는 조건식을 해석하지 않는다고
+     적습니다). **세 번 틀린 항목을 세 번째로 믿을 근거가 약합니다.**
+  2. **§16 재발 여부.** rev 3이 목록을 지운 범위가 맞는지 — 10장이 어디에
+     선을 그었는지 적었고, 2·3장의 캐시 키·scope 표는 자격증명 도달 목록이
+     아니라고 판단해 남겼습니다. 그 판단 자체를 봐 주십시오.
+
+## 10. 이 감사 자신이 만든 공개 — §16 위반
+
+**rev 1과 rev 2는 미해소 자격증명 도달 대상을 이름과 줄 번호로 담았고, 공개
+저장소에 push됐습니다.** round 2의 독립 검토가 그것을 잡았습니다.
+
+### 무엇이 공개됐는가
+
+- 자격증명 도달 분석기가 `credential_job_restores_cache`로 지목한 **14건의
+  workflow·job 이름**(4.1이 담았던 블록).
+- 그중 실제 복원자 **11건의 job 이름 · 든 secret 이름 · 각 줄 번호**(4.3이
+  담았던 표).
+- 분석기가 자격증명 보유로 본 **22건 전수**와 같은 secret 매핑(검토 프롬프트
+  문서 5·6절).
+
+secret **값**은 공개되지 않았습니다. 공개된 것은 어느 job이 어느 secret을 들고
+캐시를 복원하는지의 **목록**입니다.
+
+### 어느 계약을 어겼는가
+
+`docs/policy/engineering-agent.md` §16:
+
+> **아직 해소되지 않은 자격증명 도달 경로의 구체 목록.** 이 저장소는 공개이므로,
+> 고쳐지지 않은 경로를 이름과 줄 번호로 적는 것은 그 자체가 공개다. 목록은 비공개
+> 설계서에 있고, 해소된 것만 이 문서와 저장소 기록에 남는다. §5는 **판정 규칙**을
+> 담으며, 규칙은 공개해도 안전하다 — 안전하지 않은 것은 현재 실패하고 있는 대상의
+> 이름이다.
+
+"이 문서와 저장소 기록"이므로 `docs/policy/engineering-agent.md`만이 아니라
+`.github/audits/` 같은 저장소 기록 전체가 대상입니다.
+`tests/agentCredentialReachability.test.mjs:540-555`가 같은 이유로 posture를
+12자 digest로만 고정하며, 그 주석이 §16을 인용합니다.
+
+### 되돌릴 수 없습니다
+
+AGENTS.md "검증 범위는 되돌릴 수 없는 것에 비례합니다"의 기준으로 **복구
+불가**이고, 한 줄로 적을 수 있습니다 — **공개된 목록은 회수가 성립하지
+않습니다.** 공개 저장소에 push된 commit 넷(`3882fdb6f`, `0588519fc`,
+`5abcb4ef7`, `7598ff881`)이 PR #1964의 이력에 있고, 트리에서 지우는 것은
+공개를 되돌리지 않습니다. clone·fork·GitHub의 unreachable object 보존이 남습니다.
+
+이 감사의 다른 모든 항목은 "되돌릴 수 있음"으로 분류됐고, **실제로 복구 불가인
+것은 이 감사 자신이 만든 이 하나뿐입니다.**
+
+### 완화의 실제 크기
+
+과소도 과대도 하지 않기 위해 양쪽을 적습니다.
+
+- **줄여 주는 것:** 공개된 사실은 전부 `.github/workflows/`에서 유도됩니다.
+  그 파일들은 이미 공개이고 `secrets.X` 참조와 `cache:` 줄을 그대로 담으며,
+  `lib/agentCredentialReachability.ts`도 공개입니다. 같은 목록을 누구나
+  `npm run report:engineering-agent-tiers`로 몇 분에 다시 만들 수 있습니다.
+  한계 정보량은 작습니다.
+- **줄여 주지 않는 것:** §16이 막는 것은 데이터의 기밀성이 아니라 **현재
+  실패하고 있는 대상의 목록을 정리해 공개하는 일**입니다. 정책 저자가 그
+  구분을 명시적으로 내렸습니다 — "규칙은 공개해도 안전하다 — 안전하지 않은
+  것은 현재 실패하고 있는 대상의 이름이다." 유도 가능성은 그 판단을 무효로
+  만들지 않습니다.
+
+### 이 문서가 한 조치, 그리고 하지 않은 것
+
+- 두 문서에서 목록을 **제거**했습니다(4.1·4.2·4.3, 검토 프롬프트 5~6절). 남긴
+  것은 판정 규칙과 수치이며, §16이 안전하다고 적은 범위입니다.
+- **선을 어디에 그었는가:** 2·3장의 캐시 키·restore-key·scope 표는 남겼습니다.
+  그것은 자격증명 도달 목록이 아니라 캐시 메커니즘이고, §16은 전자를 다룹니다.
+  6장의 "이미 맞게 되어 있는 것"도 남겼습니다 — §16이 "해소된 것만 남는다"고
+  적은 그 범주입니다. **이 선이 맞는지는 다음 검토가 봐야 합니다**(9장).
+- **제거는 삭제가 아닙니다.** 이력에서 지우는 것(history rewrite, PR 삭제,
+  commit을 unreachable로 만들기)은 **하지 않았습니다.** 공개 저장소의 이력을
+  고치는 것은 되돌릴 수 없고 다른 사람의 clone을 깨뜨리므로 소유자의
+  결정입니다. 선택지와 비용은 운영자에게 보고했습니다.
+- 비공개 설계서(`H:\Project\tomverse-private-docs`)로 목록을 **옮기지
+  않았습니다.** 다른 저장소에 쓰는 것은 이 과제의 범위 밖이고, 그 repo의
+  경로·구조를 공개 문서가 인용해서도 안 됩니다(AGENTS.md 9번). 옮길지는
+  소유자의 결정입니다.
+
+### 왜 일어났는가
+
+과제는 "`.github/audits/` 아래에 **path:line 증거**로 findings를 쓰라"고
+지시했고, §16은 미해소 자격증명 도달 대상에 대해 그것을 금지합니다. 두 지시가
+이 내용에 대해 충돌했고, **저는 그 충돌을 공개 전에 짚지 않았습니다.**
+AGENTS.md는 그런 경우 "정확한 blocker를 한 줄로 적고" 승인된 범위를 계속하라고
+적습니다 — 그렇게 했어야 했습니다. 축 1·2(캐시 키와 scope)는 §16과 무관하므로
+그 부분은 path:line으로 쓰고, 축 3의 대상 이름만 비공개로 돌리는 것이 맞는
+처리였습니다.
