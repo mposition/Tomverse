@@ -94,8 +94,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
   const [recentIdeas, setRecentIdeas] = useState<RecentIdea[] | null>(null);
+  const [recentCursor, setRecentCursor] = useState<string | null>(null);
   const [recentPending, setRecentPending] = useState(false);
   const [recentError, setRecentError] = useState(false);
+  const recentRequestGeneration = useRef(0);
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
     setPlanReadyIdeaId(committedIdeaId);
@@ -215,17 +217,42 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const refreshRecentIdeas = useCallback(async () => {
     if (!recentAvailable) return;
+    const generation = ++recentRequestGeneration.current;
     setRecentPending(true);
     setRecentError(false);
     try {
       const response = await adminFetch("/api/admin/amux/ideas/submissions?view=recent",
         { cache: "no-store" });
-      const items = classifyRecentIdeaList({ status: response.status, body: await response.json() });
-      if (!items) throw new Error("recent_ideas_unavailable");
-      setRecentIdeas(items);
-    } catch { setRecentError(true); }
-    finally { setRecentPending(false); }
+      const page = classifyRecentIdeaList({ status: response.status, body: await response.json() });
+      if (!page) throw new Error("recent_ideas_unavailable");
+      if (generation === recentRequestGeneration.current) {
+        setRecentIdeas(page.items);
+        setRecentCursor(page.nextCursor);
+      }
+    } catch { if (generation === recentRequestGeneration.current) setRecentError(true); }
+    finally { if (generation === recentRequestGeneration.current) setRecentPending(false); }
   }, [recentAvailable]);
+
+  const loadMoreRecentIdeas = async () => {
+    if (!recentAvailable || !recentCursor || recentPending || !recentIdeas) return;
+    const generation = recentRequestGeneration.current;
+    setRecentPending(true);
+    setRecentError(false);
+    try {
+      const query = new URLSearchParams({ view: "recent", cursor: recentCursor });
+      const response = await adminFetch(`/api/admin/amux/ideas/submissions?${query}`,
+        { cache: "no-store" });
+      const page = classifyRecentIdeaList({ status: response.status, body: await response.json() });
+      if (!page || page.items.some((item) => recentIdeas.some((seen) => seen.requestId === item.requestId))) {
+        throw new Error("recent_ideas_unavailable");
+      }
+      if (generation === recentRequestGeneration.current) {
+        setRecentIdeas([...recentIdeas, ...page.items]);
+        setRecentCursor(page.nextCursor);
+      }
+    } catch { if (generation === recentRequestGeneration.current) setRecentError(true); }
+    finally { if (generation === recentRequestGeneration.current) setRecentPending(false); }
+  };
 
   useEffect(() => { queueMicrotask(() => { void refreshRecentIdeas(); }); }, [refreshRecentIdeas]);
 
@@ -549,6 +576,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
                 </li>
               ))}
             </ul>
+          ) : null}
+          {recentCursor ? (
+            <button type="button" onClick={loadMoreRecentIdeas} disabled={recentPending}
+              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-medium disabled:opacity-50 dark:border-zinc-600">
+              {messages.recentIdeasMore}
+            </button>
           ) : null}
         </section>
       ) : null}

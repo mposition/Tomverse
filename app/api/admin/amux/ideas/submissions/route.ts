@@ -18,6 +18,7 @@ import {
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
 import { IdeaSubmissionError, listRecentIdeaSubmissions, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { parseAmuxV4RecentIdeaCursor } from "@/lib/amux/ideaRecentCursorCore";
 import { authOptions } from "@/lib/auth";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -109,14 +110,20 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "submission_disabled" }, { status: 503, headers: noStore });
     }
     const params = new URL(request.url).searchParams;
-    const recent = params.get("view") === "recent" && params.size === 1;
+    const recent = params.get("view") === "recent" &&
+      (params.size === 1 || (params.size === 2 && params.has("cursor")));
     await consumeApiRateLimit(request, session.user!.id!,
       recent ? "admin-amux-v4-idea-recent" : "admin-amux-v4-idea-readback", {
       minute: recent ? 6 : 10,
       day: 100,
     });
     if (recent) {
-      return NextResponse.json({ status: "recent", items: await listRecentIdeaSubmissions(session) },
+      const rawCursor = params.get("cursor");
+      const cursor = rawCursor === null ? null : parseAmuxV4RecentIdeaCursor(rawCursor);
+      if (rawCursor !== null && cursor === null) {
+        return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
+      }
+      return NextResponse.json({ status: "recent", ...await listRecentIdeaSubmissions(session, cursor) },
         { headers: noStore });
     }
     if (params.size !== 1) {

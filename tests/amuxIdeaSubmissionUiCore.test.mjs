@@ -56,21 +56,27 @@ test("recent idea list accepts only bounded metadata", () => {
   const item = { ideaId: "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0", requestId,
     submittedAt: "2026-10-03T00:00:00.000Z", analysisDeadlineAt: "2026-10-10T00:00:00.000Z" };
   assert.deepEqual(classifyRecentIdeaList({ status: 200,
-    body: { status: "recent", items: [item] } }), [item]);
+    body: { status: "recent", items: [item], nextCursor: null } }),
+  { items: [item], nextCursor: null });
   for (const body of [
-    { status: "recent", items: [item, item] },
-    { status: "recent", items: [{ ...item, requestId: "invalid" }] },
-    { status: "recent", items: [{ ...item, submittedAt: "not-a-date" }] },
-    { status: "recent", items: [{ ...item, rawCiphertext: "secret" }] },
+    { status: "recent", items: [item, item], nextCursor: null },
+    { status: "recent", items: [{ ...item, requestId: "invalid" }], nextCursor: null },
+    { status: "recent", items: [{ ...item, submittedAt: "not-a-date" }], nextCursor: null },
+    { status: "recent", items: [{ ...item, rawCiphertext: "secret" }], nextCursor: null },
   ]) {
     if (body.items[0]?.rawCiphertext) {
-      assert.deepEqual(classifyRecentIdeaList({ status: 200, body }), [item]);
+      assert.deepEqual(classifyRecentIdeaList({ status: 200, body }),
+        { items: [item], nextCursor: null });
     } else {
       assert.equal(classifyRecentIdeaList({ status: 200, body }), null);
     }
   }
   assert.equal(classifyRecentIdeaList({ status: 503,
-    body: { status: "recent", items: [item] } }), null);
+    body: { status: "recent", items: [item], nextCursor: null } }), null);
+  assert.equal(classifyRecentIdeaList({ status: 200,
+    body: { status: "recent", items: [item], nextCursor: "bad!" } }), null);
+  assert.equal(classifyRecentIdeaList({ status: 200,
+    body: { status: "recent", items: [], nextCursor: "abc" } }), null);
 });
 
 test("only an exact successful submission response confirms the idea", () => {
@@ -137,6 +143,7 @@ test("recent picker stays behind read-back and never treats a list row as confir
   const get = route.split("export async function GET")[1] ?? "";
   assert.match(get, /!ideaSubmissionReadBackPermitted\(/);
   assert.match(get, /params\.get\("view"\) === "recent"/);
+  assert.match(get, /parseAmuxV4RecentIdeaCursor\(rawCursor\)/);
   assert.match(get, /recent \? "admin-amux-v4-idea-recent" : "admin-amux-v4-idea-readback"/);
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
   const select = panel.split("const selectRecentIdea =")[1]?.split("useEffect(() => {")[0] ?? "";

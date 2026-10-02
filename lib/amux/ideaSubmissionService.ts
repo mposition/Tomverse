@@ -10,6 +10,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { encodeAmuxV4RecentIdeaCursor, type AmuxV4RecentIdeaCursor } from "./ideaRecentCursorCore.ts";
 import { analysisDeadlineAt } from "./ideaRetentionCore.ts";
 import {
   AMUX_V4_IDEA_SUBMISSION_ENV,
@@ -164,21 +165,30 @@ export async function readIdeaSubmissionRequest(
 
 /** Metadata-only picker candidates. Selecting one still requires the canonical
  * request-id read-back above before any downstream action is shown. */
-export async function listRecentIdeaSubmissions(session: Session) {
+export async function listRecentIdeaSubmissions(session: Session,
+  cursor: AmuxV4RecentIdeaCursor | null = null) {
   const actorUserId = actorId(session);
   const rows = await prisma.amuxIdeaSubmission.findMany({
     where: { actorUserId, analysisDeadlineAt: { gt: new Date() },
-      cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null } },
+      cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null },
+      ...(cursor ? { OR: [
+        { submittedAt: { lt: cursor.submittedAt } },
+        { submittedAt: cursor.submittedAt, id: { lt: cursor.ideaId } },
+      ] } : {}) },
     orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
-    take: 20,
+    take: 21,
     select: { id: true, requestId: true, submittedAt: true, analysisDeadlineAt: true },
   });
-  return rows.map((row) => ({
+  const page = rows.slice(0, 20);
+  const last = page.at(-1);
+  return { items: page.map((row) => ({
     ideaId: row.id,
     requestId: row.requestId,
     submittedAt: row.submittedAt.toISOString(),
     analysisDeadlineAt: row.analysisDeadlineAt.toISOString(),
-  }));
+  })), nextCursor: rows.length > 20 && last
+    ? encodeAmuxV4RecentIdeaCursor({ submittedAt: last.submittedAt, ideaId: last.id })
+    : null };
 }
 
 /** New v4 submission path. The hard code latch ships false. */

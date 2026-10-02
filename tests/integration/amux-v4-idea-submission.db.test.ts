@@ -125,12 +125,12 @@ test("read-back preserves whether the saved idea declared external sources", asy
     { requestId: sourceRequestId, status: "committed", ideaId: sourceIdeaId,
       hasExternalSources: true });
   const recent = await listRecentIdeaSubmissions(session);
-  assert.ok(recent.some((item) => item.ideaId === ideaId && item.requestId === requestId));
-  assert.ok(recent.some((item) => item.ideaId === sourceIdeaId && item.requestId === sourceRequestId));
+  assert.ok(recent.items.some((item) => item.ideaId === ideaId && item.requestId === requestId));
+  assert.ok(recent.items.some((item) => item.ideaId === sourceIdeaId && item.requestId === sourceRequestId));
   assert.equal(JSON.stringify(recent).includes(ideaText), false);
-  assert.ok(recent.every((item) => new Date(item.analysisDeadlineAt) > new Date(item.submittedAt)));
+  assert.ok(recent.items.every((item) => new Date(item.analysisDeadlineAt) > new Date(item.submittedAt)));
   const otherOwner = { ...session, user: { ...session.user, id: `other-${randomUUID()}` } } as Session;
-  assert.deepEqual(await listRecentIdeaSubmissions(otherOwner), []);
+  assert.deepEqual(await listRecentIdeaSubmissions(otherOwner), { items: [], nextCursor: null });
 });
 
 test("recent picker omits expired, cancelled and purged ideas", async () => {
@@ -157,7 +157,28 @@ test("recent picker omits expired, cancelled and purged ideas", async () => {
   ] as const;
   for (const row of rows) await prisma.amuxIdeaSubmission.create({ data: row });
   const recent = await listRecentIdeaSubmissions(session);
-  for (const row of rows) assert.equal(recent.some((item) => item.ideaId === row.id), false);
+  for (const row of rows) assert.equal(recent.items.some((item) => item.ideaId === row.id), false);
+});
+
+test("recent picker pages beyond twenty ideas without duplicates or another owner's rows", async () => {
+  const submittedAt = new Date(Date.now() - 120_000);
+  const ids = Array.from({ length: 23 }, () => randomUUID());
+  await prisma.amuxIdeaSubmission.createMany({ data: ids.map((id) => ({
+    id, requestId: randomUUID(), actorUserId, state: "submitted",
+    submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000),
+    rawPurgeAfter: new Date(submittedAt.getTime() + 7 * 86_400_000),
+    rawCiphertext: Buffer.from("SYNTHETIC_PAGE"), rawKeyId: "synthetic-key", rawKeyVersion: 1,
+  })) });
+  const first = await listRecentIdeaSubmissions(session);
+  assert.equal(first.items.length, 20);
+  assert.ok(first.nextCursor);
+  const { parseAmuxV4RecentIdeaCursor } = await import("@/lib/amux/ideaRecentCursorCore");
+  const second = await listRecentIdeaSubmissions(session,
+    parseAmuxV4RecentIdeaCursor(first.nextCursor));
+  const all = [...first.items, ...second.items];
+  assert.equal(new Set(all.map((row) => row.ideaId)).size, all.length);
+  for (const id of ids) assert.ok(all.some((row) => row.ideaId === id));
+  assert.equal(second.nextCursor, null);
 });
 
 test("submission row and canonical audit roll back together", async () => {

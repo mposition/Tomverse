@@ -38,10 +38,15 @@ const validIsoDate = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) &&
   new Date(value).toISOString() === value;
 
-export function classifyRecentIdeaList(reply: Reply): RecentIdea[] | null {
+export function classifyRecentIdeaList(reply: Reply):
+  { items: RecentIdea[]; nextCursor: string | null } | null {
   const body = record(reply.body);
   if (reply.status !== 200 || body?.status !== "recent" ||
-      !Array.isArray(body.items) || body.items.length > 20) return null;
+      !Array.isArray(body.items) || body.items.length > 20 ||
+      (body.nextCursor !== null && (typeof body.nextCursor !== "string" ||
+        body.nextCursor.length < 1 || body.nextCursor.length > 512 ||
+        !/^[A-Za-z0-9_-]+$/.test(body.nextCursor))) ||
+      (body.nextCursor !== null && body.items.length === 0)) return null;
   const seen = new Set<string>();
   const items: RecentIdea[] = [];
   for (const value of body.items) {
@@ -54,7 +59,7 @@ export function classifyRecentIdeaList(reply: Reply): RecentIdea[] | null {
     items.push({ ideaId: item.ideaId, requestId: item.requestId,
       submittedAt: item.submittedAt, analysisDeadlineAt: item.analysisDeadlineAt });
   }
-  return items;
+  return { items, nextCursor: body.nextCursor as string | null };
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
