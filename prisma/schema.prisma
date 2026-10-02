@@ -8951,6 +8951,7 @@ model AmuxIdeaTransferPreview {
   currentForChunk     AmuxIdeaAnalysisChunk?         @relation("AmuxCurrentChunkPreview")
   planBoundCurrentForChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundCurrentPreview")
   unitDecisions       AmuxIdeaUnitDecision[]
+  analysisBudgetHold  AmuxIdeaAnalysisBudgetHold?
 
   @@unique([ideaId, chunkIndex, attempt])
   @@unique([id, ideaId, chunkIndex])
@@ -8959,6 +8960,54 @@ model AmuxIdeaTransferPreview {
   @@index([sourcePlanRevisionId])
   @@index([state, expiresAt])
   @@index([payloadPurgeAfter, payloadPurgedAt])
+}
+
+/// Agent-only monthly ceiling for AMUX v4 idea analysis. A missing row is a
+/// refusal, never an implicit allowance. This dark table touches no user
+/// credit, plan, Chat provider-budget or worker-execution cost account.
+model AmuxIdeaAnalysisBudgetWindow {
+  namespace        String
+  monthStart       DateTime
+  limitMicroUsd    BigInt
+  spentMicroUsd    BigInt   @default(0)
+  reservedMicroUsd BigInt   @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  holds AmuxIdeaAnalysisBudgetHold[]
+
+  @@id([namespace, monthStart])
+}
+
+/// One worst-case reservation for one exact, owner-confirmed preview. Unknown
+/// usage keeps the hold occupied; it is never settled as zero. No writer or
+/// model dispatch is enabled by this schema-only addition.
+model AmuxIdeaAnalysisBudgetHold {
+  id                       String    @id
+  previewId                String    @unique
+  namespace                String
+  monthStart               DateTime
+  mode                     String
+  provider                 String
+  modelId                  String
+  pricingVersion           String
+  inputTokensCap           Int
+  outputTokensCap          Int
+  inputMicroUsdPerMillion  Int
+  outputMicroUsdPerMillion Int
+  reservedMicroUsd         BigInt
+  settledMicroUsd          BigInt?
+  inputTokens              Int?
+  outputTokens             Int?
+  status                   String
+  createdAt                DateTime  @default(now())
+  dispatchedAt             DateTime?
+  closedAt                 DateTime?
+
+  window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict)
+  preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([namespace, monthStart, status])
 }
 
 /// One bounded normalized analysis chunk. Raw provider output and normalized

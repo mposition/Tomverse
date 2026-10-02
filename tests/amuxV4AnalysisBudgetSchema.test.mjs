@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const migration = new URL(
+  "../prisma/migrations/20261003100000_amux_v4_analysis_budget_ledger/migration.sql",
+  import.meta.url);
+const schema = new URL("../prisma/schema.prisma", import.meta.url);
+
+test("AMUX v4 analysis budget schema is additive, dark and agent-only", async () => {
+  const [sql, prisma] = await Promise.all([
+    readFile(migration, "utf8"), readFile(schema, "utf8"),
+  ]);
+  assert.match(sql, /CREATE TABLE "AmuxIdeaAnalysisBudgetWindow"/);
+  assert.match(sql, /CREATE TABLE "AmuxIdeaAnalysisBudgetHold"/);
+  assert.match(sql, /"namespace" = 'agent\/amux-intake'/);
+  assert.match(sql, /"limitMicroUsd" = 50000000/);
+  assert.match(sql, /UNIQUE INDEX "AmuxIdeaAnalysisBudgetHold_previewId_key"/);
+  assert.match(sql, /FOREIGN KEY \("previewId"\) REFERENCES "AmuxIdeaTransferPreview"\("id"\)/);
+  assert.match(sql, /"status" IN \('reserved', 'in_flight', 'succeeded', 'failed',/);
+  assert.match(sql, /"status" = 'owner_consumed'.*?"settledMicroUsd" = "reservedMicroUsd"/s);
+  assert.match(sql, /"status" = 'released'.*?"settledMicroUsd" = 0/s);
+  assert.match(sql, /"AmuxIdeaAnalysisBudgetHold_lifecycle_check" CHECK \(\(.*?\) IS TRUE/s);
+  assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\s+(?:INTO\s+|FROM\s+)?"?(?:Credit|Chat|Memory)/i);
+  assert.match(prisma, /model AmuxIdeaAnalysisBudgetWindow \{/);
+  assert.match(prisma, /model AmuxIdeaAnalysisBudgetHold \{/);
+  assert.match(prisma, /previewId\s+String\s+@unique/);
+});
