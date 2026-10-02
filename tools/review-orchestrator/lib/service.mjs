@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
-import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, removeWorktree, restoreInstructionFiles } from "./git.mjs";
+import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, instructionDiff, isolateInstructionFiles, removeWorktree } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
@@ -177,21 +177,29 @@ export class Orchestrator {
   async runReview(job, slot, provider) {
     const repo = this.config.repos[job.repo];
     const workdir = join(this.workRoot, `${job.id}-${slot.index}`);
-    let prompt;
     try {
-      prompt = await withLock(mirrorLock(this.config), () => {
-        addWorktree(repo.mirror, workdir, job.head);
-        const files = changedFiles(repo.mirror, job.base, job.head);
-        const restored = restoreInstructionFiles(workdir, job.base, files);
-        const diff = diffText(repo.mirror, job.base, job.head);
-        return buildPrompt({ job, files, restored, diff, maxDiffBytes: this.config.maxPromptDiffBytes });
-      });
-    } catch (error) {
-      this.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });
-      this.log(`worktree failed for ${job.id}: ${error.message}`);
-      return;
-    }
-    try {
+      let prepared;
+      try {
+        prepared = await withLock(mirrorLock(this.config), () => {
+          addWorktree(repo.mirror, workdir, job.head);
+          isolateInstructionFiles(workdir, job.base, job.head);
+          const files = changedFiles(repo.mirror, job.base, job.head);
+          const instructions = instructionDiff(repo.mirror, job.base, job.head, files);
+          const diff = diffText(repo.mirror, job.base, job.head);
+          return { files, instructions, diff };
+        });
+      } catch (error) {
+        this.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });
+        this.log(`worktree failed for ${job.id}: ${error.message}`);
+        return;
+      }
+      // An instruction-file change the reviewer cannot see in full cannot be
+      // reviewed: the checkout holds the base version, so nothing else shows it.
+      if (Buffer.byteLength(prepared.instructions.text, "utf8") > this.config.maxPromptDiffBytes) {
+        this.finish(job, slot, { verdict: "unknown", reason: "instruction_diff_too_large", findings: [] });
+        return;
+      }
+      const prompt = buildPrompt({ job, ...prepared, maxDiffBytes: this.config.maxPromptDiffBytes });
       const outcome = await this.spawnReviewer(job, slot, provider, workdir, prompt);
       this.finish(job, slot, outcome);
     } finally {
