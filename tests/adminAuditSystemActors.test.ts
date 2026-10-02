@@ -5,6 +5,9 @@ import test from "node:test";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
@@ -73,6 +76,21 @@ test("the system actor list is closed and changes only by review", () => {
   })), "system");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_INITIAL_SOURCE_PLAN_ACTION, AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE },
+  })), "unknown");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     "AMUX_V4_CARD_REGISTERED", AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), false);
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,

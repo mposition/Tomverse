@@ -9,6 +9,8 @@ import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
+import { commitAmuxIdeaAnalysisBudgetReservation,
+  AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -68,26 +70,53 @@ async function confirmedPreviewId(): Promise<string> {
 }
 
 const namespace = "agent/amux-intake";
-const monthStart = new Date("2026-10-01T00:00:00.000Z");
+const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(),
+  new Date().getUTCMonth(), 1));
+const pricing = () => ({ mode: "subscription_cli" as const,
+  provider: "openai" as const, modelId: "gpt-frontier-synthetic",
+  pricingVersion: "synthetic-price-v1",
+  pricingVerifiedAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString(),
+  pricingExpiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+  worstTierVerified: true, tokenCapsEnforceable: true,
+  billableToolsDisabled: true, inputTokensCap: 1_000,
+  outputTokensCap: 2_000, inputMicroUsdPerMillion: 1_000_000,
+  outputMicroUsdPerMillion: 2_000_000 });
 
-test("analysis budget migration accepts one exact confirmed preview hold", async () => {
+test("confirmed preview reserves one agent-only budget hold and one system audit atomically", async () => {
   const previewId = await confirmedPreviewId();
   await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
     where: { namespace_monthStart: { namespace, monthStart } },
     create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
-    update: {},
+    update: { spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) },
   });
   const holdId = randomUUID();
-  const created = await prisma.amuxIdeaAnalysisBudgetHold.create({ data: {
-    id: holdId, previewId, namespace, monthStart, mode: "subscription_cli",
-    provider: "openai", modelId: "gpt-frontier-synthetic",
-    pricingVersion: "synthetic-price-v1", inputTokensCap: 1_000,
-    outputTokensCap: 2_000, inputMicroUsdPerMillion: 1_000_000,
-    outputMicroUsdPerMillion: 2_000_000, reservedMicroUsd: BigInt(5_000),
-    status: "reserved",
-  } });
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId, previewId, pricing: pricing() }));
+  assert.equal(result.reservedMicroUsd, "5000");
+  const created = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  });
   assert.equal(created.previewId, previewId);
   assert.equal(created.settledMicroUsd, null);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, BigInt(5_000));
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: result.auditId },
+  });
+  assert.equal(audit.action, "AMUX_V4_ANALYSIS_BUDGET_RESERVED");
+  assert.equal(audit.targetId, holdId);
+  assert.equal((audit.metadata as Record<string, unknown>).modelCallStarted, false);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId: randomUUID(), previewId, pricing: pricing() })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisReservationError &&
+    error.code === "already_reserved");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_BUDGET_RESERVED", targetType: "AmuxIdeaAnalysisBudgetHold",
+    metadata: { path: ["previewId"], equals: previewId },
+  } }), 1);
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetHold.create({
     data: { ...created, id: randomUUID() },
   }), (error: unknown) => error !== null && typeof error === "object" &&
@@ -100,20 +129,51 @@ test("analysis budget migration accepts one exact confirmed preview hold", async
   });
   assert.equal(stillReserved.status, "reserved");
   assert.equal(stillReserved.settledMicroUsd, null);
-  const dispatchedAt = new Date();
-  await prisma.amuxIdeaAnalysisBudgetHold.update({ where: { id: holdId },
-    data: { status: "outcome_unknown", dispatchedAt } });
-  await assert.rejects(prisma.amuxIdeaAnalysisBudgetHold.update({
-    where: { id: holdId }, data: { status: "owner_consumed",
-      closedAt: dispatchedAt, settledMicroUsd: BigInt(0) },
-  }), /AmuxIdeaAnalysisBudgetHold_lifecycle_check/);
-  await assert.rejects(prisma.amuxIdeaAnalysisBudgetHold.update({
-    where: { id: holdId }, data: { status: "released",
-      closedAt: dispatchedAt, settledMicroUsd: BigInt(0) },
-  }), /AmuxIdeaAnalysisBudgetHold_lifecycle_check/);
+  // Exercise unknown-state constraints without leaving a global halt behind
+  // that would make the next isolated test run fail admission.
+  for (const forbiddenStatus of ["owner_consumed", "released"] as const) {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      const dispatchedAt = new Date();
+    await tx.amuxIdeaAnalysisBudgetHold.update({ where: { id: holdId },
+      data: { status: "outcome_unknown", dispatchedAt } });
+      await tx.amuxIdeaAnalysisBudgetHold.update({
+        where: { id: holdId }, data: { status: forbiddenStatus,
+        closedAt: dispatchedAt, settledMicroUsd: BigInt(0) },
+      });
+    }), /AmuxIdeaAnalysisBudgetHold_lifecycle_check/);
+  }
   assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: holdId },
-  })).status, "outcome_unknown");
+  })).status, "reserved");
+});
+
+test("two confirmed previews cannot reserve the last monthly allowance twice", async () => {
+  const previews = await Promise.all([confirmedPreviewId(), confirmedPreviewId()]);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000),
+      spentMicroUsd: BigInt(49_995_000) },
+    update: { spentMicroUsd: BigInt(49_995_000), reservedMicroUsd: BigInt(0) },
+  });
+  const holds = previews.map(() => randomUUID());
+  const results = await Promise.allSettled(previews.map((previewId, index) =>
+    prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId: holds[index]!, previewId, pricing: pricing() }))));
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  const rejected = results.find((result) => result.status === "rejected");
+  assert(rejected?.status === "rejected" &&
+    rejected.reason instanceof AmuxIdeaAnalysisReservationError &&
+    rejected.reason.code === "budget_hold" &&
+    rejected.reason.reason === "monthly_cap_exceeded");
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, BigInt(5_000));
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({
+    where: { id: { in: holds } },
+  }), 1);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: "AMUX_V4_ANALYSIS_BUDGET_RESERVED", targetId: { in: holds } },
+  }), 1);
 });
 
 test("budget window rejects another namespace or a larger monthly cap", async () => {
