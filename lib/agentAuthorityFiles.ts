@@ -120,6 +120,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/**/engineering-agent*",
+  "tests/**/agent-digest*",
   "tests/security*",
   // §4-4: administration and authentication.
   "app/api/admin/**",

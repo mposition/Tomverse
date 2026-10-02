@@ -179,6 +179,12 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AgentDigestItem",
+    delegate: "agentDigestItem",
+    writers: ["lib/agentDigestStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §4",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -484,6 +490,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 94,
     reason:
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 12,
+    writeVerbs: 3,
+    reason:
+      "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "scripts/check-enum-constraints.mjs",
+    table: "AgentDigestItem",
+    tableMentions: 1,
+    writeVerbs: 16,
+    reason:
+      "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
   {
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",

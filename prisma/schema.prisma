@@ -8116,6 +8116,31 @@ model AmuxOrchestratorHalt {
   @@index([requestId])
 }
 
+/// The shared agent digest table: one row per stored digest item of any agent
+/// team, told apart by `agentKey`. Single writer: lib/agentDigestStore.ts.
+/// Triggers (migration 20261003000000_agent_digest_item) set `createdAt` and
+/// `retentionUntil` from the database clock, allow only the body expiry as an
+/// update and only the 365-day meta purge as a delete.
+model AgentDigestItem {
+  id             String    @id @db.Uuid
+  agentKey       String
+  kind           String
+  schemaVersion  Int
+  idempotencyKey String
+  payload        Json?
+  payloadSha256  String
+  sizeBytes      Int
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Overwritten by the insert trigger: createdAt plus the agent's body retention.
+  retentionUntil DateTime  @default(now()) @db.Timestamptz(3)
+  bodyDeletedAt  DateTime? @db.Timestamptz(3)
+
+  @@unique([agentKey, idempotencyKey])
+  @@index([agentKey, createdAt])
+  @@index([retentionUntil])
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the
