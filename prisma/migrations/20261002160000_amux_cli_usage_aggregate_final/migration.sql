@@ -15,7 +15,7 @@ CREATE TABLE "AmuxCliUsageAggregateFinalization" (
     "providerScopeKey" IN ('openai', 'anthropic', 'actualProviderUnknown')
   ),
   CONSTRAINT "AmuxCliUsageAggregateFinalization_outcome_check" CHECK (
-    ("outcome" = 'published' AND "rawInvocationCount" >= 5) OR
+    ("outcome" = 'published' AND "rawInvocationCount" IS NOT NULL AND "rawInvocationCount" >= 5) OR
     ("outcome" IN ('empty', 'excluded_small') AND "rawInvocationCount" IS NULL)
   )
 );
@@ -88,6 +88,12 @@ CREATE UNIQUE INDEX "AmuxCliUsageAggregateCell_final_dimensions_key"
 CREATE FUNCTION amux_cli_aggregate_finalize_stamp() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN
+  IF NEW."year" BETWEEN 1000 AND 9998 AND
+     clock_timestamp() < pg_catalog.make_timestamptz(
+       NEW."year" + 1, 1, 1, 0, 0, 0, 'UTC') + INTERVAL '1 day' THEN
+    RAISE EXCEPTION 'AMUX CLI provider year is still open'
+      USING ERRCODE = 'AX007';
+  END IF;
   NEW."creationXid" := txid_current();
   NEW."finalizedAt" := clock_timestamp();
   RETURN NEW;
@@ -161,7 +167,7 @@ BEGIN
   ) INTO parent_outcome, raw_count, cell_count, invocation_sum USING target_id;
   IF parent_outcome IS NULL OR
      (parent_outcome = 'published' AND
-      (cell_count = 0 OR invocation_sum <> raw_count)) OR
+      (cell_count = 0 OR invocation_sum IS DISTINCT FROM raw_count)) OR
      (parent_outcome <> 'published' AND cell_count <> 0) THEN
     RAISE EXCEPTION 'AMUX CLI aggregate finalization is incomplete'
       USING ERRCODE = 'AX004';

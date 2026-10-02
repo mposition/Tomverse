@@ -18,13 +18,19 @@ if (!url || !["postgres:", "postgresql:"].includes(url.protocol) ||
 }
 
 const years: number[] = [];
+let openYear = 0;
 before(async () => {
+  const clock = await prisma.$queryRaw<Array<{ year: number }>>`
+    SELECT EXTRACT(YEAR FROM clock_timestamp())::integer AS year`;
+  openYear = clock[0]?.year ?? 0;
+  const latestClosedYear = Math.min(openYear - 2, 9998);
+  assert.ok(latestClosedYear >= 1013, "test database clock has no closed-year sample range");
   const taken = await prisma.$queryRaw<Array<{ year: number }>>`
     SELECT "year" FROM "AmuxCliUsageAggregateFinalization"
     WHERE "providerScopeKey" = 'openai'`;
   const used = new Set(taken.map((row) => row.year));
   while (years.length < 14) {
-    const candidate = randomInt(3000, 8000);
+    const candidate = randomInt(1000, latestClosedYear + 1);
     if (!used.has(candidate)) {
       years.push(candidate);
       used.add(candidate);
@@ -32,6 +38,16 @@ before(async () => {
   }
 });
 after(async () => { await prisma.$disconnect(); });
+
+test("published finalization needs a non-null raw count and a closed year", async () => {
+  await assert.rejects(prisma.$executeRaw`
+    INSERT INTO "AmuxCliUsageAggregateFinalization"
+      ("id", "year", "providerScopeKey", "outcome", "rawInvocationCount")
+    VALUES (${randomUUID()}, ${years[0]}, 'anthropic', 'published', NULL)`,
+  /AmuxCliUsageAggregateFinalization_outcome_check/);
+  await assert.rejects(insertFinalization(prisma, randomUUID(), openYear),
+    /provider year is still open/);
+});
 
 async function insertFinalization(
   tx: Prisma.TransactionClient,

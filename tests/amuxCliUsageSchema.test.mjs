@@ -14,6 +14,10 @@ const roleMigration = readFileSync(new URL(
   "../prisma/migrations/20261002170000_amux_cli_usage_role_snapshot/migration.sql",
   import.meta.url,
 ), "utf8");
+const aggregateMigration = readFileSync(new URL(
+  "../prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
+  import.meta.url,
+), "utf8");
 const yearFenceMigration = readFileSync(new URL(
   "../prisma/migrations/20261002190000_amux_cli_usage_year_insert_fence/migration.sql",
   import.meta.url,
@@ -90,4 +94,12 @@ test("an inserted receipt keeps its year lock until commit and refuses a sealed 
   assert.match(yearFenceMigration, /IF year_sealed THEN/);
   assert.match(yearFenceMigration, /ERRCODE = 'AX005'/);
   assert.doesNotMatch(yearFenceMigration, /\b(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE)\b/i);
+});
+
+test("a published aggregate needs a count and cannot seal an open provider year", () => {
+  assert.match(aggregateMigration,
+    /"outcome" = 'published' AND "rawInvocationCount" IS NOT NULL AND "rawInvocationCount" >= 5/);
+  assert.match(aggregateMigration, /invocation_sum IS DISTINCT FROM raw_count/);
+  assert.match(aggregateMigration,
+    /clock_timestamp\(\) < pg_catalog\.make_timestamptz\([\s\S]*?INTERVAL '1 day'/);
 });
