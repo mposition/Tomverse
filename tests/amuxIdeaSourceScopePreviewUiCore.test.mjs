@@ -11,10 +11,15 @@ const checked = {
       commitSha: "a".repeat(40), path: "README.md" }] }),
   collectionVerified: false, transferAuthorized: false,
 };
+const checkedPr = { ...checked, canonicalScopeJson: JSON.stringify({ version: 1,
+  sources: [{ kind: "pull_request_file", repository: "mposition/Tomverse", number: 1917,
+    baseSha: "a".repeat(40), headSha: "b".repeat(40), side: "head", path: "README.md" }] }) };
 
 test("only a complete read-only response is shown as a checked scope", () => {
   assert.deepEqual(classifySourceScopePreview({ status: 200, body: checked }, ideaId),
     { kind: "checked", canonicalScopeJson: checked.canonicalScopeJson });
+  assert.deepEqual(classifySourceScopePreview({ status: 200, body: checkedPr }, ideaId),
+    { kind: "checked", canonicalScopeJson: checkedPr.canonicalScopeJson });
   for (const reply of [
     { status: 202, body: checked },
     { status: 200, body: { ...checked, ideaId: "another" } },
@@ -24,6 +29,9 @@ test("only a complete read-only response is shown as a checked scope", () => {
     { status: 200, body: { ...checked, canonicalScopeJson: "not json" } },
     { status: 200, body: { ...checked, canonicalScopeJson: '{"version":1,"sources":[]}' } },
     { status: 200, body: { ...checked, fileCount: 0 } },
+    { status: 200, body: { ...checkedPr, canonicalScopeJson: JSON.stringify({ version: 1,
+      sources: [{ kind: "pull_request_file", repository: "mposition/Tomverse", number: 0,
+        baseSha: "a".repeat(40), headSha: "b".repeat(40), side: "head", path: "README.md" }] }) } },
   ]) {
     assert.deepEqual(classifySourceScopePreview(reply, ideaId),
       { kind: "error", code: "preview_unavailable" });
@@ -41,6 +49,7 @@ test("the Admin form uses the route only after a saved idea and keeps the dark s
   const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   assert.match(panel, /submission\.kind === "submitted" \? \([\s\S]*?sourceScopeTitle/);
   assert.match(panel, /\/api\/admin\/amux\/ideas\/source-scope-preview/);
+  assert.match(panel, /kind: "pull_request_file"/);
   assert.match(panel, /!sourceScopePreviewAvailable \|\| sourceScopePending/);
   assert.match(page, /sourceScopePreviewPermitted\([\s\S]*?AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV/);
 });

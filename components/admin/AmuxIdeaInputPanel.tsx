@@ -79,7 +79,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
   const [sourceRepository, setSourceRepository] = useState("");
+  const [sourceKind, setSourceKind] = useState<"repository_file" | "pull_request_file">("repository_file");
   const [sourceCommitSha, setSourceCommitSha] = useState("");
+  const [sourcePrNumber, setSourcePrNumber] = useState("");
+  const [sourceBaseSha, setSourceBaseSha] = useState("");
+  const [sourceHeadSha, setSourceHeadSha] = useState("");
+  const [sourceSide, setSourceSide] = useState<"base" | "head">("head");
   const [sourcePath, setSourcePath] = useState("");
   const [sourceScopePending, setSourceScopePending] = useState(false);
   const [sourceScopeResult, setSourceScopeResult] = useState<SourceScopeResult>({ kind: "idle" });
@@ -104,7 +109,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setPullRequests("");
     setResult(null);
     setSourceRepository("");
+    setSourceKind("repository_file");
     setSourceCommitSha("");
+    setSourcePrNumber("");
+    setSourceBaseSha("");
+    setSourceHeadSha("");
+    setSourceSide("head");
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
     setSubmission({ kind: "idle" });
@@ -112,8 +122,14 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const checkSourceScope = async () => {
     if (submission.kind !== "submitted" || !sourceScopePreviewAvailable || sourceScopePending ||
-        !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()) return;
+        !sourceFieldsComplete) return;
     const ideaId = submission.ideaId;
+    const source = sourceKind === "repository_file"
+      ? { kind: "repository_file", repository: sourceRepository.trim(),
+        commitSha: sourceCommitSha.trim(), path: sourcePath.trim() }
+      : { kind: "pull_request_file", repository: sourceRepository.trim(),
+        number: Number(sourcePrNumber), baseSha: sourceBaseSha.trim(),
+        headSha: sourceHeadSha.trim(), side: sourceSide, path: sourcePath.trim() };
     setSourceScopePending(true);
     setSourceScopeResult({ kind: "idle" });
     try {
@@ -122,8 +138,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ schemaVersion: 1, ideaId, scopeJson: JSON.stringify({
           version: 1,
-          sources: [{ kind: "repository_file", repository: sourceRepository.trim(),
-            commitSha: sourceCommitSha.trim(), path: sourcePath.trim() }],
+          sources: [source],
         }) }),
       });
       setSourceScopeResult(classifySourceScopePreview({ status: response.status, body: await response.json() }, ideaId));
@@ -251,6 +266,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   };
 
   const ideaBytes = new TextEncoder().encode(idea.trim()).length;
+  const sourceFieldsComplete = !!sourceRepository.trim() && !!sourcePath.trim() &&
+    (sourceKind === "repository_file" ? !!sourceCommitSha.trim() :
+      /^[1-9]\d*$/.test(sourcePrNumber) && Number.isSafeInteger(Number(sourcePrNumber)) &&
+      !!sourceBaseSha.trim() && !!sourceHeadSha.trim());
   const frozen = submission.kind === "pending" || submission.kind === "outcome_unknown" ||
     submission.kind === "submitted" || submission.kind === "recovery_unavailable";
   const refusedForStepUp = result?.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
@@ -406,17 +425,56 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
           <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.sourceScopeHint}</p>
+          <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+            {messages.sourceKindLabel}
+            <select value={sourceKind} onChange={(event) => {
+              setSourceKind(event.target.value as "repository_file" | "pull_request_file");
+              setSourceScopeResult({ kind: "idle" });
+            }} disabled={sourceScopePending}
+            className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="repository_file">{messages.sourceRepositoryFile}</option>
+              <option value="pull_request_file">{messages.sourcePullRequestFile}</option>
+            </select>
+          </label>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourceRepositoryLabel}
               <input value={sourceRepository} maxLength={165} spellCheck={false} onChange={(event) => { setSourceRepository(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
                 disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
             </label>
-            <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
-              {messages.sourceCommitLabel}
-              <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
-            </label>
+            {sourceKind === "repository_file" ? (
+              <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+                {messages.sourceCommitLabel}
+                <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                  disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+              </label>
+            ) : (
+              <>
+                <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+                  {messages.sourcePrNumberLabel}
+                  <input value={sourcePrNumber} maxLength={20} inputMode="numeric" onChange={(event) => { setSourcePrNumber(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                    disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                </label>
+                <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+                  {messages.sourceBaseShaLabel}
+                  <input value={sourceBaseSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceBaseSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                    disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                </label>
+                <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+                  {messages.sourceHeadShaLabel}
+                  <input value={sourceHeadSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceHeadSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                    disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                </label>
+                <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
+                  {messages.sourceSideLabel}
+                  <select value={sourceSide} onChange={(event) => { setSourceSide(event.target.value as "base" | "head"); setSourceScopeResult({ kind: "idle" }); }}
+                    disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900">
+                    <option value="head">{messages.sourceHeadSide}</option>
+                    <option value="base">{messages.sourceBaseSide}</option>
+                  </select>
+                </label>
+              </>
+            )}
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourcePathLabel}
               <input value={sourcePath} maxLength={256} spellCheck={false} onChange={(event) => { setSourcePath(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
@@ -424,7 +482,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             </label>
           </div>
           <button type="button" onClick={checkSourceScope}
-            disabled={!sourceScopePreviewAvailable || sourceScopePending || !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()}
+            disabled={!sourceScopePreviewAvailable || sourceScopePending || !sourceFieldsComplete}
             className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
             {sourceScopePending ? messages.sourceScopeChecking : messages.sourceScopeCheck}
           </button>
