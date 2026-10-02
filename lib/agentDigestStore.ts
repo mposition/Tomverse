@@ -37,13 +37,24 @@ export type AgentDigestRecordResult =
   | { status: "created"; id: string; auditLogId: string; sizeBytes: number; payloadSha256: string }
   | { status: "replayed"; id: string; payloadSha256: string }
   | { status: "conflict"; id: string }
-  | { status: "refused"; reason: AgentDigestRefusal; secretRuleIds?: SecretRuleId[] };
+  | { status: "refused"; reason: AgentDigestRefusal; secretRuleIds?: SecretRuleId[] }
+  | { status: "not_admitted"; reason: string };
+
+/**
+ * A caller's last check, run inside the transaction after the audit chain
+ * lock and before anything is written. Every writer of state the caller
+ * depends on (an operator control revision, for one) takes the same lock
+ * first, so the check and the write cannot interleave with a change to it.
+ * It returns a refusal code, or null to proceed.
+ */
+export type AgentDigestAdmission = (tx: Prisma.TransactionClient) => Promise<string | null>;
 
 type Db = Pick<typeof prisma, "$transaction">;
 
 export async function recordAgentDigestItem(
   submission: AgentDigestSubmission,
   db: Db = prisma,
+  admit?: AgentDigestAdmission,
 ): Promise<AgentDigestRecordResult> {
   const prepared = prepareAgentDigestItem(submission);
   if (!prepared.ok) {
@@ -68,6 +79,10 @@ export async function recordAgentDigestItem(
       // the chain and then touches this row must never wait on one that holds
       // the row and waits for the chain.
       await takeAuditChainLock(tx);
+      if (admit) {
+        const refusal = await admit(tx);
+        if (refusal !== null) return { status: "not_admitted", reason: refusal } as const;
+      }
       const inserted = await tx.agentDigestItem.createMany({
         data: [
           {
