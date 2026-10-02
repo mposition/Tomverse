@@ -9,6 +9,7 @@ import {
   parseTrainState,
   pickNextPullRequest,
   refusalReason,
+  replacementCommits,
   servicesDeployingBranch,
   withLane,
 } from "../scripts/merge-train-core.mjs";
@@ -124,9 +125,14 @@ test("equal creation times fall back to PR number", () => {
 });
 
 const commit = "c".repeat(40);
-const deployment = (status, commitHash = commit, serviceId = "svc", branch = "develop") => ({
+const older = "b".repeat(40);
+const newer = "e".repeat(40);
+let clock = 0;
+// Each deployment is created after the previous one unless given a time.
+const deployment = (status, commitHash = commit, serviceId = "svc", branch = "develop", createdAt) => ({
   status,
   serviceId,
+  createdAt: createdAt ?? new Date(Date.UTC(2026, 9, 2, 0, 0, clock++)).toISOString(),
   meta: { commitHash, branch },
 });
 
@@ -140,57 +146,67 @@ test("any waiting, queued, building or deploying deployment holds the environmen
   );
 });
 
-test("deploymentOutcome needs every service that deploys the branch", () => {
-  const both = ["web", "cron"];
-  assert.equal(deploymentOutcome([deployment("WAITING", "d".repeat(40), "web")], commit, both).state, "not_seen");
+test("deploymentOutcome needs every service that currently deploys the branch", () => {
+  const before = [deployment("SUCCESS", older, "web"), deployment("SUCCESS", older, "cron")];
+  assert.equal(deploymentOutcome(before, commit, "develop").state, "not_seen");
   // The cron service finishes in seconds; the web service has not started.
-  assert.equal(deploymentOutcome([deployment("SUCCESS", commit, "cron")], commit, both).state, "partial");
+  assert.equal(deploymentOutcome([...before, deployment("SUCCESS", commit, "cron")], commit, "develop").state, "partial");
   assert.equal(
-    deploymentOutcome([deployment("SUCCESS", commit, "cron"), deployment("WAITING", commit, "web")], commit, both).state,
+    deploymentOutcome([...before, deployment("SUCCESS", commit, "cron"), deployment("WAITING", commit, "web")], commit, "develop").state,
     "in_progress",
   );
   assert.equal(
-    deploymentOutcome([deployment("SUCCESS", commit, "cron"), deployment("SLEEPING", commit, "web")], commit, both).state,
+    deploymentOutcome([...before, deployment("SUCCESS", commit, "cron"), deployment("SLEEPING", commit, "web")], commit, "develop").state,
     "succeeded",
   );
   for (const status of ["FAILED", "SKIPPED", "CRASHED"]) {
     assert.equal(
-      deploymentOutcome([deployment("WAITING", commit, "cron"), deployment(status, commit, "web")], commit, both).state,
+      deploymentOutcome([...before, deployment("WAITING", commit, "cron"), deployment(status, commit, "web")], commit, "develop").state,
       "failed",
       status,
     );
   }
-  assert.equal(deploymentOutcome([deployment("REMOVED", commit, "web")], commit, both).state, "unknown");
-  assert.equal(deploymentOutcome([deployment("SOMETHING_NEW", commit, "web")], commit, both).state, "unknown");
+  assert.equal(deploymentOutcome([deployment("SOMETHING_NEW", commit, "web")], commit, "develop").state, "unknown");
 });
 
-test("a deployment REMOVED by a newer one for the same service is superseded, not unknown", () => {
-  const at = (deployment, createdAt) => ({ ...deployment, createdAt });
-  const newer = "e".repeat(40);
+test("a service whose newest deployment is of another branch is not waited for", () => {
   const deployments = [
-    at(deployment("SUCCESS", commit, "web"), "2026-10-02T01:00:00Z"),
-    at(deployment("REMOVED", commit, "cron"), "2026-10-02T01:00:00Z"),
-    at(deployment("SUCCESS", newer, "cron"), "2026-10-02T02:00:00Z"),
+    deployment("SUCCESS", older, "worker", "develop"),
+    deployment("SUCCESS", older, "worker", "amux-validation"),
+    deployment("SUCCESS", commit, "web"),
   ];
-  assert.equal(deploymentOutcome(deployments, commit, ["web", "cron"]).state, "succeeded");
-  // Nothing newer for that service: still unexplained.
-  assert.equal(deploymentOutcome(deployments.slice(0, 2), commit, ["web", "cron"]).state, "unknown");
+  assert.deepEqual(servicesDeployingBranch(deployments, "develop"), ["web"]);
+  assert.equal(deploymentOutcome(deployments, commit, "develop").state, "succeeded");
+});
+
+test("a redeploy of the same commit replaces the earlier attempt", () => {
+  const deployments = [deployment("REMOVED", commit, "web"), deployment("SUCCESS", commit, "web")];
+  assert.equal(deploymentOutcome(deployments, commit, "develop").state, "succeeded");
+  const failedThenFixed = [deployment("FAILED", commit, "web"), deployment("SUCCESS", commit, "web")];
+  assert.equal(deploymentOutcome(failedThenFixed, commit, "develop").state, "succeeded");
+});
+
+test("a REMOVED deployment counts through its replacement only when that commit contains the merge", () => {
+  const replaced = (replacementStatus) => [
+    deployment("SUCCESS", commit, "web"),
+    deployment("REMOVED", commit, "cron"),
+    deployment(replacementStatus, newer, "cron"),
+  ];
+  assert.deepEqual(replacementCommits(replaced("SUCCESS"), commit), [newer]);
+  assert.equal(deploymentOutcome(replaced("SUCCESS"), commit, "develop", new Set([newer])).state, "succeeded");
+  // The newer deployment's own result is what this merge got.
+  assert.equal(deploymentOutcome(replaced("BUILDING"), commit, "develop", new Set([newer])).state, "in_progress");
+  assert.equal(deploymentOutcome(replaced("FAILED"), commit, "develop", new Set([newer])).state, "failed");
+  // A rollback, or a replacement GitHub could not place after the merge.
+  assert.equal(deploymentOutcome(replaced("SUCCESS"), commit, "develop", new Set()).state, "unknown");
+  // Nothing newer at all.
+  assert.equal(deploymentOutcome(replaced("SUCCESS").slice(0, 2), commit, "develop", new Set([newer])).state, "unknown");
 });
 
 test("deploymentOutcome compares commit hashes case-insensitively", () => {
   const upper = commit.toUpperCase();
-  assert.equal(deploymentOutcome([deployment("FAILED", upper, "web")], commit, ["web"]).state, "failed");
-  assert.equal(deploymentOutcome([deployment("SUCCESS", commit, "web")], upper, ["web"]).state, "succeeded");
-});
-
-test("servicesDeployingBranch names services by the branch they deploy", () => {
-  const deployments = [
-    deployment("SUCCESS", commit, "web", "develop"),
-    deployment("SUCCESS", commit, "cron", "develop"),
-    deployment("SUCCESS", commit, "web", "develop"),
-    deployment("SUCCESS", commit, "validation", "amux-validation"),
-  ];
-  assert.deepEqual(servicesDeployingBranch(deployments, "develop"), ["web", "cron"]);
+  assert.equal(deploymentOutcome([deployment("FAILED", upper, "web")], commit, "develop").state, "failed");
+  assert.equal(deploymentOutcome([deployment("SUCCESS", commit, "web")], upper, "develop").state, "succeeded");
 });
 
 const sha = "a".repeat(40);

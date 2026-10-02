@@ -164,55 +164,97 @@ export function withLane(state, branch, patch) {
 
 const commitOf = (deployment) => String(deployment.meta?.commitHash ?? "").toLowerCase();
 
-/**
- * The services that deploy `branch` in this environment: every service with a
- * deployment of that branch in the window read. A merge has not deployed until
- * each of them has deployed it -- the cron services finish in seconds while
- * the web service is still waiting for CI.
- */
-export function servicesDeployingBranch(deployments, branch) {
-  return [...new Set(deployments.filter((deployment) => deployment.meta?.branch === branch).map((d) => d.serviceId))];
-}
+const newestFirst = (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
 
 /**
- * What happened to the deployments Railway made for one merge commit, across
- * `expectedServiceIds`.
- *
- * "not_seen" (no service has it yet) and "partial" (some have) are not
- * success; the caller decides how long they may last. A failure anywhere wins
- * over everything else. REMOVED and any status this table does not know are
- * "unknown" -- the train stops on them rather than guessing.
+ * The services that currently deploy `branch`: those whose newest deployment
+ * in the window is of that branch. A merge has not deployed until each of them
+ * has deployed it -- the cron services finish in seconds while the web service
+ * is still waiting for CI. A service that once deployed the branch and has
+ * since moved to another is not waited for.
  */
-export function deploymentOutcome(deployments, commitSha, expectedServiceIds) {
-  const sha = commitSha.toLowerCase();
-  const forCommit = deployments.filter((deployment) => commitOf(deployment) === sha);
-  if (forCommit.some((deployment) => FAILED_DEPLOYMENT_STATUSES.has(deployment.status))) {
-    return { state: "failed", deployments: forCommit };
+export function servicesDeployingBranch(deployments, branch) {
+  const newest = new Map();
+  for (const deployment of [...deployments].sort(newestFirst)) {
+    if (!newest.has(deployment.serviceId)) newest.set(deployment.serviceId, deployment);
   }
-  // Railway marks a deployment REMOVED when a newer one for the same service
-  // replaces it -- someone else merged after this commit. The newer commit
-  // contains this one, so that service has moved past it; the hold covers the
-  // newer deployment. A REMOVED with nothing newer is still unexplained.
-  const superseded = (deployment) =>
-    deployment.status === "REMOVED" &&
-    deployments.some(
+  return [...newest.values()].filter((deployment) => deployment.meta?.branch === branch).map((d) => d.serviceId);
+}
+
+/** The newest deployment of the same service created after `deployment` for another commit. */
+function replacementOf(deployments, deployment) {
+  const sha = commitOf(deployment);
+  return [...deployments]
+    .sort(newestFirst)
+    .find(
       (other) =>
         other.serviceId === deployment.serviceId &&
         commitOf(other) !== sha &&
         Date.parse(other.createdAt) > Date.parse(deployment.createdAt),
     );
-  const known = (deployment) =>
-    IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status) ||
-    SUCCEEDED_DEPLOYMENT_STATUSES.has(deployment.status) ||
-    superseded(deployment);
-  if (forCommit.some((deployment) => !known(deployment))) return { state: "unknown", deployments: forCommit };
+}
+
+/**
+ * Commits whose deployments replaced one of `commitSha`'s (Railway marks the
+ * replaced one REMOVED). The caller asks GitHub which of them contain
+ * `commitSha` and passes that set back to deploymentOutcome.
+ */
+export function replacementCommits(deployments, commitSha) {
+  const sha = commitSha.toLowerCase();
+  const commits = new Set();
+  for (const deployment of deployments) {
+    if (commitOf(deployment) !== sha || deployment.status !== "REMOVED") continue;
+    const replacement = replacementOf(deployments, deployment);
+    if (replacement) commits.add(commitOf(replacement));
+  }
+  return [...commits];
+}
+
+function serviceState(status) {
+  if (FAILED_DEPLOYMENT_STATUSES.has(status)) return "failed";
+  if (IN_FLIGHT_DEPLOYMENT_STATUSES.has(status)) return "in_progress";
+  if (SUCCEEDED_DEPLOYMENT_STATUSES.has(status)) return "done";
+  return "unknown";
+}
+
+// Worst first: the outcome is the worst state any expected service is in.
+const OUTCOME_ORDER = ["failed", "unknown", "missing", "in_progress", "done"];
+
+/**
+ * What happened to one merge commit across every service that deploys the
+ * branch (plus any service that has a deployment of the commit).
+ *
+ * Per service only the newest deployment of the commit counts, so a redeploy
+ * of the same commit replaces the earlier attempt. A deployment REMOVED by a
+ * newer one counts through that newer one -- but only when the newer commit is
+ * in `containing` (it includes this merge); a rollback to an older commit, or
+ * a replacement nobody could place, is "unknown". The train stops on
+ * "failed" and "unknown"; "not_seen" and "partial" are waits whose length the
+ * caller decides.
+ */
+export function deploymentOutcome(deployments, commitSha, branch, containing = new Set()) {
+  const sha = commitSha.toLowerCase();
+  const forCommit = deployments.filter((deployment) => commitOf(deployment) === sha);
   if (forCommit.length === 0) return { state: "not_seen", deployments: [] };
-  const deployed = new Set(forCommit.map((deployment) => deployment.serviceId));
-  if (expectedServiceIds.some((serviceId) => !deployed.has(serviceId))) {
-    return { state: "partial", deployments: forCommit };
+  const expected = new Set([
+    ...servicesDeployingBranch(deployments, branch),
+    ...forCommit.map((deployment) => deployment.serviceId),
+  ]);
+
+  let worst = "done";
+  for (const serviceId of expected) {
+    const newest = forCommit.filter((deployment) => deployment.serviceId === serviceId).sort(newestFirst)[0];
+    let state;
+    if (!newest) {
+      state = "missing";
+    } else if (newest.status === "REMOVED") {
+      const replacement = replacementOf(deployments, newest);
+      state = replacement && containing.has(commitOf(replacement)) ? serviceState(replacement.status) : "unknown";
+    } else {
+      state = serviceState(newest.status);
+    }
+    if (OUTCOME_ORDER.indexOf(state) < OUTCOME_ORDER.indexOf(worst)) worst = state;
   }
-  if (forCommit.some((deployment) => IN_FLIGHT_DEPLOYMENT_STATUSES.has(deployment.status))) {
-    return { state: "in_progress", deployments: forCommit };
-  }
-  return { state: "succeeded", deployments: forCommit };
+  const outcome = { failed: "failed", unknown: "unknown", missing: "partial", in_progress: "in_progress", done: "succeeded" };
+  return { state: outcome[worst], deployments: forCommit };
 }
