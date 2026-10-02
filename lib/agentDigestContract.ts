@@ -1,8 +1,10 @@
 /**
  * The closed lists of the shared AgentDigestItem table, as the application
  * knows them. Migration 20261003000000_agent_digest_item enforces the same
- * lists in CHECK constraints; scripts/check-enum-constraints.mjs compares the
- * two, so adding an agent or a kind is one reviewed change to both.
+ * lists in CHECK constraints. scripts/check-enum-constraints.mjs compares the
+ * agentKey list; tests/agentDigestContract.test.mjs compares the per-agent
+ * kinds, the retention and the size limit, which that parser does not read.
+ * Adding an agent or a kind is one reviewed change to both.
  *
  * Pure constants: safe to import from the store, the route and the services.
  */

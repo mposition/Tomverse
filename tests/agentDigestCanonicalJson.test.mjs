@@ -68,6 +68,14 @@ test("non-JSON values are refused", () => {
   }
 });
 
+test("a sparse array is refused rather than read as shorter or printed as invalid JSON", () => {
+  for (const bad of [Array(1), Array(2), [1, , 2]]) {
+    assert.throws(() => agentDigestCanonicalJson({ a: bad }), /sparse_array/, String(bad.length));
+  }
+  assert.throws(() => agentDigestCanonicalJson([undefined]), AgentDigestCanonicalJsonError);
+  assert.equal(agentDigestCanonicalJson([null, 1]), "[null,1]");
+});
+
 test("canonical text is independent of key insertion order and has no whitespace", () => {
   assert.equal(agentDigestCanonicalJson({ b: [1, { d: 2, c: 3 }], a: true }), '{"a":true,"b":[1,{"c":3,"d":2}]}');
   assert.equal(

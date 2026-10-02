@@ -53,7 +53,16 @@ function serialize(value: unknown, depth: number): string {
       return serializeString(value);
     case "object": {
       if (Array.isArray(value)) {
-        return `[${value.map((item) => serialize(item, depth + 1)).join(",")}]`;
+        // An index loop, not map(): map() skips the holes of a sparse array, which
+        // would let Array(1) hash like [] and Array(2) print the invalid "[,]".
+        const items: string[] = [];
+        for (let index = 0; index < value.length; index += 1) {
+          if (!Object.prototype.hasOwnProperty.call(value, index)) {
+            throw new AgentDigestCanonicalJsonError("sparse_array");
+          }
+          items.push(serialize(value[index], depth + 1));
+        }
+        return `[${items.join(",")}]`;
       }
       if (!isPlainObject(value)) throw new AgentDigestCanonicalJsonError("not_plain_object");
       const record = value as Record<string, unknown>;
