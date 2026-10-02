@@ -14,6 +14,10 @@ const roleMigration = readFileSync(new URL(
   "../prisma/migrations/20261002170000_amux_cli_usage_role_snapshot/migration.sql",
   import.meta.url,
 ), "utf8");
+const yearFenceMigration = readFileSync(new URL(
+  "../prisma/migrations/20261002190000_amux_cli_usage_year_insert_fence/migration.sql",
+  import.meta.url,
+), "utf8");
 
 test("the v22/v23 CLI receipt is separate from credits and cost reservations", () => {
   assert.match(schema, /model AmuxCliUsageInvocation \{/);
@@ -70,4 +74,20 @@ test("the usage role vocabulary tracks approved Task roles plus idea analysis", 
   assert.deepEqual(AMUX_CLI_USAGE_WORKER_ROLES.filter((role) => role !== "idea_analysis"),
     AMUX_TASK_ROLE_PROPOSALS);
   assert.equal(AMUX_CLI_USAGE_WORKER_ROLES.at(-1), "idea_analysis");
+});
+
+test("an inserted receipt keeps its year lock until commit and refuses a sealed year", () => {
+  // The replaced original is only a DB clock stamp, and its trigger is INSERT
+  // only. Pin both sides so replacement cannot silently drop older behavior.
+  assert.match(migration, /CREATE FUNCTION amux_cli_usage_set_recorded_at\(\)[\s\S]*?NEW\."recordedAt" := clock_timestamp\(\);\s*RETURN NEW;\s*END;/);
+  assert.match(migration, /CREATE TRIGGER "AmuxCliUsageInvocation_set_recordedAt"\s+BEFORE INSERT ON "AmuxCliUsageInvocation"\s+FOR EACH ROW/);
+  assert.match(yearFenceMigration, /CREATE OR REPLACE FUNCTION amux_cli_usage_set_recorded_at/);
+  assert.match(yearFenceMigration, /NEW\."recordedAt" := clock_timestamp\(\)/);
+  assert.match(yearFenceMigration, /current_setting\('transaction_isolation'\) <> 'read committed'/);
+  assert.match(yearFenceMigration, /"recordedAt" AT TIME ZONE 'UTC'/);
+  assert.match(yearFenceMigration, /pg_advisory_xact_lock_shared\(1095587160, usage_year\)/);
+  assert.match(yearFenceMigration, /"providerScopeKey" = ''actualProviderUnknown''/);
+  assert.match(yearFenceMigration, /IF year_sealed THEN/);
+  assert.match(yearFenceMigration, /ERRCODE = 'AX005'/);
+  assert.doesNotMatch(yearFenceMigration, /\b(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE)\b/i);
 });
