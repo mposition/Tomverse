@@ -111,8 +111,15 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   `codex exec --sandbox read-only -`와 `cursor-agent --print --mode ask --trust`는
   Windows에서 쓰던 형태입니다. `claude -p`는 Read·Grep·Glob만 허용하고 Bash를 막습니다
   (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). subagent
-  도구(`Agent`, `Task`)도 막습니다. 2026-10-02 Ubuntu 서버에서 세 CLI 모두 쓰기 요청을
-  거절하고 json 블록으로 끝나는 것을 확인했고, Codex는 stdout에 최종 답만 냅니다.
+  도구(`Agent`, `Task`)도 막습니다. `--strict-mcp-config`는 구독 계정에 붙은 claude.ai
+  커넥터(결제·배포 도구 포함)를 검토 세션에 아예 싣지 않습니다. 2026-10-02 Ubuntu 서버에서
+  세 CLI 모두 쓰기 요청을 거절하고 json 블록으로 끝나는 것을 확인했고, Codex는 stdout에
+  최종 답만 냅니다.
+- Claude 로그인: SSH 터미널에 붙여 넣기가 안 되면 브라우저가 있는 PC에서
+  `claude setup-token`으로 1년짜리 토큰을 만들어 `CLAUDE_CODE_OAUTH_TOKEN`으로 줍니다
+  (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
+  `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
+  붙여 넣기 없이 로그인합니다.
 - Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
   `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
 
