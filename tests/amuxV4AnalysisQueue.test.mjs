@@ -4,7 +4,9 @@ import test from "node:test";
 
 import {
   AMUX_V4_ANALYSIS_AGENT_ID,
+  AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH,
+  AMUX_V4_ANALYSIS_QUEUE_READ_ENV,
   amuxV4AnalysisQueueReadEnabled,
   isAmuxV4AnalysisAgentAuthorized,
 } from "../lib/amux/ideaAnalysisQueueCore.ts";
@@ -24,6 +26,29 @@ test("AMUX v4 analysis queue uses a dedicated identity and stays dark", () => {
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request("wrong_".repeat(7)), secret), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), undefined), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), "short"), false);
+});
+
+test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before DB", async () => {
+  const imported = await import("../app/api/internal/amux/v4/analysis-queue/route.ts");
+  const POST = imported.POST ?? imported.default.POST;
+  const originalSecret = process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+  const originalRead = process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV];
+  try {
+    process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
+    process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV] = "enabled";
+    const denied = await POST(new Request("https://tomverse.example/api/internal/amux/v4/analysis-queue",
+      { method: "POST" }));
+    assert.equal(denied.status, 401);
+    assert.match(denied.headers.get("cache-control") ?? "", /no-store/);
+    const dark = await POST(request(secret));
+    assert.equal(dark.status, 409);
+    assert.deepEqual(await dark.json(), { available: false, reason: "analysis_queue_disabled" });
+  } finally {
+    if (originalSecret === undefined) delete process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+    else process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = originalSecret;
+    if (originalRead === undefined) delete process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV];
+    else process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV] = originalRead;
+  }
 });
 
 test("AMUX v4 analysis queue returns candidate IDs, never transfer text", async () => {
