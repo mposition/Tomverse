@@ -117,6 +117,15 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The services' image and their operating runbook (§8, §12).
   "docker/**",
   "docs/ops/engineering-agent*",
+  // The product-research agent's own gates, state and runbook
+  // (docs/policy/product-research-agent.md). Its judgement modules decide what
+  // may be stored and how a phase window is counted, so no agent may change
+  // them -- the same reason the engineering agent cannot change its own.
+  "lib/productResearch*",
+  "lib/adminMessages/productResearch*",
+  "docs/ops/product-research-agent*",
+  "tests/productResearch*",
+  "tests/issueBacklog*",
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/**/engineering-agent*",

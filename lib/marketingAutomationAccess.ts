@@ -384,9 +384,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-30: the sign-in / sign-up split takes develop with the web search
  * override; both notes above stand, and the value below is computed over the
  * merged schema.
+ *
+ * 2026-10-02: the product-research agent's observation table is added
+ * (docs/policy/product-research-agent.md §4) -- one new model with its own
+ * triggers. Not a marketing model and not a webhook input; the digest moves
+ * because the whole Prisma schema is deliberately watched. Descriptor and
+ * admission decisions are unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "e51a1cccc316be0fc093d4f7c32744b1288c8ed909bfe5d5e9ef010ea4a2508c";
+  "4e88291f8397090ea8bd8259d9f946478ceda5136c2d75fd53b2c7e9a20652e6";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
