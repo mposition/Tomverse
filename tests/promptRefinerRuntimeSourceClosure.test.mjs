@@ -365,13 +365,13 @@ const compilerOptions = parsedConfig.options;
 //
 // 2026-10-01, login code mail layout: `lib/emailLoginEmails.ts` imports the
 // same frame from `lib/accountEmails.ts` -- both already listed, so the file
-// set stays 190. No element access is added; this repins positions only.
+// set stays 190. No element access is added; this repins positions only. 2026-10-02
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5e7e7ae27846d5ef4ee1cad8aea9e068",
-  "9f623f194455eb5b84958b86ead1729f",
+  "5c39a2c4ff9531db64df9a452d235322",
+  "63fbbd73a9a809a4a02cee6fe23e2ef3",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

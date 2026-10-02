@@ -11,9 +11,13 @@ import {
 } from "@/lib/marketingStore";
 import {
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
+  MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_SHADOW_KEY,
 } from "@/lib/marketingAutomationAccess";
-import { marketingWebhookIsStaging } from "@/lib/marketingWebhookCore";
+import {
+  marketingWebhookIsStaging,
+  marketingWebhookStagingConfigSnapshotDigest,
+} from "@/lib/marketingWebhookCore";
 import { handleZernioWebhook } from "@/lib/marketingWebhookReceiver";
 import { consumeMarketingWebhookFaultArm } from "@/lib/marketingWebhookSettings";
 import { prisma } from "@/lib/prisma";
@@ -36,6 +40,28 @@ export async function POST(request: Request) {
       return typeof value === "string" && value.trim() !== "";
     },
     secret: process.env.ZERNIO_WEBHOOK_SECRET,
+    pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+    readSnapshot: async () => {
+      const [row, channels] = await Promise.all([
+        prisma.appSetting.findUnique({
+          where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
+          select: { value: true },
+        }),
+        prisma.marketingChannel.findMany({
+          where: { provider: "zernio", externalAccountRef: { not: null } },
+          select: { id: true, externalAccountRef: true },
+        }),
+      ]);
+      const bindings = channels.flatMap((channel) =>
+        channel.externalAccountRef ? [{ id: channel.id, externalAccountRef: channel.externalAccountRef }] : [],
+      );
+      const shadowValue = row?.value ?? null;
+      return {
+        shadowValue,
+        channels: bindings,
+        configDigest: marketingWebhookStagingConfigSnapshotDigest(process.env, shadowValue, bindings),
+      };
+    },
     adapter: buildZernioAdapterFromEnv(STATUS_QUERY_BUDGET_MS),
     consumeFaultArm: (eventIdDigest) =>
       // Read committed, its own transaction: of two deliveries racing for one
@@ -43,22 +69,6 @@ export async function POST(request: Request) {
       runMarketingTransaction(prisma, (tx) =>
         consumeMarketingWebhookFaultArm(tx, { eventIdDigest }),
       ),
-    shadowEnabled: async () => {
-      const row = await prisma.appSetting.findUnique({
-        where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
-        select: { value: true },
-      });
-      return row?.value === "true";
-    },
-    resolveChannel: async (accountId) => {
-      const rows = await prisma.marketingChannel.findMany({
-        where: { provider: "zernio", externalAccountRef: accountId },
-        select: { id: true },
-        take: 2,
-      });
-      // One account, one channel. None is not ours; several is not one answer.
-      return rows.length === 1 ? rows[0] : null;
-    },
     recordShadow: async (input) => {
       try {
         await runMarketingTransaction(prisma, (tx) => recordMarketingWebhookShadow(tx, input));
