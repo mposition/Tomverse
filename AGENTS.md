@@ -1707,6 +1707,9 @@ Non-negotiable requirements:
      `--base origin/main`을 붙입니다. base는 develop이나 main의 이력 안에 있어야 합니다.
    - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
      올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
+   - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.
+     reviewer에게는 그 commit 이후의 diff만 보여 주고, 지시 파일과 계약 경로 판정은 base부터
+     전체를 기준으로 합니다. push하지 않은 commit도 focus가 될 수 있습니다.
 3. **기다립니다.** `node "$HOME/bin/review.mjs" wait <jobId>`를 종료 코드가 3이 아닐 때까지
    반복합니다. 한 번에 최대 9분 기다리므로 명령 하나의 시간 제한 안에 들어갑니다.
 4. **결과대로 처리합니다.**

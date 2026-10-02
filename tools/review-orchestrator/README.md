@@ -72,6 +72,11 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
 - 검토 대상은 **commit된 것**뿐입니다. base 기본값은 `origin/develop`과의
   merge-base이며, base commit은 원격에 있어야 합니다(head는 push하지 않아도 됩니다).
 - 원문은 `npm run -s review -- report <jobId> --slot 0`으로 봅니다.
+- `--focus <rev>`: reviewer에게 `<rev>..HEAD`만 보여 줍니다. 같은 브랜치를 여러 round에 걸쳐
+  검토할 때 지난 round 이후의 변경만 판정받는 용도입니다. base는 그대로 신뢰 이력의
+  분기점이고, `<rev>`는 base와 HEAD 사이에 있어야 합니다(`focus_not_in_range`). 지시 파일
+  diff와 계약 경로 판정은 범위를 좁히지 않고 base..HEAD 전체로 합니다 — checkout에 base
+  버전이 들어 있으므로, 좁히면 그 이전의 지시 파일 변경이 보이지 않게 됩니다.
 
 ### 앱 지시 파일에 넣을 문장 (서버 가동 후)
 

@@ -6,6 +6,7 @@
  *
  *   node tools/review-orchestrator/client/review.mjs submit --author codex [--base <rev>] [--head <rev>]
  *                                          [--reviewers 2] [--scope "..."] [--author-vendor xai]
+ *                                          [--focus <rev>]   review only <rev>..HEAD
  *   node tools/review-orchestrator/client/review.mjs wait <jobId> [--timeout 540]
  *   node tools/review-orchestrator/client/review.mjs status [jobId]
  *   node tools/review-orchestrator/client/review.mjs report <jobId> [--slot 0]
@@ -118,6 +119,9 @@ async function submit(options) {
   git(["rev-parse", "--verify", `${baseRef}^{commit}`]);
   const base = git(["merge-base", head, baseRef]);
   if (base === head) throw new Error("nothing to review: head equals base");
+  // --focus <rev>: show the reviewer only <rev>..HEAD (say, what changed since
+  // the last review round). The server checks it lies between base and HEAD.
+  const focus = options.focus ? git(["rev-parse", "--verify", `${options.focus}^{commit}`]) : undefined;
   if (git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
     process.stderr.write("warning: uncommitted changes are not part of the review; only committed work is sent\n");
   }
@@ -133,6 +137,7 @@ async function submit(options) {
       authorVendor: options["author-vendor"],
       reviewers: options.reviewers ? Number(options.reviewers) : 1,
       scope: options.scope,
+      focus,
       bundleRef: bundle.ref,
     };
     return await transport(encodeRpc(request), bundle.path);
