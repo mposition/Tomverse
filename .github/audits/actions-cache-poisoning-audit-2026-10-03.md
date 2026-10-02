@@ -15,6 +15,12 @@
 > `packageManager` 필드가 만드는 잠복 경로를 추가했습니다. P1에 `push: develop`·
 > dispatch·기존 항목 삭제·Rust 범위·조건부 save를, P3에 `POSTURE_DIGEST`가 캐시
 > 종류를 담지 않는다는 맹점을 추가했습니다.
+>
+> **rev 2에서 새로 찾은 것(독립 검토 전):** F5의 세 번째 방향 — 공식 규칙이
+> 닫는 것은 **다른 ref**이고 **같은 PR의 re-run**은 복원할 수 있으므로,
+> `cacheIsolationRecorded` 기록의 근거는 "다른 ref는 닫혀 있다"만으로 충분하지
+> 않습니다. 에이전트 PR에서 도는 자격증명 캐시 복원 job이 하나 있습니다
+> (`feedback-autofix-promotion-pr # promotion-pr`). F5와 P4에 적었습니다.
 
 기준 commit: `2f7550a5873606fecbfeec993c398a898a69ffcb`
 (`origin/main` 끝, 2026-10-03T00:54:48+10:00, PR #1944 병합).
@@ -488,10 +494,31 @@ that **pull_request-run caches never reach other refs' runs**"로 정의합니�
 cache 규칙이 아니라 F4·P3이 다룹니다. 그리고 PR에서 실제로 도는 자격증명 job은
 분석기의 trigger·path 도달 판정이 계속 따로 다룹니다.
 
-**남는 것은 작습니다.** 그 기록의 문구가 **양방향 격리를 주장하지 않도록**
-확인하는 것 — "캐시는 ref 간에 격리된다"가 아니라 "PR run의 캐시는 다른 ref의
-run에 도달하지 않는다"로 한정해 쓰는 것입니다. 기록이 아직 없으므로 현재
-결함도 아니고, 가장 높은 위험도 아닙니다.
+**그런데 세 번째 방향이 있고, 검토자도 저도 round 0에서 짚지 않았습니다.**
+(아래는 검토 반영 중에 제가 찾은 것이며 **아직 독립 검토를 받지 않았습니다.**)
+
+공식 규칙의 그 문장을 끝까지 읽으면 이렇습니다 — PR 캐시는 "can only be
+restored by **re-runs of the pull request**". 즉 닫힌 것은 **다른 ref**이고,
+**같은 PR의 다른 job과 이후 run에는 열려 있습니다.** 에이전트가 캐시를 심을 수
+있는 곳이 바로 거기입니다: 자기 PR.
+
+그러므로 물어야 할 것은 "에이전트의 PR에서 도는 자격증명 job이 캐시를
+복원하는가"입니다. 전수로 하나 있습니다.
+
+- `feedback-autofix-promotion-pr.yml`은 `pull_request: types:[closed],
+  branches:[develop]`(:25-27)로 돕니다 — 에이전트 PR의 base가 `develop`이므로
+  **그 PR이 닫힐 때 그 PR의 scope에서** 돕니다. `promotion-pr` job은
+  `GH_AUTOMATION_PAT`(:149, :191)을 들고 `cache: npm`(:125)을 복원합니다.
+- 나머지 `pull_request` workflow는 둘 중 하나입니다 — 자격증명이 없거나
+  (`admin-console-e2e`, `review-parity-shadow`, `orchestrator-rust`),
+  자격증명 job이 캐시를 복원하지 않습니다(`pr-fast-gate # fast-gate`,
+  `credit-finance-db-integration # report-red-lane`). `secret-history-scan`은
+  base가 `main`이라 에이전트 PR에 걸리지 않습니다.
+
+실제 위험은 **낮습니다**: 그 job이 복원하는 것은 npm cacache 하나이고 4.4의
+integrity 대조가 걸립니다. 그러나 규칙은 구조에 대한 것이므로, 기록의 근거는
+"다른 ref는 닫혀 있다"만으로 **충분하지 않습니다** — 같은 PR 방향에 대해 그 한
+job을 이름 대고 왜 안전한지 적어야 합니다.
 
 **되돌릴 수 있음** — 정책 문구 명확화 항목입니다. 그 기록을 쓰는 PR은
 `docs/policy/engineering-agent.md` 변경이므로 여전히 contract 역할과 소유자
@@ -627,16 +654,23 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
 그 판단을 뒤집었으므로 3순위로 내리고 내용을 줄입니다.**
 
 그 기록은 자기가 대답할 질문에 정확히 대답하므로(F5), P3을 기다릴 필요가
-없습니다. 남는 요구는 하나입니다 — **기록이 양방향 격리를 주장하지 않게
-쓰는 것.**
+없습니다. 남는 요구는 셋입니다.
 
-- 쓸 수 있는 문장: "pull_request run이 만든 캐시는 다른 ref의 run에 도달하지
+- 쓸 수 있는 문장: "pull_request run이 만든 캐시는 **다른 ref의** run에 도달하지
   않는다." 근거는 1장의 공식 규칙.
 - 쓰면 안 되는 문장: "Actions 캐시는 ref 간에 격리된다." 기본·base → PR 방향이
   열려 있으므로 거짓이고, 그 방향은 F4·P3이 다루는 **다른 위협**입니다.
+- **같은 PR 방향을 따로 적어야 합니다.** 공식 문장은 "re-runs of the pull
+  request"는 복원할 수 있다고 말하므로, 그 방향에 대해서는 격리가 근거가 되지
+  않습니다. F5가 찾은 하나 — `feedback-autofix-promotion-pr # promotion-pr`
+  (`GH_AUTOMATION_PAT` + `cache: npm`, 에이전트 PR이 닫힐 때 그 scope에서 돎)
+  — 를 이름 대고, 그것이 복원하는 것이 npm cacache 하나이며 integrity 대조가
+  걸린다는 것을 근거로 적습니다. 그 job에 무검증 캐시가 더해지면 이 기록은
+  **무효**가 되며, 그것을 막는 것은 P3의 검사입니다.
 
 `docs/policy/engineering-agent.md:198-201` 변경이므로 역할은 `contract`이고
-**소유자 승인이 필요합니다.** P3과의 순서 의존은 없습니다.
+**소유자 승인이 필요합니다.** P3과의 순서 의존은 없지만, 세 번째 항목 때문에
+P3이 있으면 이 기록이 더 오래 참입니다.
 
 ### P5. 복원 후 무결성 검사 — 권고하지 않음, 대안으로만 기록
 
@@ -698,5 +732,13 @@ Codex로 직접 돌렸습니다.
   가능한 두 건은 저장소에서 직접 대조했습니다 — `package.json`에
   `packageManager`·`devEngines` 부재, lockfile의 `hasInstallScript` 10건,
   그리고 `actions/setup-node` `action.yml`의 `package-manager-cache` 기본값.
-- 다음 round: rev 2에 대한 재검토 미실시. 검토 서버 큐가 비면 그쪽으로
-  제출하는 것이 AGENTS.md가 정한 경로입니다.
+- 다음 round: **rev 2에 대한 재검토 미실시.** 검토 서버에 다시 제출했으나
+  여전히 `queue_full`입니다. 큐가 비면 그쪽으로 제출하는 것이 AGENTS.md가 정한
+  경로입니다. 재검토가 특히 봐야 할 것 둘:
+  1. **F5의 철회가 과교정인지.** 저는 검토자의 논거를 받아들였지만, 그
+     과정에서 같은 PR 방향(바로 아래)을 찾았습니다. 철회 자체는 유효하다고
+     보지만 — rev 1이 **든 이유**가 틀렸으므로 — 판정이 두 번 뒤집힌 항목이니
+     제3자가 봐야 합니다.
+  2. **rev 2에서 새로 추가한 같은 PR 방향.** F5·P4의 그 단락과
+     `feedback-autofix-promotion-pr # promotion-pr` 지목은 **독립 검토를 받지
+     않았습니다.**
