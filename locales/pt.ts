@@ -20,7 +20,6 @@ export const pt = {
         accountTooltipGuest: "Entrar ou criar conta",
         guestMenuTitle: "Modo convidado",
         guestMenuDescription: "Faça login para usar suas conversas e projetos em vários dispositivos.",
-        guestMenuCreateAccount: "Criar uma conta gratuita",
         guestMenuViewPlans: "Ver planos",
         languageAndDisplay: "Idioma e exibição",
         newChat: "Novo chat",

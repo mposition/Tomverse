@@ -22,7 +22,6 @@ export const ko = {
         accountTooltipGuest: "로그인 또는 회원가입",
         guestMenuTitle: "게스트 모드",
         guestMenuDescription: "로그인하면 대화와 프로젝트를 여러 기기에서 이용할 수 있습니다.",
-        guestMenuCreateAccount: "무료 계정 만들기",
         guestMenuViewPlans: "플랜 보기",
         languageAndDisplay: "언어 및 화면 설정",
         newChat: "새 대화",

@@ -25,6 +25,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+<!-- development-execution -->
+## Development sessions deliver small working changes
+
+For a feature or bug fix, choose the smallest useful behavior within the approved scope, implement it, and run the relevant test or check. Keep investigation and design focused on what is needed for that next code change. Do not substitute policy revisions, plans, or repeated independent reviews for working functionality.
+
+Follow required approvals, policy gates, and independent review for the changes to which they apply. Once those requirements are clear, continue with code that is already authorized. If a decision blocks one change, name the exact blocker and complete another authorized, testable slice when available.
+
+Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
+<!-- /development-execution -->
+
 # 의미 있는 개발 사이클의 완료 보고
 
 작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
@@ -153,7 +163,7 @@ codex/to-develop/fix-picker          자동 PR
 docs/to-develop/release-policy       자동 PR
 to-develop/ime-submit                자동 PR
 
-claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+claude/to-main/dependabot-hold       없음 — main PR도 열 수 없습니다(아래 절)
 release/**, hotfix/**                없음 — production에 닿습니다
 dependabot/**, autofix/**,
 feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
@@ -177,23 +187,52 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
 
-## auto-merge는 PR을 만든 실행이 한 번만 켭니다
+## main으로 가는 PR은 release와 hotfix뿐입니다
 
-`Auto PR to Develop`은 **자기 실행이 PR을 새로 열었을 때만** auto-merge를
-켭니다. 이미 열려 있는 PR에는 켜지 않습니다 — push마다 다시 켜면 사람이 끈
-auto-merge가 다음 commit까지만 유효해지고, 그 사실을 아무도 말해 주지 않습니다.
+**기능은 develop으로 보내고, main에는 release가 가져갑니다.**
+`.github/RELEASE_CHECKLIST.md` 7.9절의 세 경로 — `develop`(release),
+`release/**`(선택 release), `hotfix/**`(사고·보안 권고) — 만 main에 닿습니다.
+`to-main`이라는 이름은 경로가 아닙니다. 2026-10-02부터 PR Fast Gate가 이를
+검사하며(`scripts/main-pr-source-policy.mjs`,
+`tests/mainPrSourcePolicy.test.mjs`), 그 밖의 head는 필수 check가 실패합니다.
 
-2026-09-05에 그렇게 됐습니다. PR #1256은 02:13:06Z에 auto-merge가 꺼졌고,
-draft인 동안의 push 일곱 번은 draft 검사가 막았지만, ready로 되돌린 뒤
-05:20:16Z push 하나에 workflow가 다시 켰고 13분 뒤 병합됐습니다. 병합을
-보류하라는 지시가 있던 PR입니다.
+```
+develop                              통과 — release
+release/2026-10-02-consent           통과 — 선택 release (체크리스트 7.9.1)
+hotfix/stripe-timeout                통과 — 체크리스트 7.9.2의 여섯 항목이 필요합니다
+claude/hotfix/stripe-timeout         통과 — `hotfix`는 경로 조각
+dependabot/**, autofix/**,
+feedback-autofix-main/**             통과 — 각자의 승인 게이트가 있습니다
+claude/to-main/..., codex/...        거부 — `gh pr edit <번호> --base develop`
+```
 
-**끈 것은 꺼진 채로 있습니다.** 판정은 workflow의 `if:`가 create 단계의
-`created` 출력을 읽는 것이고, `tests/autoPrAutoMergeArming.test.mjs`가 그 단계의
-실제 shell을 stub `gh`로 돌려 양쪽 경로를 고정합니다.
+근거는 수치입니다. 2026-09-20~10-02에 main에 병합된 PR 80건 중 78건이 기능
+브랜치였고, 각각 CI를 두 번 돌았으며(PR과 main push), develop으로 되돌아오는
+back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 손으로 필요했습니다.
 
-그래서 이미 열린 PR에 auto-merge가 필요하면 **사람이 켭니다.** 그것이 이 규칙이
-지키려는 결정입니다.
+규칙 이전에 main으로 열려 있던 PR 4건(#1798, #1858, #1880, #1882)은
+`scripts/main-pr-source-policy.mjs`의 예외 목록으로 통과시킵니다. 이 목록은 줄기만 하고,
+테스트가 새 항목 추가를 막습니다.
+
+## workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다
+
+`Auto PR to Develop`은 PR을 열 뿐 **병합하지도, auto-merge를 켜지도 않습니다**
+(2026-10-02 운영자 결정). auto-merge가 켜진 PR은 check가 통과하는 순간 GitHub가
+병합하므로, Railway가 무엇을 하고 있든 상관없이 몇 분 간격으로 병합된 PR들이
+staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
+
+병합은 운영자가 로컬에서 실행하는 merge train(`npm run merge-train`,
+`scripts/merge-train.mjs`)이 맡습니다. 가장 오래된 non-draft·CI 통과 PR을 하나씩
+병합하고, 그 환경에 진행 중인 Railway 배포가 하나라도 있으면 hold합니다. 자기가
+병합한 배포가 실패하면 멈추고 재시도하지 않습니다.
+
+이전 규칙의 교훈은 그대로입니다. 2026-09-05에 PR #1256은 사람이 auto-merge를
+끈 뒤 push 한 번에 workflow가 다시 켜서, 병합을 보류하라는 지시가 있던 상태로
+병합됐습니다. 자동화가 사람이 끈 스위치를 다시 켜서는 안 됩니다.
+
+`tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
+`gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
+**사람이 켭니다.**
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -1117,6 +1156,22 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`도 route에서만 읽습니다. 게시물은
+  바꾸지 않습니다 — 적용은 S2f이고 staging 서명 이후입니다.
 
 # 엔지니어링 Agent
 
