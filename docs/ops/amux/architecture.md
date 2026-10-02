@@ -59,7 +59,8 @@ vendored 서버의 `vendor/amux/crates/amux-core`는 서로 다른 소스다.
 WSL 원본 브랜치 `8ad716bf983274a9f86733be17b5f608bdcca67b`의 Cursor 변경
 3개(`0cb02264`, `c7947c20`, `8ad716bf`)를 현재 Ubuntu 서비스 기준
 `9e4be636f6656c4c49391ac1fc089d2bbd6eb34f` 위로 이식했다.
-vendored 소스 기준은 검증한 port commit `1765cbf98f0201501388dfb2cdcb266db1d76fb8`다.
+초기 import의 기준은 검증한 port commit `1765cbf98f0201501388dfb2cdcb266db1d76fb8`다.
+현재 vendored 소스에는 이후 Tomverse에서 적용한 보안 수정이 포함된다.
 현재 Ubuntu 서비스의 실행 빌드와 vendored 소스는 별도로 대조·검증해야 하며,
 PR 병합만으로 실행 바이너리가 교체되지 않는다. 제품의 verified-provider
 allowlist는 기존 정책의 별도 승인 절차를 따른다.
