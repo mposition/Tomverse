@@ -129,6 +129,42 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       "AmuxIdeaSubmission_raw_purge_monotonic_check",
     );
 
+    const expiredIdeaId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaSubmission"
+       ("id", "requestId", "actorUserId", "state", "submittedAt",
+        "analysisDeadlineAt", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 'submitted',
+               CURRENT_TIMESTAMP - INTERVAL '8 days',
+               CURRENT_TIMESTAMP - INTERVAL '1 day', CURRENT_TIMESTAMP)`,
+      [expiredIdeaId, randomUUID()],
+    );
+    await client.query(
+      `INSERT INTO public."AmuxIdeaAnalysisChunk"
+       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+        "leaseGeneration", "updatedAt")
+       VALUES ($1, 'synthetic-owner', 0, 'pending', 0, 0, CURRENT_TIMESTAMP)`,
+      [expiredIdeaId],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaAnalysisChunk"
+       SET "state" = 'draft_ready',
+           "analysisCompletedAt" = (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '2 days'
+       WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+      [expiredIdeaId],
+      "AmuxIdeaAnalysisChunk_completion_deadline_check",
+    );
+    await expectRejected(
+      `INSERT INTO public."AmuxIdeaAnalysisChunk"
+       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+        "leaseGeneration", "analysisCompletedAt", "updatedAt")
+       VALUES ($1, 'synthetic-owner', 1, 'draft_ready', 0, 0,
+               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '2 days',
+               CURRENT_TIMESTAMP)`,
+      [expiredIdeaId],
+      "AmuxIdeaAnalysisChunk_completion_deadline_check",
+    );
+
     const insertChunk = `INSERT INTO public."AmuxIdeaAnalysisChunk"
       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt", "leaseGeneration",
        "coveredStartOrdinal", "coveredEndOrdinal", "remainingStartOrdinal",
