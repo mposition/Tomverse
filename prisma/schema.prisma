@@ -7254,8 +7254,10 @@ model AmuxCliUsageAggregateFinalization {
   @@index([finalizedAt])
 }
 
-/// A final disjoint cell; never an intermediate under-five bucket. Token
-/// sums are NULL unless five distinct invocations reported that field.
+/// A final cell, whose disjointness the future writer must prove; never an
+/// intermediate under-five bucket. Token sums are NULL unless five distinct
+/// invocations reported that field. A leaf uses actualModelUnknown rather than
+/// NULL; NULL is reserved for a final parent whose model dimension was folded.
 model AmuxCliUsageAggregateCell {
   id                           String   @id @default(cuid())
   finalizationId               String

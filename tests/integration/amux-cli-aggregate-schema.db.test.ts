@@ -23,7 +23,7 @@ before(async () => {
     SELECT "year" FROM "AmuxCliUsageAggregateFinalization"
     WHERE "providerScopeKey" = 'openai'`;
   const used = new Set(taken.map((row) => row.year));
-  while (years.length < 12) {
+  while (years.length < 14) {
     const candidate = randomInt(3000, 8000);
     if (!used.has(candidate)) {
       years.push(candidate);
@@ -152,6 +152,23 @@ test("empty and excluded-small seals commit only without cells", async () => {
   assert.ok(rows.every((row) => row.cellCount === BigInt(0)));
 });
 
+test("unknown and multi-model leaf labels are distinct stored dimensions", async () => {
+  const unknownId = randomUUID();
+  const multiId = randomUUID();
+  await prisma.$transaction(async (tx) => {
+    await insertFinalization(tx, unknownId, years[12]);
+    await insertCell(tx, unknownId, years[12], { modelId: "actualModelUnknown" });
+    await insertFinalization(tx, multiId, years[13]);
+    await insertCell(tx, multiId, years[13], { modelId: "multi_model" });
+  });
+  const rows = await prisma.$queryRaw<Array<{ finalizationId: string; actualModelId: string }>>`
+    SELECT "finalizationId", "actualModelId"
+    FROM "AmuxCliUsageAggregateCell"
+    WHERE "finalizationId" IN (${unknownId}, ${multiId})`;
+  assert.deepEqual(new Map(rows.map((row) => [row.finalizationId, row.actualModelId])),
+    new Map([[unknownId, "actualModelUnknown"], [multiId, "multi_model"]]));
+});
+
 test("DB refuses a token sum reported by fewer than five calls", async () => {
   const id = randomUUID();
   await assert.rejects(prisma.$transaction(async (tx) => {
@@ -200,6 +217,15 @@ test("period and dimensions remain bound to a single final provider-year", async
     const id = randomUUID();
     await insertFinalization(tx, id, years[8]);
     await insertCell(tx, id, years[8], { modelId: null });
-    await insertCell(tx, id, years[8], { modelId: null });
+  }), /AmuxCliUsageAggregateCell_shape_check/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const id = randomUUID();
+    await insertFinalization(tx, id, years[11]);
+    await insertCell(tx, id, years[11], {
+      granularity: "month", modelId: null, workerRole: null,
+    });
+    await insertCell(tx, id, years[11], {
+      granularity: "month", modelId: null, workerRole: null,
+    });
   }), /AmuxCliUsageAggregateCell_final_dimensions_key/);
 });

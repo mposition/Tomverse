@@ -52,9 +52,9 @@ CREATE TABLE "AmuxCliUsageAggregateCell" (
     )) AND
     ("workerRole" IS NULL OR "workerRole" ~ '^[a-z][a-z0-9_]{0,31}$') AND
     (("granularity" = 'month_role' AND "period" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
-      AND "workerRole" IS NOT NULL) OR
+      AND "actualModelId" IS NOT NULL AND "workerRole" IS NOT NULL) OR
      ("granularity" = 'month_model' AND "period" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
-      AND "workerRole" IS NULL) OR
+      AND "actualModelId" IS NOT NULL AND "workerRole" IS NULL) OR
      ("granularity" = 'month' AND "period" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
       AND "actualModelId" IS NULL AND "workerRole" IS NULL) OR
      ("granularity" = 'quarter' AND "period" ~ '^[0-9]{4}-Q[1-4]$'
