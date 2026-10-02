@@ -396,6 +396,15 @@ test("excluded trees are not scanned, and the self-exclusion is exact", () => {
     one("prisma/migrations-archive/1/migration.sql", 'INSERT INTO "AdminAuditLog" VALUES (1);'),
     []
   );
+  assert.deepEqual(
+    one("vendor/amux/crates/amux-server/migrations/example.sql", 'EXECUTE statement'),
+    []
+  );
+  assertOneFinding(
+    "vendor/other/query.sql",
+    'EXECUTE statement',
+    "runtime-sql"
+  );
   assertOneFinding(
     "scripts/check-protected-table-writers-extra.mjs",
     "await prisma.adminAuditLog.create({ data })",
