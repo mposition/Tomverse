@@ -670,9 +670,10 @@ const scopeViolations = (task: CrossReviewTask, files: readonly string[]): reado
 export const MAX_SUPERSESSIONS = 2;
 
 /**
- * CHAT-01 owner mposition's 2026-10-02 approval reply in Codex task
- * 01a02221-13cd-7831-8bf8-20758d910795: one extra continuation for this
- * exact on-hold exchange, not a change to the general cap.
+ * CHAT-01 owner mposition's 2026-10-02 decision is recorded in
+ * docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v4.authorization.md.
+ * Keep this single-use branch until the v4 exchange concludes; it is not a
+ * change to the general cap.
  */
 const approvedChat01Continuation = (task: CrossReviewTask, prior: SupersededExchange): boolean =>
     task.taskId === "chat01-refiner-vnext-one-shot-durable-slots-v4" &&
