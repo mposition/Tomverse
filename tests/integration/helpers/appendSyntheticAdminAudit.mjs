@@ -8,6 +8,8 @@ export async function appendSyntheticAdminAudit(client, {
   actorUserId, action, targetType, targetId, summary, metadata = null,
   entryHash = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", ""),
 }) {
+  // Refuse autocommit callers: synthetic hashes must be rolled back by the test.
+  await client.query("SAVEPOINT synthetic_admin_audit_transaction_required");
   const id = randomUUID();
   await client.query("SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))");
   await client.query(
@@ -27,5 +29,6 @@ export async function appendSyntheticAdminAudit(client, {
     [id, actorUserId, action, targetType, targetId, summary,
       metadata === null ? null : JSON.stringify(metadata), entryHash],
   );
+  await client.query("RELEASE SAVEPOINT synthetic_admin_audit_transaction_required");
   return id;
 }
