@@ -21,6 +21,8 @@ test("only a complete read-only response is shown as a checked scope", () => {
     { status: 200, body: { ...checked, collectionVerified: true } },
     { status: 200, body: { ...checked, transferAuthorized: true } },
     { status: 200, body: { ...checked, canonicalScopeJson: "" } },
+    { status: 200, body: { ...checked, canonicalScopeJson: "not json" } },
+    { status: 200, body: { ...checked, canonicalScopeJson: '{"version":1,"sources":[]}' } },
     { status: 200, body: { ...checked, fileCount: 0 } },
   ]) {
     assert.deepEqual(classifySourceScopePreview(reply, ideaId),
