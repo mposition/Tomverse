@@ -17,6 +17,9 @@ if (mode === "accept") {
   process.stdout.write("I think it is fine.\n");
 } else if (mode === "env") {
   process.stdout.write(block({ verdict: "accept", findings: [{ severity: "nit", summary: `leak=${process.env.REVIEW_ORCH_SECRET_PROBE ?? "none"}` }] }));
+} else if (mode === "noisy") {
+  process.stderr.write("x".repeat(256 * 1024));
+  process.stdout.write(block({ verdict: "accept", findings: [] }));
 } else if (mode === "sleep") {
   setTimeout(() => process.stdout.write(block({ verdict: "accept", findings: [] })), 60_000);
 }

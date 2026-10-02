@@ -4,7 +4,17 @@ import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
-import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, instructionDiff, isolateInstructionFiles, removeWorktree } from "./git.mjs";
+import {
+  addWorktree,
+  changedFiles,
+  deleteReviewRef,
+  diffText,
+  ensureMirror,
+  importBundle,
+  instructionDiff,
+  isolateInstructionFiles,
+  removeWorktree,
+} from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
@@ -42,11 +52,24 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
   if (statSync(bundlePath).size > config.maxBundleBytes) throw new UsageError("bundle_too_large");
 
   const store = new Store(config.stateDir);
+  const pending = store.listJobs().filter(({ slots }) => slots.some((slot) => slot.status !== "done")).length;
+  if (pending >= config.maxPendingJobs) {
+    throw new UsageError("queue_full", `${pending} jobs are still pending; wait for one to finish`);
+  }
   const id = newJobId(now);
   try {
     const files = await withLock(mirrorLock(config), () => {
       ensureMirror(repo);
-      importBundle({ mirror: repo.mirror, bundlePath, bundleRef: request.bundleRef, jobId: id, base, head });
+      importBundle({
+        mirror: repo.mirror,
+        bundlePath,
+        bundleRef: request.bundleRef,
+        jobId: id,
+        base,
+        head,
+        trustedBaseRefs: config.trustedBaseRefs,
+        maxChangeBytes: config.maxChangeBytes,
+      });
       return changedFiles(repo.mirror, base, head);
     });
     if (files.length === 0) throw new UsageError("empty_change");
@@ -109,6 +132,24 @@ export class Orchestrator {
     this.killers = new Set();
     this.workRoot = join(config.stateDir, "worktrees");
     mkdirSync(this.workRoot, { recursive: true });
+  }
+
+  /**
+   * Remove finished jobs older than the retention period, with their review
+   * refs, so neither the state directory nor the mirror grows without bound.
+   */
+  async prune() {
+    const cutoff = this.now() - this.config.retentionDays * 24 * 60 * 60 * 1000;
+    const expired = this.store
+      .listJobs()
+      .filter(({ job, slots }) => job.submittedAt < cutoff && slots.every((slot) => slot.status === "done"));
+    for (const { job } of expired) {
+      const repo = this.config.repos[job.repo];
+      if (repo) await withLock(mirrorLock(this.config), () => deleteReviewRef(repo.mirror, job.id));
+      this.store.removeJob(job.id);
+    }
+    if (expired.length > 0) this.log(`pruned ${expired.length} job(s) older than ${this.config.retentionDays} days`);
+    return expired.length;
   }
 
   recoverOrphans() {
@@ -265,7 +306,14 @@ export class Orchestrator {
         chunks.push(chunk);
         out.write(chunk);
       });
-      child.stderr.on("data", (chunk) => err.write(chunk));
+      let stderrSize = 0;
+      child.stderr.on("data", (chunk) => {
+        // stderr is diagnostic only; keep the head of it and drop the rest.
+        if (stderrSize >= this.config.maxStderrBytes) return;
+        const room = this.config.maxStderrBytes - stderrSize;
+        err.write(chunk.length > room ? chunk.subarray(0, room) : chunk);
+        stderrSize += Math.min(chunk.length, room);
+      });
       child.on("error", () => done({ verdict: "unknown", reason: "reviewer_spawn_failed", findings: [] }));
       child.on("close", (code) => {
         if (timedOut) return done({ verdict: "unknown", reason: "timeout", findings: [] });

@@ -124,6 +124,35 @@ reviewer의 checkout에서는 **base 버전으로 되돌리고** 고친 내용�
 그래도 diff 본문 속 문장이 reviewer를 흔들 수는 있으므로, 판정은 마지막 json 블록과
 결정적 규칙으로만 하고 reviewer의 결론 문장을 그대로 믿지 않습니다.
 
+base는 `trustedBaseRefs`(기본 `develop`·`main`)의 이력 안에 있어야 합니다. 지시 파일이
+base에서 오므로, 아무 브랜치에나 push한 commit을 base로 지정해 지시를 심을 수 없게
+하는 장치입니다(`base_not_trusted`). 기본 base(`origin/develop`과의 분기점)와
+`--base origin/main`은 항상 통과합니다.
+
+## reviewer가 읽을 수 있는 것
+
+reviewer CLI는 자기 계정이 읽을 수 있는 파일을 모두 읽을 수 있습니다. 주입된 지시가
+그것을 검토 답에 담으면 유출이고, 유출은 되돌릴 수 없습니다. 그래서 **reviewer 전용
+계정**으로 돌립니다. 그 계정에는 reviewer CLI의 로그인 세션만 두고, 다른 계정의 홈은
+읽을 수 없게 둡니다. 같은 구독 계정으로 로그인해도 그 세션은 따로 해지할 수 있고,
+SSH 키·다른 작업의 소스는 보이지 않습니다.
+
+## 디스크와 대기열 상한
+
+| 설정 | 기본값 | 넘으면 |
+|---|---|---|
+| `maxBundleBytes` | 50 MiB | 전송 중에 `bundle_too_large` |
+| `maxChangeBytes` | 200 MiB (압축 해제 기준 새 객체 총량) | worktree를 만들기 전에 `change_too_large` |
+| `maxPendingJobs` | 20 | `queue_full` |
+| `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
+| `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
+
+## 알려진 한계
+
+- `--author`와 `--author-vendor`는 요청자가 스스로 밝히는 값입니다. 세 앱이 같은 Windows
+  계정에서 돌기 때문에 앱마다 키를 나눠도 강제할 수 없습니다. 잘못 밝히면 같은 공급사가
+  검토할 수 있으므로, 지시 파일의 호출 규칙이 앱마다 자기 이름을 쓰게 합니다.
+
 ## 저장 위치
 
 `stateDir/jobs/<jobId>/` 아래에 `job.json`(접수 내용), `slots/<n>.json`(배정·결과),
