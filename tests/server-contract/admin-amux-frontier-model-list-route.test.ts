@@ -5,7 +5,7 @@ import { mock, test } from "node:test";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
-const approvedModels = [{ approvalId: "approval_123", approvalVersion: 1,
+const approvedModels = [{ approvalId: "123e4567-e89b-42d3-a456-426614174000", approvalVersion: 1,
   provider: "openai", modelId: "gpt-frontier", allowedEfforts: ["high"] }];
 const world = {
   session: { user: { id: "owner-1" } } as { user: { id: string } } | null,
