@@ -724,13 +724,21 @@ export function buildPolicyChangeNoticeEmail(input: {
       `${copy.read}\n${privacy}\n${terms}`,
       copy.why,
     ].join("\n\n"),
-    html: [
-      `<p>${escapeNoticeHtml(copy.intro(effectiveDate))}</p>`,
-      `<p>${escapeNoticeHtml(copy.releaseNotes)}</p>`,
-      `<p>${escapeNoticeHtml(copy.consent)}</p>`,
-      `<p>${escapeNoticeHtml(copy.read)}<br><a href="${escapeNoticeHtml(privacy)}">${escapeNoticeHtml(privacy)}</a><br><a href="${escapeNoticeHtml(terms)}">${escapeNoticeHtml(terms)}</a></p>`,
-      `<p>${escapeNoticeHtml(copy.why)}</p>`,
-    ].join(""),
+    // The branded frame every other account mail uses; the wording is the
+    // same paragraphs, so the frame adds no sentence of its own.
+    html: renderTransactionalEmailLayout({
+      preview: copy.subject,
+      title: copy.subject,
+      bodyHtml: [
+        renderEmailParagraph(escapeNoticeHtml(copy.intro(effectiveDate))),
+        renderEmailParagraph(escapeNoticeHtml(copy.releaseNotes)),
+        renderEmailParagraph(escapeNoticeHtml(copy.consent)),
+        renderEmailParagraph(
+          `${escapeNoticeHtml(copy.read)}<br><a href="${escapeNoticeHtml(privacy)}" style="color:#2563eb;">${escapeNoticeHtml(privacy)}</a><br><a href="${escapeNoticeHtml(terms)}" style="color:#2563eb;">${escapeNoticeHtml(terms)}</a>`
+        ),
+        renderEmailParagraph(escapeNoticeHtml(copy.why), "muted"),
+      ].join(""),
+    }),
   };
 }
 
