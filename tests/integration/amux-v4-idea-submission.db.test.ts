@@ -218,4 +218,25 @@ test("seven-day auto-cancel stops only unfinished analysis and keeps its raw pur
   assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
     where: { id: completedIdeaId },
   })).state, "awaiting_owner");
+  for (const absentId of ["not an idea id", randomUUID()]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxOverdueIdeaAnalysisCancellation(tx, absentId)),
+    (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+      error.code === "not_found");
+  }
+  for (const rawPurgeAfter of [null, new Date(deadline.getTime() + 60_000)]) {
+    const invalidIdeaId = randomUUID();
+    await prisma.amuxIdeaSubmission.create({ data: {
+      id: invalidIdeaId, requestId: randomUUID(), actorUserId,
+      state: "submitted", submittedAt, analysisDeadlineAt: deadline,
+      rawPurgeAfter,
+    } });
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxOverdueIdeaAnalysisCancellation(tx, invalidIdeaId)),
+    (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+      error.code === "integrity_unavailable");
+    assert.equal(await prisma.adminAuditLog.count({ where: {
+      action: "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED", targetId: invalidIdeaId,
+    } }), 0);
+  }
 });
