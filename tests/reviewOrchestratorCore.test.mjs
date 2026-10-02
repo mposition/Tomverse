@@ -12,6 +12,11 @@ import { globToRegExp, requiredReviewers, validateConfig } from "../tools/review
 import { decodeRpc, tokenFromSshCommand } from "../tools/review-orchestrator/bin/review-orchestrator.mjs";
 import { encodeRpc, repoNameFromRemote } from "../tools/review-orchestrator/client/review.mjs";
 import { reviewerEnv } from "../tools/review-orchestrator/lib/service.mjs";
+import { isInstructionPath } from "../tools/review-orchestrator/lib/git.mjs";
+import { release, tryAcquire } from "../tools/review-orchestrator/lib/fsutil.mjs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const PROVIDERS = [
   { id: "claude", vendor: "anthropic", enabled: true },
@@ -170,4 +175,32 @@ test("reviewers get an allowlisted environment, not the daemon's", () => {
 test("repo name comes from the origin URL", () => {
   assert.equal(repoNameFromRemote("https://github.com/mposition/ai-chat-hub.git"), "ai-chat-hub");
   assert.equal(repoNameFromRemote("git@github.com:mposition/ai-chat-hub.git"), "ai-chat-hub");
+});
+
+test("instruction paths cover the files reviewer CLIs load on their own", () => {
+  for (const p of ["AGENTS.md", "apps/x/AGENTS.md", "CLAUDE.md", ".claude/agents/r.md", ".codex/agents/a.toml", ".cursor/rules/x.mdc", ".cursorrules", ".github/copilot-instructions.md"]) {
+    assert.equal(isInstructionPath(p), true, p);
+  }
+  for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt"]) {
+    assert.equal(isInstructionPath(p), false, p);
+  }
+});
+
+test("a lock is taken over only from a dead owner, and released only by its owner", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-orch-lock-"));
+  try {
+    const path = join(dir, "x.lock");
+    const token = tryAcquire(path);
+    assert.ok(token);
+    assert.equal(tryAcquire(path), null); // live owner: this process
+    release(path, "not-mine");
+    assert.equal(tryAcquire(path), null);
+    release(path, token);
+    writeFileSync(path, "999999999 deadbeefdeadbeef\n"); // a pid that cannot exist
+    const taken = tryAcquire(path);
+    assert.ok(taken);
+    assert.match(readFileSync(path, "utf8"), new RegExp(taken));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

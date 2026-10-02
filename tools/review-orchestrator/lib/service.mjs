@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
-import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, removeWorktree } from "./git.mjs";
+import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, removeWorktree, restoreInstructionFiles } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
@@ -46,7 +46,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
   try {
     const files = await withLock(mirrorLock(config), () => {
       ensureMirror(repo);
-      importBundle({ mirror: repo.mirror, bundlePath, jobId: id, base, head });
+      importBundle({ mirror: repo.mirror, bundlePath, bundleRef: request.bundleRef, jobId: id, base, head });
       return changedFiles(repo.mirror, base, head);
     });
     if (files.length === 0) throw new UsageError("empty_change");
@@ -140,6 +140,7 @@ export class Orchestrator {
         this.store.writeSlot(job.id, { ...slot, status: "done", verdict: "unknown", reason: "no_eligible_reviewer", findings: [], endedAt: now });
         continue;
       }
+      if (this.store.readSlot(job.id, slot.index).status !== "queued") continue;
       const provider = this.config.providers.find((p) => p.id === decision.provider);
       const running = { ...slot, status: "running", provider: provider.id, vendor: provider.vendor, assignedAt: now, startedAt: now };
       this.store.writeSlot(job.id, running);
@@ -159,7 +160,16 @@ export class Orchestrator {
     while (this.inflight.size > 0) await Promise.allSettled([...this.inflight]);
   }
 
+  /**
+   * Close a slot only if it is still the run this process started: a slot a
+   * restart already closed as unknown stays unknown.
+   */
   finish(job, slot, outcome) {
+    const current = this.store.readSlot(job.id, slot.index);
+    if (current.status !== "running" || current.assignedAt !== slot.assignedAt || current.provider !== slot.provider) {
+      this.log(`ignored a late result for ${job.id}#${slot.index}`);
+      return;
+    }
     this.store.writeSlot(job.id, { ...slot, status: "done", ...outcome, endedAt: this.now() });
     this.log(`finished ${job.id}#${slot.index} ${outcome.verdict}${outcome.reason ? ` (${outcome.reason})` : ""}`);
   }
@@ -172,8 +182,9 @@ export class Orchestrator {
       prompt = await withLock(mirrorLock(this.config), () => {
         addWorktree(repo.mirror, workdir, job.head);
         const files = changedFiles(repo.mirror, job.base, job.head);
+        const restored = restoreInstructionFiles(workdir, job.base, files);
         const diff = diffText(repo.mirror, job.base, job.head);
-        return buildPrompt({ job, files, diff, maxDiffBytes: this.config.maxPromptDiffBytes });
+        return buildPrompt({ job, files, restored, diff, maxDiffBytes: this.config.maxPromptDiffBytes });
       });
     } catch (error) {
       this.finish(job, slot, { verdict: "unknown", reason: "worktree_failed", findings: [] });

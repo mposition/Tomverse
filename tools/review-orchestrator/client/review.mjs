@@ -18,12 +18,13 @@
  * Exit codes are the server's: 0 accept, 1 reject, 2 unknown, 3 pending, 64 usage, 65 error.
  */
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, mkdtempSync, rmSync } from "node:fs";
+import { createReadStream, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 const USAGE = 64;
-const TEMP_REF = "refs/review-orchestrator/head";
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -58,17 +59,21 @@ export function repoNameFromRemote(url) {
   return match ? match[1] : null;
 }
 
-/** Bundle `base..head` under a fixed ref name the server knows to read. */
+/**
+ * Bundle `base..head` under a ref name unique to this submit, so two submits
+ * from worktrees sharing one ref store cannot bundle each other's head.
+ */
 function createBundle(base, head) {
   const dir = mkdtempSync(join(tmpdir(), "review-orch-"));
   const path = join(dir, "review.bundle");
-  git(["update-ref", TEMP_REF, head]);
+  const ref = `refs/review-orchestrator/${randomBytes(8).toString("hex")}`;
+  git(["update-ref", ref, head]);
   try {
-    git(["bundle", "create", path, TEMP_REF, `^${base}`]);
+    git(["bundle", "create", path, ref, `^${base}`]);
   } finally {
-    spawnSync("git", ["update-ref", "-d", TEMP_REF]);
+    spawnSync("git", ["update-ref", "-d", ref]);
   }
-  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { path, ref, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 function transport(token, stdinPath) {
@@ -89,7 +94,13 @@ function transport(token, stdinPath) {
     const child = spawn(command, args, { stdio: [stdinPath ? "pipe" : "ignore", "inherit", "inherit"] });
     child.on("error", reject);
     child.on("close", (code) => resolve(code ?? 65));
-    if (stdinPath) createReadStream(stdinPath).pipe(child.stdin);
+    if (stdinPath) {
+      // If the server closes early, its exit code is the answer; a broken pipe is not.
+      child.stdin.on("error", () => {});
+      const source = createReadStream(stdinPath);
+      source.on("error", reject);
+      source.pipe(child.stdin);
+    }
   });
 }
 
@@ -117,6 +128,7 @@ async function submit(options) {
       authorVendor: options["author-vendor"],
       reviewers: options.reviewers ? Number(options.reviewers) : 1,
       scope: options.scope,
+      bundleRef: bundle.ref,
     };
     return await transport(encodeRpc(request), bundle.path);
   } finally {
@@ -137,7 +149,14 @@ async function main(argv) {
   throw new Error("usage: review.mjs submit|wait|status|report ...");
 }
 
-const isEntry = process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/").split("/").pop());
+// Compare real paths: a symlinked launcher must still run main, not exit 0 silently.
+const isEntry = (() => {
+  try {
+    return realpathSync(process.argv[1] ?? "") === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
 if (isEntry) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),

@@ -43,7 +43,8 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
 - `submit`은 바로 jobId를 돌려줍니다(종료 코드 3 = 대기 중).
 - `wait`는 최대 9분 기다립니다. 아직이면 `"status": "pending"`과 종료 코드 3을
   돌려주므로 같은 명령을 다시 부릅니다.
-- 종료 코드: 0 accept · 1 reject · 2 unknown · 3 pending · 64 요청 오류 · 65 서버 오류.
+- 종료 코드(submit·wait): 0 accept · 1 reject · 2 unknown · 3 pending · 64 요청 오류 · 65 서버 오류.
+  `report`와 jobId 없는 `status`는 성공하면 0입니다(accept라는 뜻이 아닙니다).
 - 검토 대상은 **commit된 것**뿐입니다. base 기본값은 `origin/develop`과의
   merge-base이며, base commit은 원격에 있어야 합니다(head는 push하지 않아도 됩니다).
 - 원문은 `npm run -s review -- report <jobId> --slot 0`으로 봅니다.
@@ -85,11 +86,19 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 
 - 각 CLI가 **헤드리스로, stdin 프롬프트를 받아, 파일을 쓰지 않고** 끝나는지.
   `codex exec --sandbox read-only -`와 `cursor-agent --print --mode ask --trust`는
-  Windows에서 쓰던 형태입니다. `claude -p`의 `--allowedTools`/`--disallowedTools`
-  조합은 이 도구용으로 새로 적은 것이라 아직 검증되지 않았습니다. 셋 다 Linux 버전에서
-  확인합니다.
+  Windows에서 쓰던 형태입니다. `claude -p`는 Read·Grep·Glob만 허용하고 Bash를 막습니다
+  (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). 이 조합은
+  새로 적은 것이라 아직 검증되지 않았습니다. 셋 다 Linux 버전에서 확인합니다.
 - Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
   `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
+
+## 작성자가 reviewer에게 지시하지 못하게
+
+reviewer CLI는 작업 디렉터리의 지시 파일(`AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`,
+`.cursor/`, `.cursorrules` 등)을 스스로 읽습니다. 그래서 이번 변경이 그 파일을 고쳤다면,
+reviewer의 checkout에서는 **base 버전으로 되돌리고** 고친 내용은 diff로만 보여 줍니다.
+그래도 diff 본문 속 문장이 reviewer를 흔들 수는 있으므로, 판정은 마지막 json 블록과
+결정적 규칙으로만 하고 reviewer의 결론 문장을 그대로 믿지 않습니다.
 
 ## 저장 위치
 

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export class GitError extends Error {
   constructor(code, detail, { clientFault = false } = {}) {
@@ -12,6 +12,7 @@ export class GitError extends Error {
 }
 
 export const SHA = /^[0-9a-f]{40}$/;
+export const BUNDLE_REF = /^refs\/review-orchestrator\/[0-9a-f]{16}$/;
 
 export function git(args, { cwd, allowFailure = false, maxBuffer = 64 * 1024 * 1024 } = {}) {
   const result = spawnSync("git", args, {
@@ -42,8 +43,9 @@ export function ensureMirror(repo) {
  * client said: the bundle's prerequisites exist here, its head is `head`, and
  * `base` is an ancestor of it.
  */
-export function importBundle({ mirror, bundlePath, jobId, base, head }) {
+export function importBundle({ mirror, bundlePath, bundleRef, jobId, base, head }) {
   if (!SHA.test(base) || !SHA.test(head)) throw new GitError("sha_invalid", "", { clientFault: true });
+  if (!BUNDLE_REF.test(bundleRef ?? "")) throw new GitError("bundle_ref_invalid", "", { clientFault: true });
   const verify = git(["bundle", "verify", bundlePath], { cwd: mirror, allowFailure: true });
   if (!verify.ok) {
     throw new GitError(
@@ -53,7 +55,7 @@ export function importBundle({ mirror, bundlePath, jobId, base, head }) {
     );
   }
   const ref = `refs/review/${jobId}`;
-  git(["fetch", "--quiet", bundlePath, `+refs/review-orchestrator/head:${ref}`], { cwd: mirror });
+  git(["fetch", "--quiet", bundlePath, `+${bundleRef}:${ref}`], { cwd: mirror });
   const actual = git(["rev-parse", ref], { cwd: mirror }).stdout.trim();
   if (actual !== head) {
     git(["update-ref", "-d", ref], { cwd: mirror, allowFailure: true });
@@ -79,6 +81,35 @@ export function diffText(mirror, base, head) {
 
 export function addWorktree(mirror, dir, head) {
   git(["worktree", "add", "--detach", "--quiet", dir, head], { cwd: mirror });
+}
+
+/**
+ * Files the reviewer CLIs load on their own as instructions. The author must
+ * not be able to instruct the reviewer, so these are reset to the base
+ * version in the reviewer's checkout; their changes reach the reviewer only as
+ * quoted diff.
+ */
+const INSTRUCTION_NAMES = new Set([
+  "agents.md", "agents.override.md", "claude.md", "claude.local.md", "gemini.md",
+  ".cursorrules", ".windsurfrules", "copilot-instructions.md",
+]);
+const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin"]);
+
+export function isInstructionPath(path) {
+  const segments = path.split("/");
+  if (INSTRUCTION_NAMES.has(segments[segments.length - 1].toLowerCase())) return true;
+  return segments.slice(0, -1).some((segment) => INSTRUCTION_DIRS.has(segment.toLowerCase()));
+}
+
+export function restoreInstructionFiles(worktree, base, files) {
+  const restored = [];
+  for (const file of files.filter(isInstructionPath)) {
+    const atBase = git(["cat-file", "-e", `${base}:${file}`], { cwd: worktree, allowFailure: true }).ok;
+    if (atBase) git(["checkout", base, "--", file], { cwd: worktree });
+    else rmSync(join(worktree, file), { force: true });
+    restored.push(file);
+  }
+  return restored;
 }
 
 export function removeWorktree(mirror, dir) {

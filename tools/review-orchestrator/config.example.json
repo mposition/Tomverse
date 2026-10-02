@@ -29,8 +29,8 @@
       "args": [
         "-p",
         "--output-format", "text",
-        "--allowedTools", "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*)",
-        "--disallowedTools", "Edit,Write,NotebookEdit,WebFetch,WebSearch"
+        "--allowedTools", "Read,Grep,Glob",
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
       ]
     },
     {
