@@ -168,17 +168,24 @@ export async function readIdeaSubmissionRequest(
 export async function listRecentIdeaSubmissions(session: Session,
   cursor: AmuxV4RecentIdeaCursor | null = null) {
   const actorUserId = actorId(session);
-  const rows = await prisma.amuxIdeaSubmission.findMany({
-    where: { actorUserId, analysisDeadlineAt: { gt: new Date() },
-      cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null },
-      ...(cursor ? { OR: [
-        { submittedAt: { lt: cursor.submittedAt } },
-        { submittedAt: cursor.submittedAt, id: { lt: cursor.ideaId } },
-      ] } : {}) },
-    orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
-    take: 21,
-    select: { id: true, requestId: true, submittedAt: true, analysisDeadlineAt: true },
-  });
+  const rows = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
+             set_config('idle_in_transaction_session_timeout', '3000', true) AS idle_limit
+    `;
+    const now = await databaseNow(tx);
+    return tx.amuxIdeaSubmission.findMany({
+      where: { actorUserId, analysisDeadlineAt: { gt: now },
+        cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null },
+        ...(cursor ? { OR: [
+          { submittedAt: { lt: cursor.submittedAt } },
+          { submittedAt: cursor.submittedAt, id: { lt: cursor.ideaId } },
+        ] } : {}) },
+      orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
+      take: 21,
+      select: { id: true, requestId: true, submittedAt: true, analysisDeadlineAt: true },
+    });
+  }, { maxWait: 2_000, timeout: 5_000 });
   const page = rows.slice(0, 20);
   const last = page.at(-1);
   return { items: page.map((row) => ({
