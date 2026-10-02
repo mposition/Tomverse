@@ -112,9 +112,11 @@ async function submit(options) {
   if (!author) throw new Error("--author is required (claude, codex, cursor, ...)");
   const head = git(["rev-parse", "--verify", `${options.head ?? "HEAD"}^{commit}`]);
   const baseRef = options.base ?? process.env.REVIEW_ORCH_BASE ?? "origin/develop";
-  const base = options.base
-    ? git(["rev-parse", "--verify", `${baseRef}^{commit}`])
-    : git(["merge-base", head, baseRef]);
+  // Always the fork point: `--base origin/main` means "where this branch left
+  // main", not main's tip, which is no ancestor once main has moved on. For a
+  // base that already is an ancestor, the merge-base is that commit itself.
+  git(["rev-parse", "--verify", `${baseRef}^{commit}`]);
+  const base = git(["merge-base", head, baseRef]);
   if (base === head) throw new Error("nothing to review: head equals base");
   if (git(["status", "--porcelain", "--untracked-files=no"]) !== "") {
     process.stderr.write("warning: uncommitted changes are not part of the review; only committed work is sent\n");
