@@ -31,6 +31,12 @@ import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
   frontierCatalogReadPermitted,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
+import {
+  AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
+  AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV,
+  transferPreviewReadPermitted,
+  transferPreviewWritePermitted,
+} from "@/lib/amux/ideaTransferPreviewInputCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -70,6 +76,11 @@ export default async function AdminAmuxBacklogPage({
     process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]);
   const initialPlanAvailable = initialPlanWritePermitted(process.env[AMUX_V4_INITIAL_PLAN_WRITE_ENV]) &&
     initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV]);
+  const frontierModelsAvailable = frontierCatalogReadPermitted(
+    process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]);
+  const transferPreviewAvailable = initialPlanAvailable && frontierModelsAvailable &&
+    transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV]) &&
+    transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV]);
   const chips = amuxTabChips(
     { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
       ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
@@ -95,7 +106,8 @@ export default async function AdminAmuxBacklogPage({
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
-          frontierModelsAvailable={frontierCatalogReadPermitted(process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV])}
+          frontierModelsAvailable={frontierModelsAvailable}
+          transferPreviewAvailable={transferPreviewAvailable}
           operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
