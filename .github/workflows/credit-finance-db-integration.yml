@@ -2,6 +2,7 @@ name: Credit Finance DB Integration
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "prisma/**"
       - "lib/chatSecurity.ts"
@@ -90,10 +91,12 @@ concurrency:
 
 jobs:
   credit-finance-db:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main'
     name: Credit and finance PostgreSQL scenarios (${{ matrix.group }})
     runs-on: ubuntu-latest
 
-    # Seven lanes, because one job stopped fitting.
+    # Nine lanes, because one job stopped fitting -- and then seven stopped
+    # fitting evenly.
     #
     # 20 minutes left no margin, so on 2026-08-15 this became 30 with a note
     # saying what would have to happen next: "past about 25 minutes the suite
@@ -114,6 +117,13 @@ jobs:
     # diff does not touch a single suite here. So the number goes back to
     # bounding a hang, and the work is divided instead.
     #
+    # Seven lanes split by domain left `accounts` (the catch-all) at 53 suites
+    # and `email` at 42 against 9-18 elsewhere. A lane costs ~15s per suite
+    # plus ~2 minutes of setup, so accounts ran ~16 minutes while assistant ran
+    # ~3, and on every develop and main push Railway's Wait for CI held the
+    # deployment for the slowest lane. On 2026-10-02 `consent`, `agents` and
+    # `conversations` took the overflow; the largest lane is now 24 suites.
+    #
     # The lanes are named in scripts/db-integration-groups.mjs and a test
     # asserts this matrix runs all of them -- a lane defined and not listed
     # here would look exactly like a passing check.
@@ -121,12 +131,14 @@ jobs:
       fail-fast: false
       matrix:
         group:
+          - consent
           - email
           - assistant
           - memory
-          - import
+          - conversations
           - routing
           - finance
+          - agents
           - accounts
 
     # Bounds a hang, not the runtime. The largest lane holds under a third of
@@ -252,7 +264,7 @@ jobs:
   # The name branch protection knows.
   #
   # Splitting one job into a matrix renames its check: "Credit and finance
-  # PostgreSQL scenarios" becomes seven checks with the group in brackets. A
+  # PostgreSQL scenarios" becomes one check per lane with the group in brackets. A
   # required check that no longer reports is not a failure an operator can see
   # -- it is a pull request that waits forever for something nobody is going to
   # run, which is worse than a red one.
@@ -265,7 +277,7 @@ jobs:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
     needs: credit-finance-db
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main')
     steps:
       - name: Require every lane to have passed
         env:

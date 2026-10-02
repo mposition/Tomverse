@@ -5,7 +5,7 @@ name: Main Chromium Regression
 # scripts/verify-smoke-coverage.mjs); every other desktop-chromium test --
 # visual regression, typography, touch targets, keyboard policy, responsive
 # layout, analytics consent, i18n -- is still executed here, unfiltered, on
-# every main push. Nothing was deleted; the CI tier moved.
+# every pull request into main. Nothing was deleted; the CI tier moved.
 #
 # `test:e2e:chromium` must therefore stay unfiltered. Adding a tag filter to
 # it would drop those tests from CI entirely, and the security-regression
@@ -21,15 +21,40 @@ name: Main Chromium Regression
 # `playwright test` calls -- which is the command the security-regression
 # check pins precisely so nobody can quietly narrow this run.
 
+# On pull requests into main, not on pushes to it (2026-10-02).
+#
+# As a push workflow this ran after the merge button, so it could report a
+# broken release but not stop one -- and it was also the slowest suite in the
+# commit's check suite. Railway's Wait for CI holds a deployment until every
+# workflow on the commit has finished, so production waited for this run on
+# every release: 36 minutes at the median and 56 at p90 over the 20 main
+# commits before the change, against ~3 minutes of build and deploy. A red run
+# skipped the deployment outright (9cedc01f, the 2026-10-01 release).
+#
+# main requires branches to be up to date before merging, so the merge commit
+# carries exactly the tree this run verified on the pull request. Running it
+# there gives the same verdict before the merge instead of after it, and takes
+# it off the deployment's critical path. The note below that called moving it
+# "the real fix" is the change made here.
+#
+# Not while the pull request is a draft. A release PR's head is develop's
+# head, so its checks join every develop commit's check suite -- and Railway's
+# Wait for CI holds the *staging* deployment for them too. A release PR kept
+# open as a draft while develop moves would hold every staging deploy for this
+# run. Drafts skip both jobs (a skipped run fails nothing, and a draft cannot
+# merge); `ready_for_review` starts the run that the merge then needs.
 on:
-  push:
+  pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Until 2026-10-02 this ran on push, and the concurrency was set for that:
+#
 # Every push to `main` is a release, so every push needs its own verdict.
 #
 # This run takes ~28 minutes wall clock (~106 runner-minutes across the five
@@ -57,10 +82,13 @@ permissions:
 # the merge button, so it reports rather than blocks. Moving the canonical
 # suite in front of the release -- a required gate on the release pull request
 # -- is the real fix and is not attempted here.
+#
+# That reasoning was about pushes. On a pull request a new push supersedes the
+# head it replaces -- only the latest head can be merged, so only its verdict
+# matters -- and the run for the older head is cancelled.
 concurrency:
-  group: main-chromium-${{ github.ref }}
-  cancel-in-progress: false
-  queue: max
+  group: main-chromium-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   playwright:
@@ -71,6 +99,7 @@ jobs:
     # every shard runs the same pinned image, so a golden is compared on the
     # canonical environment no matter which shard happens to own it.
     runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # One shard's share of the suite, plus its own build. The single-job
     # version needed 75 minutes and was still growing into it.
     #
@@ -217,7 +246,7 @@ jobs:
     # `always()` so this reports a red check instead of going pending when a
     # shard fails, is cancelled, or is skipped. The step below decides the
     # verdict; reaching it is not itself a pass.
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       # `needs.playwright.result` collapses the whole matrix: it is `success`
       # only when every shard succeeded. `skipped` and `cancelled` are
