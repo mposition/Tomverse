@@ -17,6 +17,10 @@ import {
   ideaSubmissionReadBackPermitted,
   ideaSubmissionWritePermitted,
 } from "@/lib/amux/ideaSubmissionCore";
+import {
+  AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV,
+  sourceScopePreviewPermitted,
+} from "@/lib/amux/ideaSourceScopePreviewCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -52,6 +56,8 @@ export default async function AdminAmuxBacklogPage({
   const ideaSubmissionAvailable =
     ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
     ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
+  const sourceScopePreviewAvailable = sourceScopePreviewPermitted(
+    process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]);
   const chips = amuxTabChips(
     { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
       ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
@@ -74,7 +80,8 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "ideas" ? (
-        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable} operatorId={session.user.id} />
+        <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
+          sourceScopePreviewAvailable={sourceScopePreviewAvailable} operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (
