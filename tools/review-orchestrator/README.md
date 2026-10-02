@@ -33,8 +33,31 @@
 자격증명은 SSH key뿐이며 production 자격증명은 필요 없습니다. 읽기 전용입니다:
 로컬 저장소에는 임시 ref 하나를 만들었다 바로 지웁니다.
 
+처음 한 번은 키와 SSH 별칭을 준비합니다(**로컬 PC의 PowerShell, 아무 폴더**).
+
 ```powershell
-$env:REVIEW_ORCH_HOST = "review@review-server"   # 이 창을 닫으면 사라집니다
+ssh-keygen -t ed25519 -f $HOME\.ssh\review_orch -C windows-pc   # 암호 질문에는 Enter만 두 번
+ssh-keygen -y -P "" -f $HOME\.ssh\review_orch > $null; "no-passphrase-exit=$LASTEXITCODE"   # 0이어야 합니다
+notepad $HOME\.ssh\config   # 아래 블록을 추가
+ssh -o StrictHostKeyChecking=accept-new review-orch   # 서버 지문 등록. rpc_missing JSON이 나오면 정상
+```
+
+```
+Host review-orch
+  HostName <서버 주소>
+  User <CLI가 로그인된 계정>
+  IdentityFile ~/.ssh/review_orch
+  IdentitiesOnly yes
+```
+
+- `-N '""'`로 빈 암호를 주지 않습니다. PowerShell 7은 따옴표 두 글자를 암호로 넘기고,
+  클라이언트는 `BatchMode`라 암호를 물을 수 없어 `Permission denied`가 납니다.
+- 지문을 등록하지 않으면 같은 이유로 `Host key verification failed`가 납니다.
+- 클라이언트는 이 도구가 들어 있는 checkout(현재 develop)에서만 `npm run review`로 부를 수
+  있습니다. `npm run -s`는 "Missing script" 오류도 숨기므로 `$LASTEXITCODE`를 봅니다.
+
+```powershell
+$env:REVIEW_ORCH_HOST = "review-orch"   # 이 창을 닫으면 사라집니다
 npm run -s review -- submit --author codex --scope "무엇을 왜 바꿨는지 한두 줄"
 npm run -s review -- wait r-20261002-061500-a1b2c3
 ```
