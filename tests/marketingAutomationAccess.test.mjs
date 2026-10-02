@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+
+import ts from "typescript";
 
 import {
   MARKETING_AUTOMATION_FEATURES,
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
   MARKETING_PRICE_FALLBACK_ALERT_READY,
+  MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
   MARKETING_WEBHOOK_PIPELINE_COMPLETE,
   MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
   MARKETING_WEBHOOK_PIPELINE_FILES,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  MARKETING_WEBHOOK_PIPELINE_ROOT,
   canonicalMarketingWebhookFileText,
   canonicalMarketingWebhookJson,
   computeMarketingWebhookConfigSnapshotDigest,
@@ -24,6 +30,7 @@ import {
   MARKETING_WEBHOOK_VERIFICATION_SIGNED_ACTION,
   marketingWebhookSignatureAuditRequirement,
 } from "../lib/marketingAuditEvidence.ts";
+import { MARKETING_WEBHOOK_EVENT_TYPES } from "../lib/marketingWebhookCore.ts";
 
 const readable = (value) => ({ ok: true, value });
 const unreadable = { ok: false };
@@ -36,14 +43,14 @@ const configSnapshot = {
   appSettings: {
     "marketingAutomation.webhookShadowEnabled": "true",
   },
-  acceptedEventTypes: [],
+  acceptedEventTypes: [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
   envDigests: marketingWebhookEnvDigests(
     rawWebhookEnvironment,
     MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
   ),
   schemaVersion: "marketing-webhook-shadow-v1",
 };
-const configSnapshotDigest =
+const stagingConfigSnapshotDigest =
   computeMarketingWebhookConfigSnapshotDigest(configSnapshot);
 
 const record = {
@@ -60,7 +67,7 @@ const record = {
   },
   evidenceRefs: ["artifact://marketing-webhook/c1-c5"],
   pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
-  configSnapshotDigest,
+  stagingConfigSnapshotDigest,
 };
 const recordText = `${JSON.stringify(record, null, 2)}\n`;
 const recordDigest = digestMarketingWebhookVerificationRecord(recordText);
@@ -373,7 +380,7 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
   const baseline = resolveMarketingAutomationAccess(completeInputs()).webhookApply;
   assert.deepEqual(baseline, {
     enabled: false,
-    reasons: ["webhook_pipeline_incomplete"],
+    reasons: ["webhook_pipeline_incomplete", "webhook_production_config_unsigned"],
   });
 
   const cases = [
@@ -398,17 +405,6 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
         verified: false,
       }),
       "webhook_audit_invalid",
-    ],
-    [
-      "webhookConfigSnapshot",
-      readable({
-        ...configSnapshot,
-        envDigests: marketingWebhookEnvDigests(
-          { TOMVERSE_DEPLOY_ENV: "production" },
-          MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
-        ),
-      }),
-      "webhook_config_snapshot_stale",
     ],
     [
       "webhookEvent",
@@ -460,6 +456,33 @@ test("webhook apply validates record, sibling signature, scope, audit, and confi
   assert.ok(
     resolveMarketingAutomationAccess(stalePipeline).webhookApply.reasons.includes(
       "webhook_pipeline_fingerprint_stale",
+    ),
+  );
+
+  // S1 r7 amendment 1: a live snapshot that differs from the staging one the
+  // record carries (here, production identity) is expected, not a refusal. What
+  // still refuses is the missing production generation, which S2f adds.
+  const productionSnapshot = completeInputs();
+  productionSnapshot.webhookConfigSnapshot = readable({
+    ...configSnapshot,
+    envDigests: marketingWebhookEnvDigests(
+      { TOMVERSE_DEPLOY_ENV: "production" },
+      MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames,
+    ),
+  });
+  assert.deepEqual(
+    resolveMarketingAutomationAccess(productionSnapshot).webhookApply,
+    baseline,
+  );
+
+  const oldRecordShape = completeInputs();
+  const { stagingConfigSnapshotDigest: digestValue, ...withoutStaging } = record;
+  oldRecordShape.webhookVerificationRecordText = readable(
+    JSON.stringify({ ...withoutStaging, configSnapshotDigest: digestValue }),
+  );
+  assert.ok(
+    resolveMarketingAutomationAccess(oldRecordShape).webhookApply.reasons.includes(
+      "webhook_record_invalid",
     ),
   );
 
@@ -526,6 +549,105 @@ test("record digest strips BOM and normalises CRLF without changing the record",
   );
 });
 
+test("the accepted event list is the receiver's recorded list", () => {
+  // Written out in the access module because the receiver's core imports it.
+  assert.deepEqual(
+    [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
+    [...MARKETING_WEBHOOK_EVENT_TYPES],
+  );
+});
+
+// The receiver route's local import closure, from the TypeScript syntax tree:
+// static imports and re-exports, `import x = require()`, and `import()` /
+// `require()` calls. A call whose argument is not a plain string literal is a
+// failure, not a skip -- a dependency nobody can name cannot be fingerprinted.
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const isFile = (candidate) => {
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+};
+const resolveLocal = (fromPath, specifier) => {
+  let base;
+  if (specifier.startsWith("@/")) base = path.join(repositoryRoot, specifier.slice(2));
+  else if (specifier.startsWith(".")) base = path.join(repositoryRoot, path.dirname(fromPath), specifier);
+  else return null;
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
+    if (isFile(candidate)) return path.relative(repositoryRoot, candidate).split(path.sep).join("/");
+  }
+  throw new Error(`${fromPath}: cannot resolve ${specifier}`);
+};
+const moduleSpecifiers = (filePath, source) => {
+  const file = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+  const found = [];
+  const literal = (node, what) => {
+    if (node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) {
+      found.push(node.text);
+      return;
+    }
+    throw new Error(`${filePath}: ${what} with a specifier that is not a plain string`);
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      if (node.moduleSpecifier) literal(node.moduleSpecifier, "import/export");
+    } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      literal(node.moduleReference.expression, "import = require");
+    } else if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(callee) && callee.text === "require";
+      if (isDynamicImport || isRequire) literal(node.arguments[0], isDynamicImport ? "import()" : "require()");
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+};
+const localImportClosure = (rootPath) => {
+  const seen = new Set();
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const source = readFileSync(path.join(repositoryRoot, current), "utf8");
+    for (const specifier of moduleSpecifiers(current, source)) {
+      const resolved = resolveLocal(current, specifier);
+      if (resolved) pending.push(resolved);
+    }
+  }
+  return seen;
+};
+
+test("the closure scanner names commented and template imports and refuses computed ones", () => {
+  assert.deepEqual(
+    moduleSpecifiers(
+      "x.ts",
+      'const a = import(/* why */ "@/lib/a"); const b = import(`@/lib/b`); export * from "./c"; import d = require("./d");',
+    ),
+    ["@/lib/a", "@/lib/b", "./c", "./d"],
+  );
+  for (const source of ["import(name);", "require(`@/lib/${name}`);", "const m = require(base + \"x\");"]) {
+    assert.throws(() => moduleSpecifiers("x.ts", source), /not a plain string/, source);
+  }
+});
+
+test("the pipeline file list is the receiver route's whole import closure", () => {
+  const closure = localImportClosure(MARKETING_WEBHOOK_PIPELINE_ROOT);
+  // The module holding the fingerprint cannot hash itself.
+  closure.delete("lib/marketingAutomationAccess.ts");
+  const declared = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
+    (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
+  );
+  assert.deepEqual([...declared].sort(), [...closure].sort());
+  assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_FILES], [...MARKETING_WEBHOOK_PIPELINE_FILES].sort());
+  for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
+    assert.ok(isFile(path.join(repositoryRoot, file)), file);
+  }
+});
+
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
   const files = MARKETING_WEBHOOK_PIPELINE_FILES.map((path) => ({
     path,
@@ -546,7 +668,8 @@ test("pipeline fingerprint is current and independent of LF versus CRLF", () => 
     computeMarketingWebhookPipelineFingerprint(
       files.map((file) => ({
         ...file,
-        content: `\uFEFF${file.content.replaceAll("\n", "\r\n")}`,
+        // One BOM, whether or not the file already starts with one.
+        content: `\uFEFF${file.content.replace(/^\uFEFF/, "").replaceAll("\n", "\r\n")}`,
       })),
       MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
     ),
@@ -562,6 +685,8 @@ test("configuration digest accepts only caller-hashed environment values", () =>
       RAILWAY_ENVIRONMENT_NAME:
         configSnapshot.envDigests.RAILWAY_ENVIRONMENT_NAME,
       APP_ENV: configSnapshot.envDigests.APP_ENV,
+      ZERNIO_WEBHOOK_SECRET: configSnapshot.envDigests.ZERNIO_WEBHOOK_SECRET,
+      ZERNIO_API_KEY: configSnapshot.envDigests.ZERNIO_API_KEY,
     },
     acceptedEventTypes: [...configSnapshot.acceptedEventTypes].reverse(),
     appSettings: {
@@ -575,6 +700,8 @@ test("configuration digest accepts only caller-hashed environment values", () =>
     TOMVERSE_DEPLOY_ENV: createHash("sha256")
       .update("staging", "utf8")
       .digest("hex"),
+    ZERNIO_API_KEY: null,
+    ZERNIO_WEBHOOK_SECRET: null,
   });
 
   const canonicalSnapshot = canonicalMarketingWebhookJson({
@@ -587,9 +714,9 @@ test("configuration digest accepts only caller-hashed environment values", () =>
   });
   assert.equal(
     canonicalSnapshot,
-    '{"acceptedEventTypes":[],"appSettings":{"marketingAutomation.webhookShadowEnabled":"true"},"envDigests":{"APP_ENV":null,"RAILWAY_ENVIRONMENT_NAME":null,"TOMVERSE_DEPLOY_ENV":"e919a75364398a449f860aeadddc57fa0502145a4e63959ddb33c417a48dc0da"},"schemaVersion":"marketing-webhook-shadow-v1"}',
+    '{"acceptedEventTypes":[],"appSettings":{"marketingAutomation.webhookShadowEnabled":"true"},"envDigests":{"APP_ENV":null,"RAILWAY_ENVIRONMENT_NAME":null,"TOMVERSE_DEPLOY_ENV":"e919a75364398a449f860aeadddc57fa0502145a4e63959ddb33c417a48dc0da","ZERNIO_API_KEY":null,"ZERNIO_WEBHOOK_SECRET":null},"schemaVersion":"marketing-webhook-shadow-v1"}',
   );
-  assert.equal(first, "a0edae0675b3d90bb1087fa1fbb4b6189525dd9b24f8b94f714341fc235e1f73");
+  assert.equal(first, "cb02916e4097920c4655ad02f34d428daacc40fdb0f87b59b6053b77138678bc");
   assert.notEqual(
     first,
     computeMarketingWebhookConfigSnapshotDigest({

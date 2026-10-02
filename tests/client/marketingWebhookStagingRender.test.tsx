@@ -127,6 +127,20 @@ test("each report arms its own event, against the generation shown", () => {
   assert.equal((fresh?.body({ ttlMinutes: "30" }) as { expectedGeneration: number }).expectedGeneration, 0);
 });
 
+test("an event that was never processed is armed by Zernio's event id", () => {
+  const action = actionsOf(render({})).find((a) => a.id === "webhook-fault-arm-event-id");
+  assert.equal(action?.path, "/api/admin/marketing/webhook/fault-arm");
+  assert.ok(action?.confirm);
+  assert.deepEqual(
+    action?.body({ eventId: "  1f0e8a52-4c1b-4f6a-9d2e-5c7e1a4b6d90 ", ttlMinutes: "15" }),
+    { eventId: "1f0e8a52-4c1b-4f6a-9d2e-5c7e1a4b6d90", expectedGeneration: 0, ttlMinutes: 15 },
+  );
+  assert.equal(
+    actionsOf(render({ canWrite: false })).some((a) => a.id === "webhook-fault-arm-event-id"),
+    false,
+  );
+});
+
 test("a reader, a foreign arm value or an unreadable state offers no write", () => {
   for (const [label, props] of [
     ["reader", { canWrite: false }],

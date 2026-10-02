@@ -365,7 +365,8 @@ const compilerOptions = parsedConfig.options;
 //
 // 2026-10-01, login code mail layout: `lib/emailLoginEmails.ts` imports the
 // same frame from `lib/accountEmails.ts` -- both already listed, so the file
-// set stays 190. No element access is added; this repins positions only.
+// set stays 190. No element access is added; this repins positions only. 2026-10-02
+//
 // 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
 // (docs/policy/product-research-agent.md §5), and one dated record is added to
@@ -396,12 +397,18 @@ const compilerOptions = parsedConfig.options;
 // line or column -- a declaration above one, as here, or a comment above one.
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
+//
+// 2026-10-03, taking develop: both branches had repinned this -- develop for
+// changes of its own, this one for the actors array -- so neither value
+// described the merged tree and the one below is computed over it. The count
+// and the position-free digest are unchanged on both sides, which is what
+// says the merge repositioned accesses rather than adding any.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "773179541adadd88c0f0ca8aa61ec8c7",
-  "3f5cd53d3e353d276f10acd3c707d7d2",
+  "8b3d03318ad89d398503ce0e05d3c73b",
+  "221bf3cbf61d195e8a3aad80340e0073",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
