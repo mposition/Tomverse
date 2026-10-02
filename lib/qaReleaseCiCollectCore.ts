@@ -142,6 +142,9 @@ export async function collectQaReleaseCi(input: {
         }
         for (const apiJob of jobs) {
           if (!isConclusion(apiJob.conclusion)) continue; // still running, or a value GitHub added later
+          // A skipped job did not run (a draft pull request skips e2e), so it
+          // must not stand in as the job's latest result over an older one.
+          if (apiJob.conclusion === "skipped") continue;
           const match = QA_RELEASE_CI_JOB_NAMES[workflow]
             .map((entry) => ({ entry, found: entry.name.exec(apiJob.name) }))
             .find((candidate) => candidate.found !== null);

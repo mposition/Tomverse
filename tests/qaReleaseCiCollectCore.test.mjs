@@ -148,3 +148,14 @@ test("each job contributes one row, from the newest run that ran it", async () =
   assert.deepEqual(result.releaseLane.map((row) => [row.runId, row.jobConclusion]), [["31", "success"]]);
   assert.deepEqual(result.ci.map((row) => [row.runId, row.shard, row.jobConclusion]), [["41", 1, "success"], ["42", 2, "failure"]]);
 });
+
+test("a skipped job does not replace an older result for that job", async () => {
+  const gh = github([
+    ["workflows/e2e.yml/runs", { total_count: 2, workflow_runs: [run(51, 1), run(52, 3)] }],
+    ["runs/51/jobs", { total_count: 1, jobs: [{ name: "Chromium desktop and mobile regression", conclusion: "skipped", steps: [] }] }],
+    ["runs/52/jobs", { total_count: 1, jobs: [{ name: "Chromium desktop and mobile regression", conclusion: "failure", steps: [] }] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
+  ]);
+  const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
+  assert.deepEqual(result.ci.map((row) => [row.runId, row.jobConclusion]), [["52", "failure"]]);
+});
