@@ -898,10 +898,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "a3db47908c097928fca7524ef67dcd5b2afbcc1f387f9fd1efa3a3c4984ce2d1",
+    sha256: "81081dade66bed12ba79a57cace76956629ac58506c39c92ad8205ae12c824d5",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: it also runs a pending migration's declared presence probe -- a single SELECT taken from that migration's own header -- inside BEGIN READ ONLY and ROLLBACK, so a probe cannot write; the only new statements are those two and the probe.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
