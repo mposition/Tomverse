@@ -266,6 +266,9 @@ async function chainPlacementProblem(
 /** The target type the store writes for a post's audit entries. */
 export const MARKETING_POST_AUDIT_TARGET_TYPE = "MarketingPost";
 
+/** The target type a shadow report's audit entry names. */
+export const MARKETING_REPORT_AUDIT_TARGET_TYPE = "MarketingReport";
+
 /** Why a system audit entry is not evidence of what the system recorded. */
 export const MARKETING_SYSTEM_AUDIT_PROBLEMS = [
   "entry_missing",

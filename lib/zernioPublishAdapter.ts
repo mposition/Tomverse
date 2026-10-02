@@ -166,6 +166,8 @@ const RETRACTABLE_PLATFORMS = new Set([
 
 type ZernioPlatformResult = {
   platform?: string;
+  /** The target account, as a string or an object carrying one (as the S0 probe reads it). */
+  accountId?: string | { _id?: string; id?: string };
   status?: string;
   platformPostId?: string;
   platformPostUrl?: string;
@@ -436,7 +438,10 @@ export const zernioPublishAdapter = (
       return { outcome: "outcome_unknown", errorCode: "no_lookup_by_request_key" };
     },
 
-    async lookupStatus(externalPostId: string): Promise<MarketingObjectStatus> {
+    async lookupStatus(
+      externalPostId: string,
+      externalAccountRef: string,
+    ): Promise<MarketingObjectStatus> {
       // A different question from the one above, and one Zernio *can* answer: we
       // know the object's own id, so we ask about it directly.
       const result = await call(`/v1/posts/${encodeURIComponent(externalPostId)}`, {
@@ -461,11 +466,31 @@ export const zernioPublishAdapter = (
       // answers `live` or `unknown`, and never guesses the third.
       if (result.status !== 200) return { state: "unknown" };
       const post = (result.body as { post?: ZernioPost } | null)?.post ?? (result.body as ZernioPost | null);
-      const status = post?.status;
-      if (status !== "published") return { state: "unknown" };
-      const entry = post?.platforms?.[0];
-      const externalUrl = httpsUrl(entry?.platformPostUrl ?? entry?.publishedUrl);
-      return externalUrl ? { state: "live", externalUrl } : { state: "unknown" };
+      // **The target this question is about, not the post's first.** A post can
+      // go to several accounts and each has its own status; the post's own
+      // status is an aggregate (`partial` when they differ). The first version
+      // read that aggregate and `platforms[0]`, so a question about the second
+      // account was answered about the first. A target whose account cannot be
+      // matched is not an answer at all.
+      const accountOf = (entry: ZernioPlatformResult) =>
+        typeof entry.accountId === "string"
+          ? entry.accountId
+          : (entry.accountId?._id ?? entry.accountId?.id ?? null);
+      const entries = post?.platforms ?? [];
+      const ref = String(externalAccountRef ?? "").trim();
+      const matching = entries.filter((entry) => ref !== "" && accountOf(entry) === ref);
+      const entry = matching.length === 1 ? matching[0] : undefined;
+      if (!entry) return { state: "unknown" };
+      if (entry.status === "published") {
+        const externalUrl = httpsUrl(entry.platformPostUrl ?? entry.publishedUrl);
+        return externalUrl ? { state: "live", externalUrl } : { state: "unknown" };
+      }
+      // Failed, or retracted through Zernio: the provider affirms this copy is
+      // not up. Still not removal by the platform -- see above.
+      if (entry.status === "failed" || entry.status === "cancelled") {
+        return { state: "not_live" };
+      }
+      return { state: "unknown" };
     },
 
     async cancel(
