@@ -108,24 +108,48 @@ export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
 ] as const;
 
 /**
- * Every file whose bytes decide what a received event becomes: receiver,
- * signature verification, event-id dedupe, storage transaction (and the index
- * the schema cannot see), event list, event-to-status mapping and the status
- * query. A change to any of them makes a signed staging record stale.
+ * Every file whose bytes can decide what a received event becomes: the whole
+ * local import closure of the receiver route (receiver, signature, dedupe,
+ * storage and audit transaction, mapping, status query), plus the schema and
+ * the dedupe index it cannot see. Not a hand-picked subset -- the test derives
+ * the closure and refuses any difference. This module itself is left out: it
+ * holds the fingerprint, and its webhook inputs are in the descriptor below.
+ * A change to any listed file makes a signed staging record stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FILES = [
   "app/api/_marketing/zernioAdapter.ts",
   "app/api/webhooks/zernio/route.ts",
+  "lib/adminAudit.ts",
+  "lib/adminAuditIntegrityCore.ts",
+  "lib/adminAuditSystemActors.ts",
+  "lib/clientIp.ts",
+  "lib/deploymentEnvironment.ts",
+  "lib/marketingAuditEvidence.ts",
   "lib/marketingAutomationSchema.ts",
+  "lib/marketingBannedClaims.ts",
+  "lib/marketingClaimVerbs.ts",
+  "lib/marketingFacts.ts",
+  "lib/marketingGuardCore.ts",
+  "lib/marketingGuardNormalise.ts",
+  "lib/marketingGuardRules.ts",
+  "lib/marketingKoreanClaims.ts",
+  "lib/marketingMemoryClaims.ts",
+  "lib/marketingMinorsClaims.ts",
+  "lib/marketingNegation.ts",
   "lib/marketingPublishAdapter.ts",
+  "lib/marketingStore.ts",
   "lib/marketingWebhookCore.ts",
   "lib/marketingWebhookReceiver.ts",
   "lib/marketingWebhookSettings.ts",
-  "lib/marketingWebhookShadowStore.ts",
+  "lib/postgresConnectionConfigCore.mjs",
+  "lib/prisma.ts",
   "lib/zernioPublishAdapter.ts",
   "prisma/migrations/20261002120000_marketing_webhook_shadow_event_unique/migration.sql",
   "prisma/schema.prisma",
 ] as const;
+
+/** The route whose import closure the list above must equal. */
+export const MARKETING_WEBHOOK_PIPELINE_ROOT = "app/api/webhooks/zernio/route.ts";
 
 /**
  * Names only. The staging snapshot hashes these environment values; the
@@ -422,7 +446,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f45a2cabb3457e5a5511b0247869eea805f9676b8506eeb8275fa8f23affc705";
+  "108ca45a92cacbd4f6f8f04c327ec14c0415dfe08489996d8f6dc55e30c547be";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

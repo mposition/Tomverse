@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -12,6 +14,7 @@ import {
   MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
   MARKETING_WEBHOOK_PIPELINE_FILES,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  MARKETING_WEBHOOK_PIPELINE_ROOT,
   canonicalMarketingWebhookFileText,
   canonicalMarketingWebhookJson,
   computeMarketingWebhookConfigSnapshotDigest,
@@ -552,6 +555,60 @@ test("the accepted event list is the receiver's recorded list", () => {
   );
 });
 
+// The receiver route's local import closure: every static, side-effect,
+// re-export and literal dynamic import or require that names a repository
+// file. A comment that looks like an import only adds a file; it can never
+// hide one, so the comparison below errs towards listing too much.
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const IMPORT_SPECIFIER =
+  /\b(?:import|export)\s[^;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g;
+const isFile = (candidate) => {
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+};
+const resolveLocal = (fromPath, specifier) => {
+  let base;
+  if (specifier.startsWith("@/")) base = path.join(repositoryRoot, specifier.slice(2));
+  else if (specifier.startsWith(".")) base = path.join(repositoryRoot, path.dirname(fromPath), specifier);
+  else return null;
+  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
+    if (isFile(candidate)) return path.relative(repositoryRoot, candidate).replaceAll("\\", "/");
+  }
+  throw new Error(`${fromPath}: cannot resolve ${specifier}`);
+};
+const localImportClosure = (rootPath) => {
+  const seen = new Set();
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const source = readFileSync(path.join(repositoryRoot, current), "utf8");
+    for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+      const resolved = resolveLocal(current, match[1] ?? match[2] ?? match[3]);
+      if (resolved) pending.push(resolved);
+    }
+  }
+  return seen;
+};
+
+test("the pipeline file list is the receiver route's whole import closure", () => {
+  const closure = localImportClosure(MARKETING_WEBHOOK_PIPELINE_ROOT);
+  // The module holding the fingerprint cannot hash itself.
+  closure.delete("lib/marketingAutomationAccess.ts");
+  const declared = MARKETING_WEBHOOK_PIPELINE_FILES.filter(
+    (file) => file !== "prisma/schema.prisma" && !file.startsWith("prisma/migrations/"),
+  );
+  assert.deepEqual([...declared].sort(), [...closure].sort());
+  assert.deepEqual([...MARKETING_WEBHOOK_PIPELINE_FILES], [...MARKETING_WEBHOOK_PIPELINE_FILES].sort());
+  for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
+    assert.ok(isFile(path.join(repositoryRoot, file)), file);
+  }
+});
+
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
   const files = MARKETING_WEBHOOK_PIPELINE_FILES.map((path) => ({
     path,
@@ -572,7 +629,8 @@ test("pipeline fingerprint is current and independent of LF versus CRLF", () => 
     computeMarketingWebhookPipelineFingerprint(
       files.map((file) => ({
         ...file,
-        content: `\uFEFF${file.content.replaceAll("\n", "\r\n")}`,
+        // One BOM, whether or not the file already starts with one.
+        content: `\uFEFF${file.content.replace(/^\uFEFF/, "").replaceAll("\n", "\r\n")}`,
       })),
       MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
     ),

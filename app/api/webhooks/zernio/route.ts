@@ -4,11 +4,11 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { buildZernioAdapterFromEnv } from "@/app/api/_marketing/zernioAdapter";
-import { runMarketingTransaction } from "@/lib/marketingStore";
 import {
   marketingWebhookShadowExists,
   recordMarketingWebhookShadow,
-} from "@/lib/marketingWebhookShadowStore";
+  runMarketingTransaction,
+} from "@/lib/marketingStore";
 import {
   MARKETING_AUTOMATION_KILL_SWITCH_ENV,
   MARKETING_WEBHOOK_SHADOW_KEY,
