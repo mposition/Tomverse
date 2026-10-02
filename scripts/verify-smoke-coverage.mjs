@@ -252,6 +252,6 @@ if (process.exitCode) {
 } else {
   console.log(
     `OK: ${tagged.length} smoke tests cover ${Object.keys(CATEGORY_MINIMUMS).length} required areas ` +
-      `(${allSpecs.length - tagged.length} further ${PROJECT} tests run on main push and nightly).`
+      `(${allSpecs.length - tagged.length} further ${PROJECT} tests run on pull requests into main and nightly).`
   );
 }
