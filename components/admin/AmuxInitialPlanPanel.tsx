@@ -6,7 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
-  classifyInitialPlanPost, classifyInitialPlanReadback,
+  classifyExistingInitialPlan, classifyInitialPlanPost, classifyInitialPlanReadback,
   clearPendingInitialPlan, readPendingInitialPlan, reservePendingInitialPlan,
 } from "@/lib/amux/ideaInitialPlanUiCore";
 
@@ -29,6 +29,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [state, setState] = useState<PlanState>({ kind: "idle" });
   const [recoveryChecked, setRecoveryChecked] = useState(false);
+  const [checkedIdeaId, setCheckedIdeaId] = useState<string | null>(null);
   const [readBackPending, setReadBackPending] = useState(false);
 
   const readBack = useCallback(async (pendingIdeaId: string) => {
@@ -58,14 +59,39 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
         void readBack(receipt.ideaId);
       } else if (receipt.kind === "unavailable") {
         setState({ kind: "recovery_unavailable" });
+      } else if (ideaId && available && !declaredExternalSources) {
+        void (async () => {
+          try {
+            const query = new URLSearchParams({ ideaId });
+            const response = await adminFetch(`/api/admin/amux/ideas/initial-source-plan?${query}`,
+              { cache: "no-store" });
+            const decision = classifyExistingInitialPlan({ status: response.status,
+              body: await response.json() }, ideaId);
+            if (!active) return;
+            if (decision.kind === "committed") {
+              setState({ kind: "committed", ideaId, revisionId: decision.revisionId });
+            } else if (decision.kind === "absent") {
+              setState({ kind: "idle" });
+              setCheckedIdeaId(ideaId);
+            } else {
+              setState({ kind: "outcome_unknown", ideaId });
+            }
+          } catch {
+            if (active) setState({ kind: "outcome_unknown", ideaId });
+          } finally {
+            if (active) setRecoveryChecked(true);
+          }
+        })();
+        return;
       }
       setRecoveryChecked(true);
     });
     return () => { active = false; };
-  }, [operatorId, readBack]);
+  }, [operatorId, readBack, ideaId, available, declaredExternalSources]);
 
   const prepare = async () => {
     if (!ideaId || !available || declaredExternalSources || !recoveryChecked ||
+        checkedIdeaId !== ideaId ||
         state.kind !== "idle") return;
     if (!reservePendingInitialPlan(receiptStore(), operatorId, ideaId)) {
       setState({ kind: "recovery_unavailable" });
@@ -99,7 +125,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       <p className="text-zinc-700 dark:text-zinc-300">{m.initialPlanHint}</p>
       {ideaId && declaredExternalSources ? <p>{m.initialPlanExternalScope}</p> : null}
       {ideaId && !declaredExternalSources && state.kind === "idle" ? (
-        <button type="button" onClick={prepare} disabled={!available || !recoveryChecked}
+        <button type="button" onClick={prepare} disabled={!available || !recoveryChecked || checkedIdeaId !== ideaId}
           className="min-h-11 rounded-lg border border-blue-700 px-4 font-medium text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
           {m.initialPlanPrepare}
         </button>

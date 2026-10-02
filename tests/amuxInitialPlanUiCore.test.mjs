@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  classifyInitialPlanPost, classifyInitialPlanReadback,
+  classifyExistingInitialPlan, classifyInitialPlanPost, classifyInitialPlanReadback,
   clearPendingInitialPlan, readPendingInitialPlan, reservePendingInitialPlan,
 } from "../lib/amux/ideaInitialPlanUiCore.ts";
 
@@ -65,6 +65,20 @@ test("absent, partial, malformed and failed read-back never invite retry", () =>
     { kind: "outcome_unknown" });
 });
 
+test("a clean load shows an existing plan without another POST", () => {
+  assert.deepEqual(classifyExistingInitialPlan({ status: 200,
+    body: { ideaId, status: "committed", revisionId } }, ideaId),
+  { kind: "committed", revisionId });
+  assert.deepEqual(classifyExistingInitialPlan({ status: 200,
+    body: { ideaId, status: "absent" } }, ideaId), { kind: "absent" });
+  for (const body of [
+    { ideaId, status: "partial" },
+    { ideaId, status: "absent", revisionId },
+    { ideaId: revisionId, status: "absent" },
+  ]) assert.deepEqual(classifyExistingInitialPlan({ status: 200, body }, ideaId),
+    { kind: "outcome_unknown" });
+});
+
 test("Admin UI calls plan only for a saved idea with no external sources", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
   const plan = readFileSync(new URL("../components/admin/AmuxInitialPlanPanel.tsx", import.meta.url), "utf8");
@@ -73,6 +87,8 @@ test("Admin UI calls plan only for a saved idea with no external sources", () =>
   assert.match(panel, /declaredExternalSources=\{lines\(repositories\)\.length > 0 \|\| lines\(pullRequests\)\.length > 0\}/);
   assert.match(plan, /!ideaId \|\| !available \|\| declaredExternalSources/);
   assert.match(plan, /reservePendingInitialPlan\(receiptStore\(\), operatorId, ideaId\)/);
+  assert.match(plan, /classifyExistingInitialPlan/);
+  assert.match(plan, /checkedIdeaId !== ideaId/);
   assert.match(plan, /await readBack\(ideaId\)/);
   assert.match(page, /initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
   assert.match(page, /initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);
