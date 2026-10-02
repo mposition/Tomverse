@@ -389,12 +389,21 @@ const compilerOptions = parsedConfig.options;
 // `lib/adminAuditSystemActors.ts` and the
 // marketing pipeline fingerprint repin move source positions only. Count and
 // position-free inventory are unchanged.
+// 2026-10-02, product-research audit actors: two names are added to
+// `lib/adminAuditSystemActors.ts` as their own exported array
+// (docs/policy/product-research-agent.md §5), above `auditRowActorKind()`.
+// That file is already listed, so the file set stays 190, and the inventory
+// and its position-free digest are unchanged -- the declaration only pushes
+// the one computed access in that file further down. This repins positions
+// only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
   "958f053e86c94c6f7fa813a73f8ef5b9",
   "0c096082e9afc3bb75be1ebfa98ee7f7",
+  "1e6323108c2fd270698393a462a8c608",
+  "567cdae347e7643067cee2dbb26b91e7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
