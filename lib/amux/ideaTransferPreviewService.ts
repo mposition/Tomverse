@@ -38,6 +38,7 @@ export class IdeaTransferPreviewError extends Error {
 type PreviewPayload = {
   version: 1;
   previewId: string;
+  ideaId: string;
   selection: {
     provider: IdeaOnlyTransferPreviewRequest["provider"];
     modelId: string;
@@ -163,7 +164,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       throw new IdeaTransferPreviewError("not_ready");
     }
     const payload: PreviewPayload = {
-      version: 1, previewId: choice.previewId,
+      version: 1, previewId: choice.previewId, ideaId: choice.ideaId,
       selection: { provider: choice.provider, modelId: choice.modelId,
         reasoningEffort: choice.reasoningEffort, approvalId: choice.approvalId,
         approvalVersion: choice.approvalVersion },
@@ -268,6 +269,7 @@ export async function readIdeaOnlyTransferPreview(session: Session, previewId: s
     }
     const payload = parsed as PreviewPayload;
     if (payload.version !== 1 || payload.previewId !== row.id ||
+        payload.ideaId !== row.ideaId ||
         payload.selection?.modelId !== row.modelId ||
         payload.templateVersion !== row.templateVersion ||
         typeof payload.prompt !== "string" ||
