@@ -96,6 +96,8 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       } else if (prior.kind === "present") {
         setState({ kind: "outcome_unknown", binding: prior.binding });
         if (available) void readBack(prior.binding);
+      } else {
+        setState({ kind: "idle" });
       }
     });
     return () => { active = false; lifecycleVersion.current += 1; };

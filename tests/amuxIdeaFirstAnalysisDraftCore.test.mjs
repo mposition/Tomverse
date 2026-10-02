@@ -61,3 +61,12 @@ test("an unfinished first response or owner question cannot masquerade as comple
     { ...card, sourceRefIds: ["unapproved_source"] }] })),
   { decision: "hold", reason: "invalid_result" });
 });
+
+test("a complete rejection is a ready analysis record with no proposed cards", () => {
+  const result = prepare(chunk({ outcome: "reject", units: [] }));
+  assert.equal(result.decision, "ready");
+  if (result.decision === "ready") {
+    assert.equal(result.draft.outcome, "reject");
+    assert.equal(result.draft.units.length, 0);
+  }
+});

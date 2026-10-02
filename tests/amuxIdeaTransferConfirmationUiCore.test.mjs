@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { clearRefusedConfirmationAttempt, definitiveConfirmationPrewriteRefusal,
   readConfirmedIdeaTransfer, readConfirmationAttempt, readConfirmationAttemptForPreview,
@@ -101,4 +102,7 @@ test("expired read-back distinguishes an unconfirmed preview from a recorded con
     { ...base, confirmationRecorded: true }, previewId, "other-idea"), null);
   assert.equal(readExpiredIdeaTransferConfirmation(200,
     { ...base, confirmationRecorded: "true" }, previewId, ideaId), null);
+  const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /observed !== "not_confirmed" &&\s*observed !== "expired_unconfirmed"\) return;/,
+    "an expired confirmed decision must retain its same-tab attempt fence");
 });

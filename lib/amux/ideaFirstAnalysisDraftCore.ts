@@ -4,6 +4,8 @@ import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
 /** A first, idea-only analysis can finish without a continuation worker.
  * This prepares encrypted DB values but never writes or authorizes a call.
+ * "ready" means a complete analysis record, not necessarily proposed cards:
+ * a complete rejection legitimately has zero draft units.
  * Its caller must still prove that the confirmed preview belongs to ideaId,
  * that this exact response came from its fenced invocation, and that the
  * source-plan/lease/budget/audit guards all hold under the app DB writer. */
