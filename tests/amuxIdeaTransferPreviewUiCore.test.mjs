@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  clearRefusedPreviewReceipt, definitivePreviewPrewriteRefusal,
   readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
   reservePreviewReceipt,
 } from "../lib/amux/ideaTransferPreviewUiCore.ts";
@@ -68,6 +69,31 @@ test("a replacement receipt changes only the expected preview id", () => {
     previewId, previewId, model, "high"), false);
 });
 
+test("definite pre-write refusals release only their exact receipt; unknown outcomes stay fenced", () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); } };
+  assert.equal(reservePreviewReceipt(storage, "operator", ideaId, previewId, model, "high"), true);
+  for (const [status, body] of [
+    [428, { error: "ADMIN_REAUTHENTICATION_REQUIRED" }],
+    [429, { error: "RATE_LIMITED" }],
+    [409, { error: "not_ready" }],
+    [409, { error: "model_changed" }],
+    [503, { error: "preview_disabled" }],
+  ]) assert.equal(definitivePreviewPrewriteRefusal(status, body), true);
+  for (const [status, body] of [
+    [503, { error: "outcome_unknown" }],
+    [503, { error: "preview_unavailable" }],
+    [409, { error: "outcome_unknown" }],
+    [200, { state: "prepared" }],
+  ]) assert.equal(definitivePreviewPrewriteRefusal(status, body), false);
+  assert.equal(clearRefusedPreviewReceipt(storage, "operator", ideaId, ideaId), false);
+  assert.equal(readPreviewReceipt(storage, "operator", ideaId).kind, "present");
+  assert.equal(clearRefusedPreviewReceipt(storage, "operator", ideaId, previewId), true);
+  assert.deepEqual(readPreviewReceipt(storage, "operator", ideaId), { kind: "absent" });
+});
+
 test("Admin UI gates preparation on an observed idea-only plan and provides exact-ID read-back", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
@@ -76,6 +102,8 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(panel, /!previewAvailable \|\| !planReady \|\| declaredExternalSources/);
   assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId,/);
   assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
+  assert.match(panel, /definitivePreviewPrewriteRefusal\(response\.status, body\)/);
+  assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId\)/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);

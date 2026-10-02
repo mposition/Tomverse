@@ -13,6 +13,7 @@ import {
   type AvailableFrontierModel,
 } from "@/lib/amux/ideaFrontierCatalogUiCore";
 import {
+  clearRefusedPreviewReceipt, definitivePreviewPrewriteRefusal,
   readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
   reservePreviewReceipt,
   type PreparedIdeaTransferPreview,
@@ -261,17 +262,19 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
         previewId, ideaId, model, effort);
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
-      if (response.status === 409 && body && typeof body === "object" &&
-          !Array.isArray(body) &&
-          ["not_ready", "model_changed"].includes(
-            String((body as Record<string, unknown>).error)) &&
-          previous?.kind === "present" &&
-          replacePreviewReceipt(receiptStore(), operatorId, ideaId,
-            previewId, previous.previewId, previous.model, previous.effort)) {
+      if (definitivePreviewPrewriteRefusal(response.status, body)) {
+        const released = previous?.kind === "present"
+          ? replacePreviewReceipt(receiptStore(), operatorId, ideaId,
+            previewId, previous.previewId, previous.model, previous.effort)
+          : clearRefusedPreviewReceipt(receiptStore(), operatorId, ideaId, previewId);
+        if (!released) {
+          setPreview({ kind: "unknown" });
+          return;
+        }
         setFailure(await readAdminApiFailure(response.clone(), {
           fallback: m.transferPreviewUnknown, locale,
         }));
-        setPreview({ kind: "expired" });
+        setPreview({ kind: previous?.kind === "present" ? "expired" : "idle" });
         return;
       }
       await readBack(previewId, model, effort);

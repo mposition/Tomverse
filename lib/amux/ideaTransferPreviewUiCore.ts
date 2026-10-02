@@ -122,3 +122,24 @@ export function replacePreviewReceipt(
     return storage.getItem(previewReceiptKey(operatorId, ideaId)) === receipt;
   } catch { return false; }
 }
+
+/** Only a response known to precede the writer may release the same-tab fence. */
+export function definitivePreviewPrewriteRefusal(status: number, body: unknown): boolean {
+  if ([400, 401, 403, 404, 413, 415, 428, 429].includes(status)) return true;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const error = (body as Record<string, unknown>).error;
+  return status === 409 && (error === "not_ready" || error === "model_changed") ||
+    status === 503 && error === "preview_disabled";
+}
+
+/** A generic 503 or lost response is never proof that the write did not land. */
+export function clearRefusedPreviewReceipt(storage: Storage | null,
+  operatorId: string, ideaId: string, expectedPreviewId: string): boolean {
+  const current = readPreviewReceipt(storage, operatorId, ideaId);
+  if (!storage || current.kind !== "present" || current.previewId !== expectedPreviewId) return false;
+  try {
+    const key = previewReceiptKey(operatorId, ideaId);
+    storage.removeItem(key);
+    return storage.getItem(key) === null;
+  } catch { return false; }
+}
