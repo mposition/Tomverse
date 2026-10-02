@@ -144,7 +144,7 @@ export async function listApprovedAmuxIdeaFrontierModels(): Promise<
   const catalog = await readVerifiedAmuxIdeaFrontierCatalog();
   if (catalog.decision !== "catalog_current") return catalog;
   return { decision: "catalog_current", models: catalog.approvals
-    .filter((row) => row.status === "approved")
+    .filter((row) => row.status === "approved" && row.approvedAt <= catalog.databaseNow)
     .map((row) => ({ approvalId: row.id, approvalVersion: row.version,
       provider: row.provider, modelId: row.modelId,
       allowedEfforts: [...row.allowedEfforts] })) };
