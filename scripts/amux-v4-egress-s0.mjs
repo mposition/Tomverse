@@ -8,7 +8,7 @@ import { createServer as createTcpServer, connect as connectTcp } from "node:net
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AMUX_V4_LOCAL_BRIDGE_SOURCE } from "../lib/amux/ideaLocalBridgeSource.mjs";
+import { amuxV4SandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
 import { createAmuxV4EgressProxy } from "../lib/amux/ideaLocalEgressProxy.ts";
 
 const CHILD = String.raw`
@@ -32,7 +32,7 @@ const request = (authority, expected, method = "CONNECT") => new Promise((resolv
 });
 const direct = () => new Promise((resolve, reject) => {
   const socket = net.connect({ host: "127.0.0.1",
-    port: Number(process.env.AMUX_HOST_ECHO_PORT) });
+    port: Number(process.argv[1]) });
   const timer = setTimeout(() => { socket.destroy(); reject(new Error("direct connection hung")); }, 1000);
   socket.once("connect", () => { clearTimeout(timer); socket.destroy(); reject(new Error("direct network allowed")); });
   socket.once("error", (error) => {
@@ -43,7 +43,7 @@ const direct = () => new Promise((resolve, reject) => {
 });
 async function main() {
   assert.deepEqual(Object.keys(process.env).sort(),
-    ["AMUX_HOST_ECHO_PORT", "HOME", "HTTPS_PROXY", "PATH", "PWD"]);
+    ["HOME", "HTTPS_PROXY", "PATH", "PWD"]);
   assert.equal(process.env.PWD, "/tmp");
   assert.equal(process.env.DATABASE_URL, undefined);
   assert.equal(process.env.GITHUB_TOKEN, undefined);
@@ -127,20 +127,8 @@ async function main() {
   try {
     await listen(proxy, socketPath);
     await chmod(socketPath, 0o600);
-    await runChild([
-      "--unshare-all", "--die-with-parent", "--new-session",
-      "--cap-drop", "ALL", "--clearenv",
-      "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
-      "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
-      "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-      "--dir", "/run", "--ro-bind", directory, "/run/amux",
-      "--chdir", "/tmp",
-      "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp",
-      "--setenv", "HTTPS_PROXY", "http://127.0.0.1:3128",
-      "--setenv", "AMUX_HOST_ECHO_PORT", String(echoAddress.port),
-      "--", "/usr/bin/node", "-e", AMUX_V4_LOCAL_BRIDGE_SOURCE,
-      "--", "/usr/bin/node", "-e", CHILD,
-    ]);
+    await runChild(amuxV4SandboxArgs(directory,
+      ["/usr/bin/node", "-e", CHILD, String(echoAddress.port)]));
     assert.deepEqual(lookups, ["api.openai.com", "api.openai.com",
       "api.openai.com"], "refused targets must not trigger DNS");
     assert.deepEqual(dials, [{ address: "104.18.6.192", port: 443 }],
