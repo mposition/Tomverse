@@ -33,7 +33,11 @@
 | `PRODUCT_RESEARCH_AGENT_ENABLED` | Agent project의 서비스 변수 | unset이면 clone·GitHub 조회·제출을 하지 않고 exit 0 |
 | `PRODUCT_RESEARCH_AGENT_ENABLED` | 본 앱 환경변수 | unset이면 제출 route는 404, Admin 섹션은 꺼짐 안내 |
 
-**전체 정지는 둘 다 unset입니다.** 자동 정지 트리거는 없고, 해제는 운영자가
+**꺼짐은 unset 또는 빈 문자열뿐입니다.** 값이 있으면 `false`든 `0`이든 켜짐입니다 —
+끄려면 변수를 **지웁니다**. 스위치가 답하는 질문은 "운영자가 설정했는가"이고,
+그 단어의 뜻을 해석하기 시작하면 아무도 읽을 수 없는 스위치가 됩니다.
+
+**전체 정지는 둘 다 지우는 것입니다.** 자동 정지 트리거는 없고, 해제는 운영자가
 변수를 다시 설정하는 것뿐입니다.
 
 앱 스위치를 처음 켠 시각은 `AppSetting`의 `productResearch.enabledSince`에
@@ -58,6 +62,10 @@ maintenance가 **한 번** 기록합니다. 손으로 지우지 마십시오 —
 
 - **GitHub 읽기 토큰**: 이 저장소 하나만 대상으로 하는 fine-grained token,
   권한은 Issues: read 하나. 다른 권한이 붙어 있으면 발급을 다시 합니다.
+  **이 토큰은 clone에 쓰이지 않습니다.** 대상 저장소가 공개이므로 clone은 익명
+  fetch이고, 토큰이 있는 이유는 접근이 아니라 REST rate limit입니다(익명 60회/시간,
+  인증 5,000회/시간). clone이 실패할 때 Contents 권한을 붙이는 것은 답이 아닙니다 —
+  `RAILPACK_DEPLOY_APT_PACKAGES`를 먼저 보십시오.
 - **제출 secret**: 32자 이상, 환경별로 **서로 다른 값**. 본 앱과 Agent 서비스
   양쪽에 같은 값을 넣습니다(환경 안에서만 같습니다).
 
@@ -91,13 +99,19 @@ node version: …
 slot this run would answer for: …
 ```
 
-**`git available: false`이거나 `partial clone supported: false`이면 여기서
-멈춥니다.** 4번의 apt 변수를 확인하고 다시 재십시오.
+**S0은 넷을 측정하고 넷 다 통과해야 합니다**(정책 §9).
 
-partial clone 결과가 전체 checkout과 같은 보고를 내는지는 저장소 안에서 이미
-고정돼 있습니다 — `tests/issueBacklogPartialClone.test.mjs`가 네트워크도
-자격증명도 없이 local fixture로 byte 단위 비교를 합니다. probe는 "이 이미지에서
-clone이 되는가"만 답합니다.
+| # | 측정 | 어디서 보는가 | 통과 못 하면 |
+|---|---|---|---|
+| 1 | git 사용 가능·버전 2.19 이상 | probe 출력 | 멈춤. 4번의 apt 변수를 확인하고 다시 재십시오 |
+| 2 | partial clone 결과의 byte 동치 | 저장소의 `tests/issueBacklogPartialClone.test.mjs` | 멈춤 |
+| 3 | 읽기 토큰이 대상 저장소 하나·Issues: read 하나 | GitHub 토큰 설정 화면 | 멈춤. 토큰을 다시 발급합니다 |
+| 4 | Agent project에 DB 서비스 0개·공유 변수 0개 | Railway project 화면 | 멈춤 |
+
+**앞의 둘만 보고 넘어가지 마십시오.** 3번과 4번이 어긋난 채로도 probe는 통과를 출력합니다 — probe가 보는 것은
+이미지이고, 토큰 권한과 project 경계는 화면에서 사람이 보는 것입니다.
+
+probe가 답하는 것은 1번뿐입니다 — "이 이미지에서 clone이 되는가".
 
 ### 6. apply
 
