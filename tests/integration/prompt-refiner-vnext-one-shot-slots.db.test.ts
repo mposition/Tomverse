@@ -94,16 +94,23 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
 
     await insertAudit("partial-stage-audit", "stage");
     await client.query("BEGIN");
-    await createStage("partial-stage-audit");
-    await createSlots(78);
-    await assert.rejects(client.query("COMMIT"), /exactly 80 reserved slots/);
-    await client.query("ROLLBACK");
+    try {
+      await createStage("partial-stage-audit");
+      await createSlots(78);
+      await assert.rejects(client.query("COMMIT"), /exactly 80 reserved slots/);
+    } finally {
+      await client.query("ROLLBACK");
+    }
 
     await insertAudit("stage-audit", "stage");
     await client.query("BEGIN");
-    await createStage();
-    await createSlots(79);
-    await client.query("COMMIT");
+    try {
+      await createStage();
+      await createSlots(79);
+      await client.query("COMMIT");
+    } finally {
+      await client.query("ROLLBACK");
+    }
     const totals = await client.query(`
       SELECT count(*)::integer AS count,
              sum("reservedCostMicroUsd")::bigint AS micro_usd
@@ -126,21 +133,29 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
         ("id", "stageId", "slotIndex", "reservedCostMicroUsd")
       VALUES ('duplicate-index', $1, 1, 29918)
     `, [stage]), /PromptRefinerVnextOneShotSlot_stageId_slotIndex_key/);
-    await client.query("BEGIN");
-    await client.query(`
-      UPDATE "PromptRefinerVnextOneShotStage"
-         SET "status" = 'closed' WHERE "id" = $1
-    `, [stage]);
-    const stagedClose = await client.query(`
-      SELECT "status" FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
-    `, [stage]);
-    assert.equal(stagedClose.rows[0].status, "closed");
     await assert.rejects(client.query(`
-      UPDATE "PromptRefinerVnextOneShotSlot"
-         SET "status" = 'consumed', "requestId" = 'closed-request',
-             "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 1
-    `, [stage]), /run approval is required/);
-    await client.query("ROLLBACK");
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'closed', "runApprovalAuditLogId" = 'stage-audit'
+       WHERE "id" = $1
+    `, [stage]), /stage transition is not permitted/);
+    await client.query("BEGIN");
+    try {
+      await client.query(`
+        UPDATE "PromptRefinerVnextOneShotStage"
+           SET "status" = 'closed' WHERE "id" = $1
+      `, [stage]);
+      const stagedClose = await client.query(`
+        SELECT "status" FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
+      `, [stage]);
+      assert.equal(stagedClose.rows[0].status, "closed");
+      await assert.rejects(client.query(`
+        INSERT INTO "PromptRefinerVnextOneShotSlot"
+          ("id", "stageId", "slotIndex", "reservedCostMicroUsd")
+        VALUES ('closed-stage-slot', $1, 1, 29918)
+      `, [stage]), /stage must be staged for slot allocation/);
+    } finally {
+      await client.query("ROLLBACK");
+    }
     await insertAudit("future-audit", "stage", { createdAt: "2099-01-01" });
     await assert.rejects(client.query(`
       INSERT INTO "PromptRefinerVnextOneShotStage" (
@@ -240,6 +255,13 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
       UPDATE "PromptRefinerVnextOneShotStage"
          SET "status" = 'run_approved',
              "runApprovalAuditLogId" = 'ancient-run-audit'
+       WHERE "id" = $1
+    `, [stage]), /run approval audit is stale/);
+    await insertAudit("future-run-audit", "run", { createdAt: "2099-01-01" });
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'run_approved',
+             "runApprovalAuditLogId" = 'future-run-audit'
        WHERE "id" = $1
     `, [stage]), /run approval audit is stale/);
     await insertAudit("unrelated-run-audit", "run", {
