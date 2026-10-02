@@ -46,7 +46,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-shadow-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
-  ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+  ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS, "qa-release-intake",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
