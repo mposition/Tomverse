@@ -3,6 +3,31 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 /** Copy for the read-only Marketing console (docs/policy/marketing-automation.md §6.1). */
 export const adminMarketingMessages = defineAdminMessages({
   en: {
+    webhookStagingTitle: "Webhook shadow (staging only)",
+    webhookStagingNote:
+      "Signed Zernio events are recorded here without changing any post. This block exists only in staging; production never shows it.",
+    webhookShadowTurnOn: "Turn the webhook shadow on",
+    webhookShadowTurnOff: "Turn the webhook shadow off",
+    webhookShadowConfirmOn:
+      "From now on, every signed post event from Zernio is stored as a shadow report.",
+    webhookUnreadable:
+      "The staging webhook state could not be read. Refresh before arming anything.",
+    webhookArmNone: "No fault is armed.",
+    webhookArmArmed: "A fault is armed for event {digest} until {until} (generation {generation}).",
+    webhookArmConsumed: "The last fault (generation {generation}) was consumed.",
+    webhookArmExpired: "The last fault (generation {generation}) expired unused.",
+    webhookArmForeign:
+      "The stored fault arm is not one this console wrote, so arming is refused until it is removed.",
+    webhookReportsTitle: "Newest {count} shadow reports, not a total.",
+    webhookReportsEmpty: "No shadow report yet.",
+    webhookMatchYes: "status query agrees",
+    webhookMatchNo: "status query does not agree",
+    webhookArmThis: "Arm a fault for this event",
+    webhookArmConfirm:
+      "The next delivery of this event is answered 503 once, then retried and handled normally.",
+    webhookArmDone: "Armed (generation {generation}). Redeliver this event from Zernio's webhook log.",
+    fieldTtlMinutes: "Expires after (minutes)",
+    hintTtl: "From 1 to 1440.",
     loadFailed: "Could not refresh marketing data.",
     writesNote:
       "Every control here writes, and every write compares against the version this screen read. A refusal means the row moved, not that the control is broken.",
@@ -153,6 +178,31 @@ export const adminMarketingMessages = defineAdminMessages({
     none: "-",
   },
   ko: {
+    webhookStagingTitle: "Webhook shadow (staging 전용)",
+    webhookStagingNote:
+      "서명된 Zernio 이벤트를 게시물은 바꾸지 않고 여기에 기록합니다. 이 영역은 staging에만 있고 production에는 나타나지 않습니다.",
+    webhookShadowTurnOn: "webhook shadow 켜기",
+    webhookShadowTurnOff: "webhook shadow 끄기",
+    webhookShadowConfirmOn:
+      "지금부터 Zernio가 보내는 서명된 게시물 이벤트를 모두 shadow 기록으로 저장합니다.",
+    webhookUnreadable:
+      "staging webhook 상태를 읽지 못했습니다. arm하기 전에 새로고침하세요.",
+    webhookArmNone: "arm된 fault가 없습니다.",
+    webhookArmArmed: "이벤트 {digest}에 fault가 arm돼 있습니다. {until}까지 유효합니다(세대 {generation}).",
+    webhookArmConsumed: "마지막 fault(세대 {generation})는 소비됐습니다.",
+    webhookArmExpired: "마지막 fault(세대 {generation})는 쓰이지 않고 만료됐습니다.",
+    webhookArmForeign:
+      "저장된 fault arm 값이 이 콘솔이 쓴 형식이 아니어서, 지워지기 전까지 arm이 거절됩니다.",
+    webhookReportsTitle: "최근 shadow 기록 {count}건입니다(전체 아님).",
+    webhookReportsEmpty: "아직 shadow 기록이 없습니다.",
+    webhookMatchYes: "상태 조회 일치",
+    webhookMatchNo: "상태 조회 불일치",
+    webhookArmThis: "이 이벤트로 fault arm",
+    webhookArmConfirm:
+      "이 이벤트의 다음 전달 한 번은 503으로 응답하고, 그 뒤 재시도는 정상 처리됩니다.",
+    webhookArmDone: "arm했습니다(세대 {generation}). Zernio webhook 로그에서 이 이벤트를 redeliver하세요.",
+    fieldTtlMinutes: "유효 시간(분)",
+    hintTtl: "1에서 1440 사이.",
     loadFailed: "마케팅 데이터를 새로 가져오지 못했습니다.",
     writesNote:
       "여기의 모든 조작은 쓰기이며, 화면이 읽은 버전과 대조해 저장합니다. 거절은 행이 그 사이에 바뀌었다는 뜻이지 조작이 고장 났다는 뜻이 아닙니다.",

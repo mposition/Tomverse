@@ -5,6 +5,11 @@ import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
 import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
 import {
+  MARKETING_WEBHOOK_FAULT_ARM_KEY,
+  marketingWebhookIsStaging,
+  parseMarketingWebhookFaultArm,
+} from "@/lib/marketingWebhookCore";
+import {
   MARKETING_READ_PAGE_SIZE,
   marketingSectionAvailability,
   type MarketingConsoleSection,
@@ -55,6 +60,42 @@ export type MarketingSwitchStates = {
   webhookApplyScope: MarketingSwitchState;
 };
 
+/**
+ * What the staging webhook exercise needs on screen (S2e), or nothing at all.
+ *
+ * Only in staging -- the same test the receiver and the writers use -- so a
+ * production console never reads or draws any of it. The shadow switch's own
+ * state is already in `switches.webhookShadow`; this adds the latch and the
+ * newest shadow reports, whose event digests are what an operator arms.
+ */
+export type MarketingWebhookStagingView = {
+  /** False when the arm or the reports could not be read; the screen says so. */
+  readable: boolean;
+  /** Null when nothing has ever been armed or the stored value is not an arm. */
+  faultArm: {
+    eventIdDigest: string;
+    state: "armed" | "consumed";
+    generation: number;
+    armedAt: string;
+    expiresAt: string;
+  } | null;
+  /** A stored value that is not an arm: arming would be refused, so say why. */
+  faultArmUnreadable: boolean;
+  /** An armed latch whose expiry had passed when this was read. */
+  faultArmExpired: boolean;
+  /** Newest first, at most `MARKETING_READ_PAGE_SIZE`. */
+  shadowReports: Array<{
+    id: string;
+    createdAt: string;
+    eventIdDigest: string;
+    eventType: string;
+    channel: string | null;
+    accountSlug: string | null;
+    derivedStatus: string;
+    statusQueryMatch: boolean;
+  }>;
+};
+
 export type MarketingConsolePayload = {
   section: MarketingConsoleSection;
   availability: MarketingSectionAvailability;
@@ -84,6 +125,8 @@ export type MarketingConsolePayload = {
    * a new generation would save against a state nobody saw.
    */
   configGeneration: number | null;
+  /** Null outside staging; see `MarketingWebhookStagingView`. */
+  webhookStaging: MarketingWebhookStagingView | null;
 };
 
 const state = (
@@ -186,12 +229,82 @@ async function readSwitches(): Promise<{
   }
 }
 
+async function readWebhookStaging(): Promise<MarketingWebhookStagingView | null> {
+  if (!marketingWebhookIsStaging()) return null;
+  try {
+    const [armRow, reports] = await Promise.all([
+      prisma.appSetting.findUnique({
+        where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY },
+        select: { value: true },
+      }),
+      prisma.marketingReport.findMany({
+        where: { kind: "webhook_shadow" },
+        orderBy: { createdAt: "desc" },
+        take: MARKETING_READ_PAGE_SIZE,
+        select: { id: true, payload: true, createdAt: true },
+      }),
+    ]);
+    const arm = parseMarketingWebhookFaultArm(armRow?.value);
+    const payloadOf = (value: unknown) =>
+      (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+    const channelIds = [
+      ...new Set(
+        reports
+          .map((report) => payloadOf(report.payload).channelId)
+          .filter((id): id is string => typeof id === "string"),
+      ),
+    ];
+    const channels =
+      channelIds.length === 0
+        ? []
+        : await prisma.marketingChannel.findMany({
+            where: { id: { in: channelIds } },
+            select: { id: true, channel: true, accountSlug: true },
+          });
+    const channelById = new Map(channels.map((channel) => [channel.id, channel]));
+    return {
+      readable: true,
+      faultArm: arm,
+      faultArmUnreadable: armRow !== null && arm === null,
+      faultArmExpired:
+        arm !== null && arm.state === "armed" && Date.parse(arm.expiresAt) <= Date.now(),
+      shadowReports: reports.map((report) => {
+        const payload = payloadOf(report.payload);
+        const channel =
+          typeof payload.channelId === "string" ? channelById.get(payload.channelId) : undefined;
+        return {
+          id: report.id,
+          createdAt: report.createdAt.toISOString(),
+          eventIdDigest: typeof payload.eventIdDigest === "string" ? payload.eventIdDigest : "",
+          eventType: typeof payload.eventType === "string" ? payload.eventType : "",
+          channel: channel?.channel ?? null,
+          accountSlug: channel?.accountSlug ?? null,
+          derivedStatus: typeof payload.derivedStatus === "string" ? payload.derivedStatus : "",
+          statusQueryMatch: payload.statusQueryMatch === true,
+        };
+      }),
+    };
+  } catch {
+    // Unreadable is its own answer: an empty list would claim nothing arrived.
+    return {
+      readable: false,
+      faultArm: null,
+      faultArmUnreadable: false,
+      faultArmExpired: false,
+      shadowReports: [],
+    };
+  }
+}
+
 export async function readMarketingConsole(
   section: MarketingConsoleSection,
   canWrite: boolean
 ): Promise<MarketingConsolePayload> {
   const availability = marketingSectionAvailability(section);
-  const { switches, configGeneration } = await readSwitches();
+  const [{ switches, configGeneration }, webhookStaging] = await Promise.all([
+    readSwitches(),
+    readWebhookStaging(),
+  ]);
 
   if (!availability.available) {
     return {
@@ -202,6 +315,7 @@ export async function readMarketingConsole(
       rows: [],
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
     };
   }
@@ -237,6 +351,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
         id: post.id,
@@ -300,6 +415,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: posts.map((post) => ({
         id: post.id,
@@ -365,6 +481,7 @@ export async function readMarketingConsole(
       pageSize: MARKETING_READ_PAGE_SIZE,
       switches,
       configGeneration,
+      webhookStaging,
       canWrite,
       rows: channels.map((channel) => ({
         ...channel,
@@ -394,6 +511,7 @@ export async function readMarketingConsole(
     pageSize: MARKETING_READ_PAGE_SIZE,
     switches,
     configGeneration,
+    webhookStaging,
     canWrite,
     rows: reports.map((report) => ({
       ...report,
