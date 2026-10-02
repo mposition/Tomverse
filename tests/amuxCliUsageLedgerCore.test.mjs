@@ -191,3 +191,13 @@ test("accessor objects are refused and negative zero is canonicalized", () => {
   assert.equal(Object.is(normalized.event.context.chunkIndex, -0), false);
   assert.equal(Object.is(normalized.event.observation.completedTurns, -0), false);
 });
+
+test("idea analysis chunk index stays within the database integer range", () => {
+  const atLimit = claude();
+  atLimit.context = { kind: "idea_analysis", ideaId: "idea-1",
+    chunkIndex: 2_147_483_647, agentId: "amux-intake" };
+  assert.ok(inspectAmuxCliUsageLedgerEvent(atLimit));
+  const beyondLimit = structuredClone(atLimit);
+  beyondLimit.context.chunkIndex = 2_147_483_648;
+  assert.equal(inspectAmuxCliUsageLedgerEvent(beyondLimit), null);
+});

@@ -140,7 +140,8 @@ export function inspectAmuxCliUsageLedgerEvent(raw: unknown):
   } else if (context.kind === "idea_analysis") {
     if (!keys(context, ["kind", "ideaId", "chunkIndex", "agentId"]) ||
         typeof context.ideaId !== "string" || !ID.test(context.ideaId) ||
-        !count(context.chunkIndex) || context.agentId !== "amux-intake") return null;
+        !count(context.chunkIndex) || context.chunkIndex > 2_147_483_647 ||
+        context.agentId !== "amux-intake") return null;
   } else return null;
 
   const observation = record(value.observation);
