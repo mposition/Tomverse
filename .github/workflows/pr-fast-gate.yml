@@ -99,6 +99,26 @@ jobs:
           node-version: 22
           cache: npm
 
+      # main takes the three lanes of .github/RELEASE_CHECKLIST.md 7.9 --
+      # develop, release/**, hotfix/** -- and features go to develop. First,
+      # and before `npm ci`, so a misdirected pull request learns in a minute
+      # rather than after the whole tier. The head repository is checked here
+      # because the policy reads only a branch name, and a fork can call its
+      # branch `develop`.
+      - name: Pull requests into main come from a release or a hotfix
+        if: github.base_ref == 'main'
+        timeout-minutes: 2
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::A pull request into main must come from a branch of $GITHUB_REPOSITORY, not $HEAD_REPO."
+            exit 1
+          fi
+          node scripts/main-pr-source-policy.mjs "$HEAD_REF" "$PR_NUMBER"
+
       # `--no-audit` skips the registry advisory round-trip npm otherwise
       # makes on every install; it does not weaken the audit itself, which
       # Daily Security Audit runs deliberately (`npm audit --omit=dev`) and
