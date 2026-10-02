@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AgentDigestAgentKey } from "@/lib/agentDigestContract";
 import {
@@ -64,6 +64,10 @@ export async function recordAgentDigestItem(
         CASE WHEN current_setting('server_version_num')::int >= 170000
           THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
         END`;
+      // The audit chain's lock before any row lock: a transaction that holds
+      // the chain and then touches this row must never wait on one that holds
+      // the row and waits for the chain.
+      await takeAuditChainLock(tx);
       const inserted = await tx.agentDigestItem.createMany({
         data: [
           {

@@ -67,17 +67,17 @@ test("a new item is one row and one system audit entry, with the canonical hash 
 });
 
 test("the same key and bytes replay; different bytes conflict; neither writes a row or an audit entry", async () => {
-  const input = submission({ a: 1 });
+  const input = submission({ a: 1, b: 2 });
   const first = await recordAgentDigestItem(input);
   assert.equal(first.status, "created");
   if (first.status !== "created") return;
   createdIds.push(first.id);
 
   // Key order differs, canonical bytes do not.
-  const replay = await recordAgentDigestItem({ ...input, payload: { a: 1 } });
+  const replay = await recordAgentDigestItem({ ...input, payload: { b: 2, a: 1 } });
   assert.deepEqual(replay, { status: "replayed", id: first.id, payloadSha256: first.payloadSha256 });
 
-  const conflict = await recordAgentDigestItem({ ...input, payload: { a: 2 } });
+  const conflict = await recordAgentDigestItem({ ...input, payload: { a: 2, b: 2 } });
   assert.deepEqual(conflict, { status: "conflict", id: first.id });
 
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 1);

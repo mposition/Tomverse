@@ -99,6 +99,15 @@ function collectStrings(value: unknown, into: string[]): void {
   }
 }
 
+function containsNul(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("\u0000");
+  if (Array.isArray(value)) return value.some(containsNul);
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).some(([key, item]) => key.includes("\u0000") || containsNul(item));
+  }
+  return false;
+}
+
 export function prepareAgentDigestItem(input: AgentDigestSubmission): AgentDigestPreparation {
   if (!isAgentKey(input.agentKey)) return { ok: false, reason: "unknown_agent" };
   if (!AGENT_DIGEST_KINDS[input.agentKey].includes(input.kind)) return { ok: false, reason: "unknown_kind" };
@@ -123,6 +132,9 @@ export function prepareAgentDigestItem(input: AgentDigestSubmission): AgentDiges
     if (error instanceof AgentDigestCanonicalJsonError) return { ok: false, reason: "payload_not_canonical" };
     throw error;
   }
+  // PostgreSQL jsonb cannot hold U+0000, so a body or key containing it is
+  // refused here instead of failing inside the transaction.
+  if (containsNul(input.payload)) return { ok: false, reason: "payload_not_canonical" };
   // The DB also refuses an empty body; a canonical value is never zero bytes.
   if (bytes.sizeBytes > AGENT_DIGEST_MAX_PAYLOAD_BYTES) return { ok: false, reason: "payload_too_large" };
 
