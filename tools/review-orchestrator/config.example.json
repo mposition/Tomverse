@@ -54,11 +54,18 @@
     },
     {
       "id": "devin",
-      "vendor": "unknown",
-      "enabled": false,
-      "maxConcurrent": 1,
+      "vendor": "cognition",
+      "enabled": true,
+      "maxConcurrent": 2,
+      "model": "swe-2-high",
       "command": "devin",
-      "args": []
+      "args": [
+        "-p",
+        "--prompt-file", "/dev/stdin",
+        "--respect-workspace-trust", "false",
+        "--permission-mode", "auto",
+        "--model", "{model}"
+      ]
     }
   ]
 }
