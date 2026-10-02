@@ -24,6 +24,9 @@ const STATUS_ORDER = ["doing", "review", "blocked", "todo", "backlog", "done", "
 export type AmuxAdminCardRow = {
   id: string;
   sourceKey: string | null;
+  cardType: string | null;
+  parentFeatureNodeId: string | null;
+  parentStoryCardId: string | null;
   status: string;
   owner: string | null;
   claimVerified: boolean;
@@ -40,8 +43,16 @@ export type AmuxAdminCardRow = {
   updatedAt: string;
 };
 
+export type AmuxAdminHierarchyNode = {
+  id: string;
+  level: string;
+  parentId: string | null;
+  state: string;
+};
+
 export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null = null): Promise<{
   rows: AmuxAdminCardRow[];
+  hierarchyNodes: AmuxAdminHierarchyNode[];
   total: number;
   limit: number;
   nextCursor: string | null;
@@ -62,6 +73,9 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
       select: {
         id: true,
         sourceKey: true,
+        cardType: true,
+        parentFeatureNodeId: true,
+        parentStoryCardId: true,
         status: true,
         owner: true,
         claimedAt: true,
@@ -76,6 +90,24 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
     }),
   ]);
   const cards = fetched.slice(0, AMUX_ADMIN_CARD_LIST_LIMIT);
+  const featureIds = [...new Set(cards.flatMap((card) =>
+    card.parentFeatureNodeId ? [card.parentFeatureNodeId] : []))];
+  const features = featureIds.length ? await prisma.amuxPortfolioNode.findMany({
+    where: { id: { in: featureIds } },
+    select: { id: true, level: true, parentId: true, state: true },
+  }) : [];
+  const epicIds = [...new Set(features.flatMap((node) => node.parentId ? [node.parentId] : []))];
+  const epics = epicIds.length ? await prisma.amuxPortfolioNode.findMany({
+    where: { id: { in: epicIds } },
+    select: { id: true, level: true, parentId: true, state: true },
+  }) : [];
+  const initiativeIds = [...new Set(epics.flatMap((node) => node.parentId ? [node.parentId] : []))];
+  const initiatives = initiativeIds.length ? await prisma.amuxPortfolioNode.findMany({
+    where: { id: { in: initiativeIds } },
+    select: { id: true, level: true, parentId: true, state: true },
+  }) : [];
+  const hierarchyNodes = [...new Map([...features, ...epics, ...initiatives]
+    .map((node) => [node.id, node])).values()];
   const last = cards.at(-1);
   const nextCursor = fetched.length > AMUX_ADMIN_CARD_LIST_LIMIT && last
     ? encodeAmuxAdminCardCursor({ updatedAt: last.updatedAt, id: last.id }) : null;
@@ -125,6 +157,9 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
     .map((card) => ({
       id: card.id,
       sourceKey: card.sourceKey,
+      cardType: card.cardType,
+      parentFeatureNodeId: card.parentFeatureNodeId,
+      parentStoryCardId: card.parentStoryCardId,
       status: card.status,
       owner: card.owner,
       claimVerified: amuxLegacyTodoClaimVerified(card, routeByTask.get(card.id) ?? null),
@@ -146,5 +181,5 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
         rank(left.status) - rank(right.status) ||
         (left.sourceKey ?? left.id).localeCompare(right.sourceKey ?? right.id),
     );
-  return { rows, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT, nextCursor };
+  return { rows, hierarchyNodes, total, limit: AMUX_ADMIN_CARD_LIST_LIMIT, nextCursor };
 }

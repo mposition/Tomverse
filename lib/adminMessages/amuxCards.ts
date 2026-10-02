@@ -11,6 +11,11 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     viewLabel: "Card view",
     viewBoard: "Board",
     viewList: "List",
+    viewHierarchy: "Hierarchy",
+    hierarchyScope: (shown: number, total: number) =>
+      `Structural outline for this page's ${shown} of ${total} cards. Node identifiers are shown until approved titles can be read; missing ancestors remain visible as unlinked cards.`,
+    hierarchyUnlinked: "Unlinked or incomplete hierarchy",
+    hierarchyOutsideStory: (id: string) => `Story outside this page · ${id}`,
     boardScope: (shown: number, total: number, hasMore: boolean) =>
       shown < total ? `This board shows ${shown} cards on the current page${hasMore ? "; use Next for more" : "; this is the final page"}.` : "This board shows all active cards in the current result.",
     terminalInList: (count: number) => `${count} completed or cancelled cards appear only in List.`,
@@ -49,6 +54,11 @@ export const adminAmuxCardsMessages = defineAdminMessages({
     viewLabel: "카드 보기",
     viewBoard: "보드",
     viewList: "목록",
+    viewHierarchy: "계층",
+    hierarchyScope: (shown: number, total: number) =>
+      `전체 ${total}장 중 현재 페이지 ${shown}장의 구조입니다. 승인된 제목 조회 전에는 노드 ID를 표시하며, 상위 항목이 없으면 연결되지 않은 카드로 남깁니다.`,
+    hierarchyUnlinked: "연결되지 않았거나 계층이 불완전한 카드",
+    hierarchyOutsideStory: (id: string) => `다른 페이지의 Story · ${id}`,
     boardScope: (shown: number, total: number, hasMore: boolean) =>
       shown < total ? `현재 페이지의 카드 ${shown}장만 보입니다.${hasMore ? " 다음 페이지에서 더 볼 수 있습니다." : " 마지막 페이지입니다."}` : "현재 결과의 활성 카드를 모두 보여 줍니다.",
     terminalInList: (count: number) => `완료·취소 카드 ${count}장은 목록에서만 보입니다.`,

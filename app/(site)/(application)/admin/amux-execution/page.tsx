@@ -90,11 +90,12 @@ export default async function AdminAmuxExecutionPage({
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
     const cursor = parseAmuxAdminCardCursor(query.cursor);
     if (query.cursor !== undefined && cursor === null) notFound();
-    const { rows, total, limit, nextCursor } = await listAmuxCardsForAdmin(cursor);
+    const { rows, hierarchyNodes, total, limit, nextCursor } = await listAmuxCardsForAdmin(cursor);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxCardListPanel rows={rows} total={total} limit={limit} nextCursor={nextCursor} />
+        <AmuxCardListPanel rows={rows} hierarchyNodes={hierarchyNodes}
+          total={total} limit={limit} nextCursor={nextCursor} />
       </div>
     );
   }
