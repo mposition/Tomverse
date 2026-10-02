@@ -13,7 +13,8 @@ import {
   type AvailableFrontierModel,
 } from "@/lib/amux/ideaFrontierCatalogUiCore";
 import {
-  readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
+  readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
+  reservePreviewReceipt,
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
 import {
@@ -223,12 +224,25 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const preparePreview = async () => {
     if (!ideaId || !previewAvailable || !planReady || declaredExternalSources ||
         !selected || !checked ||
-        !selected.allowedEfforts.includes(selectedEffort) || preview.kind !== "idle") return;
+        !selected.allowedEfforts.includes(selectedEffort) ||
+        (preview.kind !== "idle" && preview.kind !== "expired")) return;
     const model = selected;
     const effort = selectedEffort;
     const previewId = crypto.randomUUID();
-    if (!reservePreviewReceipt(receiptStore(), operatorId, ideaId, previewId,
-      model, effort)) {
+    const previous = preview.kind === "expired"
+      ? readPreviewReceipt(receiptStore(), operatorId, ideaId) : null;
+    if (previous?.kind === "present" &&
+        readConfirmationAttemptForPreview(receiptStore(), operatorId,
+          previous.previewId, ideaId).kind !== "absent") {
+      setPreview({ kind: "unknown" });
+      return;
+    }
+    const receiptReady = previous?.kind === "present"
+      ? replacePreviewReceipt(receiptStore(), operatorId, ideaId,
+        previous.previewId, previewId, model, effort)
+      : previous === null && reservePreviewReceipt(receiptStore(), operatorId,
+        ideaId, previewId, model, effort);
+    if (!receiptReady) {
       setPreview({ kind: "recovery_unavailable" });
       return;
     }
@@ -237,6 +251,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       const response = await adminFetch("/api/admin/amux/ideas/transfer-preview", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: 1, previewId, ideaId,
+          ...(previous?.kind === "present"
+            ? { replacesPreviewId: previous.previewId } : {}),
           provider: model.provider, modelId: model.modelId,
           reasoningEffort: effort, approvalId: model.approvalId,
           approvalVersion: model.approvalVersion }),
@@ -245,6 +261,19 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
         previewId, ideaId, model, effort);
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
+      if (response.status === 409 && body && typeof body === "object" &&
+          !Array.isArray(body) &&
+          ["not_ready", "model_changed"].includes(
+            String((body as Record<string, unknown>).error)) &&
+          previous?.kind === "present" &&
+          replacePreviewReceipt(receiptStore(), operatorId, ideaId,
+            previewId, previous.previewId, previous.model, previous.effort)) {
+        setFailure(await readAdminApiFailure(response.clone(), {
+          fallback: m.transferPreviewUnknown, locale,
+        }));
+        setPreview({ kind: "expired" });
+        return;
+      }
       await readBack(previewId, model, effort);
     } catch { await readBack(previewId, model, effort); }
   };
@@ -353,7 +382,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
           {ideaId ? <button type="button" onClick={() => void preparePreview()}
             disabled={!previewAvailable || !planReady || declaredExternalSources ||
-              !checked || preview.kind !== "idle"}
+              !checked || (preview.kind !== "idle" && preview.kind !== "expired")}
             className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
             {m.transferPreviewPrepare}
           </button> : null}

@@ -184,6 +184,57 @@ test("idea-only transfer preview stores exact encrypted input, binds the chunk, 
   assert.equal(await prisma.amuxIdeaTransferPreview.count({ where: { ideaId } }), 1);
 });
 
+test("an expired unconfirmed preview can be replaced without changing a confirmed receipt", async () => {
+  const ideaId = await createIdea({ idea: `SYNTHETIC_REPREVIEW_${randomUUID()}` });
+  await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
+    { session, request, ideaId, keys }));
+  const choice = { previewId: randomUUID(), ideaId, provider: "openai" as const,
+    modelId: "gpt-frontier-synthetic", reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys, browserNonce }));
+  const replacement = { ...choice, previewId: randomUUID(),
+    replacesPreviewId: choice.previewId };
+  await assert.rejects(prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: replacement, keys, browserNonce })),
+  (error: unknown) => error instanceof IdeaTransferPreviewError && error.code === "not_ready");
+  await prisma.amuxIdeaTransferPreview.update({ where: { id: choice.previewId },
+    data: { expiresAt: new Date("2020-01-01T00:00:00Z") } });
+  const prepared = await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: replacement, keys, browserNonce }));
+  assert.equal(prepared.previewId, replacement.previewId);
+  const oldRow = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: choice.previewId } });
+  assert.equal(oldRow.state, "expired");
+  assert.equal(oldRow.payloadCiphertext, null);
+  assert.ok(oldRow.payloadPurgedAt);
+  const newRow = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: replacement.previewId } });
+  assert.equal(newRow.attempt, 2);
+  assert.equal(newRow.state, "prepared");
+  const chunk = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } } });
+  assert.equal(chunk.currentPreviewId, replacement.previewId);
+  assert.equal(chunk.attempt, 2);
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "amux.v4.transfer_preview.prepared", targetId: replacement.previewId },
+  });
+  assert.equal((audit.metadata as Record<string, unknown>).replacesPreviewId,
+    choice.previewId);
+  await assert.rejects(prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: { ...replacement, previewId: randomUUID() },
+      keys, browserNonce })),
+  (error: unknown) => error instanceof IdeaTransferPreviewError && error.code === "not_ready");
+  const confirmed = await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: replacement.previewId, ideaId,
+      payloadDigest: prepared.payloadDigest,
+      payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys }));
+  assert.equal(confirmed.previewId, replacement.previewId);
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: replacement.previewId } })).state, "confirmed");
+  assert.equal(await prisma.amuxIdeaTransferPreview.count({ where: { ideaId } }), 2);
+});
+
 test("transfer preview row, chunk pointer and human audit roll back together", async () => {
   const ideaId = await createIdea({ idea: `SYNTHETIC_PREVIEW_ROLLBACK_${randomUUID()}` });
   await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
@@ -253,6 +304,13 @@ test("owner confirmation binds the reviewed digest and browser receipt without a
     payloadDigestKeyId: prepared.payloadDigestKeyId,
     confirmExpiresAt: row.confirmExpiresAt, modelCallStarted: false,
   });
+  await assert.rejects(prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request,
+      choice: { ...choice, previewId: randomUUID(), replacesPreviewId: choice.previewId },
+      keys, browserNonce })),
+  (error: unknown) => error instanceof IdeaTransferPreviewError && error.code === "not_ready");
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: choice.previewId } })).state, "confirmed");
   await assert.rejects(prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx,
     { session, request, choice: confirmation, browserNonce, keys })),
   (error: unknown) => error instanceof IdeaTransferConfirmationError && error.code === "not_ready");

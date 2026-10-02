@@ -15,6 +15,7 @@ export const transferPreviewReadPermitted = (value: string | undefined): boolean
 export type IdeaOnlyTransferPreviewRequest = {
   previewId: string;
   ideaId: string;
+  replacesPreviewId?: string;
   provider: "openai" | "anthropic";
   modelId: string;
   reasoningEffort: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
@@ -26,6 +27,7 @@ const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const FIELDS = ["version", "previewId", "ideaId", "provider", "modelId",
   "reasoningEffort", "approvalId", "approvalVersion"];
+const REPLACEMENT_FIELD = "replacesPreviewId";
 
 export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   | { ok: true; request: IdeaOnlyTransferPreviewRequest }
@@ -39,11 +41,15 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
     return { ok: false, code: "schema_rejected" };
   }
   const value = parsed as Record<string, unknown>;
-  if (Object.keys(value).length !== FIELDS.length ||
+  const replacing = Object.hasOwn(value, REPLACEMENT_FIELD);
+  if (Object.keys(value).length !== FIELDS.length + Number(replacing) ||
       !FIELDS.every((field) => Object.hasOwn(value, field)) ||
       value.version !== 1 ||
       typeof value.previewId !== "string" || !isAmuxIdeaRequestId(value.previewId) ||
       typeof value.ideaId !== "string" || !isAmuxIdeaRequestId(value.ideaId) ||
+      (replacing && (typeof value.replacesPreviewId !== "string" ||
+        !isAmuxIdeaRequestId(value.replacesPreviewId) ||
+        value.replacesPreviewId === value.previewId)) ||
       (value.provider !== "openai" && value.provider !== "anthropic") ||
       typeof value.modelId !== "string" || !MODEL_ID.test(value.modelId) ||
       typeof value.reasoningEffort !== "string" || !EFFORTS.has(value.reasoningEffort) ||
@@ -53,6 +59,7 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   }
   return { ok: true, request: {
     previewId: value.previewId, ideaId: value.ideaId,
+    ...(replacing ? { replacesPreviewId: value.replacesPreviewId as string } : {}),
     provider: value.provider, modelId: value.modelId,
     reasoningEffort: value.reasoningEffort as IdeaOnlyTransferPreviewRequest["reasoningEffort"],
     approvalId: value.approvalId, approvalVersion: value.approvalVersion as number,

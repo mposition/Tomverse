@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
+  readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
+  reservePreviewReceipt,
 } from "../lib/amux/ideaTransferPreviewUiCore.ts";
 
 const model = { approvalId: "123e4567-e89b-42d3-a456-426614174003",
@@ -50,13 +51,31 @@ test("a pending receipt survives a lost reply and cannot be overwritten", () => 
   assert.deepEqual(readPreviewReceipt(null, "operator", ideaId), { kind: "unavailable" });
 });
 
+test("a replacement receipt changes only the expected preview id", () => {
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); } };
+  const nextId = "123e4567-e89b-42d3-a456-426614174004";
+  assert.equal(reservePreviewReceipt(storage, "operator", ideaId, previewId, model, "high"), true);
+  assert.equal(replacePreviewReceipt(storage, "operator", ideaId,
+    ideaId, nextId, model, "high"), false);
+  assert.equal(replacePreviewReceipt(storage, "operator", ideaId,
+    previewId, nextId, model, "high"), true);
+  assert.deepEqual(readPreviewReceipt(storage, "operator", ideaId), {
+    kind: "present", previewId: nextId, model, effort: "high",
+  });
+  assert.equal(replacePreviewReceipt(storage, "operator", ideaId,
+    previewId, previewId, model, "high"), false);
+});
+
 test("Admin UI gates preparation on an observed idea-only plan and provides exact-ID read-back", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
   const plan = readFileSync(new URL("../components/admin/AmuxInitialPlanPanel.tsx", import.meta.url), "utf8");
   const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   assert.match(panel, /!previewAvailable \|\| !planReady \|\| declaredExternalSources/);
-  assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId/);
+  assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId,/);
+  assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);

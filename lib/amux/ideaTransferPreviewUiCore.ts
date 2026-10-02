@@ -101,3 +101,24 @@ export function reservePreviewReceipt(
       receipt;
   } catch { return false; }
 }
+
+/** Replace only the receipt already checked by the operator. A rejected write
+ * can restore the prior id so read-back remains possible. */
+export function replacePreviewReceipt(
+  storage: Storage | null, operatorId: string, ideaId: string,
+  expectedPreviewId: string, previewId: string,
+  model: AvailableFrontierModel, effort: string,
+): boolean {
+  if (!storage || !isAmuxIdeaRequestId(expectedPreviewId) ||
+      !isAmuxIdeaRequestId(previewId) || expectedPreviewId === previewId ||
+      !model.allowedEfforts.includes(effort)) return false;
+  const current = readPreviewReceipt(storage, operatorId, ideaId);
+  if (current.kind !== "present" || current.previewId !== expectedPreviewId) return false;
+  try {
+    const receipt = JSON.stringify({ ideaId, previewId,
+      model: { approvalId: model.approvalId, approvalVersion: model.approvalVersion,
+        provider: model.provider, modelId: model.modelId }, effort });
+    storage.setItem(previewReceiptKey(operatorId, ideaId), receipt);
+    return storage.getItem(previewReceiptKey(operatorId, ideaId)) === receipt;
+  } catch { return false; }
+}
