@@ -609,6 +609,14 @@ scope로만 감) **run의 ref가 기본 branch이거나 `develop`일 때만** �
 
 ### P2. restore-keys와 키 namespace를 끊습니다 — 1순위, P1과 독립
 
+> **구현 완료.** `.next/cache`의 broad fallback 여섯 줄을 지우고, 두 캐시
+> 계열의 키를 `<family>-v2-<workflow namespace>-`로 바꿨습니다. 불변식은
+> `scripts/ci-cache-key-policy.mjs`가 판정하고
+> `npm run check:ci-cache-keys`가 PR Fast Gate static 단계에서 강제하며
+> `tests/ciCacheKeyPolicy.test.mjs`가 고정합니다. `v2`가 P1의 "기존 항목이
+> 남는다" 요구를 함께 해결합니다 — 옛 세대의 항목은 어떤 키에도 맞지 않으므로
+> 운영자가 캐시를 손으로 지울 필요가 없습니다.
+
 - `${{ runner.os }}-next-` fallback 다섯 곳 제거(F2의 목록). `pr-fast-gate`가
   이미 한 것과 같은 변경이고, 정합성 이득이 함께 옵니다. 비용 거의 없음.
 - Playwright 키에 workflow 식별자를 넣어 pool을 쪼갭니다.
