@@ -109,7 +109,14 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
           {m.latestHeading}
         </h2>
         {initial.latest === null ? (
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{m.latestEmpty}</p>
+          // Two different absences. "Nothing was ever recorded" and "the slot
+          // that just passed has no observation" look the same on an empty
+          // screen, and only the second one is a fault.
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+            {initial.latestOmitted === "current_slot_not_recorded"
+              ? m.latestNotCurrent
+              : m.latestEmpty}
+          </p>
         ) : (
           <>
             <p className="mt-1 font-mono text-xs text-zinc-500">

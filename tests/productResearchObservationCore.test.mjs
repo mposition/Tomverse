@@ -31,6 +31,7 @@ import {
   TITLE_MAX_CODE_POINTS,
   buildObservationPayload,
   normaliseIssueTitle,
+  displayableObservationSlot,
   observationLabel,
   observationSilenceVerdict,
   observationSlotSeries,
@@ -621,4 +622,50 @@ test("a window shorter than itself is insufficient evidence, not a verdict", () 
   // fourteen, and the number it reached is the whole answer.
   assert.equal(p1WindowJudgement(seriesFromPattern("o".repeat(12))).consecutiveOk, 12);
   assert.equal(p1WindowJudgement(seriesFromPattern("o".repeat(12))).met, false);
+});
+
+test("a failed or missing slot does not get an earlier success's rows", () => {
+  // The screen asks what the backlog looks like now. An earlier success's rows
+  // under a failed or missing slot would be an earlier success's content on a
+  // screen reporting no update, which the policy forbids
+  // (docs/policy/product-research-agent.md §2, condition 8). Yesterday's
+  // observation is not wrong; it is not the answer to the question the heading
+  // asks.
+  const current = seriesFromPattern("o" + "o".repeat(5));
+  assert.deepEqual(displayableObservationSlot(current, { everRecorded: true }), {
+    slot: END_SLOT,
+    omitted: "none",
+  });
+
+  for (const pattern of ["f" + "o".repeat(5), "." + "o".repeat(5)]) {
+    const judged = displayableObservationSlot(seriesFromPattern(pattern), {
+      everRecorded: true,
+    });
+    assert.equal(judged.slot, null, pattern);
+    // Named apart from "nothing was ever recorded": the two look identical on
+    // an empty screen and only this one is a fault.
+    assert.equal(judged.omitted, "current_slot_not_recorded", pattern);
+  }
+
+  const never = displayableObservationSlot(seriesFromPattern("." + "."), {
+    everRecorded: false,
+  });
+  assert.equal(never.slot, null);
+  assert.equal(never.omitted, "never_recorded");
+
+  // An empty series answers rather than throwing: a screen rendered before any
+  // slot exists must not be a crash.
+  assert.deepEqual(displayableObservationSlot([], {}), {
+    slot: null,
+    omitted: "never_recorded",
+  });
+  assert.deepEqual(displayableObservationSlot(undefined, { everRecorded: true }), {
+    slot: null,
+    omitted: "current_slot_not_recorded",
+  });
+
+  // A duplicate is not a displayable slot either: the one thing it is certain
+  // of is that the stored state is wrong.
+  const duplicated = [{ slot: END_SLOT, state: "duplicate" }];
+  assert.equal(displayableObservationSlot(duplicated, { everRecorded: true }).slot, null);
 });
