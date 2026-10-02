@@ -129,6 +129,27 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 - Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
   `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
 
+## 서버 업데이트 (drain)
+
+재시작하면 실행 중이던 검토는 `unknown`(`orchestrator_restarted`)으로 닫히고, 쓰는 사람이
+많으면 서버가 비는 순간이 오지 않습니다. 그래서 **drain으로 새 배정을 멈추고, 실행 중인
+검토가 끝난 뒤** 재시작합니다. drain 중에도 요청은 받아서 대기열에 쌓이고, 잃지 않습니다.
+drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마지막에 직접 풉니다.
+
+**서버의 관리 계정 bash.** 첫 줄은 이 창에서만 쓰는 변수입니다.
+
+```bash
+RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
+$RO drain on
+$RO drain wait --timeout 3600        # 실행 중인 검토가 0이 되면 0으로 끝납니다. 시간 초과는 3
+sudo -u review git -C /home/review/review-orchestrator pull --ff-only
+sudo systemctl restart review-orchestrator
+$RO drain off
+```
+
+`drain`은 서버에서만 쓸 수 있고 SSH로 들어오는 요청에는 열려 있지 않습니다. 상태는
+`$RO status`의 `draining`, `runningReviews`, `queuedReviews`로 봅니다.
+
 ## 작성자가 reviewer에게 지시하지 못하게
 
 reviewer CLI는 작업 디렉터리의 지시 파일(`AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`,

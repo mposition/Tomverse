@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
@@ -29,6 +29,19 @@ export class UsageError extends Error {
 }
 
 const mirrorLock = (config) => join(config.stateDir, "mirror.lock");
+
+/**
+ * Drain mode is a flag file in the state directory, so it survives a restart:
+ * an update drains, waits for the running reviews, restarts, then lifts the
+ * drain, and no review is cut off and closed as unknown.
+ */
+const drainFlag = (config) => join(config.stateDir, "drain");
+export const isDraining = (config) => existsSync(drainFlag(config));
+export function setDraining(config, on) {
+  mkdirSync(config.stateDir, { recursive: true });
+  if (on) writeFileSync(drainFlag(config), `${new Date().toISOString()}\n`);
+  else rmSync(drainFlag(config), { force: true });
+}
 
 /**
  * Accept one review request. `bundlePath` is the client's git bundle already
@@ -202,6 +215,9 @@ export class Orchestrator {
   }
 
   tick() {
+    // Draining: start nothing new, let running reviews finish. Submits are still
+    // accepted and wait in the queue until the drain is lifted.
+    if (isDraining(this.config)) return [];
     const jobs = this.store.listJobs();
     const now = this.now();
     const decisions = planAssignments({
