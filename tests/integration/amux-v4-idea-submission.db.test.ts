@@ -9,6 +9,7 @@ import { inspectAmuxIdeaSubmission, submissionFailureKind } from "@/lib/amux/ide
 import {
   commitIdeaSubmission,
   IdeaSubmissionError,
+  listRecentIdeaSubmissions,
   readIdeaSubmissionRequest,
 } from "@/lib/amux/ideaSubmissionService";
 import { prisma } from "@/lib/prisma";
@@ -123,6 +124,13 @@ test("read-back preserves whether the saved idea declared external sources", asy
   assert.deepEqual(await readIdeaSubmissionRequest(session, sourceRequestId),
     { requestId: sourceRequestId, status: "committed", ideaId: sourceIdeaId,
       hasExternalSources: true });
+  const recent = await listRecentIdeaSubmissions(session);
+  assert.ok(recent.some((item) => item.ideaId === ideaId && item.requestId === requestId));
+  assert.ok(recent.some((item) => item.ideaId === sourceIdeaId && item.requestId === sourceRequestId));
+  assert.equal(JSON.stringify(recent).includes(ideaText), false);
+  assert.ok(recent.every((item) => new Date(item.analysisDeadlineAt) > new Date(item.submittedAt)));
+  const otherOwner = { ...session, user: { ...session.user, id: `other-${randomUUID()}` } } as Session;
+  assert.deepEqual(await listRecentIdeaSubmissions(otherOwner), []);
 });
 
 test("submission row and canonical audit roll back together", async () => {

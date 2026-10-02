@@ -162,6 +162,25 @@ export async function readIdeaSubmissionRequest(
     hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
 }
 
+/** Metadata-only picker candidates. Selecting one still requires the canonical
+ * request-id read-back above before any downstream action is shown. */
+export async function listRecentIdeaSubmissions(session: Session) {
+  const actorUserId = actorId(session);
+  const rows = await prisma.amuxIdeaSubmission.findMany({
+    where: { actorUserId, analysisDeadlineAt: { gt: new Date() },
+      cancelledAt: null, rawPurgedAt: null, rawCiphertext: { not: null } },
+    orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
+    take: 20,
+    select: { id: true, requestId: true, submittedAt: true, analysisDeadlineAt: true },
+  });
+  return rows.map((row) => ({
+    ideaId: row.id,
+    requestId: row.requestId,
+    submittedAt: row.submittedAt.toISOString(),
+    analysisDeadlineAt: row.analysisDeadlineAt.toISOString(),
+  }));
+}
+
 /** New v4 submission path. The hard code latch ships false. */
 export async function submitIdea(input: {
   session: Session;

@@ -122,6 +122,7 @@ export default async function AdminAmuxBacklogPage({
       {tabs}
       {tab.id === "ideas" ? (
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
+          recentAvailable={ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV])}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           sourceScopeApprovalAvailable={sourceScopeApprovalAvailable}
           initialPlanAvailable={initialPlanAvailable}

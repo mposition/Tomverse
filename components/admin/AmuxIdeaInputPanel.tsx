@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxSourceScopeApprovalPanel } from "@/components/admin/AmuxSourceScopeApprovalPanel";
@@ -11,8 +11,11 @@ import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
   canStartAnotherIdea,
+  canSelectRecentIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
+  classifyRecentIdeaList,
+  type RecentIdea,
 } from "@/lib/amux/ideaSubmissionUiCore";
 import {
   clearConfirmedIdeaRequest,
@@ -70,13 +73,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   sourceScopeApprovalAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, operatorId }: {
+  transferConfirmAvailable, recentAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   sourceScopeApprovalAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean; operatorId: string;
+  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
+  recentAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
+  const { locale } = useAdminLocale();
   const [idea, setIdea] = useState("");
   const [repositories, setRepositories] = useState("");
   const [pullRequests, setPullRequests] = useState("");
@@ -85,6 +90,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
+  const [recentIdeas, setRecentIdeas] = useState<RecentIdea[] | null>(null);
+  const [recentPending, setRecentPending] = useState(false);
+  const [recentError, setRecentError] = useState(false);
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
     setPlanReadyIdeaId(committedIdeaId);
@@ -185,6 +193,51 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       setReadBackPending(false);
     }
   }, [operatorId]);
+
+  const refreshRecentIdeas = useCallback(async () => {
+    if (!recentAvailable) return;
+    setRecentPending(true);
+    setRecentError(false);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/submissions?view=recent",
+        { cache: "no-store" });
+      const items = classifyRecentIdeaList({ status: response.status, body: await response.json() });
+      if (!items) throw new Error("recent_ideas_unavailable");
+      setRecentIdeas(items);
+    } catch { setRecentError(true); }
+    finally { setRecentPending(false); }
+  }, [recentAvailable]);
+
+  useEffect(() => { queueMicrotask(() => { void refreshRecentIdeas(); }); }, [refreshRecentIdeas]);
+
+  const selectRecentIdea = (requestId: string) => {
+    if (!recoveryChecked || !canSelectRecentIdea(submission.kind,
+      pending || readBackPending || sourceScopePending) ||
+      (submission.kind !== "submitted" &&
+        (!!idea.trim() || !!repositories.trim() || !!pullRequests.trim())) ||
+      !recentIdeas?.some((row) => row.requestId === requestId)) return;
+    if (submission.kind === "submitted") {
+      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    }
+    inputRevision.current += 1;
+    setIdea("");
+    setRepositories("");
+    setPullRequests("");
+    setResult(null);
+    setPlanReadyIdeaId(null);
+    setSourceRepository("");
+    setSourceKind("repository_file");
+    setSourceCommitSha("");
+    setSourcePrNumber("");
+    setSourceBaseSha("");
+    setSourceHeadSha("");
+    setSourceSide("head");
+    setSourcePath("");
+    setSourceScopeResult({ kind: "idle" });
+    inFlight.current = true;
+    setSubmission({ kind: "outcome_unknown", requestId });
+    void readBack(requestId);
+  };
 
   useEffect(() => {
     let active = true;
@@ -427,6 +480,47 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           </button>
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
         </div>
+      ) : null}
+      {recentAvailable ? (
+        <section className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+          aria-labelledby="amux-v4-recent-ideas-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 id="amux-v4-recent-ideas-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">{messages.recentIdeasTitle}</h3>
+              <p className="text-zinc-600 dark:text-zinc-400">{messages.recentIdeasHint}</p>
+            </div>
+            <button type="button" onClick={refreshRecentIdeas} disabled={recentPending}
+              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-medium disabled:opacity-50 dark:border-zinc-600">
+              {messages.recentIdeasRefresh}
+            </button>
+          </div>
+          {recentPending ? <p role="status">{messages.recentIdeasLoading}</p> : null}
+          {recentError ? <p role="alert">{messages.recentIdeasError}</p> : null}
+          {submission.kind !== "submitted" &&
+            (!!idea.trim() || !!repositories.trim() || !!pullRequests.trim()) ?
+            <p>{messages.recentIdeasUnsaved}</p> : null}
+          {!recentPending && !recentError && recentIdeas?.length === 0 ? <p>{messages.recentIdeasEmpty}</p> : null}
+          {recentIdeas && recentIdeas.length > 0 ? (
+            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {recentIdeas.map((row) => (
+                <li key={row.requestId} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                  <span className="break-all text-zinc-700 dark:text-zinc-300">
+                    {messages.recentIdeaLabel(row.ideaId, new Date(row.submittedAt).toLocaleString(locale))}
+                  </span>
+                  <button type="button" onClick={() => selectRecentIdea(row.requestId)}
+                    disabled={!recoveryChecked || !canSelectRecentIdea(submission.kind,
+                      pending || readBackPending || sourceScopePending) ||
+                      (submission.kind !== "submitted" &&
+                        (!!idea.trim() || !!repositories.trim() || !!pullRequests.trim())) ||
+                      (submission.kind === "submitted" && submission.requestId === row.requestId)}
+                    className="min-h-11 rounded-lg border border-blue-700 px-3 font-medium text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+                    {messages.recentIdeaOpen}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
       ) : null}
       <AmuxInitialPlanPanel
         key={submission.kind === "submitted" ? submission.ideaId : "none"}

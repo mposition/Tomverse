@@ -17,7 +17,7 @@ import {
   inspectAmuxIdeaSubmission,
   isAmuxIdeaRequestId,
 } from "@/lib/amux/ideaSubmissionCore";
-import { IdeaSubmissionError, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
+import { IdeaSubmissionError, listRecentIdeaSubmissions, readIdeaSubmissionRequest, submitIdea } from "@/lib/amux/ideaSubmissionService";
 import { authOptions } from "@/lib/auth";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -112,7 +112,15 @@ export async function GET(request: Request) {
       minute: 10,
       day: 100,
     });
-    const requestId = new URL(request.url).searchParams.get("requestId");
+    const params = new URL(request.url).searchParams;
+    if (params.get("view") === "recent" && params.size === 1) {
+      return NextResponse.json({ status: "recent", items: await listRecentIdeaSubmissions(session) },
+        { headers: noStore });
+    }
+    if (params.size !== 1) {
+      return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
+    }
+    const requestId = params.get("requestId");
     if (!requestId || !isAmuxIdeaRequestId(requestId)) {
       return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });
     }

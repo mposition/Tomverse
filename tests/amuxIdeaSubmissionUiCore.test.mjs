@@ -6,8 +6,10 @@ import test from "node:test";
 
 import {
   canStartAnotherIdea,
+  canSelectRecentIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
+  classifyRecentIdeaList,
 } from "../lib/amux/ideaSubmissionUiCore.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -19,6 +21,37 @@ test("another idea starts only after a definitive save and no pending check", ()
   for (const state of ["idle", "pending", "outcome_unknown", "recovery_unavailable", "refused"]) {
     assert.equal(canStartAnotherIdea(state, false), false);
   }
+});
+
+test("recent idea selection cannot bypass an unresolved submission", () => {
+  for (const state of ["idle", "submitted", "refused"]) {
+    assert.equal(canSelectRecentIdea(state, false), true);
+    assert.equal(canSelectRecentIdea(state, true), false);
+  }
+  for (const state of ["pending", "outcome_unknown", "recovery_unavailable"]) {
+    assert.equal(canSelectRecentIdea(state, false), false);
+  }
+});
+
+test("recent idea list accepts only bounded metadata", () => {
+  const item = { ideaId: "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0", requestId,
+    submittedAt: "2026-10-03T00:00:00.000Z", analysisDeadlineAt: "2026-10-10T00:00:00.000Z" };
+  assert.deepEqual(classifyRecentIdeaList({ status: 200,
+    body: { status: "recent", items: [item] } }), [item]);
+  for (const body of [
+    { status: "recent", items: [item, item] },
+    { status: "recent", items: [{ ...item, requestId: "invalid" }] },
+    { status: "recent", items: [{ ...item, submittedAt: "not-a-date" }] },
+    { status: "recent", items: [{ ...item, rawCiphertext: "secret" }] },
+  ]) {
+    if (body.items[0]?.rawCiphertext) {
+      assert.deepEqual(classifyRecentIdeaList({ status: 200, body }), [item]);
+    } else {
+      assert.equal(classifyRecentIdeaList({ status: 200, body }), null);
+    }
+  }
+  assert.equal(classifyRecentIdeaList({ status: 503,
+    body: { status: "recent", items: [item] } }), null);
 });
 
 test("only an exact successful submission response confirms the idea", () => {
@@ -78,4 +111,16 @@ test("write route requires the independent read-back gate before admission", () 
   assert.match(post, /hasExternalSources: inspected\.counts\.repositoryCount \+ inspected\.counts\.pullRequestCount > 0/);
   const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
   assert.match(panel, /declaredExternalSources=\{submission\.kind === "submitted" && submission\.hasExternalSources\}/);
+});
+
+test("recent picker stays behind read-back and never treats a list row as confirmation", () => {
+  const route = readFileSync(path.join(root, "app/api/admin/amux/ideas/submissions/route.ts"), "utf8");
+  const get = route.split("export async function GET")[1] ?? "";
+  assert.match(get, /!ideaSubmissionReadBackPermitted\(/);
+  assert.match(get, /params\.get\("view"\) === "recent"/);
+  const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const select = panel.split("const selectRecentIdea =")[1]?.split("useEffect(() => {")[0] ?? "";
+  assert.match(select, /void readBack\(requestId\)/);
+  assert.match(select, /setSubmission\(\{ kind: "outcome_unknown", requestId \}\)/);
+  assert.doesNotMatch(select, /setSubmission\(\{ kind: "submitted"/);
 });

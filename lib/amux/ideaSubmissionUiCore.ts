@@ -14,6 +14,39 @@ export function canStartAnotherIdea(
   return state === "submitted" && !busy;
 }
 
+export function canSelectRecentIdea(
+  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" | "refused",
+  busy: boolean,
+): boolean {
+  return !busy && (state === "idle" || state === "submitted" || state === "refused");
+}
+
+export type RecentIdea = { ideaId: string; requestId: string;
+  submittedAt: string; analysisDeadlineAt: string };
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const validIsoDate = (value: unknown): value is string =>
+  typeof value === "string" && Number.isFinite(Date.parse(value)) &&
+  new Date(value).toISOString() === value;
+
+export function classifyRecentIdeaList(reply: Reply): RecentIdea[] | null {
+  const body = record(reply.body);
+  if (reply.status !== 200 || body?.status !== "recent" ||
+      !Array.isArray(body.items) || body.items.length > 20) return null;
+  const seen = new Set<string>();
+  const items: RecentIdea[] = [];
+  for (const value of body.items) {
+    const item = record(value);
+    if (!item || typeof item.ideaId !== "string" || !UUID.test(item.ideaId) ||
+        typeof item.requestId !== "string" || !UUID.test(item.requestId) ||
+        !validIsoDate(item.submittedAt) || !validIsoDate(item.analysisDeadlineAt) ||
+        seen.has(item.requestId)) return null;
+    seen.add(item.requestId);
+    items.push({ ideaId: item.ideaId, requestId: item.requestId,
+      submittedAt: item.submittedAt, analysisDeadlineAt: item.analysisDeadlineAt });
+  }
+  return items;
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
