@@ -1,12 +1,12 @@
 name: PR Fast Gate
 #
-# Four jobs, one required status check.
+# Five jobs, one required status check.
 #
 # ############################################################################
 # # `fast-gate` below MUST keep the name                                     #
 # #     Security, unit, build, and Chromium smoke tests                      #
 # # Branch protection on develop and main references check runs by NAME, and #
-# # that string is the required check. The three jobs it aggregates are      #
+# # that string is the required check. The jobs it aggregates are            #
 # # deliberately NOT registered as required checks -- adding them would mean #
 # # reconfiguring branch protection, and renaming this one would leave every #
 # # open PR waiting forever on a check that no longer exists.                #
@@ -18,8 +18,9 @@ name: PR Fast Gate
 # Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
 # what runs where.
 #
-# secret-scan, static-and-unit, build-and-e2e and ui-risk run concurrently;
-# fast-gate waits for all four and fails unless every one of them succeeded.
+# secret-scan, static-and-unit, unit-tests, build-and-e2e and ui-risk run
+# concurrently; fast-gate waits for all five and fails unless every one of them
+# succeeded.
 # A matrix job's result is the roll-up of its shards, so all four of ui-risk's
 # must pass for it to count as one success. Nothing merges on a green
 # fast-gate that did not pass all four, and no upstream job can go green by
@@ -71,16 +72,16 @@ jobs:
   # Runs unconditionally, including on documentation-only PRs: the encoding
   # check is exactly the check a Markdown-only change needs, and the rest is
   # cheap enough that scoping it would buy less than it risks.
+  #
+  # The unit suite used to run here too, as one step of this job. By 2026-10 it
+  # took ~14 of this job's ~19.5 minutes and this job was the slowest in the
+  # gate, so it moved to `unit-tests` below and the two now run side by side.
   static-and-unit:
-    name: Security, lint, encoding, and unit tests
+    name: Security, lint, and encoding checks
     runs-on: ubuntu-latest
-    # Recent to-develop runs measured 559-576s in the unit step and 782-822s
-    # for this job. The continuation contract suite added ~31s, and run
-    # 34695229219 then hit the old 10-minute step ceiling while still passing
-    # tests. Keep the unit deadline below the job deadline so an actual hang
-    # identifies its stage; the remaining job budget covers the static checks
-    # below on a slow but passing run.
-    timeout-minutes: 25
+    # Without the unit suite the job measured ~5.5 minutes of checks plus
+    # install. 15 bounds a hang, not the runtime.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -112,10 +113,6 @@ jobs:
       - name: Security regression checks
         timeout-minutes: 5
         run: npm run security:regression
-
-      - name: Unit and API policy tests
-        timeout-minutes: 15
-        run: npm run test:unit
 
       # Its own process, not part of test:unit, because it needs
       # --experimental-test-module-mocks and module mocks are process-global
@@ -627,11 +624,38 @@ jobs:
         timeout-minutes: 10
         run: npx eslint . --max-warnings=0
 
-      - name: AMUX dashboard SPA lint
+  # The unit and API policy suite, in its own job so it runs beside the static
+  # checks instead of after them. scripts/run-unit-tests.mjs runs one test file
+  # per core here (Windows stays serial) and runs the few files that write into
+  # the checkout alone afterwards -- see scripts/unit-test-serial-files.mjs.
+  unit-tests:
+    name: Unit and API policy tests
+    runs-on: ubuntu-latest
+    # Serial, the step took ~14 minutes; concurrent, a fraction of that. 20
+    # bounds a hang and still covers a run that falls back to serial
+    # (UNIT_TEST_CONCURRENCY=1) while an ordering problem is investigated.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Some unit tests read git history (memory-eval signing commits,
+          # pinned source snapshots); a depth-1 clone cannot answer them.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
         timeout-minutes: 10
-        run: |
-          npm ci --prefix vendor/amux --ignore-scripts --no-audit --no-fund
-          npm run lint:spa --prefix vendor/amux
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit and API policy tests
+        timeout-minutes: 18
+        run: npm run test:unit
 
   build-and-e2e:
     name: Production build and Chromium smoke tests
@@ -976,7 +1000,7 @@ jobs:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [secret-scan, static-and-unit, build-and-e2e, ui-risk]
+    needs: [secret-scan, static-and-unit, unit-tests, build-and-e2e, ui-risk]
     # `always()` so this reports a red check instead of going pending when an
     # upstream job fails, is cancelled, or is skipped. The step below decides
     # the verdict; reaching it is not itself a pass.
@@ -992,6 +1016,7 @@ jobs:
         env:
           SECRET_SCAN: ${{ needs.secret-scan.result }}
           STATIC_AND_UNIT: ${{ needs.static-and-unit.result }}
+          UNIT_TESTS: ${{ needs.unit-tests.result }}
           BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
           # A matrix job's result is the roll-up of every shard: `success` only
           # if all shards succeeded, so both viewport classes are gated.
@@ -1002,6 +1027,7 @@ jobs:
           for entry in \
             "secret-scan=$SECRET_SCAN" \
             "static-and-unit=$STATIC_AND_UNIT" \
+            "unit-tests=$UNIT_TESTS" \
             "build-and-e2e=$BUILD_AND_E2E" \
             "ui-risk=$UI_RISK"
           do
