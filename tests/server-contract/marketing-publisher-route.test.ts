@@ -49,6 +49,11 @@ type World = {
   closeCalls: { status: string; error?: string }[];
   incidents: Incident[];
   incidentReporterThrows: Error | null;
+  /** What the batch returns, and what it was called with. */
+  batch: Record<string, unknown>;
+  batchThrows: Error | null;
+  batchCalls: { runId: string; deadlineAt: Date; provider: string }[];
+  finishInputs: { result?: unknown; processedCount?: number }[];
 };
 
 const world: World = {
@@ -62,6 +67,10 @@ const world: World = {
   closeCalls: [],
   incidents: [],
   incidentReporterThrows: null,
+  batch: {},
+  batchThrows: null,
+  batchCalls: [],
+  finishInputs: [],
 };
 
 const resetWorld = () => {
@@ -75,6 +84,12 @@ const resetWorld = () => {
   world.closeCalls = [];
   world.incidents = [];
   world.incidentReporterThrows = null;
+  world.batch = { claimed: 1, verified: 2, published: 1 };
+  world.batchThrows = null;
+  world.batchCalls = [];
+  world.finishInputs = [];
+  delete process.env.ZERNIO_API_KEY;
+  delete process.env.MARKETING_AUTOMATION_KILL_SWITCH;
 };
 
 let routePromise: Promise<{
@@ -100,14 +115,35 @@ const loadRoute = () => {
           if (world.heartbeatThrows) throw world.heartbeatThrows;
           return world.heartbeat;
         },
+        // The operations are opaque to the route: it builds them and hands them
+        // to the batch, which is replaced below.
+        marketingPublisherOperations: () => ({}),
         finishMarketingPublisherRun: async (
           _client: unknown,
           _runId: string,
-          input: { status: string; error?: string },
+          input: { status: string; error?: string; result?: unknown; processedCount?: number },
         ) => {
           world.closeCalls.push({ status: input.status, error: input.error });
+          world.finishInputs.push({ result: input.result, processedCount: input.processedCount });
           if (world.closeThrows) throw world.closeThrows;
           return world.closed;
+        },
+      },
+    });
+    mock.module(mod("lib/marketingPublisherBatch.ts"), {
+      namedExports: {
+        MARKETING_PUBLISHER_CALL_BUDGET_MS: 30_000,
+        runMarketingPublisherBatch: async (
+          deps: { adapter: { provider: string } },
+          input: { runId: string; deadlineAt: Date },
+        ) => {
+          world.batchCalls.push({
+            runId: input.runId,
+            deadlineAt: input.deadlineAt,
+            provider: deps.adapter.provider,
+          });
+          if (world.batchThrows) throw world.batchThrows;
+          return world.batch;
         },
       },
     });
@@ -178,9 +214,61 @@ test("an ordinary run answers 200 and names why it did nothing", async () => {
   const { status, body } = await post();
   assert.equal(status, 200);
   assert.equal(body.status, "succeeded");
-  // No adapter exists until S2d2, and the run says so rather than looking idle.
-  assert.equal(body.skipped, "no_adapter_implemented");
+  // The Zernio adapter exists, but this route is not handed its credential, and
+  // the run says so rather than looking idle.
+  assert.equal(body.skipped, "no_credential");
   assert.deepEqual(world.incidents, []);
+});
+
+test("without the credential the batch never runs", async () => {
+  resetWorld();
+  const { body } = await post();
+  assert.equal(body.skipped, "no_credential");
+  assert.deepEqual(world.batchCalls, []);
+});
+
+test("with the credential the batch runs once and its counts are what is recorded", async () => {
+  resetWorld();
+  process.env.ZERNIO_API_KEY = "sk_" + "0".repeat(64);
+  const { status, body } = await post();
+  assert.equal(status, 200);
+  assert.equal(world.batchCalls.length, 1);
+  assert.equal(world.batchCalls[0]?.provider, "zernio");
+  assert.deepEqual(body.summary, world.batch);
+  assert.equal(body.skipped, undefined);
+  // The row carries counts and closed codes, never the key or anything a
+  // platform said.
+  assert.deepEqual(world.finishInputs.at(-1), {
+    result: { summary: world.batch },
+    processedCount: 3,
+  });
+  assert.equal(JSON.stringify(body).includes(process.env.ZERNIO_API_KEY), false);
+});
+
+test("the kill switch is obeyed before the credential is even read", async () => {
+  resetWorld();
+  process.env.ZERNIO_API_KEY = "sk_" + "0".repeat(64);
+  process.env.MARKETING_AUTOMATION_KILL_SWITCH = "1";
+  const { body } = await post();
+  assert.equal(body.skipped, "kill_switch");
+  assert.deepEqual(world.batchCalls, []);
+});
+
+test("a batch that throws fails the run and records an incident", async () => {
+  // The batch throws when an outcome could not be recorded -- a post left
+  // `publishing` with nobody answering for it -- and that must not look like an
+  // ordinary run.
+  resetWorld();
+  process.env.ZERNIO_API_KEY = "sk_" + "0".repeat(64);
+  world.batchThrows = new Error("outcome could not be recorded");
+  const { status, body } = await post();
+  assert.equal(status, 500);
+  assert.equal(body.code, "run_failed");
+  assert.deepEqual(
+    world.incidents.map((incident) => incident.code),
+    ["MARKETING_PUBLISHER_RUN_FAILED"],
+  );
+  assert.equal(world.closeCalls.at(-1)?.status, "failed");
 });
 
 test("a failed run records an incident carrying the original error", async () => {
