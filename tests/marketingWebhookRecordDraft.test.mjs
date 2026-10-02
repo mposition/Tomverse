@@ -41,14 +41,25 @@ const provedPublished = [
   delivery(2, 5, 503, "deliberate_fault"),
   delivery(2, 6, 200, "recorded"),
 ];
+const probe = (kind, overrides = {}) => ({
+  kind,
+  at: at(0),
+  statusCode: 401,
+  answer: "signature_invalid",
+  pipeline: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  reportsBefore: 2,
+  reportsAfter: 2,
+  ...overrides,
+});
+const probes = [probe("unsigned"), probe("wrong_signature"), probe("tampered_body")];
 const base = {
   recordId: "2026-10-03__zernio-shadow",
   executor: "staging-operator",
   stagingCommitSha: "a".repeat(40),
   stagingConfigSnapshotDigest: CONFIG,
   reports: [report(1), report(2)],
-  deliveries: [delivery(9, 0, 401, "signature_invalid", "webhook.test"), ...provedPublished],
-  c2EvidenceRefs: ["probe:tampered-body:401"],
+  deliveries: provedPublished,
+  c2Probes: probes,
   evidenceRefs: [],
 };
 
@@ -60,7 +71,7 @@ test("a type that proved every condition is in a strict record", () => {
   assert.equal(record.pipelineFingerprint, MARKETING_WEBHOOK_PIPELINE_FINGERPRINT);
   assert.deepEqual(record.observedScope, [{ eventType: PUBLISHED, channelId: "channel-li" }]);
   assert.equal(draft.recordDigest, digestMarketingWebhookVerificationRecord(draft.fileText));
-  assert.ok(record.evidenceRefs.includes("probe:tampered-body:401"));
+  assert.ok(record.evidenceRefs.some((ref) => ref.startsWith("probe:tampered_body:")));
   assert.ok(record.evidenceRefs.some((ref) => ref.includes(":503:deliberate_fault")));
 });
 
@@ -89,8 +100,7 @@ test("a fault armed on an event already recorded does not prove 4", () => {
   const draft = draftMarketingWebhookVerificationRecord({
     ...base,
     deliveries: [
-      base.deliveries[0],
-      delivery(1, 1, 200, "recorded"),
+            delivery(1, 1, 200, "recorded"),
       delivery(1, 2, 200, "duplicate"),
       delivery(1, 4, 503, "deliberate_fault"),
     ],
@@ -104,7 +114,7 @@ test("a failure with no later recording, or two later recordings, does not prove
   for (const tail of [[], [delivery(2, 6, 200, "recorded"), delivery(2, 7, 200, "recorded")]]) {
     const draft = draftMarketingWebhookVerificationRecord({
       ...base,
-      deliveries: [...base.deliveries.slice(0, 3), delivery(2, 3, 200, "shadow_off"), delivery(2, 5, 503, "deliberate_fault"), ...tail],
+      deliveries: [...base.deliveries.slice(0, 2), delivery(2, 3, 200, "shadow_off"), delivery(2, 5, 503, "deliberate_fault"), ...tail],
     });
     assert.equal(draft.ok, false, JSON.stringify(tail));
     assert.ok(draft.excludedTypes[0].missing.includes("c4"));
@@ -122,11 +132,17 @@ test("a pair whose status query disagreed is left out of a proved type", () => {
   assert.deepEqual(draft.excludedPairs, [{ eventType: PUBLISHED, channelId: "channel-fb" }]);
 });
 
-test("condition 2 needs a refused delivery and the executor's tampered-body reference", () => {
-  const noRefusal = draftMarketingWebhookVerificationRecord({ ...base, deliveries: provedPublished });
-  assert.deepEqual(noRefusal.problems, ["c2_no_refused_delivery"]);
-  const noProbe = draftMarketingWebhookVerificationRecord({ ...base, c2EvidenceRefs: [] });
-  assert.deepEqual(noProbe.problems, ["c2_evidence_missing"]);
+test("condition 2 needs all three probes refused by this build, with nothing stored", () => {
+  const cases = [
+    [probes.slice(0, 2), "c2_probe_missing"],
+    [[...probes.slice(0, 2), probe("tampered_body", { statusCode: 200, answer: "recorded" })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 2), probe("tampered_body", { pipeline: "f".repeat(64) })], "c2_probe_not_refused"],
+    [[...probes.slice(0, 2), probe("tampered_body", { reportsAfter: 3 })], "c2_probe_stored"],
+  ];
+  for (const [c2Probes, problem] of cases) {
+    const draft = draftMarketingWebhookVerificationRecord({ ...base, c2Probes });
+    assert.deepEqual(draft.problems, [problem], problem);
+  }
 });
 
 test("only what this build answered under this configuration is evidence", () => {
@@ -136,27 +152,19 @@ test("only what this build answered under this configuration is evidence", () =>
     const draft = draftMarketingWebhookVerificationRecord({
       ...base,
       deliveries: [
-        base.deliveries[0],
-        ...provedPublished.map((attempt) => ({ ...attempt, ...stamp })),
+                ...provedPublished.map((attempt) => ({ ...attempt, ...stamp })),
       ],
     });
     assert.equal(draft.ok, false, JSON.stringify(stamp));
     assert.deepEqual(draft.problems, ["no_event_type_proved"]);
   }
-  // A refusal answered by another build does not prove condition 2 for this one.
-  const oldRefusal = draftMarketingWebhookVerificationRecord({
-    ...base,
-    deliveries: [delivery(9, 0, 401, "signature_invalid", "webhook.test", olderBuild), ...provedPublished],
-  });
-  assert.deepEqual(oldRefusal.problems, ["c2_no_refused_delivery"]);
 });
 
 test("an event an older build already recorded is not unprocessed for condition 4", () => {
   const draft = draftMarketingWebhookVerificationRecord({
     ...base,
     deliveries: [
-      base.deliveries[0],
-      ...provedPublished.slice(0, 2),
+            ...provedPublished.slice(0, 2),
       delivery(2, 3, 200, "recorded", PUBLISHED, { pipeline: "f".repeat(64) }),
       delivery(2, 5, 503, "deliberate_fault"),
       delivery(2, 6, 200, "duplicate"),

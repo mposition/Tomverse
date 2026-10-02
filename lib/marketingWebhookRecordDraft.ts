@@ -11,8 +11,10 @@
  * processed -- final rows alone cannot tell either from a first delivery.
  *
  * Condition 2 (unsigned or tampered requests refused before parsing) is not
- * about an event type. It needs one refused delivery in the log and the
- * executor's reference for the tampered-body probe, which Zernio cannot send.
+ * about an event type. Zernio only ever sends signed requests, so it is proved
+ * by probes the drafting script sends itself: no signature, a wrong one, and a
+ * signed body with one byte changed -- each answered 401 by this build, with
+ * the stored reports unchanged.
  */
 import {
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
@@ -54,16 +56,34 @@ export type MarketingWebhookRecordDraftInput = {
   readonly stagingConfigSnapshotDigest: string;
   readonly reports: readonly MarketingWebhookShadowRow[];
   readonly deliveries: readonly MarketingWebhookDelivery[];
-  /** The executor's reference for the tampered-body probe; required, never inferred. */
-  readonly c2EvidenceRefs: readonly string[];
+  /** The script's own refused requests for condition 2. */
+  readonly c2Probes: readonly MarketingWebhookC2Probe[];
   readonly evidenceRefs: readonly string[];
+};
+
+export const MARKETING_WEBHOOK_C2_PROBE_KINDS = [
+  "unsigned",
+  "wrong_signature",
+  "tampered_body",
+] as const;
+
+export type MarketingWebhookC2Probe = {
+  readonly kind: (typeof MARKETING_WEBHOOK_C2_PROBE_KINDS)[number];
+  readonly at: string;
+  readonly statusCode: number;
+  readonly answer: string | null;
+  readonly pipeline: string | null;
+  /** Shadow reports counted just before and just after the probe. */
+  readonly reportsBefore: number;
+  readonly reportsAfter: number;
 };
 
 export type MarketingWebhookTypeShortfall = "c1" | "c3" | "c4" | "c5";
 
 export type MarketingWebhookRecordDraftProblem =
-  | "c2_no_refused_delivery"
-  | "c2_evidence_missing"
+  | "c2_probe_missing"
+  | "c2_probe_not_refused"
+  | "c2_probe_stored"
   | "no_event_type_proved";
 
 export type MarketingWebhookRecordDraft =
@@ -208,14 +228,23 @@ export const draftMarketingWebhookVerificationRecord = (
   };
 
   const problems: MarketingWebhookRecordDraftProblem[] = [];
-  const refused = input.deliveries.filter(
-    (delivery) =>
-      delivery.statusCode === 401 &&
-      delivery.answer === "signature_invalid" &&
-      delivery.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
-  );
-  if (refused.length === 0) problems.push("c2_no_refused_delivery");
-  if (input.c2EvidenceRefs.length === 0) problems.push("c2_evidence_missing");
+  for (const kind of MARKETING_WEBHOOK_C2_PROBE_KINDS) {
+    const probes = input.c2Probes.filter((probe) => probe.kind === kind);
+    if (probes.length === 0) {
+      problems.push("c2_probe_missing");
+    } else if (
+      !probes.every(
+        (probe) =>
+          probe.statusCode === 401 &&
+          probe.answer === "signature_invalid" &&
+          probe.pipeline === MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+      )
+    ) {
+      problems.push("c2_probe_not_refused");
+    } else if (!probes.every((probe) => probe.reportsAfter === probe.reportsBefore)) {
+      problems.push("c2_probe_stored");
+    }
+  }
 
   const types = [...new Set(input.deliveries.map((delivery) => delivery.event))].sort();
   const excludedTypes: Array<{ eventType: string; missing: MarketingWebhookTypeShortfall[] }> = [];
@@ -239,16 +268,18 @@ export const draftMarketingWebhookVerificationRecord = (
     }
   }
   if (observedScope.length === 0) problems.push("no_event_type_proved");
-  if (problems.length > 0) return { ok: false, problems, excludedTypes };
+  if (problems.length > 0) return { ok: false, problems: [...new Set(problems)], excludedTypes };
 
-  refs.add(deliveryRef(refused[0]!));
+  for (const probe of input.c2Probes) {
+    refs.add(`probe:${probe.kind}:${probe.at}:${probe.statusCode}:${probe.answer ?? "-"}`);
+  }
   const record = {
     recordId: input.recordId,
     executor: input.executor,
     stagingCommitSha: input.stagingCommitSha,
     observedScope: observedScope.sort(comparePairs),
     conditions: { c1: "pass", c2: "pass", c3: "pass", c4: "pass", c5: "pass" },
-    evidenceRefs: [...new Set([...input.c2EvidenceRefs, ...input.evidenceRefs, ...[...refs].sort()])],
+    evidenceRefs: [...new Set([...input.evidenceRefs, ...[...refs].sort()])],
     pipelineFingerprint: MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
     stagingConfigSnapshotDigest: input.stagingConfigSnapshotDigest,
   };
