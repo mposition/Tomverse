@@ -74,7 +74,7 @@
         'box-shadow:0 2px 12px rgba(0,0,0,.4);';
       const msg = standalone
         ? 'This app is pinned to amux’s <b>retired address</b> (port ' + (window._AMUX_LEGACY_PORT | 0) + '). ' +
-          'Re-adding it is the only way to move it: open <b>' + target.replace(/\/$/, '') + '</b> in Safari, ' +
+          'Re-adding it is the only way to move it: open <b>' + esc(target.replace(/\/$/, '')) + '</b> in Safari, ' +
           'accept the certificate, then <b>Share → Add to Home Screen</b> and delete the old icon.'
         : 'amux moved to port ' + canonical + '. This page is on the retired address and could not reach the new one ' +
           '— you may need to accept its certificate once.';
@@ -4206,7 +4206,7 @@ function _notifRenderPanel() {
   list.innerHTML = _notifItems.slice(0, 50).map(n => {
     const ago = _notifTimeAgo(n.ts);
     return '<div class="notif-panel-item' + (n.read ? '' : ' unread') + '"'
-      + (n.session ? ' onclick="toggleNotifPanel();openPeek(\'' + n.session.replace(/'/g, "\\'") + '\')"' : '')
+      + (n.session ? ' onclick="toggleNotifPanel();openPeek(\'' + escJs(n.session) + '\')"' : '')
       + '><span class="npi-icon">' + n.icon + '</span>'
       + '<div class="npi-body"><div class="npi-title">' + esc(n.title) + '</div>'
       + '<div class="npi-text">' + esc(n.body) + '</div></div>'
@@ -5533,13 +5533,13 @@ function render() {
     // time and one consumer read it for one branch.
     const taskIsDesc = !runtimeBoard.cardless && displayTaskSource === 'desc' && !!displayTaskName;
     return `
-    <div class="card ${isExp ? 'expanded' : ''}" data-session="${esc(s.name)}" data-worker-status="${_sessStatusKey(s)}" data-pinned="${s.pinned ? '1' : '0'}" onclick="event.stopPropagation();toggle('${s.name}')">
-      <div class="card-header" onclick="headerTap('${s.name}', event)" onmousedown="tileMouseDown(event,'${s.name}')">
+    <div class="card ${isExp ? 'expanded' : ''}" data-session="${esc(s.name)}" data-worker-status="${_sessStatusKey(s)}" data-pinned="${s.pinned ? '1' : '0'}" onclick="event.stopPropagation();toggle('${escJs(s.name)}')">
+      <div class="card-header" onclick="headerTap('${escJs(s.name)}', event)" onmousedown="tileMouseDown(event,'${escJs(s.name)}')">
         <div class="card-header-top">
           <div class="card-drag-handle" title="Drag to reorder"><svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="3" r="1.3"/><circle cx="7" cy="3" r="1.3"/><circle cx="3" cy="8" r="1.3"/><circle cx="7" cy="8" r="1.3"/><circle cx="3" cy="13" r="1.3"/><circle cx="7" cy="13" r="1.3"/></svg></div>
           <div class="card-name">${s.pinned ? '<span class="pin-icon">&#x1F4CC;</span> ' : ''}${s.isolated ? '<span class="card-isolated" title="ISOLATED (raw agent): tmux plus the CLI, no amux harness — no AMUX_SESSION/AMUX_URL, no MCP config, no self-report hooks. Undiscoverable to peers: hidden from their fleet list and roster, and peer sends are refused. You can still peek and send from here. Applies at the next spawn.">ISOLATED</span> ' : ''}${esc(s.name)}${offCached ? ' <span class="card-offline-dot" title="Scrollback saved on this device — readable offline">&#x2B07;</span>' : ''}</div>
-          <button class="card-menu-btn" onclick="event.stopPropagation();toggleMenu('${s.name}')" title="Options">&#x22EF;</button>
-          <div class="card-menu" id="menu-${s.name}">
+          <button class="card-menu-btn" onclick="event.stopPropagation();toggleMenu('${escJs(s.name)}')" title="Options">&#x22EF;</button>
+          <div class="card-menu" id="menu-${esc(s.name)}">
           ${_renderWorkerActionMenu(s, 'card')}
         </div>
         </div>
@@ -5599,46 +5599,46 @@ function render() {
       ${isExp && s.preview ? `<div class="card-preview">${esc(s.preview)}</div>` : ''}
       ${logSearchMode && _logMatches[s.name] ? (() => {
         const hits = _logMatches[s.name];
-        const sq = searchQuery.replace(/'/g,"\\'");
+        const sq = escJs(searchQuery);
         return hits.slice(0, 2).map((h, hi) =>
-          `<div class="card-log-hit" onclick="event.stopPropagation();openPeek('${s.name}',{query:'${sq}',hitIdx:${hi}})"><span class="log-hit-loc">${esc(s.name)}:${h.line}</span> <span class="log-hit-text">${esc(h.text.slice(0, 80))}</span></div>`
-        ).join('') + (hits.length > 2 ? `<div class="card-log-hit" style="color:var(--dim);font-style:italic;" onclick="event.stopPropagation();openPeek('${s.name}',{query:'${sq}'})">+${hits.length - 2} more matches</div>` : '');
+          `<div class="card-log-hit" onclick="event.stopPropagation();openPeek('${escJs(s.name)}',{query:'${sq}',hitIdx:${hi}})"><span class="log-hit-loc">${esc(s.name)}:${h.line}</span> <span class="log-hit-text">${esc(h.text.slice(0, 80))}</span></div>`
+        ).join('') + (hits.length > 2 ? `<div class="card-log-hit" style="color:var(--dim);font-style:italic;" onclick="event.stopPropagation();openPeek('${escJs(s.name)}',{query:'${sq}'})">+${hits.length - 2} more matches</div>` : '');
       })() : ''}
       ${(isYolo || (provider && provider !== 'claude') || effort || s.backend === 'herdr' || model || (s.tags||[]).length || s.worktree_active || s.ephemeral) ? `<div class="badges">
         ${s.backend === 'herdr' ? `<span class="badge herdr" title="Hosted on herdr">herdr</span>` : ''}
-        ${provider && provider !== 'claude' ? `<span class="badge provider ${provider}" onclick="event.stopPropagation();editField('${s.name}','provider','${escJs(provider)}')" title="Change provider">${pLabel}</span>` : ''}
+        ${provider && provider !== 'claude' ? `<span class="badge provider ${provider}" onclick="event.stopPropagation();editField('${escJs(s.name)}','provider','${escJs(provider)}')" title="Change provider">${pLabel}</span>` : ''}
         ${isYolo ? '<span class="badge yolo">YOLO</span>' : ''}
         ${s.worktree_active ? '<span class="badge worktree" title="Running in an isolated git worktree">worktree</span>' : ''}
         ${s.ephemeral ? `<span class="badge ephemeral" title="Ephemeral fan-out worker${s.ephemeral_parent ? ' of ' + esc(s.ephemeral_parent) : ''}">eph${s.ephemeral_parent ? ' of ' + esc(s.ephemeral_parent) : ''}</span>` : ''}
-        ${effort ? `<span class="badge effort" onclick="event.stopPropagation();editField('${s.name}','model','${esc(model)}','${esc(provider)}')" title="Reasoning effort — click to change">${esc(effort)}</span>` : ''}
+        ${effort ? `<span class="badge effort" onclick="event.stopPropagation();editField('${escJs(s.name)}','model','${escJs(model)}','${escJs(provider)}')" title="Reasoning effort — click to change">${esc(effort)}</span>` : ''}
         ${(s.tags||[]).map(g => `<span class="grp-chip" title="Filter by group ${esc(g)}" onclick="event.stopPropagation();toggleTagFilter('${escJs(g)}')">${esc(g)}</span>`).join('')}
-        ${model ? `<span class="badge model card-model-inline" onclick="event.stopPropagation();editField('${s.name}','model','${esc(model)}','${esc(provider)}')" title="Change model">${esc(model)}</span>` : ''}
+        ${model ? `<span class="badge model card-model-inline" onclick="event.stopPropagation();editField('${escJs(s.name)}','model','${escJs(model)}','${escJs(provider)}')" title="Change model">${esc(model)}</span>` : ''}
       </div>` : ''}
       ${!s.running ? `<div style="padding:6px 0 2px;" onclick="event.stopPropagation()">
-        <button class="btn primary" style="width:100%;" onclick="doStart('${s.name}')">&#x25B6; Start</button>
+        <button class="btn primary" style="width:100%;" onclick="doStart('${escJs(s.name)}')">&#x25B6; Start</button>
       </div>` : ''}
       <div class="panel" onclick="event.stopPropagation()">
-        ${isExp && displayTaskName ? `<div class="card-task-name${taskDim || taskIsDesc ? ' task-stale' : ''}" title="Open the active board card" style="font-weight:600;">${displayTaskBoardId ? _activeTaskLink(s.name, displayTaskBoardId, displayTaskName) : `<span onclick="event.stopPropagation();editField('${s.name}','task','${escJs(s.task_override || '')}')" style="cursor:pointer;">${esc(displayTaskName)}</span>`}${taskStale ? ` <span class="task-stale-badge">&middot; board ${taskStale}</span>` : ''}${taskIsDesc ? ` <span class="task-stale-badge">&middot; no active card</span>` : ''}</div>` : ''}
+        ${isExp && displayTaskName ? `<div class="card-task-name${taskDim || taskIsDesc ? ' task-stale' : ''}" title="Open the active board card" style="font-weight:600;">${displayTaskBoardId ? _activeTaskLink(s.name, displayTaskBoardId, displayTaskName) : `<span onclick="event.stopPropagation();editField('${escJs(s.name)}','task','${escJs(s.task_override || '')}')" style="cursor:pointer;">${esc(displayTaskName)}</span>`}${taskStale ? ` <span class="task-stale-badge">&middot; board ${taskStale}</span>` : ''}${taskIsDesc ? ` <span class="task-stale-badge">&middot; no active card</span>` : ''}</div>` : ''}
         ${isExp && s.running ? `<div class="card-timing">
           ${s.session_created ? `<div class="timing-item"><span class="timing-label">Worker</span><span class="timing-value">${fmtDuration(Math.floor(Date.now()/1000) - s.session_created)}</span></div>` : ''}
           ${s.task_time ? `<div class="timing-item"><span class="timing-label">Task</span><span class="timing-value accent">${esc(s.task_time)}</span></div>` : ''}
           ${s.last_activity ? `<div class="timing-item"><span class="timing-label">Last interaction</span><span class="timing-value">${timeAgo(s.last_activity)}</span></div>` : ''}
         </div>` : ''}
-        ${s.preview_lines && s.preview_lines.length ? `<div class="card-preview-lines" onclick="event.stopPropagation();openPeek('${s.name}')" style="cursor:pointer;">${rewriteLocalhostUrls(s.preview_lines.map(l => esc(l)).join('\n'))}</div>` : ''}
-        <div class="card-stats" id="stats-${s.name}"></div>
+        ${s.preview_lines && s.preview_lines.length ? `<div class="card-preview-lines" onclick="event.stopPropagation();openPeek('${escJs(s.name)}')" style="cursor:pointer;">${rewriteLocalhostUrls(s.preview_lines.map(l => esc(l)).join('\n'))}</div>` : ''}
+        <div class="card-stats" id="stats-${esc(s.name)}"></div>
         ${s.running ? `
-        <div class="chips" id="card-chips-${s.name}"></div>
-        <div class="peek-attach-bar card-attach-bar${(_cardFiles[s.name]||[]).length ? ' has-files' : ''}" id="card-attach-${s.name}">${_renderCardFileChips(s.name)}</div>
-        <div class="send-row" style="position:relative;" ondragover="cardDragOver(event)" ondragleave="cardDragLeave(event)" ondrop="cardDrop('${s.name}',event)" title="Drag files here to attach">
-          <div id="card-ac-${s.name}" class="ac-list slash-ac"></div>
-          <textarea class="send-input" id="input-${s.name}" rows="1"
+        <div class="chips" id="card-chips-${esc(s.name)}"></div>
+        <div class="peek-attach-bar card-attach-bar${(_cardFiles[s.name]||[]).length ? ' has-files' : ''}" id="card-attach-${esc(s.name)}">${_renderCardFileChips(s.name)}</div>
+        <div class="send-row" style="position:relative;" ondragover="cardDragOver(event)" ondragleave="cardDragLeave(event)" ondrop="cardDrop('${escJs(s.name)}',event)" title="Drag files here to attach">
+          <div id="card-ac-${esc(s.name)}" class="ac-list slash-ac"></div>
+          <textarea class="send-input" id="input-${esc(s.name)}" rows="1"
             placeholder="Send to ${esc(s.name)}..." autocomplete="off" autocorrect="on"
             autocapitalize="sentences" spellcheck="true" enterkeyhint="enter"
-            oninput="autoGrow(this);cardSlashAcUpdate('${s.name}');cmdHistoryReset();_draftSaveDebounced('${s.name}',this.value)"
-            onkeydown="cardSlashAcKeydown('${s.name}',event)"
-            onpaste="handleCardPaste('${s.name}',event)"
-            onbeforeinput="cardSlashAcBeforeInput('${s.name}',event)"></textarea>
-          <div class="send-split${_sendMode === 'queue' ? ' mode-queue' : ''}"><button class="btn primary send-split-main" ${_composerPendingSends.has(s.name) ? 'disabled' : ''} onpointerdown="event.preventDefault()" onpointerup="_btnFire(event, () => sendFromInput('${s.name}'))" ontouchstart="_btnTouchStart(event)" ontouchend="_btnTouchEnd(event, () => sendFromInput('${s.name}'))" onclick="_btnFire(event, () => sendFromInput('${s.name}'))">${_sendMode === 'queue' ? 'Queue' : 'Send'}</button><button class="btn primary send-split-arrow" onpointerdown="event.preventDefault()" onpointerup="_btnFire(event, () => _toggleSendMode(event))" ontouchstart="_btnTouchStart(event)" ontouchend="_btnTouchEnd(event, () => _toggleSendMode(event))" onclick="_btnFire(event, () => _toggleSendMode(event))" title="Switch send mode">&#x25BC;</button></div>
+            oninput="autoGrow(this);cardSlashAcUpdate('${escJs(s.name)}');cmdHistoryReset();_draftSaveDebounced('${escJs(s.name)}',this.value)"
+            onkeydown="cardSlashAcKeydown('${escJs(s.name)}',event)"
+            onpaste="handleCardPaste('${escJs(s.name)}',event)"
+            onbeforeinput="cardSlashAcBeforeInput('${escJs(s.name)}',event)"></textarea>
+          <div class="send-split${_sendMode === 'queue' ? ' mode-queue' : ''}"><button class="btn primary send-split-main" ${_composerPendingSends.has(s.name) ? 'disabled' : ''} onpointerdown="event.preventDefault()" onpointerup="_btnFire(event, () => sendFromInput('${escJs(s.name)}'))" ontouchstart="_btnTouchStart(event)" ontouchend="_btnTouchEnd(event, () => sendFromInput('${escJs(s.name)}'))" onclick="_btnFire(event, () => sendFromInput('${escJs(s.name)}'))">${_sendMode === 'queue' ? 'Queue' : 'Send'}</button><button class="btn primary send-split-arrow" onpointerdown="event.preventDefault()" onpointerup="_btnFire(event, () => _toggleSendMode(event))" ontouchstart="_btnTouchStart(event)" ontouchend="_btnTouchEnd(event, () => _toggleSendMode(event))" onclick="_btnFire(event, () => _toggleSendMode(event))" title="Switch send mode">&#x25BC;</button></div>
         </div>` : ''}
       </div>
     </div>`;
@@ -6502,9 +6502,9 @@ function _renderTabCustomizerMenu() {
     if (!list) return;
     if (!presets.length) { list.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;padding:4px 0;">No saved presets</div>'; return; }
     list.innerHTML = presets.map(p => `<div style="display:flex;align-items:center;gap:4px;padding:3px 0;">
-      <button onclick="loadLayoutPreset('${p.name.replace(/'/g,"\\'")}')" style="flex:1;text-align:left;background:none;border:none;cursor:pointer;color:var(--text);font-size:0.82rem;padding:2px 0;">${p.name}</button>
-      <button onclick="shareLayoutPreset('${p.name.replace(/'/g,"\\'")}')" title="Copy share link" style="background:none;border:none;cursor:pointer;color:var(--dim);font-size:0.72rem;padding:2px;">&#x1F517;</button>
-      <button onclick="deleteLayoutPreset('${p.name.replace(/'/g,"\\'")}')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--dim);font-size:0.72rem;padding:2px;">&times;</button>
+      <button onclick="loadLayoutPreset('${escJs(p.name)}')" style="flex:1;text-align:left;background:none;border:none;cursor:pointer;color:var(--text);font-size:0.82rem;padding:2px 0;">${esc(p.name)}</button>
+      <button onclick="shareLayoutPreset('${escJs(p.name)}')" title="Copy share link" style="background:none;border:none;cursor:pointer;color:var(--dim);font-size:0.72rem;padding:2px;">&#x1F517;</button>
+      <button onclick="deleteLayoutPreset('${escJs(p.name)}')" title="Delete" style="background:none;border:none;cursor:pointer;color:var(--dim);font-size:0.72rem;padding:2px;">&times;</button>
     </div>`).join('');
   }).catch(()=>{});
   // Init Sortable on menu for drag-to-reorder (only on tab items, not preset
@@ -7210,7 +7210,7 @@ function updateRateLimitPill() {
 function _scrollToFirstRateLimited() {
   const target = sessions.find(s => s.rate_limited_until) || sessions.find(s => s.credit_limited);
   if (!target) return;
-  const sel = '[data-session="' + target.name.replace(/"/g, '\\"') + '"]';
+  const sel = '[data-session="' + CSS.escape(target.name) + '"]';
   const card = document.querySelector(sel);
   if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -11903,7 +11903,7 @@ async function _psfLoad(dirPath) {
   for (const part of parts) {
     cum += '/' + part;
     const cp = cum;
-    crumbHtml += '<span style="color:var(--dim)"> › </span><span class="psf-crumb" onclick="_psfLoad(\'' + cp.replace(/'/g, "\\'") + '\')">' + esc(part) + '</span>';
+    crumbHtml += '<span style="color:var(--dim)"> › </span><span class="psf-crumb" onclick="_psfLoad(\'' + escJs(cp) + '\')">' + esc(part) + '</span>';
   }
   bc.innerHTML = crumbHtml;
   body.innerHTML = '<div style="padding:12px;color:var(--dim)">Loading...</div>';
@@ -11928,7 +11928,7 @@ async function _psfLoad(dirPath) {
       const sizeStr = entry.type === 'dir' ? '' : _fmtSize(entry.size);
       const dateStr = entry.modified ? timeAgo(entry.modified) : '';
       const slash = entry.type === 'dir' ? '<span style="color:var(--dim)">/</span>' : '';
-      const ep = entryPath.replace(/'/g, "\\'");
+      const ep = escJs(entryPath);
       row.innerHTML =
         `<div class="fe-cell-name">${icon}<span>${esc(entry.name)}${slash}</span></div>` +
         `<div class="fe-cell-size">${sizeStr}</div>` +
@@ -11954,7 +11954,7 @@ async function _psfViewFile(filePath) {
   const bc = document.getElementById('psf-breadcrumb');
   const dir = filePath.substring(0, filePath.lastIndexOf('/')) || '/';
   const fname = filePath.split('/').pop();
-  bc.innerHTML = '<span class="psf-crumb" onclick="_psfLoad(\'' + dir.replace(/'/g, "\\'") + '\')">← back</span><span style="color:var(--dim)"> / </span><span style="color:var(--text)">' + esc(fname) + '</span>';
+  bc.innerHTML = '<span class="psf-crumb" onclick="_psfLoad(\'' + escJs(dir) + '\')">← back</span><span style="color:var(--dim)"> / </span><span style="color:var(--text)">' + esc(fname) + '</span>';
   body.innerHTML = '<div style="padding:12px;color:var(--dim)">Loading...</div>';
   try {
     let url = API + '/api/file?path=' + encodeURIComponent(filePath);
@@ -12457,7 +12457,7 @@ function ansiToHtml(text) {
     if(bg)s.push('background:'+bg);
     if(!s.length)return ''; spanOpen=true; return `<span style="${s.join(';')}">`;
   };
-  const eh=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const eh = esc;
   const linkChunk=raw=>{
     const urlRe=/https?:\/\/[^\s<>\]\)'"`,;]+/g;
     const fileRe=/(?:^|[\s(])((\/[\w./-]+(?:\.\w+)(?::[\d]+)?)|(\.\/[\w./-]+(?:\.\w+)(?::[\d]+)?))/gm;
@@ -12469,7 +12469,7 @@ function ansiToHtml(text) {
     for(const x of mx){
       if(x.start>last)out+=eh(raw.slice(last,x.start));
       if(x.type==='url'){out+=`<a href="${eh(x.value)}" target="_blank" rel="noopener noreferrer">${eh(x.value)}</a>`;}
-      else{const rp=x.value.replace(/:[\d]+$/,'');const cls=/\.md$/i.test(rp)?'md-link':'file-link';out+=`<span class="${cls}" onclick="if(window.getSelection().toString())return;event.preventDefault();event.stopPropagation();openFilePreview('${eh(rp)}')">${eh(x.value)}</span>`;}
+      else{const rp=x.value.replace(/:[\d]+$/,'');const cls=/\.md$/i.test(rp)?'md-link':'file-link';out+=`<span class="${cls}" onclick="if(window.getSelection().toString())return;event.preventDefault();event.stopPropagation();openFilePreview('${escJs(rp)}')">${eh(x.value)}</span>`;}
       last=x.end;
     }
     if(last<raw.length)out+=eh(raw.slice(last));
@@ -12684,7 +12684,7 @@ function _linkifyPaths(safeHtml) {
       // alone silently never fires.
       if ((pre === '' || pre === '\n') && offset >= 0) {
         const before = String(whole).slice(0, offset + pre.length);
-        const lastLine = before.slice(before.lastIndexOf('\n', offset - 1) + 1).replace(/<[^>]*>/g, '');
+        const lastLine = _htmlText(before.slice(before.lastIndexOf('\n', offset - 1) + 1));
         const lastTok = (lastLine.trim().split(/[\s(\[>"'`,;=]+/).pop() || '');
         if (/^\.?\//.test(lastTok) && !/\.[A-Za-z0-9]{1,8}$/.test(lastTok)) return m;
       }
@@ -12846,15 +12846,14 @@ function _classifyPromptKind(promptText) {
   // Absence from a loaded history window is not evidence of human authorship.
   return 'unknown';
 }
+function _htmlText(value) {
+  return new DOMParser().parseFromString(String(value), 'text/html').body.textContent || '';
+}
 function highlightPrompts(html) {
   const gemini = _peekGeminiPrompts();
   const promptStart = gemini ? /^[ \t]{0,2}[❯›>](?:[ \t]+|$)/ : /^[ \t]{0,2}[❯›](?:[ \t]+|$)/;
   const lines = html.split('\n');
-  const decoder = document.createElement('textarea');
-  const plain = lines.map(line => {
-    decoder.innerHTML = line.replace(/<[^>]*>/g, '');
-    return decoder.value.replace(/\u00a0/g, ' ');
-  });
+  const plain = lines.map(line => _htmlText(line).replace(/\u00a0/g, ' '));
   const out = [];
   for (let i = 0; i < lines.length;) {
     const start = promptStart.test(plain[i]);
@@ -12916,7 +12915,7 @@ function wrapBoxBlocks(html) {
   const BOX   = /[─-╿]/;              // any box-drawing char (U+2500–257F)
   const HRULE = /[─━═]/;         // ─ ━ ═ → structural border line
   const VERT  = /[│┃┌-╿]/g; // │┃ + corners/junctions/rounded/diagonals
-  const stripTags = s => s.replace(/<[^>]*>/g, '');
+  const stripTags = _htmlText;
   const isBoxLine = raw => {
     const t = stripTags(raw);
     if (!BOX.test(t)) return false;
@@ -13339,7 +13338,7 @@ async function _peekLoadEarlier(options) {
 // stops being a scrollable box; real tables keep their scroller.
 function _fitRules(html) {
   return html.split('\n').map(line => {
-    const t = line.replace(/<[^>]*>/g, '').trim();
+    const t = _htmlText(line).trim();
     if (/^─{30,}$/.test(t)) return '<span class="peek-rule"></span>';
     const m = t.match(/^─{8,}\s(\S[^─]{0,120}?)\s(─{1,8})$/);
     if (m) return '<span class="peek-rule"><span class="peek-rule-tag">' + esc(m[1]) + '</span></span>';
@@ -16711,7 +16710,7 @@ async function _voiceStart() {
           + 'The user is interacting with worker "' + session + '". '  // was `worker` (undefined): ReferenceError in onopen silently killed the voice setup message
           + 'You can send commands or messages to their terminal worker using the send_to_session tool. '
           + 'Keep responses concise and conversational. '
-          + 'Here is recent worker output for context:\\n' + recentOutput.replace(/"/g, '\\"').slice(0, 1500)
+          + 'Here is recent worker output for context:\\n' + recentOutput.slice(0, 1500)
         }] },
         tools: [{ functionDeclarations: [{
           name: 'send_to_session',
@@ -17357,8 +17356,8 @@ function _renderCmdHistoryList() {
     const kLbl = (_MSG_KIND[_cmdHistKind] || {}).label;
     list.innerHTML = '<div style="color:var(--dim);font-size:0.85rem;padding:20px;text-align:center;">'
       + (q ? 'No matches.'
-           : kLbl ? 'No ' + kLbl.toLowerCase() + ' messages'+ (sessFilter ? ' for ' + sessFilter : '') + '.'
-                  : (sessFilter ? 'No messages for ' + sessFilter + '.' : 'No history yet.')) + '</div>';
+           : kLbl ? 'No ' + kLbl.toLowerCase() + ' messages'+ (sessFilter ? ' for ' + esc(sessFilter) : '') + '.'
+                   : (sessFilter ? 'No messages for ' + esc(sessFilter) + '.' : 'No history yet.')) + '</div>';
     return;
   }
   // Was a second hand-maintained copy of the row markup, which is why this
@@ -19256,7 +19255,7 @@ function clearPeekSearch() {
 }
 
 // ── File preview ──
-function _csvEsc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function _csvEsc(s) { return esc(s == null ? '' : s); }
 let _csvRows = [], _csvHeader = [], _csvSort = { col: -1, asc: true }, _csvColWidths = [], _csvFrozen = false;
 
 function renderCsvTable(csv) {
@@ -19869,8 +19868,8 @@ function _renderFileBody(data, mode) {
     // Ebook formats we can't render in-browser (MOBI/AZW/CBR/DJVU…) get a
     // reader-styled card rather than the generic binary blob.
     const icon = data.is_ebook ? '📚' : '📦';
-    const note = data.is_ebook ? `<div style="font-size:0.78rem;color:var(--dim);text-align:center;max-width:22em;">This ebook format (${data.ebook_kind || data.ext}) can’t be previewed in the browser — download to open in your reader.</div>` : '';
-    body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px;"><div style="font-size:2.5rem;">${icon}</div><div style="font-size:0.95rem;color:var(--muted);">${fname}${sizeMB ? ' · ' + sizeMB : ''}${data.ext ? ' · ' + data.ext : ''}</div>${note}<a href="${_authUrl(rawUrl)}" download="${fname}" style="padding:8px 18px;background:var(--green);color:#fff;border-radius:6px;font-size:0.85rem;font-weight:600;text-decoration:none;">Download</a></div>`;
+    const note = data.is_ebook ? `<div style="font-size:0.78rem;color:var(--dim);text-align:center;max-width:22em;">This ebook format (${esc(data.ebook_kind || data.ext)}) can’t be previewed in the browser — download to open in your reader.</div>` : '';
+    body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:32px;"><div style="font-size:2.5rem;">${icon}</div><div style="font-size:0.95rem;color:var(--muted);">${esc(fname)}${sizeMB ? ' · ' + esc(sizeMB) : ''}${data.ext ? ' · ' + esc(data.ext) : ''}</div>${note}<a href="${esc(_authUrl(rawUrl))}" download="${esc(fname)}" style="padding:8px 18px;background:var(--green);color:#fff;border-radius:6px;font-size:0.85rem;font-weight:600;text-decoration:none;">Download</a></div>`;
     return;
   }
   // Text files — Raw / Edit / Preview
@@ -20925,7 +20924,7 @@ async function loadFiles(path) {
   for (const part of parts) {
     cum += '/' + part;
     const cp = cum;
-    crumbHtml += '<span class="fe-crumb-sep">›</span><span class="fe-crumb" onclick="loadFiles(\'' + cp.replace(/'/g, "\\'") + '\')">' + esc(part) + '</span>';
+    crumbHtml += '<span class="fe-crumb-sep">›</span><span class="fe-crumb" onclick="loadFiles(\'' + escJs(cp) + '\')">' + esc(part) + '</span>';
   }
   document.getElementById('files-breadcrumb').innerHTML = crumbHtml;
   _filesToolbarCheck();
@@ -20964,7 +20963,7 @@ function _feBuildRow(entry, parentPath, depth, q) {
   const slash = entry.type === 'dir' ? '<span style="color:var(--dim)">/</span>' : '';
   const sizeStr = entry.type === 'dir' ? '' : _fmtSize(entry.size);
   const dateStr = entry.modified ? timeAgo(entry.modified) : '';
-  const ep = entryPath.replace(/'/g, "\\'");
+  const ep = escJs(entryPath);
   const toggle = entry.type === 'dir'
     ? `<button class="fe-expand" title="Expand / collapse" onclick="event.stopPropagation();_feToggleExpand(this)">&#9656;</button>`
     : `<span class="fe-expand-spacer"></span>`;
@@ -23097,7 +23096,7 @@ async function loadExplore(path) {
   for (const part of parts) {
     cum += '/' + part;
     const cp = cum;
-    crumbHtml += `<span class="explore-crumb" onclick="loadExplore('${cp.replace(/'/g,"\\'")}')"> ${esc(part)}</span><span style="color:var(--dim)">/</span>`;
+    crumbHtml += `<span class="explore-crumb" onclick="loadExplore('${escJs(cp)}')"> ${esc(part)}</span><span style="color:var(--dim)">/</span>`;
   }
   document.getElementById('explore-breadcrumb').innerHTML = crumbHtml;
   try {
@@ -23146,7 +23145,7 @@ function _renderExploreEntries(body, path, data, cacheTs) {
     row.className = 'explore-row';
     const icon = entry.type === 'dir' ? '&#x1F4C2;' : '&#x1F4C4;';
     const displayName = entry.name + (entry.type === 'dir' ? '/' : '');
-    const menuBtn = `<button class="explore-menu-btn" title="Options" onclick="event.stopPropagation();_showExploreMenu('${entryPath.replace(/'/g,"\\'")}',this,'${entry.type}')">⋯</button>`;
+    const menuBtn = `<button class="explore-menu-btn" title="Options" onclick="event.stopPropagation();_showExploreMenu('${escJs(entryPath)}',this,'${entry.type}')">⋯</button>`;
     const mtime = entry.modified ? `<span class="explore-mtime">${timeAgo(entry.modified)}</span>` : '';
     const nameHtml = q ? esc(displayName).replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi'), m => `<mark style="background:var(--accent-muted,rgba(99,102,241,0.25));color:inherit;border-radius:2px;">${m}</mark>`) : esc(displayName);
     row.innerHTML = `<span class="explore-icon">${icon}</span><span class="explore-name">${nameHtml}</span><span class="explore-size">${esc(_fmtSize(entry.size))}</span>${mtime}${menuBtn}`;
@@ -28056,17 +28055,14 @@ async function fetchBoard() {
 // influenceable (any session can POST a note), and the dashboard embeds the
 // API token — so unsanitized HTML = stored XSS → RCE. DOMPurify strips
 // scripts, event handlers, and javascript: URLs while keeping normal
-// formatting. If it failed to load, fall back to a conservative strip.
+// formatting. If it failed to load, render the content as plain text.
 function _sanitizeHtml(html) {
   if (html == null) return '';
   if (typeof DOMPurify !== 'undefined' && DOMPurify.sanitize) {
     return DOMPurify.sanitize(String(html), { ADD_ATTR: ['target'] });
   }
-  // Fallback: drop <script>/<style>, on*= handlers, and javascript:/data: URLs.
-  return String(html)
-    .replace(/<\s*(script|style|iframe|object|embed|link|meta)\b[\s\S]*?(<\/\s*\1\s*>|$)/gi, '')
-    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/(href|src)\s*=\s*("|')?\s*(javascript|data|vbscript):/gi, '$1=$2#blocked:');
+  // A failed sanitizer leaves readable plain text without executable markup.
+  return esc(String(html));
 }
 // Resolve a markdown link href to an ABSOLUTE file path, relative to the file
 // being viewed (basePath = that file's absolute path). Returns '' for links that
@@ -32984,12 +32980,15 @@ async function loadProxies() {
     }
     wrap.innerHTML = list.map(p => {
       const live = p.live;
+      const proxyId = escJs(p.id);
+      const proxyPort = Number.isSafeInteger(Number(p.port)) ? Number(p.port) : 0;
+      const proxyUrl = /^https?:\/\//i.test(p.url || '') ? p.url : '';
       const dot = live ? '<span style="color:var(--green);">●</span>' : '<span style="color:var(--dim);">○</span>';
       const status = live ? '<span style="color:var(--green);font-weight:600;">Live</span>' : '<span style="color:var(--dim);">Stopped</span>';
-      const urlRow = (live && p.url)
+      const urlRow = (live && proxyUrl)
         ? '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">'
-          + '<a href="' + esc(p.url) + '" target="_blank" style="color:var(--accent);font-size:0.8rem;word-break:break-all;">' + esc(p.url) + '</a>'
-          + '<button class="btn" style="font-size:0.7rem;padding:2px 8px;" onclick="_proxyCopy(this,\'' + esc(p.url) + '\')">Copy</button>'
+          + '<a href="' + esc(proxyUrl) + '" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-size:0.8rem;word-break:break-all;">' + esc(proxyUrl) + '</a>'
+          + '<button class="btn" style="font-size:0.7rem;padding:2px 8px;" onclick="_proxyCopy(this,\'' + escJs(proxyUrl) + '\')">Copy</button>'
           + '<span style="color:var(--dim);font-size:0.72rem;">' + (p.requests || 0) + ' req'
           + (p.dropped ? ' &middot; <span style="color:#f0a020;">' + p.dropped + ' rate-limited</span>' : '') + '</span></div>'
         : '';
@@ -32998,14 +32997,14 @@ async function loadProxies() {
         + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
         +   '<div style="min-width:0;">'
         +     '<div style="font-weight:600;font-size:0.9rem;">' + dot + ' ' + esc(p.name) + '</div>'
-        +     '<div style="color:var(--dim);font-size:0.76rem;margin-top:2px;">' + esc(p.scheme) + '://localhost:' + p.port + ' &middot; ' + status + '</div>'
+        +     '<div style="color:var(--dim);font-size:0.76rem;margin-top:2px;">' + esc(p.scheme) + '://localhost:' + proxyPort + ' &middot; ' + status + '</div>'
         +   '</div>'
         +   '<div style="display:flex;gap:6px;flex-shrink:0;">'
         +     (live
-              ? '<button class="btn" onclick="_proxyStop(\'' + p.id + '\')">Stop</button>'
-              : '<button class="btn primary" onclick="_proxyStart(\'' + p.id + '\',this)">Start</button>')
-        +     '<button class="btn" onclick="_proxyEdit(\'' + p.id + '\',\'' + esc(p.name).replace(/'/g,"\\'") + '\',' + p.port + ',\'' + esc(p.scheme) + '\')">Edit</button>'
-        +     '<button class="btn" style="color:var(--red);" onclick="_proxyDelete(\'' + p.id + '\',\'' + esc(p.name).replace(/'/g,"\\'") + '\')">Delete</button>'
+              ? '<button class="btn" onclick="_proxyStop(\'' + proxyId + '\')">Stop</button>'
+              : '<button class="btn primary" onclick="_proxyStart(\'' + proxyId + '\',this)">Start</button>')
+        +     '<button class="btn" onclick="_proxyEdit(\'' + proxyId + '\',\'' + escJs(p.name) + '\',' + proxyPort + ',\'' + escJs(p.scheme) + '\')">Edit</button>'
+        +     '<button class="btn" style="color:var(--red);" onclick="_proxyDelete(\'' + proxyId + '\',\'' + escJs(p.name) + '\')">Delete</button>'
         +   '</div>'
         + '</div>' + urlRow + errRow + '</div>';
     }).join('');
@@ -33087,12 +33086,13 @@ async function loadTunnelSettings() {
   }
   if (s.running && s.url) {
     const target = (s.target || '').replace(/^https?:\/\//, '');
+    const safeUrl = /^https?:\/\//i.test(s.url) ? s.url : '#';
     box.innerHTML =
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><span style="width:8px;height:8px;border-radius:50%;background:#3fb950;flex-shrink:0;"></span><b style="color:var(--fg);">Live</b><span style="color:var(--dim);margin-left:auto;font-size:0.72rem;">' + (s.requests || 0) + ' reqs</span></div>' +
-      '<div style="font-size:0.72rem;color:var(--dim);margin-bottom:4px;">serving <code>' + target + '</code></div>' +
-      '<a href="' + s.url + '" target="_blank" style="display:block;word-break:break-all;color:var(--accent);font-size:0.8rem;margin-bottom:8px;">' + s.url + '</a>' +
+      '<div style="font-size:0.72rem;color:var(--dim);margin-bottom:4px;">serving <code>' + esc(target) + '</code></div>' +
+      '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener noreferrer" style="display:block;word-break:break-all;color:var(--accent);font-size:0.8rem;margin-bottom:8px;">' + esc(s.url) + '</a>' +
       '<div style="display:flex;gap:6px;">' +
-      '<button class="btn" style="flex:1;font-size:0.76rem;" onclick="_tunnelCopyURL(this,\'' + s.url.replace(/'/g, "\\'") + '\')">Copy URL</button>' +
+      '<button class="btn" style="flex:1;font-size:0.76rem;" onclick="_tunnelCopyURL(this,\'' + escJs(s.url) + '\')">Copy URL</button>' +
       '<button class="btn" style="flex:1;font-size:0.76rem;" onclick="_tunnelSettingsStop(this)">Stop</button></div>';
   } else {
     box.innerHTML =
@@ -33154,7 +33154,7 @@ async function _renderIcalBody(box) {
     html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:0.45rem;"><span style="width:8px;height:8px;border-radius:50%;background:#3fb950;flex-shrink:0;"></span><strong style="font-size:0.85rem;">Public tunnel active</strong><span style="color:var(--dim);font-size:0.72rem;margin-left:auto;">' + (tun.requests || 0) + ' reqs</span></div>';
     html += '<code style="display:block;background:var(--bg);padding:0.45rem 0.6rem;border-radius:6px;font-size:0.73rem;word-break:break-all;margin-bottom:0.5rem;">' + esc_url(tunUrl) + '</code>';
     html += '<div style="display:flex;gap:0.4rem;">';
-    html += '<button class="btn" style="font-size:0.76rem;" onclick="_tunnelCopy(this,\'' + tunUrl.replace(/'/g, "\\'") + '\')">Copy URL</button>';
+    html += '<button class="btn" style="font-size:0.76rem;" onclick="_tunnelCopy(this,\'' + escJs(tunUrl) + '\')">Copy URL</button>';
     html += '<button id="tun-toggle" class="btn" style="font-size:0.76rem;" onclick="_tunnelStopUI(this.closest(\'[data-ical-box]\'))">Stop tunnel</button>';
     html += '</div>';
   } else if (tun && tun.configured) {
@@ -33544,7 +33544,7 @@ function _wsRenderProfileBar() {
     return;
   }
   el.innerHTML = names.map(n => {
-    const safe = n.replace(/'/g, "\\'");
+    const safe = escJs(n);
     return `<span class="ws-profile-chip" onclick="wsLoadProfile('${safe}')">${esc(n)
       }<button class="ws-profile-del" onclick="event.stopPropagation();wsDeleteProfile('${safe}')" title="Delete this browser profile">&#128465;</button></span>`;
   }).join('');
@@ -35070,15 +35070,15 @@ function _skillsRender(q, countEl, container) {
 
   const card = (cmd, desc, hint, editable, fetchKey) => {
     const id = 'sc-' + cmd.replace(/[^a-z0-9]/gi,'_');
-    const safeCmd = cmd.replace(/'/g,"\\'");
+    const safeCmd = escJs(cmd);
     const usage = hint ? cmd + ' ' + hint : cmd;
     return '<div class="skill-card" id="' + id + '">' +
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">' +
-        '<span class="skill-card-name" style="cursor:pointer;" onclick="_skillToggle(\'' + id + '\',\'' + esc(fetchKey || '') + '\')">' + esc(cmd) + '</span>' +
+        '<span class="skill-card-name" style="cursor:pointer;" onclick="_skillToggle(\'' + id + '\',\'' + escJs(fetchKey || '') + '\')">' + esc(cmd) + '</span>' +
         '<div style="display:flex;gap:4px;flex-shrink:0;">' +
-          (editable ? '<button class="btn" style="font-size:0.65rem;padding:2px 8px;" onclick="event.stopPropagation();editSkill(\'' + esc(cmd.replace(/^\//,'')) + '\')">Edit</button>' : '') +
-          '<button class="btn" style="font-size:0.65rem;padding:2px 8px;" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + esc(usage) + '\');showToast(\'Copied!\')">Copy</button>' +
-          '<button class="btn" style="font-size:0.65rem;padding:2px 6px;" onclick="_skillToggle(\'' + id + '\',\'' + esc(fetchKey || '') + '\')" title="Expand">▾</button>' +
+          (editable ? '<button class="btn" style="font-size:0.65rem;padding:2px 8px;" onclick="event.stopPropagation();editSkill(\'' + escJs(cmd.replace(/^\//,'')) + '\')">Edit</button>' : '') +
+          '<button class="btn" style="font-size:0.65rem;padding:2px 8px;" onclick="event.stopPropagation();navigator.clipboard.writeText(\'' + escJs(usage) + '\');showToast(\'Copied!\')">Copy</button>' +
+          '<button class="btn" style="font-size:0.65rem;padding:2px 6px;" onclick="_skillToggle(\'' + id + '\',\'' + escJs(fetchKey || '') + '\')" title="Expand">▾</button>' +
         '</div>' +
       '</div>' +
       (desc ? '<div class="skill-card-desc">' + esc(desc) + '</div>' : '') +
@@ -35157,7 +35157,7 @@ function _skillRenderContent(raw) {
       html += '<div>' + t + '</div>';
     } else {
       const safeVal = p.val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const rawVal = p.val.replace(/'/g, "\\'").replace(/\n/g,'\\n');
+      const rawVal = escJs(p.val);
       html += '<div style="position:relative;margin:6px 0;">' +
         '<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 36px 8px 10px;font-size:0.75rem;overflow-x:auto;white-space:pre-wrap;word-break:break-all;margin:0;">' + safeVal + '</pre>' +
         '<button onclick="navigator.clipboard.writeText(\'' + rawVal + '\');showToast(\'Copied!\')" style="position:absolute;top:4px;right:4px;background:var(--border);border:none;border-radius:4px;padding:2px 6px;font-size:0.65rem;cursor:pointer;color:var(--text);">Copy</button>' +
