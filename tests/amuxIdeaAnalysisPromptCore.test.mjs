@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AMUX_V4_ANALYSIS_DATA_MAX_BYTES,
+  AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
@@ -75,6 +76,27 @@ test("missing idea, forged target and oversized data fail closed", () => {
   oversized.sourceTexts[1].text = "B".repeat(7_900);
   oversized.sourceTexts.push({ refId: "source_more", kind: "github_excerpt", text: "C".repeat(1_000) });
   assert.deepEqual(buildAmuxIdeaAnalysisPrompt(oversized),
+    { status: "hold", reason: "prompt_data_too_large" });
+});
+
+test("confirmed source excerpts share one 8 KiB UTF-8 limit", () => {
+  const within = valid();
+  within.sourceTexts[0].text = "A".repeat(7_900);
+  within.sourceTexts[1].text = "B".repeat(AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES - 7_900);
+  assert.equal(buildAmuxIdeaAnalysisPrompt(within).status, "prompt_candidate");
+
+  const over = valid();
+  over.sourceTexts[0].text = within.sourceTexts[0].text;
+  over.sourceTexts[1].text = `${within.sourceTexts[1].text}C`;
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(over),
+    { status: "hold", reason: "prompt_data_too_large" });
+
+  const korean = valid();
+  korean.sourceTexts = [{ refId: "source_idea", kind: "operator_idea",
+    text: "한".repeat(2_730) }];
+  assert.equal(buildAmuxIdeaAnalysisPrompt(korean).status, "prompt_candidate");
+  korean.sourceTexts[0].text += "한";
+  assert.deepEqual(buildAmuxIdeaAnalysisPrompt(korean),
     { status: "hold", reason: "prompt_data_too_large" });
 });
 

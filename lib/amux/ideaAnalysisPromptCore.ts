@@ -20,6 +20,7 @@ import {
  * credential-free sandbox. No live runner imports this module today. */
 export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v3" as const;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
+export const AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES = 8 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
 export const AMUX_V4_ANALYSIS_TARGET_CAP = 96;
 export const AMUX_V4_CONTINUATION_SCOPE_MAX_BYTES = 2_000;
@@ -197,14 +198,21 @@ function buildCheckedPrompt(
   }
   const sourceRefs = new Set<string>();
   let ideaCount = 0;
+  let sourceBytes = 0;
   // The confirmed payload is byte-exact; paired CRLF is allowed but never
   // normalized after the operator has reviewed the preview.
   for (const source of sourceTexts) {
     if (!amuxExactDataKeys(source, ["refId", "kind", "text"]) ||
         !amuxAnalysisRefSafe(source.refId) || sourceRefs.has(source.refId) ||
         !["operator_idea", "github_excerpt"].includes(source.kind) ||
-        typeof source.text !== "string" || source.text.trim().length === 0 ||
-        !amuxAnalysisInputTextSafe(source.text)) {
+        typeof source.text !== "string") {
+      return { status: "hold", reason: "prompt_data_unverified" };
+    }
+    sourceBytes += Buffer.byteLength(source.text, "utf8");
+    if (sourceBytes > AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES) {
+      return { status: "hold", reason: "prompt_data_too_large" };
+    }
+    if (source.text.trim().length === 0 || !amuxAnalysisInputTextSafe(source.text)) {
       return { status: "hold", reason: "prompt_data_unverified" };
     }
     sourceRefs.add(source.refId);
