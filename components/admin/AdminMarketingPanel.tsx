@@ -472,6 +472,47 @@ export function MarketingWebhookStaging({
   // write cannot be compared against, so no arm control is offered for it.
   const canArm = canWrite && staging.readable && !staging.faultArmUnreadable;
   const expectedGeneration = arm?.generation ?? 0;
+  const describeArm = (result: unknown) => {
+    const generation = (result as { generation?: unknown } | null)?.generation;
+    return typeof generation === "number"
+      ? m.webhookArmDone.replace("{generation}", String(generation))
+      : null;
+  };
+  const ttlField = {
+    name: "ttlMinutes",
+    label: m.fieldTtlMinutes,
+    kind: "number" as const,
+    initial: "30",
+    hint: m.hintTtl,
+  };
+  // Condition 4 needs an event delivered while the shadow was off: it has no
+  // report row to arm from, so it is named by Zernio's own event id.
+  const armByEventId: MarketingAction[] = canArm
+    ? [
+        {
+          id: "webhook-fault-arm-event-id",
+          label: m.webhookArmByEventId,
+          path: "/api/admin/marketing/webhook/fault-arm",
+          confirm: m.webhookArmConfirm,
+          fields: [
+            {
+              name: "eventId",
+              label: m.fieldZernioEventId,
+              kind: "text",
+              initial: "",
+              hint: m.hintZernioEventId,
+            },
+            ttlField,
+          ],
+          describe: describeArm,
+          body: (values) => ({
+            eventId: String(values.eventId ?? "").trim(),
+            expectedGeneration,
+            ttlMinutes: Number(values.ttlMinutes),
+          }),
+        },
+      ]
+    : [];
 
   return (
     <div
@@ -486,6 +527,7 @@ export function MarketingWebhookStaging({
       <p data-testid="marketing-webhook-arm-state" className="mt-3 text-xs text-zinc-300">
         {armLine}
       </p>
+      <MarketingActionRail actions={armByEventId} section={section} onDone={onDone} m={m} />
       {!staging.readable ? null : !staging.reportsReadable ? (
         // A list that could not be read is not an empty one.
         <p className="mt-3 text-xs text-amber-300">{m.webhookReportsUnreadable}</p>
