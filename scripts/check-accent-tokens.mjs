@@ -96,6 +96,7 @@ const KNOWN_ROLES = [
   "accent-promotion",
   "accent-web-search",
   "status-success",
+  "status-switch-on",
 ];
 
 const ROLE_UTILITY = new RegExp(
