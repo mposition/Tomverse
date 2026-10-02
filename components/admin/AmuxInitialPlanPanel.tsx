@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
@@ -27,16 +29,22 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
   ideaId: string | null; operatorId: string; available: boolean; declaredExternalSources: boolean;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
+  const { locale } = useAdminLocale();
   const [state, setState] = useState<PlanState>({ kind: "idle" });
+  const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [checkedIdeaId, setCheckedIdeaId] = useState<string | null>(null);
   const [readBackPending, setReadBackPending] = useState(false);
 
   const readBack = useCallback(async (pendingIdeaId: string) => {
     setReadBackPending(true);
+    setFailure(null);
     try {
       const query = new URLSearchParams({ ideaId: pendingIdeaId });
       const response = await adminFetch(`/api/admin/amux/ideas/initial-source-plan?${query}`, { cache: "no-store" });
+      setFailure(response.ok ? null : await readAdminApiFailure(response.clone(), {
+        fallback: m.initialPlanUnavailable, locale,
+      }));
       const decision = classifyInitialPlanReadback({ status: response.status,
         body: await response.json() }, pendingIdeaId);
       if (decision.kind === "committed") {
@@ -47,7 +55,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       }
     } catch { setState({ kind: "outcome_unknown", ideaId: pendingIdeaId }); }
     finally { setReadBackPending(false); }
-  }, [operatorId]);
+  }, [operatorId, locale, m.initialPlanUnavailable]);
 
   useEffect(() => {
     let active = true;
@@ -97,12 +105,16 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       setState({ kind: "recovery_unavailable" });
       return;
     }
+    setFailure(null);
     setState({ kind: "pending", ideaId });
     try {
       const response = await adminFetch("/api/admin/amux/ideas/initial-source-plan", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: 1, ideaId }),
       });
+      setFailure(response.ok ? null : await readAdminApiFailure(response.clone(), {
+        fallback: m.initialPlanUnavailable, locale,
+      }));
       const decision = classifyInitialPlanPost({ status: response.status,
         body: await response.json() }, ideaId);
       if (decision.kind === "committed") {
@@ -133,7 +145,8 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       {!available ? <p className="text-zinc-600 dark:text-zinc-400">{m.initialPlanUnavailable}</p> : null}
       {state.kind === "pending" ? <p role="status">{m.initialPlanPreparing}</p> : null}
       {state.kind === "committed" ? <p role="status">{m.initialPlanCommitted(state.ideaId)}</p> : null}
-      {state.kind === "refused" ? <p role="alert">{m.initialPlanRefused(state.code)}</p> : null}
+      {state.kind === "refused" && !failure ? <p role="alert">{m.initialPlanRefused(state.code)}</p> : null}
+      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       {state.kind === "recovery_unavailable" ? <p role="alert">{m.recoveryUnavailable}</p> : null}
       {state.kind === "outcome_unknown" ? (
         <div role="alert" className="space-y-2">
