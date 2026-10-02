@@ -4,8 +4,30 @@ import test from "node:test";
 import {
   AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED,
   amuxV4AnalysisResultReadEnabled,
+  matchesAmuxIdeaAnalysisUnitCommitments,
   parseAmuxIdeaAnalysisResultView,
 } from "../lib/amux/ideaAnalysisResultReadCore.ts";
+
+test("analysis audit commitments reject a changed, missing or reordered unit", () => {
+  const units = [
+    { id: "unit-01", localRef: "c0:node-0", unitKind: "node",
+      bodyDigest: "a".repeat(64), bodyDigestKeyId: "key-01" },
+    { id: "unit-02", localRef: "c0:card-0", unitKind: "card",
+      bodyDigest: "b".repeat(64), bodyDigestKeyId: "key-01" },
+  ];
+  const commitments = units.map((unit) => ({ id: unit.id,
+    localRef: unit.localRef, kind: unit.unitKind,
+    digest: unit.bodyDigest, digestKeyId: unit.bodyDigestKeyId }));
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(commitments, units), true);
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(commitments, units.toReversed()), false);
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(commitments.slice(1), units), false);
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
+    commitments[0], { ...commitments[1], digest: "c".repeat(64) },
+  ], units), false);
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
+    commitments[0], { ...commitments[1], unexpected: "text" },
+  ], units), false);
+});
 
 test("the owner result read remains dark even if its environment value is enabled", () => {
   assert.equal(AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED, false);

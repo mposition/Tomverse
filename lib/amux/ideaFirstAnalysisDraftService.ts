@@ -181,6 +181,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       outcome: prepared.draft.outcome,
       freeformDigest: prepared.draft.freeform.digest,
       freeformDigestKeyId: prepared.draft.freeform.digestKeyId,
+      unitCommitments: prepared.draft.units.map((unit) => ({
+        id: unit.id, localRef: unit.localRef, kind: unit.unitKind,
+        digest: unit.body.digest, digestKeyId: unit.body.digestKeyId,
+      })),
       cardRegistrationStarted: false },
   });
   const completedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({
