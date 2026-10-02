@@ -103,7 +103,7 @@ tokio-tungstenite = "0.24"
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license-file = "LICENSE"
 
 # Fast iteration: thin LTO only for release, debug builds favor compile speed.
 [profile.release]

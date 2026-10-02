@@ -52,3 +52,15 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      - name: Build vendored AMUX server
+        working-directory: vendor/amux
+        run: cargo build -p amux-server --locked
+
+      - name: Test vendored AMUX Cursor integration
+        working-directory: vendor/amux
+        run: cargo test -p amux-server --lib cursor --locked
+
+      - name: Check vendored AMUX Docker build inputs
+        working-directory: vendor/amux
+        run: cargo test -p amux-server --test dockerfile_build_inputs --locked

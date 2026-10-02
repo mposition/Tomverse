@@ -2,7 +2,7 @@
 name = "amux-core"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 description = "amux shared types and pure logic: scope resolution, board state machine, command/event protocol. No I/O."
 
 [dependencies]
