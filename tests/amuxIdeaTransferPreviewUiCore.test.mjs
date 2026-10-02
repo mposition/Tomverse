@@ -4,7 +4,8 @@ import test from "node:test";
 
 import {
   clearRefusedPreviewReceipt, definitivePreviewPrewriteRefusal,
-  readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
+  readPreparedIdeaTransferPreview, readPreviewReceipt, readPreviewWriteReply,
+  replacePreviewReceipt,
   reservePreviewReceipt,
 } from "../lib/amux/ideaTransferPreviewUiCore.ts";
 
@@ -105,6 +106,20 @@ test("definite pre-write refusals release only their exact receipt; unknown outc
   assert.deepEqual(readPreviewReceipt(storage, "operator", ideaId), { kind: "absent" });
 });
 
+test("a consumed refusal still has a readable server error for the Admin notice", async () => {
+  const response = new Response(JSON.stringify({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }),
+    { status: 428, headers: { "content-type": "application/json" } });
+  const reply = await readPreviewWriteReply(response);
+  assert.equal(reply.definitiveRefusal, true);
+  assert.deepEqual(reply.body, { error: "ADMIN_REAUTHENTICATION_REQUIRED" });
+  assert.deepEqual(await reply.refusalResponse.json(), reply.body,
+    "the notice must not throw after the original response was consumed");
+
+  const ambiguous = await readPreviewWriteReply(new Response(
+    JSON.stringify({ error: "outcome_unknown" }), { status: 503 }));
+  assert.equal(ambiguous.definitiveRefusal, false);
+});
+
 test("Admin UI gates preparation on an observed idea-only plan and provides exact-ID read-back", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");
@@ -113,9 +128,8 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(panel, /!previewAvailable \|\| !planReady \|\| declaredExternalSources/);
   assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId,/);
   assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
-  assert.match(panel, /definitivePreviewPrewriteRefusal\(response\.status, body\)/);
+  assert.match(panel, /readPreviewWriteReply\(response\)/);
   assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId\)/);
-  assert.match(panel, /const refusalResponse = response\.clone\(\);\s*const body: unknown = await response\.json\(\)/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);

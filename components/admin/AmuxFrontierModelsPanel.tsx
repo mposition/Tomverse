@@ -13,8 +13,9 @@ import {
   type AvailableFrontierModel,
 } from "@/lib/amux/ideaFrontierCatalogUiCore";
 import {
-  clearRefusedPreviewReceipt, definitivePreviewPrewriteRefusal,
-  readPreparedIdeaTransferPreview, readPreviewReceipt, replacePreviewReceipt,
+  clearRefusedPreviewReceipt,
+  readPreparedIdeaTransferPreview, readPreviewReceipt, readPreviewWriteReply,
+  replacePreviewReceipt,
   reservePreviewReceipt,
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
@@ -258,12 +259,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           reasoningEffort: effort, approvalId: model.approvalId,
           approvalVersion: model.approvalVersion }),
       });
-      const refusalResponse = response.clone();
-      const body: unknown = await response.json();
+      const { body, refusalResponse, definitiveRefusal } = await readPreviewWriteReply(response);
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
         previewId, ideaId, model, effort);
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
-      if (definitivePreviewPrewriteRefusal(response.status, body)) {
+      if (definitiveRefusal) {
         const released = previous?.kind === "present"
           ? replacePreviewReceipt(receiptStore(), operatorId, ideaId,
             previewId, previous.previewId, previous.model, previous.effort)

@@ -139,6 +139,20 @@ export function definitivePreviewPrewriteRefusal(status: number, body: unknown):
   return status === 503 && error === "preview_disabled";
 }
 
+/** Keep a readable response for the Admin error notice before consuming JSON.
+ * A definite refusal must not fall through to ambiguous ID read-back merely
+ * because its body was already consumed. */
+export async function readPreviewWriteReply(response: Response): Promise<{
+  body: unknown;
+  refusalResponse: Response;
+  definitiveRefusal: boolean;
+}> {
+  const refusalResponse = response.clone();
+  const body: unknown = await response.json();
+  return { body, refusalResponse,
+    definitiveRefusal: definitivePreviewPrewriteRefusal(response.status, body) };
+}
+
 /** A generic 503 or lost response is never proof that the write did not land. */
 export function clearRefusedPreviewReceipt(storage: Storage | null,
   operatorId: string, ideaId: string, expectedPreviewId: string): boolean {

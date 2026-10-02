@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sealAmuxAnalysisDraft } from "../lib/amux/ideaAnalysisDraftSealCore.ts";
+import { amuxAnalysisFreeformSubjectId, sealAmuxAnalysisDraft } from "../lib/amux/ideaAnalysisDraftSealCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "../lib/amux/ideaCrypto.ts";
 
 const keys = {
@@ -76,12 +76,15 @@ test("coverage and owner question are sealed separately from proposal units", ()
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.equal(result.draft.units.length, 1);
-  const freeform = openAmuxContent(result.draft.freeform, "analysis_freeform", "preview-01", keys);
+  const freeform = openAmuxContent(result.draft.freeform, "analysis_freeform",
+    amuxAnalysisFreeformSubjectId("idea-01", "preview-01"), keys);
   const decoded = JSON.parse(freeform.toString("utf8"));
   assert.equal(decoded.ownerQuestion, value.ownerQuestion);
   assert.equal("units" in decoded, false);
   assert.throws(() => openAmuxContent(result.draft.freeform,
-    "analysis_freeform", "preview-02", keys));
+    "analysis_freeform", amuxAnalysisFreeformSubjectId("idea-01", "preview-02"), keys));
+  assert.throws(() => openAmuxContent(result.draft.freeform,
+    "analysis_freeform", amuxAnalysisFreeformSubjectId("idea-02", "preview-01"), keys));
 });
 
 test("unapproved source and invalid idea identity are refused before sealing", () => {

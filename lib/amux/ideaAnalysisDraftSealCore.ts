@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import {
@@ -36,6 +36,17 @@ export type SealedAmuxAnalysisDraft = {
   units: SealedAmuxDraftUnit[];
 };
 
+/** Stable AAD identity for the exact idea and attempt, without a length cap
+ * inherited from either external reference. IDs are not content digests. */
+export function amuxAnalysisFreeformSubjectId(ideaId: string, previewId: string): string {
+  return createHash("sha256")
+    .update("amux-v4-analysis-freeform\0", "utf8")
+    .update(ideaId, "utf8")
+    .update("\0", "utf8")
+    .update(previewId, "utf8")
+    .digest("hex");
+}
+
 /**
  * Turn one bounded, untrusted model response into independently encrypted
  * proposal bodies. This does not verify a source plan, cursor, lease, budget,
@@ -70,11 +81,11 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
     remainingScope: chunk.remainingScope,
   }), "utf8");
   try {
-    // Preview IDs are globally unique and already bound to this idea/chunk by
-    // the checked response. Binding the envelope to the exact preview also
-    // prevents a retry's freeform body from being swapped into this attempt.
+    // The parser checks the preview and chunk but not the idea. The future
+    // writer must verify the preview row belongs to this idea; AAD binds both
+    // IDs so a different idea or retry cannot open the swapped envelope.
     const freeform = sealAmuxContent(freeformBytes, "analysis_freeform",
-      chunk.previewId, input.keys);
+      amuxAnalysisFreeformSubjectId(input.ideaId, chunk.previewId), input.keys);
     const units = chunk.units.map((unit, unitIndex): SealedAmuxDraftUnit => {
       const id = randomUUID();
       const bytes = Buffer.from(amuxCanonicalJson(unit), "utf8");
