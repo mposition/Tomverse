@@ -9,17 +9,6 @@ const DEFAULTS = {
   maxBundleBytes: 50 * 1024 * 1024,
   maxPromptDiffBytes: 300 * 1024,
   maxOutputBytes: 8 * 1024 * 1024,
-  maxStderrBytes: 1024 * 1024,
-  // Bytes of objects the change introduces, after decompression: a small
-  // bundle can carry a blob that inflates to gigabytes in the worktree.
-  maxChangeBytes: 200 * 1024 * 1024,
-  // Jobs with any review not yet done. A forced-command key cannot queue more.
-  maxPendingJobs: 20,
-  retentionDays: 30,
-  // A base must be in the history of one of these protected branches: the
-  // reviewer's instruction files come from the base, so a base the submitter
-  // pushed to any other branch could carry instructions of its own.
-  trustedBaseRefs: ["refs/heads/develop", "refs/heads/main"],
   pollMs: 2000,
 };
 
@@ -58,16 +47,6 @@ export function validateConfig(raw) {
     if (typeof repo?.url !== "string" || typeof repo?.mirror !== "string") {
       errors.push(`repos.${name}: url and mirror`);
     }
-  }
-  if (
-    !Array.isArray(config.trustedBaseRefs) ||
-    config.trustedBaseRefs.length === 0 ||
-    !config.trustedBaseRefs.every((ref) => typeof ref === "string" && /^refs\/heads\/[A-Za-z0-9._/-]+$/.test(ref))
-  ) {
-    errors.push("trustedBaseRefs: one or more refs/heads/<branch>");
-  }
-  for (const key of ["maxChangeBytes", "maxPendingJobs", "maxStderrBytes", "retentionDays"]) {
-    if (!(Number.isInteger(config[key]) && config[key] > 0)) errors.push(`${key}: positive integer`);
   }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();

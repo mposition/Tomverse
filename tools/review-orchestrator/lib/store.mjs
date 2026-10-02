@@ -51,10 +51,6 @@ export class Store {
     rmSync(join(this.stagingDir, id), { recursive: true, force: true });
   }
 
-  removeJob(id) {
-    rmSync(this.jobDir(id), { recursive: true, force: true });
-  }
-
   /** Publish a staged job: job.json plus queued slots, made visible by one rename. */
   publish(job) {
     const staging = this.stagingFor(job.id);

@@ -28,10 +28,9 @@
       "command": "claude",
       "args": [
         "-p",
-        "--strict-mcp-config",
         "--output-format", "text",
         "--allowedTools", "Read,Grep,Glob",
-        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent,Task"
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
       ]
     },
     {

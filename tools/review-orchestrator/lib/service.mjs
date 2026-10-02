@@ -4,17 +4,7 @@ import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
-import {
-  addWorktree,
-  changedFiles,
-  deleteReviewRef,
-  diffText,
-  ensureMirror,
-  importBundle,
-  instructionDiff,
-  isolateInstructionFiles,
-  removeWorktree,
-} from "./git.mjs";
+import { addWorktree, changedFiles, diffText, ensureMirror, importBundle, instructionDiff, isolateInstructionFiles, removeWorktree } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
@@ -53,59 +43,40 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
 
   const store = new Store(config.stateDir);
   const id = newJobId(now);
-  // Counting pending jobs and publishing this one happen under one lock, so
-  // concurrent submits cannot all read the same count and all pass the cap.
-  return withLock(mirrorLock(config), () => {
-    const pending = store.listJobs().filter(({ slots }) => slots.some((slot) => slot.status !== "done")).length;
-    if (pending >= config.maxPendingJobs) {
-      throw new UsageError("queue_full", `${pending} jobs are still pending; wait for one to finish`);
-    }
-    let imported = false;
-    try {
+  try {
+    const files = await withLock(mirrorLock(config), () => {
       ensureMirror(repo);
-      importBundle({
-        mirror: repo.mirror,
-        bundlePath,
-        bundleRef: request.bundleRef,
-        jobId: id,
-        base,
-        head,
-        trustedBaseRefs: config.trustedBaseRefs,
-        maxChangeBytes: config.maxChangeBytes,
-      });
-      imported = true;
-      const files = changedFiles(repo.mirror, base, head);
-      if (files.length === 0) throw new UsageError("empty_change");
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
-      const available = independentVendorCount(config.providers, authorVendor);
-      if (available < reviewers) {
-        throw new UsageError(
-          "insufficient_independent_reviewers",
-          `needs ${reviewers} vendors other than ${authorVendor}, ${available} configured`,
-        );
-      }
-      const job = {
-        id,
-        repo: repoName,
-        base,
-        head,
-        author,
-        authorVendor,
-        reviewers,
-        touchesContract,
-        scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
-        fileCount: files.length,
-        submittedAt: now.getTime(),
-      };
-      store.publish(job);
-      return { jobId: id, reviewers, touchesContract, fileCount: files.length };
-    } catch (error) {
-      store.discardStaging(id);
-      // A refused job leaves no review ref behind either.
-      if (imported) deleteReviewRef(repo.mirror, id);
-      throw error;
+      importBundle({ mirror: repo.mirror, bundlePath, bundleRef: request.bundleRef, jobId: id, base, head });
+      return changedFiles(repo.mirror, base, head);
+    });
+    if (files.length === 0) throw new UsageError("empty_change");
+    const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
+    const available = independentVendorCount(config.providers, authorVendor);
+    if (available < reviewers) {
+      throw new UsageError(
+        "insufficient_independent_reviewers",
+        `needs ${reviewers} vendors other than ${authorVendor}, ${available} configured`,
+      );
     }
-  });
+    const job = {
+      id,
+      repo: repoName,
+      base,
+      head,
+      author,
+      authorVendor,
+      reviewers,
+      touchesContract,
+      scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
+      fileCount: files.length,
+      submittedAt: now.getTime(),
+    };
+    store.publish(job);
+    return { jobId: id, reviewers, touchesContract, fileCount: files.length };
+  } catch (error) {
+    store.discardStaging(id);
+    throw error;
+  }
 }
 
 /** Environment a reviewer process gets: an allowlist, never the daemon's own. */
@@ -138,30 +109,6 @@ export class Orchestrator {
     this.killers = new Set();
     this.workRoot = join(config.stateDir, "worktrees");
     mkdirSync(this.workRoot, { recursive: true });
-  }
-
-  /**
-   * Remove finished jobs older than the retention period, with their review
-   * refs, so neither the state directory nor the mirror grows without bound.
-   */
-  async prune() {
-    const cutoff = this.now() - this.config.retentionDays * 24 * 60 * 60 * 1000;
-    const expired = this.store
-      .listJobs()
-      // Retention runs from when the last review finished, not from submission:
-      // a job that waited long must not vanish the moment it completes.
-      .filter(
-        ({ job, slots }) =>
-          slots.every((slot) => slot.status === "done") &&
-          Math.max(job.submittedAt, ...slots.map((slot) => slot.endedAt ?? job.submittedAt)) < cutoff,
-      );
-    for (const { job } of expired) {
-      const repo = this.config.repos[job.repo];
-      if (repo) await withLock(mirrorLock(this.config), () => deleteReviewRef(repo.mirror, job.id));
-      this.store.removeJob(job.id);
-    }
-    if (expired.length > 0) this.log(`pruned ${expired.length} job(s) older than ${this.config.retentionDays} days`);
-    return expired.length;
   }
 
   recoverOrphans() {
@@ -318,14 +265,7 @@ export class Orchestrator {
         chunks.push(chunk);
         out.write(chunk);
       });
-      let stderrSize = 0;
-      child.stderr.on("data", (chunk) => {
-        // stderr is diagnostic only; keep the head of it and drop the rest.
-        if (stderrSize >= this.config.maxStderrBytes) return;
-        const room = this.config.maxStderrBytes - stderrSize;
-        err.write(chunk.length > room ? chunk.subarray(0, room) : chunk);
-        stderrSize += Math.min(chunk.length, room);
-      });
+      child.stderr.on("data", (chunk) => err.write(chunk));
       child.on("error", () => done({ verdict: "unknown", reason: "reviewer_spawn_failed", findings: [] }));
       child.on("close", (code) => {
         if (timedOut) return done({ verdict: "unknown", reason: "timeout", findings: [] });

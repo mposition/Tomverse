@@ -33,31 +33,8 @@
 자격증명은 SSH key뿐이며 production 자격증명은 필요 없습니다. 읽기 전용입니다:
 로컬 저장소에는 임시 ref 하나를 만들었다 바로 지웁니다.
 
-처음 한 번은 키와 SSH 별칭을 준비합니다(**로컬 PC의 PowerShell, 아무 폴더**).
-
 ```powershell
-ssh-keygen -t ed25519 -f $HOME\.ssh\review_orch -C windows-pc   # 암호 질문에는 Enter만 두 번
-ssh-keygen -y -P "" -f $HOME\.ssh\review_orch > $null; "no-passphrase-exit=$LASTEXITCODE"   # 0이어야 합니다
-notepad $HOME\.ssh\config   # 아래 블록을 추가
-ssh -o StrictHostKeyChecking=accept-new review-orch   # 서버 지문 등록. rpc_missing JSON이 나오면 정상
-```
-
-```
-Host review-orch
-  HostName <서버 주소>
-  User <CLI가 로그인된 계정>
-  IdentityFile ~/.ssh/review_orch
-  IdentitiesOnly yes
-```
-
-- `-N '""'`로 빈 암호를 주지 않습니다. PowerShell 7은 따옴표 두 글자를 암호로 넘기고,
-  클라이언트는 `BatchMode`라 암호를 물을 수 없어 `Permission denied`가 납니다.
-- 지문을 등록하지 않으면 같은 이유로 `Host key verification failed`가 납니다.
-- 클라이언트는 이 도구가 들어 있는 checkout(현재 develop)에서만 `npm run review`로 부를 수
-  있습니다. `npm run -s`는 "Missing script" 오류도 숨기므로 `$LASTEXITCODE`를 봅니다.
-
-```powershell
-$env:REVIEW_ORCH_HOST = "review-orch"   # 이 창을 닫으면 사라집니다
+$env:REVIEW_ORCH_HOST = "review@review-server"   # 이 창을 닫으면 사라집니다
 npm run -s review -- submit --author codex --scope "무엇을 왜 바꿨는지 한두 줄"
 npm run -s review -- wait r-20261002-061500-a1b2c3
 ```
@@ -110,16 +87,8 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 - 각 CLI가 **헤드리스로, stdin 프롬프트를 받아, 파일을 쓰지 않고** 끝나는지.
   `codex exec --sandbox read-only -`와 `cursor-agent --print --mode ask --trust`는
   Windows에서 쓰던 형태입니다. `claude -p`는 Read·Grep·Glob만 허용하고 Bash를 막습니다
-  (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). subagent
-  도구(`Agent`, `Task`)도 막습니다. `--strict-mcp-config`는 구독 계정에 붙은 claude.ai
-  커넥터(결제·배포 도구 포함)를 검토 세션에 아예 싣지 않습니다. 2026-10-02 Ubuntu 서버에서
-  세 CLI 모두 쓰기 요청을 거절하고 json 블록으로 끝나는 것을 확인했고, Codex는 stdout에
-  최종 답만 냅니다.
-- Claude 로그인: SSH 터미널에 붙여 넣기가 안 되면 브라우저가 있는 PC에서
-  `claude setup-token`으로 1년짜리 토큰을 만들어 `CLAUDE_CODE_OAUTH_TOKEN`으로 줍니다
-  (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
-  `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
-  붙여 넣기 없이 로그인합니다.
+  (`git diff --output=`으로 파일을 쓸 수 있으므로 git 명령도 열지 않습니다). 이 조합은
+  새로 적은 것이라 아직 검증되지 않았습니다. 셋 다 Linux 버전에서 확인합니다.
 - Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
   `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
 
@@ -130,35 +99,6 @@ reviewer CLI는 작업 디렉터리의 지시 파일(`AGENTS.md`, `CLAUDE.md`, `
 reviewer의 checkout에서는 **base 버전으로 되돌리고** 고친 내용은 diff로만 보여 줍니다.
 그래도 diff 본문 속 문장이 reviewer를 흔들 수는 있으므로, 판정은 마지막 json 블록과
 결정적 규칙으로만 하고 reviewer의 결론 문장을 그대로 믿지 않습니다.
-
-base는 `trustedBaseRefs`(기본 `develop`·`main`)의 이력 안에 있어야 합니다. 지시 파일이
-base에서 오므로, 아무 브랜치에나 push한 commit을 base로 지정해 지시를 심을 수 없게
-하는 장치입니다(`base_not_trusted`). 기본 base(`origin/develop`과의 분기점)와
-`--base origin/main`은 항상 통과합니다.
-
-## reviewer가 읽을 수 있는 것
-
-reviewer CLI는 자기 계정이 읽을 수 있는 파일을 모두 읽을 수 있습니다. 주입된 지시가
-그것을 검토 답에 담으면 유출이고, 유출은 되돌릴 수 없습니다. 그래서 **reviewer 전용
-계정**으로 돌립니다. 그 계정에는 reviewer CLI의 로그인 세션만 두고, 다른 계정의 홈은
-읽을 수 없게 둡니다. 같은 구독 계정으로 로그인해도 그 세션은 따로 해지할 수 있고,
-SSH 키·다른 작업의 소스는 보이지 않습니다.
-
-## 디스크와 대기열 상한
-
-| 설정 | 기본값 | 넘으면 |
-|---|---|---|
-| `maxBundleBytes` | 50 MiB | 전송 중에 `bundle_too_large` |
-| `maxChangeBytes` | 200 MiB (압축 해제 기준 새 객체 총량) | worktree를 만들기 전에 `change_too_large` |
-| `maxPendingJobs` | 20 | `queue_full` |
-| `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
-| `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
-
-## 알려진 한계
-
-- `--author`와 `--author-vendor`는 요청자가 스스로 밝히는 값입니다. 세 앱이 같은 Windows
-  계정에서 돌기 때문에 앱마다 키를 나눠도 강제할 수 없습니다. 잘못 밝히면 같은 공급사가
-  검토할 수 있으므로, 지시 파일의 호출 규칙이 앱마다 자기 이름을 쓰게 합니다.
 
 ## 저장 위치
 
