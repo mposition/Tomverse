@@ -27,6 +27,7 @@ import {
 } from "@/lib/productResearchObservationCore.mjs";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
 import { prisma } from "@/lib/prisma";
+import { readProductResearchEnabledSince } from "@/lib/productResearchObservationStore";
 import { slotForInstant } from "@/lib/productResearchObservationRunnerCore.mjs";
 
 /** How many slots the screen lists, and says it lists. */
@@ -65,8 +66,10 @@ export type ProductResearchConsoleView = {
   limit: number;
   retentionDays: number;
   silenceHours: number;
-  silence: { state: string; sinceHours: number | null };
+  silence: { state: string; sinceHours: number | null; measuredFrom: string | null };
   lastSuccessAt: string | null;
+  /** When the app side was first seen switched on, or null. */
+  enabledSince: string | null;
   slots: ProductResearchSlotView[];
   /** The newest successful slot's rows, or an empty list when there is none. */
   latest: {
@@ -156,6 +159,8 @@ export async function readProductResearchConsole(
     });
 
   const newestSuccess = rows.find((row) => row.outcome === "ok") ?? null;
+  // Reads the anchor, and writes it the first time the switch is seen on.
+  const enabledSince = enabled ? await readProductResearchEnabledSince(now) : null;
 
   // The payload is read in its own query, for the one slot being displayed: it
   // is the only large column, and loading thirty of them to show one would put
@@ -187,9 +192,13 @@ export async function readProductResearchConsole(
     silence: observationSilenceVerdict({
       enabled,
       lastSuccessAt: newestSuccess?.slot.getTime() ?? null,
+      // The anchor outlives the rows, so the screen keeps saying how long it has
+      // been after the retention sweep has removed every row there was.
+      enabledSince: enabledSince?.getTime() ?? null,
       now: now.getTime(),
     }),
     lastSuccessAt: newestSuccess?.slot.toISOString() ?? null,
+    enabledSince: enabledSince?.toISOString() ?? null,
     slots,
     latest:
       latestRow === null || payload === null
