@@ -1711,8 +1711,9 @@ Non-negotiable requirements:
      `codex`, Cursor는 `cursor`이고, Cursor는 실제로 쓴 모델의 공급사를
      `--author-vendor`(`anthropic`·`openai`·`xai`·`google` 등)로 함께 적습니다.
      서버가 이 값으로 같은 공급사를 빼므로, 다른 앱의 이름을 쓰지 않습니다.
-   - base 기본값은 `origin/develop`과의 분기점입니다. main에서 나온 브랜치는
-     `--base origin/main`을 붙입니다. base는 develop이나 main의 이력 안에 있어야 합니다.
+   - base는 클라이언트가 고릅니다. `origin/develop`과 `origin/main`의 분기점 중 **더 가까운 것**이
+     base가 되므로 `--base`는 붙이지 않습니다. 먼 기준점은 이미 병합된 남의 변경을 끌고 와서
+     reviewer를 둘로 늘리고 대기열을 막습니다(2026-10-02, 대기 20건 전부가 그랬습니다).
    - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
      올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
    - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.
