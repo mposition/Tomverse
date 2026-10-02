@@ -61,6 +61,10 @@ export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE = "analysis-budget-expire-v1" 
 export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_SETTLED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" as const;
+/** An uncertain CLI outcome blocks further analysis until read-back and owner resolution. */
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
 /** Policy v6: an unfinished idea stops at its immutable seven-day deadline. */
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
@@ -124,6 +128,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
+    return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
   }
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
