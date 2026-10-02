@@ -6,11 +6,12 @@
 - 같은 문서 §5.2a: 로그인과 가입의 분리(v25)
 - 같은 문서 §5.4: 제품 내 안내(S8)
 - 같은 문서 §7.7: 처리 결과 알림(S6b)
-- 주소가 증명된 세션의 즉시 동의(B안): docs/policy/email-double-opt-in.md §14, Microsoft 포함 §14.7
+- 주소가 증명된 세션의 즉시 동의(B안): docs/policy/email-double-opt-in.md §14, Microsoft 포함 §14.7,
+  가입 opt-in의 세 항목과 결과 알림 한 통 §14.8
 
 이 체크리스트를 실행하고 서명하는 것이 production에서 `feature.emailSignupConsentEnabled`를 켜기 위한 전제 조건입니다.
 
-- **template revision**: `2026-10-01a`
+- **template revision**: `2026-10-02a`
 
 ## 이 문서는 template입니다
 
@@ -94,13 +95,16 @@ A·B·C·D가 그 경로들입니다.
 
 - [ ] staging이 서빙 중인 **전체 40자리 SHA**를 `GET /api/build-info`에서 읽음.
       merge SHA를 옮겨 적지 않습니다.
-- [ ] 그 SHA가 `8219eea1`(PR #1804 merge) 이후임 — 여백(#1801)·동의 메일 디자인(#1802)·Microsoft 증명(#1804) 포함
+- [ ] 그 SHA가 `3e3a7d30`(PR #1854 merge) 이후임 — 여백(#1801)·동의 메일 디자인(#1802)·Microsoft 증명(#1804)·가입 opt-in 세 항목(#1854) 포함
 - [ ] staging DB의 `feature.emailSignupConsentEnabled`와
       `feature.emailConsentConfirmationEnabled`가 둘 다 `true`임
 - [ ] 실행자의 접속 국가가 marketing 허용 국가(`MARKETING_ALLOWED_COUNTRY_CODES`)임.
       아니면 장치가 **나타나지 않는 것이 정상**이고, 이 회차는 다른 것을 측정합니다.
 - [ ] **새 주소와 새 OAuth 계정.** staging DB는 production 사본이므로, production에
       한 번이라도 가입한 Google·Microsoft 계정이나 주소는 **기존 계정**입니다.
+      계정을 지우고 같은 주소를 다시 쓰면 그 주소의 **거부 기록이 남아 있습니다** —
+      거부는 계정이 아니라 주소에 붙으므로, 거부한 적 있는 주소에는 제품 내 안내가
+      뜨지 않습니다.
       이메일 주소는 `+` 태그로 나눠도 됩니다(정규화 v1은 소문자화만 하므로 서로
       다른 주소입니다).
 - [ ] 계정마다 **새 시크릿 창**을 씁니다.
@@ -133,13 +137,15 @@ A·B·C·D가 그 경로들입니다.
       (`capturedVia=signup_form`), 확인 메일 없음, `UserSettings.country`에 IP
       추정 국가.
 - [ ] **A-2 (동의, 증명된 세션, G)** 동의 체크만 하고 Google로 가입.
-      기대: 가입 직후 `notice_shown`과 `product_updates` **`granted`**
-      (`evidence.confirmedVia=verified_session`, `proof=google_verified`,
-      `capturedVia=signup_form`), `EmailPreference.confirmedAt` 있음. **확인 메일
-      (`marketing_consent_confirmation`)은 없고**, `consent_result_notice` 1통만.
+      기대: 가입 직후 `notice_shown`과 **세 항목**(`product_updates`·`newsletter`·
+      `promotions`) 각각 **`granted`**(`evidence.confirmedVia=verified_session`,
+      `proof=google_verified`, `capturedVia=signup_form`), 세 `EmailPreference` 모두
+      켜지고 `confirmedAt` 있음(docs/policy/email-double-opt-in.md §14.8). **확인 메일
+      (`marketing_consent_confirmation`)은 없고**, `consent_result_notice`는 **1통**만
+      (세 항목에 한 통). 이메일 설정 화면에서 세 스위치가 켜져 보임.
 - [ ] **A-3 (동의, Microsoft, M)** 동의 체크만 하고 Microsoft로 가입.
       기대: Microsoft 로그인도 주소 증명이므로(docs/policy/email-double-opt-in.md §14.7)
-      가입 직후 `notice_shown`과 `product_updates` **`granted`**
+      가입 직후 `notice_shown`과 세 항목 각각 **`granted`**
       (`confirmedVia=verified_session`, `proof=microsoft_signin`). **확인 메일은 없고**,
       `consent_result_notice` 1통만. "무선택"은 C-3이 확인합니다.
 
@@ -178,7 +184,10 @@ E4로 가입하면 다시 `true`로 씁니다. 두 쓰기는 기록의 관측 �
 남깁니다.
 
 - [ ] **D-1 (E4)** flag가 꺼진 동안 `/auth/signup`에서 E4로 가입(장치가 **없음**을
-      확인), flag를 다시 켠 뒤 새로고침.
+      확인). 가입을 마치면 에이전트에게 알리고, flag가 다시 켜진 **뒤에** 같은 창의
+      **새 탭**에서 staging을 열고 1–2초 뒤 한 번 더 새로고침. 국가 추정은 탭마다 한
+      번만 보내므로, flag가 꺼진 동안 열었던 탭에서는 국가가 기록되지 않고 안내도
+      뜨지 않습니다. E4는 거부 이력이 없는 새 주소여야 합니다(사전 조건).
       기대: 제품 화면에 안내("제품 소식을 이메일로 받아보시겠습니까?")가 뜨고, 렌더
       시점에 `notice_shown`(`capturedVia=in_product_notice`).
 - [ ] **D-2** "받지 않겠습니다" 클릭. 기대: 창이 닫히고 `objected` 1건.
@@ -191,8 +200,8 @@ E4로 가입하면 다시 `true`로 씁니다. 두 쓰기는 기록의 관측 �
 - [ ] **E-2 (E6)** 같은 방식으로 만든 계정(이메일 코드 로그인 = 증명된 세션)에서
       "네, 받겠습니다" → 이메일 설정 화면으로 이동, 세 항목이 **즉시 켜짐**.
       기대: `granted` 3건(`evidence.via=in_product_notice`,
-      `confirmedVia=verified_session`), 확인 메일 없음. 처리 결과 알림은 동의 기록마다
-      나가므로 **3통**입니다 — 한 번의 "네"에 3통이 가는 것은 관측으로 적습니다.
+      `confirmedVia=verified_session`), 확인 메일 없음. 처리 결과 알림은 한 번의 "네"에
+      **1통**입니다(docs/policy/email-double-opt-in.md §14.8).
 - [ ] **E-3** A-2(또는 A-3)의 `consent_result_notice`가 도착하고 발신자·처리 내용·결과·날짜를
       적음. 환영 메일과 같은 디자인(로고·카드·제목 띠)이고, 문구는 승인 문안 그대로(#1802).
 - [ ] **E-4 (G)** 이메일 설정에서 marketing을 모두 끔 → `withdrawn`과
