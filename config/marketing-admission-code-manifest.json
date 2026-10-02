@@ -6,8 +6,8 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "749d41f1867b630c6b8a098a306d723c2a2ded01a8916b23e7556296ac66caf8",
-  "totalSizeBytes": 435961,
+  "digest": "d4e67b6b286540b2819374f4658d8a59c249d9f98ffc54747f2cae1c69cbfdfb",
+  "totalSizeBytes": 484755,
   "files": [
     {
       "path": "lib/adminAudit.ts",
@@ -36,18 +36,18 @@
     },
     {
       "path": "lib/marketingAuditEvidence.ts",
-      "sizeBytes": 9816,
-      "sha256": "3eb055b2ad783a15def3f4942db243420514cbabe448cc5041c66cde4a406309"
+      "sizeBytes": 13105,
+      "sha256": "58397e487ef89322c66f23c0a25d4239561d28aa1f932c3e48c20b4a67d37f23"
     },
     {
       "path": "lib/marketingAutomationAccess.ts",
       "sizeBytes": 38157,
-      "sha256": "dbec2416b3f4838eef2ffcfc7aaf8ef4af224df1862b03789757258fa87b9947"
+      "sha256": "013b72ac87bc7645a2a8cb1b5c6feb707abb8267c7d3e606ca6390bdc52b6fa2"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
-      "sizeBytes": 30616,
-      "sha256": "3c72dc347094a20c51406e97478e00821dfc31853a6446dec5fa027712ac706b"
+      "sizeBytes": 32448,
+      "sha256": "59617d8fcece79f15e66ab8a2477ad58834d1ee0e30fc3429c89eaaeb2886c1b"
     },
     {
       "path": "lib/marketingBannedClaims.ts",
@@ -101,8 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 159481,
-      "sha256": "6c8ed2c7cdfd0b75dd71286c8eaa42f41b1e4b9b74f83a5d450e592bf19e0012"
+      "sizeBytes": 203154,
+      "sha256": "fd44c169ca16ad2fb7d016cf1354082f62289c5a93080398ea22ec526e9bb90a"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",

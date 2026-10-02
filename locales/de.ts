@@ -20,7 +20,6 @@ export const de = {
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
         guestMenuDescription: "Melde dich an, um auf deine Unterhaltungen und Projekte auf allen Geräten zuzugreifen.",
-        guestMenuCreateAccount: "Kostenloses Konto erstellen",
         guestMenuViewPlans: "Pläne ansehen",
         languageAndDisplay: "Sprache & Anzeige",
         newChat: "Neuer Chat",
