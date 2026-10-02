@@ -2,8 +2,8 @@
 //
 // The section shows open issues beside a verdict, which reads as a to-do list
 // unless the copy says otherwise. The policy forbids six words for that reason
-// (docs/policy/product-research-agent.md §2.3, §2.4) and these hold them out of
-// both locales, out of the label table, and out of the component.
+// (docs/policy/product-research-agent.md §2, conditions 3 and 4) and these hold
+// them out of both locales, out of the label table, and out of the component.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
