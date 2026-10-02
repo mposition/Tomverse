@@ -10,9 +10,10 @@ import {
   amuxV4AnalysisQueueReadEnabled,
   isAmuxV4AnalysisAgentAuthorized,
 } from "@/lib/amux/ideaAnalysisQueueCore";
+import { parseAmuxV4AnalysisQueueCursor } from "@/lib/amux/ideaAnalysisQueueCursorCore";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 
-const emptyRequest = z.object({}).strict();
+const queueRequest = z.object({ after: z.string().max(512).optional() }).strict();
 
 /** Metadata-only polling route. It does not claim a receipt or return text. */
 export async function POST(request: Request): Promise<Response> {
@@ -27,13 +28,18 @@ export async function POST(request: Request): Promise<Response> {
       "application/json") {
     return amuxJsonNoStore({ error: "Invalid content type." }, 415);
   }
+  let cursor = null;
   try {
-    await readLimitedJson(request, 1_024, emptyRequest);
+    const body = await readLimitedJson(request, 1_024, queueRequest);
+    cursor = body.after === undefined ? null : parseAmuxV4AnalysisQueueCursor(body.after);
+    if (body.after !== undefined && cursor === null) {
+      return amuxJsonNoStore({ error: "Invalid cursor." }, 400);
+    }
   } catch {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
   try {
-    return amuxJsonNoStore(await listAmuxV4AnalysisCandidates());
+    return amuxJsonNoStore(await listAmuxV4AnalysisCandidates(cursor));
   } catch {
     return amuxJsonNoStore({ error: "Analysis queue unavailable." }, 503);
   }
