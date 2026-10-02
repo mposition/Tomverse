@@ -11,7 +11,7 @@ export type PreparedIdeaTransferPreview = {
 };
 
 export function readPreparedIdeaTransferPreview(
-  status: number, body: unknown, expectedPreviewId: string,
+  status: number, body: unknown, expectedPreviewId: string, expectedIdeaId: string,
   selected: AvailableFrontierModel, effort: string,
 ): PreparedIdeaTransferPreview | null {
   if ((status !== 200 && status !== 201) || !body || typeof body !== "object" ||
@@ -28,6 +28,7 @@ export function readPreparedIdeaTransferPreview(
   if (!choice || typeof choice !== "object" || Array.isArray(choice)) return null;
   const model = choice as Record<string, unknown>;
   if (record.version !== 1 || record.previewId !== expectedPreviewId ||
+      record.ideaId !== expectedIdeaId ||
       record.templateVersion !== "amux-v4-analysis-prompt-v3" ||
       typeof record.prompt !== "string" || record.prompt.length === 0 ||
       new TextEncoder().encode(record.prompt).length > 65_536 ||

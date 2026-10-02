@@ -13,24 +13,25 @@ const ideaId = "123e4567-e89b-42d3-a456-426614174002";
 const previewId = "123e4567-e89b-42d3-a456-426614174001";
 const reply = { state: "prepared", previewId, expiresAt: "2099-10-02T12:00:00.000Z",
   transferAuthorized: false,
-  payload: { version: 1, previewId, templateVersion: "amux-v4-analysis-prompt-v3",
+  payload: { version: 1, previewId, ideaId, templateVersion: "amux-v4-analysis-prompt-v3",
     prompt: "synthetic exact prompt", selection: {
       provider: model.provider, modelId: model.modelId, reasoningEffort: "high",
       approvalId: model.approvalId, approvalVersion: model.approvalVersion,
     } } };
 
 test("only the exact selected model and prompt preview is shown", () => {
-  assert.deepEqual(readPreparedIdeaTransferPreview(201, reply, previewId, model, "high"), {
+  assert.deepEqual(readPreparedIdeaTransferPreview(201, reply, previewId, ideaId, model, "high"), {
     previewId, expiresAt: reply.expiresAt, prompt: "synthetic exact prompt",
     provider: "openai", modelId: "gpt-frontier", reasoningEffort: "high",
   });
   for (const changed of [
     { transferAuthorized: true }, { previewId: ideaId },
+    { payload: { ...reply.payload, ideaId: previewId } },
     { expiresAt: "2020-01-01T00:00:00.000Z" },
     { payload: { ...reply.payload, prompt: "" } },
     { payload: { ...reply.payload, selection: { ...reply.payload.selection, approvalVersion: 2 } } },
-  ]) assert.equal(readPreparedIdeaTransferPreview(201, { ...reply, ...changed }, previewId, model, "high"), null);
-  assert.equal(readPreparedIdeaTransferPreview(503, reply, previewId, model, "high"), null);
+  ]) assert.equal(readPreparedIdeaTransferPreview(201, { ...reply, ...changed }, previewId, ideaId, model, "high"), null);
+  assert.equal(readPreparedIdeaTransferPreview(503, reply, previewId, ideaId, model, "high"), null);
 });
 
 test("a pending receipt survives a lost reply and cannot be overwritten", () => {

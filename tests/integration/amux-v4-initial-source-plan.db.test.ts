@@ -137,6 +137,7 @@ test("idea-only transfer preview stores exact encrypted input, binds the chunk, 
   assert.equal(result.previewId, choice.previewId);
   assert.match(result.payload.prompt, /SYNTHETIC_PREVIEW_/);
   assert.equal(result.payload.selection.modelId, choice.modelId);
+  assert.equal(result.payload.ideaId, ideaId);
   const row = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: choice.previewId },
   });

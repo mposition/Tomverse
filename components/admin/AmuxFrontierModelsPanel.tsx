@@ -61,11 +61,11 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
         setPreview({ kind: "expired" });
         return;
       }
-      const parsed = readPreparedIdeaTransferPreview(response.status, body, pendingId,
+      const parsed = readPreparedIdeaTransferPreview(response.status, body, pendingId, ideaId ?? "",
         model, effort);
       setPreview(parsed ? { kind: "prepared", value: parsed } : { kind: "unknown" });
     } catch { setPreview({ kind: "unknown" }); }
-  }, [locale, m.transferPreviewUnknown]);
+  }, [ideaId, locale, m.transferPreviewUnknown]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!available) return;
@@ -180,7 +180,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
       });
       const body: unknown = await response.json();
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
-        previewId, model, effort);
+        previewId, ideaId, model, effort);
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
       await readBack(previewId, model, effort);
     } catch { await readBack(previewId, model, effort); }
