@@ -10,10 +10,12 @@ import {
   deleteReviewRef,
   diffText,
   ensureMirror,
+  git,
   importBundle,
   instructionDiff,
   isolateInstructionFiles,
   removeWorktree,
+  SHA,
 } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
 import { Store, newJobId } from "./store.mjs";
@@ -33,6 +35,24 @@ const mirrorLock = (config) => join(config.stateDir, "mirror.lock");
  * written to disk. Everything is checked before the job becomes visible, so a
  * rejected submit leaves no job behind.
  */
+/**
+ * The optional focus commit: the reviewer is shown `focus..head` instead of
+ * `base..head`, so a later round can be judged on what changed since the last
+ * one. It narrows only what is shown. The base still decides the reviewer's
+ * instruction files and the contract-path count, so it must lie strictly
+ * between them: a descendant of base (or base) and a proper ancestor of head.
+ */
+function checkFocus(mirror, base, head, focus) {
+  if (focus === undefined || focus === null || focus === "") return null;
+  if (!SHA.test(focus)) throw new UsageError("focus_invalid", "focus must be a full commit SHA");
+  if (focus === head) throw new UsageError("empty_focus", "focus is head itself");
+  const isAncestor = (a, b) => git(["merge-base", "--is-ancestor", a, b], { cwd: mirror, allowFailure: true }).ok;
+  if (!isAncestor(base, focus) || !isAncestor(focus, head)) {
+    throw new UsageError("focus_not_in_range", "focus must be on the path from base to head");
+  }
+  return focus;
+}
+
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
   const { repo: repoName, base, head, author, authorVendor: statedVendor, scope } = request;
   const repo = config.repos[repoName];
@@ -74,8 +94,11 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         maxChangeBytes: config.maxChangeBytes,
       });
       imported = true;
+      const focus = checkFocus(repo.mirror, base, head, request.focus);
       const files = changedFiles(repo.mirror, base, head);
       if (files.length === 0) throw new UsageError("empty_change");
+      const focusFiles = focus ? changedFiles(repo.mirror, focus, head) : files;
+      if (focusFiles.length === 0) throw new UsageError("empty_focus", "focus..head changes no file");
       const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
@@ -89,16 +112,18 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         repo: repoName,
         base,
         head,
+        focus,
         author,
         authorVendor,
         reviewers,
         touchesContract,
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
+        focusFileCount: focusFiles.length,
         submittedAt: now.getTime(),
       };
       store.publish(job);
-      return { jobId: id, reviewers, touchesContract, fileCount: files.length };
+      return { jobId: id, reviewers, touchesContract, fileCount: files.length, focus, focusFileCount: focusFiles.length };
     } catch (error) {
       store.discardStaging(id);
       // A refused job leaves no review ref behind either.
@@ -236,9 +261,14 @@ export class Orchestrator {
         prepared = await withLock(mirrorLock(this.config), () => {
           addWorktree(repo.mirror, workdir, job.head);
           isolateInstructionFiles(workdir, job.base, job.head);
-          const files = changedFiles(repo.mirror, job.base, job.head);
-          const instructions = instructionDiff(repo.mirror, job.base, job.head, files);
-          const diff = diffText(repo.mirror, job.base, job.head);
+          // Instruction-file edits are shown over the whole base..head range
+          // even with a focus: the checkout holds their base version, so a
+          // narrower range would hide an earlier edit from the reviewer entirely.
+          const allFiles = changedFiles(repo.mirror, job.base, job.head);
+          const instructions = instructionDiff(repo.mirror, job.base, job.head, allFiles);
+          const from = job.focus ?? job.base;
+          const files = job.focus ? changedFiles(repo.mirror, from, job.head) : allFiles;
+          const diff = diffText(repo.mirror, from, job.head);
           return { files, instructions, diff };
         });
       } catch (error) {
