@@ -11,7 +11,7 @@ import {
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
 } from "@/lib/adminAuditSystemActors";
-import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "./ideaIdentityCore.ts";
+import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import {
@@ -68,9 +68,7 @@ export async function readInitialIdeaSourcePlan(session: Session, ideaId: string
   });
   const ownerMetadata = ownerAudit?.metadata;
   const valid = plan.state === "active" && !!audit?.entryHash && !!ownerAudit?.entryHash &&
-    !!metadata && typeof metadata === "object" && !Array.isArray(metadata) &&
-    (metadata as Record<string, unknown>).systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR &&
-    (metadata as Record<string, unknown>).manifestDigest === plan.manifestDigest &&
+    matchesInitialPlanSystemAudit(metadata, plan.manifestDigest) &&
     !!ownerMetadata && typeof ownerMetadata === "object" && !Array.isArray(ownerMetadata) &&
     (ownerMetadata as Record<string, unknown>).revisionId === plan.id &&
     (ownerMetadata as Record<string, unknown>).systemAuditId === plan.creationAuditLogId;
