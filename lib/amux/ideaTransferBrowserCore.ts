@@ -15,6 +15,17 @@ export function newIdeaTransferBrowserNonce(): string {
   return randomBytes(32).toString("base64url");
 }
 
+/** Duplicate cookies or an absent browser receipt cannot confirm a preview. */
+export function readIdeaTransferBrowserNonce(cookieHeader: string | null,
+  previewId: string): string | null {
+  const name = ideaTransferBrowserCookieName(previewId);
+  if (!cookieHeader) return null;
+  const values = cookieHeader.split(";").map((part) => part.trim())
+    .filter((part) => part.startsWith(`${name}=`))
+    .map((part) => part.slice(name.length + 1));
+  return values.length === 1 && NONCE.test(values[0]) ? values[0] : null;
+}
+
 /** Only a keyed proof, never the cookie or session identifier, enters audit. */
 export function ideaTransferBrowserDigest(input: {
   previewId: string; nonce: string; authenticatedAt: string | undefined;
