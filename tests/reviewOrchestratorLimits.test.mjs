@@ -3,8 +3,8 @@
 // forever.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
@@ -90,6 +90,51 @@ test("new objects over the size cap are refused before any worktree exists", () 
     assert.equal(refused.code, 64, refused.stderr);
     assert.match(refused.stderr, /change_too_large/);
     assert.deepEqual(new Store(f.config.stateDir).listJobs(), []);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("concurrent submits cannot all pass the pending cap", async () => {
+  const f = fixture({ maxPendingJobs: 1 });
+  try {
+    f.commit("a.txt", "two\n");
+    const env = { ...process.env, REVIEW_ORCH_CONFIG: join(f.root, "config.json"), REVIEW_ORCH_LOCAL_BIN: SERVER };
+    const submitOnce = () =>
+      new Promise((done) => {
+        const child = spawn(process.execPath, [CLIENT, "submit", "--author", "codex", "--repo", "demo"], { cwd: f.work, env });
+        let stderr = "";
+        child.stderr.on("data", (chunk) => (stderr += chunk));
+        child.on("close", (code) => done({ code, stderr }));
+      });
+    const results = await Promise.all(Array.from({ length: 4 }, submitOnce));
+    const accepted = results.filter((r) => r.code === 3);
+    const refused = results.filter((r) => r.code === 64 && /queue_full/.test(r.stderr));
+    assert.equal(accepted.length, 1, JSON.stringify(results));
+    assert.equal(refused.length, 3, JSON.stringify(results));
+    assert.equal(new Store(f.config.stateDir).listJobs().length, 1);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("retention counts from when the last review finished, not from submission", async () => {
+  const f = fixture({ retentionDays: 1 });
+  try {
+    f.commit("a.txt", "two\n");
+    const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
+    // The job waited three days in the queue, then finished just now.
+    const store = new Store(f.config.stateDir);
+    const jobFile = join(store.jobDir(jobId), "job.json");
+    const job = JSON.parse(readFileSync(jobFile, "utf8"));
+    writeFileSync(jobFile, JSON.stringify({ ...job, submittedAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }));
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick();
+    await orchestrator.idle();
+    assert.equal(await orchestrator.prune(), 0);
+    assert.equal(existsSync(store.jobDir(jobId)), true);
+    const later = new Orchestrator(f.config, { now: () => Date.now() + 2 * 24 * 60 * 60 * 1000 });
+    assert.equal(await later.prune(), 1);
   } finally {
     f.cleanup();
   }
