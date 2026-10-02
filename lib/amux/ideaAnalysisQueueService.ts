@@ -6,6 +6,7 @@ import {
   encodeAmuxV4AnalysisQueueCursor,
   type AmuxV4AnalysisQueueCursor,
 } from "./ideaAnalysisQueueCursorCore.ts";
+import { buildAmuxV4AnalysisCandidateWhere } from "./ideaAnalysisQueueWhereCore.ts";
 
 const PAGE_SIZE = 32;
 
@@ -28,26 +29,14 @@ export async function listAmuxV4AnalysisCandidates(
              set_config('idle_in_transaction_session_timeout', '3000', true) AS idle_limit
     `;
     const clock = await tx.$queryRaw<Array<{ now: Date }>>`
-      SELECT clock_timestamp() AS "now"
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const now = clock[0]?.now;
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
       throw new Error("AMUX v4 analysis queue clock unavailable");
     }
-    const where: Prisma.AmuxIdeaTransferPreviewWhereInput = {
-      state: "confirmed", consumedAt: null, outcomeUnknownAt: null,
-      confirmedAt: { not: null }, confirmExpiresAt: { gt: now },
-      expiresAt: { gt: now }, payloadCiphertext: { not: null },
-      payloadPurgedAt: null,
-      idea: { state: "submitted", analysisDeadlineAt: { gt: now } },
-      currentForChunk: { is: { state: "awaiting_preview" } },
-      ...(cursor ? { OR: [
-        { confirmedAt: { gt: cursor.confirmedAt } },
-        { confirmedAt: cursor.confirmedAt, id: { gt: cursor.previewId } },
-      ] } : {}),
-    };
     const rows = await tx.amuxIdeaTransferPreview.findMany({
-      where,
+      where: buildAmuxV4AnalysisCandidateWhere(now, cursor),
       orderBy: [{ confirmedAt: "asc" }, { id: "asc" }],
       take: PAGE_SIZE + 1,
       select: { id: true, ideaId: true, chunkIndex: true,

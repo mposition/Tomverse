@@ -15,8 +15,9 @@ export const amuxV4AnalysisQueueReadEnabled = (value: string | undefined): boole
 /** Only the dedicated local Agent identity may read candidate IDs. This
  * helper never grants payload access or permission to claim a receipt. */
 export function isAmuxV4AnalysisAgentAuthorized(request: Request,
-  configured: string | undefined): boolean {
+  configured: string | undefined, syncSecret?: string): boolean {
   if (typeof configured !== "string" || !SECRET.test(configured) ||
+      configured === syncSecret ||
       request.headers.get("x-amux-agent-id") !== AMUX_V4_ANALYSIS_AGENT_ID) return false;
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) return false;
