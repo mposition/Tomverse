@@ -47,7 +47,8 @@ test("unknown usage is nullable, never represented as zero by default", () => {
     assert.match(schema, new RegExp(`${field}\\s+BigInt\\?`));
   }
   assert.match(migration, /"completeness" = 'unknown' AND "inputTokens" IS NULL/);
-  assert.match(migration, /"cli" = 'codex' AND "cacheCreationInputTokens" IS NULL/);
+  assert.match(migration, /"cli" = 'codex' AND "inputTokensIncludeCacheRead" IS TRUE/);
+  assert.doesNotMatch(migration, /"cli" = 'codex' AND "cacheCreationInputTokens" IS NULL/);
   assert.match(migration, /"cli" = 'claude' AND "reasoningOutputTokens" IS NULL/);
   assert.doesNotMatch(migration, /"(?:inputTokens|outputTokens|cacheReadInputTokens)" BIGINT (?:NOT NULL )?DEFAULT 0/);
 });

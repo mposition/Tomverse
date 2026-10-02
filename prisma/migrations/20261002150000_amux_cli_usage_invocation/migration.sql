@@ -157,8 +157,7 @@ CREATE TABLE "AmuxCliUsageInvocation" (
         AND "outputTokens" IS NOT NULL AND "cacheReadInputTokens" IS NOT NULL))
   ),
   CONSTRAINT "AmuxCliUsageInvocation_cli_shape_check" CHECK (
-    ("cli" = 'codex' AND "cacheCreationInputTokens" IS NULL
-      AND "inputTokensIncludeCacheRead" IS TRUE
+    ("cli" = 'codex' AND "inputTokensIncludeCacheRead" IS TRUE
       AND "inputTokensIncludeCacheWrite" IS NULL
       AND "reasoningOutputIncludedInOutput" IS TRUE)
     OR

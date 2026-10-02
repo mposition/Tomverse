@@ -174,6 +174,26 @@ test("DB preserves Claude partial totals without claiming a model breakdown", as
   }), /synthetic rollback/);
 });
 
+test("DB retains a Codex-reported cache-write count without inferring its pricing inclusion", async () => {
+  const row = unknownRow({
+    cli: "codex", status: "succeeded", completeness: "reported_complete", completedTurns: 1,
+    inputTokens: BigInt(100), outputTokens: BigInt(10),
+    cacheReadInputTokens: BigInt(20), cacheCreationInputTokens: BigInt(7),
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await insertUsage(tx, row);
+    const stored = await tx.$queryRaw<Array<{
+      cacheCreationInputTokens: bigint | null;
+      inputTokensIncludeCacheWrite: boolean | null;
+    }>>`SELECT "cacheCreationInputTokens", "inputTokensIncludeCacheWrite"
+       FROM "AmuxCliUsageInvocation" WHERE "invocationId" = ${row.invocationId}::uuid`;
+    assert.deepEqual(stored, [{
+      cacheCreationInputTokens: BigInt(7), inputTokensIncludeCacheWrite: null,
+    }]);
+    throw new Error("synthetic rollback");
+  }), /synthetic rollback/);
+});
+
 const fenceNamespace = 1095587160;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
