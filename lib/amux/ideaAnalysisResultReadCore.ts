@@ -32,6 +32,11 @@ const text = (value: unknown, max = 2_000): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 const textList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 12 && value.every((item) => text(item, 500));
+const refList = (value: unknown, max: number, min = 0): value is string[] =>
+  Array.isArray(value) && value.length >= min && value.length <= max &&
+  value.every((item) => text(item, 128));
+const optionalRef = (value: unknown): value is string | null =>
+  value === null || text(value, 128);
 
 /** The append-only analysis audit binds every stored proposal, including
  * units whose body has since been purged. No proposal text enters the audit. */
@@ -89,13 +94,25 @@ export function parseAmuxIdeaAnalysisResultView(
     if (!record(value.proposal) || value.proposal.localId !== value.localRef) return null;
     const proposal = value.proposal;
     if (proposal.kind === "node") {
-      if (!text(proposal.title, 200) || !text(proposal.description)) return null;
+      if (!["initiative", "epic", "feature"].includes(String(proposal.level)) ||
+          !text(proposal.title, 200) || !text(proposal.description) ||
+          !optionalRef(proposal.parentRef) ||
+          !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "card") {
-      if (!text(proposal.title, 200) || !text(proposal.problem) ||
+      if (!["story", "task"].includes(String(proposal.cardType)) ||
+          !text(proposal.title, 200) || !text(proposal.problem) ||
           !textList(proposal.scopeIn) || !textList(proposal.scopeOut) ||
-          !textList(proposal.completionCriteria)) return null;
+          !textList(proposal.completionCriteria) || !text(proposal.featureRef, 128) ||
+          !optionalRef(proposal.parentStoryRef) ||
+          !refList(proposal.dependencyRefs, 16) ||
+          !refList(proposal.duplicateCandidateRefs, 8) ||
+          !refList(proposal.sourceRefIds, 16, 1) ||
+          !optionalRef(proposal.taskRole) || !optionalRef(proposal.executionGrade) ||
+          (proposal.executionBrief !== null && !text(proposal.executionBrief))) return null;
     } else if (proposal.kind === "evidence") {
-      if (!text(proposal.summary)) return null;
+      if (!["observed_error", "source_finding"].includes(String(proposal.evidenceType)) ||
+          !text(proposal.summary) || !text(proposal.cardRef, 128) ||
+          !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else return null;
   }
   return body as AmuxIdeaAnalysisResultView;

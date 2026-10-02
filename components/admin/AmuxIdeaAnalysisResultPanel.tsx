@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaProposalRelations } from "@/components/admin/AmuxIdeaProposalRelations";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -77,12 +78,12 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
           {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
           {unit.proposal?.kind === "node" ? <div className="space-y-1">
             <h4 className="font-semibold">{unit.proposal.title}</h4>
-            <p>{unit.proposal.level} · {unit.proposal.parentRef ?? "root"}</p>
+            <p>{unit.proposal.level}</p>
             <p className="whitespace-pre-wrap">{unit.proposal.description}</p>
           </div> : null}
           {unit.proposal?.kind === "card" ? <div className="space-y-2">
             <h4 className="font-semibold">{unit.proposal.title}</h4>
-            <p>{unit.proposal.cardType} · {unit.proposal.featureRef}</p>
+            <p>{unit.proposal.cardType}</p>
             <div><p className="font-medium">{m.analysisResultProblem}</p>
               <p className="whitespace-pre-wrap">{unit.proposal.problem}</p></div>
             <div><p className="font-medium">{m.analysisResultScopeIn}</p>
@@ -100,8 +101,8 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
           {unit.proposal?.kind === "evidence" ? <div className="space-y-1">
             <h4 className="font-semibold">{unit.proposal.evidenceType}</h4>
             <p className="whitespace-pre-wrap">{unit.proposal.summary}</p>
-            <p className="text-xs">{unit.proposal.cardRef}</p>
           </div> : null}
+          {unit.proposal ? <AmuxIdeaProposalRelations proposal={unit.proposal} messages={m} /> : null}
         </li>)}
       </ol>
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>

@@ -30,9 +30,9 @@ test("hierarchy render identifies page scope, direct tasks, off-page Story, and 
   assert.match(html, /<ol class="ms-5 mt-1 space-y-1">/);
   assert.match(html, /<section aria-labelledby="amux-hierarchy-unlinked-heading"><h3 id="amux-hierarchy-unlinked-heading"/);
   assert.match(html,
-    /feature · feature-1<\/span><span[^>]*>active<\/span><ol[^>]*><li[^>]*>(?:(?!<\/li>).)*task · task-direct/s);
+    /feature · feature-1<\/span><span[^>]*>active<\/span><ol[^>]*><li[^>]*>(?:(?!<\/li>)[\s\S])*task · task-direct/);
   assert.match(html,
-    /Story outside this page · story-off-page<\/span><ol[^>]*><li[^>]*>(?:(?!<\/li>).)*task · task-child/s);
+    /Story outside this page · story-off-page<\/span><ol[^>]*><li[^>]*>(?:(?!<\/li>)[\s\S])*task · task-child/);
   assert.doesNotMatch(html, /Level 2: <\/span><span class="font-medium">unknown · legacy/);
   assert.equal((html.match(/<li /g) ?? []).length, 7);
 });

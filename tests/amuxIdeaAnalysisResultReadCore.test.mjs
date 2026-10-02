@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -51,6 +52,14 @@ test("the owner result read remains dark even if its environment value is enable
   assert.equal(amuxV4AnalysisResultReadEnabled(undefined), false);
 });
 
+test("the Admin result renders proposal relationships only while its verified body remains", () => {
+  const panel = readFileSync(new URL("../components/admin/AmuxIdeaAnalysisResultPanel.tsx",
+    import.meta.url), "utf8");
+  assert.match(panel, /unit\.proposal \? <AmuxIdeaProposalRelations proposal=\{unit\.proposal\} messages=\{m\} \/>/);
+  assert.match(panel, /unit\.proposal\?\.kind === "card"/);
+  assert.doesNotMatch(panel, /dangerouslySetInnerHTML/);
+});
+
 test("Admin accepts only its exact idea's bounded result shape", () => {
   const ideaId = "idea-01";
   const result = { state: "ready", ideaId, previewId: "preview-01",
@@ -58,7 +67,11 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     coveredScope: null, units: [{ id: "unit-01", localRef: "c0:card-0",
       bodyDigest: "a".repeat(64), bodyDigestKeyId: "key-01",
       decisionState: "proposed", proposal: { kind: "card", localId: "c0:card-0",
+        cardType: "story",
         title: "Review a proposed card", problem: "The owner needs a review.",
+        featureRef: "c0:node-1", parentStoryRef: null,
+        dependencyRefs: [], duplicateCandidateRefs: [], sourceRefIds: ["source-1"],
+        taskRole: null, executionGrade: null, executionBrief: null,
         scopeIn: ["Show the proposal"], scopeOut: [],
         completionCriteria: ["Owner can inspect the unit"] } }] };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, result, ideaId), result);
@@ -76,4 +89,13 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
     ...result, units: [{ ...result.units[0], bodyDigest: "invalid" }],
   }, ideaId), null);
+  for (const malformed of [
+    { dependencyRefs: undefined }, { sourceRefIds: [] },
+    { parentStoryRef: 123 }, { featureRef: null },
+  ]) {
+    assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
+      units: [{ ...result.units[0], proposal: { ...result.units[0].proposal,
+        ...malformed } }],
+    }, ideaId), null);
+  }
 });
