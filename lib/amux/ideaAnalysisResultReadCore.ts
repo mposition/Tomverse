@@ -1,4 +1,5 @@
 import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
+import { AMUX_TASK_ROLE_PROPOSALS, AMUX_EXECUTION_GRADE_PROPOSALS } from "./ideaAnalysisVocabulary.ts";
 
 export const AMUX_V4_ANALYSIS_RESULT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ";
 export const AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED = false;
@@ -99,16 +100,23 @@ export function parseAmuxIdeaAnalysisResultView(
           !optionalRef(proposal.parentRef) ||
           !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "card") {
-      if (!["story", "task"].includes(String(proposal.cardType)) ||
-          !text(proposal.title, 200) || !text(proposal.problem) ||
+      if (proposal.cardType === "story") {
+        if (!["general", "bug"].includes(String(proposal.storyKind)) ||
+            proposal.taskRole !== null || proposal.executionGrade !== null ||
+            proposal.executionBrief !== null || proposal.parentStoryRef !== null) return null;
+      } else if (proposal.cardType === "task") {
+        if (proposal.storyKind !== null ||
+            !AMUX_TASK_ROLE_PROPOSALS.some((role) => role === proposal.taskRole) ||
+            !AMUX_EXECUTION_GRADE_PROPOSALS.some((grade) => grade === proposal.executionGrade) ||
+            !text(proposal.executionBrief)) return null;
+      } else return null;
+      if (!text(proposal.title, 200) || !text(proposal.problem) ||
           !textList(proposal.scopeIn) || !textList(proposal.scopeOut) ||
           !textList(proposal.completionCriteria) || !text(proposal.featureRef, 128) ||
           !optionalRef(proposal.parentStoryRef) ||
           !refList(proposal.dependencyRefs, 16) ||
           !refList(proposal.duplicateCandidateRefs, 8) ||
-          !refList(proposal.sourceRefIds, 16, 1) ||
-          !optionalRef(proposal.taskRole) || !optionalRef(proposal.executionGrade) ||
-          (proposal.executionBrief !== null && !text(proposal.executionBrief))) return null;
+          !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "evidence") {
       if (!["observed_error", "source_finding"].includes(String(proposal.evidenceType)) ||
           !text(proposal.summary) || !text(proposal.cardRef, 128) ||

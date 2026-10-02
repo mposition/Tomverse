@@ -27,13 +27,17 @@ test("proposed Task shows hierarchy, dependencies, overlap, and evidence refs as
 test("missing optional links are explicit, and model text cannot become markup", () => {
   const html = render({ kind: "node", localId: "c0:node-0", level: "initiative",
     title: "Test proposal", description: "Text only",
-    parentRef: "<script>run()</script>", sourceRefIds: [],
+    parentRef: null, sourceRefIds: ["source-1"],
   }, "ko");
   assert.match(html, /상위 항목 참조/);
-  assert.match(html, /&lt;script&gt;run\(\)&lt;\/script&gt;/);
   assert.match(html, /근거 자료 참조/);
   assert.match(html, /없음/);
-  assert.doesNotMatch(html, /<script>|<a\b|href=/);
+  const escaped = render({ kind: "node", localId: "c0:node-0", level: "epic",
+    title: "Test proposal", description: "Text only",
+    parentRef: "<script>run()</script>", sourceRefIds: ["source-1"],
+  });
+  assert.match(escaped, /&lt;script&gt;run\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(escaped, /<script>|<a\b|href=/);
 });
 
 test("evidence proposal names its card reference without implying approval", () => {

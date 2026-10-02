@@ -1,5 +1,7 @@
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { scanAmuxV4Input } from "./localIntakeCore.ts";
+import { AMUX_TASK_ROLE_PROPOSALS, AMUX_EXECUTION_GRADE_PROPOSALS } from "./ideaAnalysisVocabulary.ts";
+export { AMUX_TASK_ROLE_PROPOSALS, AMUX_EXECUTION_GRADE_PROPOSALS } from "./ideaAnalysisVocabulary.ts";
 
 /**
  * Structural admission for one untrusted AMUX v4 model response. This is not
@@ -23,11 +25,6 @@ const LOCAL_ID = /^c(0|[1-9][0-9]*):(node|card|evidence)-(0|[1-9][0-9]{0,3})$/;
 // cannot safely distinguish one from an invisible encoded instruction stream.
 const SPOOFING_CHAR = /[\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u034F\u180B-\u180D\u180E\u180F\u17B4\u17B5\u2800\uFE00-\uFE0F\u{E0100}-\u{E01EF}]|(?![\t\n])\p{Cc}/u;
 const byteLength = (value: string) => Buffer.byteLength(value, "utf8");
-
-export const AMUX_TASK_ROLE_PROPOSALS = [
-  "design", "implement", "test", "review", "verify", "investigate", "operate",
-] as const;
-export const AMUX_EXECUTION_GRADE_PROPOSALS = ["routine", "advanced", "frontier"] as const;
 
 /** Snapshot a bounded dense array without invoking a caller-supplied iterator. */
 export const copyBoundedAmuxArray = <T>(value: unknown, max: number): T[] | null => {

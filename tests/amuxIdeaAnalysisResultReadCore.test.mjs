@@ -67,7 +67,7 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     coveredScope: null, units: [{ id: "unit-01", localRef: "c0:card-0",
       bodyDigest: "a".repeat(64), bodyDigestKeyId: "key-01",
       decisionState: "proposed", proposal: { kind: "card", localId: "c0:card-0",
-        cardType: "story",
+        cardType: "story", storyKind: "general",
         title: "Review a proposed card", problem: "The owner needs a review.",
         featureRef: "c0:node-1", parentStoryRef: null,
         dependencyRefs: [], duplicateCandidateRefs: [], sourceRefIds: ["source-1"],
@@ -90,12 +90,47 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     ...result, units: [{ ...result.units[0], bodyDigest: "invalid" }],
   }, ideaId), null);
   for (const malformed of [
+    { cardType: "initiative" }, { storyKind: "proposal" },
     { dependencyRefs: undefined }, { sourceRefIds: [] },
     { parentStoryRef: 123 }, { featureRef: null },
   ]) {
     assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
       units: [{ ...result.units[0], proposal: { ...result.units[0].proposal,
         ...malformed } }],
+    }, ideaId), null);
+  }
+  const task = { ...result.units[0].proposal, cardType: "task", storyKind: null,
+    taskRole: "design", executionGrade: "routine", executionBrief: "Design one unit" };
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
+    units: [{ ...result.units[0], proposal: task }],
+  }, ideaId)?.state, "ready");
+  for (const malformed of [
+    { taskRole: "unapproved_role" }, { executionGrade: "unapproved_grade" },
+    { executionBrief: null }, { storyKind: "bug" },
+  ]) {
+    assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
+      units: [{ ...result.units[0], proposal: { ...task, ...malformed } }],
+    }, ideaId), null);
+  }
+  const node = { kind: "node", localId: "c0:node-0", level: "initiative",
+    parentRef: null, title: "Organize work", description: "One top-level goal",
+    sourceRefIds: ["source-1"] };
+  const evidence = { kind: "evidence", localId: "c0:evidence-0",
+    evidenceType: "source_finding", summary: "Observed in source",
+    cardRef: "c0:card-0", sourceRefIds: ["source-1"] };
+  for (const [localRef, proposal, malformed] of [
+    [node.localId, node, { level: "project" }],
+    [node.localId, node, { sourceRefIds: [] }],
+    [evidence.localId, evidence, { evidenceType: "freeform" }],
+    [evidence.localId, evidence, { cardRef: null }],
+    [evidence.localId, evidence, { sourceRefIds: [] }],
+  ]) {
+    const unit = { ...result.units[0], localRef, proposal };
+    assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
+      units: [unit],
+    }, ideaId)?.state, "ready");
+    assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
+      units: [{ ...unit, proposal: { ...proposal, ...malformed } }],
     }, ideaId), null);
   }
 });
