@@ -8,6 +8,7 @@
 //   npm run merge-train -- --include-main         # also main -> production
 //   npm run merge-train -- --pr=1916 --once       # consider only this PR
 //   npm run merge-train -- --clear-latch=develop  # a person clears a stop
+//   npm run merge-train -- --forget-merge=develop # ...and stops following its merge
 //   npm run merge-train -- --break-lock           # a person removes a dead train's lock
 //
 // Run it from a local PowerShell in the repository clone. It uses the
@@ -15,9 +16,9 @@
 // own. It is a stopgap until the QA/Release agent exists, not that agent.
 //
 // Per lane, each poll:
-//   1. A latched lane does nothing until a person clears it.
-//   2. A merge the train started but never confirmed is resolved first, from
-//      GitHub's own record of the PR.
+//   1. A merge the train started but never confirmed is resolved first, from
+//      GitHub's own record of the PR -- even on a latched lane.
+//   2. A latched lane does nothing more until a person clears it.
 //   3. If a merge made by the train is still deploying, wait until every
 //      service that deploys the branch has deployed it. A failed, skipped,
 //      crashed or unrecognised deployment latches the lane and stops the train
@@ -49,7 +50,7 @@ import {
   parseTrainState,
   pickNextPullRequest,
   refusalReason,
-  servicesDeployingBranch,
+  replacementCommits,
   withLane,
 } from "./merge-train-core.mjs";
 
@@ -69,6 +70,7 @@ const once = args.includes("--once");
 const includeMain = args.includes("--include-main");
 const breakLock = args.includes("--break-lock");
 const clearLatch = flag("clear-latch");
+const forgetMerge = flag("forget-merge");
 const onlyPr = flag("pr") === undefined ? null : Number(flag("pr"));
 const pollSeconds = Number(flag("poll-seconds") ?? 60);
 // How long a merge commit may go without Railway registering any deployment
@@ -76,6 +78,9 @@ const pollSeconds = Number(flag("poll-seconds") ?? 60);
 const notSeenTimeoutMinutes = Number(flag("not-seen-timeout-minutes") ?? 15);
 // How long a deployment may stay in flight (CI wait included) before stopping.
 const deployTimeoutMinutes = Number(flag("deploy-timeout-minutes") ?? 120);
+// A merge call that failed while the PR still reads OPEN may yet land; the
+// lane waits this long before believing it did not.
+const UNCONFIRMED_GRACE_MINUTES = 5;
 
 function usage(message) {
   console.error(message);
@@ -162,7 +167,18 @@ function processAlive(pid) {
  */
 function acquireLock() {
   mkdirSync(STATE_DIR, { recursive: true });
-  if (breakLock) rmSync(LOCK_PATH, { force: true });
+  const holderOf = () => Number(readFileSync(LOCK_PATH, "utf8").trim());
+  const holderAlive = (holder) => Number.isInteger(holder) && holder > 0 && processAlive(holder);
+  if (breakLock) {
+    let holder = null;
+    try {
+      holder = holderOf();
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (holder !== null && holderAlive(holder)) usage(`--break-lock refused: pid ${holder} is still running`);
+    rmSync(LOCK_PATH, { force: true });
+  }
   const mine = `${process.pid}\n`;
   try {
     const fd = openSync(LOCK_PATH, "wx");
@@ -170,8 +186,8 @@ function acquireLock() {
     closeSync(fd);
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
-    const holder = Number(readFileSync(LOCK_PATH, "utf8").trim());
-    const alive = Number.isInteger(holder) && holder > 0 && processAlive(holder);
+    const holder = holderOf();
+    const alive = holderAlive(holder);
     usage(
       alive
         ? `another merge train is running (pid ${holder}); refusing to start a second one`
@@ -249,24 +265,41 @@ function save(branch, patch) {
 function resolveUnconfirmedMerge(lane, merging) {
   const pr = viewPullRequest(merging.number, "state,mergeCommit");
   if (pr.state === "MERGED" && SHA_PATTERN.test(String(pr.mergeCommit?.oid))) {
-    log(lane, `#${merging.number} was merged as ${pr.mergeCommit.oid.slice(0, 9)} before the last stop; following it`);
+    log(lane, `#${merging.number} was merged as ${pr.mergeCommit.oid.slice(0, 9)}; following it`);
+    // The clock starts now: time the train was down is not time Railway had.
     save(lane.branch, {
       merging: null,
-      awaiting: { number: merging.number, sha: pr.mergeCommit.oid, mergedAt: merging.startedAt },
+      awaiting: { number: merging.number, sha: pr.mergeCommit.oid, mergedAt: Date.now() },
     });
-    return;
+    return true;
   }
   if (pr.state === "OPEN") {
-    log(lane, `#${merging.number} was not merged before the last stop`);
+    const minutes = (Date.now() - merging.startedAt) / 60000;
+    if (minutes < UNCONFIRMED_GRACE_MINUTES) {
+      log(lane, `#${merging.number} still reads OPEN after a failed merge call; waiting before believing it`);
+      return false;
+    }
+    log(lane, `#${merging.number} was not merged`);
     save(lane.branch, { merging: null });
-    return;
+    return true;
   }
   throw new TrainStop(lane.branch, `#${merging.number} is ${pr.state} after an unconfirmed merge; outcome unknown`);
 }
 
+/** The replacement commits that include `sha`, per GitHub's compare. */
+function commitsContaining(sha, candidates) {
+  const containing = new Set();
+  for (const candidate of candidates) {
+    if (!SHA_PATTERN.test(candidate)) continue;
+    const status = runText("gh", ["api", `repos/${REPOSITORY}/compare/${sha}...${candidate}`, "--jq", ".status"]).trim();
+    if (status === "ahead" || status === "identical") containing.add(candidate);
+  }
+  return containing;
+}
+
 function followAwaitedMerge(lane, awaiting, deployments) {
-  const expected = servicesDeployingBranch(deployments, lane.branch);
-  const outcome = deploymentOutcome(deployments, awaiting.sha, expected);
+  const containing = commitsContaining(awaiting.sha, replacementCommits(deployments, awaiting.sha));
+  const outcome = deploymentOutcome(deployments, awaiting.sha, lane.branch, containing);
   const minutes = (Date.now() - awaiting.mergedAt) / 60000;
   const label = `#${awaiting.number} (${awaiting.sha.slice(0, 9)})`;
   const seen = outcome.deployments.length ? `: ${describeDeployments(outcome.deployments)}` : "";
@@ -291,15 +324,17 @@ function mergeOne(lane, candidate) {
   // Re-read both sides right before merging. The pick came from a rollup and
   // a Railway snapshot that are a poll old; a late failing check or a push
   // that queued a deployment in between must stop this merge.
+  // Railway first because it is the slow read (one call per service); the PR
+  // is read last so the window between its checks and the merge is one call.
+  const busy = inFlightDeployments(environmentDeployments(lane.environment));
+  if (busy.length > 0) {
+    log(lane, `hold (appeared before merging #${candidate.number}): ${describeDeployments(busy)}`);
+    return;
+  }
   const pr = viewPullRequest(candidate.number, PR_FIELDS);
   const refusal = refusalReason(pr, lane.branch);
   if (refusal !== null || pr.headRefOid !== candidate.headRefOid) {
     log(lane, `#${pr.number} changed before merging (${refusal ?? "new head"}); re-reading next poll`);
-    return;
-  }
-  const busy = inFlightDeployments(environmentDeployments(lane.environment));
-  if (busy.length > 0) {
-    log(lane, `hold (appeared before merging #${pr.number}): ${describeDeployments(busy)}`);
     return;
   }
   if (dryRun) {
@@ -329,21 +364,25 @@ function mergeOne(lane, candidate) {
     return;
   }
   if (result.state === "OPEN" && mergeError) {
-    // GitHub refused (head moved, conflict); nothing changed.
-    save(lane.branch, { merging: null });
-    log(lane, `#${pr.number} not merged: ${String(mergeError.stderr || mergeError.message).trim().split("\n")[0]}`);
+    // Probably refused (head moved, conflict), but a timed-out call can still
+    // land after this read. The merging record stays; the next polls resolve
+    // it after a grace period, and nothing else merges on this lane meanwhile.
+    log(lane, `#${pr.number} not merged yet: ${String(mergeError.stderr || mergeError.message).trim().split("\n")[0]}`);
     return;
   }
   throw new TrainStop(lane.branch, `#${pr.number} is ${result.state} after the merge call; outcome unknown`);
 }
 
 function tick(lane) {
-  const { latch, merging } = laneState(state, lane.branch);
+  const { merging } = laneState(state, lane.branch);
+  // Before the latch: resolving only reads GitHub and turns "maybe merged"
+  // into a merge to follow, which is what a person clearing the latch needs.
+  if (merging && !resolveUnconfirmedMerge(lane, merging)) return;
+  const { latch } = laneState(state, lane.branch);
   if (latch) {
     log(lane, `latched since ${latch.at}: ${latch.reason} -- clear with --clear-latch=${lane.branch}`);
     return;
   }
-  if (merging) resolveUnconfirmedMerge(lane, merging);
 
   const deployments = environmentDeployments(lane.environment);
   const { awaiting } = laneState(state, lane.branch);
@@ -367,25 +406,35 @@ function tick(lane) {
 
 // ---- main -----------------------------------------------------------------
 
-if (clearLatch !== undefined) {
-  if (!LANES.some((lane) => lane.branch === clearLatch)) {
-    usage(`--clear-latch takes one of: ${LANES.map((lane) => lane.branch).join(", ")}`);
+for (const [name, value] of [["clear-latch", clearLatch], ["forget-merge", forgetMerge]]) {
+  if (value !== undefined && !LANES.some((lane) => lane.branch === value)) {
+    usage(`--${name} takes one of: ${LANES.map((lane) => lane.branch).join(", ")}`);
   }
+}
+
+if (clearLatch !== undefined || forgetMerge !== undefined) {
   acquireLock();
-  const current = readState();
-  const { latch, awaiting, merging } = laneState(current, clearLatch);
-  if (!latch) {
-    // Nothing a person has looked at: a merge still being followed or
-    // confirmed is left exactly as it is.
-    console.log(`${clearLatch} was not latched; nothing changed`);
-    process.exit(0);
+  let next = readState();
+  if (clearLatch !== undefined) {
+    const { latch, awaiting, merging } = laneState(next, clearLatch);
+    // Only the latch. A merge still being followed or confirmed stays: if its
+    // deployment really failed the lane latches again, and a person who has
+    // dealt with that says so separately with --forget-merge.
+    next = withLane(next, clearLatch, { latch: null });
+    const following = merging ?? awaiting;
+    console.log(
+      (latch ? `cleared ${clearLatch} latch (${latch.reason})` : `${clearLatch} was not latched`) +
+        (following ? `; still following #${following.number} (--forget-merge=${clearLatch} to stop)` : ""),
+    );
   }
-  // The merge the latch was about is dropped with it: a person clearing the
-  // latch has looked at that deployment, and following it again would only
-  // re-latch on the same failure.
-  writeState(withLane(current, clearLatch, { latch: null, awaiting: null, merging: null }));
-  const dropped = awaiting ?? merging;
-  console.log(`cleared ${clearLatch} latch (${latch.reason})${dropped ? `; no longer following #${dropped.number}` : ""}`);
+  if (forgetMerge !== undefined) {
+    const { latch, awaiting, merging } = laneState(next, forgetMerge);
+    if (latch) usage(`--forget-merge refused: ${forgetMerge} is latched; look at the latch and clear it first`);
+    const following = merging ?? awaiting;
+    next = withLane(next, forgetMerge, { awaiting: null, merging: null });
+    console.log(following ? `no longer following #${following.number} on ${forgetMerge}` : `${forgetMerge} was following nothing`);
+  }
+  writeState(next);
   process.exit(0);
 }
 
@@ -399,30 +448,24 @@ console.log(
     `${dryRun ? " (dry run)" : ""}${onlyPr === null ? "" : `, only #${onlyPr}`}, poll ${pollSeconds}s`,
 );
 
-let current = null;
 try {
   for (;;) {
-    for (const lane of lanes) {
-      current = lane;
-      tick(lane);
-    }
+    for (const lane of lanes) tick(lane);
     if (once) break;
     await sleep(pollSeconds * 1000);
   }
 } catch (error) {
-  const unconfirmed = current && laneState(state, current.branch).merging;
-  if (error instanceof TrainStop || unconfirmed) {
-    // An outcome the train will not guess past -- or a failure while a merge
-    // was unconfirmed, which is the same thing. The latch outlives this
+  if (error instanceof TrainStop) {
+    // An outcome the train will not guess past. The latch outlives this
     // process, so a restart cannot merge on top of it.
-    const branch = error instanceof TrainStop ? error.branch : current.branch;
-    if (!dryRun) save(branch, { latch: { reason: error.message, at: new Date().toISOString() } });
-    console.error(`STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${branch}.`);
+    if (!dryRun) save(error.branch, { latch: { reason: error.message, at: new Date().toISOString() } });
+    console.error(`STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${error.branch}.`);
     process.exit(1);
   }
-  // A failed read (gh, railway CLI, network) is not an outcome, so it does
-  // not latch; but acting on a partial view of the environment is how a second
-  // deploy gets queued, so the train stops.
+  // A failed read (gh, railway CLI, network) is not an outcome, so it does not
+  // latch. A merge left unconfirmed by it is still on record and is resolved
+  // from GitHub on the next start; acting on a partial view of the
+  // environment is how a second deploy gets queued, so the train stops.
   console.error(`STOP (read failed): ${error.message}`);
   process.exit(1);
 }
