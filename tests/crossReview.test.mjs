@@ -1140,6 +1140,13 @@ test("a task continues only a concluded exchange, inherits what it left open, an
   assert.match(supersessionProblems({ ...durableV4, taskId: "another-task" }, durableV3)[0], /the cap is 2/);
   assert.match(supersessionProblems(durableV4, { ...durableV3, status: "failed" })[0], /the cap is 2/);
   assert.match(
+    supersessionProblems(
+      { ...durableV4, supersedes: { ...durableV4.supersedes, taskId: "another-v3" } },
+      { ...durableV3, taskId: "another-v3" }
+    )[0],
+    /the cap is 2/
+  );
+  assert.match(
     supersessionProblems({ ...durableV4, supersedes: { ...durableV4.supersedes, exchange: "another/exchange.json" } }, durableV3)[0],
     /the cap is 2/
   );
