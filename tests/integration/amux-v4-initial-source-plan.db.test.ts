@@ -8,6 +8,8 @@ import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { createInitialIdeaOnlySourcePlan, InitialSourcePlanError } from "@/lib/amux/ideaInitialSourcePlanService";
 import { commitInitialIdeaSourcePlan, readInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
+import { commitIdeaOnlyTransferPreview, readIdeaOnlyTransferPreview,
+  IdeaTransferPreviewError } from "@/lib/amux/ideaTransferPreviewService";
 import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/amux/ideaIdentityCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { AuditWriteRefusedError, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -43,6 +45,11 @@ const keys = {
   masterKeyId: "synthetic-master", masterKeyVersion: 1,
   masterKey: randomBytes(32), digestKeyId: "synthetic-digest", digestKey: randomBytes(32),
 };
+process.env.AMUX_V4_CONTENT_MASTER_KEY_ID = keys.masterKeyId;
+process.env.AMUX_V4_CONTENT_MASTER_KEY_VERSION = String(keys.masterKeyVersion);
+process.env.AMUX_V4_CONTENT_MASTER_KEY_B64 = keys.masterKey.toString("base64");
+process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID = keys.digestKeyId;
+process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = keys.digestKey.toString("base64");
 
 after(async () => { await prisma.$disconnect(); });
 
@@ -115,6 +122,76 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   (error: unknown) => error instanceof InitialSourcePlanError && error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 1);
   assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 1);
+});
+
+test("idea-only transfer preview stores exact encrypted input, binds the chunk, and sends nothing", async () => {
+  const text = `SYNTHETIC_PREVIEW_${randomUUID()}`;
+  const ideaId = await createIdea({ idea: text });
+  const plan = await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
+    { session, request, ideaId, keys }));
+  const choice = { previewId: randomUUID(), ideaId, provider: "openai" as const,
+    modelId: "gpt-frontier-synthetic", reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  const result = await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys }));
+  assert.equal(result.previewId, choice.previewId);
+  assert.match(result.payload.prompt, /SYNTHETIC_PREVIEW_/);
+  assert.equal(result.payload.selection.modelId, choice.modelId);
+  const row = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: choice.previewId },
+  });
+  const chunk = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+  });
+  assert.equal(row.state, "prepared");
+  assert.equal(row.sourcePlanRevisionId, plan.revisionId);
+  assert.equal(row.sourceScopeApprovalId, null);
+  assert.equal(row.modelId, choice.modelId);
+  assert.equal(Buffer.from(row.payloadCiphertext!).includes(Buffer.from(text)), false);
+  assert.equal(chunk.currentPreviewId, choice.previewId);
+  assert.equal(chunk.state, "awaiting_preview");
+  assert.equal(chunk.attempt, 1);
+  assert.deepEqual(await readIdeaOnlyTransferPreview(session, choice.previewId), {
+    state: "prepared", previewId: choice.previewId, expiresAt: row.expiresAt,
+    payload: result.payload, transferAuthorized: false,
+  });
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "amux.v4.transfer_preview.prepared",
+      targetType: "AmuxIdeaTransferPreview", targetId: choice.previewId },
+  });
+  assert.equal(audit.actorUserId, actorUserId);
+  assert.equal(JSON.stringify(audit.metadata).includes(text), false);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: choice.previewId }, data: { expiresAt: new Date("2020-01-01T00:00:00Z") },
+  });
+  assert.deepEqual(await readIdeaOnlyTransferPreview(session, choice.previewId),
+    { state: "expired", transferAuthorized: false });
+  await assert.rejects(prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys })),
+  (error: unknown) => error instanceof IdeaTransferPreviewError && error.code === "not_ready");
+  assert.equal(await prisma.amuxIdeaTransferPreview.count({ where: { ideaId } }), 1);
+});
+
+test("transfer preview row, chunk pointer and human audit roll back together", async () => {
+  const ideaId = await createIdea({ idea: `SYNTHETIC_PREVIEW_ROLLBACK_${randomUUID()}` });
+  await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
+    { session, request, ideaId, keys }));
+  const choice = { previewId: randomUUID(), ideaId, provider: "anthropic" as const,
+    modelId: "claude-frontier-synthetic", reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await commitIdeaOnlyTransferPreview(tx, { session, request, choice, keys });
+    throw new Error("synthetic preview rollback");
+  }), /synthetic preview rollback/);
+  const chunk = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+  });
+  assert.equal(chunk.state, "pending");
+  assert.equal(chunk.currentPreviewId, null);
+  assert.equal(await prisma.amuxIdeaTransferPreview.count({ where: { ideaId } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: "amux.v4.transfer_preview.prepared", targetId: choice.previewId },
+  }), 0);
 });
 
 test("read-back reports absence and never discloses another owner's plan", async () => {
