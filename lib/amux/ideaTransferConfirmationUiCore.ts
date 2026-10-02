@@ -97,3 +97,31 @@ export function clearRefusedConfirmationAttempt(storage: Storage | null, operato
     return storage.getItem(key) === null;
   } catch { return false; }
 }
+
+/** These exact route responses are produced before the confirmation writer.
+ * Unknown, post-write, or future errors retain the one-shot browser fence. */
+export function definitiveConfirmationPrewriteRefusal(status: number, body: unknown): boolean {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const { error, code } = body as Record<string, unknown>;
+  if (status === 400) return error === "schema_rejected" || code === "INVALID_JSON";
+  if (status === 403) return error === "Forbidden.";
+  if (status === 404) return error === "Not found." || error === "not_found";
+  if (status === 409) return ["not_ready", "expired", "digest_changed", "browser_mismatch"]
+    .includes(String(error));
+  if (status === 413) return error === "too_large" || code === "REQUEST_BODY_TOO_LARGE";
+  if (status === 415) return error === "content_type_refused";
+  if (status === 428) return error === "ADMIN_REAUTHENTICATION_REQUIRED";
+  if (status === 429) return code === "API_RATE_LIMITED";
+  return status === 503 && error === "confirmation_disabled";
+}
+
+export async function readConfirmationWriteReply(response: Response): Promise<{
+  body: unknown;
+  refusalResponse: Response;
+  definitiveRefusal: boolean;
+}> {
+  const refusalResponse = response.clone();
+  const body: unknown = await response.json();
+  return { body, refusalResponse,
+    definitiveRefusal: definitiveConfirmationPrewriteRefusal(response.status, body) };
+}

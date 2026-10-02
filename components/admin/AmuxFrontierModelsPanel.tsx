@@ -21,7 +21,7 @@ import {
 } from "@/lib/amux/ideaTransferPreviewUiCore";
 import {
   clearRefusedConfirmationAttempt, readConfirmedIdeaTransfer, readConfirmationAttempt,
-  readConfirmationAttemptForPreview, reserveConfirmationAttempt,
+  readConfirmationAttemptForPreview, readConfirmationWriteReply, reserveConfirmationAttempt,
   type ConfirmedIdeaTransfer,
 } from "@/lib/amux/ideaTransferConfirmationUiCore";
 
@@ -57,25 +57,32 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
 
   const readConfirmation = useCallback(async (pendingId: string,
-    expectedIdeaId: string, expectedDigest: string, expectedDigestKeyId: string) => {
+    expectedIdeaId: string, expectedDigest: string, expectedDigestKeyId: string):
+    Promise<"confirmed" | "not_confirmed" | "expired" | "unknown"> => {
     const report = (next: ConfirmState) => setConfirmation((current) =>
       current.kind === "confirmed" ? current : next);
     try {
       const query = new URLSearchParams({ previewId: pendingId });
       const response = await adminFetch(`/api/admin/amux/ideas/transfer-confirmation?${query}`,
         { cache: "no-store" });
-      if (!response.ok) { report({ kind: "unknown" }); return; }
+      if (!response.ok) { report({ kind: "unknown" }); return "unknown"; }
       const body: unknown = await response.json();
       const parsed = readConfirmedIdeaTransfer(response.status, body, pendingId,
         expectedIdeaId, expectedDigest, expectedDigestKeyId);
       if (parsed) {
         report({ kind: "confirmed", value: parsed });
         setPreview((current) => current.kind === "prepared" ? current : { kind: "confirmed" });
+        return "confirmed";
       } else if (body && typeof body === "object" &&
                  (body as Record<string, unknown>).state === "expired") {
         report({ kind: "expired" });
-      } else { report({ kind: "unknown" }); }
-    } catch { report({ kind: "unknown" }); }
+        return "expired";
+      } else if (body && typeof body === "object" &&
+                 (body as Record<string, unknown>).state === "not_confirmed") {
+        report({ kind: "unknown" });
+        return "not_confirmed";
+      } else { report({ kind: "unknown" }); return "unknown"; }
+    } catch { report({ kind: "unknown" }); return "unknown"; }
   }, []);
 
   const readBack = useCallback(async (pendingId: string, model: AvailableFrontierModel,
@@ -314,28 +321,32 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           payloadDigest: value.payloadDigest,
           payloadDigestKeyId: value.payloadDigestKeyId }),
       });
-      if (response.status === 409) {
-        await readConfirmation(value.previewId, ideaId, value.payloadDigest,
-          value.payloadDigestKeyId);
-        return;
-      }
-      if ([400, 401, 403, 404, 410, 413, 415, 428].includes(response.status)) {
-        const refusal = await readAdminApiFailure(response, {
-          fallback: m.transferConfirmRefused, locale,
-        });
-        setFailure(refusal);
-        if (response.status !== 410) {
-          clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
-            ideaId, value.payloadDigest, value.payloadDigestKeyId);
-        }
-        setConfirmation((current) => current.kind === "confirmed" ? current :
-          { kind: response.status === 410 ? "expired" : "refused" });
-        return;
-      }
-      const body: unknown = await response.json();
+      const { body, refusalResponse, definitiveRefusal } = await readConfirmationWriteReply(response);
       const parsed = readConfirmedIdeaTransfer(response.status, body, value.previewId,
         ideaId, value.payloadDigest, value.payloadDigestKeyId);
       if (parsed) { setConfirmation({ kind: "confirmed", value: parsed }); return; }
+      if (definitiveRefusal) {
+        const observed = response.status === 409
+          ? await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+            value.payloadDigestKeyId) : null;
+        if (response.status === 409 && observed !== "not_confirmed" && observed !== "expired") return;
+        const refusal = await readAdminApiFailure(refusalResponse, {
+          fallback: m.transferConfirmRefused, locale,
+        });
+        if (!clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+          ideaId, value.payloadDigest, value.payloadDigestKeyId)) {
+          setConfirmation({ kind: "unknown" });
+          return;
+        }
+        setFailure(refusal);
+        // Only this POST code proves an unconfirmed prepared preview expired.
+        // A GET "expired" may instead describe an already-confirmed receipt.
+        const expired = (body as Record<string, unknown>).error === "expired";
+        if (expired) setPreview({ kind: "expired" });
+        setConfirmation((current) => current.kind === "confirmed" ? current :
+          { kind: expired ? "expired" : [428, 429].includes(response.status) ? "idle" : "refused" });
+        return;
+      }
     } catch { /* A lost response must be read back by ID, not re-posted. */ }
     await readConfirmation(value.previewId, ideaId, value.payloadDigest,
       value.payloadDigestKeyId);

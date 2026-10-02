@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { clearRefusedConfirmationAttempt, readConfirmedIdeaTransfer, readConfirmationAttempt,
-  readConfirmationAttemptForPreview,
+import { clearRefusedConfirmationAttempt, definitiveConfirmationPrewriteRefusal,
+  readConfirmedIdeaTransfer, readConfirmationAttempt, readConfirmationAttemptForPreview,
+  readConfirmationWriteReply,
   reserveConfirmationAttempt } from "../lib/amux/ideaTransferConfirmationUiCore.ts";
 
 const previewId = "123e4567-e89b-42d3-a456-426614174001";
@@ -60,4 +61,32 @@ test("a same-tab confirmation attempt survives refresh and blocks a second clien
     digest, digestKeyId), true);
   assert.equal(readConfirmationAttempt(storage, "owner", previewId, ideaId,
     digest, digestKeyId), "absent");
+});
+
+test("only named pre-write confirmation refusals release the attempt fence", async () => {
+  for (const [status, body] of [
+    [400, { error: "schema_rejected" }],
+    [403, { error: "Forbidden." }],
+    [404, { error: "not_found" }],
+    [409, { error: "not_ready" }],
+    [409, { error: "expired" }],
+    [409, { error: "digest_changed" }],
+    [409, { error: "browser_mismatch" }],
+    [413, { code: "REQUEST_BODY_TOO_LARGE" }],
+    [415, { error: "content_type_refused" }],
+    [428, { error: "ADMIN_REAUTHENTICATION_REQUIRED" }],
+    [429, { code: "API_RATE_LIMITED" }],
+    [503, { error: "confirmation_disabled" }],
+  ]) assert.equal(definitiveConfirmationPrewriteRefusal(status, body), true);
+  for (const [status, body] of [
+    [409, { error: "outcome_unknown" }],
+    [503, { error: "confirmation_unavailable" }],
+    [404, null],
+    [409, { error: "future_postwrite_error" }],
+  ]) assert.equal(definitiveConfirmationPrewriteRefusal(status, body), false);
+
+  const reply = await readConfirmationWriteReply(new Response(
+    JSON.stringify({ error: "expired" }), { status: 409 }));
+  assert.equal(reply.definitiveRefusal, true);
+  assert.deepEqual(await reply.refusalResponse.json(), reply.body);
 });
