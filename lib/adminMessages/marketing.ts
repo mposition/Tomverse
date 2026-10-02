@@ -20,6 +20,8 @@ export const adminMarketingMessages = defineAdminMessages({
       "The stored fault arm is not one this console wrote, so arming is refused until it is removed.",
     webhookReportsTitle: "Newest {count} shadow reports, not a total.",
     webhookReportsEmpty: "No shadow report yet.",
+    webhookReportsUnreadable:
+      "A stored shadow report does not read as one, so the list is not shown. This is not the same as none having arrived.",
     webhookMatchYes: "status query agrees",
     webhookMatchNo: "status query does not agree",
     webhookArmThis: "Arm a fault for this event",
@@ -195,6 +197,8 @@ export const adminMarketingMessages = defineAdminMessages({
       "저장된 fault arm 값이 이 콘솔이 쓴 형식이 아니어서, 지워지기 전까지 arm이 거절됩니다.",
     webhookReportsTitle: "최근 shadow 기록 {count}건입니다(전체 아님).",
     webhookReportsEmpty: "아직 shadow 기록이 없습니다.",
+    webhookReportsUnreadable:
+      "저장된 shadow 기록 중 형식에 맞지 않는 것이 있어 목록을 표시하지 않습니다. 기록이 없다는 뜻은 아닙니다.",
     webhookMatchYes: "상태 조회 일치",
     webhookMatchNo: "상태 조회 불일치",
     webhookArmThis: "이 이벤트로 fault arm",

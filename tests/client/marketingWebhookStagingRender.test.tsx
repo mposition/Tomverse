@@ -52,6 +52,9 @@ const past = new Date(Date.now() - 60 * 1000).toISOString();
 
 const staging = (overrides: Record<string, unknown> = {}) => ({
   readable: true,
+  shadow: "off",
+  reportsReadable: true,
+  reportLimit: 20,
   faultArm: null,
   faultArmUnreadable: false,
   faultArmExpired: false,
@@ -76,8 +79,7 @@ const render = (props: {
   canWrite?: boolean;
 }) =>
   MarketingWebhookStaging({
-    staging: staging(props.staging) as never,
-    shadow: props.shadow ?? "off",
+    staging: staging({ shadow: props.shadow ?? "off", ...props.staging }) as never,
     canWrite: props.canWrite ?? true,
     section: "reports",
     onDone: () => undefined,
@@ -170,7 +172,44 @@ test("the arm line says what is true: none, armed, consumed, expired or foreign"
   assert.ok(line({ staging: { readable: false } }).includes(m.webhookUnreadable));
 });
 
-test("the list states how many it shows, and an empty one says so", () => {
-  assert.ok(textOf(render({})).includes(m.webhookReportsTitle.replace("{count}", "1")));
+test("the list states its limit, not how many came back, and an empty one says so", () => {
+  // One report returned of a list that holds twenty: "newest 20, not a total".
+  assert.ok(textOf(render({})).includes(m.webhookReportsTitle.replace("{count}", "20")));
   assert.ok(textOf(render({ staging: { shadowReports: [] } })).includes(m.webhookReportsEmpty));
+});
+
+test("a list that could not be read is never drawn as an empty one", () => {
+  for (const props of [
+    { staging: { readable: false, shadowReports: [] } },
+    { staging: { reportsReadable: false, shadowReports: [] } },
+  ]) {
+    const text = textOf(render(props));
+    assert.equal(text.includes(m.webhookReportsEmpty), false, JSON.stringify(props));
+    assert.equal(text.includes(m.webhookReportsTitle.replace("{count}", "20")), false);
+  }
+  assert.ok(textOf(render({ staging: { reportsReadable: false, shadowReports: [] } })).includes(m.webhookReportsUnreadable));
+});
+
+test("a shadow value the writer would refuse gets no toggle", () => {
+  for (const props of [
+    { shadow: "unreadable" as const },
+    { staging: { readable: false } },
+  ]) {
+    assert.equal(
+      actionsOf(render(props)).some((a) => a.id === "webhook-shadow-toggle"),
+      false,
+      JSON.stringify(props),
+    );
+  }
+});
+
+test("the shared rail asks before a form is sent, not only before a plain button", async () => {
+  // The fault arm has a field, so it opens a form; the confirmation used to be
+  // skipped on that path and a deliberate 503 was armed without its warning.
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync("components/admin/MarketingActions.tsx", "utf8");
+  const submit = source.slice(source.indexOf("onSubmit={(event) => {"));
+  const confirmAt = submit.indexOf("window.confirm(opened.confirm)");
+  const sendAt = submit.indexOf("send(opened");
+  assert.ok(confirmAt > 0 && sendAt > confirmAt, "the form asks before it sends");
 });

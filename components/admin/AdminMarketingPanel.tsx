@@ -52,6 +52,9 @@ export type MarketingConsoleView = {
 
 type WebhookStagingView = {
   readable: boolean;
+  shadow: "on" | "off" | "unreadable";
+  reportsReadable: boolean;
+  reportLimit: number;
   faultArm: {
     eventIdDigest: string;
     state: "armed" | "consumed";
@@ -204,7 +207,6 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
       {view.webhookStaging ? (
         <MarketingWebhookStaging
           staging={view.webhookStaging}
-          shadow={view.switches.webhookShadow}
           canWrite={view.canWrite}
           section={view.section}
           onDone={() => void refresh()}
@@ -421,22 +423,23 @@ function MarketingSwitchStrip({
  */
 export function MarketingWebhookStaging({
   staging,
-  shadow,
   canWrite,
   section,
   onDone,
   m,
 }: {
   staging: WebhookStagingView;
-  shadow: SwitchState;
   canWrite: boolean;
   section: string;
   onDone: () => void;
   m: Record<string, string>;
 }) {
+  // The switch as its writer reads it, not the strip's folded value: a stored
+  // value the writer refuses gets no toggle.
+  const shadow = staging.shadow;
   const shadowOn = shadow === "on";
   const shadowToggle: MarketingAction[] =
-    canWrite && (shadow === "on" || shadow === "off")
+    canWrite && staging.readable && (shadow === "on" || shadow === "off")
       ? [
           {
             id: "webhook-shadow-toggle",
@@ -483,71 +486,78 @@ export function MarketingWebhookStaging({
       <p data-testid="marketing-webhook-arm-state" className="mt-3 text-xs text-zinc-300">
         {armLine}
       </p>
-      <p className="mt-3 text-xs text-zinc-500">
-        {m.webhookReportsTitle.replace("{count}", String(staging.shadowReports.length))}
-      </p>
-      {staging.shadowReports.length === 0 ? (
-        <p className="mt-2 text-xs text-zinc-400">{m.webhookReportsEmpty}</p>
+      {!staging.readable ? null : !staging.reportsReadable ? (
+        // A list that could not be read is not an empty one.
+        <p className="mt-3 text-xs text-amber-300">{m.webhookReportsUnreadable}</p>
       ) : (
-        <div className="mt-2 grid gap-2">
-          {staging.shadowReports.map((report) => (
-            <article
-              key={report.id}
-              data-testid="marketing-webhook-report"
-              className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3"
-            >
-              <p className="text-xs text-zinc-200">
-                {stamp(report.createdAt)} · {report.channel ?? "?"}
-                {report.accountSlug ? ` (${report.accountSlug})` : ""} · {report.eventType} →{" "}
-                {report.derivedStatus} ·{" "}
-                <span className={report.statusQueryMatch ? "text-emerald-300" : "text-amber-300"}>
-                  {report.statusQueryMatch ? m.webhookMatchYes : m.webhookMatchNo}
-                </span>
-              </p>
-              <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">
-                {report.eventIdDigest}
-              </p>
-              <MarketingActionRail
-                actions={
-                  canArm && report.eventIdDigest !== ""
-                    ? [
-                        {
-                          id: `webhook-fault-arm-${report.id}`,
-                          label: m.webhookArmThis,
-                          path: "/api/admin/marketing/webhook/fault-arm",
-                          confirm: m.webhookArmConfirm,
-                          fields: [
+        <>
+          <p className="mt-3 text-xs text-zinc-500">
+            {m.webhookReportsTitle.replace("{count}", String(staging.reportLimit))}
+          </p>
+          {staging.shadowReports.length === 0 ? (
+            <p className="mt-2 text-xs text-zinc-400">{m.webhookReportsEmpty}</p>
+          ) : (
+            <div className="mt-2 grid gap-2">
+              {staging.shadowReports.map((report) => (
+                <article
+                  key={report.id}
+                  data-testid="marketing-webhook-report"
+                  className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3"
+                >
+                  <p className="text-xs text-zinc-200">
+                    {stamp(report.createdAt)} · {report.channel ?? "?"}
+                    {report.accountSlug ? ` (${report.accountSlug})` : ""} · {report.eventType} →{" "}
+                    {report.derivedStatus} ·{" "}
+                    <span className={report.statusQueryMatch ? "text-emerald-300" : "text-amber-300"}>
+                      {report.statusQueryMatch ? m.webhookMatchYes : m.webhookMatchNo}
+                    </span>
+                  </p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">
+                    {report.eventIdDigest}
+                  </p>
+                  <MarketingActionRail
+                    actions={
+                      canArm && report.eventIdDigest !== ""
+                        ? [
                             {
-                              name: "ttlMinutes",
-                              label: m.fieldTtlMinutes,
-                              kind: "number",
-                              initial: "30",
-                              hint: m.hintTtl,
+                              id: `webhook-fault-arm-${report.id}`,
+                              label: m.webhookArmThis,
+                              path: "/api/admin/marketing/webhook/fault-arm",
+                              confirm: m.webhookArmConfirm,
+                              fields: [
+                                {
+                                  name: "ttlMinutes",
+                                  label: m.fieldTtlMinutes,
+                                  kind: "number",
+                                  initial: "30",
+                                  hint: m.hintTtl,
+                                },
+                              ],
+                              describe: (result) => {
+                                const generation = (result as { generation?: unknown } | null)
+                                  ?.generation;
+                                return typeof generation === "number"
+                                  ? m.webhookArmDone.replace("{generation}", String(generation))
+                                  : null;
+                              },
+                              body: (values) => ({
+                                eventIdDigest: report.eventIdDigest,
+                                expectedGeneration,
+                                ttlMinutes: Number(values.ttlMinutes),
+                              }),
                             },
-                          ],
-                          describe: (result) => {
-                            const generation = (result as { generation?: unknown } | null)
-                              ?.generation;
-                            return typeof generation === "number"
-                              ? m.webhookArmDone.replace("{generation}", String(generation))
-                              : null;
-                          },
-                          body: (values) => ({
-                            eventIdDigest: report.eventIdDigest,
-                            expectedGeneration,
-                            ttlMinutes: Number(values.ttlMinutes),
-                          }),
-                        },
-                      ]
-                    : []
-                }
-                section={section}
-                onDone={onDone}
-                m={m}
-              />
-            </article>
-          ))}
-        </div>
+                          ]
+                        : []
+                    }
+                    section={section}
+                    onDone={onDone}
+                    m={m}
+                  />
+                </article>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

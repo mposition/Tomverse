@@ -3,7 +3,11 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { readMarketingAutomationSettings } from "@/lib/appSettings";
 import { marketingConfigGenerationFromValue } from "@/lib/marketingSwitchWriter";
-import { marketingWebhookApplyScopeStatus } from "@/lib/marketingAutomationAccess";
+import {
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  marketingWebhookApplyScopeStatus,
+} from "@/lib/marketingAutomationAccess";
+import { parseMarketingReportPayload } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_WEBHOOK_FAULT_ARM_KEY,
   marketingWebhookIsStaging,
@@ -71,6 +75,17 @@ export type MarketingSwitchStates = {
 export type MarketingWebhookStagingView = {
   /** False when the arm or the reports could not be read; the screen says so. */
   readable: boolean;
+  /**
+   * The shadow switch as its writer reads it: absent or "false" is off, "true"
+   * is on, anything else is unreadable -- the writer refuses that value, so the
+   * screen must not offer a toggle the writer will certainly refuse. (The
+   * generic switch strip folds every non-"true" value to off.)
+   */
+  shadow: "on" | "off" | "unreadable";
+  /** False when a stored report does not parse as the strict shadow payload. */
+  reportsReadable: boolean;
+  /** How many reports the list holds at most; the screen states this number. */
+  reportLimit: number;
   /** Null when nothing has ever been armed or the stored value is not an arm. */
   faultArm: {
     eventIdDigest: string;
@@ -232,9 +247,13 @@ async function readSwitches(): Promise<{
 async function readWebhookStaging(): Promise<MarketingWebhookStagingView | null> {
   if (!marketingWebhookIsStaging()) return null;
   try {
-    const [armRow, reports] = await Promise.all([
+    const [armRow, shadowRow, reports] = await Promise.all([
       prisma.appSetting.findUnique({
         where: { key: MARKETING_WEBHOOK_FAULT_ARM_KEY },
+        select: { value: true },
+      }),
+      prisma.appSetting.findUnique({
+        where: { key: MARKETING_WEBHOOK_SHADOW_KEY },
         select: { value: true },
       }),
       prisma.marketingReport.findMany({
@@ -245,15 +264,37 @@ async function readWebhookStaging(): Promise<MarketingWebhookStagingView | null>
       }),
     ]);
     const arm = parseMarketingWebhookFaultArm(armRow?.value);
-    const payloadOf = (value: unknown) =>
-      (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-    const channelIds = [
-      ...new Set(
-        reports
-          .map((report) => payloadOf(report.payload).channelId)
-          .filter((id): id is string => typeof id === "string"),
-      ),
-    ];
+    const shadowValue = shadowRow?.value;
+    const shadow =
+      shadowValue === undefined || shadowValue === "false"
+        ? ("off" as const)
+        : shadowValue === "true"
+          ? ("on" as const)
+          : ("unreadable" as const);
+    // Each payload through the strict schema it was written with. One that does
+    // not parse makes the list unreadable rather than a row of defaults: a
+    // missing `statusQueryMatch` is not a disagreement.
+    type ShadowPayload = {
+      eventIdDigest: string;
+      eventType: string;
+      channelId: string;
+      derivedStatus: string;
+      statusQueryMatch: boolean;
+    };
+    let reportsReadable = true;
+    const parsed: Array<{ id: string; createdAt: Date; payload: ShadowPayload }> = [];
+    for (const report of reports) {
+      try {
+        parsed.push({
+          id: report.id,
+          createdAt: report.createdAt,
+          payload: parseMarketingReportPayload("webhook_shadow", report.payload) as ShadowPayload,
+        });
+      } catch {
+        reportsReadable = false;
+      }
+    }
+    const channelIds = [...new Set(parsed.map((report) => report.payload.channelId))];
     const channels =
       channelIds.length === 0
         ? []
@@ -264,30 +305,36 @@ async function readWebhookStaging(): Promise<MarketingWebhookStagingView | null>
     const channelById = new Map(channels.map((channel) => [channel.id, channel]));
     return {
       readable: true,
+      shadow,
+      reportsReadable,
+      reportLimit: MARKETING_READ_PAGE_SIZE,
       faultArm: arm,
       faultArmUnreadable: armRow !== null && arm === null,
       faultArmExpired:
         arm !== null && arm.state === "armed" && Date.parse(arm.expiresAt) <= Date.now(),
-      shadowReports: reports.map((report) => {
-        const payload = payloadOf(report.payload);
-        const channel =
-          typeof payload.channelId === "string" ? channelById.get(payload.channelId) : undefined;
-        return {
-          id: report.id,
-          createdAt: report.createdAt.toISOString(),
-          eventIdDigest: typeof payload.eventIdDigest === "string" ? payload.eventIdDigest : "",
-          eventType: typeof payload.eventType === "string" ? payload.eventType : "",
-          channel: channel?.channel ?? null,
-          accountSlug: channel?.accountSlug ?? null,
-          derivedStatus: typeof payload.derivedStatus === "string" ? payload.derivedStatus : "",
-          statusQueryMatch: payload.statusQueryMatch === true,
-        };
-      }),
+      shadowReports: reportsReadable
+        ? parsed.map((report) => {
+            const channel = channelById.get(report.payload.channelId);
+            return {
+              id: report.id,
+              createdAt: report.createdAt.toISOString(),
+              eventIdDigest: report.payload.eventIdDigest,
+              eventType: report.payload.eventType,
+              channel: channel?.channel ?? null,
+              accountSlug: channel?.accountSlug ?? null,
+              derivedStatus: report.payload.derivedStatus,
+              statusQueryMatch: report.payload.statusQueryMatch,
+            };
+          })
+        : [],
     };
   } catch {
     // Unreadable is its own answer: an empty list would claim nothing arrived.
     return {
       readable: false,
+      shadow: "unreadable",
+      reportsReadable: false,
+      reportLimit: MARKETING_READ_PAGE_SIZE,
       faultArm: null,
       faultArmUnreadable: false,
       faultArmExpired: false,
