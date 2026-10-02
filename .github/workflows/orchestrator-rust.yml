@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   workspace:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main'
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Build and test the Rust workspace
     runs-on: ubuntu-latest
     timeout-minutes: 30

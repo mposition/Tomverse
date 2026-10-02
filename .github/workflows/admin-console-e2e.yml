@@ -65,7 +65,7 @@ concurrency:
 
 jobs:
   admin-console-e2e:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.head_ref != 'develop' || github.base_ref != 'main'
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Admin Console E2E (PostgreSQL)
     runs-on: ubuntu-latest
     # Measured ~3 minutes of Playwright plus a production build. 25 minutes
