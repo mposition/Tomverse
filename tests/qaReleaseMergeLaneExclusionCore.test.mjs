@@ -29,7 +29,15 @@ test("an ordinary feature PR is a candidate", () => {
 
 test("a migration alone does not exclude (policy: unattended develop merges include migrations)", () => {
   assert.deepEqual(
-    judge({ changedFiles: [{ path: "prisma/migrations/20261003000000_x/migration.sql" }] }),
+    judge({
+      changedFiles: [
+        {
+          path: "prisma/migrations/20261003000000_x/migration.sql",
+          migrationSql: 'ALTER TABLE "Conversation" ADD COLUMN "x" TEXT;',
+        },
+        { path: "prisma/schema.prisma" },
+      ],
+    }),
     { excluded: false },
   );
 });
@@ -42,6 +50,11 @@ test("each gate path excludes", () => {
     "scripts/deep/nested/run.mjs",
     "package.json",
     "package-lock.json",
+    "eslint.config.mjs",
+    ".gitleaks.toml",
+    "tsconfig.json",
+    "next.config.ts",
+    "playwright.config.ts",
     "AGENTS.md",
     "CLAUDE.md",
     "docs/policy/qa-release-agent.md",
@@ -57,7 +70,7 @@ test("each gate path excludes", () => {
 });
 
 test("near-miss paths are not gates", () => {
-  for (const path of ["docs/ops/railway-restore-drill.md", "lib/adminAudit.ts", "components/package.json.md", "AGENTS.md.bak"]) {
+  for (const path of ["docs/ops/railway-restore-drill.md", "lib/adminAudit.ts", "components/package.json.md", "docs/AGENTS.md.bak"]) {
     assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
   }
 });
@@ -127,5 +140,29 @@ test("reasons accumulate and are stable", () => {
       changedFiles: [{ path: "package.json" }, { path: "lib/qaReleaseX.ts" }],
     }),
     { excluded: true, reasons: ["agent_own_path", "excluded_branch", "gate_path"] },
+  );
+});
+
+test("a migration naming this agent's tables, or one whose SQL cannot be read, excludes", () => {
+  const path = "prisma/migrations/20261003000000_x/migration.sql";
+  for (const migrationSql of [
+    'CREATE TABLE "QaReleaseControlRevision" ("revision" INTEGER);',
+    'DROP TABLE "QaReleaseMergeLaneState";',
+    "DELETE FROM \"AgentDigestItem\" WHERE \"agentKey\" = 'qa-release';",
+    null,
+    undefined,
+  ]) {
+    assert.deepEqual(
+      judge({ changedFiles: [{ path, migrationSql }] }),
+      { excluded: true, reasons: ["protected_table_migration"] },
+      String(migrationSql),
+    );
+  }
+});
+
+test("migration SQL on a non-migration path is ignored", () => {
+  assert.deepEqual(
+    judge({ changedFiles: [{ path: "docs/notes.md", migrationSql: 'DROP TABLE "QaReleaseX";' }] }),
+    { excluded: false },
   );
 });
