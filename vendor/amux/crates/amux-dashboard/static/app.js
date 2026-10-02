@@ -6124,9 +6124,9 @@ function showBranchPopover(name, e) {
     pop.innerHTML = `
       <div style="font-size:0.75rem;color:var(--dim);margin-bottom:8px;font-weight:600;">⎇ Create worker branch</div>
       <div style="font-size:0.78rem;color:var(--dim);margin-bottom:8px;">Isolate changes from other workers on <strong>${esc(gi.branch || 'main')}</strong></div>
-      <input class="search-input" id="bp-input-${name}" value="${esc(suggested)}" style="font-size:0.82rem;margin-bottom:8px;">
+      <input class="search-input" id="bp-input-${esc(name)}" value="${esc(suggested)}" style="font-size:0.82rem;margin-bottom:8px;">
       <div class="branch-popover-actions">
-        <button class="btn primary" style="flex:1;" onclick="doCreateBranch('${name}')">Create &amp; checkout</button>
+        <button class="btn primary" style="flex:1;" onclick="doCreateBranch('${escJs(name)}')">Create &amp; checkout</button>
         <button class="btn" onclick="document.querySelectorAll('.branch-popover').forEach(p=>p.remove())">✕</button>
       </div>`;
   }
@@ -28141,7 +28141,7 @@ function renderMarkdown(raw, basePath) {
       // Add id to headings so #anchor links work (TOC, cross-refs)
       renderer.heading = function({ tokens, depth }) {
         const text = this.parser.parseInline(tokens);
-        const slug = text.replace(/<[^>]+>/g, '').toLowerCase().trim()
+        const slug = _htmlText(text).toLowerCase().trim()
           .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-');
         return '<h' + depth + ' id="' + slug + '">' + text + '</h' + depth + '>\n';
       };
