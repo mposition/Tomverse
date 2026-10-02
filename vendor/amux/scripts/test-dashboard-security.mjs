@@ -15,6 +15,7 @@ const helpers = [
   section('function _sanitizeHtml(html) {', '// Resolve a markdown'),
   section('function _htmlText(value) {', 'function highlightPrompts(html) {'),
   section('function _csvEsc(s) {', 'let _csvRows ='),
+  section('function showBranchPopover(name, e) {', 'async function doCreateBranch(name) {'),
 ].join('\n');
 
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined });
@@ -46,7 +47,19 @@ try {
     const csv = `a" onmouseover="window.__xss=1`;
     probe.innerHTML = `<span title="${_csvEsc(csv)}">Cell</span>`;
     const span = probe.querySelector('span');
-    return { records, fallback, csv: { title: span.title, attributes: span.attributes.length }, text: _htmlText('<b>safe</b>&amp; text') };
+    const branchName = `a\\';window.__xss=1;//" onmouseover="window.__xss=2`;
+    window.__xss = 0;
+    window.gitInfo = { [branchName]: { branch: 'main' } };
+    window.sessions = [{ name: branchName, branch: 'none' }];
+    window._isBranchMain = branch => branch === 'main';
+    window._cssRect = () => ({ left: 0, bottom: 0 });
+    window.doCreateBranch = value => { window.__capturedBranch = value; };
+    showBranchPopover(branchName, { stopPropagation() {}, target: probe });
+    const pop = document.querySelector('.branch-popover');
+    const input = pop.querySelector('input');
+    pop.querySelector('button.primary').click();
+    const branch = { id: input.id, value: input.value, captured: window.__capturedBranch, xss: window.__xss, inputCount: pop.querySelectorAll('input').length };
+    return { records, fallback, csv: { title: span.title, attributes: span.attributes.length }, text: _htmlText('<b>safe</b>&amp; text'), branch, branchName };
   }, helpers);
   for (const row of result.records) {
     assert.equal(row.captured, row.payload);
@@ -58,6 +71,7 @@ try {
   assert.match(result.fallback.text, /<img src=x/);
   assert.deepEqual(result.csv, { title: `a" onmouseover="window.__xss=1`, attributes: 1 });
   assert.equal(result.text, 'safe& text');
+  assert.deepEqual(result.branch, { id: 'bp-input-' + result.branchName, value: 'session/' + result.branchName, captured: result.branchName, xss: 0, inputCount: 1 });
   console.log('Dashboard HTML security regression passed');
 } finally {
   await browser.close();
