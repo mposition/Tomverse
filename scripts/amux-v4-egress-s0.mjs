@@ -8,13 +8,13 @@ import { createServer as createTcpServer, connect as connectTcp } from "node:net
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { AMUX_V4_LOCAL_BRIDGE_SOURCE } from "../lib/amux/ideaLocalBridgeSource.mjs";
 import { createAmuxV4EgressProxy } from "../lib/amux/ideaLocalEgressProxy.ts";
 
 const CHILD = String.raw`
 const assert = require("node:assert/strict");
 const { existsSync, readFileSync, readdirSync } = require("node:fs");
 const net = require("node:net");
-const socketPath = "/run/amux/proxy.sock";
 const request = (authority, expected, method = "CONNECT") => new Promise((resolve, reject) => {
   const socket = net.connect({ host: "127.0.0.1", port: 3128 });
   let output = "";
@@ -53,31 +53,23 @@ async function main() {
   assert.equal(existsSync("/etc"), false);
   assert.equal(existsSync("/root"), false);
   assert.deepEqual(readdirSync("/run"), ["amux"]);
+  const socketMount = readFileSync("/proc/self/mountinfo", "utf8").split("\n")
+    .map((line) => line.split(" "))
+    .find((fields) => fields[4] === "/run/amux");
+  assert.ok(socketMount && socketMount[5].split(",").includes("ro"));
   const interfaces = readFileSync("/proc/net/dev", "utf8").split("\n")
     .slice(2).filter((line) => line.includes(":"))
     .map((line) => line.split(":")[0].trim());
   assert.deepEqual(interfaces, ["lo"]);
   await direct();
-  const bridge = net.createServer((client) => {
-    const upstream = net.connect(socketPath);
-    client.pipe(upstream); upstream.pipe(client);
-    client.on("error", () => upstream.destroy());
-    upstream.on("error", () => client.destroy());
-    client.on("close", () => upstream.destroy());
-    upstream.on("close", () => client.destroy());
-  });
-  await new Promise((resolve, reject) => {
-    bridge.once("error", reject);
-    bridge.listen(3128, "127.0.0.1", resolve);
-  });
-  try {
-    assert.match(await request("evil.example:443", 403), /403 Forbidden/);
-    assert.match(await request("api.openai.com:80", 403), /403 Forbidden/);
-    assert.match(await request("127.0.0.1:443", 403), /403 Forbidden/);
-    assert.match(await request("http://api.openai.com/", 405, "GET"), /405 Method Not Allowed/);
-    assert.match(await request("api.openai.com:443", 200), /200 Connection Established/);
-    process.stdout.write("S0_OK\n");
-  } finally { await new Promise((resolve) => bridge.close(resolve)); }
+  assert.match(await request("evil.example:443", 403), /403 Forbidden/);
+  assert.match(await request("api.openai.com:80", 403), /403 Forbidden/);
+  assert.match(await request("127.0.0.1:443", 403), /403 Forbidden/);
+  assert.match(await request("http://api.openai.com/", 405, "GET"), /405 Method Not Allowed/);
+  assert.match(await request("api.openai.com:443", 200), /200 Connection Established/);
+  assert.match(await request("api.openai.com:443", 403), /403 Forbidden/);
+  assert.match(await request("api.openai.com:443", 403), /403 Forbidden/);
+  process.stdout.write("S0_OK\n");
 }
 main().catch((error) => { process.stderr.write(error.message + "\n"); process.exitCode = 1; });
 `;
@@ -121,7 +113,12 @@ async function main() {
   const echo = createTcpServer((socket) => socket.pipe(socket));
   const echoAddress = await listen(echo, { host: "127.0.0.1", port: 0 });
   const proxy = createAmuxV4EgressProxy(["api.openai.com"], {
-    resolve: async (host) => { lookups.push(host); return ["104.18.6.192"]; },
+    resolve: async (host) => {
+      lookups.push(host);
+      if (lookups.length === 2) return ["169.254.169.254"];
+      if (lookups.length === 3) return ["104.18.6.192", "127.0.0.1"];
+      return ["104.18.6.192"];
+    },
     dial: (address, port) => {
       dials.push({ address, port });
       return connectTcp({ host: "127.0.0.1", port: echoAddress.port });
@@ -141,9 +138,11 @@ async function main() {
       "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp",
       "--setenv", "HTTPS_PROXY", "http://127.0.0.1:3128",
       "--setenv", "AMUX_HOST_ECHO_PORT", String(echoAddress.port),
+      "--", "/usr/bin/node", "-e", AMUX_V4_LOCAL_BRIDGE_SOURCE,
       "--", "/usr/bin/node", "-e", CHILD,
     ]);
-    assert.deepEqual(lookups, ["api.openai.com"], "refused target must not trigger DNS");
+    assert.deepEqual(lookups, ["api.openai.com", "api.openai.com",
+      "api.openai.com"], "refused targets must not trigger DNS");
     assert.deepEqual(dials, [{ address: "104.18.6.192", port: 443 }],
       "only the checked public IP and port may be dialed");
     process.stdout.write("AMUX_V4_EGRESS_S0_PASS\n");
