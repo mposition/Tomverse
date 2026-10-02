@@ -22,6 +22,12 @@ import {
   sourceScopePreviewPermitted,
 } from "@/lib/amux/ideaSourceScopePreviewCore";
 import {
+  AMUX_V4_SOURCE_SCOPE_APPROVAL_READ_ENV,
+  AMUX_V4_SOURCE_SCOPE_APPROVAL_WRITE_ENV,
+  sourceScopeApprovalReadPermitted,
+  sourceScopeApprovalWritePermitted,
+} from "@/lib/amux/ideaSourceScopeApprovalCore";
+import {
   AMUX_V4_INITIAL_PLAN_READBACK_ENV,
   AMUX_V4_INITIAL_PLAN_WRITE_ENV,
   initialPlanReadbackPermitted,
@@ -80,6 +86,9 @@ export default async function AdminAmuxBacklogPage({
     ideaSubmissionReadBackPermitted(process.env[AMUX_V4_IDEA_READBACK_ENV]);
   const sourceScopePreviewAvailable = sourceScopePreviewPermitted(
     process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]);
+  const sourceScopeApprovalAvailable = sourceScopePreviewAvailable &&
+    sourceScopeApprovalWritePermitted(process.env[AMUX_V4_SOURCE_SCOPE_APPROVAL_WRITE_ENV]) &&
+    sourceScopeApprovalReadPermitted(process.env[AMUX_V4_SOURCE_SCOPE_APPROVAL_READ_ENV]);
   const initialPlanAvailable = initialPlanWritePermitted(process.env[AMUX_V4_INITIAL_PLAN_WRITE_ENV]) &&
     initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV]);
   const frontierModelsAvailable = frontierCatalogReadPermitted(
@@ -114,6 +123,7 @@ export default async function AdminAmuxBacklogPage({
       {tab.id === "ideas" ? (
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
+          sourceScopeApprovalAvailable={sourceScopeApprovalAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
           transferPreviewAvailable={transferPreviewAvailable}

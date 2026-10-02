@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
+import { AmuxSourceScopeApprovalPanel } from "@/components/admin/AmuxSourceScopeApprovalPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -41,7 +42,7 @@ type InputPreviewResult = {
 type SourceScopeResult =
   | { kind: "idle" }
   | { kind: "checked"; canonicalScopeJson: string;
-      scopeDigest: string; scopeDigestKeyId: string }
+      ideaDigest: string; scopeDigest: string; scopeDigestKeyId: string }
   | { kind: "error"; code: string };
 
 type SubmissionState =
@@ -67,9 +68,11 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 }
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
+  sourceScopeApprovalAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
   transferConfirmAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
+  sourceScopeApprovalAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean; operatorId: string;
 }) {
@@ -512,6 +515,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             <div role="status" className="space-y-2 text-sm text-zinc-800 dark:text-zinc-100">
               <p>{messages.sourceScopeChecked}</p>
               <code className="block break-all rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">{sourceScopeResult.canonicalScopeJson}</code>
+              <AmuxSourceScopeApprovalPanel
+                key={`${submission.ideaId}:${sourceScopeResult.scopeDigest}`}
+                ideaId={submission.ideaId} operatorId={operatorId}
+                checked={sourceScopeResult} available={sourceScopeApprovalAvailable} />
             </div>
           ) : null}
           {sourceScopeResult.kind === "error" ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{messages.sourceScopeError(sourceScopeResult.code)}</p> : null}

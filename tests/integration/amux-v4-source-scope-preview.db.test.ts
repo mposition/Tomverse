@@ -6,6 +6,8 @@ import type { Session } from "next-auth";
 
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
+import { AmuxSourceScopeApprovalError,
+  commitAmuxSourceScopeApproval } from "@/lib/amux/ideaSourceScopeApprovalService";
 import {
   AmuxSourceScopePreviewError,
   configureAmuxSourceScopeReadOnlyTransaction,
@@ -101,4 +103,58 @@ test("source scope preview reads only owned audited idea and never approves tran
     throw new Error("synthetic rollback");
   }), /synthetic rollback/);
   assert.equal(await prisma.amuxIdeaSubmission.count({ where: { id: ideaId } }), 0);
+});
+
+test("owner approval atomically binds a current idea and scope to its audit", async () => {
+  const ideaId = randomUUID();
+  const approvalId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(),
+    input: { version: 1, idea: "SYNTHETIC_SCOPE_APPROVAL",
+      repositories: ["mposition/Tomverse"], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  const scopeJson = JSON.stringify({ version: 1, sources: [{
+    kind: "repository_file", repository: "mposition/Tomverse",
+    commitSha: "a".repeat(40), path: "lib/amux/ideaSourceScopeCore.ts",
+  }] });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await commitIdeaSubmission(tx, { session, request, inspected, ideaId, keys });
+    const preview = await previewAmuxSourceScopeInTransaction(tx, actorUserId,
+      { schemaVersion: 1, ideaId, scopeJson }, keys);
+    const choice = { schemaVersion: 1 as const, approvalId, ideaId,
+      ideaDigest: preview.ideaDigest,
+      canonicalScopeJson: preview.canonicalScopeJson,
+      scopeDigest: preview.scopeDigest,
+      scopeDigestKeyId: preview.scopeDigestKeyId };
+    await assert.rejects(commitAmuxSourceScopeApproval(tx, {
+      session, request, choice: { ...choice, scopeDigest: "0".repeat(64) }, keys,
+    }), (error: unknown) => error instanceof AmuxSourceScopeApprovalError &&
+      error.code === "preview_changed");
+    assert.equal(await tx.amuxIdeaSourceScopeApproval.count({ where: { ideaId } }), 0);
+    const result = await commitAmuxSourceScopeApproval(tx,
+      { session, request, choice, keys });
+    assert.equal(result.ideaDigest, preview.ideaDigest);
+    assert.equal(result.previewScopeDigest, preview.scopeDigest);
+    const row = await tx.amuxIdeaSourceScopeApproval.findUniqueOrThrow({
+      where: { id: approvalId },
+    });
+    assert.equal(row.status, "approved");
+    assert.equal(row.authorizationAuditLogId, result.auditId);
+    assert.equal(row.scopeDigest, result.scopeDigest);
+    const audit = await tx.adminAuditLog.findUniqueOrThrow({
+      where: { id: result.auditId },
+    });
+    assert.equal(audit.action, "amux.v4.source_scope.approved");
+    assert.equal((audit.metadata as Record<string, unknown>).previewScopeDigest,
+      preview.scopeDigest);
+    assert.doesNotMatch(JSON.stringify(audit.metadata), /ideaSourceScopeCore\.ts/);
+    assert.equal(await tx.amuxIdeaTransferPreview.count({ where: { ideaId } }), 0);
+    await assert.rejects(commitAmuxSourceScopeApproval(tx,
+      { session, request, choice, keys }),
+    (error: unknown) => error instanceof AmuxSourceScopeApprovalError &&
+      error.code === "approval_exists");
+    throw new Error("synthetic rollback");
+  }), /synthetic rollback/);
+  assert.equal(await prisma.amuxIdeaSourceScopeApproval.count({ where: { id: approvalId } }), 0);
 });

@@ -9,7 +9,8 @@ const checked = {
   ideaId, fileCount: 1, canonicalScopeJson: JSON.stringify({ version: 1,
     sources: [{ kind: "repository_file", repository: "mposition/Tomverse",
       commitSha: "a".repeat(40), path: "README.md" }] }),
-  scopeDigest: "b".repeat(64), scopeDigestKeyId: "amux-v4-preview-key",
+  ideaDigest: "c".repeat(64), scopeDigest: "b".repeat(64),
+  scopeDigestKeyId: "amux-v4-preview-key",
   collectionVerified: false, transferAuthorized: false,
 };
 const checkedPr = { ...checked, canonicalScopeJson: JSON.stringify({ version: 1,
@@ -19,10 +20,12 @@ const checkedPr = { ...checked, canonicalScopeJson: JSON.stringify({ version: 1,
 test("only a complete read-only response is shown as a checked scope", () => {
   assert.deepEqual(classifySourceScopePreview({ status: 200, body: checked }, ideaId),
     { kind: "checked", canonicalScopeJson: checked.canonicalScopeJson,
-      scopeDigest: checked.scopeDigest, scopeDigestKeyId: checked.scopeDigestKeyId });
+      ideaDigest: checked.ideaDigest, scopeDigest: checked.scopeDigest,
+      scopeDigestKeyId: checked.scopeDigestKeyId });
   assert.deepEqual(classifySourceScopePreview({ status: 200, body: checkedPr }, ideaId),
     { kind: "checked", canonicalScopeJson: checkedPr.canonicalScopeJson,
-      scopeDigest: checkedPr.scopeDigest, scopeDigestKeyId: checkedPr.scopeDigestKeyId });
+      ideaDigest: checkedPr.ideaDigest, scopeDigest: checkedPr.scopeDigest,
+      scopeDigestKeyId: checkedPr.scopeDigestKeyId });
   for (const reply of [
     { status: 202, body: checked },
     { status: 200, body: { ...checked, ideaId: "another" } },
@@ -33,6 +36,7 @@ test("only a complete read-only response is shown as a checked scope", () => {
     { status: 200, body: { ...checked, canonicalScopeJson: '{"version":1,"sources":[]}' } },
     { status: 200, body: { ...checked, fileCount: 0 } },
     { status: 200, body: { ...checked, scopeDigest: "" } },
+    { status: 200, body: { ...checked, ideaDigest: "" } },
     { status: 200, body: { ...checked, scopeDigestKeyId: "other/key" } },
     { status: 200, body: { ...checkedPr, canonicalScopeJson: JSON.stringify({ version: 1,
       sources: [{ kind: "pull_request_file", repository: "mposition/Tomverse", number: 0,

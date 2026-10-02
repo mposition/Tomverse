@@ -2,7 +2,7 @@ type ScopePreviewReply = { status: number; body: unknown };
 
 export type ScopePreviewDecision =
   | { kind: "checked"; canonicalScopeJson: string;
-      scopeDigest: string; scopeDigestKeyId: string }
+      ideaDigest: string; scopeDigest: string; scopeDigestKeyId: string }
   | { kind: "error"; code: string };
 
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
@@ -49,10 +49,12 @@ export function classifySourceScopePreview(
   if (reply.status === 200 && body?.ideaId === ideaId && body.fileCount === 1 &&
       body.collectionVerified === false && body.transferAuthorized === false &&
       typeof body.canonicalScopeJson === "string" && oneSourceFile(body.canonicalScopeJson) &&
+      typeof body.ideaDigest === "string" && keyedDigest.test(body.ideaDigest) &&
       typeof body.scopeDigest === "string" && keyedDigest.test(body.scopeDigest) &&
       typeof body.scopeDigestKeyId === "string" && keyId.test(body.scopeDigestKeyId)) {
     return { kind: "checked", canonicalScopeJson: body.canonicalScopeJson,
-      scopeDigest: body.scopeDigest, scopeDigestKeyId: body.scopeDigestKeyId };
+      ideaDigest: body.ideaDigest, scopeDigest: body.scopeDigest,
+      scopeDigestKeyId: body.scopeDigestKeyId };
   }
   return { kind: "error", code: typeof body?.error === "string" ? body.error : "preview_unavailable" };
 }

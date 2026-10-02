@@ -34,6 +34,7 @@ const ownerId = (session: Session): string => {
 
 export type AmuxSourceScopePreview = {
   ideaId: string;
+  ideaDigest: string;
   canonicalScopeJson: string;
   scopeDigest: string;
   scopeDigestKeyId: string;
@@ -106,6 +107,7 @@ export async function previewAmuxSourceScopeInTransaction(
   } finally { scopeBytes.fill(0); }
   return {
     ideaId: idea.id,
+    ideaDigest: idea.rawDigest,
     canonicalScopeJson: scope.canonicalJson,
     scopeDigest: binding.digest,
     scopeDigestKeyId: binding.digestKeyId,
