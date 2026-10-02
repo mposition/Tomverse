@@ -128,6 +128,22 @@ test("a localhost submission URL may be plain http, and only localhost", () => {
   assert.equal(remote.mode, "config");
 });
 
+test("the loopback exception is an exception to https, not to HTTP", () => {
+  // A scheme the submission cannot be made over has to be refused here. Left
+  // to the run it becomes a failed submission, which reads as the route being
+  // down rather than as the variable being wrong.
+  for (const url of [
+    "ftp://localhost/x",
+    "file://localhost/x",
+    "ws://127.0.0.1:3000/x",
+    "postgresql://localhost:5432/db",
+  ]) {
+    const plan = planRun(serviceEnv({ PRODUCT_RESEARCH_INGEST_URL: url }));
+    assert.equal(plan.mode, "config", url);
+    assert.match(plan.problems.join(" "), /is not https|connection string/);
+  }
+});
+
 test("a complete environment produces the config the run needs and nothing more", () => {
   const plan = planRun(serviceEnv());
   assert.equal(plan.mode, "run");
