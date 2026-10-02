@@ -1,7 +1,7 @@
 # QA·릴리스 Agent 정책
 
-상태: **버전 2 초안 — 승인 대기.** 버전 1은 2026-10-02 승인·병합됨. 버전 2가 승인·병합되기 전까지는 버전 1이 효력을 가집니다.
-approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 1 (버전 2 승인 시 운영자가 고쳐 기록)
+상태: **승인됨(버전 2).** 최초 작성 2026-10-02, 버전 1 승인 2026-10-02, 버전 2 승인 2026-10-02.
+approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 2
 allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 | 버전 | 승인 | 변경 |
@@ -9,9 +9,9 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 최초 초안 |
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: main은 사람이 병합하고 레인은 표시만, develop 제외 목록 보강, latch 전용 알림 |
 | 1 | 2026-10-02 mposition | 최초 승인(세 번째 초안). 세 번째 초안 — 독립 검토 반영: App의 main 병합을 ruleset으로 막음(bypass는 저장소 관리자 역할만), 게이트 범위를 `package.json`과 `scripts/**`로, 제외는 후보 선정에서 건너뜀, 승인 판정 단계를 본문에, 모든 secret·키 회전 기록, staging migration 복구, 스위치 off, 단일 점유 |
-| (2, 미승인) | (승인 대기) | 버전 1의 독립 검토 반영 — 저장소 루트 파일 전체와 이 Agent의 테이블을 바꾸는 migration을 게이트로, develop 직접 push를 GitHub 설정으로 막고 그 관측을 S-M1 진입 조건으로, main ruleset은 시험 브랜치 관측 뒤에, 지시는 현재 revision·스위치·latch에 결속해 GitHub 호출 직전에 본 앱이 소비, 세 서비스 모두 revision 번호, kill switch는 "값이 있으면 정지", staging 복구 runbook을 S-M2 진입 조건으로, timeout의 문장 수와 Prisma 값, 승인 판정 0·4번 보강, glob 의미 |
+| 2 | 2026-10-02 mposition | 버전 1의 독립 검토 반영 — 저장소 루트 파일 전체와 이 Agent의 테이블을 바꾸는 migration을 게이트로, develop 직접 push를 GitHub 설정으로 막고 그 관측을 S-M1 진입 조건으로, main ruleset은 시험 브랜치 관측 뒤에, 지시는 현재 revision·스위치·latch에 결속해 GitHub 호출 직전에 본 앱이 소비, 세 서비스 모두 revision 번호, kill switch는 "값이 있으면 정지", staging 복구 runbook을 S-M2 진입 조건으로, timeout의 문장 수와 Prisma 값, 승인 판정 0·4번 보강, glob 의미 |
 
-운영자 `mposition`이 2026-10-02 대화 세션에서 이 문서를 승인했다(버전 1). 이 문서는 이 Agent 구현의 규범 근거다. 다만
+운영자 `mposition`이 2026-10-02 대화 세션에서 이 문서를 승인했다(버전 1, 그리고 같은 날 버전 2). 이 문서는 이 Agent 구현의 규범 근거다. 다만
 **아래 승인 판정이 통과하기 전에는(이 승인 기록이 `develop`에 병합되기 전을 포함해) S0의 어떤 코드도 작성·병합하지 않는다.**
 이 문서는 Claude가 설계하고 독립 검토(교차 vendor)로 `accept` 판정을 받은 비공개 설계서를 공개 계약으로 옮긴 것이다.
 내용 변경은 운영자 승인과 정책 버전 증가가 필요하다. 승인은 단계별 착수 조건을 없애지 않으며, 어떤
@@ -200,7 +200,7 @@ latch로 남습니다. 이미 병합된 commit은 사람이 revert PR로 되돌�
 
 | 값 | 내용 | 상태 |
 |---|---|---|
-| timeout | 문장 2,000 ms, 유휴 1,000 ms(DB가 강제, 문장마다·유휴 구간마다 다시 걸림). 트랜잭션당 최대는 그 트랜잭션의 **문장 수 A**로 유도한 애플리케이션 값 `3A + 5`초입니다(문장마다 2초, 문장 사이 유휴 1초, 시작·끝 왕복과 여유 5초): digest 제출 저장 A = 9 → 32초, 침묵 판단 읽기 A = 2 → 11초, 침묵 알림 기록 A = 9 → 32초, 감시 실패 기록 A = 7 → 26초. 침묵 감지 한 회차의 최악은 읽기·알림·감시 실패의 합 69초(11 + 32 + 26)이고, 제출 저장은 다른 route입니다. **Prisma interactive transaction의 timeout은 각 트랜잭션의 최대보다 5초 길게 명시하고**(기본 5초를 쓰지 않음), 상수 순서 `Prisma > transaction > statement > idle`을 test가 고정합니다. 문장 수가 바뀌면 이 값도 이 문서의 개정으로 바뀝니다. PostgreSQL 17에서만 있는 `transaction_timeout`은 그 서버가 지원할 때만 걸고, 16에서는 걸지 않습니다 | 승인(버전 1), 유도식·Prisma 값은 버전 2 |
+| timeout | 문장 2,000 ms, 유휴 1,000 ms(DB가 강제, 문장마다·유휴 구간마다 다시 걸림). 트랜잭션당 최대는 그 트랜잭션의 **문장 수 A**로 유도한 애플리케이션 값 `3A + 5`초입니다(문장마다 2초, 문장 사이 유휴 1초, 시작·끝 왕복과 여유 5초): digest 제출 저장 A = 9 → 32초, 침묵 판단 읽기 A = 2 → 11초, 침묵 알림 기록 A = 9 → 32초, 감시 실패 기록 A = 7 → 26초. 침묵 감지 한 회차의 최악은 읽기·알림·감시 실패의 합 69초(11 + 32 + 26)이고, 제출 저장은 다른 route입니다. **Prisma interactive transaction의 timeout은 각 트랜잭션의 최대보다 5초 길게 명시하고**(기본 5초를 쓰지 않음), 상수 순서 `Prisma > transaction > statement > idle`을 test가 고정합니다. 문장 수가 바뀌면 이 값도 이 문서의 개정으로 바뀝니다. PostgreSQL 17에서만 있는 `transaction_timeout`은 그 서버가 지원할 때만 걸고, 16에서는 걸지 않습니다 | 승인 |
 | digest | cron `0 21 * * *` UTC, hard timeout 15분, 침묵 기준 28시간, 본문 보존 90일, 재실행 권고 상한 2건·7일, issues 배열 40 / 30 / 30 | 승인 |
 | CI | PostgreSQL 17 전용 job 하나(17 경로의 시험용) | 승인 |
 | Monitor | cron `*/30 * * * *`, 호출자 timeout 120초 | 제안값(S0 전에 확정) |
