@@ -86,6 +86,14 @@ test("a repeat under the same key is a replay only when the bytes, kind and vers
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored }), "replayed");
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored, payloadSha256: "b".repeat(64) }), "conflict");
   assert.equal(classifyAgentDigestRepeat(stored, { ...stored, schemaVersion: 2 }), "conflict");
+  assert.equal(classifyAgentDigestRepeat(stored, { ...stored, kind: "weekly_digest" }), "conflict");
+});
+
+test("a NUL character, which jsonb cannot hold, is refused before the transaction", () => {
+  const nul = String.fromCharCode(0);
+  for (const payload of [{ s: `a${nul}b` }, { [`k${nul}`]: 1 }, { list: [[nul]] }]) {
+    assert.deepEqual(prepareAgentDigestItem(submission({ payload })), { ok: false, reason: "payload_not_canonical" });
+  }
 });
 
 test("an assignment-shaped secret split across a key and its value is refused", () => {
