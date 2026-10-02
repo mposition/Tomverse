@@ -15,87 +15,26 @@
 // commits git is asked about.
 
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const CLI = fileURLToPath(
-  new URL("../scripts/report-issue-backlog.mjs", import.meta.url)
-);
+import {
+  makeIssueBacklogFixture,
+  runIssueBacklogCli,
+} from "./support/issueBacklogFixtureRepo.mjs";
 
 const ISSUE = {
   number: 636,
   title: "Deprecate creation of fixed-amount billing promotions",
 };
 
-/**
- * A repository whose `develop` holds a commit referencing the issue and whose
- * `main` does not, with HEAD detached so both branches can be moved or deleted
- * while the report is being asked about them.
- */
-const makeFixture = () => {
-  const directory = mkdtempSync(join(tmpdir(), "issue-backlog-sha-"));
-  const git = (...argv) => {
-    const result = spawnSync("git", argv, {
-      cwd: directory,
-      encoding: "utf8",
-    });
-    assert.equal(
-      result.status,
-      0,
-      `git ${argv.join(" ")} failed: ${result.stderr}`
-    );
-    return result.stdout.trim();
-  };
+const makeFixture = () => makeIssueBacklogFixture(ISSUE);
+const runCli = runIssueBacklogCli;
 
-  git("init", "--quiet", "--initial-branch=develop");
-  git("config", "user.email", "fixture@example.com");
-  git("config", "user.name", "Fixture");
-  git("config", "commit.gpgsign", "false");
-  writeFileSync(join(directory, "placeholder.txt"), "base\n");
-  git("add", "-A");
-  git("commit", "--quiet", "-m", "base");
-  const base = git("rev-parse", "HEAD");
-
-  writeFileSync(join(directory, "fix.txt"), "fixed\n");
-  git("add", "-A");
-  git("commit", "--quiet", "-m", `fix(billing): refuse fixed amounts (#${ISSUE.number})`);
-  const develop = git("rev-parse", "HEAD");
-
-  git("branch", "--force", "main", base);
-  // Detached, so `git branch -D develop` is allowed below.
-  git("checkout", "--quiet", "--detach", develop);
-
-  const issuesFile = join(directory, "issues.json");
-  writeFileSync(issuesFile, JSON.stringify([ISSUE]));
-
-  return { directory, git, base, develop, main: base, issuesFile };
-};
-
-const runCli = (args) =>
-  spawnSync(process.execPath, [CLI, ...args], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-
-const pinnedRun = (fixture, overrides = {}) => {
-  const develop = overrides.develop ?? fixture.develop;
-  const main = overrides.main ?? fixture.main;
-  return runCli([
-    "--json",
-    "--issues-file",
-    fixture.issuesFile,
-    "--repository",
-    fixture.directory,
-    "--branch-sha",
-    `develop=${develop}`,
-    "--branch-sha",
-    `main=${main}`,
-  ]);
-};
+const pinnedRun = (fixture, overrides = {}) =>
+  runCli(fixture.pinnedArgs(overrides));
 
 test("a pinned run reports the commits it was given, not the branch names", () => {
   const fixture = makeFixture();
@@ -110,7 +49,7 @@ test("a pinned run reports the commits it was given, not the branch names", () =
     // The referencing commit is only on the pinned develop commit's history.
     assert.deepEqual(issue.commitBranches, ["develop"]);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
@@ -134,7 +73,7 @@ test("moving and deleting both refs after the pin changes nothing", () => {
     assert.equal(after.status, 0, after.stderr);
     assert.equal(after.stdout, before.stdout);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
@@ -219,7 +158,7 @@ test("a pin that does not name both branches exactly once is refused", () => {
       assert.equal(result.stdout.trim(), "", `${name} printed a report`);
     }
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
@@ -239,7 +178,7 @@ test("another checkout may only be read with both commits pinned", () => {
     assert.match(result.stderr, /--repository needs --branch-sha/);
     assert.equal(result.stdout.trim(), "");
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
@@ -254,7 +193,7 @@ test("--repository and --branch-sha both need their values", () => {
     assert.equal(missingPath.status, 1);
     assert.match(missingPath.stderr, /--repository needs a path/);
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
@@ -277,7 +216,7 @@ test("the pricing parser check still reads this checkout, not the pinned one", (
       false
     );
   } finally {
-    rmSync(fixture.directory, { recursive: true, force: true });
+    fixture.cleanUp();
   }
 });
 
