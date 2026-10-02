@@ -5,10 +5,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmod, mkdtemp, rmdir, unlink } from "node:fs/promises";
 import { createServer as createTcpServer, connect as connectTcp } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { amuxV4SandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
+import { amuxV4VerifiedSandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
 import { createAmuxV4EgressProxy } from "../lib/amux/ideaLocalEgressProxy.ts";
 
 const CHILD = String.raw`
@@ -105,7 +104,7 @@ async function runChild(args) {
 
 async function main() {
   assert.equal(process.platform, "linux", "run the bundled probe inside Ubuntu");
-  const directory = await mkdtemp(join(tmpdir(), "amux-v4-egress-s0-"));
+  const directory = await mkdtemp("/tmp/amux-v4-egress-s0-");
   await chmod(directory, 0o700);
   const socketPath = join(directory, "proxy.sock");
   const lookups = [];
@@ -127,7 +126,7 @@ async function main() {
   try {
     await listen(proxy, socketPath);
     await chmod(socketPath, 0o600);
-    await runChild(amuxV4SandboxArgs(directory,
+    await runChild(await amuxV4VerifiedSandboxArgs(directory,
       ["/usr/bin/node", "-e", CHILD, String(echoAddress.port)]));
     assert.deepEqual(lookups, ["api.openai.com", "api.openai.com",
       "api.openai.com"], "refused targets must not trigger DNS");
