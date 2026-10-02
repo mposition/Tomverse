@@ -316,6 +316,19 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
              "runApprovalAuditLogId" = 'early-run-audit'
        WHERE "id" = $1
     `, [stage]), /run approval must follow stage approval/);
+    await insertAudit("same-millisecond-run-audit", "run");
+    await client.query(`
+      UPDATE "AdminAuditLog"
+         SET "createdAt" = (
+           SELECT "approvedAt" FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1
+         ) WHERE "id" = 'same-millisecond-run-audit'
+    `, [stage]);
+    await assert.rejects(client.query(`
+      UPDATE "PromptRefinerVnextOneShotStage"
+         SET "status" = 'run_approved',
+             "runApprovalAuditLogId" = 'same-millisecond-run-audit'
+       WHERE "id" = $1
+    `, [stage]), /run approval must follow stage approval/);
     // A caller-owned temporary audit table must not authorize this stage.
     await client.query(`CREATE TEMP TABLE "AdminAuditLog"
       (LIKE "${schema}"."AdminAuditLog" INCLUDING DEFAULTS)`);
