@@ -2,6 +2,10 @@ import {
   AMUX_CLI_USAGE_AGGREGATE_MIN_INVOCATIONS,
   amuxCliUsageRetentionDeadline,
 } from "./cliUsageRetentionCore.ts";
+import {
+  AMUX_CLI_ACTUAL_MODEL_MULTIPLE,
+  AMUX_CLI_ACTUAL_MODEL_UNKNOWN,
+} from "./cliUsageActualModelCore.ts";
 
 /** Dark, content-free v25 planner. A future writer must prove DB ownership of
  * these rows and of serverNow, serialize invocation inserts with provider-year
@@ -11,7 +15,8 @@ export type AmuxCliAggregationSource = {
   invocationId: string;
   recordedAt: string;
   actualProviderId: string | null;
-  actualModelId: string | null;
+  /** Explicit actual model, actualModelUnknown, or multi_model; never NULL. */
+  actualModelId: string;
   workerRole: string;
   inputTokens: bigint | null;
   outputTokens: bigint | null;
@@ -27,6 +32,7 @@ const TOKEN_FIELDS: readonly TokenField[] = [
 export const AMUX_CLI_AGGREGATION_YEAR_CLOSE_GRACE_MS = 24 * 60 * 60 * 1000;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,159}$/;
+const MODEL_ID = /^[A-Za-z0-9._/\[\]-]{1,160}$/;
 const ISO_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 
 export type AmuxCliAggregateCell = {
@@ -113,8 +119,12 @@ export function planAmuxCliProviderYearAggregates(args: {
     if (!row || typeof row !== "object" ||
         typeof row.invocationId !== "string" || !UUID_V4.test(row.invocationId) ||
         seen.has(row.invocationId) || row.actualProviderId !== actualProviderId ||
-        (row.actualModelId !== null &&
-          (typeof row.actualModelId !== "string" || !NAME.test(row.actualModelId))) ||
+        typeof row.actualModelId !== "string" || !MODEL_ID.test(row.actualModelId) ||
+        row.actualModelId.split("/").some((part: string) =>
+          part === "" || part === "." || part === "..") ||
+        ([AMUX_CLI_ACTUAL_MODEL_MULTIPLE, AMUX_CLI_ACTUAL_MODEL_UNKNOWN]
+          .some((reserved) => row.actualModelId.toLowerCase() === reserved.toLowerCase() &&
+            row.actualModelId !== reserved)) ||
         typeof row.workerRole !== "string" || !NAME.test(row.workerRole) ||
         TOKEN_FIELDS.some((field) => row[field] !== null &&
           (typeof row[field] !== "bigint" || row[field] < BigInt(0)))) {
