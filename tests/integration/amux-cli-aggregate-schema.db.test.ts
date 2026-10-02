@@ -90,13 +90,17 @@ test("provider-year finalization and its cells commit atomically and stay immuta
   });
   const stored = await prisma.$queryRaw<Array<{
     creationXid: bigint; finalizedAt: Date; firstRecordedAt: Date;
+    workerRole: string; providerScopeKey: string;
   }>>`
-    SELECT f."creationXid", f."finalizedAt", c."firstRecordedAt"
+    SELECT f."creationXid", f."finalizedAt", f."providerScopeKey",
+      c."firstRecordedAt", c."workerRole"
     FROM "AmuxCliUsageAggregateFinalization" f
     JOIN "AmuxCliUsageAggregateCell" c ON c."finalizationId" = f."id"
     WHERE f."id" = ${id}`;
   assert.equal(stored.length, 1);
   assert.equal(stored[0].creationXid, transactionXid);
+  assert.equal(stored[0].providerScopeKey, "openai");
+  assert.equal(stored[0].workerRole, "implement");
   assert.ok(stored[0].finalizedAt.getTime() > Date.parse("2026-01-01T00:00:00Z"));
   assert.ok(stored[0].firstRecordedAt.getTime() > Date.parse("2026-01-01T00:00:00Z"));
   await assert.rejects(prisma.$executeRaw`
@@ -208,6 +212,11 @@ test("period and dimensions remain bound to a single final provider-year", async
     await insertFinalization(tx, id, years[6]);
     await insertCell(tx, id, years[6] + 1);
   }), /must be part/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const id = randomUUID();
+    await insertFinalization(tx, id, years[6]);
+    await insertCell(tx, id, years[6], { workerRole: "super_admin" });
+  }), /AmuxCliUsageAggregateCell_workerRole_check/);
   await assert.rejects(prisma.$transaction(async (tx) => {
     const id = randomUUID();
     await insertFinalization(tx, id, years[7]);
