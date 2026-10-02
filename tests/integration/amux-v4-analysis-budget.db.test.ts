@@ -4,6 +4,7 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
+import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
@@ -249,13 +250,31 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
   const holdId = randomUUID();
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
     { holdId, previewId, priceVersionId, runner, keys }));
-  const notOwner = { ...session, user: { ...session.user,
-    id: `other-${randomUUID()}`, email: "other@example.test" } } as Session;
+  const nonOwnerId = `synthetic-amux-budget-ops-${randomUUID()}`;
+  const nonOwnerEmail = "amux-v4-budget-ops@example.test";
+  const previousOpsEmails = process.env.ADMIN_OPS_EMAILS;
+  process.env.ADMIN_USER_IDS = `${actorUserId},${nonOwnerId}`;
+  process.env.ADMIN_EMAILS = `${actorEmail},${nonOwnerEmail}`;
+  process.env.ADMIN_OPS_EMAILS = nonOwnerEmail;
+  try {
+    const notOwner = { ...session, user: { ...session.user,
+      id: nonOwnerId, email: nonOwnerEmail } } as Session;
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session: notOwner, request, holdId })), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisCancellationError &&
+      error.code === "forbidden");
+  } finally {
+    process.env.ADMIN_USER_IDS = actorUserId;
+    process.env.ADMIN_EMAILS = actorEmail;
+    if (previousOpsEmails === undefined) delete process.env.ADMIN_OPS_EMAILS;
+    else process.env.ADMIN_OPS_EMAILS = previousOpsEmails;
+  }
+  const staleOwner = { ...session, user: { ...session.user,
+    authenticatedAt: new Date(Date.now() - 60 * 60_000).toISOString() } } as Session;
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
-      { session: notOwner, request, holdId })), (error: unknown) =>
-    error instanceof AmuxIdeaAnalysisCancellationError &&
-    error.code === "forbidden");
+      { session: staleOwner, request, holdId })), isAdminReauthenticationError);
   const cancelled = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
       { session, request, holdId }));
@@ -283,6 +302,50 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
   } }), 1);
 });
 
+test("unused holds remain cancellable after their confirmed preview expires", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const confirmed = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaTransferPreview.update({
+      where: { id: previewId }, data: { state: "in_flight",
+        consumedAt: new Date(confirmed.confirmedAt!.getTime() + 1) },
+    });
+    await assert.rejects(
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session, request, holdId }),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+        error.code === "not_cancellable");
+    throw new Error("rollback synthetic consumed preview");
+  }), /rollback synthetic consumed preview/);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId }, data: { state: "expired" },
+  });
+  await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId }));
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, reservedBefore);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).status, "released");
+});
+
 test("an in-flight hold cannot be cancelled or remove its budget", async () => {
   const selectedModelId = modelId();
   const previewId = await confirmedPreviewId(selectedModelId);
@@ -307,6 +370,17 @@ test("an in-flight hold cannot be cancelled or remove its budget", async () => {
       { session, request, holdId })), (error: unknown) =>
     error instanceof AmuxIdeaAnalysisCancellationError &&
     error.code === "not_cancellable");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaAnalysisBudgetHold.update({
+      where: { id: holdId }, data: { status: "outcome_unknown" },
+    });
+    await assert.rejects(
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session, request, holdId }),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+        error.code === "not_cancellable");
+    throw new Error("rollback synthetic unknown outcome");
+  }), /rollback synthetic unknown outcome/);
   assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace, monthStart } },
   })).reservedMicroUsd, reservedBefore + BigInt(5_000));
