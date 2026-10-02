@@ -115,7 +115,9 @@ test("a selected idea remains retryable after refresh removes its page", () => {
   const retry = panel.split("const retryRecentIdea =")[1]?.split("useEffect(() => {")[0] ?? "";
   assert.match(retry, /void readBack\(requestId, "selection"\)/);
   assert.doesNotMatch(retry, /recentIdeas/);
+  assert.match(retry, /inFlight\.current \|\|/);
   assert.match(panel, /onClick=\{\(\) => retryRecentIdea\(submission\.requestId\)\}/);
+  assert.match(panel, /onClick=\{\(\) => retryRecentIdea\(submission\.requestId\)\}[\s\S]*?disabled=\{readBackPending\}/);
   const loadMore = panel.split("const loadMoreRecentIdeas =")[1]?.split("useEffect(() => {")[0] ?? "";
   assert.match(loadMore, /mergeRecentIdeaPages\(recentIdeas, page\.items\)/);
   assert.match(loadMore, /generation === recentRequestGeneration\.current/);

@@ -181,8 +181,10 @@ test("recent picker pages beyond twenty ideas without duplicates or another owne
   assert.equal(new Set(all.map((row) => row.ideaId)).size, all.length);
   for (const id of ids) assert.ok(all.some((row) => row.ideaId === id));
   assert.equal(second.nextCursor, null);
-  const pageIds = new Set<string>(ids);
-  assert.equal((await listRecentIdeaSubmissions(session)).items.some((row) => pageIds.has(row.ideaId)), false);
+  const unrelatedSession = { ...session,
+    user: { ...session.user, id: `synthetic-amux-empty-${randomUUID()}` } } as Session;
+  assert.deepEqual(await listRecentIdeaSubmissions(unrelatedSession),
+    { items: [], nextCursor: null });
 });
 
 test("submission row and canonical audit roll back together", async () => {

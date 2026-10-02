@@ -285,7 +285,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const retryRecentIdea = (requestId: string) => {
     if (submission.kind !== "selection_unavailable" ||
-        submission.requestId !== requestId || readBackPending || pending || sourceScopePending) return;
+        submission.requestId !== requestId || inFlight.current ||
+        readBackPending || pending || sourceScopePending) return;
     // The initial selection already came from this owner's metadata list.
     // Refresh may have replaced that page; canonical request-id read-back is
     // still the authority and must not depend on the current list page.
@@ -539,7 +540,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800 dark:text-amber-200">
           <p>{messages.recentIdeaUnavailable}</p>
           <button type="button" onClick={() => retryRecentIdea(submission.requestId)}
-            disabled={readBackPending || recentPending}
+            disabled={readBackPending}
             className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium dark:border-amber-300">
             {messages.checkSubmissionStatus}
           </button>
