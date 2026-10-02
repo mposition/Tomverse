@@ -10,6 +10,10 @@ import {
   amuxV4AnalysisQueueReadEnabled,
   isAmuxV4AnalysisAgentAuthorized,
 } from "../lib/amux/ideaAnalysisQueueCore.ts";
+import {
+  encodeAmuxV4AnalysisQueueCursor,
+  parseAmuxV4AnalysisQueueCursor,
+} from "../lib/amux/ideaAnalysisQueueCursorCore.ts";
 
 const secret = "v4_intake_only_012345678901234567890123456789";
 const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
@@ -57,9 +61,22 @@ test("AMUX v4 analysis queue returns candidate IDs, never transfer text", async 
   assert.match(service, /state: "confirmed", consumedAt: null/);
   assert.match(service, /currentForChunk: \{ is: \{ state: "awaiting_preview" \} \}/);
   assert.match(service, /take: PAGE_SIZE \+ 1/);
+  assert.match(service, /confirmedAt: \{ gt: cursor\.confirmedAt \}/);
+  assert.match(service, /id: \{ gt: cursor\.previewId \}/);
+  assert.match(service, /nextCursor:/);
   assert.doesNotMatch(service, /payloadCiphertext: true|rawCiphertext: true|openAmuxContent/);
   assert.doesNotMatch(service, /\.(create|update|delete|upsert|createMany|updateMany|deleteMany)\(/);
   assert.match(route, /isAmuxV4AnalysisAgentAuthorized/);
   assert.match(route, /amuxV4AnalysisQueueReadEnabled/);
   assert.doesNotMatch(route, /codex|claude|spawn\(/);
+});
+
+test("AMUX v4 analysis queue cursor round-trips a stable page position", () => {
+  const position = { confirmedAt: new Date("2026-10-03T00:00:00.123Z"), previewId: "preview_123" };
+  assert.deepEqual(parseAmuxV4AnalysisQueueCursor(
+    encodeAmuxV4AnalysisQueueCursor(position)), position);
+  for (const invalid of ["", "!", "abc", "e30", "a".repeat(513),
+    Buffer.from(JSON.stringify(["2026-10-03T00:00:00.123Z", "bad/id"])).toString("base64url")]) {
+    assert.equal(parseAmuxV4AnalysisQueueCursor(invalid), null);
+  }
 });
