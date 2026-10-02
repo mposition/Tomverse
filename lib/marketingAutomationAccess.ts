@@ -522,10 +522,12 @@ export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
  * (docs/policy/product-research-agent.md §4) -- one new model with its own
  * triggers. Not a marketing model and not a webhook input; the digest moves
  * because the whole Prisma schema is deliberately watched. Descriptor and
- * admission decisions are unchanged.
+ * admission decisions are unchanged. The value below is computed with that
+ * model's columns aligned the way `prisma format` aligns them, which is the
+ * state the file is committed in.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4e88291f8397090ea8bd8259d9f946478ceda5136c2d75fd53b2c7e9a20652e6";
+  "5218bbda50e63a75bcb73a5766dce4bd0b77357037f605d1b8be6fbacdc1d526";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
