@@ -39,6 +39,20 @@ export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
 export type EngineeringAgentSystemAuditActor =
   (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
 
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
+
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
@@ -47,6 +61,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS,
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

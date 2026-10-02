@@ -31,6 +31,15 @@ import { z } from "zod";
 import {
   resolveDeploymentEnvironment,
 } from "@/lib/deploymentEnvironment";
+import {
+  MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES,
+  MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
+  MARKETING_WEBHOOK_SCHEMA_VERSION,
+  MARKETING_WEBHOOK_SHADOW_KEY,
+  canonicalMarketingWebhookJson,
+  computeMarketingWebhookConfigSnapshotDigest,
+  marketingWebhookEnvDigests,
+} from "@/lib/marketingAutomationAccess";
 import type { MarketingPostStatus } from "@/lib/marketingAutomationSchema";
 
 export const MARKETING_WEBHOOK_PROVIDER = "zernio";
@@ -300,6 +309,43 @@ export class MarketingWebhookSettingRefusedError extends Error {
 export const marketingWebhookIsStaging = (env: NodeJS.ProcessEnv = process.env): boolean =>
   String(env.TOMVERSE_DEPLOY_ENV ?? "").trim().toLowerCase() === "staging" &&
   resolveDeploymentEnvironment(env) === "staging";
+
+/**
+ * The staging configuration snapshot digest (S1 r7 amendment 1): the shadow
+ * switch's stored value, the accepted event list, the schema version and the
+ * hashes of the declared environment values -- and which Zernio account each
+ * channel answers for. One function for the receiver, which stamps it on every
+ * signed answer, and the record drafter, which keeps only attempts stamped with
+ * the digest it records.
+ */
+export type MarketingWebhookChannelBinding = {
+  readonly id: string;
+  readonly externalAccountRef: string;
+};
+
+export const marketingWebhookStagingConfigSnapshotDigest = (
+  env: Readonly<Record<string, string | undefined>>,
+  shadowValue: string | null,
+  channels: readonly MarketingWebhookChannelBinding[],
+): string =>
+  createHash("sha256")
+    .update(
+      canonicalMarketingWebhookJson({
+        snapshot: computeMarketingWebhookConfigSnapshotDigest({
+          appSettings: { [MARKETING_WEBHOOK_SHADOW_KEY]: shadowValue },
+          acceptedEventTypes: [...MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES],
+          envDigests: marketingWebhookEnvDigests(env, MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR.envNames),
+          schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
+        }),
+        // Reconnecting a channel to another account changes the digest, so
+        // evidence observed through the old account never certifies the new one.
+        channels: channels
+          .map((channel) => JSON.stringify([channel.id, channel.externalAccountRef]))
+          .sort(),
+      }),
+      "utf8",
+    )
+    .digest("hex");
 
 // ---------------------------------------------------------------------------
 // The fault arm
