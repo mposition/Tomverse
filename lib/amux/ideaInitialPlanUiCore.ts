@@ -66,3 +66,16 @@ export function classifyInitialPlanReadback(reply: Reply, ideaId: string):
   }
   return { kind: "outcome_unknown" };
 }
+
+/** A clean page load can distinguish no plan from a committed plan. An
+ * unresolved POST uses classifyInitialPlanReadback instead: absence there is
+ * deliberately not permission to retry. */
+export function classifyExistingInitialPlan(reply: Reply, ideaId: string):
+  { kind: "committed"; revisionId: string } | { kind: "absent" } | { kind: "outcome_unknown" } {
+  const committed = classifyInitialPlanReadback(reply, ideaId);
+  if (committed.kind === "committed") return committed;
+  const body = record(reply.body);
+  if (reply.status === 200 && body?.ideaId === ideaId && body.status === "absent" &&
+      Object.keys(body).length === 2) return { kind: "absent" };
+  return { kind: "outcome_unknown" };
+}
