@@ -92,7 +92,7 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   const holdId = randomUUID();
   const result = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx,
-      { holdId, previewId, pricing: pricing() }));
+      { holdId, previewId, pricing: pricing(), keys }));
   assert.equal(result.reservedMicroUsd, "5000");
   const created = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: holdId },
@@ -114,7 +114,7 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   assert.equal((audit.metadata as Record<string, unknown>).modelCallStarted, false);
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx,
-      { holdId: randomUUID(), previewId, pricing: pricing() })),
+      { holdId: randomUUID(), previewId, pricing: pricing(), keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisReservationError &&
     error.code === "already_reserved");
   assert.equal(await prisma.adminAuditLog.count({ where: {
@@ -151,6 +151,22 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   })).status, "reserved");
 });
 
+test("a price for another provider cannot reserve the confirmed model payload", async () => {
+  const previewId = await confirmedPreviewId();
+  const holdId = randomUUID();
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx, { holdId, previewId, keys,
+      pricing: { ...pricing(), provider: "anthropic" } })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisReservationError &&
+    error.code === "integrity_unavailable");
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({
+    where: { id: holdId },
+  }), 0);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: "AMUX_V4_ANALYSIS_BUDGET_RESERVED", targetId: holdId },
+  }), 0);
+});
+
 test("two confirmed previews cannot reserve the last monthly allowance twice", async () => {
   const previews = await Promise.all([confirmedPreviewId(), confirmedPreviewId()]);
   await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
@@ -162,7 +178,7 @@ test("two confirmed previews cannot reserve the last monthly allowance twice", a
   const holds = previews.map(() => randomUUID());
   const results = await Promise.allSettled(previews.map((previewId, index) =>
     prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
-      { holdId: holds[index]!, previewId, pricing: pricing() }))));
+      { holdId: holds[index]!, previewId, pricing: pricing(), keys }))));
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   const rejected = results.find((result) => result.status === "rejected");
   assert(rejected?.status === "rejected" &&
