@@ -58,4 +58,6 @@ test("AMUX v4 CLI requires a digest-pinned private staged executable", () => {
     { path: "/home/tommy/.local/bin/codex", sha256: "a".repeat(64) }), TypeError);
   assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex"],
     { path, sha256: "not-a-digest" }), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex", "--version"],
+    { get path() { return path; }, sha256: "a".repeat(64) }), TypeError);
 });
