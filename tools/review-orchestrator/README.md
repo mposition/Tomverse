@@ -69,8 +69,12 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
   돌려주므로 같은 명령을 다시 부릅니다.
 - 종료 코드(submit·wait): 0 accept · 1 reject · 2 unknown · 3 pending · 64 요청 오류 · 65 서버 오류.
   `report`와 jobId 없는 `status`는 성공하면 0입니다(accept라는 뜻이 아닙니다).
-- 검토 대상은 **commit된 것**뿐입니다. base 기본값은 `origin/develop`과의
-  merge-base이며, base commit은 원격에 있어야 합니다(head는 push하지 않아도 됩니다).
+- 검토 대상은 **commit된 것**뿐입니다. base는 `origin/develop`·`origin/main`(그리고 `--base`를
+  줬다면 그것)과 HEAD의 분기점 중 **가장 가까운 것**이고, 원격에 있어야 합니다(head는 push하지
+  않아도 됩니다). 먼 분기점은 이미 병합된 남의 변경을 diff에 끌고 와서 계약 경로 판정으로
+  reviewer를 둘로 늘립니다.
+- `--focus`가 **이 서버에서 검토를 마친 job의 head**이면 계약 경로 판정도 `focus..HEAD`로 합니다.
+  검토받은 적 없는 focus는 base..HEAD 전체로 셉니다(focus 앞에 계약 변경을 숨길 수 없게).
 - 원문은 `npm run -s review -- report <jobId> --slot 0`으로 봅니다.
 - `--focus <rev>`: reviewer에게 `<rev>..HEAD`만 보여 줍니다. 같은 브랜치를 여러 round에 걸쳐
   검토할 때 지난 round 이후의 변경만 판정받는 용도입니다. base는 그대로 신뢰 이력의
@@ -146,6 +150,10 @@ sudo -u review git -C /home/review/review-orchestrator pull --ff-only
 sudo systemctl restart review-orchestrator
 $RO drain off
 ```
+
+다음 round가 이미 들어와 쓸모가 없어진 대기 작업은 `$RO cancel <jobId>...`로 닫습니다. 대기 중인
+slot만 `unknown`(`cancelled_by_operator`)이 되고, 실행 중인 검토는 끝까지 갑니다. cancel된
+검토는 검토로 치지 않으므로 이후 `--focus`의 계약 경로 판정을 좁히지 않습니다.
 
 `drain`은 서버에서만 쓸 수 있고 SSH로 들어오는 요청에는 열려 있지 않습니다. 상태는
 `$RO status`의 `draining`, `runningReviews`, `queuedReviews`로 봅니다.

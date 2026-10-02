@@ -7,6 +7,7 @@
  *   review-orchestrator daemon                 the scheduling loop (systemd)
  *   review-orchestrator status [jobId]         local inspection
  *   review-orchestrator drain on|off|wait      local only: stop new assignments for an update
+ *   review-orchestrator cancel <jobId>...      local only: close a job's queued slots
  *
  * Exit codes for submit and wait: 0 accept, 1 reject, 2 unknown, 3 pending.
  * report and the queue overview exit 0 on success. 64 usage, 65 error.
@@ -217,7 +218,18 @@ async function main(argv) {
   if (command === "ssh-dispatch") return handle(config, decodeRpc(tokenFromSshCommand(process.env.SSH_ORIGINAL_COMMAND)));
   if (command === "status") return handle(config, { command: "status", jobId: rest[0] });
   if (command === "drain") return drain(config, rest);
-  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon, status or drain");
+  if (command === "cancel") {
+    // Local only, like drain. Closes queued slots; a running review finishes.
+    if (rest.length === 0) throw new UsageError("cancel_needs_job_id");
+    const orchestrator = new Orchestrator(config);
+    const result = rest.map((jobId) => {
+      if (!isJobId(jobId)) throw new UsageError("job_id_invalid", jobId);
+      return { jobId, closedSlots: orchestrator.cancel(jobId) };
+    });
+    print(result);
+    return 0;
+  }
+  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon, status, drain or cancel");
 }
 
 // Compare real paths: a symlinked launcher must still run main, not exit 0 silently.

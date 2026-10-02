@@ -24,7 +24,7 @@
       "id": "claude",
       "vendor": "anthropic",
       "enabled": true,
-      "maxConcurrent": 1,
+      "maxConcurrent": 2,
       "command": "claude",
       "args": [
         "-p",
@@ -38,7 +38,7 @@
       "id": "codex",
       "vendor": "openai",
       "enabled": true,
-      "maxConcurrent": 1,
+      "maxConcurrent": 2,
       "command": "codex",
       "args": ["exec", "--sandbox", "read-only", "-C", "{workdir}", "-"],
       "passEnv": ["CODEX_HOME"]
@@ -47,7 +47,7 @@
       "id": "cursor",
       "vendor": "xai",
       "enabled": true,
-      "maxConcurrent": 1,
+      "maxConcurrent": 2,
       "model": "grok-4.7-xhigh",
       "command": "cursor-agent",
       "args": ["--print", "--mode", "ask", "--trust", "--model", "{model}"]
