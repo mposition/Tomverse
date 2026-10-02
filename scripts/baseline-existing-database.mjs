@@ -1,12 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import pg from "pg";
 
 import {
   CONNECT_RETRY_COUNT,
   connectWithRetry,
 } from "./direct-database-connect-core.mjs";
+import {
+  pendingProbes,
+  presenceAnswer,
+  presenceQuery,
+  presenceVerdict,
+} from "./baseline-presence-core.mjs";
 
 /**
  * Reconciles a database that already holds the schema with a migration history
@@ -59,6 +65,17 @@ import {
  * migrations *and* a schema that already matches `schema.prisma` exactly --
  * and refuses with the commands to resolve it. Refusing leaves the database
  * untouched; proceeding would not.
+ *
+ * ## Migrations the diff cannot see
+ *
+ * "Matches `schema.prisma`" is evidence only about what `migrate diff`
+ * compares. A migration that adds only a partial or expression index, a CHECK
+ * constraint, a trigger or a function matches before it is applied as well as
+ * after, so on its own it would always be refused. Such a migration names the
+ * relation it creates (`-- baseline-check: present-if-relation "Name"`); when
+ * every pending migration names one and every one is proven absent, the deploy
+ * goes on.
+ * See `scripts/baseline-presence-core.mjs`.
  */
 
 const BASELINE_MIGRATION = "00000000000000_baseline";
@@ -189,14 +206,52 @@ try {
     (name) => name !== BASELINE_MIGRATION && !recordedSet.has(name)
   );
   if (pending.length > 0 && schemaMatchesPrisma()) {
-    fail(
-      "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
-      {
-        pending,
-        recordedMigrations: recorded.length,
-        command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
-      }
+    // The match is no evidence about a migration the diff cannot see. Each one
+    // may name the relation it creates; only proof that every one of them is
+    // absent lets the deploy go on.
+    const { probes, undeclared } = pendingProbes(pending, (name) =>
+      readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8")
     );
+    if (undeclared.length === 0) {
+      const answers = new Map();
+      for (const { name, relation } of probes) {
+        // One fixed question with the declared name bound as a parameter: a
+        // migration supplies a name, never SQL. Read-only and rolled back as
+        // well, though the fixed query has nothing to write.
+        await client.query("BEGIN READ ONLY");
+        try {
+          const { rows } = await client.query(presenceQuery(relation));
+          // Exactly one row of one boolean, or no answer at all.
+          answers.set(name, presenceAnswer(rows));
+        } catch {
+          answers.set(name, undefined);
+        } finally {
+          await client.query("ROLLBACK").catch(() => undefined);
+        }
+      }
+      const verdict = presenceVerdict(pending, answers);
+      if (verdict.proceed) {
+        log(
+          "Pending migrations change nothing schema.prisma describes, and the relation each one declares is absent. Letting migrate deploy apply them.",
+          { pending }
+        );
+      } else {
+        fail(
+          "This database already matches schema.prisma, and the relations these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
+          { pending, notProvenAbsent: verdict.notProvenAbsent }
+        );
+      }
+    } else {
+      fail(
+        "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
+        {
+          pending,
+          recordedMigrations: recorded.length,
+          command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
+          undeclared,
+        }
+      );
+    }
   }
 } catch (error) {
   const message =
