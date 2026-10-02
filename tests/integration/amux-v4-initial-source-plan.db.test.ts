@@ -7,7 +7,9 @@ import type { Session } from "next-auth";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { createInitialIdeaOnlySourcePlan, InitialSourcePlanError } from "@/lib/amux/ideaInitialSourcePlanService";
+import { commitInitialIdeaSourcePlan, readInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/amux/ideaIdentityCore";
+import { getAdminRole } from "@/lib/adminAuth";
 import { AuditWriteRefusedError, writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE, isSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
@@ -63,7 +65,7 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   const ideaId = await createIdea({ idea: text });
   const beforeCards = await prisma.amuxWorkItem.count();
   const result = await prisma.$transaction((tx) =>
-    createInitialIdeaOnlySourcePlan(tx, { ideaId, actorUserId, keys }));
+    commitInitialIdeaSourcePlan(tx, { session, request, ideaId, keys }));
   const row = await prisma.amuxIdeaSourcePlanRevision.findUniqueOrThrow({
     where: { id: result.revisionId },
   });
@@ -87,11 +89,40 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   assert.equal(Object.hasOwn(audit.metadata as Record<string, unknown>, "actorUserId"), false);
   assert.ok(audit.entryHash);
   assert.equal(JSON.stringify(audit.metadata).includes(text), false);
+  const ownerAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+    where: { id: result.ownerAuditId },
+  });
+  assert.equal(ownerAudit.actorUserId, actorUserId);
+  assert.equal(ownerAudit.action, "amux.v4.initial_source_plan.requested");
+  assert.equal(ownerAudit.targetId, ideaId);
+  assert.equal((ownerAudit.metadata as Record<string, unknown>).systemAuditId, result.auditId);
+  assert.ok(ownerAudit.entryHash);
   assert.equal(await prisma.amuxWorkItem.count(), beforeCards);
+  assert.deepEqual(await readInitialIdeaSourcePlan(session, ideaId),
+    { ideaId, status: "committed", revisionId: result.revisionId });
   await assert.rejects(prisma.$transaction((tx) =>
     createInitialIdeaOnlySourcePlan(tx, { ideaId, actorUserId, keys })),
   (error: unknown) => error instanceof InitialSourcePlanError && error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 1);
+});
+
+test("read-back reports absence and never discloses another owner's plan", async () => {
+  const ideaId = await createIdea({ idea: "SYNTHETIC_READBACK_PLAN" });
+  assert.deepEqual(await readInitialIdeaSourcePlan(session, ideaId),
+    { ideaId, status: "absent" });
+  const otherSession = { ...session, user: { ...session.user,
+    id: `other-${actorUserId}` } } as Session;
+  assert.equal(getAdminRole(otherSession), "owner");
+  await assert.rejects(readInitialIdeaSourcePlan(otherSession, ideaId),
+    (error: unknown) => error instanceof Error && error.message === "not_found");
+});
+
+test("read-back refuses a plan lacking its initiating human audit", async () => {
+  const ideaId = await createIdea({ idea: "SYNTHETIC_UNTRACED_PLAN" });
+  await prisma.$transaction((tx) => createInitialIdeaOnlySourcePlan(tx,
+    { ideaId, actorUserId, keys }));
+  assert.deepEqual(await readInitialIdeaSourcePlan(session, ideaId),
+    { ideaId, status: "partial" });
 });
 
 test("the v4 actor cannot write a different action or target", async () => {
@@ -161,5 +192,8 @@ test("source-plan row, idea pointer and canonical audit roll back together", asy
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 0);
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED", targetId: revisionId },
+  }), 0);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: "amux.v4.initial_source_plan.requested", targetId: ideaId },
   }), 0);
 });
