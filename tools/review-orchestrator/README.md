@@ -130,8 +130,12 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
   `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
   붙여 넣기 없이 로그인합니다.
-- Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
-  `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
+- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file /dev/stdin
+  --respect-workspace-trust false --permission-mode auto --model swe-2-high`. `auto`는 읽기 전용
+  도구만 자동 승인하고, `-p`에서는 확인이 필요한 도구 호출을 거절합니다(쓰기 요청에서 파일이
+  생기지 않음을 확인). 공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의
+  SWE-2를 고정해 `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다.
+  설치 직후 `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
 
 ## 서버 업데이트 (drain)
 
