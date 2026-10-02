@@ -3360,6 +3360,10 @@ const checks = [
         prWorkflow.includes("fetch-depth: 0") &&
         prWorkflow.includes("npm run security:regression") &&
         prWorkflow.includes("npm run test:unit") &&
+        // The unit suite has its own job; running is not gating unless that
+        // job is in the required check's `needs` and its verdict is enforced.
+        prWorkflow.includes("UNIT_TESTS: ${{ needs.unit-tests.result }}") &&
+        prWorkflow.includes('"unit-tests=$UNIT_TESTS"') &&
         prWorkflow.includes("npm run check:encoding:strict") &&
         // `npm run check` is split into its two halves here for step-level
         // timing; both halves must still run, at the same strictness.
