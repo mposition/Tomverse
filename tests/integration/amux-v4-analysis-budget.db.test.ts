@@ -369,6 +369,21 @@ test("system expiry releases only a never-dispatched hold after its DB deadline"
         error.code === "not_cancellable");
     throw new Error("rollback synthetic dispatch");
   }), /rollback synthetic dispatch/);
+  for (const unsafePreview of [
+    { consumedAt: preview.confirmedAt! },
+    { outcomeUnknownAt: new Date() },
+    { state: "provider_failed" },
+  ]) {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      await tx.amuxIdeaTransferPreview.update({
+        where: { id: previewId }, data: unsafePreview,
+      });
+      await assert.rejects(commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId),
+        (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+          error.code === "not_cancellable");
+      throw new Error("rollback synthetic unsafe preview");
+    }), /rollback synthetic unsafe preview/);
+  }
 
   const released = await prisma.$transaction((tx) =>
     commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId));
