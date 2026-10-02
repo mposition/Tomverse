@@ -124,11 +124,29 @@ test("an incomplete or empty file list excludes -- unknown is not safe", () => {
     excluded: true,
     reasons: ["changed_files_incomplete"],
   });
-  assert.deepEqual(judge({ changedFiles: [] }), { excluded: true, reasons: ["changed_files_incomplete"] });
+  assert.deepEqual(judge({ changedFiles: [] }), { excluded: true, reasons: ["changed_files_empty"] });
+  assert.deepEqual(judge({ changedFiles: undefined }), { excluded: true, reasons: ["changed_files_incomplete"] });
+});
+
+test("a missing input list excludes instead of reading as empty or throwing", () => {
+  assert.deepEqual(judge({ policyTestPaths: undefined }), { excluded: true, reasons: ["inputs_unreadable"] });
+  assert.deepEqual(judge({ agentOwnPatterns: null }), { excluded: true, reasons: ["inputs_unreadable"] });
 });
 
 test("a path that cannot be judged excludes", () => {
-  for (const path of ["/etc/passwd", "lib\\x.ts", "lib/../AGENTS.md", "lib//x.ts", "./x.ts", "", "lib/a\u0001.ts"]) {
+  for (const path of [
+    "/etc/passwd",
+    "lib\\x.ts",
+    "lib/../AGENTS.md",
+    "lib//x.ts",
+    "./x.ts",
+    "",
+    "lib/a\u0001.ts",
+    "lib/a\u007f.ts",
+    "lib/\ud800.ts",
+    "lib/.git/config",
+    `lib/${"a".repeat(5000)}.ts`,
+  ]) {
     assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: true, reasons: ["unreadable_path"] }, JSON.stringify(path));
   }
 });

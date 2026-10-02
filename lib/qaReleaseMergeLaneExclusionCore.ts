@@ -7,7 +7,7 @@
  * candidate. Every input comes from the caller -- this module reads no
  * network, file or clock -- and every uncertainty excludes.
  */
-import { compileManifestPattern } from "./agentAuthorityFiles.ts";
+import { compileManifestPattern, isCanonicalRepoPath } from "./agentAuthorityFiles.ts";
 
 /** Gate paths: the checks, their runners and the documents that define them. */
 export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
@@ -67,6 +67,8 @@ export type QaReleaseExclusionInput = {
 
 export type QaReleaseExclusionReason =
   | "changed_files_incomplete"
+  | "changed_files_empty"
+  | "inputs_unreadable"
   | "unreadable_path"
   | "gate_path"
   | "policy_test"
@@ -81,14 +83,12 @@ export type QaReleaseExclusion =
 const GATE_MATCHERS = QA_RELEASE_MERGE_LANE_GATE_PATTERNS.map(compileManifestPattern);
 
 /**
- * A repository-relative path as Git stores it. Anything else cannot be judged
- * against the patterns and so excludes the pull request.
+ * A repository-relative path as Git stores it, judged by the same rule the
+ * ownership manifest uses. Anything else cannot be judged against the
+ * patterns and so excludes the pull request.
  */
-function isReadablePath(path: string): boolean {
-  if (typeof path !== "string" || path.length === 0) return false;
-  if (path.startsWith("/") || path.includes("\\")) return false;
-  if (/[\u0000-\u001f]/.test(path)) return false;
-  return path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+function isReadablePath(path: unknown): path is string {
+  return typeof path === "string" && isCanonicalRepoPath(path);
 }
 
 function branchExcluded(headBranch: string): boolean {
@@ -100,17 +100,28 @@ function branchExcluded(headBranch: string): boolean {
 export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput): QaReleaseExclusion {
   const reasons = new Set<QaReleaseExclusionReason>();
 
-  if (!input.changedFilesComplete || input.changedFiles.length === 0) {
-    reasons.add("changed_files_incomplete");
-  }
   if (typeof input.headBranch !== "string" || input.headBranch === "" || branchExcluded(input.headBranch)) {
     reasons.add("excluded_branch");
+  }
+  // The lists the judgement depends on must be present; a missing one is not
+  // an empty one.
+  if (!Array.isArray(input.policyTestPaths) || !Array.isArray(input.agentOwnPatterns)) {
+    reasons.add("inputs_unreadable");
+  }
+  const changedFiles = Array.isArray(input.changedFiles) ? input.changedFiles : null;
+  if (changedFiles === null || input.changedFilesComplete !== true) {
+    reasons.add("changed_files_incomplete");
+  } else if (changedFiles.length === 0) {
+    reasons.add("changed_files_empty");
+  }
+  if (reasons.has("inputs_unreadable") || changedFiles === null) {
+    return { excluded: true, reasons: [...reasons].sort() };
   }
 
   const policyTests = new Set(input.policyTestPaths);
   const ownMatchers = input.agentOwnPatterns.map(compileManifestPattern);
 
-  for (const file of input.changedFiles) {
+  for (const file of changedFiles) {
     const paths = [file.path];
     if (file.previousPath !== undefined && file.previousPath !== null) paths.push(file.previousPath);
     for (const path of paths) {
