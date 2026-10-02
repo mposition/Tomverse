@@ -102,7 +102,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 ## 8. 병합 레인
 
 1. **범위.** develop(→ Railway `staging`)만 병합합니다. 한 번에 하나씩 병합하고, staging에 배포가 둘 이상 쌓이지 않게
-   합니다. **main(→ `production`)은 사람이 GitHub에서 병합합니다**(RELEASE_CHECKLIST §7.9, `docs/policy/trace-feedback-automation.md`
+   합니다. **main(→ `production`)은 사람이 GitHub에서 병합합니다**(`.github/RELEASE_CHECKLIST.md`의 7.9절, `docs/policy/trace-feedback-automation.md`
    §9.3, `docs/policy/engineering-agent.md`의 승인 증거와 같음). 레인은 main 후보(`mainPullRequestDecision()`이 허용한 head)와
    production 상태를 Admin에 표시만 합니다. 이 Agent는 auto-merge를 켜지 않습니다.
 2. **후보.** base가 develop, draft 아님, check가 모두 끝났고 실패 없음, PR Fast Gate 성공 run이 하나 이상, mergeable인 PR 중
