@@ -49,6 +49,10 @@ import {
   transferConfirmReadPermitted,
   transferConfirmWritePermitted,
 } from "@/lib/amux/ideaTransferConfirmationCore";
+import {
+  AMUX_V4_ANALYSIS_RESULT_READ_ENV,
+  amuxV4AnalysisResultReadEnabled,
+} from "@/lib/amux/ideaAnalysisResultReadCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -129,6 +133,8 @@ export default async function AdminAmuxBacklogPage({
           frontierModelsAvailable={frontierModelsAvailable}
           transferPreviewAvailable={transferPreviewAvailable}
           transferConfirmAvailable={transferConfirmAvailable}
+          analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
+            process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])}
           operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
