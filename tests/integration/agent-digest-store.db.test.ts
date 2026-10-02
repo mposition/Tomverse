@@ -142,3 +142,16 @@ test("a caller's admission refusal inside the transaction writes no row and no a
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 0);
   assert.equal(await prisma.adminAuditLog.count(), auditsBefore);
 });
+
+test("a refusal from the caller's last-statement confirmation rolls back the row and its audit entry", async () => {
+  const input = submission({ confirm: true });
+  const auditsBefore = await prisma.adminAuditLog.count();
+  const result = await recordAgentDigestItem(input, prisma, undefined, async (tx) => {
+    // Runs after the audit entry: both writes are visible inside the transaction.
+    const seen = await tx.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } });
+    return seen === 1 ? "run_deadline_passed" : "unexpected";
+  });
+  assert.deepEqual(result, { status: "not_admitted", reason: "run_deadline_passed" });
+  assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: input.idempotencyKey } }), 0);
+  assert.equal(await prisma.adminAuditLog.count(), auditsBefore);
+});

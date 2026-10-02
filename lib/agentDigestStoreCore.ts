@@ -15,7 +15,11 @@
  * Pure: no database, no clock, no environment.
  */
 
-import { agentDigestCanonicalBytes, AgentDigestCanonicalJsonError } from "./agentDigestCanonicalJson.ts";
+import {
+  agentDigestCanonicalBytes,
+  agentDigestCanonicalJson,
+  AgentDigestCanonicalJsonError,
+} from "./agentDigestCanonicalJson.ts";
 import {
   AGENT_DIGEST_AGENT_KEYS,
   AGENT_DIGEST_KINDS,
@@ -125,23 +129,34 @@ export function prepareAgentDigestItem(input: AgentDigestSubmission): AgentDiges
     return { ok: false, reason: "idempotency_key_invalid" };
   }
 
+  // A digest body is a JSON object. A top-level null in particular would
+  // reach the column as SQL NULL, which the insert trigger refuses.
+  if (input.payload === null || typeof input.payload !== "object" || Array.isArray(input.payload)) {
+    return { ok: false, reason: "payload_not_canonical" };
+  }
+
+  // Everything below works on an independent snapshot parsed from the
+  // canonical text, never on the caller's object: the caller cannot change
+  // what was hashed, sized and scanned while the write is still pending.
+  let payload: unknown;
   let bytes: { sizeBytes: number; payloadSha256: string };
   try {
-    bytes = agentDigestCanonicalBytes(input.payload);
+    payload = JSON.parse(agentDigestCanonicalJson(input.payload));
+    bytes = agentDigestCanonicalBytes(payload);
   } catch (error) {
     if (error instanceof AgentDigestCanonicalJsonError) return { ok: false, reason: "payload_not_canonical" };
     throw error;
   }
   // PostgreSQL jsonb cannot hold U+0000, so a body or key containing it is
   // refused here instead of failing inside the transaction.
-  if (containsNul(input.payload)) return { ok: false, reason: "payload_not_canonical" };
+  if (containsNul(payload)) return { ok: false, reason: "payload_not_canonical" };
   // The DB also refuses an empty body; a canonical value is never zero bytes.
   if (bytes.sizeBytes > AGENT_DIGEST_MAX_PAYLOAD_BYTES) return { ok: false, reason: "payload_too_large" };
 
   // The idempotency key is stored and copied into the audit chain, which
   // nothing ever expires, so it is scanned like the body.
   const strings: string[] = [key];
-  collectStrings(input.payload, strings);
+  collectStrings(payload, strings);
   const found = new Set<SecretRuleId>();
   for (const text of strings) for (const id of detectSecrets(text)) found.add(id);
   if (found.size > 0) return { ok: false, reason: "payload_contains_secret", secretRuleIds: [...found].sort() };
@@ -153,7 +168,7 @@ export function prepareAgentDigestItem(input: AgentDigestSubmission): AgentDiges
       kind: input.kind,
       schemaVersion: input.schemaVersion,
       idempotencyKey: key,
-      payload: input.payload,
+      payload,
       payloadSha256: bytes.payloadSha256,
       sizeBytes: bytes.sizeBytes,
     },
