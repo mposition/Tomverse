@@ -98,6 +98,8 @@ test("classification of representative paths", () => {
     ["locales/ko.ts", "product"],
     ["tests/chatInput.test.mjs", "product"],
     ["docs/ops/amux/staging-checklist.md", "control-plane"],
+    ["vendor/amux/crates/amux-server/src/main.rs", "control-plane"],
+    ["vendor/other/file.rs", "unclassified"],
     ["docs/policy/engineering-agent.md", "control-plane"],
     ["lib/amux/guard.ts", "control-plane"],
     ["lib/agentPushPolicy.ts", "control-plane"],

@@ -123,3 +123,9 @@ docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-
 
 # rust build output
 /target/
+
+# Independent-review briefs written for another agent. They are working notes
+# that name private paths and design documents, and belong in a scratch
+# directory outside the repository, never in a commit (this repository is
+# public). Two were committed by mistake with marketing S2d2 and removed.
+/.*-review-r*.md
