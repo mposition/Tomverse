@@ -17,6 +17,7 @@ import {
   OBSERVATION_SCHEMA_VERSION,
   validateObservationPayload,
 } from "./productResearchObservationCore.mjs";
+import { detectSecrets } from "./engineeringAgentSecretPatterns";
 import { slotForInstant } from "./productResearchObservationRunnerCore.mjs";
 
 /**
@@ -44,45 +45,48 @@ export const SUBMISSION_REFUSALS = [
   "unknown_failure_stage",
   "payload_invalid",
   "row_count_exceeded",
+  "secret_detected",
 ];
 
-/**
- * The two answers, as a discriminated union.
- *
- * Written out in JSDoc because TypeScript reads this module from a .mjs file
- * and would otherwise infer `accepted: boolean`, which narrows nothing -- the
- * route would then be free to read `.row` off a refusal.
- *
- * @typedef {{
- *   id: string,
- *   slot: Date,
- *   outcome: "ok" | "failed",
- *   failureStage: string | null,
- *   schemaVersion: number,
- *   developSha: string | null,
- *   mainSha: string | null,
- *   issueCount: number | null,
- *   payload: unknown,
- *   payloadDigest: string | null,
- * }} ObservationRowInput
- *
- * @typedef {{accepted: false, code: string, detail: string | null}} SubmissionRefused
- * @typedef {{accepted: true, row: ObservationRowInput}} SubmissionAdmitted
- * @typedef {SubmissionRefused | SubmissionAdmitted} SubmissionDecision
- */
+export type ObservationRowInput = {
+  id: string;
+  slot: Date;
+  outcome: "ok" | "failed";
+  failureStage: string | null;
+  schemaVersion: number;
+  developSha: string | null;
+  mainSha: string | null;
+  issueCount: number | null;
+  payload: unknown;
+  payloadDigest: string | null;
+};
 
-/** @returns {SubmissionRefused} */
-const refuse = (code, detail = null) => ({ accepted: false, code, detail });
+/** A payload that has already been through `validateObservationPayload()`. */
+type ValidatedPayload = {
+  schemaVersion: number;
+  issues: { id: string; title: string }[];
+  counts: unknown;
+  blindSpots: unknown;
+};
 
-const isPlainObject = (value) =>
+export type SubmissionDecision =
+  | { accepted: false; code: string; detail: string | null }
+  | { accepted: true; row: ObservationRowInput };
+const refuse = (code: string, detail: string | null = null): SubmissionDecision => ({
+  accepted: false,
+  code,
+  detail,
+});
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** sha256 of the payload, serialised with its object keys in sorted order. */
-export const observationPayloadDigest = (payload) => {
+export const observationPayloadDigest = (payload: unknown): string => {
   // Canonical, so the same observation submitted twice digests the same whatever
   // order the runner happened to build its objects in. Arrays keep their order,
   // because the row order is part of what was observed.
-  const canonical = (value) => {
+  const canonical = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(canonical);
     if (isPlainObject(value)) {
       return Object.fromEntries(
@@ -104,13 +108,13 @@ export const observationPayloadDigest = (payload) => {
  * window is still the database's to enforce -- this refusal is so a submitter
  * answering for the wrong slot is told which rule it broke instead of seeing a
  * constraint name.
- *
- * @param {unknown} body
- * @param {{now: number, id: unknown}} options
- * @returns {SubmissionDecision}
  */
-export const admitObservationSubmission = (body, { now, id }) => {
+export const admitObservationSubmission = (
+  body: unknown,
+  { now, id }: { now: number; id: unknown },
+): SubmissionDecision => {
   if (!isPlainObject(body)) return refuse("invalid_request", "body is not an object");
+  const fields = body;
   // Not coerced: coercion is how a caller's wrong type becomes a plausible id,
   // and the id is the row's primary key.
   if (typeof id !== "string" || !ID_PATTERN.test(id)) {
@@ -133,39 +137,40 @@ export const admitObservationSubmission = (body, { now, id }) => {
     if (!allowed.has(key)) return refuse("invalid_request", `unknown key ${key}`);
   }
 
-  if (body.schemaVersion !== OBSERVATION_SCHEMA_VERSION) {
+  if (fields.schemaVersion !== OBSERVATION_SCHEMA_VERSION) {
     return refuse("unknown_schema_version");
   }
 
-  if (typeof body.slot !== "string" || !SLOT_PATTERN.test(body.slot)) {
+  if (typeof fields.slot !== "string" || !SLOT_PATTERN.test(fields.slot)) {
     return refuse("slot_not_canonical");
   }
-  const slotMs = Date.parse(body.slot);
+  const slotMs = Date.parse(fields.slot);
   if (!Number.isFinite(slotMs)) return refuse("slot_not_canonical");
   // The slot a run of this moment answers for. A submitter that named another
   // one is either answering for a slot it missed or reserving a future one.
-  if (body.slot !== slotForInstant(now)) return refuse("slot_not_current");
+  if (fields.slot !== slotForInstant(now)) return refuse("slot_not_current");
 
-  if (body.outcome === "failed") {
+  if (fields.outcome === "failed") {
     if (
-      body.payload !== undefined ||
-      body.developSha !== undefined ||
-      body.mainSha !== undefined
+      fields.payload !== undefined ||
+      fields.developSha !== undefined ||
+      fields.mainSha !== undefined
     ) {
       // A failure carrying content is the defect the shape CHECK exists for;
       // refusing it here means the submitter is told why.
       return refuse("outcome_shape_invalid", "a failed slot carries no content");
     }
-    if (!OBSERVATION_FAILURE_STAGES.includes(body.failureStage)) {
+    const stage = fields.failureStage;
+    if (typeof stage !== "string" || !OBSERVATION_FAILURE_STAGES.includes(stage)) {
       return refuse("unknown_failure_stage");
     }
     return {
-      accepted: /** @type {true} */ (true),
+      accepted: true,
       row: {
         id,
         slot: new Date(slotMs),
-        outcome: /** @type {"failed"} */ ("failed"),
-        failureStage: body.failureStage,
+        outcome: "failed",
+        failureStage: stage,
         schemaVersion: OBSERVATION_SCHEMA_VERSION,
         developSha: null,
         mainSha: null,
@@ -176,39 +181,57 @@ export const admitObservationSubmission = (body, { now, id }) => {
     };
   }
 
-  if (body.outcome !== "ok") return refuse("outcome_shape_invalid", "unknown outcome");
-  if (body.failureStage !== undefined) {
+  if (fields.outcome !== "ok") return refuse("outcome_shape_invalid", "unknown outcome");
+  if (fields.failureStage !== undefined) {
     return refuse("outcome_shape_invalid", "a successful slot has no failure stage");
   }
-  if (typeof body.developSha !== "string" || !SHA_PATTERN.test(body.developSha)) {
+  if (typeof fields.developSha !== "string" || !SHA_PATTERN.test(fields.developSha)) {
     return refuse("outcome_shape_invalid", "developSha is not a commit");
   }
-  if (typeof body.mainSha !== "string" || !SHA_PATTERN.test(body.mainSha)) {
+  if (typeof fields.mainSha !== "string" || !SHA_PATTERN.test(fields.mainSha)) {
     return refuse("outcome_shape_invalid", "mainSha is not a commit");
   }
 
   // The payload is judged by the module that built it: the counts are
   // recomputed from the rows and compared, so a submitted count that nobody
   // can rederive is refused rather than stored.
-  const { problems = [] } = validateObservationPayload(body.payload);
+  const { problems = [] } = validateObservationPayload(fields.payload);
   if (problems.length > 0) return refuse("payload_invalid", problems[0]);
-  if (body.payload.issues.length > OBSERVATION_ROW_LIMIT) return refuse("row_count_exceeded");
+
+  // Public issue titles are external text, and the policy scans them before
+  // they are stored (docs/policy/product-research-agent.md §2.7). The agent
+  // reads whatever anyone opened an issue about; a title holding a token is
+  // unlikely and the cost of storing one is a credential sitting in a table
+  // an operator reads every morning.
+  //
+  // The whole slot is refused rather than the row dropped: dropping it would
+  // make the stored observation disagree with the backlog it claims to
+  // describe, and nothing on the screen would say a row was missing. Only the
+  // rule ids are reported -- a record about a secret that quotes the secret
+  // has leaked it.
+  const payload = fields.payload as ValidatedPayload;
+  const hits = new Set<string>();
+  for (const issue of payload.issues) {
+    for (const ruleId of detectSecrets(issue.title)) hits.add(ruleId);
+  }
+  if (hits.size > 0) return refuse("secret_detected", [...hits].sort().join(","));
+  if (payload.issues.length > OBSERVATION_ROW_LIMIT) return refuse("row_count_exceeded");
 
   return {
-    accepted: /** @type {true} */ (true),
+    accepted: true,
     row: {
       id,
       slot: new Date(slotMs),
-      outcome: /** @type {"ok"} */ ("ok"),
+      outcome: "ok",
       failureStage: null,
       schemaVersion: OBSERVATION_SCHEMA_VERSION,
-      developSha: body.developSha,
-      mainSha: body.mainSha,
-      issueCount: body.payload.issues.length,
-      payload: body.payload,
+      developSha: fields.developSha,
+      mainSha: fields.mainSha,
+      issueCount: payload.issues.length,
+      payload,
       // Computed here from the payload that is about to be stored, never read
       // from the body.
-      payloadDigest: observationPayloadDigest(body.payload),
+      payloadDigest: observationPayloadDigest(payload),
     },
   };
 };

@@ -15,7 +15,7 @@ import {
 import {
   SUBMISSION_MAX_BYTES,
   admitObservationSubmission,
-} from "@/lib/productResearchObservationSubmission.mjs";
+} from "@/lib/productResearchObservationSubmission";
 import {
   ProductResearchObservationRefusedError,
   recordProductResearchObservation,

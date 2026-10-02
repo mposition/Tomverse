@@ -15,7 +15,7 @@ import {
 import {
   admitObservationSubmission,
   observationPayloadDigest,
-} from "../lib/productResearchObservationSubmission.mjs";
+} from "../lib/productResearchObservationSubmission.ts";
 
 const NOW = Date.parse("2026-10-02T21:31:00.000Z");
 const SLOT = "2026-10-02T21:30:00.000Z";
@@ -218,4 +218,53 @@ test("a commit that is not a full sha cannot be stored as one", () => {
     assert.equal(submit({ developSha: sha }).code, "outcome_shape_invalid", String(sha));
     assert.equal(submit({ mainSha: sha }).code, "outcome_shape_invalid", String(sha));
   }
+});
+
+test("a credential in an issue title refuses the whole slot", () => {
+  // Public issue titles are external text: the agent reads whatever anyone
+  // opened an issue about. A title holding a token is unlikely, and the cost of
+  // storing one is a credential sitting in a table an operator reads every
+  // morning (docs/policy/product-research-agent.md §2.7).
+  //
+  // Synthetic values, shaped to match the rules and belonging to nothing.
+  for (const [label, title] of [
+    ["github token", `Fix the token ${"ghp_"}${"A".repeat(36)}`],
+    ["github fine-grained", `See ${"github_pat_"}${"B".repeat(45)}`],
+    ["aws key id", `Rotate AKIA${"CDEFGHIJKLMNOPQR"}`],
+    ["private key block", "Paste of -----BEGIN RSA PRIVATE KEY----- in the logs"],
+    ["connection string", "Repro with postgresql://user:hunter22@db.example/app"],
+    ["jwt", `Token eyJ${"a".repeat(10)}.${"b".repeat(10)}.${"c".repeat(10)} expired`],
+  ]) {
+    const tainted = buildObservationPayload({
+      classified: [{ number: 7, title, verdict: "open_work", signals: [] }],
+    }).payload;
+    assert.ok(tainted, label);
+    const result = submit({ payload: tainted });
+    assert.equal(result.accepted, false, label);
+    assert.equal(result.code, "secret_detected", label);
+    // Only the rule ids: a record about a secret that quotes the secret has
+    // leaked it.
+    assert.equal(result.detail.includes("ghp_"), false, label);
+    assert.equal(result.detail.includes("hunter22"), false, label);
+    assert.match(result.detail, /^[a-z0-9-]+(,[a-z0-9-]+)*$/, label);
+  }
+
+  // The whole slot goes, not the row. Dropping the row would make the stored
+  // observation disagree with the backlog it claims to describe, and nothing on
+  // the screen would say a row was missing.
+  const mixed = buildObservationPayload({
+    classified: [
+      { number: 1, title: "An ordinary title", verdict: "open_work", signals: [] },
+      { number: 2, title: `key ${"ghp_"}${"Z".repeat(36)}`, verdict: "open_work", signals: [] },
+    ],
+  }).payload;
+  assert.equal(submit({ payload: mixed }).code, "secret_detected");
+
+  // And an ordinary title that merely mentions the word is not a hit.
+  const ordinary = buildObservationPayload({
+    classified: [
+      { number: 3, title: "Rotate the GitHub token in staging", verdict: "open_work", signals: [] },
+    ],
+  }).payload;
+  assert.equal(submit({ payload: ordinary }).accepted, true);
 });

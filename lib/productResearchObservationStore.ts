@@ -185,3 +185,19 @@ export async function sweepProductResearchObservations(
     { timeout: 20_000 },
   );
 }
+
+/**
+ * The newest successful slot, or null when there is none.
+ *
+ * Successful specifically: a failed slot proves the cron ran, not that an
+ * observation exists, and the silence check is about whether anyone can still
+ * read what the backlog looks like.
+ */
+export async function latestProductResearchSuccess(): Promise<Date | null> {
+  const row = await prisma.productResearchObservation.findFirst({
+    where: { outcome: "ok" },
+    select: { slot: true },
+    orderBy: { slot: "desc" },
+  });
+  return row?.slot ?? null;
+}
