@@ -2731,6 +2731,13 @@ test("execution start and settle are fenced by task revision and worker generati
     assert.equal(task.claimedAt, null);
     assert.equal(task.revision, 3);
 
+    const { listAmuxCardsForAdmin } = await import("@/lib/amux/adminCardList");
+    const { amuxAdminKanbanLane } = await import("@/lib/amux/adminKanbanCore");
+    const adminRow = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(adminRow);
+    assert.equal(adminRow.hasOwnerAttentionEscalation, false);
+    assert.equal(amuxAdminKanbanLane(adminRow), "in_review");
+
     const attempt = await prisma.amuxExecutionAttempt.findUniqueOrThrow({
       where: { id: started.attemptId },
     });
@@ -5129,14 +5136,14 @@ test("the admin board distinguishes review obligation from open escalation", asy
     const review = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
     assert.ok(review);
     assert.equal(review.requiresHumanReview, true);
-    assert.equal(review.hasOpenEscalation, false);
+    assert.equal(review.hasOwnerAttentionEscalation, false);
 
     await prisma.amuxHumanEscalation.create({
-      data: { id: escalationId, taskId, reason: "synthetic_review_needed", openedBy: "synthetic-test" },
+      data: { id: escalationId, taskId, reason: "canonical_deadline_review_required", openedBy: "synthetic-test" },
     });
     const escalated = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
     assert.ok(escalated);
-    assert.equal(escalated.hasOpenEscalation, true);
+    assert.equal(escalated.hasOwnerAttentionEscalation, true);
 
     await prisma.amuxHumanEscalation.update({
       where: { id: escalationId },
@@ -5148,7 +5155,7 @@ test("the admin board distinguishes review obligation from open escalation", asy
     });
     const acknowledged = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
     assert.ok(acknowledged);
-    assert.equal(acknowledged.hasOpenEscalation, true);
+    assert.equal(acknowledged.hasOwnerAttentionEscalation, true);
 
     await prisma.amuxHumanEscalation.update({
       where: { id: escalationId },
@@ -5162,7 +5169,7 @@ test("the admin board distinguishes review obligation from open escalation", asy
     });
     const resolved = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
     assert.ok(resolved);
-    assert.equal(resolved.hasOpenEscalation, false);
+    assert.equal(resolved.hasOwnerAttentionEscalation, false);
   } finally {
     await prisma.amuxWorkItem.update({ where: { id: taskId }, data: { status: "done" } });
   }

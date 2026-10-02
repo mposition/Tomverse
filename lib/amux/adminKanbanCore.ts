@@ -21,14 +21,14 @@ type CardState = {
   status: string;
   owner: string | null;
   claimVerified: boolean;
-  hasOpenEscalation: boolean;
+  hasOwnerAttentionEscalation: boolean;
 };
 
 /** Terminal cards remain available in the full list. An unexpected active
  * status goes to owner attention so it cannot disappear from the board. */
 export function amuxAdminKanbanLane(row: CardState): AmuxAdminKanbanLane | null {
   if (row.status === "done" || row.status === "cancelled") return null;
-  if (row.status === "blocked" || row.hasOpenEscalation) return "owner_attention";
+  if (row.status === "blocked" || row.hasOwnerAttentionEscalation) return "owner_attention";
   if (row.status === "backlog") return "tomverse_backlog";
   if (row.status === "todo") {
     if (row.owner === null && !row.claimVerified) return "amux_backlog";

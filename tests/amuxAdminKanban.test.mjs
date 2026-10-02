@@ -4,8 +4,8 @@ import test from "node:test";
 import { AMUX_ADMIN_KANBAN_LANES, amuxLegacyTodoClaimVerified, projectAmuxAdminKanban,
   amuxAdminKanbanLane } from "../lib/amux/adminKanbanCore.ts";
 
-const card = (status, owner = null, hasOpenEscalation = false, claimVerified = false) => ({
-  status, owner, hasOpenEscalation, claimVerified,
+const card = (status, owner = null, hasOwnerAttentionEscalation = false, claimVerified = false) => ({
+  status, owner, hasOwnerAttentionEscalation, claimVerified,
 });
 
 test("AMUX board separates Tomverse backlog from unassigned and assigned todo", () => {
