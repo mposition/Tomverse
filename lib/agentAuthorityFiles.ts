@@ -51,6 +51,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "public",
   "scripts",
   "tests",
+  "tools",
   "types",
   "vendor",
 ] as const;
@@ -99,6 +100,11 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   ".github/**",
   "scripts/**",
   "config/**",
+  // Operator tooling that runs reviewer CLIs (the independent review
+  // orchestrator): it decides who reviews whom, so no agent may change it.
+  "tools/**",
+  "tests/reviewOrchestrator*",
+  "tests/fixtures/review-orchestrator/**",
   // §4-4: policy and contract documents.
   "docs/policy/**",
   "docs/ui-contracts/**",
