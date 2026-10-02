@@ -327,6 +327,11 @@ export const EXCLUDED_PREFIXES = [
     reason: "Documentation. Nothing here is imported or executed.",
   },
   {
+    prefix: "vendor/amux/",
+    reason:
+      "Independent Rust/SQLite AMUX workspace. Its SQL cannot use the Tomverse Prisma client or product database credentials; product SQL paths remain scanned.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
