@@ -18,7 +18,10 @@ import {
   AGENT_RUNNER_SERVICES,
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
-import { DECLARED_SERVICE_VARIABLES } from "../lib/productResearchObservationRunnerCore.mjs";
+import {
+  DECLARED_SERVICE_VARIABLES,
+  PROBE_SERVICE_VARIABLES,
+} from "../lib/productResearchObservationRunnerCore.mjs";
 
 const railwayDirectory = join(process.cwd(), ".railway");
 
@@ -111,6 +114,11 @@ test("the probe holds no means of submitting, and exists only in staging", () =>
   assert.equal(variables.includes("PRODUCT_RESEARCH_INGEST_SECRET"), false);
   // And it runs when an operator runs it, not on a schedule.
   assert.equal(probe.cronSchedule, null);
+
+  // The probe checks its environment against its own shorter list, so the two
+  // have to be the same list: a name declared here and not there stops the
+  // probe, and a name there and not here is deleted by the next apply.
+  assert.deepEqual([...variables].sort(), [...PROBE_SERVICE_VARIABLES].sort());
 });
 
 test("the resource list is exactly the table for that environment, and refuses the unknown", () => {

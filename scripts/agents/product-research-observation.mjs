@@ -22,8 +22,10 @@ import process from "node:process";
 
 import {
   DEFAULT_RUN_TIMINGS,
+  childEnvironment,
   createRunState,
   gitSupportsPartialClone,
+  planProbe,
   planRun,
   runTimingProblems,
   slotForInstant,
@@ -49,6 +51,10 @@ const probeImage = () => {
   const version = spawnSync("git", ["--version"], {
     encoding: "utf8",
     timeout: 10_000,
+    // Not the whole environment. `git --version` has no reason to see the
+    // service's token, and a child that inherits everything is a child that
+    // can print anything.
+    env: childEnvironment(process.env, { platform: process.platform }),
   });
   const gitAvailable = version.status === 0;
   say(`git available: ${gitAvailable}`);
@@ -77,7 +83,21 @@ const main = () => {
     return 1;
   }
 
-  if (PROBE) return probeImage();
+  if (PROBE) {
+    // The probe cannot use `planRun()` -- that planner requires the
+    // submission URL and secret the probe must not have -- but the check
+    // those share is the one that says a product database credential cannot
+    // be in this project, and skipping it would leave one service here
+    // unchecked.
+    const plan = planProbe(process.env, {
+      systemNames: systemNamesForPlatform(process.platform),
+    });
+    if (plan.mode === "config") {
+      for (const problem of plan.problems) say(`config: ${problem}`);
+      return 1;
+    }
+    return probeImage();
+  }
 
   const plan = planRun(process.env, {
     systemNames: systemNamesForPlatform(process.platform),
