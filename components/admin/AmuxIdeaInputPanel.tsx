@@ -116,6 +116,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const inFlight = useRef(false);
 
   const invalidateResult = () => {
+    if (!canCreateIdeaFromState(submission.kind)) return;
     inputRevision.current += 1;
     setResult(null);
     setSubmission({ kind: "idle" });

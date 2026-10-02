@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import ts from "typescript";
 
 import {
   canCreateIdeaFromState,
@@ -30,6 +31,25 @@ test("a failed recent-idea read-back requires retry or explicit reset before a n
   const submit = panel.split("const submit = async () => {")[1]?.split("const checkInput = async")[0] ?? "";
   assert.match(submit, /!canCreateIdeaFromState\(submission\.kind\)/);
   assert.match(panel, /const frozen = !canCreateIdeaFromState\(submission\.kind\)/);
+  assert.match(panel, /const invalidateResult = \(\) => \{\s*if \(!canCreateIdeaFromState\(submission\.kind\)\) return/);
+  const source = ts.createSourceFile("AmuxIdeaInputPanel.tsx", panel,
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const protectedIds = new Set(["amux-v4-idea", "amux-v4-repositories", "amux-v4-pull-requests"]);
+  const visit = (node) => {
+    if (ts.isJsxSelfClosingElement(node)) {
+      const attributes = node.attributes.properties.filter(ts.isJsxAttribute);
+      const id = attributes.find((attribute) => attribute.name.text === "id")?.initializer;
+      if (id && ts.isStringLiteral(id) && protectedIds.has(id.text)) {
+        const disabled = attributes.find((attribute) => attribute.name.text === "disabled")?.initializer;
+        assert.ok(disabled && ts.isJsxExpression(disabled));
+        assert.equal(disabled.expression?.getText(source), "pending || frozen");
+        protectedIds.delete(id.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  assert.deepEqual([...protectedIds], []);
 });
 
 test("another idea starts only after a definitive save and no pending check", () => {
