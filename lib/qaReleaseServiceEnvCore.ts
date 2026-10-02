@@ -144,7 +144,8 @@ export function decideQaReleaseServiceStart(
     // its kill switch must not run as if nobody had pulled it -- so the
     // operator declares it empty to run and fills it to stop.
     const killSwitch = env.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
-    if (killSwitch === undefined || killSwitch.trim() !== "") return "disabled";
+    // Any character stops it, whitespace included: only a declared, empty value runs.
+    if (killSwitch !== "") return "disabled";
     if (value("QA_RELEASE_MERGE_LANE_ENABLED") !== "true") return "disabled";
   }
   if (REQUIRED[service].some((name) => value(name) === "")) return "refuse";

@@ -63,7 +63,7 @@ function worstCaseDigest() {
       workflow: "nightly-visual-regression.yml",
       runId: "9".repeat(16),
       job: "visual-regression",
-      shard: 32,
+      shard: null, // null serializes longer than any shard number
       jobConclusion: "startup_failure",
       label: longest(QA_RELEASE_CI_CLASSES),
     })),
@@ -89,8 +89,8 @@ test("the enums match their sources", () => {
   for (const name of QA_RELEASE_CHECK_NAMES) assert.ok(pkg.scripts[name], `npm script ${name}`);
   for (const workflow of QA_RELEASE_CI_WORKFLOWS) {
     const text = readFileSync(new URL(`../.github/workflows/${workflow}`, import.meta.url), "utf8");
-    const jobsBlock = text.split(/^jobs:s*$/m)[1] ?? "";
-    const jobIds = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):s*$/gm)].map((m) => m[1]);
+    const jobsBlock = text.split(/^jobs:\s*$/m)[1] ?? "";
+    const jobIds = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)].map((m) => m[1]);
     assert.deepEqual([...QA_RELEASE_CI_JOBS[workflow]].sort(), jobIds.sort(), workflow);
   }
   // The worst case uses the longest workflow-job pair and conclusion; keep it honest.

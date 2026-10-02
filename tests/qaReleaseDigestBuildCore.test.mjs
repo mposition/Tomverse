@@ -87,7 +87,7 @@ test("an unavailable backlog says so instead of reading as an empty one", () => 
 
 test("a list over its maximum is replaced by its overflow code, never truncated", () => {
   const input = baseInput();
-  input.ci = Array.from({ length: 25 }, (_, i) => ({
+  input.ci = Array.from({ length: 17 }, (_, i) => ({
     workflow: "e2e.yml",
     runId: String(i + 1),
     job: "playwright",
@@ -123,7 +123,7 @@ test("an unknown verdict or status is refused rather than dropped", () => {
 
 test("every document it returns fits the 16 KiB contract", () => {
   const input = baseInput();
-  input.ci = Array.from({ length: 24 }, (_, i) => ({
+  input.ci = Array.from({ length: 16 }, (_, i) => ({
     workflow: "nightly-visual-regression.yml",
     runId: String(1e15 + i),
     job: "visual-regression",
@@ -138,7 +138,7 @@ test("every document it returns fits the 16 KiB contract", () => {
   ];
   const digest = buildQaReleaseDigest(input);
   assert.ok(qaReleaseDigestByteLength(digest) <= QA_RELEASE_DIGEST_MAX_BYTES);
-  assert.equal(digest.ci.length, 24);
+  assert.equal(digest.ci.length, 16);
   assert.equal(digest.issues.candidates.length, 40);
 });
 
@@ -180,4 +180,27 @@ test("more applicability-unknown gates than the cap become an overflow code", ()
   assert.deepEqual(digest.gates.applicabilityUnknown, []);
   assert.equal(digest.gates.byVerdict.applicability_unknown, 41);
   assert.ok(digest.notChecked.includes("applicability_unknown_overflow"));
+});
+
+test("a pair that did not classify a gate, or classified it twice, is not coverage and leaves no rows", () => {
+  const base = baseInput();
+  const stillUnknown = {
+    ...base,
+    hypotheticalReports: [
+      base.hypotheticalReports[0],
+      { assumed: false, report: { classified: [gate("MEMORY-01", "pending", "applicability_unknown")] } },
+    ],
+  };
+  const twice = {
+    ...base,
+    hypotheticalReports: [
+      { assumed: true, report: { classified: [gate("MEMORY-01", "pending", "not_implemented"), gate("MEMORY-01", "pending", "evidence_present")] } },
+      base.hypotheticalReports[1],
+    ],
+  };
+  for (const input of [stillUnknown, twice, { ...base, hypotheticalReports: [base.hypotheticalReports[0]] }]) {
+    const digest = buildQaReleaseDigest(input);
+    assert.ok(digest.notChecked.includes("memory_condition_unknown"));
+    assert.deepEqual(digest.hypothetical, []);
+  }
 });

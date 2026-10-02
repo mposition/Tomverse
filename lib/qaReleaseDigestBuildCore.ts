@@ -137,13 +137,19 @@ export function buildQaReleaseDigest(input: QaReleaseDigestBuildInput): QaReleas
   if (issues === null) addCode(digest, "issue_backlog_unavailable");
   addCode(digest, "gates_changed_not_compared");
 
-  // Hypothetical rows count only as a complete pair: every applicability-
-  // unknown gate under both assumptions. Anything less is not coverage.
+  // Hypothetical rows count only as a complete pair: under each assumption,
+  // one report, and in it exactly one row per applicability-unknown gate that
+  // the assumption actually classified. Anything less is not coverage, and
+  // its rows are dropped so a partial matrix cannot read as results.
   const unknownIds = digest.gates.applicabilityUnknown;
   const coveredUnder = (assumed: boolean) =>
     input.hypotheticalReports.filter((r) => r.assumed === assumed).length === 1 &&
-    unknownIds.every((id) => hypothetical.some((row) => row.assumed === assumed && row.id === id));
+    unknownIds.every((id) => {
+      const rows = hypothetical.filter((row) => row.assumed === assumed && row.id === id);
+      return rows.length === 1 && rows[0].verdict !== "applicability_unknown";
+    });
   if (unknownIds.length > 0 && !(coveredUnder(true) && coveredUnder(false))) {
+    digest.hypothetical = [];
     addCode(digest, "memory_condition_unknown");
   }
 
