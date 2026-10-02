@@ -1,7 +1,11 @@
 "use client";
 
+import { useState } from "react";
+
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AmuxAdminCardRow } from "@/lib/amux/adminCardList";
+import { AMUX_ADMIN_KANBAN_LANES, projectAmuxAdminKanban,
+  type AmuxAdminKanbanLane } from "@/lib/amux/adminKanbanCore";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
 const cellClass = "border-b border-zinc-200 px-2 py-1 align-top dark:border-zinc-700";
@@ -16,6 +20,16 @@ export function AmuxCardListPanel({
   limit: number;
 }) {
   const messages = useAdminMessages(adminAmuxCardsMessages);
+  const [view, setView] = useState<"board" | "list">("board");
+  const board = projectAmuxAdminKanban(rows);
+  const laneTitles: Record<AmuxAdminKanbanLane, string> = {
+    tomverse_backlog: messages.laneTomverseBacklog,
+    amux_backlog: messages.laneAmuxBacklog,
+    todo: messages.laneTodo,
+    in_progress: messages.laneInProgress,
+    in_review: messages.laneInReview,
+    owner_attention: messages.laneOwnerAttention,
+  };
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-card-list-panel">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
@@ -23,8 +37,48 @@ export function AmuxCardListPanel({
       <p className="text-sm text-zinc-700 dark:text-zinc-300" data-testid="amux-card-list-count">
         {messages.shown(rows.length, total, limit)}
       </p>
+      <div role="group" aria-label={messages.viewLabel} className="flex gap-2">
+        <button type="button" aria-pressed={view === "board"} onClick={() => setView("board")}
+          className="rounded border border-zinc-400 px-3 py-1 text-sm aria-pressed:bg-zinc-800 aria-pressed:text-white dark:aria-pressed:bg-zinc-200 dark:aria-pressed:text-zinc-900">
+          {messages.viewBoard}
+        </button>
+        <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")}
+          className="rounded border border-zinc-400 px-3 py-1 text-sm aria-pressed:bg-zinc-800 aria-pressed:text-white dark:aria-pressed:bg-zinc-200 dark:aria-pressed:text-zinc-900">
+          {messages.viewList}
+        </button>
+      </div>
       {rows.length === 0 ? (
         <p className="text-sm text-zinc-700 dark:text-zinc-300">{messages.empty}</p>
+      ) : view === "board" ? (
+        <>
+          <p className="text-xs text-zinc-600 dark:text-zinc-400">{messages.boardScope(rows.length, total)}</p>
+          {board.terminalCount > 0 ? (
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              {messages.terminalInList(board.terminalCount)}
+            </p>
+          ) : null}
+          <div className="flex gap-3 overflow-x-auto pb-3" data-testid="amux-kanban-board">
+            {AMUX_ADMIN_KANBAN_LANES.map((lane) => (
+              <section key={lane} aria-label={laneTitles[lane]}
+                className="w-56 shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-700 dark:bg-zinc-900">
+                <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {laneTitles[lane]} <span className="font-normal">({board.lanes[lane].length})</span>
+                </h3>
+                <div className="space-y-2">
+                  {board.lanes[lane].map((row) => (
+                    <article key={row.id} data-testid="amux-kanban-card"
+                      className="rounded border border-zinc-200 bg-white p-2 text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100">
+                      <h4 className="break-words font-medium">{row.sourceKey ?? row.id}</h4>
+                      {row.sourceKey ? <p className="break-all font-mono text-zinc-500 dark:text-zinc-400">{row.id}</p> : null}
+                      <p>{row.status} · {row.kind} · {row.priority}</p>
+                      <p>{messages.columnOwner}: {row.owner ?? messages.none}</p>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-zinc-800 dark:text-zinc-100">

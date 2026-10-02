@@ -51,5 +51,7 @@ test("the card list reads identifiers and state only", async () => {
 test("the panel states how many rows it shows out of how many", async () => {
   const panel = await read("components/admin/AmuxCardListPanel.tsx");
   assert.match(panel, /messages\.shown\(rows\.length, total, limit\)/);
+  assert.match(panel, /projectAmuxAdminKanban\(rows\)/);
+  assert.match(panel, /data-testid="amux-kanban-board"/);
   assert.doesNotMatch(panel, /adminFetch|fetch\(/);
 });
