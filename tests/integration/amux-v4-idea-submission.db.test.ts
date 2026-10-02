@@ -162,23 +162,27 @@ test("recent picker omits expired, cancelled and purged ideas", async () => {
 
 test("recent picker pages beyond twenty ideas without duplicates or another owner's rows", async () => {
   const submittedAt = new Date(Date.now() - 120_000);
+  const pageActorUserId = `synthetic-amux-page-${randomUUID()}`;
+  const pageSession = { ...session, user: { ...session.user, id: pageActorUserId } } as Session;
   const ids = Array.from({ length: 23 }, () => randomUUID());
   await prisma.amuxIdeaSubmission.createMany({ data: ids.map((id) => ({
-    id, requestId: randomUUID(), actorUserId, state: "submitted",
+    id, requestId: randomUUID(), actorUserId: pageActorUserId, state: "submitted",
     submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000),
     rawPurgeAfter: new Date(submittedAt.getTime() + 7 * 86_400_000),
     rawCiphertext: Buffer.from("SYNTHETIC_PAGE"), rawKeyId: "synthetic-key", rawKeyVersion: 1,
   })) });
-  const first = await listRecentIdeaSubmissions(session);
+  const first = await listRecentIdeaSubmissions(pageSession);
   assert.equal(first.items.length, 20);
   assert.ok(first.nextCursor);
   const { parseAmuxV4RecentIdeaCursor } = await import("@/lib/amux/ideaRecentCursorCore");
-  const second = await listRecentIdeaSubmissions(session,
+  const second = await listRecentIdeaSubmissions(pageSession,
     parseAmuxV4RecentIdeaCursor(first.nextCursor));
   const all = [...first.items, ...second.items];
   assert.equal(new Set(all.map((row) => row.ideaId)).size, all.length);
   for (const id of ids) assert.ok(all.some((row) => row.ideaId === id));
   assert.equal(second.nextCursor, null);
+  const pageIds = new Set<string>(ids);
+  assert.equal((await listRecentIdeaSubmissions(session)).items.some((row) => pageIds.has(row.ideaId)), false);
 });
 
 test("submission row and canonical audit roll back together", async () => {

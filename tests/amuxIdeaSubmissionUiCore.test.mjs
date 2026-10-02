@@ -12,6 +12,7 @@ import {
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
   classifyRecentIdeaList,
+  mergeRecentIdeaPages,
 } from "../lib/amux/ideaSubmissionUiCore.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -97,6 +98,28 @@ test("recent idea list accepts only bounded metadata", () => {
     body: { status: "recent", items: [item], nextCursor: "bad!" } }), null);
   assert.equal(classifyRecentIdeaList({ status: 200,
     body: { status: "recent", items: [], nextCursor: "abc" } }), null);
+});
+
+test("paged recent ideas preserve earlier rows and reject duplicate pages", () => {
+  const first = { ideaId: "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0", requestId,
+    submittedAt: "2026-10-03T00:00:00.000Z", analysisDeadlineAt: "2026-10-10T00:00:00.000Z" };
+  const second = { ...first, ideaId: "87def5f0-2c78-4bd3-9558-ab8a8e3617d0",
+    requestId: "97def5f0-2c78-4bd3-9558-ab8a8e3617d0" };
+  assert.deepEqual(mergeRecentIdeaPages([first], [second]), [first, second]);
+  assert.equal(mergeRecentIdeaPages([first], [first]), null);
+  assert.equal(mergeRecentIdeaPages([], [second, second]), null);
+});
+
+test("a selected idea remains retryable after refresh removes its page", () => {
+  const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  const retry = panel.split("const retryRecentIdea =")[1]?.split("useEffect(() => {")[0] ?? "";
+  assert.match(retry, /void readBack\(requestId, "selection"\)/);
+  assert.doesNotMatch(retry, /recentIdeas/);
+  assert.match(panel, /onClick=\{\(\) => retryRecentIdea\(submission\.requestId\)\}/);
+  const loadMore = panel.split("const loadMoreRecentIdeas =")[1]?.split("useEffect(() => {")[0] ?? "";
+  assert.match(loadMore, /mergeRecentIdeaPages\(recentIdeas, page\.items\)/);
+  assert.match(loadMore, /generation === recentRequestGeneration\.current/);
+  assert.match(loadMore, /setRecentCursor\(page\.nextCursor\)/);
 });
 
 test("only an exact successful submission response confirms the idea", () => {

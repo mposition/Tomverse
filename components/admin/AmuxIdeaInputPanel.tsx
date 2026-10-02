@@ -16,6 +16,7 @@ import {
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
   classifyRecentIdeaList,
+  mergeRecentIdeaPages,
   type RecentIdea,
 } from "@/lib/amux/ideaSubmissionUiCore";
 import {
@@ -244,11 +245,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       const response = await adminFetch(`/api/admin/amux/ideas/submissions?${query}`,
         { cache: "no-store" });
       const page = classifyRecentIdeaList({ status: response.status, body: await response.json() });
-      if (!page || page.items.some((item) => recentIdeas.some((seen) => seen.requestId === item.requestId))) {
-        throw new Error("recent_ideas_unavailable");
-      }
+      const merged = page && mergeRecentIdeaPages(recentIdeas, page.items);
+      if (!page || !merged) throw new Error("recent_ideas_unavailable");
       if (generation === recentRequestGeneration.current) {
-        setRecentIdeas([...recentIdeas, ...page.items]);
+        setRecentIdeas(merged);
         setRecentCursor(page.nextCursor);
       }
     } catch { if (generation === recentRequestGeneration.current) setRecentError(true); }
@@ -278,6 +278,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourceSide("head");
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
+    inFlight.current = true;
+    setSubmission({ kind: "selection_pending", requestId });
+    void readBack(requestId, "selection");
+  };
+
+  const retryRecentIdea = (requestId: string) => {
+    if (submission.kind !== "selection_unavailable" ||
+        submission.requestId !== requestId || readBackPending || pending || sourceScopePending) return;
+    // The initial selection already came from this owner's metadata list.
+    // Refresh may have replaced that page; canonical request-id read-back is
+    // still the authority and must not depend on the current list page.
     inFlight.current = true;
     setSubmission({ kind: "selection_pending", requestId });
     void readBack(requestId, "selection");
@@ -527,7 +538,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       {submission.kind === "selection_unavailable" ? (
         <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-800 dark:text-amber-200">
           <p>{messages.recentIdeaUnavailable}</p>
-          <button type="button" onClick={() => selectRecentIdea(submission.requestId)}
+          <button type="button" onClick={() => retryRecentIdea(submission.requestId)}
             disabled={readBackPending || recentPending}
             className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium dark:border-amber-300">
             {messages.checkSubmissionStatus}

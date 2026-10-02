@@ -33,6 +33,16 @@ export function canSelectRecentIdea(
 
 export type RecentIdea = { ideaId: string; requestId: string;
   submittedAt: string; analysisDeadlineAt: string };
+
+/** A stale or repeated page cannot silently replace or duplicate picker rows. */
+export function mergeRecentIdeaPages(current: RecentIdea[], next: RecentIdea[]): RecentIdea[] | null {
+  const seen = new Set(current.map((row) => row.requestId));
+  for (const row of next) {
+    if (seen.has(row.requestId)) return null;
+    seen.add(row.requestId);
+  }
+  return [...current, ...next];
+}
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const validIsoDate = (value: unknown): value is string =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) &&
