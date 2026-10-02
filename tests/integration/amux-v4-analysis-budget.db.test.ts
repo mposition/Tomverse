@@ -4,11 +4,15 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
-  AMUX_V4_FIRST_DRAFT_SAVED_SCOPE } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
@@ -856,6 +860,19 @@ test("a complete first result saves independent encrypted units and closes only 
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
     error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 4);
+
+  await prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    await writeSystemAuditLog({ tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+      targetId: `${ideaId}:0`,
+      summary: "Synthetic duplicate completion record for readback regression test.",
+      metadata: { ideaId, previewId, syntheticDuplicate: true } });
+  });
+  await assert.rejects(readAmuxFirstIdeaAnalysisResult(session, ideaId, keys),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisResultReadError &&
+      error.code === "integrity_unavailable");
 });
 
 test("a complete rejection closes analysis without creating proposal cards", async () => {
