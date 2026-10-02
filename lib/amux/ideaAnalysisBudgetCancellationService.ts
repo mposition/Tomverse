@@ -10,8 +10,8 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 
 /** Dark transaction body. A reserved hold may be cancelled before dispatch;
  * in-flight or unknown outcomes must retain their full reservation. There is
- * no route to this writer and it cannot authorize an Agent call. */
-export const AMUX_V4_UNUSED_RESERVATION_CANCEL_CODE_LATCH = false;
+ * no route to this writer and it cannot authorize an Agent call. Dispatch
+ * must require a reserved hold, never only an unconsumed confirmed preview. */
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxIdeaAnalysisCancellationError extends Error {
@@ -79,7 +79,7 @@ export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
       hold.monthStart.getTime() !== identity.monthStart.getTime() ||
       hold.status !== "reserved" || hold.dispatchedAt !== null ||
       hold.closedAt !== null || hold.settledMicroUsd !== null ||
-      !preview || preview.state !== "confirmed" ||
+      !preview || !["confirmed", "expired", "owner_rejected"].includes(preview.state) ||
       preview.consumedAt !== null || preview.outcomeUnknownAt !== null) {
     throw new AmuxIdeaAnalysisCancellationError("not_cancellable");
   }
@@ -100,7 +100,8 @@ export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
     action: "amux.v4.analysis_budget.unused_reservation_cancelled",
     targetType: "AmuxIdeaAnalysisBudgetHold", targetId: hold.id,
     summary: "Owner cancelled one unused AMUX analysis budget reservation before dispatch.",
-    metadata: { namespace: hold.namespace, previewId: hold.previewId,
+    metadata: { namespace: hold.namespace,
+      monthStart: hold.monthStart.toISOString(), previewId: hold.previewId,
       releasedMicroUsd: hold.reservedMicroUsd.toString(),
       modelCallStarted: false },
   });
