@@ -786,7 +786,7 @@ jobs:
         run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
-      # on main push via Main Chromium Regression, and nightly via Daily
+      # on pull requests into main via Main Chromium Regression, and nightly via Daily
       # Security Audit and Nightly Visual Regression. See
       # scripts/verify-smoke-coverage.mjs for what this tier must cover.
       #
@@ -863,7 +863,7 @@ jobs:
   # shard would buy less than this one did and cost another runner.
   #
   # The full 63-golden visual matrix stays out of the PR tier -- it runs
-  # unfiltered on main push and nightly.
+  # unfiltered on pull requests into main and nightly.
   ui-risk:
     name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
