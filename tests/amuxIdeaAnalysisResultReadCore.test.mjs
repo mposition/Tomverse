@@ -24,6 +24,22 @@ test("analysis audit commitments reject a changed, missing or reordered unit", (
   assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
     commitments[0], { ...commitments[1], digest: "c".repeat(64) },
   ], units), false);
+  for (const changed of [
+    { ...units[1], localRef: null },
+    { ...units[1], id: "unit-03" },
+    { ...units[1], unitKind: "node" },
+    { ...units[1], bodyDigestKeyId: "key-02" },
+  ]) {
+    assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(commitments,
+      [units[0], changed]), false);
+  }
+  const manyUnits = Array.from({ length: 41 }, (_, index) => ({
+    ...units[0], id: `unit-${index + 10}`, localRef: `c0:node-${index}`,
+  }));
+  const manyCommitments = manyUnits.map((unit) => ({ id: unit.id,
+    localRef: unit.localRef, kind: unit.unitKind,
+    digest: unit.bodyDigest, digestKeyId: unit.bodyDigestKeyId }));
+  assert.equal(matchesAmuxIdeaAnalysisUnitCommitments(manyCommitments, manyUnits), false);
   assert.equal(matchesAmuxIdeaAnalysisUnitCommitments([
     commitments[0], { ...commitments[1], unexpected: "text" },
   ], units), false);
