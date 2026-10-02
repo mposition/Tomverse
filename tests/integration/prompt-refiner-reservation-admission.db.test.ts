@@ -62,6 +62,14 @@ const reset = async () => {
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaFrontierModelApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaUnitDecision",
       "EngineeringAgentApproval",
       "AdminAuditLog"
     RESTART IDENTITY

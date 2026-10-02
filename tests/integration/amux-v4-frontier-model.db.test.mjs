@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
+import { appendSyntheticAdminAudit } from "./helpers/appendSyntheticAdminAudit.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -23,18 +24,11 @@ test("Frontier catalog requires human audit and enforces one-way versioned appro
   const secondId = randomUUID();
 
   async function audit(id, action, actorUserId = actor, targetType = "AmuxIdeaFrontierModelApproval", entryHash = null) {
-    const auditId = randomUUID();
-    await client.query(
-      `INSERT INTO public."AdminAuditLog"
-       ("id", "actorUserId", "action", "targetType", "targetId",
-        "summary", "entryHash")
-       VALUES ($1, $2, $3, $4, $5,
-               'synthetic Frontier eligibility probe', $6)`,
-      [auditId, actorUserId, action, targetType, id, entryHash === null
-        ? randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")
-        : entryHash],
-    );
-    return auditId;
+    return appendSyntheticAdminAudit(client, {
+      actorUserId, action, targetType, targetId: id,
+      summary: "synthetic Frontier eligibility probe",
+      ...(entryHash === null ? {} : { entryHash }),
+    });
   }
 
   async function rejected(query, params, expected) {
