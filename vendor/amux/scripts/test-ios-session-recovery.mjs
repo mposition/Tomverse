@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Actual native Safari proof on an owned simulator; fixture input never reaches the fleet.
+// AMUX_IOS_TEST_CA selects the server certificate when it differs from ~/.amux/tls/cert.pem.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs/promises';
-const base = new URL(process.env.AMUX_IOS_TEST_URL || 'https://localhost:18854');
-assert(['localhost', '127.0.0.1', '[::1]'].includes(base.hostname));
-assert(Number(base.port) >= 18000 || process.env.AMUX_IOS_ALLOW_LIVE === '1',
-  'Live driver requires explicit AMUX_IOS_ALLOW_LIVE=1; all page input uses a private local fixture');
+import { isolatedTestBase, localRequestOptions, trustedTestCa } from './ios-test-transport.mjs';
+const base = isolatedTestBase(process.env.AMUX_IOS_TEST_URL, process.env.AMUX_IOS_ALLOW_LIVE === '1');
+const testCa = await trustedTestCa(base);
 const session = process.env.AMUX_SESSION || 'ios-test';
 const journal = process.env.AMUX_IOS_JOURNAL;
 assert(journal, 'AMUX_IOS_JOURNAL must identify this test server’s driver journal');
@@ -15,11 +15,10 @@ const run = Date.now().toString(36);
 let presses = 0, started = false, device;
 const results = [];
 function request(url, method = 'GET', body) {
-  url = new URL(url);
   return new Promise((resolve, reject) => {
-    const req = (url.protocol === 'https:' ? https : http).request(url, {
-      method, rejectUnauthorized: false, headers: {'content-type': 'application/json'},
-    }, res => {
+    const req = (base.protocol === 'https:' ? https : http).request(localRequestOptions(url, base, {
+      method, ca: testCa, headers: {'content-type': 'application/json'},
+    }), res => {
       const chunks = [];
       res.on('data', b => chunks.push(b));
       res.on('error', reject);

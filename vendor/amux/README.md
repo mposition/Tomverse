@@ -18,6 +18,10 @@ small fix for the pre-existing missing Devin usage row. The original remote
 is `https://github.com/mixpeek/amux.git`; its Git history was not merged into
 Tomverse. `LICENSE` retains the upstream MIT terms.
 
+Subsequent Tomverse commits harden the imported dashboard and local iOS test
+transport; the vendored tree is therefore no longer byte-identical to that
+port commit.
+
 Build and focused test from this directory:
 
 ```bash
