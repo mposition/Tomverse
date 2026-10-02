@@ -3,9 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { AmuxCardHierarchyList } from "@/components/admin/AmuxCardHierarchyList";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AmuxAdminCardRow, AmuxAdminHierarchyNode } from "@/lib/amux/adminCardList";
-import { projectAmuxAdminHierarchy } from "@/lib/amux/adminHierarchyCore";
 import { AMUX_ADMIN_KANBAN_LANES, projectAmuxAdminKanban,
   type AmuxAdminKanbanLane } from "@/lib/amux/adminKanbanCore";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
@@ -28,7 +28,6 @@ export function AmuxCardListPanel({
   const messages = useAdminMessages(adminAmuxCardsMessages);
   const [view, setView] = useState<"board" | "list" | "hierarchy">("board");
   const board = projectAmuxAdminKanban(rows);
-  const hierarchy = projectAmuxAdminHierarchy(rows, hierarchyNodes);
   const laneTitles: Record<AmuxAdminKanbanLane, string> = {
     tomverse_backlog: messages.laneTomverseBacklog,
     amux_backlog: messages.laneAmuxBacklog,
@@ -97,25 +96,7 @@ export function AmuxCardListPanel({
           </div>
         </>
       ) : view === "hierarchy" ? (
-        <div className="space-y-2" data-testid="amux-hierarchy-list">
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">
-            {messages.hierarchyScope(rows.length, total)}
-          </p>
-          <ol className="space-y-1">
-            {hierarchy.map((item) => <li key={`${item.kind}:${item.id}`}
-              className="rounded border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700"
-              style={{ marginInlineStart: `${item.depth * 1.25}rem` }}>
-              <span className="font-medium">
-                {item.kind === "unlinked" ? messages.hierarchyUnlinked :
-                  item.kind === "outside_page_story" ? messages.hierarchyOutsideStory(item.id) :
-                    item.label}
-              </span>
-              {item.status ? <span className="ms-2 text-zinc-600 dark:text-zinc-400">
-                {item.status}
-              </span> : null}
-            </li>)}
-          </ol>
-        </div>
+        <AmuxCardHierarchyList rows={rows} nodes={hierarchyNodes} total={total} messages={messages} />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-zinc-800 dark:text-zinc-100">

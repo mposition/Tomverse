@@ -56,6 +56,12 @@ test("the card list reads identifiers and state only", async () => {
   assert.match(loader, /amuxHumanEscalation\.findMany\(/);
   assert.match(loader, /reasons\.push\(row\.reason\)/);
   assert.match(loader, /hasOwnerAttentionEscalation: amuxHasOwnerAttentionEscalation\(card\.status,/);
+  const ancestorSelects = [...loader.matchAll(/prisma\.amuxPortfolioNode\.findMany\(\{[\s\S]*?select:\s*\{([^}]*)\}/g)];
+  assert.equal(ancestorSelects.length, 3, "feature, epic, and initiative reads must all stay constrained");
+  for (const [, fields] of ancestorSelects) {
+    assert.deepEqual(fields.split(",").map((field) => field.trim()).filter(Boolean),
+      ["id: true", "level: true", "parentId: true", "state: true"]);
+  }
 });
 
 test("the panel states how many rows it shows out of how many", async () => {
@@ -63,6 +69,9 @@ test("the panel states how many rows it shows out of how many", async () => {
   assert.match(panel, /messages\.shown\(rows\.length, total, limit\)/);
   assert.match(panel, /projectAmuxAdminKanban\(rows\)/);
   assert.match(panel, /data-testid="amux-kanban-board"/);
+  assert.match(panel, /onClick=\{\(\) => setView\("hierarchy"\)\}/);
+  assert.match(panel, /view === "hierarchy" \? \(/);
+  assert.match(panel, /<AmuxCardHierarchyList rows=\{rows\} nodes=\{hierarchyNodes\}/);
   assert.match(panel, /messages\.nextPage\(limit\)/);
   assert.doesNotMatch(panel, /adminFetch|fetch\(/);
 });

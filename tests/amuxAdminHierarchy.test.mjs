@@ -39,7 +39,7 @@ test("AMUX outline labels an off-page Story without inventing a card", () => {
   assert.deepEqual(items.filter((item) => item.kind === "card").map((item) => item.depth), [4, 4]);
 });
 
-test("missing or cross-feature ancestors keep every card in the unlinked group", () => {
+test("missing feature and cross-feature Story links stay visible without relocating valid cards", () => {
   const items = projectAmuxAdminHierarchy([
     row("missing-feature", "story", "not-found"),
     row("wrong-story", "task", "f1", "other-feature-story"),
