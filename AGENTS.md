@@ -1715,7 +1715,7 @@ Non-negotiable requirements:
    - `2` unknown: **다시 보내지 않습니다.** `report <jobId>`의 원문과 함께 사람에게 알립니다.
      결과를 모르는 것을 다른 reviewer로 몰래 다시 보내면 부하가 한쪽으로 쏠립니다.
    - `64`·`65`: 요청이나 서버의 오류입니다. 오류 출력을 그대로 사람에게 알립니다.
-     `REVIEW_ORCH_HOST`가 없다는 오류도 여기에 속합니다.
+     SSH 접속 오류(`Permission denied`, `Could not resolve hostname`)도 여기에 속합니다.
 
 검토 결과는 **신호이지 승인이 아닙니다.** accept가 병합이나 배포 승인을 대신하지
 않고, 정책 문서가 기록을 요구하는 별도 교차 검토 절차가 있으면 그 절차를 따릅니다.

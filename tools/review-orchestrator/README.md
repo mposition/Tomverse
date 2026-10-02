@@ -29,7 +29,9 @@
 ## Windows에서 쓰기
 
 **로컬 PC, 저장소 clone 폴더 안(PowerShell 또는 각 앱의 shell).** SSH key로
-서버에 접속할 수 있어야 하고, 이 창에서 `REVIEW_ORCH_HOST`가 설정돼 있어야 합니다.
+서버에 접속할 수 있어야 합니다. 접속 대상은 기본으로 아래의 SSH 별칭 `review-orch`이고,
+다른 대상을 쓸 때만 `REVIEW_ORCH_HOST`를 설정합니다(환경변수가 필요 없으므로 앱을 다시
+시작할 일도 없습니다).
 자격증명은 SSH key뿐이며 production 자격증명은 필요 없습니다. 읽기 전용입니다:
 로컬 저장소에는 임시 ref 하나를 만들었다 바로 지웁니다.
 
@@ -57,7 +59,6 @@ Host review-orch
   있습니다. `npm run -s`는 "Missing script" 오류도 숨기므로 `$LASTEXITCODE`를 봅니다.
 
 ```powershell
-$env:REVIEW_ORCH_HOST = "review-orch"   # 이 창을 닫으면 사라집니다
 npm run -s review -- submit --author codex --scope "무엇을 왜 바꿨는지 한두 줄"
 npm run -s review -- wait r-20261002-061500-a1b2c3
 ```

@@ -11,7 +11,9 @@
  *   node tools/review-orchestrator/client/review.mjs report <jobId> [--slot 0]
  *
  * Environment:
- *   REVIEW_ORCH_HOST     SSH destination (user@host or a ~/.ssh/config alias). Required.
+ *   REVIEW_ORCH_HOST     SSH destination (user@host or a ~/.ssh/config alias),
+ *                        default "review-orch" -- the alias the README sets up, so
+ *                        an app needs no environment variable (and no restart).
  *   REVIEW_ORCH_REMOTE   remote command, default "review-orchestrator"
  *   REVIEW_ORCH_BASE     default base ref, default "origin/develop"
  *
@@ -25,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 
 const USAGE = 64;
+export const DEFAULT_HOST = "review-orch";
 
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -86,8 +89,7 @@ function transport(token, stdinPath) {
     command = process.execPath;
     args = [local, "rpc", token];
   } else {
-    const host = process.env.REVIEW_ORCH_HOST;
-    if (!host) throw new Error("REVIEW_ORCH_HOST is not set");
+    const host = process.env.REVIEW_ORCH_HOST || DEFAULT_HOST;
     command = process.env.REVIEW_ORCH_SSH || "ssh";
     args = ["-o", "BatchMode=yes", host, process.env.REVIEW_ORCH_REMOTE || "review-orchestrator", "rpc", token];
   }
