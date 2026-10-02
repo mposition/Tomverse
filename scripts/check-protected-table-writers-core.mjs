@@ -878,6 +878,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The initial source-plan migration adds one restrictive foreign key from creationAuditLogId to the existing audit row. Its write verbs create and constrain AmuxIdeaSourcePlanRevision and AmuxIdeaAnalysisChunk only; it never writes AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261003120000_amux_v4_analysis_price_versions/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 14,
+    reason:
+      "The analysis price-version migration adds two restrictive foreign keys to existing approval and revocation audit rows. Its write verbs create and constrain AmuxIdeaAnalysisPriceVersion and add a provenance column to AmuxIdeaAnalysisBudgetHold; it neither writes nor seeds AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

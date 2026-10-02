@@ -8,11 +8,15 @@ const migration = new URL(
 const totalMigration = new URL(
   "../prisma/migrations/20261003110000_amux_v4_analysis_budget_total_check/migration.sql",
   import.meta.url);
+const priceMigration = new URL(
+  "../prisma/migrations/20261003120000_amux_v4_analysis_price_versions/migration.sql",
+  import.meta.url);
 const schema = new URL("../prisma/schema.prisma", import.meta.url);
 
 test("AMUX v4 analysis budget schema is additive, dark and agent-only", async () => {
-  const [sql, totalSql, prisma] = await Promise.all([
+  const [sql, totalSql, priceSql, prisma] = await Promise.all([
     readFile(migration, "utf8"), readFile(totalMigration, "utf8"),
+    readFile(priceMigration, "utf8"),
     readFile(schema, "utf8"),
   ]);
   assert.match(sql, /CREATE TABLE "AmuxIdeaAnalysisBudgetWindow"/);
@@ -30,5 +34,13 @@ test("AMUX v4 analysis budget schema is additive, dark and agent-only", async ()
   assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\s+(?:INTO\s+|FROM\s+)?"?(?:Credit|Chat|Memory)/i);
   assert.match(prisma, /model AmuxIdeaAnalysisBudgetWindow \{/);
   assert.match(prisma, /model AmuxIdeaAnalysisBudgetHold \{/);
+  assert.match(priceSql, /CREATE TABLE "AmuxIdeaAnalysisPriceVersion"/);
+  assert.match(priceSql, /"AmuxIdeaAnalysisPriceVersion_one_active_key"/);
+  assert.match(priceSql, /BEFORE INSERT OR UPDATE OR DELETE ON "AmuxIdeaAnalysisPriceVersion"/);
+  assert.match(priceSql, /"AmuxIdeaAnalysisBudgetHold_priceVersion_fkey"/);
+  assert.match(priceSql, /"AmuxIdeaAnalysisBudgetHold_new_price_required_check"[\s\S]*?NOT VALID/);
+  assert.doesNotMatch(priceSql, /\bINSERT\s+INTO\s+"AmuxIdeaAnalysisPriceVersion"/i);
+  assert.match(prisma, /model AmuxIdeaAnalysisPriceVersion \{/);
+  assert.match(prisma, /priceVersionId\s+String\?/);
   assert.match(prisma, /previewId\s+String\s+@unique/);
 });

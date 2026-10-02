@@ -11,22 +11,15 @@ import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
   AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
-  AMUX_V4_ANALYSIS_NAMESPACE,
-  type AmuxIdeaAnalysisBudgetBasis } from "./ideaAnalysisBudgetCore.ts";
+  AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
 
-/** This transaction body is not a claim or a dispatch permission. It accepts
- * prices and cap evidence only from a future server-owned, versioned resolver;
- * no route, CLI runner or switch calls it. A dispatch must separately prove
- * that the confirmed encrypted selection, Frontier approval, price source,
- * token caps and global halt state are still current. */
+/** This transaction body is not a claim or a dispatch permission. It reads
+ * owner-approved price evidence from the app DB; no route, CLI runner or
+ * switch calls it. A dispatch must separately prove that the selected
+ * Frontier approval, runner capability, token caps and halt state are current. */
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = false;
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
-
-export type AmuxIdeaAnalysisReservationPricing = Pick<AmuxIdeaAnalysisBudgetBasis,
-  "mode" | "provider" | "modelId" | "pricingVersion" |
-  "pricingVerifiedAt" | "pricingExpiresAt" | "worstTierVerified" |
-  "tokenCapsEnforceable" | "billableToolsDisabled" | "inputTokensCap" |
-  "outputTokensCap" | "inputMicroUsdPerMillion" | "outputMicroUsdPerMillion">;
 
 export class AmuxIdeaAnalysisReservationError extends Error {
   constructor(readonly code: "not_ready" | "budget_unavailable" |
@@ -45,13 +38,15 @@ function refuse(code: AmuxIdeaAnalysisReservationError["code"], reason?: string)
 export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   holdId: string;
   previewId: string;
-  /** Never sourced from the Agent request. The future caller must load the
-   * approved price and runner-capability snapshots inside this transaction. */
-  pricing: AmuxIdeaAnalysisReservationPricing;
+  priceVersionId: string;
+  /** The future caller must derive both facts from a measured, isolated runner
+   * profile; these booleans are not accepted from an Agent HTTP request. */
+  runner: { tokenCapsEnforceable: boolean; billableToolsDisabled: boolean };
   keys: AmuxContentKeys;
 }): Promise<{ holdId: string; previewId: string; reservedMicroUsd: string;
   auditId: string }> {
-  if (!ID.test(input.holdId) || !ID.test(input.previewId)) refuse("not_ready");
+  if (!ID.test(input.holdId) || !ID.test(input.previewId) ||
+      !ID.test(input.priceVersionId)) refuse("not_ready");
   await tx.$queryRaw`
     SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
@@ -115,7 +110,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       !preview.payloadCiphertext || !preview.payloadKeyId ||
       !preview.payloadKeyVersion || preview.payloadPurgedAt !== null ||
       !preview.confirmExpiresAt || persistedNow >= preview.confirmExpiresAt ||
-      persistedNow >= preview.expiresAt || preview.modelId !== input.pricing.modelId) {
+      persistedNow >= preview.expiresAt) {
     refuse("not_ready");
   }
   const plan = await tx.amuxIdeaSourcePlanRevision.findUnique({
@@ -164,6 +159,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     refuse("integrity_unavailable");
   }
   let raw: Buffer;
+  let confirmedProvider: unknown;
+  let confirmedModelId: unknown;
   try {
     raw = openAmuxContent({ ciphertext: Buffer.from(preview.payloadCiphertext),
       keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
@@ -188,8 +185,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       refuse("integrity_unavailable");
     }
     const choice = selection as Record<string, unknown>;
-    if (choice.provider !== input.pricing.provider ||
-        choice.modelId !== input.pricing.modelId ||
+    if (typeof choice.provider !== "string" ||
         choice.modelId !== preview.modelId ||
         choice.approvalId !==
           (preparedMetadata as Record<string, unknown>).modelApprovalId ||
@@ -197,9 +193,17 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
           (preparedMetadata as Record<string, unknown>).modelApprovalVersion) {
       refuse("integrity_unavailable");
     }
+    confirmedProvider = choice.provider;
+    confirmedModelId = choice.modelId;
   } catch {
     refuse("integrity_unavailable");
   } finally { raw.fill(0); }
+  const priceRead = await readApprovedAmuxIdeaAnalysisPriceVersion(tx, {
+    priceVersionId: input.priceVersionId,
+    provider: confirmedProvider, modelId: confirmedModelId, now,
+  });
+  if (priceRead.decision !== "ready") refuse("budget_hold", priceRead.reason);
+  const pricing = priceRead.price;
   if (await tx.amuxIdeaAnalysisBudgetHold.findUnique({
     where: { previewId: preview.id }, select: { id: true },
   })) refuse("already_reserved");
@@ -222,7 +226,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     select: { id: true },
   });
   const decision = assessAmuxIdeaAnalysisBudget({
-    ...input.pricing,
+    ...pricing,
+    ...input.runner,
     namespace: AMUX_V4_ANALYSIS_NAMESPACE,
     asOfIso: now.toISOString(),
     windowStartsAtIso: monthStart.toISOString(),
@@ -241,6 +246,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     metadata: { previewId: preview.id, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
       monthStart: monthStart.toISOString(), provider: decision.provider,
       modelId: decision.modelId, pricingVersion: decision.pricingVersion,
+      priceVersionId: input.priceVersionId,
       reservedMicroUsd: decision.worstCaseMicroUsd,
       amountMeaning: decision.amountMeaning, modelCallStarted: false },
   });
@@ -256,10 +262,11 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
     mode: decision.mode, provider: decision.provider, modelId: decision.modelId,
     pricingVersion: decision.pricingVersion,
-    inputTokensCap: input.pricing.inputTokensCap,
-    outputTokensCap: input.pricing.outputTokensCap,
-    inputMicroUsdPerMillion: input.pricing.inputMicroUsdPerMillion,
-    outputMicroUsdPerMillion: input.pricing.outputMicroUsdPerMillion,
+    priceVersionId: input.priceVersionId,
+    inputTokensCap: pricing.inputTokensCap,
+    outputTokensCap: pricing.outputTokensCap,
+    inputMicroUsdPerMillion: pricing.inputMicroUsdPerMillion,
+    outputMicroUsdPerMillion: pricing.outputMicroUsdPerMillion,
     reservedMicroUsd: reserve, status: "reserved",
   } });
   return { holdId: input.holdId, previewId: preview.id,
