@@ -1,0 +1,16 @@
+[Unit]
+Description=Independent review orchestrator
+After=network-online.target
+
+[Service]
+Type=simple
+User=review
+Environment=REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json
+ExecStart=/usr/bin/env node /opt/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs daemon
+# An unknown outcome is not retried: a restart closes in-flight reviews as unknown.
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
