@@ -328,8 +328,9 @@ export const EXCLUDED_PREFIXES = [
   },
   {
     prefix: "vendor/amux/",
+    extension: ".sql",
     reason:
-      "Independent Rust/SQLite AMUX workspace. Its SQL cannot use the Tomverse Prisma client or product database credentials; product SQL paths remain scanned.",
+      "The independent AMUX workspace uses local SQLite. Only its SQL is excluded; JS/TS files remain scanned for product database writes.",
   },
   {
     path: "scripts/check-protected-table-writers-core.mjs",
@@ -970,7 +971,7 @@ const isDatabaseDriverModule = (specifier) =>
 
 export const isExcluded = (path) =>
   EXCLUDED_PREFIXES.some((entry) =>
-    entry.path ? path === entry.path : path.startsWith(entry.prefix)
+    entry.path ? path === entry.path : path.startsWith(entry.prefix) && (!entry.extension || path.endsWith(entry.extension))
   );
 
 /** The repository paths this check reads, from a list of candidate paths. */

@@ -397,8 +397,13 @@ test("excluded trees are not scanned, and the self-exclusion is exact", () => {
     []
   );
   assert.deepEqual(
-    one("vendor/amux/crates/amux-server/migrations/example.sql", 'EXECUTE statement'),
+    one("vendor/amux/crates/amux-server/migrations/0001_baseline.sql", 'EXECUTE statement'),
     []
+  );
+  assertOneFinding(
+    "vendor/amux/scripts/product-db.mjs",
+    "await prisma.adminAuditLog.create({ data })",
+    "delegate-write"
   );
   assertOneFinding(
     "vendor/other/query.sql",
