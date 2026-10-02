@@ -19,6 +19,7 @@ import {
   OBSERVATION_SILENCE_HOURS,
   P1_WINDOW_SLOTS,
   P2_WINDOW_SLOTS,
+  displayableObservationSlot,
   observationLabel,
   observationSilenceVerdict,
   observationSlotSeries,
@@ -71,7 +72,11 @@ export type ProductResearchConsoleView = {
   /** When the app side was first seen switched on, or null. */
   enabledSince: string | null;
   slots: ProductResearchSlotView[];
-  /** The newest successful slot's rows, or an empty list when there is none. */
+  /**
+   * The rows of the slot that just passed, and only when it succeeded.
+   * `null` when it failed, has no row, or when none was ever recorded --
+   * `latestOmitted` says which.
+   */
   latest: {
     slot: string;
     developSha: string;
@@ -81,6 +86,8 @@ export type ProductResearchConsoleView = {
     counts: unknown;
     blindSpots: unknown;
   } | null;
+  /** Why `latest` is null: never recorded, or the current slot did not succeed. */
+  latestOmitted: "none" | "never_recorded" | "current_slot_not_recorded";
   windows: {
     p1: ReturnType<typeof p1WindowJudgement>;
     p2: ReturnType<typeof p2WindowJudgement>;
@@ -158,7 +165,22 @@ export async function readProductResearchConsole(
       };
     });
 
+  // Two different questions, and they must not share an answer.
+  //
+  // The silence check asks when this agent last worked, so it looks back for
+  // the newest success however old. The screen's "newest recorded slot" asks
+  // what the current state of the backlog is, and only the slot that just
+  // passed can answer that: showing yesterday's rows under today's failed or
+  // missing slot would put an earlier success's content on a screen reporting
+  // no update, which the policy forbids
+  // (docs/policy/product-research-agent.md §2, condition 8). Yesterday's
+  // observation is not wrong, but it is not the answer to the question the
+  // heading asks.
   const newestSuccess = rows.find((row) => row.outcome === "ok") ?? null;
+  const displayable = displayableObservationSlot(series, {
+    everRecorded: newestSuccess !== null,
+  });
+
   // Reads the anchor, and writes it the first time the switch is seen on.
   const enabledSince = enabled ? await readProductResearchEnabledSince(now) : null;
 
@@ -166,10 +188,10 @@ export async function readProductResearchConsole(
   // is the only large column, and loading thirty of them to show one would put
   // thirty observations into the HTML.
   const latestRow =
-    newestSuccess === null
+    displayable.slot === null
       ? null
       : await prisma.productResearchObservation.findUnique({
-          where: { slot: newestSuccess.slot },
+          where: { slot: new Date(displayable.slot) },
           select: {
             slot: true,
             developSha: true,
@@ -221,6 +243,7 @@ export async function readProductResearchConsole(
             counts: payload.counts,
             blindSpots: payload.blindSpots,
           },
+    latestOmitted: displayable.omitted,
     windows: {
       p1: p1WindowJudgement(series, { windowSlots: P1_WINDOW_SLOTS }),
       p2: p2WindowJudgement(series, { windowSlots: P2_WINDOW_SLOTS }),

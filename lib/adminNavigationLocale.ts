@@ -209,8 +209,21 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "engineering-agent": {
     label: "엔지니어링 에이전트",
-    description: "결정을 기다리는 T2 초안, run, 에이전트가 연 pull request, 모드",
-    aliases: ["엔지니어링", "에이전트", "T2 초안", "패치", "풀 리퀘스트", "게시 서비스", "러너", "동결"],
+    description: "에이전트의 기록 — 엔지니어링 T2 초안과 run, 제품·리서치 관측 회차",
+    aliases: [
+      "엔지니어링",
+      "에이전트",
+      "T2 초안",
+      "패치",
+      "풀 리퀘스트",
+      "게시 서비스",
+      "러너",
+      "동결",
+      "제품 리서치",
+      "관측",
+      "이슈 백로그",
+      "회차",
+    ],
     tabs: {
       queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
       runs: { label: "Run", description: "각 run과 시작 모드, 종료 결과, 정지 여부" },
@@ -219,6 +232,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
         description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
       },
       settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
+      "product-research": {
+        label: "제품·리서치",
+        description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값",
+      },
     },
   },
   "email-campaigns": {

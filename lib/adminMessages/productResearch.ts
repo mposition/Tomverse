@@ -35,6 +35,8 @@ export const adminProductResearchMessages = defineAdminMessages({
     submittedColumn: "Submitted",
     latestHeading: "The newest recorded slot",
     latestEmpty: "No slot has been recorded, so there is nothing to show.",
+    latestNotCurrent:
+      "The slot that just passed has no recorded observation, so there is nothing to show here. An earlier slot's rows would not answer what the backlog looks like now; the table above says which slots were recorded.",
     issueColumn: "Issue",
     titleColumn: "Title",
     verdictColumn: "Source verdict",
@@ -74,6 +76,8 @@ export const adminProductResearchMessages = defineAdminMessages({
     submittedColumn: "제출 시각",
     latestHeading: "가장 최근 기록 회차",
     latestEmpty: "기록된 회차가 없어 보여 줄 내용이 없습니다.",
+    latestNotCurrent:
+      "직전 예정 회차에 기록된 관측이 없어 여기에 보여 줄 내용이 없습니다. 이전 회차의 행은 지금의 backlog 상태에 대한 답이 아니며, 어떤 회차가 기록됐는지는 위 표에 있습니다.",
     issueColumn: "이슈",
     titleColumn: "제목",
     verdictColumn: "원천 판정",
