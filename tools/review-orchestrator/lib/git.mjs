@@ -43,7 +43,7 @@ export function ensureMirror(repo) {
  * client said: the bundle's prerequisites exist here, its head is `head`, and
  * `base` is an ancestor of it.
  */
-export function importBundle({ mirror, bundlePath, bundleRef, jobId, base, head }) {
+export function importBundle({ mirror, bundlePath, bundleRef, jobId, base, head, trustedBaseRefs, maxChangeBytes }) {
   if (!SHA.test(base) || !SHA.test(head)) throw new GitError("sha_invalid", "", { clientFault: true });
   if (!BUNDLE_REF.test(bundleRef ?? "")) throw new GitError("bundle_ref_invalid", "", { clientFault: true });
   const verify = git(["bundle", "verify", bundlePath], { cwd: mirror, allowFailure: true });
@@ -61,12 +61,43 @@ export function importBundle({ mirror, bundlePath, bundleRef, jobId, base, head 
     git(["update-ref", "-d", ref], { cwd: mirror, allowFailure: true });
     throw new GitError("head_mismatch", `bundle head ${actual} is not ${head}`, { clientFault: true });
   }
-  const ancestor = git(["merge-base", "--is-ancestor", base, head], { cwd: mirror, allowFailure: true });
-  if (!ancestor.ok) {
+  const refuse = (code, detail) => {
     git(["update-ref", "-d", ref], { cwd: mirror, allowFailure: true });
-    throw new GitError("base_not_ancestor", "", { clientFault: true });
+    throw new GitError(code, detail, { clientFault: true });
+  };
+  const ancestor = git(["merge-base", "--is-ancestor", base, head], { cwd: mirror, allowFailure: true });
+  if (!ancestor.ok) refuse("base_not_ancestor");
+  // The reviewer's instruction files come from the base, so the base must be
+  // history a person merged, not a commit the submitter pushed anywhere.
+  const trusted = trustedBaseRefs.some(
+    (trustedRef) =>
+      git(["rev-parse", "--verify", "--quiet", trustedRef], { cwd: mirror, allowFailure: true }).ok &&
+      git(["merge-base", "--is-ancestor", base, trustedRef], { cwd: mirror, allowFailure: true }).ok,
+  );
+  if (!trusted) {
+    refuse("base_not_trusted", `the base must be in the history of ${trustedBaseRefs.join(" or ")}`);
   }
+  const size = introducedBytes(mirror, base, head);
+  if (size > maxChangeBytes) refuse("change_too_large", `${size} bytes of new objects, limit ${maxChangeBytes}`);
   return ref;
+}
+
+/** Uncompressed size of every object `head` adds over `base`. */
+export function introducedBytes(mirror, base, head) {
+  const objects = git(["rev-list", "--objects", "--no-object-names", `${base}..${head}`], { cwd: mirror }).stdout;
+  if (objects.trim() === "") return 0;
+  const result = spawnSync("git", ["cat-file", "--batch-check=%(objectsize)"], {
+    cwd: mirror,
+    input: objects,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) throw new GitError("git_failed", "cat-file --batch-check");
+  return result.stdout.split("\n").filter(Boolean).reduce((sum, line) => sum + Number(line), 0);
+}
+
+export function deleteReviewRef(mirror, jobId) {
+  git(["update-ref", "-d", `refs/review/${jobId}`], { cwd: mirror, allowFailure: true });
 }
 
 export function changedFiles(mirror, base, head) {
