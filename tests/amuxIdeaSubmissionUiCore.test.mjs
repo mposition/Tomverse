@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import ts from "typescript";
+import { adminAmuxIdeaInputMessages } from "../lib/adminMessages/amuxIdeaInput.ts";
 
 import {
   canCreateIdeaFromState,
@@ -17,6 +18,15 @@ import {
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestId = "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0";
+
+test("recent idea labels show the fixed analysis deadline in both Admin languages", () => {
+  assert.equal(adminAmuxIdeaInputMessages.en.recentIdeaLabel("idea-1", "Oct 1", "Oct 8"),
+    "Oct 1 · idea-1 · Analysis deadline: Oct 8");
+  assert.equal(adminAmuxIdeaInputMessages.ko.recentIdeaLabel("idea-1", "10월 1일", "10월 8일"),
+    "10월 1일 · idea-1 · 분석 기한: 10월 8일");
+  const panel = readFileSync(path.join(root, "components/admin/AmuxIdeaInputPanel.tsx"), "utf8");
+  assert.match(panel, /recentIdeaLabel\(row\.ideaId,[\s\S]*?row\.analysisDeadlineAt/);
+});
 
 test("a failed recent-idea read-back requires retry or explicit reset before a new write", () => {
   for (const state of ["idle", "refused"]) {

@@ -575,7 +575,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               {recentIdeas.map((row) => (
                 <li key={row.requestId} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <span className="break-all text-zinc-700 dark:text-zinc-300">
-                    {messages.recentIdeaLabel(row.ideaId, new Date(row.submittedAt).toLocaleString(locale))}
+                    {messages.recentIdeaLabel(row.ideaId,
+                      new Date(row.submittedAt).toLocaleString(locale),
+                      new Date(row.analysisDeadlineAt).toLocaleString(locale))}
                   </span>
                   <button type="button" onClick={() => selectRecentIdea(row.requestId)}
                     disabled={!recoveryChecked || !canSelectRecentIdea(submission.kind,

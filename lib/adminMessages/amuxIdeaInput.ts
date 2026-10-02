@@ -33,7 +33,8 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     recentIdeasError: "Recent ideas could not be checked. No new idea was saved.",
     recentIdeasUnsaved: "Clear the unsaved input above before opening a saved idea.",
     recentIdeasEmpty: "No active ideas found.",
-    recentIdeaLabel: (ideaId: string, submittedAt: string) => `${submittedAt} · ${ideaId}`,
+    recentIdeaLabel: (ideaId: string, submittedAt: string, expiresAt: string) =>
+      `${submittedAt} · ${ideaId} · Analysis deadline: ${expiresAt}`,
     recentIdeaOpen: "Continue this idea",
     recentIdeaChecking: "Verifying this saved idea…",
     recentIdeaUnavailable: "This saved idea could not be verified. No new save was attempted. Retry the check or choose another idea.",
@@ -176,7 +177,8 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     recentIdeasError: "최근 아이디어를 확인하지 못했습니다. 새 아이디어는 저장되지 않았습니다.",
     recentIdeasUnsaved: "저장한 아이디어를 열기 전에 위의 미저장 입력을 비워 주세요.",
     recentIdeasEmpty: "진행 가능한 아이디어가 없습니다.",
-    recentIdeaLabel: (ideaId: string, submittedAt: string) => `${submittedAt} · ${ideaId}`,
+    recentIdeaLabel: (ideaId: string, submittedAt: string, expiresAt: string) =>
+      `${submittedAt} · ${ideaId} · 분석 기한: ${expiresAt}`,
     recentIdeaOpen: "이 아이디어 이어가기",
     recentIdeaChecking: "저장된 아이디어를 확인 중…",
     recentIdeaUnavailable: "저장된 아이디어를 확인하지 못했습니다. 새로 저장하지 않았습니다. 다시 확인하거나 다른 아이디어를 선택하세요.",
