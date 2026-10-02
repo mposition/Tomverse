@@ -6,9 +6,21 @@ export const AMUX_ADMIN_KANBAN_LANES = [
 
 export type AmuxAdminKanbanLane = typeof AMUX_ADMIN_KANBAN_LANES[number];
 
+/** Legacy AMUX claim evidence. v22 needs its own assignment receipt before
+ * it can use the assigned lane; a free-form owner string is never enough. */
+export function amuxLegacyTodoClaimVerified(card: {
+  status: string; owner: string | null; claimedAt: Date | null; revision: number;
+}, route: { worker: string; taskRevision: number } | null): boolean {
+  return card.status === "todo" && card.owner !== null &&
+    card.claimedAt instanceof Date && Number.isFinite(card.claimedAt.getTime()) &&
+    Number.isSafeInteger(card.revision) && card.revision > 0 &&
+    route?.worker === card.owner && route.taskRevision === card.revision - 1;
+}
+
 type CardState = {
   status: string;
   owner: string | null;
+  claimVerified: boolean;
   requiresHumanReview: boolean;
 };
 
@@ -18,7 +30,10 @@ export function amuxAdminKanbanLane(row: CardState): AmuxAdminKanbanLane | null 
   if (row.status === "done" || row.status === "cancelled") return null;
   if (row.status === "blocked" || row.requiresHumanReview) return "owner_attention";
   if (row.status === "backlog") return "tomverse_backlog";
-  if (row.status === "todo") return row.owner === null ? "amux_backlog" : "todo";
+  if (row.status === "todo") {
+    if (row.owner === null && !row.claimVerified) return "amux_backlog";
+    return row.owner !== null && row.claimVerified ? "todo" : "owner_attention";
+  }
   if (row.status === "doing") return "in_progress";
   if (row.status === "review") return "in_review";
   return "owner_attention";

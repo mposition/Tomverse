@@ -39,6 +39,7 @@ test("the card list reads identifiers and state only", async () => {
     assert.equal(select.includes(forbidden), false, forbidden);
   }
   assert.match(select, /executionBriefDigest: true/);
+  assert.match(select, /claimedAt: true/);
   assert.match(loader, /take: AMUX_ADMIN_CARD_LIST_LIMIT \+ 1/);
   assert.match(loader, /updatedAt: \{ lt: cursor\.updatedAt \}/);
   assert.match(loader, /id: \{ lt: cursor\.id \}/);
@@ -50,6 +51,8 @@ test("the card list reads identifiers and state only", async () => {
   // The pg adapter sends parameters untyped; an uncast array is refused.
   assert.match(loader, /ANY\(\$\{ids\}::text\[\]\)/);
   assert.match(loader, /groupBy\(\{\s*by: \["taskId"\]/);
+  assert.match(loader, /FROM "AmuxRouteDecision"/);
+  assert.match(loader, /claimVerified: amuxLegacyTodoClaimVerified\(card, routeByTask\.get\(card\.id\) \?\? null\)/);
 });
 
 test("the panel states how many rows it shows out of how many", async () => {

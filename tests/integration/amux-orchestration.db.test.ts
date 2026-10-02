@@ -5067,6 +5067,56 @@ test("the admin card list reads attempt counts and the latest attempt in set que
   }
 });
 
+test("the admin board requires matching claim evidence before showing assigned Todo", async () => {
+  const { listAmuxCardsForAdmin } = await import("@/lib/amux/adminCardList");
+  const taskId = await createTodo("amux-admin-claim-evidence");
+  const worker = `amux-claim-evidence-${randomUUID()}`;
+  try {
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { owner: worker },
+    });
+    const ownerOnly = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(ownerOnly);
+    assert.equal(ownerOnly.claimVerified, false);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.amuxWorkItem.update({
+        where: { id: taskId },
+        data: { claimedAt: new Date(), revision: 1 },
+      });
+      await tx.amuxRouteDecision.create({
+        data: {
+          taskId,
+          worker,
+          schedulerScore: 1,
+          scoringVersion: "synthetic-admin-claim-test",
+          taskRevision: 0,
+          signals: {},
+        },
+      });
+    });
+    const claimed = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(claimed);
+    assert.equal(claimed.claimVerified, true);
+
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { revision: 2 },
+    });
+    const stale = (await listAmuxCardsForAdmin()).rows.find((row) => row.id === taskId);
+    assert.ok(stale);
+    assert.equal(stale.claimVerified, false);
+  } finally {
+    // Route decisions are append-only evidence; leave this synthetic card
+    // terminal rather than weakening the database invariant for cleanup.
+    await prisma.amuxWorkItem.update({
+      where: { id: taskId },
+      data: { status: "done", owner: null, claimedAt: null },
+    });
+  }
+});
+
 const runPromotedCardToSettle = async (
   label: string,
   settle: (input: {

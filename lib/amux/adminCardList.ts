@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { encodeAmuxAdminCardCursor,
   type AmuxAdminCardCursor } from "./adminCardCursorCore.ts";
+import { amuxLegacyTodoClaimVerified } from "./adminKanbanCore.ts";
 
 /**
  * Read-only card list for the owner console.
@@ -24,6 +25,7 @@ export type AmuxAdminCardRow = {
   sourceKey: string | null;
   status: string;
   owner: string | null;
+  claimVerified: boolean;
   kind: string;
   priority: string;
   revision: number;
@@ -60,6 +62,7 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
         sourceKey: true,
         status: true,
         owner: true,
+        claimedAt: true,
         kind: true,
         priority: true,
         revision: true,
@@ -75,10 +78,10 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
   const nextCursor = fetched.length > AMUX_ADMIN_CARD_LIST_LIMIT && last
     ? encodeAmuxAdminCardCursor({ updatedAt: last.updatedAt, id: last.id }) : null;
   const ids = cards.map((card) => card.id);
-  // Two set queries for the whole page, not one per card: a nested `take` on
+  // Set queries for the whole page, not one per card: a nested `take` on
   // a to-many relation is loaded per parent row.
-  const [counts, latest] = ids.length === 0
-    ? [[], []]
+  const [counts, latest, routes] = ids.length === 0
+    ? [[], [], []]
     : await Promise.all([
         prisma.amuxExecutionAttempt.groupBy({
           by: ["taskId"],
@@ -92,9 +95,16 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
           WHERE "taskId" = ANY(${ids}::text[])
           ORDER BY "taskId", "startedAt" DESC
         `,
+        prisma.$queryRaw<Array<{ taskId: string; worker: string; taskRevision: number }>>`
+          SELECT DISTINCT ON ("taskId") "taskId", "worker", "taskRevision"
+          FROM "AmuxRouteDecision"
+          WHERE "taskId" = ANY(${ids}::text[])
+          ORDER BY "taskId", "createdAt" DESC, "id" DESC
+        `,
       ]);
   const countByTask = new Map(counts.map((row) => [row.taskId, row._count._all]));
   const latestByTask = new Map(latest.map((row) => [row.taskId, row]));
+  const routeByTask = new Map(routes.map((row) => [row.taskId, row]));
   const rank = (status: string) => {
     const index = STATUS_ORDER.indexOf(status);
     return index === -1 ? STATUS_ORDER.length : index;
@@ -105,6 +115,7 @@ export async function listAmuxCardsForAdmin(cursor: AmuxAdminCardCursor | null =
       sourceKey: card.sourceKey,
       status: card.status,
       owner: card.owner,
+      claimVerified: amuxLegacyTodoClaimVerified(card, routeByTask.get(card.id) ?? null),
       kind: card.kind,
       priority: card.priority,
       revision: card.revision,

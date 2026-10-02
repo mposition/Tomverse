@@ -77,6 +77,8 @@ export function AmuxCardListPanel({
                       {row.sourceKey ? <p className="break-all font-mono text-zinc-500 dark:text-zinc-400">{row.id}</p> : null}
                       <p>{row.status} · {row.kind} · {row.priority}</p>
                       <p>{messages.columnOwner}: {row.owner ?? messages.none}</p>
+                      {row.status === "todo" && row.owner !== null && !row.claimVerified
+                        ? <p className="text-amber-700 dark:text-amber-300">{messages.assignmentUnverified}</p> : null}
                     </article>
                   ))}
                 </div>
@@ -108,7 +110,11 @@ export function AmuxCardListPanel({
                     <span className="block font-mono text-xs text-zinc-500 dark:text-zinc-400">{row.id}</span>
                   </td>
                   <td className={cellClass}>{row.status}</td>
-                  <td className={`${cellClass} font-mono text-xs`}>{row.owner ?? messages.none}</td>
+                  <td className={`${cellClass} font-mono text-xs`}>
+                    {row.owner ?? messages.none}
+                    {row.status === "todo" && row.owner !== null && !row.claimVerified
+                      ? <span className="block font-sans text-amber-700 dark:text-amber-300">{messages.assignmentUnverified}</span> : null}
+                  </td>
                   <td className={cellClass}>{row.priority}</td>
                   <td className={cellClass}>{row.kind}</td>
                   <td className={cellClass}>{row.briefPresent ? messages.briefPresent : messages.briefAbsent}</td>
