@@ -16,7 +16,7 @@ import {
  * The runner's own comments record how this goes wrong: the import and memory
  * suites "were written alongside their slices but never listed here, i.e.
  * never actually run by CI -- a guard nobody runs is not a guard." One job
- * gave that one way to happen, a file missing from one list. Seven lanes give
+ * gave that one way to happen, a file missing from one list. Several lanes give
  * it two, so this closes both -- and it did not exist before the split, which
  * is what makes the split safe rather than a second place to lose a suite.
  */
@@ -64,7 +64,7 @@ test("the runner names no suite that no longer exists", () => {
 test("every suite lands in exactly one lane", () => {
     // The failure the split introduces: a suite matching no rule, or a rule
     // ordering that sends one somewhere nobody looks. Total coverage is what
-    // makes seven jobs equal to the one they replaced.
+    // makes the lane jobs equal to the one they replaced.
     const byLane = new Map(DB_INTEGRATION_GROUPS.map((id) => [id, []]));
     for (const file of onDisk) {
         const lane = dbIntegrationGroupOf(file);
