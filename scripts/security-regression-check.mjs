@@ -3706,11 +3706,6 @@ const checks = [
       // drift underneath it goes unread.
       const source = raw.replace(/\r\n/g, "\n");
       const policy = read("scripts/auto-pr-branch-policy.mjs");
-      // The arming step's own block, so what is asserted about it does not
-      // depend on where it sits in the file.
-      const armStep = source
-        .split(/\r?\n {6}- name: /)
-        .find((block) => /^[^\r\n]*auto-merge/i.test(block));
       // The whole list, not a match inside it. A pattern that only asserted
       // the two entries were present would pass with `- "claude/**"` appended
       // underneath them, which is the opt-out rule restored one line at a
@@ -3733,27 +3728,16 @@ const checks = [
         listed[0] === "to-develop/**" &&
         listed[1] === "**/to-develop/**" &&
         source.includes('node scripts/auto-pr-branch-policy.mjs "$BRANCH"') &&
-        // The diff check and the step that creates the pull request. Two,
-        // not three: the arming step used to carry this same condition and
-        // now reads the create step's output instead, which is a stricter
-        // gate rather than a missing one -- `created` can only be `true` on
-        // a run where the create step ran, and that step is gated on the
-        // module. The chain is asserted rather than assumed, because an
-        // arming step that went back to consulting the glob directly would
-        // restore the count and lose the property.
+        // The diff check and the step that creates the pull request.
         (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 2 &&
-        // Armed once, by the run that opened the pull request. This step
-        // used to run on every push: it looked up whatever PR was open for
-        // the branch and called `gh pr merge --auto` on it, so auto-merge
-        // turned off by a person came back on at the next commit -- on
-        // 2026-09-05 #1256 merged into develop that way, under an
-        // instruction to hold it.
-        Boolean(armStep) &&
-        source.includes("if: steps.create-pr.outputs.created == 'true'") &&
-        // And it is handed the number rather than searching for one. A
-        // lookup here reaches an already-open pull request whatever the
-        // create step decided, which is the same defect by another route.
-        !armStep.includes("gh pr list") &&
+        // The workflow opens pull requests and never merges or arms them. It
+        // once re-armed auto-merge on every push (#1256 merged into develop
+        // that way on 2026-09-05, under an instruction to hold it), then armed
+        // it once at creation, and GitHub merged each green PR the moment its
+        // checks passed -- stacking Railway "Wait for CI" deployments. Merging
+        // belongs to the operator-run merge train (scripts/merge-train.mjs).
+        !/gh pr merge/.test(source) &&
+        !/--auto\b/.test(source) &&
         // The namespaces that open their own PRs are still refused, and still
         // refused ahead of the marker -- `feedback-autofix` records the number
         // of the PR its own workflow created, so a second one is not a
