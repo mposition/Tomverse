@@ -54,8 +54,10 @@ export function AmuxCardHierarchyList({ rows, nodes, total, messages }: {
       {linked.length > 0 ? <ol className="space-y-1">
         {linked.map((branch) => renderBranch(branch, messages))}
       </ol> : null}
-      {unlinked ? <section aria-label={messages.hierarchyUnlinked}>
-        <h4 className="mb-1 font-medium">{messages.hierarchyUnlinked}</h4>
+      {unlinked ? <section aria-labelledby="amux-hierarchy-unlinked-heading">
+        <h3 id="amux-hierarchy-unlinked-heading" className="mb-1 font-medium">
+          {messages.hierarchyUnlinked}
+        </h3>
         <ul className="space-y-1">
           {unlinked.children.map(({ item }) => <li key={item.id}
             className="rounded border border-zinc-200 px-2 py-1 text-sm dark:border-zinc-700">
