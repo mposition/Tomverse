@@ -6,6 +6,8 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_VERSION } from
   "../lib/promptRefinerQualityEvaluationVnextOneShotRoot.ts";
 import { verifyPromptRefinerVnextOneShotManifestRubrics as verify } from
   "../lib/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.ts";
+import { verifyPromptRefinerVnextOneShotManifestEnvelope as verifyEnvelope } from
+  "../lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts";
 
 // All strings are public synthetic development fixtures, not holdout data.
 const seedHex = "00".repeat(32);
@@ -180,4 +182,114 @@ test("changed restricted rubric cannot reuse the original root", () => {
   changed.cases[0].rubric.counterexample = "Another distinct synthetic counterexample.";
   assert.throws(() => verify(JSON.stringify(changed), original.rootDigest,
     preregistrationDigest), /manifest_root_mismatch/);
+});
+
+test("owner-held envelope closes shapes without claiming full validation", () => {
+  const { manifestText, rootDigest } = fixture();
+  const cases = JSON.parse(manifestText).cases;
+  const mixedKo = cases.find((item) => item.language === "ko" &&
+    item.eligibleChallengeTag === "mixed_language");
+  const mixedEn = cases.find((item) => item.language === "en" &&
+    item.eligibleChallengeTag === "mixed_language");
+  assert.equal(mixedKo.sourceText, mixedEn.sourceText);
+  assert.deepEqual(verifyEnvelope(manifestText, rootDigest, preregistrationDigest), {
+    caseCount: 80, manifestShapeClosed: true, caseShapeClosed: true,
+    duplicateSourceTextRejected: true, semanticTruthVerified: false,
+    independentAuthorshipVerified: false, privacyExclusionVerified: false,
+    fullManifestValidated: false, dispatchAuthorized: false,
+  });
+});
+
+test("extra manifest and case fields fail closed", () => {
+  const extraManifest = fixture((value) => ({ ...value, unexpected: "synthetic" }));
+  assert.throws(() => verifyEnvelope(extraManifest.manifestText,
+    extraManifest.rootDigest, preregistrationDigest), /manifest_envelope_shape_invalid/);
+  const extraCase = fixture((value) => {
+    value.cases[0].unexpected = "synthetic";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(extraCase.manifestText,
+    extraCase.rootDigest, preregistrationDigest), /manifest_case_shape_invalid/);
+});
+
+test("missing header and source fields fail in earlier structural layers", () => {
+  const missingSeed = fixture((value) => {
+    delete value.seedHex;
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(missingSeed.manifestText,
+    missingSeed.rootDigest, preregistrationDigest), /vnext_allocation:unexpected_or_missing_fields/);
+  const missingSource = fixture((value) => {
+    delete value.cases[4].sourceText;
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(missingSource.manifestText,
+    missingSource.rootDigest, preregistrationDigest), /manifest_source_invalid/);
+});
+
+test("duplicate and Unicode-equivalent source text fail closed", () => {
+  const duplicate = fixture((value) => {
+    value.cases[5].sourceText = value.cases[4].sourceText;
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(duplicate.manifestText,
+    duplicate.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const normalized = fixture((value) => {
+    value.cases[4].sourceText = "synthetic caf\u00e9 source";
+    value.cases[5].sourceText = "synthetic cafe\u0301 source";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(normalized.manifestText,
+    normalized.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const whitespace = fixture((value) => {
+    value.cases[4].sourceText = "synthetic ko source 5";
+    value.cases[5].sourceText = "synthetic  ko source 5";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(whitespace.manifestText,
+    whitespace.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const casing = fixture((value) => {
+    value.cases[4].sourceText = "Synthetic ko source 5";
+    value.cases[5].sourceText = "synthetic ko source 5";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(casing.manifestText,
+    casing.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const zeroWidth = fixture((value) => {
+    value.cases[4].sourceText = "synthetic ko source 5";
+    value.cases[5].sourceText = "synthetic ko source 5\u200b";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(zeroWidth.manifestText,
+    zeroWidth.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const compatibility = fixture((value) => {
+    value.cases[4].sourceText = "synthetic ko source 5";
+    value.cases[5].sourceText = "synthetic ko source \uff15";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(compatibility.manifestText,
+    compatibility.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const folding = fixture((value) => {
+    value.cases[4].sourceText = "synthetic stra\u00dfe source";
+    value.cases[5].sourceText = "SYNTHETIC STRASSE SOURCE";
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(folding.manifestText,
+    folding.rootDigest, preregistrationDigest), /manifest_duplicate_source/);
+  const untaggedAcrossLanguages = fixture((value) => {
+    value.cases[3].sourceText = value.cases[43].sourceText;
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(untaggedAcrossLanguages.manifestText,
+    untaggedAcrossLanguages.rootDigest, preregistrationDigest),
+  /manifest_duplicate_source/);
+  const mixedWithinLanguage = fixture((value) => {
+    value.cases[12].sourceText = value.cases[0].sourceText;
+    value.cases[12].challengeWitness.naturalLanguageSpan =
+      span(value.cases[12].sourceText, value.cases[12].sourceText);
+    return value;
+  });
+  assert.throws(() => verifyEnvelope(mixedWithinLanguage.manifestText,
+    mixedWithinLanguage.rootDigest, preregistrationDigest),
+  /manifest_duplicate_source/);
 });
