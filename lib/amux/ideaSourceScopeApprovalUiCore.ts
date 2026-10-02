@@ -12,6 +12,7 @@ type Reply = { status: number; body: unknown };
 export type ScopeApprovalDecision =
   | { kind: "approved"; expiresAt: string }
   | { kind: "expired" }
+  | { kind: "reauth_required" }
   | { kind: "refused"; code: string }
   | { kind: "outcome_unknown" };
 
@@ -37,6 +38,10 @@ export function classifySourceScopeApprovalReply(reply: Reply,
   }
   if (reply.status === 200 && sameBinding && body?.state === "expired") {
     return { kind: "expired" };
+  }
+  if (mode === "read" && reply.status === 428 &&
+      body?.error === "ADMIN_REAUTHENTICATION_REQUIRED") {
+    return { kind: "reauth_required" };
   }
   // A duplicate ID may already have committed. Never release its browser fence.
   if (body?.error === "approval_exists") return { kind: "outcome_unknown" };

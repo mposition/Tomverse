@@ -49,6 +49,9 @@ test("only an exact scope and idea binding can be displayed as approved", () => 
 test("an absent read-back never releases an ambiguous write", () => {
   assert.deepEqual(classifySourceScopeApprovalReply({ status: 404,
     body: { error: "not_found" } }, binding, "read"), { kind: "outcome_unknown" });
+  assert.deepEqual(classifySourceScopeApprovalReply({ status: 428,
+    body: { error: "ADMIN_REAUTHENTICATION_REQUIRED" } }, binding, "read"),
+  { kind: "reauth_required" });
   assert.deepEqual(classifySourceScopeApprovalReply({ status: 409,
     body: { error: "preview_changed" } }, binding, "write"),
   { kind: "refused", code: "preview_changed" });
@@ -102,6 +105,7 @@ test("Admin action is separately dark and reads back the same approval ID", () =
   assert.match(panel, /reserveSourceScopeApprovalAttempt\(receiptStore\(\), operatorId, binding\)/);
   assert.match(panel, /new URLSearchParams\(\{ approvalId: binding\.approvalId \}\)/);
   assert.match(panel, /classifySourceScopeApprovalReply/);
+  assert.match(panel, /state\.reauthRequired[\s\S]*adminRecentAuthenticationHref/);
   assert.match(proxy, /requiresMutationOriginCheck\(request\.method, request\.nextUrl\.pathname\)\s*&&\s*!hasValidMutationOrigin\(request\)/);
   const path = "/api/admin/amux/ideas/source-scope-approval";
   assert.equal(requiresMutationOriginCheck("POST", path), true);

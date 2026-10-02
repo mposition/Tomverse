@@ -23,7 +23,7 @@ type CheckedScope = {
 
 type State =
   | { kind: "idle" }
-  | { kind: "pending" | "outcome_unknown"; binding: ScopeApprovalBinding }
+  | { kind: "pending" | "outcome_unknown"; binding: ScopeApprovalBinding; reauthRequired?: boolean }
   | { kind: "approved"; binding: ScopeApprovalBinding; expiresAt: string }
   | { kind: "expired" | "refused"; code?: string }
   | { kind: "storage_unavailable" };
@@ -59,6 +59,8 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         } else {
           setState({ kind: "expired" });
         }
+      } else if (decision.kind === "reauth_required") {
+        setState({ kind: "outcome_unknown", binding, reauthRequired: true });
       } else {
         setState({ kind: "outcome_unknown", binding });
       }
@@ -148,6 +150,10 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         {messages.sourceScopeApprovalRefused(state.code ?? "approval_unavailable")}</p> : null}
       {state.kind === "outcome_unknown" ? <div role="alert" className="space-y-2 text-sm text-amber-800 dark:text-amber-200">
         <p>{messages.sourceScopeApprovalUnknown(state.binding.approvalId)}</p>
+        {state.reauthRequired ? (
+          <a href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}
+            className="block font-medium underline">{messages.stepUp}</a>
+        ) : null}
         <button type="button" onClick={() => void readBack(state.binding)}
           className="min-h-11 rounded-lg border border-amber-700 px-3 font-medium dark:border-amber-300">
           {messages.sourceScopeApprovalReadBack}
