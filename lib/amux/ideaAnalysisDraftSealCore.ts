@@ -1,0 +1,97 @@
+import { randomUUID } from "node:crypto";
+
+import { amuxCanonicalJson } from "./boardImportCore.ts";
+import {
+  inspectAmuxAnalysisChunk,
+  type AmuxAnalysisChunkInspection,
+  type AmuxPermittedTargetRef,
+} from "./ideaAnalysisChunkCore.ts";
+import { sealAmuxContent, type AmuxContentKeys, type SealedAmuxContent } from "./ideaCrypto.ts";
+
+type InspectionInput = {
+  raw: string;
+  expectedPreviewId: string;
+  expectedChunkIndex: number;
+  expectedRevisionChunkIndex: number;
+  previousContinuationKind: "input" | "output" | null;
+  permittedSourceRefIds: readonly string[];
+  permittedTargetRefs: readonly AmuxPermittedTargetRef[];
+};
+
+export type SealedAmuxDraftUnit = {
+  id: string;
+  unitIndex: number;
+  localRef: string;
+  unitKind: "node" | "card" | "evidence";
+  body: SealedAmuxContent;
+};
+
+export type SealedAmuxAnalysisDraft = {
+  chunkIndex: number;
+  previewId: string;
+  outcome: "propose" | "needs_information" | "reject";
+  coverageStatus: "complete" | "more" | "needs_owner_input";
+  continuationKind: "input" | "output" | null;
+  freeform: SealedAmuxContent;
+  units: SealedAmuxDraftUnit[];
+};
+
+/**
+ * Turn one bounded, untrusted model response into independently encrypted
+ * proposal bodies. This does not verify a source plan, cursor, lease, budget,
+ * approval or DB state and grants no write, transfer or execution permission.
+ * The future single writer must check those before persisting these envelopes.
+ * In particular it must never store the whole parsed chunk as one draft body:
+ * one unit's expiry must not retain another unit's content.
+ */
+export function sealAmuxAnalysisDraft(input: InspectionInput & {
+  ideaId: string;
+  keys: AmuxContentKeys;
+}):
+  | { ok: false; code: Extract<AmuxAnalysisChunkInspection, { ok: false }>["code"] | "idea_id_invalid" }
+  | { ok: true; draft: SealedAmuxAnalysisDraft } {
+  if (typeof input?.ideaId !== "string" ||
+      !/^[A-Za-z0-9:_-]{1,100}$/.test(input.ideaId)) {
+    return { ok: false, code: "idea_id_invalid" };
+  }
+  const inspected = inspectAmuxAnalysisChunk(input);
+  if (!inspected.ok) return { ok: false, code: inspected.code };
+
+  const { chunk } = inspected;
+  const freeformBytes = Buffer.from(amuxCanonicalJson({
+    schemaVersion: chunk.schemaVersion,
+    previewId: chunk.previewId,
+    chunkIndex: chunk.chunkIndex,
+    outcome: chunk.outcome,
+    coverageStatus: chunk.coverageStatus,
+    continuationKind: chunk.continuationKind,
+    ownerQuestion: chunk.ownerQuestion,
+    coveredScope: chunk.coveredScope,
+    remainingScope: chunk.remainingScope,
+  }), "utf8");
+  try {
+    const freeform = sealAmuxContent(freeformBytes, "analysis_freeform",
+      `${input.ideaId}:${chunk.chunkIndex}`, input.keys);
+    const units = chunk.units.map((unit, unitIndex): SealedAmuxDraftUnit => {
+      const id = randomUUID();
+      const bytes = Buffer.from(amuxCanonicalJson(unit), "utf8");
+      try {
+        return { id, unitIndex, localRef: unit.localId, unitKind: unit.kind,
+          body: sealAmuxContent(bytes, "analysis_draft", id, input.keys) };
+      } finally {
+        bytes.fill(0);
+      }
+    });
+    return { ok: true, draft: {
+      chunkIndex: chunk.chunkIndex,
+      previewId: chunk.previewId,
+      outcome: chunk.outcome,
+      coverageStatus: chunk.coverageStatus,
+      continuationKind: chunk.continuationKind,
+      freeform,
+      units,
+    } };
+  } finally {
+    freeformBytes.fill(0);
+  }
+}
