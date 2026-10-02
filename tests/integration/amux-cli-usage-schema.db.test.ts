@@ -173,3 +173,139 @@ test("DB preserves Claude partial totals without claiming a model breakdown", as
     throw new Error("synthetic rollback");
   }), /synthetic rollback/);
 });
+
+const fenceNamespace = 1095587160;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function withFenceSchema(run: (schema: string) => Promise<void>): Promise<void> {
+  // This is a dedicated loopback test DB. The random schema contains only two
+  // synthetic tables and is the exact target of the finally cleanup.
+  const schema = `amux_cli_fence_${randomUUID().replaceAll("-", "")}`;
+  await prisma.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+  try {
+    await prisma.$executeRawUnsafe(`CREATE TABLE "${schema}"."AmuxCliUsageAggregateFinalization"
+      ("year" INTEGER NOT NULL, "providerScopeKey" TEXT NOT NULL)`);
+    await prisma.$executeRawUnsafe(`CREATE TABLE "${schema}"."AmuxCliUsageInvocation"
+      ("recordedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT now())`);
+    await prisma.$executeRawUnsafe(`CREATE TRIGGER "AmuxCliUsageInvocation_set_recordedAt"
+      BEFORE INSERT ON "${schema}"."AmuxCliUsageInvocation" FOR EACH ROW
+      EXECUTE FUNCTION public.amux_cli_usage_set_recorded_at()`);
+    await run(schema);
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
+  }
+}
+
+async function waitForAdvisoryWait(year: number): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const locks = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+      SELECT count(*) AS waiting FROM pg_locks
+      WHERE locktype = 'advisory' AND classid = ${fenceNamespace}::oid
+        AND objid = ${year}::oid AND granted IS FALSE`;
+    if ((locks[0]?.waiting ?? BigInt(0)) > BigInt(0)) return;
+    await sleep(40);
+  }
+  throw new Error("the second connection never waited on the advisory year lock");
+}
+
+test("a committed seal makes a waiting READ COMMITTED receipt fail", async () => {
+  await withFenceSchema(async (schema) => {
+    const year = new Date().getUTCFullYear();
+    let sealReady = false;
+    let releaseSeal!: () => void;
+    let signalSealed!: () => void;
+    const holdSeal = new Promise<void>((resolve) => { releaseSeal = resolve; });
+    const sealed = new Promise<void>((resolve) => { signalSealed = resolve; });
+    const seal = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${fenceNamespace},
+        ${year})::TEXT AS locked`;
+      await tx.$executeRawUnsafe(`INSERT INTO "${schema}"."AmuxCliUsageAggregateFinalization"
+        ("year", "providerScopeKey") VALUES (${year}, 'actualProviderUnknown')`);
+      sealReady = true;
+      signalSealed();
+      await holdSeal;
+    }, { timeout: 10_000 }).then(() => null, (error: unknown) => {
+      signalSealed();
+      return error;
+    });
+    await sealed;
+    assert.equal(sealReady, true);
+    const late = prisma.$executeRawUnsafe(
+      `INSERT INTO "${schema}"."AmuxCliUsageInvocation" DEFAULT VALUES`,
+    ).then(() => null, (error: unknown) => error);
+    try {
+      await waitForAdvisoryWait(year);
+    } finally {
+      releaseSeal();
+    }
+    assert.equal(await seal, null);
+    assert.match(String(await late), /AMUX CLI usage year has an immutable finalization/);
+    const rows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+      `SELECT count(*) AS count FROM "${schema}"."AmuxCliUsageInvocation"`,
+    );
+    assert.equal(rows[0].count, BigInt(0));
+  });
+});
+
+test("a committed receipt is visible to the finalizer after its exclusive lock", async () => {
+  await withFenceSchema(async (schema) => {
+    const year = new Date().getUTCFullYear();
+    let receiptReady = false;
+    let releaseReceipt!: () => void;
+    let signalInserted!: () => void;
+    const holdReceipt = new Promise<void>((resolve) => { releaseReceipt = resolve; });
+    const inserted = new Promise<void>((resolve) => { signalInserted = resolve; });
+    const receipt = prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`INSERT INTO "${schema}"."AmuxCliUsageInvocation"
+        DEFAULT VALUES`);
+      receiptReady = true;
+      signalInserted();
+      await holdReceipt;
+    }, { timeout: 10_000 }).then(() => null, (error: unknown) => {
+      signalInserted();
+      return error;
+    });
+    await inserted;
+    assert.equal(receiptReady, true);
+    const finalizer = prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(${fenceNamespace},
+        ${year})::TEXT AS locked`;
+      return tx.$queryRawUnsafe<Array<{ count: bigint }>>(
+        `SELECT count(*) AS count FROM "${schema}"."AmuxCliUsageInvocation"`,
+      );
+    }, { timeout: 10_000 }).then((rows) => ({ rows, error: null }),
+      (error: unknown) => ({ rows: null, error }));
+    try {
+      await waitForAdvisoryWait(year);
+    } finally {
+      releaseReceipt();
+    }
+    assert.equal(await receipt, null);
+    const outcome = await finalizer;
+    assert.equal(outcome.error, null);
+    assert.equal(outcome.rows?.[0].count, BigInt(1));
+  });
+});
+
+test("the trigger rejects repeatable-read and keeps a UTC instant under a non-UTC session", async () => {
+  await withFenceSchema(async (schema) => {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`INSERT INTO "${schema}"."AmuxCliUsageInvocation"
+        DEFAULT VALUES`);
+    }, { isolationLevel: "RepeatableRead" }), /requires READ COMMITTED/);
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Kiritimati'`;
+      await tx.$executeRawUnsafe(`INSERT INTO "${schema}"."AmuxCliUsageInvocation"
+        DEFAULT VALUES`);
+      const rows = await tx.$queryRawUnsafe<Array<{ recordedAt: Date }>>(
+        `SELECT "recordedAt" FROM "${schema}"."AmuxCliUsageInvocation"`,
+      );
+      assert.equal(rows[0].recordedAt.getUTCFullYear(), new Date().getUTCFullYear());
+      const locks = await tx.$queryRaw<Array<{ objid: bigint }>>`
+        SELECT objid::BIGINT AS objid FROM pg_locks
+        WHERE locktype = 'advisory' AND classid = ${fenceNamespace}::oid
+          AND pid = pg_backend_pid() AND granted IS TRUE`;
+      assert.ok(locks.some((row) => row.objid === BigInt(rows[0].recordedAt.getUTCFullYear())));
+    });
+  });
+});

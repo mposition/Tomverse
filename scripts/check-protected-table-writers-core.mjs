@@ -883,6 +883,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261002190000_amux_cli_usage_year_insert_fence/migration.sql",
+    count: 1,
+    reason:
+      "One dynamic SELECT checks for the immutable actualProviderUnknown seal in the trigger's own TG_TABLE_SCHEMA, quoted with %I. The year is a USING parameter and the provider key is a fixed SQL literal. It cannot target another table or write a protected row.",
+  },
+  {
     path: "prisma/migrations/20261002160000_amux_cli_usage_aggregate_final/migration.sql",
     count: 2,
     reason:
