@@ -7,11 +7,17 @@ const normalizeOrigin = (value: string | undefined) => {
 
     try {
         const url = new URL(value);
+        // WHATWG `hostname` keeps the brackets for an IPv6 host, so the bare
+        // `::1` never matched `[::1]` and a production origin configured as
+        // that loopback literal was accepted as the app's public origin --
+        // the one failure direction here, since every absolute URL the app
+        // hands out would then point at the server's own loopback.
+        const hostname = url.hostname.replace(/^\[|\]$/g, "");
         const isLocalHost =
-            url.hostname === "localhost" ||
-            url.hostname.endsWith(".localhost") ||
-            url.hostname === "127.0.0.1" ||
-            url.hostname === "::1";
+            hostname === "localhost" ||
+            hostname.endsWith(".localhost") ||
+            hostname === "127.0.0.1" ||
+            hostname === "::1";
         if (
             (url.protocol !== "https:" &&
                 !(process.env.NODE_ENV !== "production" &&
