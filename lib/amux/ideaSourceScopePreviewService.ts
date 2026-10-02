@@ -5,7 +5,8 @@ import type { Session } from "next-auth";
 
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
-import { openAmuxContent, verifyAmuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
+import { amuxContentDigest, openAmuxContent, verifyAmuxContentDigest,
+  type AmuxContentKeys } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { inspectAmuxIdeaSourceScope } from "./ideaSourceScopeCore.ts";
@@ -34,6 +35,8 @@ const ownerId = (session: Session): string => {
 export type AmuxSourceScopePreview = {
   ideaId: string;
   canonicalScopeJson: string;
+  scopeDigest: string;
+  scopeDigestKeyId: string;
   fileCount: number;
   collectionVerified: false;
   transferAuthorized: false;
@@ -96,9 +99,16 @@ export async function previewAmuxSourceScopeInTransaction(
   if (!declared.ok) throw new AmuxSourceScopePreviewError("idea_unavailable", 409);
   const scope = inspectAmuxIdeaSourceScope(request.scopeJson, declared.input);
   if (!scope.ok) throw new AmuxSourceScopePreviewError("scope_rejected", 400);
+  const scopeBytes = Buffer.from(scope.canonicalJson, "utf8");
+  let binding: ReturnType<typeof amuxContentDigest>;
+  try {
+    binding = amuxContentDigest(scopeBytes, "source_scope", idea.id, keys);
+  } finally { scopeBytes.fill(0); }
   return {
     ideaId: idea.id,
     canonicalScopeJson: scope.canonicalJson,
+    scopeDigest: binding.digest,
+    scopeDigestKeyId: binding.digestKeyId,
     fileCount: scope.fileCount,
     collectionVerified: false,
     transferAuthorized: false,

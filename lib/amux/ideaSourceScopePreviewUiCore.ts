@@ -1,10 +1,13 @@
 type ScopePreviewReply = { status: number; body: unknown };
 
 export type ScopePreviewDecision =
-  | { kind: "checked"; canonicalScopeJson: string }
+  | { kind: "checked"; canonicalScopeJson: string;
+      scopeDigest: string; scopeDigestKeyId: string }
   | { kind: "error"; code: string };
 
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+const keyedDigest = /^[a-f0-9]{64}$/;
+const keyId = /^[A-Za-z0-9_-]{1,64}$/;
 const exactKeys = (value: Record<string, unknown>, expected: string[]) =>
   Object.keys(value).sort().join("\0") === expected.sort().join("\0");
 
@@ -45,8 +48,11 @@ export function classifySourceScopePreview(
     ? reply.body as Record<string, unknown> : null;
   if (reply.status === 200 && body?.ideaId === ideaId && body.fileCount === 1 &&
       body.collectionVerified === false && body.transferAuthorized === false &&
-      typeof body.canonicalScopeJson === "string" && oneSourceFile(body.canonicalScopeJson)) {
-    return { kind: "checked", canonicalScopeJson: body.canonicalScopeJson };
+      typeof body.canonicalScopeJson === "string" && oneSourceFile(body.canonicalScopeJson) &&
+      typeof body.scopeDigest === "string" && keyedDigest.test(body.scopeDigest) &&
+      typeof body.scopeDigestKeyId === "string" && keyId.test(body.scopeDigestKeyId)) {
+    return { kind: "checked", canonicalScopeJson: body.canonicalScopeJson,
+      scopeDigest: body.scopeDigest, scopeDigestKeyId: body.scopeDigestKeyId };
   }
   return { kind: "error", code: typeof body?.error === "string" ? body.error : "preview_unavailable" };
 }

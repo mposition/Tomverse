@@ -76,6 +76,22 @@ const envelopeAadFor = (context: Buffer, keys: AmuxMasterKey): Buffer => {
 const digestFor = (plain: Buffer, aad: Buffer, digestKey: Buffer) =>
   createHmac("sha256", digestKey).update(aad).update(Buffer.from([0])).update(plain).digest("hex");
 
+/** Bind a read-only preview to exact bytes without creating a ciphertext row.
+ * This is not an approval and the caller must still re-check current source. */
+export function amuxContentDigest(
+  plain: Buffer,
+  purpose: AmuxContentPurpose,
+  subjectId: string,
+  key: AmuxDigestKey,
+): { digest: string; digestKeyId: string } {
+  assertDigestKey(key);
+  if (!Buffer.isBuffer(plain) || plain.length > MAX_CONTENT_BYTES) {
+    throw new Error("AMUX content size is invalid");
+  }
+  return { digest: digestFor(plain, aadFor(purpose, subjectId), key.digestKey),
+    digestKeyId: key.digestKeyId };
+}
+
 export function sealAmuxContent(
   plain: Buffer,
   purpose: AmuxContentPurpose,
@@ -110,8 +126,7 @@ export function sealAmuxContent(
       ]),
       keyId: keys.masterKeyId,
       keyVersion: keys.masterKeyVersion,
-      digest: digestFor(plain, context, keys.digestKey),
-      digestKeyId: keys.digestKeyId,
+      ...amuxContentDigest(plain, purpose, subjectId, keys),
     };
   } finally {
     dataKey.fill(0);

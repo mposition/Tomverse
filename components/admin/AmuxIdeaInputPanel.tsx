@@ -40,7 +40,8 @@ type InputPreviewResult = {
 
 type SourceScopeResult =
   | { kind: "idle" }
-  | { kind: "checked"; canonicalScopeJson: string }
+  | { kind: "checked"; canonicalScopeJson: string;
+      scopeDigest: string; scopeDigestKeyId: string }
   | { kind: "error"; code: string };
 
 type SubmissionState =

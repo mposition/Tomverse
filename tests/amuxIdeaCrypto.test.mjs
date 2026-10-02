@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { openAmuxContent, sealAmuxContent, verifyAmuxContentDigest } from "../lib/amux/ideaCrypto.ts";
+import { amuxContentDigest, openAmuxContent, sealAmuxContent,
+  verifyAmuxContentDigest } from "../lib/amux/ideaCrypto.ts";
 
 const keys = () => ({
   masterKeyId: "amux-v4-master-test",
@@ -64,6 +65,21 @@ test("AMUX content fails closed on missing key configuration and oversized input
   assert.throws(() => sealAmuxContent(Buffer.alloc(1024 * 1024 + 1), "idea_raw", "idea-test-1", keyring));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(0), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(0));
   assert.deepEqual(openAmuxContent(sealAmuxContent(Buffer.alloc(1024 * 1024), "idea_raw", "idea-test-1", keyring), "idea_raw", "idea-test-1", keyring), Buffer.alloc(1024 * 1024));
+});
+
+test("read-only scope preview digest binds exact bytes, purpose and idea", () => {
+  const keyring = keys();
+  const bytes = Buffer.from('{"version":1,"sources":[]}', "utf8");
+  const binding = amuxContentDigest(bytes, "source_scope", "idea-test-1", keyring);
+  assert.equal(binding.digestKeyId, keyring.digestKeyId);
+  assert.equal(verifyAmuxContentDigest(bytes, "source_scope", "idea-test-1",
+    binding.digest, binding.digestKeyId, keyring), true);
+  assert.equal(verifyAmuxContentDigest(bytes, "source_scope", "idea-test-2",
+    binding.digest, binding.digestKeyId, keyring), false);
+  assert.equal(verifyAmuxContentDigest(bytes, "idea_raw", "idea-test-1",
+    binding.digest, binding.digestKeyId, keyring), false);
+  assert.equal(verifyAmuxContentDigest(Buffer.from('{"version":2,"sources":[]}', "utf8"),
+    "source_scope", "idea-test-1", binding.digest, binding.digestKeyId, keyring), false);
 });
 
 test("AMUX envelope header and each authenticated segment reject tampering", () => {
