@@ -20,13 +20,21 @@ import {
   OBSERVATION_LABELS,
   OBSERVATION_ROW_LIMIT,
   OBSERVATION_SCHEMA_VERSION,
+  OBSERVATION_SILENCE_HOURS,
   OBSERVED_BRANCHES,
+  P1_WINDOW_SLOTS,
+  P2_MIN_SUCCESSES,
+  P2_WINDOW_SLOTS,
   PRICING_STATES,
   PROBE_STATES,
   TITLE_MAX_CODE_POINTS,
   buildObservationPayload,
   normaliseIssueTitle,
   observationLabel,
+  observationSilenceVerdict,
+  observationSlotSeries,
+  p1WindowJudgement,
+  p2WindowJudgement,
   summariseObservation,
   validateObservationPayload,
 } from "../lib/productResearchObservationCore.mjs";
@@ -415,4 +423,184 @@ test("the branches this table reports are the ones the report evaluates", () => 
     .map((part) => part.trim().replace(/^"|"$/g, ""))
     .filter(Boolean);
   assert.deepEqual(names, OBSERVED_BRANCHES);
+});
+
+test("silence has four answers, and only one of them is an incident", () => {
+  const now = Date.parse("2026-10-03T00:00:00.000Z");
+  const hours = (count) => now - count * 60 * 60 * 1000;
+
+  // An unset switch is a state an operator chose.
+  assert.deepEqual(observationSilenceVerdict({ enabled: false, lastSuccessAt: hours(100), now }), {
+    state: "disabled",
+    sinceHours: null,
+  });
+
+  // A switch just turned on has no success yet. Raising an incident for that
+  // would mean every activation pages somebody, so it is reported and not
+  // alarmed -- the Admin screen shows it rather than an empty table that reads
+  // as working.
+  for (const missing of [null, undefined]) {
+    assert.deepEqual(observationSilenceVerdict({ enabled: true, lastSuccessAt: missing, now }), {
+      state: "no_observation_yet",
+      sinceHours: null,
+    });
+  }
+
+  // One slot a day plus its one-hour window is 25 hours, so a late-but-inside-
+  // the-window run is not an incident and a wholly missed slot is.
+  assert.equal(OBSERVATION_SILENCE_HOURS, 26);
+  for (const [age, expected] of [
+    [25, "recent"],
+    [25.9, "recent"],
+    [26, "silent"],
+    [100, "silent"],
+  ]) {
+    assert.equal(
+      observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(age), now }).state,
+      expected,
+      String(age),
+    );
+  }
+
+  // A last success in the future is the app's clock disagreeing with the
+  // database's. Read as `recent` it would silence the check for as long as the
+  // disagreement lasted.
+  assert.equal(
+    observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(-5), now }).state,
+    "silent",
+  );
+
+  // A value that is not a time is not `recent` either.
+  assert.equal(
+    observationSilenceVerdict({ enabled: true, lastSuccessAt: Number.NaN, now }).state,
+    "no_observation_yet",
+  );
+
+  // The hours are the real figure rather than the threshold, so an incident can
+  // say how long it has been.
+  assert.equal(
+    Math.round(observationSilenceVerdict({ enabled: true, lastSuccessAt: hours(31), now }).sinceHours),
+    31,
+  );
+});
+
+const SLOT_DAY = 24 * 60 * 60 * 1000;
+const END_SLOT = "2026-10-02T21:30:00.000Z";
+
+/** `pattern` is newest-first: "o" ok, "f" failed, "." no row at all. */
+const seriesFromPattern = (pattern) => {
+  const end = Date.parse(END_SLOT);
+  const rows = [];
+  for (const [index, mark] of [...pattern].entries()) {
+    if (mark === ".") continue;
+    rows.push({
+      slot: new Date(end - index * SLOT_DAY),
+      outcome: mark === "o" ? "ok" : "failed",
+      failureStage: mark === "o" ? null : "timeout",
+    });
+  }
+  return observationSlotSeries(rows, { endSlot: END_SLOT, count: pattern.length });
+};
+
+test("a slot nothing ran on is in the series, because that night is the question", () => {
+  // A list of stored rows cannot show a night nothing ran: two neighbouring
+  // rows look consecutive whatever is missing between them.
+  const series = seriesFromPattern("o.o");
+  assert.deepEqual(
+    series.map((entry) => entry.state),
+    ["ok", "missing", "ok"],
+  );
+  assert.deepEqual(
+    series.map((entry) => entry.slot),
+    ["2026-10-02T21:30:00.000Z", "2026-10-01T21:30:00.000Z", "2026-09-30T21:30:00.000Z"],
+  );
+  // A failed slot keeps its stage, so the screen can say what stopped it.
+  assert.equal(seriesFromPattern("f")[0].failureStage, "timeout");
+});
+
+test("two rows for one slot are reported, not reduced to one", () => {
+  // The unique constraint makes this impossible, which is exactly why a series
+  // that found one must say so rather than pick a row and carry on.
+  const slot = new Date(Date.parse(END_SLOT));
+  const series = observationSlotSeries(
+    [
+      { slot, outcome: "ok", failureStage: null },
+      { slot, outcome: "failed", failureStage: "timeout" },
+    ],
+    { endSlot: END_SLOT, count: 1 },
+  );
+  assert.equal(series[0].state, "duplicate");
+});
+
+test("the staging window restarts at a break instead of counting around it", () => {
+  assert.equal(P1_WINDOW_SLOTS, 14);
+
+  const clean = p1WindowJudgement(seriesFromPattern("o".repeat(14)));
+  assert.equal(clean.consecutiveOk, 14);
+  assert.equal(clean.met, true);
+  assert.equal(clean.brokenAt, null);
+
+  // Thirteen clean nights behind one bad one is not fourteen consecutive
+  // anything, and the policy says the count starts again.
+  for (const [pattern, expected] of [
+    ["f" + "o".repeat(14), { consecutiveOk: 0, state: "failed" }],
+    ["." + "o".repeat(14), { consecutiveOk: 0, state: "missing" }],
+    ["o".repeat(13) + "f" + "o".repeat(14), { consecutiveOk: 13, state: "failed" }],
+    ["o".repeat(13) + "." + "o", { consecutiveOk: 13, state: "missing" }],
+  ]) {
+    const judgement = p1WindowJudgement(seriesFromPattern(pattern));
+    assert.equal(judgement.consecutiveOk, expected.consecutiveOk, pattern.slice(0, 20));
+    assert.equal(judgement.met, false, pattern.slice(0, 20));
+    assert.equal(judgement.brokenAt.state, expected.state);
+  }
+});
+
+test("the production window tolerates three bad nights in thirty and not four", () => {
+  assert.equal(P2_WINDOW_SLOTS, 30);
+  assert.equal(P2_MIN_SUCCESSES, 27);
+
+  const met = p2WindowJudgement(seriesFromPattern("o".repeat(27) + "fff"));
+  assert.equal(met.successes, 27);
+  assert.equal(met.verdict, "met");
+
+  const notMet = p2WindowJudgement(seriesFromPattern("o".repeat(26) + "ffff"));
+  assert.equal(notMet.successes, 26);
+  assert.equal(notMet.verdict, "not_met");
+
+  // Unlike P1, the successes need not be consecutive: this asks whether it
+  // keeps working, not whether it works at all.
+  const scattered = p2WindowJudgement(seriesFromPattern("ofoofo" + "o".repeat(23) + "f"));
+  assert.equal(scattered.observedSlots, 30);
+  assert.equal(scattered.verdict, "met");
+
+  // An integrity failure is not something a run of successes makes up for.
+  const slot = new Date(Date.parse(END_SLOT));
+  const duplicated = observationSlotSeries(
+    [
+      { slot, outcome: "ok", failureStage: null },
+      { slot, outcome: "ok", failureStage: null },
+      ...Array.from({ length: 29 }, (_unused, index) => ({
+        slot: new Date(slot.getTime() - (index + 1) * SLOT_DAY),
+        outcome: "ok",
+        failureStage: null,
+      })),
+    ],
+    { endSlot: END_SLOT, count: 30 },
+  );
+  const withDuplicate = p2WindowJudgement(duplicated);
+  assert.equal(withDuplicate.successes, 29);
+  assert.equal(withDuplicate.duplicates, 1);
+  assert.equal(withDuplicate.verdict, "not_met");
+});
+
+test("a window shorter than itself is insufficient evidence, not a verdict", () => {
+  // 27 of 30 cannot be read off twelve slots in either direction, and calling
+  // it a failure would block the phase for not having waited.
+  const short = p2WindowJudgement(seriesFromPattern("o".repeat(12)));
+  assert.equal(short.observedSlots, 12);
+  assert.equal(short.verdict, "insufficient_evidence");
+  // P1 has no such state: fewer than fourteen consecutive is simply not
+  // fourteen, and the number it reached is the whole answer.
+  assert.equal(p1WindowJudgement(seriesFromPattern("o".repeat(12))).consecutiveOk, 12);
+  assert.equal(p1WindowJudgement(seriesFromPattern("o".repeat(12))).met, false);
 });
