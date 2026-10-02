@@ -30,7 +30,9 @@ export type QaReleaseDigestServicePorts = {
    * The CI and release-lane rows, or null when GitHub could not be read. Kept
    * a port so the collector is its own reviewed slice.
    */
-  collectCi: (readToken: string) => Promise<Pick<QaReleaseDigest, "ci" | "releaseLane"> | null>;
+  collectCi: (
+    readToken: string,
+  ) => Promise<(Pick<QaReleaseDigest, "ci" | "releaseLane"> & { unrecognizedJobs: number; truncated: boolean }) | null>;
   postJson: (url: string, headers: Readonly<Record<string, string>>, body: string) => Promise<{ status: number }>;
   now: () => Date;
 };
@@ -109,7 +111,11 @@ export async function runQaReleaseDigestService(
   }
 
   const ci = await ports.collectCi(readToken);
-  const notChecked: QaReleaseDigestBuildInput["notChecked"] = ci === null ? ["github_read_unavailable"] : [];
+  const notChecked: QaReleaseDigestBuildInput["notChecked"] = [];
+  if (ci === null) notChecked.push("github_read_unavailable");
+  // Rows from a partial read are kept, and the digest says they are partial:
+  // a renamed job or a window past the page cap must not read as "no failures".
+  else if (ci.unrecognizedJobs > 0 || ci.truncated) notChecked.push("ci_collection_incomplete");
 
   const digest = buildQaReleaseDigest({
     digestDate: startedAt.toISOString().slice(0, 10),

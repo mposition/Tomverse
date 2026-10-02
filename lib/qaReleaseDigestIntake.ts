@@ -87,7 +87,11 @@ export async function receiveQaReleaseDigest(
     async (tx) => {
       const newest = await readLatestQaReleaseOperatorControl(tx);
       if (newest?.revision !== admittedRevision) return "control_revision_mismatch";
-      return newest.digestEnabled ? null : "digest_disabled";
+      if (!newest.digestEnabled) return "digest_disabled";
+      // A run past its own hard deadline is not recorded as a success
+      // (policy section 3): the database clock decides, in this transaction.
+      const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${new Date(digest.runDeadline)}::timestamptz AS late`;
+      return clock[0]?.late === false ? null : "run_deadline_passed";
     },
   );
   switch (result.status) {

@@ -35,7 +35,7 @@ function ports(overrides = {}) {
       }
       return { exitCode: name === "check:release-records" ? 1 : 0, stdout: "" };
     },
-    collectCi: async () => ({ ci: [], releaseLane: [] }),
+    collectCi: async () => ({ ci: [], releaseLane: [], unrecognizedJobs: 0, truncated: false }),
     postJson: async (url, headers, body) => {
       calls.posts.push({ url, headers, body });
       return { status: 201 };
@@ -118,4 +118,17 @@ test("a refusal or an unknown outcome fails the run once, never retried", async 
   assert.deepEqual(await runQaReleaseDigestService(env(), thrown), { exitCode: 1, outcome: "submission_outcome_unknown" });
   const replay = ports({ postJson: async () => ({ status: 200 }) });
   assert.deepEqual(await runQaReleaseDigestService(env(), replay), { exitCode: 0, outcome: "replayed" });
+});
+
+test("a partial CI read is submitted with its rows and marked incomplete", async () => {
+  for (const partial of [{ unrecognizedJobs: 1, truncated: false }, { unrecognizedJobs: 0, truncated: true }]) {
+    const p = ports({ collectCi: async () => ({ ci: [], releaseLane: [], ...partial }) });
+    await runQaReleaseDigestService(env(), p);
+    const digest = JSON.parse(p.calls.posts[0].body);
+    assert.ok(digest.notChecked.includes("ci_collection_incomplete"), JSON.stringify(partial));
+    assert.equal(digest.notChecked.includes("github_read_unavailable"), false);
+  }
+  const whole = ports();
+  await runQaReleaseDigestService(env(), whole);
+  assert.equal(JSON.parse(whole.calls.posts[0].body).notChecked.includes("ci_collection_incomplete"), false);
 });

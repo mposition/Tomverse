@@ -59,8 +59,9 @@ const run = (id, hoursAgo) => ({ id, status: "completed", created_at: new Date(N
 
 test("rows carry job, shard, conclusion and a class only for failures; old runs and unknown names are left out", async () => {
   const gh = github([
-    ["workflows/e2e.yml/runs", { workflow_runs: [run(11, 2), run(12, 30)] }],
+    ["workflows/e2e.yml/runs", { total_count: 2, workflow_runs: [run(11, 2), run(12, 30)] }],
     ["runs/11/jobs", {
+      total_count: 5,
       jobs: [
         { name: "Chromium regression (shard 2/5)", conclusion: "failure", steps: [{ name: "Install Chromium", conclusion: "failure" }] },
         { name: "Chromium regression (shard 3/5)", conclusion: "success", steps: [] },
@@ -69,9 +70,9 @@ test("rows carry job, shard, conclusion and a class only for failures; old runs 
         { name: "Chromium regression (shard 4/5)", conclusion: null, steps: [] },
       ],
     }],
-    ["workflows/deployed-commit-drift.yml/runs", { workflow_runs: [run(21, 1)] }],
-    ["runs/21/jobs", { jobs: [{ name: "Deployed commit vs branch head", conclusion: "failure", steps: [{ name: QA_RELEASE_NOTIFIER_STEP, conclusion: "success" }] }] }],
-    ["/runs?", { workflow_runs: [] }],
+    ["workflows/deployed-commit-drift.yml/runs", { total_count: 1, workflow_runs: [run(21, 1)] }],
+    ["runs/21/jobs", { total_count: 1, jobs: [{ name: "Deployed commit vs branch head", conclusion: "failure", steps: [{ name: QA_RELEASE_NOTIFIER_STEP, conclusion: "success" }] }] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
   ]);
   const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
   assert.deepEqual(result.ci, [
@@ -83,6 +84,7 @@ test("rows carry job, shard, conclusion and a class only for failures; old runs 
     { workflow: "drift", runId: "21", job: "drift", jobConclusion: "failure", existingNotifierStepRan: true },
   ]);
   assert.equal(result.unrecognizedJobs, 1);
+  assert.equal(result.truncated, false);
   assert.equal(gh.calls.some((path) => path.includes("runs/12/")), false, "a run older than the window is not read");
   assert.equal(gh.calls.some((path) => /logs/.test(path)), false, "logs are never fetched");
 });
@@ -90,4 +92,39 @@ test("rows carry job, shard, conclusion and a class only for failures; old runs 
 test("any failed or malformed read answers null, not an empty list", async () => {
   assert.equal(await collectQaReleaseCi({ fetchJson: async () => { throw new Error("403"); }, nowMs: NOW }), null);
   assert.equal(await collectQaReleaseCi({ fetchJson: async () => ({ message: "Not Found" }), nowMs: NOW }), null);
+});
+
+test("runs are read across pages until the window ends, and a window past the page cap is marked truncated", async () => {
+  // 150 runs inside the window: two pages, then an older run ends the list.
+  const inWindow = Array.from({ length: 150 }, (_, i) => run(1000 + i, 1 + i / 10));
+  const gh = github([
+    ["workflows/e2e.yml/runs?status=completed&per_page=100&page=1", { total_count: 151, workflow_runs: inWindow.slice(0, 100) }],
+    ["workflows/e2e.yml/runs?status=completed&per_page=100&page=2", { total_count: 151, workflow_runs: [...inWindow.slice(100), run(9, 30)] }],
+    ["/jobs?", { total_count: 0, jobs: [] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
+  ]);
+  const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
+  assert.equal(result.truncated, false);
+  assert.equal(gh.calls.filter((path) => path.includes("/jobs?")).length, 150);
+  assert.equal(gh.calls.some((path) => path.includes("page=3")), false);
+
+  // Every page full and still inside the window at the cap.
+  const busy = github([
+    ["workflows/e2e.yml/runs", () => ({ total_count: 5000, workflow_runs: Array.from({ length: 100 }, (_, i) => run(i, 1)) })],
+    ["/jobs?", { total_count: 0, jobs: [] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
+  ]);
+  assert.equal((await collectQaReleaseCi({ fetchJson: busy.fetchJson, nowMs: NOW })).truncated, true);
+});
+
+test("jobs are read across pages by their total count", async () => {
+  const gh = github([
+    ["workflows/e2e.yml/runs", { total_count: 1, workflow_runs: [run(5, 1)] }],
+    ["runs/5/jobs?per_page=100&page=1", { total_count: 101, jobs: Array.from({ length: 100 }, () => ({ name: "Chromium regression (shard 1/5)", conclusion: "success", steps: [] })) }],
+    ["runs/5/jobs?per_page=100&page=2", { total_count: 101, jobs: [{ name: "Chromium desktop and mobile regression", conclusion: "failure", steps: [] }] }],
+    ["/runs?", { total_count: 0, workflow_runs: [] }],
+  ]);
+  const result = await collectQaReleaseCi({ fetchJson: gh.fetchJson, nowMs: NOW });
+  assert.equal(result.ci.length, 101);
+  assert.equal(result.ci.at(-1).job, "regression");
 });

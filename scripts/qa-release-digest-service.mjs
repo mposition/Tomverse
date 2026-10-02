@@ -27,10 +27,24 @@ const SCRIPT_TIMEOUT_MS = 4 * 60 * 1000;
 const HTTP_TIMEOUT_MS = 30_000;
 const GITHUB_API = "https://api.github.com";
 
-/** `npm run <name> -- <args>` with only what a report needs to run. */
+/**
+ * `npm run <name> -- <args>` with only what a report needs to run. The child
+ * leads its own process group, so the timeout kills npm and every process it
+ * started, and the promise settles at the timeout even if a grandchild still
+ * holds the pipe open.
+ */
 const runScript = (name, args, extraEnv = {}) =>
   new Promise((resolve) => {
+    let settled = false;
+    let timer;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
     const child = spawn("npm", ["run", "--silent", name, ...(args.length > 0 ? ["--", ...args] : [])], {
+      detached: true,
       stdio: ["ignore", "pipe", "ignore"],
       env: {
         PATH: process.env.PATH ?? "",
@@ -45,15 +59,16 @@ const runScript = (name, args, extraEnv = {}) =>
       // A report larger than this is not one the digest can carry anyway.
       if (stdout.length < 8 * 1024 * 1024) stdout += chunk;
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), SCRIPT_TIMEOUT_MS);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ exitCode: code ?? 1, stdout });
-    });
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve({ exitCode: 1, stdout: "" });
-    });
+    timer = setTimeout(() => {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+      settle({ exitCode: 1, stdout: "" });
+    }, SCRIPT_TIMEOUT_MS);
+    child.on("close", (code) => settle({ exitCode: code ?? 1, stdout }));
+    child.on("error", () => settle({ exitCode: 1, stdout: "" }));
   });
 
 const githubJson = (token) => async (path) => {

@@ -29,6 +29,14 @@ test("children get a minimal environment; the secret and the whole environment n
   );
 });
 
+test("a script that overruns is killed with its whole process group, and the run moves on", () => {
+  assert.match(SOURCE, /detached: true/);
+  assert.ok(SOURCE.includes('process.kill(-child.pid, "SIGKILL");'));
+  // The timeout settles the promise itself; it does not wait for "close".
+  const timeoutBlock = SOURCE.slice(SOURCE.indexOf("timer = setTimeout("), SOURCE.indexOf("}, SCRIPT_TIMEOUT_MS);"));
+  assert.ok(timeoutBlock.includes('settle({ exitCode: 1, stdout: "" });'));
+});
+
 test("every request follows no redirect and has a timeout", () => {
   const fetches = SOURCE.match(/await fetch\(/g) ?? [];
   assert.equal(fetches.length, 2);

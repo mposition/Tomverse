@@ -39,12 +39,12 @@ const control = (digestEnabled: boolean) => ({
 
 let revision = 0;
 
-const digestFor = (date: string, pending = 40) =>
+const digestFor = (date: string, pending = 40, runDeadline = new Date(Date.now() + 15 * 60_000).toISOString()) =>
   buildQaReleaseDigest({
     digestDate: date,
     baseSha: "a".repeat(40),
     generatedAt: `${date}T21:00:00.000Z`,
-    runDeadline: `${date}T21:15:00.000Z`,
+    runDeadline,
     gateReport: { classified: Array.from({ length: pending }, (_, i) => ({ id: `GATE-${String(i).padStart(2, "0")}`, status: "pending", verdict: "unmapped" })) },
     hypotheticalReports: [],
     issueReport: { classified: [] },
@@ -153,4 +153,11 @@ test("a revision recorded while the body is still arriving stops the digest from
   );
   assert.deepEqual(result, { status: 409, body: { error: "control_revision_mismatch" } });
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-04" } }), 0);
+});
+
+test("a digest submitted after its own run deadline is not recorded", async () => {
+  revision = (await recordQaReleaseOperatorControl({ session: session as never, control: control(true) })).revision;
+  const late = digestFor("2026-10-05", 40, new Date(Date.now() - 1000).toISOString());
+  assert.deepEqual(await call(late), { status: 409, body: { error: "run_deadline_passed" } });
+  assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-05" } }), 0);
 });

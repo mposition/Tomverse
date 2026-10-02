@@ -29,6 +29,14 @@ export const QA_RELEASE_REPOSITORY = "mposition/Tomverse";
 /** How far back a run counts toward today's digest. */
 export const QA_RELEASE_CI_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Pages read per list before the collection is called incomplete. Runs come
+ * newest first, so the run list stops at the first run older than the
+ * window; a window that needs more pages than this is reported, not cut.
+ */
+export const QA_RELEASE_CI_MAX_PAGES = 10;
+const PAGE_SIZE = 100;
+
 type Workflow = (typeof QA_RELEASE_CI_WORKFLOWS)[number];
 
 /**
@@ -63,7 +71,12 @@ type ApiJob = { name: string; conclusion: string | null; steps?: ApiStep[] };
 export type QaReleaseCiCollection = Pick<QaReleaseDigest, "ci" | "releaseLane"> & {
   /** Jobs whose display name matched no known pattern: a rename to look at. */
   unrecognizedJobs: number;
+  /** A list needed more than QA_RELEASE_CI_MAX_PAGES pages. */
+  truncated: boolean;
 };
+
+/** False when the read failed or the body was not the expected list. */
+type Page<T> = { items: T[]; total: number } | false;
 
 const isConclusion = (value: string | null): value is QaReleaseDigest["ci"][number]["jobConclusion"] =>
   value !== null && (QA_RELEASE_JOB_CONCLUSIONS as readonly string[]).includes(value);
@@ -77,22 +90,52 @@ export async function collectQaReleaseCi(input: {
   const ci: QaReleaseDigest["ci"] = [];
   const releaseLane: QaReleaseDigest["releaseLane"] = [];
   let unrecognizedJobs = 0;
+  let truncated = false;
+
+  const page = async <T>(path: string, key: "workflow_runs" | "jobs"): Promise<Page<T>> => {
+    const body = (await input.fetchJson(path)) as Record<string, unknown> | null;
+    const items = body?.[key];
+    const total = body?.total_count;
+    return Array.isArray(items) && typeof total === "number" ? { items: items as T[], total } : false;
+  };
+
   try {
     for (const workflow of QA_RELEASE_CI_WORKFLOWS) {
-      const runsBody = (await input.fetchJson(
-        `/repos/${QA_RELEASE_REPOSITORY}/actions/workflows/${workflow}/runs?status=completed&per_page=20`,
-      )) as { workflow_runs?: ApiRun[] };
-      if (!Array.isArray(runsBody?.workflow_runs)) return null;
-      const runs = runsBody.workflow_runs.filter((run) => {
-        const created = Date.parse(run.created_at);
-        return Number.isFinite(created) && input.nowMs - created <= QA_RELEASE_CI_WINDOW_MS && created <= input.nowMs;
-      });
+      // Every completed run inside the window, newest first, across pages.
+      const runs: ApiRun[] = [];
+      let reachedOlder = false;
+      for (let number = 1; number <= QA_RELEASE_CI_MAX_PAGES && !reachedOlder; number += 1) {
+        const result = await page<ApiRun>(
+          `/repos/${QA_RELEASE_REPOSITORY}/actions/workflows/${workflow}/runs?status=completed&per_page=${PAGE_SIZE}&page=${number}`,
+          "workflow_runs",
+        );
+        if (result === false) return null;
+        for (const run of result.items) {
+          const created = Date.parse(run.created_at);
+          if (!Number.isFinite(created)) return null;
+          if (input.nowMs - created > QA_RELEASE_CI_WINDOW_MS) reachedOlder = true;
+          else if (created <= input.nowMs) runs.push(run);
+        }
+        if (number * PAGE_SIZE >= result.total) reachedOlder = true;
+        else if (number === QA_RELEASE_CI_MAX_PAGES && !reachedOlder) truncated = true;
+      }
+
       for (const run of runs) {
-        const jobsBody = (await input.fetchJson(
-          `/repos/${QA_RELEASE_REPOSITORY}/actions/runs/${run.id}/jobs?per_page=50`,
-        )) as { jobs?: ApiJob[] };
-        if (!Array.isArray(jobsBody?.jobs)) return null;
-        for (const apiJob of jobsBody.jobs) {
+        const jobs: ApiJob[] = [];
+        for (let number = 1; ; number += 1) {
+          const result = await page<ApiJob>(
+            `/repos/${QA_RELEASE_REPOSITORY}/actions/runs/${run.id}/jobs?per_page=${PAGE_SIZE}&page=${number}`,
+            "jobs",
+          );
+          if (result === false) return null;
+          jobs.push(...result.items);
+          if (number * PAGE_SIZE >= result.total) break;
+          if (number === QA_RELEASE_CI_MAX_PAGES) {
+            truncated = true;
+            break;
+          }
+        }
+        for (const apiJob of jobs) {
           if (!isConclusion(apiJob.conclusion)) continue; // still running, or a value GitHub added later
           const match = QA_RELEASE_CI_JOB_NAMES[workflow]
             .map((entry) => ({ entry, found: entry.name.exec(apiJob.name) }))
@@ -134,5 +177,5 @@ export async function collectQaReleaseCi(input: {
   } catch {
     return null;
   }
-  return { ci, releaseLane, unrecognizedJobs };
+  return { ci, releaseLane, unrecognizedJobs, truncated };
 }
