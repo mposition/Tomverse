@@ -1640,6 +1640,44 @@ Non-negotiable requirements:
   Everything else here is ordinary review.
 <!-- END:chat-starter-catalog-invariant -->
 
+<!-- BEGIN:independent-review-requests -->
+# 독립 검토는 검토 서버에 요청합니다
+
+작업을 마치고 독립 검토가 필요하면 **reviewer를 직접 고르지 않습니다.** 다른
+공급사의 앱이나 CLI를 손으로 부르지 않고 검토 서버에 요청합니다. 서버가 작성자와
+**모델 공급사가 다른** reviewer를 부하에 따라 배정하고, 판정을 결정적 규칙으로
+돌려줍니다. 설치와 동작은 `tools/review-orchestrator/README.md`에 있습니다.
+
+1. **검토할 변경을 commit합니다.** commit되지 않은 변경은 서버로 가지 않습니다.
+2. **요청합니다.** 클라이언트는 운영자 PC의 고정 위치에 있으므로 어느 브랜치에서나
+   같은 명령을 씁니다. 이 도구가 들어 있는 checkout에서는 `npm run -s review --`도 같습니다.
+
+   ```
+   node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<무엇을 왜 바꿨는지 한두 줄>"
+   ```
+
+   - `--author`는 **지금 작업한 앱 자신**입니다. Claude Code는 `claude`, Codex는
+     `codex`, Cursor는 `cursor`이고, Cursor는 실제로 쓴 모델의 공급사를
+     `--author-vendor`(`anthropic`·`openai`·`xai`·`google` 등)로 함께 적습니다.
+     서버가 이 값으로 같은 공급사를 빼므로, 다른 앱의 이름을 쓰지 않습니다.
+   - base 기본값은 `origin/develop`과의 분기점입니다. main에서 나온 브랜치는
+     `--base origin/main`을 붙입니다. base는 develop이나 main의 이력 안에 있어야 합니다.
+   - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
+     올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
+3. **기다립니다.** `node "$HOME/bin/review.mjs" wait <jobId>`를 종료 코드가 3이 아닐 때까지
+   반복합니다. 한 번에 최대 9분 기다리므로 명령 하나의 시간 제한 안에 들어갑니다.
+4. **결과대로 처리합니다.**
+   - `0` accept: 결과를 보고합니다.
+   - `1` reject: 지적을 고치고 commit한 뒤 **새로 submit**합니다. 같은 job을 다시 쓰지 않습니다.
+   - `2` unknown: **다시 보내지 않습니다.** `report <jobId>`의 원문과 함께 사람에게 알립니다.
+     결과를 모르는 것을 다른 reviewer로 몰래 다시 보내면 부하가 한쪽으로 쏠립니다.
+   - `64`·`65`: 요청이나 서버의 오류입니다. 오류 출력을 그대로 사람에게 알립니다.
+     `REVIEW_ORCH_HOST`가 없다는 오류도 여기에 속합니다.
+
+검토 결과는 **신호이지 승인이 아닙니다.** accept가 병합이나 배포 승인을 대신하지
+않고, 정책 문서가 기록을 요구하는 별도 교차 검토 절차가 있으면 그 절차를 따릅니다.
+<!-- END:independent-review-requests -->
+
 <!-- BEGIN:agent-delegation-policy -->
 # 작업을 어느 모델에 보낼지
 
