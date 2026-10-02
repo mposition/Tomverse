@@ -85,6 +85,9 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
 
   useEffect(() => {
     let active = true;
+    // A prop/availability change can reuse this component without unmounting.
+    // Invalidate reads and writes started under the previous binding too.
+    lifecycleVersion.current += 1;
     const prior = readSourceScopeApprovalAttempt(receiptStore(), operatorId, expected);
     queueMicrotask(() => {
       if (!active) return;
@@ -95,7 +98,7 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         if (available) void readBack(prior.binding);
       }
     });
-    return () => { active = false; };
+    return () => { active = false; lifecycleVersion.current += 1; };
   }, [available, operatorId, expected, readBack]);
 
   const approve = async () => {

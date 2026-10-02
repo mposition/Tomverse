@@ -177,7 +177,8 @@ test("idea-only transfer preview stores exact encrypted input, binds the chunk, 
   assert.deepEqual(await readIdeaOnlyTransferPreview(session, choice.previewId),
     { state: "expired", transferAuthorized: false });
   assert.deepEqual(await readIdeaTransferConfirmation(session, choice.previewId),
-    { state: "expired", modelCallStarted: false });
+    { state: "expired", previewId: choice.previewId, ideaId,
+      confirmationRecorded: false, modelCallStarted: false });
   await assert.rejects(prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
     { session, request, choice, keys, browserNonce })),
   (error: unknown) => error instanceof IdeaTransferPreviewError && error.code === "not_ready");

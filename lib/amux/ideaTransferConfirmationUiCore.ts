@@ -30,6 +30,19 @@ export function readConfirmedIdeaTransfer(status: number, body: unknown,
     confirmExpiresAt: result.confirmExpiresAt };
 }
 
+/** An expired prepared preview may be replaced. An expired confirmed one
+ * still records a real owner decision and must retain its one-shot fence. */
+export function readExpiredIdeaTransferConfirmation(status: number, body: unknown,
+  expectedPreviewId: string, expectedIdeaId: string): "unconfirmed" | "confirmed" | null {
+  if (status !== 200 || !body || typeof body !== "object" || Array.isArray(body)) return null;
+  const reply = body as Record<string, unknown>;
+  if (reply.state !== "expired" || reply.previewId !== expectedPreviewId ||
+      reply.ideaId !== expectedIdeaId || reply.modelCallStarted !== false) return null;
+  if (reply.confirmationRecorded === false) return "unconfirmed";
+  if (reply.confirmationRecorded === true) return "confirmed";
+  return null;
+}
+
 export function confirmationAttemptKey(operatorId: string, previewId: string): string {
   if (!isAmuxIdeaRequestId(previewId)) throw new Error("Invalid preview ID");
   return `amux-v4-transfer-confirm:${operatorId}:${previewId}`;

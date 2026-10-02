@@ -21,7 +21,8 @@ import {
 } from "@/lib/amux/ideaTransferPreviewUiCore";
 import {
   clearRefusedConfirmationAttempt, readConfirmedIdeaTransfer, readConfirmationAttempt,
-  readConfirmationAttemptForPreview, readConfirmationWriteReply, reserveConfirmationAttempt,
+  readConfirmationAttemptForPreview, readConfirmationWriteReply,
+  readExpiredIdeaTransferConfirmation, reserveConfirmationAttempt,
   type ConfirmedIdeaTransfer,
 } from "@/lib/amux/ideaTransferConfirmationUiCore";
 
@@ -58,7 +59,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   const readConfirmation = useCallback(async (pendingId: string,
     expectedIdeaId: string, expectedDigest: string, expectedDigestKeyId: string):
-    Promise<"confirmed" | "not_confirmed" | "expired" | "unknown"> => {
+    Promise<"confirmed" | "not_confirmed" | "expired_unconfirmed" |
+      "expired_confirmed" | "unknown"> => {
     const report = (next: ConfirmState) => setConfirmation((current) =>
       current.kind === "confirmed" ? current : next);
     try {
@@ -73,11 +75,14 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         report({ kind: "confirmed", value: parsed });
         setPreview((current) => current.kind === "prepared" ? current : { kind: "confirmed" });
         return "confirmed";
-      } else if (body && typeof body === "object" &&
-                 (body as Record<string, unknown>).state === "expired") {
+      }
+      const expired = readExpiredIdeaTransferConfirmation(response.status, body,
+        pendingId, expectedIdeaId);
+      if (expired !== null) {
         report({ kind: "expired" });
-        return "expired";
-      } else if (body && typeof body === "object" &&
+        return expired === "confirmed" ? "expired_confirmed" : "expired_unconfirmed";
+      }
+      if (body && typeof body === "object" &&
                  (body as Record<string, unknown>).state === "not_confirmed") {
         report({ kind: "unknown" });
         return "not_confirmed";
@@ -336,7 +341,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         const observed = response.status === 409
           ? await readConfirmation(value.previewId, ideaId, value.payloadDigest,
             value.payloadDigestKeyId) : null;
-        if (response.status === 409 && observed !== "not_confirmed" && observed !== "expired") return;
+        if (response.status === 409 && observed !== "not_confirmed" &&
+            observed !== "expired_unconfirmed") return;
         const refusal = await readAdminApiFailure(refusalResponse, {
           fallback: m.transferConfirmRefused, locale,
         });

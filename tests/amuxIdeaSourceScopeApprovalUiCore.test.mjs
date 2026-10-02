@@ -111,6 +111,7 @@ test("Admin action is separately dark and reads back the same approval ID", () =
   // when an old keyed panel has unmounted or React has restarted its effect.
   assert.match(panel, /const readBack = useCallback\([\s\S]*?await response\.json\(\)[\s\S]*?if \(!isCurrent\(version\)\) return;[\s\S]*?clearSourceScopeApprovalAttempt/);
   assert.match(panel, /const approve = async \(\) => \{[\s\S]*?await response\.json\(\)[\s\S]*?if \(!isCurrent\(version\)\) return;[\s\S]*?clearSourceScopeApprovalAttempt/);
+  assert.match(panel, /useEffect\(\(\) => \{\s*let active = true;[\s\S]*?lifecycleVersion\.current \+= 1;[\s\S]*?return \(\) => \{ active = false; lifecycleVersion\.current \+= 1; \};/);
   assert.match(proxy, /requiresMutationOriginCheck\(request\.method, request\.nextUrl\.pathname\)\s*&&\s*!hasValidMutationOrigin\(request\)/);
   const path = "/api/admin/amux/ideas/source-scope-approval";
   assert.equal(requiresMutationOriginCheck("POST", path), true);

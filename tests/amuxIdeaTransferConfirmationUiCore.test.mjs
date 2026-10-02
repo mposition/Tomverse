@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { clearRefusedConfirmationAttempt, definitiveConfirmationPrewriteRefusal,
   readConfirmedIdeaTransfer, readConfirmationAttempt, readConfirmationAttemptForPreview,
-  readConfirmationWriteReply,
+  readConfirmationWriteReply, readExpiredIdeaTransferConfirmation,
   reserveConfirmationAttempt } from "../lib/amux/ideaTransferConfirmationUiCore.ts";
 
 const previewId = "123e4567-e89b-42d3-a456-426614174001";
@@ -89,4 +89,16 @@ test("only named pre-write confirmation refusals release the attempt fence", asy
     JSON.stringify({ error: "expired" }), { status: 409 }));
   assert.equal(reply.definitiveRefusal, true);
   assert.deepEqual(await reply.refusalResponse.json(), reply.body);
+});
+
+test("expired read-back distinguishes an unconfirmed preview from a recorded confirmation", () => {
+  const base = { state: "expired", previewId, ideaId, modelCallStarted: false };
+  assert.equal(readExpiredIdeaTransferConfirmation(200,
+    { ...base, confirmationRecorded: false }, previewId, ideaId), "unconfirmed");
+  assert.equal(readExpiredIdeaTransferConfirmation(200,
+    { ...base, confirmationRecorded: true }, previewId, ideaId), "confirmed");
+  assert.equal(readExpiredIdeaTransferConfirmation(200,
+    { ...base, confirmationRecorded: true }, previewId, "other-idea"), null);
+  assert.equal(readExpiredIdeaTransferConfirmation(200,
+    { ...base, confirmationRecorded: "true" }, previewId, ideaId), null);
 });
