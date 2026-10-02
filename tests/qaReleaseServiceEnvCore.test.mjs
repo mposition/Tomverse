@@ -78,3 +78,22 @@ test("the monitor runs with its own secret and a revision", () => {
   assert.equal(decideQaReleaseServiceStart("monitor", { ...runtime, QA_RELEASE_MONITOR_SECRET: "m", QA_RELEASE_CONTROL_REVISION: "2" }), "run");
   assert.equal(decideQaReleaseServiceStart("monitor", { ...runtime, QA_RELEASE_CONTROL_REVISION: "2" }), "refuse");
 });
+
+test("Railway variables are admitted by exact name only, never by prefix", () => {
+  for (const name of ["RAILWAY_TOKEN", "RAILWAY_API_TOKEN", "RAILWAY_DATABASE_URL", "RAILWAY_"]) {
+    assert.deepEqual(checkQaReleaseServiceEnv("digest", [...Object.keys(runtime), name]), { ok: false, unexpectedCount: 1 }, name);
+  }
+  assert.deepEqual(checkQaReleaseServiceEnv("digest", ["RAILWAY_GIT_COMMIT_SHA", "RAILWAY_SERVICE_ID", "PORT"]), { ok: true });
+});
+
+test("an unset or whitespace kill switch reads as empty, as policy section 8 item 6 defines it", () => {
+  const unset = laneEnv();
+  delete unset.QA_RELEASE_MERGE_LANE_KILL_SWITCH;
+  assert.equal(decideQaReleaseServiceStart("mergeLane", unset), "run");
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: undefined })), "run");
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv({ QA_RELEASE_MERGE_LANE_KILL_SWITCH: "  " })), "run");
+  // The other two inputs are not optional: an unset enable flag stops the lane.
+  const noFlag = laneEnv();
+  delete noFlag.QA_RELEASE_MERGE_LANE_ENABLED;
+  assert.equal(decideQaReleaseServiceStart("mergeLane", noFlag), "disabled");
+});

@@ -46,6 +46,7 @@ export const QA_RELEASE_RUNTIME_VARIABLES: readonly string[] = Object.freeze([
   "NODE_ENV",
   "NODE_VERSION",
   "PATH",
+  "PORT",
   "PWD",
   "SHLVL",
   "TZ",
@@ -53,8 +54,40 @@ export const QA_RELEASE_RUNTIME_VARIABLES: readonly string[] = Object.freeze([
   "_",
 ]);
 
-/** Railway's own variables. Every one is named, none is a credential to this repository. */
-export const QA_RELEASE_RUNTIME_PREFIX = "RAILWAY_";
+/**
+ * Railway's own variables, by exact name -- never by the "RAILWAY_" prefix,
+ * which would also admit a credential someone named RAILWAY_TOKEN or
+ * RAILWAY_DATABASE_URL. Taken from Railway's variables reference (identity,
+ * networking, volume and git-source variables); provisional until O-10
+ * records a live service, like the list above.
+ */
+export const QA_RELEASE_RAILWAY_VARIABLES: readonly string[] = Object.freeze([
+  "RAILWAY_DEPLOYMENT_ID",
+  "RAILWAY_ENVIRONMENT",
+  "RAILWAY_ENVIRONMENT_ID",
+  "RAILWAY_ENVIRONMENT_NAME",
+  "RAILWAY_GIT_AUTHOR",
+  "RAILWAY_GIT_BRANCH",
+  "RAILWAY_GIT_COMMIT_MESSAGE",
+  "RAILWAY_GIT_COMMIT_SHA",
+  "RAILWAY_GIT_REPO_NAME",
+  "RAILWAY_GIT_REPO_OWNER",
+  "RAILWAY_PRIVATE_DOMAIN",
+  "RAILWAY_PROJECT_ID",
+  "RAILWAY_PROJECT_NAME",
+  "RAILWAY_PUBLIC_DOMAIN",
+  "RAILWAY_REPLICA_ID",
+  "RAILWAY_REPLICA_REGION",
+  "RAILWAY_SERVICE_ID",
+  "RAILWAY_SERVICE_NAME",
+  "RAILWAY_SNAPSHOT_ID",
+  "RAILWAY_STATIC_URL",
+  "RAILWAY_TCP_APPLICATION_PORT",
+  "RAILWAY_TCP_PROXY_DOMAIN",
+  "RAILWAY_TCP_PROXY_PORT",
+  "RAILWAY_VOLUME_MOUNT_PATH",
+  "RAILWAY_VOLUME_NAME",
+]);
 
 export type QaReleaseEnvCheck = { ok: true } | { ok: false; unexpectedCount: number };
 
@@ -64,10 +97,8 @@ export type QaReleaseEnvCheck = { ok: true } | { ok: false; unexpectedCount: num
  */
 export function checkQaReleaseServiceEnv(service: QaReleaseService, names: readonly string[]): QaReleaseEnvCheck {
   const own = new Set<string>(QA_RELEASE_SERVICE_VARIABLES[service]);
-  const runtime = new Set(QA_RELEASE_RUNTIME_VARIABLES);
-  const unexpected = names.filter(
-    (name) => !own.has(name) && !runtime.has(name) && !name.startsWith(QA_RELEASE_RUNTIME_PREFIX),
-  );
+  const runtime = new Set([...QA_RELEASE_RUNTIME_VARIABLES, ...QA_RELEASE_RAILWAY_VARIABLES]);
+  const unexpected = names.filter((name) => !own.has(name) && !runtime.has(name));
   return unexpected.length === 0 ? { ok: true } : { ok: false, unexpectedCount: unexpected.length };
 }
 
@@ -107,6 +138,11 @@ export function decideQaReleaseServiceStart(
   const value = (name: string) => (env[name] ?? "").trim();
   if (service === "digest" && value("QA_RELEASE_DIGEST_ENABLED") !== "true") return "disabled";
   if (service === "mergeLane") {
+    // Policy section 8 item 6: the kill switch stops on any value and is off
+    // only when empty -- the chatStarterKillSwitchEngaged() judgement, where an
+    // unset variable reads as empty. An environment variable has no
+    // "unreadable" state in-process; that clause bites where a read can fail,
+    // such as the operator control record the app route reads.
     if (value("QA_RELEASE_MERGE_LANE_KILL_SWITCH") !== "") return "disabled";
     if (value("QA_RELEASE_MERGE_LANE_ENABLED") !== "true") return "disabled";
   }
