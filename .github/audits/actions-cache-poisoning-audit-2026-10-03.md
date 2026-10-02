@@ -4,6 +4,9 @@
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
 > 각 항목에 승인·검토 요건을 적었습니다.
 >
+> **rev 2 자체는 아직 판정을 받지 못했습니다** — 검토 서버 round 1이
+> `reviewer_exit_1`로 unknown이고, 재전송은 하지 않았습니다(9장).
+>
 > **rev 2에서 바뀐 것**(9장의 검토 결과 반영, 초안의 판정을 뒤집은 것 포함):
 > F5는 **틀렸고** 2순위에서 3순위로 내렸습니다 — 분석기의 cache 규칙은
 > 에이전트가 심은 캐시만 묻고 그 질문에 그 기록이 정확히 답합니다. F1의 "pool
@@ -716,9 +719,35 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 
 ## 9. 독립 검토
 
-요청 경로: 먼저 AGENTS.md가 정한 검토 서버에 제출했으나
-`queue_full: 20 jobs are still pending`로 거절됐습니다. 그래서 과제가 지정한
-Codex로 직접 돌렸습니다.
+**두 round를 돌았고, 판정은 하나뿐입니다.**
+
+| round | 대상 | 경로 | reviewer | 결과 |
+|---|---|---|---|---|
+| 0 | rev 1 (`3882fdb6f`) | Codex 직접 (서버 큐 `queue_full`) | Codex `gpt-5.6-sol` / xhigh | **reject** — 지적 전부 반영 |
+| 1 | rev 2 (`5abcb4ef7`) | 검토 서버 `r-20261002-223406-84907a` | **devin** (vendor `cognition`) | **unknown** — `reviewer_exit_1`, findings 0건 |
+
+### round 1 — unknown, 재전송하지 않음
+
+```
+{
+  "jobId": "r-20261002-223406-84907a",
+  "status": "unknown",
+  "base": "2f7550a5873606fecbfeec993c398a898a69ffcb",
+  "head": "5abcb4ef7656ab152d6b9c0e8e535fe12547d730",
+  "author": "claude", "authorVendor": "anthropic",
+  "touchesContract": false,
+  "reviews": [{ "slot": 0, "status": "done", "provider": "devin",
+                "vendor": "cognition", "verdict": "unknown",
+                "reason": "reviewer_exit_1", "findings": [] }]
+}
+```
+
+`report`는 본문을 돌려주지 않습니다(0 바이트) — reviewer가 종료 코드 1로
+끝났으므로 검토 내용이 없습니다. **그러므로 rev 2는 독립 검토를 받지 않은
+상태입니다.** AGENTS.md는 unknown을 다른 reviewer로 다시 보내지 말라고 하므로
+(부하가 한쪽으로 쏠림) 재전송하지 않았고, 이 결정은 사람에게 보고했습니다.
+
+### round 0 — reject, 전부 반영
 
 - reviewer: Codex CLI 0.146.0, `gpt-5.6-sol` / `model_reasoning_effort=xhigh`
   (`.codex/agents/contract.toml`이 되돌릴 수 없는 작업에 쓰는 조합),
@@ -732,9 +761,9 @@ Codex로 직접 돌렸습니다.
   가능한 두 건은 저장소에서 직접 대조했습니다 — `package.json`에
   `packageManager`·`devEngines` 부재, lockfile의 `hasInstallScript` 10건,
   그리고 `actions/setup-node` `action.yml`의 `package-manager-cache` 기본값.
-- 다음 round: **rev 2에 대한 재검토 미실시.** 검토 서버에 다시 제출했으나
-  여전히 `queue_full`입니다. 큐가 비면 그쪽으로 제출하는 것이 AGENTS.md가 정한
-  경로입니다. 재검토가 특히 봐야 할 것 둘:
+- 다음 round: **rev 2는 아직 판정을 받지 못했습니다**(round 1이 unknown).
+  reviewer 쪽 실패이므로 문서를 고칠 지적은 없고, 다시 보낼지는 사람의
+  결정입니다. 재검토가 특히 봐야 할 것 둘:
   1. **F5의 철회가 과교정인지.** 저는 검토자의 논거를 받아들였지만, 그
      과정에서 같은 PR 방향(바로 아래)을 찾았습니다. 철회 자체는 유효하다고
      보지만 — rev 1이 **든 이유**가 틀렸으므로 — 판정이 두 번 뒤집힌 항목이니
