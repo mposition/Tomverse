@@ -163,7 +163,7 @@ codex/to-develop/fix-picker          자동 PR
 docs/to-develop/release-policy       자동 PR
 to-develop/ime-submit                자동 PR
 
-claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+claude/to-main/dependabot-hold       없음 — main PR도 열 수 없습니다(아래 절)
 release/**, hotfix/**                없음 — production에 닿습니다
 dependabot/**, autofix/**,
 feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
@@ -186,6 +186,33 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
+
+## main으로 가는 PR은 release와 hotfix뿐입니다
+
+**기능은 develop으로 보내고, main에는 release가 가져갑니다.**
+`.github/RELEASE_CHECKLIST.md` 7.9절의 세 경로 — `develop`(release),
+`release/**`(선택 release), `hotfix/**`(사고·보안 권고) — 만 main에 닿습니다.
+`to-main`이라는 이름은 경로가 아닙니다. 2026-10-02부터 PR Fast Gate가 이를
+검사하며(`scripts/main-pr-source-policy.mjs`,
+`tests/mainPrSourcePolicy.test.mjs`), 그 밖의 head는 필수 check가 실패합니다.
+
+```
+develop                              통과 — release
+release/2026-10-02-consent           통과 — 선택 release (체크리스트 7.9.1)
+hotfix/stripe-timeout                통과 — 체크리스트 7.9.2의 여섯 항목이 필요합니다
+claude/hotfix/stripe-timeout         통과 — `hotfix`는 경로 조각
+dependabot/**, autofix/**,
+feedback-autofix-main/**             통과 — 각자의 승인 게이트가 있습니다
+claude/to-main/..., codex/...        거부 — `gh pr edit <번호> --base develop`
+```
+
+근거는 수치입니다. 2026-09-20~10-02에 main에 병합된 PR 80건 중 78건이 기능
+브랜치였고, 각각 CI를 두 번 돌았으며(PR과 main push), develop으로 되돌아오는
+back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 손으로 필요했습니다.
+
+규칙 이전에 main으로 열려 있던 PR 4건(#1798, #1858, #1880, #1882)은
+`scripts/main-pr-source-policy.mjs`의 예외 목록으로 통과시킵니다. 이 목록은 줄기만 하고,
+테스트가 새 항목 추가를 막습니다.
 
 ## workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다
 
@@ -1664,6 +1691,9 @@ Non-negotiable requirements:
      `--base origin/main`을 붙입니다. base는 develop이나 main의 이력 안에 있어야 합니다.
    - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
      올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
+   - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.
+     reviewer에게는 그 commit 이후의 diff만 보여 주고, 지시 파일과 계약 경로 판정은 base부터
+     전체를 기준으로 합니다. push하지 않은 commit도 focus가 될 수 있습니다.
 3. **기다립니다.** `node "$HOME/bin/review.mjs" wait <jobId>`를 종료 코드가 3이 아닐 때까지
    반복합니다. 한 번에 최대 9분 기다리므로 명령 하나의 시간 제한 안에 들어갑니다.
 4. **결과대로 처리합니다.**
@@ -1672,7 +1702,7 @@ Non-negotiable requirements:
    - `2` unknown: **다시 보내지 않습니다.** `report <jobId>`의 원문과 함께 사람에게 알립니다.
      결과를 모르는 것을 다른 reviewer로 몰래 다시 보내면 부하가 한쪽으로 쏠립니다.
    - `64`·`65`: 요청이나 서버의 오류입니다. 오류 출력을 그대로 사람에게 알립니다.
-     `REVIEW_ORCH_HOST`가 없다는 오류도 여기에 속합니다.
+     SSH 접속 오류(`Permission denied`, `Could not resolve hostname`)도 여기에 속합니다.
 
 검토 결과는 **신호이지 승인이 아닙니다.** accept가 병합이나 배포 승인을 대신하지
 않고, 정책 문서가 기록을 요구하는 별도 교차 검토 절차가 있으면 그 절차를 따릅니다.

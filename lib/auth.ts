@@ -219,8 +219,9 @@ export const authOptions: NextAuthOptions = {
             if (user) {
                 token.id = user.id;
                 // What this sign-in proved about the account's address, from
-                // the sign-in itself only: the email-code authorize() result or
-                // Google's raw profile with email_verified, and only for this
+                // the sign-in itself only: the email-code authorize() result,
+                // Google's raw profile with email_verified, or Microsoft's raw
+                // profile (owner decision, DOI section 14.7), and only for this
                 // user's own address. Written here and nowhere else -- not on a
                 // session update -- and not carried over from an earlier
                 // sign-in (docs/policy/email-double-opt-in.md §14.1).

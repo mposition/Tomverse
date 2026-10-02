@@ -26,6 +26,23 @@ import {
   MARKETING_PUBLISHER_STATEMENT_TIMEOUT_MS,
   MARKETING_PUBLISHER_TRANSACTION_TIMEOUT_MS,
 } from "@/lib/marketingPublisherRunCore";
+import { resolvePublishAdmission } from "@/lib/marketingAutonomousAdmission";
+import {
+  claimDueMarketingPost,
+  listMarketingPostsAwaitingVerification,
+  listMarketingPostsPublishingPastLease,
+  listPublishingMarketingChannels,
+  recordMarketingPostFailed,
+  recordMarketingPostOutcomeUnknown,
+  recordMarketingPostPollVerified,
+  recordMarketingPostPublished,
+  releaseMarketingPostClaim,
+  runMarketingTransaction,
+  startMarketingPostDispatch,
+  type MarketingClaimReleaseReason,
+  type MarketingHealthObservation,
+  type MarketingTransaction,
+} from "@/lib/marketingStore";
 
 /**
  * The SQLSTATEs the deadline trigger raises for the two refusals this module
@@ -459,9 +476,13 @@ export class MarketingPublisherTransactionRefusedError extends Error {
  */
 export async function runBoundedMarketingTransaction<T>(
   client: PrismaClient,
-  work: (tx: Prisma.TransactionClient) => Promise<T>,
+  work: (tx: MarketingTransaction) => Promise<T>,
 ): Promise<T> {
-  return client.$transaction(
+  // Through the store's runner, so the transaction this hands over is branded in
+  // the one place the brand is made -- a second cast here would be a second way
+  // to call something a marketing transaction.
+  return runMarketingTransaction(
+    client,
     async (tx) => {
       const version = await tx.$queryRaw<Array<{ num: number }>>(Prisma.sql`
         SELECT current_setting('server_version_num')::int AS "num"
@@ -482,7 +503,7 @@ export async function runBoundedMarketingTransaction<T>(
       // this connection a `transaction_timeout`, the timer started at `BEGIN`
       // with that value, and setting the GUC here changes what
       // `current_setting` reports without rescheduling anything. The bound in
-      // force would be somebody else's, and the 115 seconds this function
+      // force would be somebody else's, and the 175 seconds this function
       // promises would be a number in a variable.
       //
       // Whether any such default exists is a fact about the deployment, not
@@ -546,7 +567,7 @@ export async function runBoundedMarketingTransaction<T>(
 }
 
 /**
- * A transaction client that refuses its thirteenth statement.
+ * A transaction client that refuses the statement after its budget.
  *
  * Every model delegate call and every raw query is one statement. Counted on
  * the call, not on completion, so a statement that is slow still spends its
@@ -554,7 +575,7 @@ export async function runBoundedMarketingTransaction<T>(
  *
  * What it counts is what the plan names: statements *in application code*.
  * One Prisma call can send more than one SQL statement -- an `include` is a
- * second query -- so twelve is a count of calls rather than of SQL, which is
+ * second query -- so the budget is a count of calls rather than of SQL, which is
  * why the plan calls the derived maximum an application figure and names
  * `transaction_timeout` as the bound that actually holds.
  *
@@ -567,7 +588,10 @@ export async function runBoundedMarketingTransaction<T>(
  * `tests/marketingPublisherBoundedCallers.test.mjs`, before the first caller
  * is written.
  */
-const countingTransaction = (tx: Prisma.TransactionClient): Prisma.TransactionClient => {
+// No cast: `new Proxy(target, handler)` has the target's type, so the brand is
+// carried rather than asserted, and the store's runner stays the one place a
+// marketing transaction is made.
+const countingTransaction = (tx: MarketingTransaction): MarketingTransaction => {
   let issued = 0;
   const spend = () => {
     issued += 1;
@@ -610,5 +634,128 @@ const countingTransaction = (tx: Prisma.TransactionClient): Prisma.TransactionCl
       }
       return delegate;
     },
-  }) as Prisma.TransactionClient;
+  });
 };
+
+/* -------------------------------------------------------------------------- */
+/* The publisher's bounded operations (S2 plan, S2d2)                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Every transaction the publisher runs, each one store call under the bound.
+ *
+ * **Why the calls live here and nowhere else.** The bounded transaction promises
+ * a transaction timeout, a statement ceiling and a statement budget, and all
+ * three hold only for statements issued on the transaction it hands over. A body
+ * that reached another client would be on another connection, where none of
+ * them applies and whose writes could commit after this one rolled back.
+ * `tests/marketingPublisherBoundedCallers.test.mjs` refuses a call to
+ * `runBoundedMarketingTransaction` anywhere but this module, and here requires
+ * each body to be a single call of a store function on its own transaction. The
+ * store is the sole writer and binds no client of its own, which that test also
+ * checks; what it cannot check -- that a store function issues every statement on
+ * the transaction it is given -- is the store's contract, reviewed with it.
+ *
+ * **Vendor calls are never inside one of these.** The publisher observes health
+ * and publishes between them, so no transaction is held open across a network
+ * call to a platform and no platform call is ever made from inside a transaction
+ * that could roll back after it.
+ *
+ * Health is passed in, observed by the caller during this invocation and stamped
+ * with the database's clock; the resolver judges its age against the same clock.
+ */
+export const marketingPublisherOperations = (client: PrismaClient) => ({
+  listChannels: () =>
+    runBoundedMarketingTransaction(client, (tx) => listPublishingMarketingChannels(tx)),
+
+  listPublishingPastLease: (input: { readonly before: Date; readonly limit: number }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      listMarketingPostsPublishingPastLease(tx, input),
+    ),
+
+  listAwaitingVerification: (limit: number) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      listMarketingPostsAwaitingVerification(tx, limit),
+    ),
+
+  claim: (input: {
+    readonly channelId: string;
+    readonly claimToken: string;
+    readonly health: MarketingHealthObservation | null;
+  }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      claimDueMarketingPost(tx, {
+        channelId: input.channelId,
+        claimToken: input.claimToken,
+        resolveAdmission: (database, channel) =>
+          resolvePublishAdmission(database, channel, input.health),
+      }),
+    ),
+
+  release: (input: {
+    readonly id: string;
+    readonly claimToken: string;
+    readonly expectedLeaseUntil: Date;
+    readonly expectedHistoryVersion: number;
+    readonly reason: MarketingClaimReleaseReason;
+  }) => runBoundedMarketingTransaction(client, (tx) => releaseMarketingPostClaim(tx, input)),
+
+  dispatch: (input: {
+    readonly id: string;
+    readonly claimToken: string;
+    readonly expectedLeaseUntil: Date;
+    readonly expectedHistoryVersion: number;
+    readonly runDeadlineAt: Date;
+    readonly callBudgetMs: number;
+    readonly health: MarketingHealthObservation | null;
+  }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      startMarketingPostDispatch(tx, {
+        id: input.id,
+        claimToken: input.claimToken,
+        expectedLeaseUntil: input.expectedLeaseUntil,
+        expectedHistoryVersion: input.expectedHistoryVersion,
+        runDeadlineAt: input.runDeadlineAt,
+        callBudgetMs: input.callBudgetMs,
+        resolveAdmission: (database, channel, postMode) =>
+          resolvePublishAdmission(database, channel, input.health, postMode),
+      }),
+    ),
+
+  recordPublished: (input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+  }) =>
+    runBoundedMarketingTransaction(client, (tx) => recordMarketingPostPublished(tx, input)),
+
+  recordFailed: (input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  }) => runBoundedMarketingTransaction(client, (tx) => recordMarketingPostFailed(tx, input)),
+
+  recordOutcomeUnknown: (input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      recordMarketingPostOutcomeUnknown(tx, input),
+    ),
+
+  recordVerified: (input: { readonly id: string; readonly expectedHistoryVersion: number }) =>
+    runBoundedMarketingTransaction(client, (tx) =>
+      recordMarketingPostPollVerified(tx, {
+        id: input.id,
+        expectedHistoryVersion: input.expectedHistoryVersion,
+        verificationMethod: "status_query",
+      }),
+    ),
+});
+
+export type MarketingPublisherOperations = ReturnType<typeof marketingPublisherOperations>;

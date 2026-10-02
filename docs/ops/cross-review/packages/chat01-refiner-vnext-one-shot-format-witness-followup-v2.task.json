@@ -1,0 +1,27 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-format-witness-followup-v2",
+  "requirement": "Continue the concluded chat01-refiner-vnext-one-shot-format-witness-v1 exchange, which remains on_hold after two revisions despite a Claude Code Max approve verdict with one reproducible nit. Preserve its round packages, verdicts, original invalid-json failure, and final status; this successor is not a retroactive pass or a round-limit reset. The operator approved a formal successor review on 2026-10-01. Codex authors; Claude Code Max first-party subscription CLI reviews read-only using the operator-approved --skip-preflight exception. This is only a development-only constrained-format witness fixture helper under approved one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b. No actual holdout content, provider/API paid call, dispatch, stage/run approval, flag change, product traffic, PR merge, or deployment is authorized. Anthropic API is forbidden.",
+  "completionCriteria": [
+    "Read the original requirement and exact scoped diff before tests and author account; bind the verdict to this successor package digest and inspect the inherited v1 on_hold finding.",
+    "Reproduce the inherited sparse two-slot predicates array case and confirm it now fails before predicate evaluation with vnext_one_shot_format_witness_predicates_invalid; both slots must be own array elements.",
+    "Confirm the passing and isolated failing synthetic fixtures still check only the two existing structural atoms, with strict shapes and bounded text; no fixture contents appear in return values or logs.",
+    "Confirm fullManifestValidated, rubricTruthVerified and dispatchAuthorized remain false; this is not full manifest validation or an operational gate.",
+    "Confirm the development-only source and synthetic tests are byte-pinned by the closure, including the closure test itself, and the previous v1 exchange records remain on_hold and unmodified.",
+    "Require focused tests, typecheck, lint and whitespace guards; distinguish controller-recorded checks from commands actually run by the reviewer.",
+    "Return exactly one raw JSON verdict without Markdown fences and only reproducible actionable findings; approve with any finding is not a controller pass."
+  ],
+  "baseCommit": "623122d4d9ffaeabdfc4a60d1fc4a4702d2cd71a",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-format-witness-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-format-witness-followup-v2.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-format-witness-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotFormatWitness.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitness.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitnessClosure.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-format-witness-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-format-witness-v1/exchange.json"
+  }
+}

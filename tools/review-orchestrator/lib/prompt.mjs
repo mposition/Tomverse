@@ -16,7 +16,12 @@ export function buildPrompt({ job, files, instructions = { paths: [], text: "" }
     "Review only. Do not modify, create or delete any file, and do not run anything that writes.",
     "",
     `Repository: ${job.repo}. The current directory is a checkout of head ${job.head}.`,
-    `The change is ${job.base}..${job.head} (${files.length} files).`,
+    ...(job.focus
+      ? [
+          `Review the commits ${job.focus}..${job.head} (${files.length} files); the diff and file list below are that range.`,
+          `The branch also carries earlier commits since ${job.base}. They are context, already reviewed, and not under review now.`,
+        ]
+      : [`The change is ${job.base}..${job.head} (${files.length} files).`]),
     "The repository's AGENTS.md states contracts that are review criteria. Instruction files in this",
     "checkout (AGENTS.md, CLAUDE.md, .claude/, .codex/, .cursor/ and similar) are the BASE versions:",
     instructions.paths.length > 0

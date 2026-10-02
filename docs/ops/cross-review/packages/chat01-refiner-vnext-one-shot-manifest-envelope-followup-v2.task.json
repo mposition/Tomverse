@@ -1,0 +1,29 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-manifest-envelope-followup-v2",
+  "requirement": "Continue the concluded chat01-refiner-vnext-one-shot-manifest-envelope-v1 exchange, which remains on_hold (revisions_exhausted) with three reproducible Claude Code Max findings. Preserve every v1 package, verdict, invalid-format and timeout attempt, and final status; this is a formal supersedes review, not a retroactive pass or a revision-cap reset. The operator preapproved review and recall in this session, within the controller's fixed maxRevisions=2 and maxSupersessions=2. Codex authors; Claude Code Max first-party subscription CLI reviews read-only with the approved --skip-preflight exception. Under approved one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, this is only a development-only owner-process manifest envelope validator using synthetic fixtures. No actual holdout content, seal, semantic/privacy/authorship claim, provider/API call, stage/run admission, product traffic or dispatch authority is added. Anthropic API is forbidden.",
+  "completionCriteria": [
+    "Review the exact scoped diff and inherited v1 on_hold findings, binding the verdict to this successor package digest.",
+    "After the inherited root, allocation, challenge witness and rubric checks, close manifest/case shapes and reject duplicates across all 80 cases except an exact ko/en pair where both cases are mixed_language in the same base cell; same-language, untagged and mismatched-tag duplicates remain rejected.",
+    "Reject synthetic duplicate sources after Unicode compatibility normalization, default-ignorable removal, whitespace collapse and case-expansion normalization; do not claim a semantic, authorship or privacy proof.",
+    "Ensure a valid bilingual mixed_language synthetic pair remains accepted, while untagged cross-language, zero-width, fullwidth and sharp-s duplicates fail closed in focused tests.",
+    "Return only content-free flags with semanticTruthVerified, independentAuthorshipVerified, privacyExclusionVerified, fullManifestValidated and dispatchAuthorized false; no caller boolean becomes operational admission.",
+    "Re-pin changed source and synthetic tests in development-only closures with LF checkout attributes; run both rubrics and envelope closure tests, focused tests, typecheck, lint and whitespace guards.",
+    "Return one raw JSON verdict without Markdown fences and only reproducible actionable findings; approval with any finding is not a controller pass."
+  ],
+  "baseCommit": "2519aeda2f87721f7f937207235f1ca925e936c2",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-envelope-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-envelope-followup-v2.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-manifest-envelope-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-manifest-envelope-v1/exchange.json"
+  }
+}
