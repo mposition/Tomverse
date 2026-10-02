@@ -181,31 +181,31 @@ export function servicesDeployingBranch(deployments, branch) {
   return [...newest.values()].filter((deployment) => deployment.meta?.branch === branch).map((d) => d.serviceId);
 }
 
-/** The newest deployment of the same service created after `deployment` for another commit. */
-function replacementOf(deployments, deployment) {
+// Railway's states for a deployment that has been, or is being, replaced.
+const REPLACED_DEPLOYMENT_STATUSES = new Set(["REMOVED", "REMOVING"]);
+
+/** Every deployment of the same service created after `deployment` for another commit. */
+function replacementsOf(deployments, deployment) {
   const sha = commitOf(deployment);
-  return [...deployments]
-    .sort(newestFirst)
-    .find(
-      (other) =>
-        other.serviceId === deployment.serviceId &&
-        commitOf(other) !== sha &&
-        Date.parse(other.createdAt) > Date.parse(deployment.createdAt),
-    );
+  return deployments.filter(
+    (other) =>
+      other.serviceId === deployment.serviceId &&
+      commitOf(other) !== sha &&
+      Date.parse(other.createdAt) > Date.parse(deployment.createdAt),
+  );
 }
 
 /**
- * Commits whose deployments replaced one of `commitSha`'s (Railway marks the
- * replaced one REMOVED). The caller asks GitHub which of them contain
+ * Commits whose deployments came after a replaced deployment of `commitSha`
+ * on the same service. The caller asks GitHub which of them contain
  * `commitSha` and passes that set back to deploymentOutcome.
  */
 export function replacementCommits(deployments, commitSha) {
   const sha = commitSha.toLowerCase();
   const commits = new Set();
   for (const deployment of deployments) {
-    if (commitOf(deployment) !== sha || deployment.status !== "REMOVED") continue;
-    const replacement = replacementOf(deployments, deployment);
-    if (replacement) commits.add(commitOf(replacement));
+    if (commitOf(deployment) !== sha || !REPLACED_DEPLOYMENT_STATUSES.has(deployment.status)) continue;
+    for (const replacement of replacementsOf(deployments, deployment)) commits.add(commitOf(replacement));
   }
   return [...commits];
 }
@@ -225,10 +225,13 @@ const OUTCOME_ORDER = ["failed", "unknown", "missing", "in_progress", "done"];
  * branch (plus any service that has a deployment of the commit).
  *
  * Per service only the newest deployment of the commit counts, so a redeploy
- * of the same commit replaces the earlier attempt. A deployment REMOVED by a
- * newer one counts through that newer one -- but only when the newer commit is
- * in `containing` (it includes this merge); a rollback to an older commit, or
- * a replacement nobody could place, is "unknown". The train stops on
+ * of the same commit replaces the earlier attempt. A deployment REMOVED (or
+ * REMOVING) counts through the later deployments of that service whose commit
+ * is in `containing` (it includes this merge): any one that succeeded means
+ * the merge is serving, whatever newer attempts are waiting or skipped beside
+ * it; otherwise one in flight is a wait, and otherwise one that failed is a
+ * failure. A rollback to an older commit, or a replacement nobody could place,
+ * is "unknown". The train stops on
  * "failed" and "unknown"; "not_seen" and "partial" are waits whose length the
  * caller decides.
  */
@@ -247,9 +250,13 @@ export function deploymentOutcome(deployments, commitSha, branch, containing = n
     let state;
     if (!newest) {
       state = "missing";
-    } else if (newest.status === "REMOVED") {
-      const replacement = replacementOf(deployments, newest);
-      state = replacement && containing.has(commitOf(replacement)) ? serviceState(replacement.status) : "unknown";
+    } else if (REPLACED_DEPLOYMENT_STATUSES.has(newest.status)) {
+      const states = new Set(
+        replacementsOf(deployments, newest)
+          .filter((replacement) => containing.has(commitOf(replacement)))
+          .map((replacement) => serviceState(replacement.status)),
+      );
+      state = ["done", "in_progress", "failed"].find((candidate) => states.has(candidate)) ?? "unknown";
     } else {
       state = serviceState(newest.status);
     }

@@ -109,12 +109,13 @@ const lanes = LANES.filter((lane) => lane.branch !== "main" || includeMain);
 // (integer) and head SHAs (40 hex).
 const useShell = process.platform === "win32";
 
-function runText(command, commandArgs) {
+function runText(command, commandArgs, options = {}) {
   return execFileSync(command, commandArgs, {
     encoding: "utf8",
     shell: useShell,
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
+    ...options,
   });
 }
 const runJson = (command, commandArgs) => JSON.parse(runText(command, commandArgs));
@@ -176,7 +177,12 @@ function acquireLock() {
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
-    if (holder !== null && holderAlive(holder)) usage(`--break-lock refused: pid ${holder} is still running`);
+    if (holder !== null && holderAlive(holder)) {
+      usage(
+        `--break-lock refused: pid ${holder} is still running. If that process is not a merge train ` +
+          `(the pid was reused), delete ${LOCK_PATH} by hand.`,
+      );
+    }
     rmSync(LOCK_PATH, { force: true });
   }
   const mine = `${process.pid}\n`;
@@ -193,6 +199,8 @@ function acquireLock() {
         ? `another merge train is running (pid ${holder}); refusing to start a second one`
         : `${LOCK_PATH} is held by pid ${holder || "unknown"}, which is not running. ` +
             "If no merge train is running, rerun with --break-lock.",
+    // A reused pid reads as a running train; a person who has checked deletes
+    // the lock file by hand.
     );
   }
   // Removes the lock only while it is still this process's own.
@@ -286,13 +294,25 @@ function resolveUnconfirmedMerge(lane, merging) {
   throw new TrainStop(lane.branch, `#${merging.number} is ${pr.state} after an unconfirmed merge; outcome unknown`);
 }
 
-/** The replacement commits that include `sha`, per GitHub's compare. */
+/**
+ * The replacement commits that include `sha`, per GitHub's compare. A
+ * compare that fails (an unknown SHA, a diff GitHub refuses to build) leaves
+ * that commit out, which makes the outcome "unknown" and latches -- the train
+ * stops on it once rather than crashing on it at every start.
+ */
 function commitsContaining(sha, candidates) {
   const containing = new Set();
   for (const candidate of candidates) {
     if (!SHA_PATTERN.test(candidate)) continue;
-    const status = runText("gh", ["api", `repos/${REPOSITORY}/compare/${sha}...${candidate}`, "--jq", ".status"]).trim();
-    if (status === "ahead" || status === "identical") containing.add(candidate);
+    try {
+      // per_page=1 keeps the response to the status, not the whole diff.
+      const status = runText("gh", [
+        "api", `repos/${REPOSITORY}/compare/${sha}...${candidate}?per_page=1`, "--jq", ".status",
+      ]).trim();
+      if (status === "ahead" || status === "identical") containing.add(candidate);
+    } catch {
+      // Left out: see above.
+    }
   }
   return containing;
 }
@@ -348,7 +368,11 @@ function mergeOne(lane, candidate) {
   save(lane.branch, { merging: { number: pr.number, headSha: pr.headRefOid, startedAt: Date.now() } });
   let mergeError = null;
   try {
-    runText("gh", ["pr", "merge", String(pr.number), "--repo", REPOSITORY, "--merge", "--match-head-commit", pr.headRefOid]);
+    runText(
+      "gh",
+      ["pr", "merge", String(pr.number), "--repo", REPOSITORY, "--merge", "--match-head-commit", pr.headRefOid],
+      { timeout: 2 * 60 * 1000 },
+    );
   } catch (error) {
     mergeError = error;
   }
@@ -365,8 +389,10 @@ function mergeOne(lane, candidate) {
   }
   if (result.state === "OPEN" && mergeError) {
     // Probably refused (head moved, conflict), but a timed-out call can still
-    // land after this read. The merging record stays; the next polls resolve
-    // it after a grace period, and nothing else merges on this lane meanwhile.
+    // land after this read. The merging record stays, its grace period counted
+    // from now rather than from before the call; the next polls resolve it,
+    // and nothing else merges on this lane meanwhile.
+    save(lane.branch, { merging: { number: pr.number, headSha: pr.headRefOid, startedAt: Date.now() } });
     log(lane, `#${pr.number} not merged yet: ${String(mergeError.stderr || mergeError.message).trim().split("\n")[0]}`);
     return;
   }
@@ -459,7 +485,14 @@ try {
     // An outcome the train will not guess past. The latch outlives this
     // process, so a restart cannot merge on top of it.
     if (!dryRun) save(error.branch, { latch: { reason: error.message, at: new Date().toISOString() } });
-    console.error(`STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${error.branch}.`);
+    const { awaiting, merging } = laneState(state, error.branch);
+    const following = merging ?? awaiting;
+    console.error(
+      `STOP: ${error.message}. Check Railway and the PR, then --clear-latch=${error.branch}` +
+        (following
+          ? ` -- adding --forget-merge=${error.branch} in the same command if you have dealt with #${following.number}.`
+          : "."),
+    );
     process.exit(1);
   }
   // A failed read (gh, railway CLI, network) is not an outcome, so it does not
