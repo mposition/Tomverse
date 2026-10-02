@@ -911,6 +911,12 @@ is not one of the three. `scripts/auto-pr-branch-policy.mjs` already refuses
 develop pull request, so these names carry no automation of their own -- their
 pull requests are opened and merged by a person on purpose.
 
+Since 2026-10-02 PR Fast Gate enforces the other direction too: a pull
+request into `main` from anything but `develop`, `release/**`, a `hotfix`
+branch or the automation that carries its own gates fails the required check
+(`scripts/main-pr-source-policy.mjs`). A `to-main` branch is retargeted to
+`develop` and ships with the next release.
+
 ### 7.9.1 Selective release: `release/**`
 
 For a change that is finished, is already on `develop`, and should not wait for
