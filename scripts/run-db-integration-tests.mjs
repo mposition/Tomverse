@@ -239,6 +239,9 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
