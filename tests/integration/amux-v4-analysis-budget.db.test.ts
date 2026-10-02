@@ -5,7 +5,8 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 
 import { auditRowActorKind,
-  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
@@ -21,6 +22,8 @@ import { commitAmuxIdeaAnalysisUnusedReservationCancellation,
   AmuxIdeaAnalysisCancellationError } from "@/lib/amux/ideaAnalysisBudgetCancellationService";
 import { commitAmuxExpiredIdeaAnalysisReservationRelease } from
   "@/lib/amux/ideaAnalysisBudgetExpiryService";
+import { commitAmuxKnownIdeaAnalysisSettlement,
+  AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
@@ -542,6 +545,96 @@ test("an in-flight hold cannot be cancelled or remove its budget", async () => {
     action: "amux.v4.analysis_budget.unused_reservation_cancelled",
     targetId: holdId,
   } }), 0);
+});
+
+async function syntheticDispatchedHold(): Promise<{ holdId: string; previewId: string }> {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true },
+  });
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId },
+    data: { state: "in_flight", consumedAt: preview.confirmedAt },
+  });
+  await prisma.amuxIdeaAnalysisBudgetHold.update({
+    where: { id: holdId },
+    data: { status: "in_flight", dispatchedAt: new Date() },
+  });
+  return { holdId, previewId };
+}
+
+test("known CLI usage settles an in-flight Agent hold once and releases the remainder", async () => {
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const { holdId } = await syntheticDispatchedHold();
+  for (const input of [
+    { holdId, outcome: "outcome_unknown" as const,
+      inputTokens: null, outputTokens: null },
+    { holdId, outcome: "verified_success" as const,
+      inputTokens: 1_001, outputTokens: 1 },
+  ]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxKnownIdeaAnalysisSettlement(tx, input)), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisSettlementError && error.code === "usage_hold");
+  }
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, before.reservedMicroUsd + BigInt(5_000));
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_BUDGET_SETTLED", targetId: holdId,
+  } }), 0);
+  const input = { holdId, outcome: "verified_success" as const,
+    inputTokens: 100, outputTokens: 50 };
+  const settled = await prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx, input));
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.settledMicroUsd, "200");
+  assert.equal(settled.releasedMicroUsd, "4800");
+  const [hold, window, audit] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: settled.auditId } }),
+  ]);
+  assert.equal(hold.status, "succeeded");
+  assert.equal(hold.settledMicroUsd, BigInt(200));
+  assert.equal(hold.inputTokens, 100);
+  assert.equal(hold.outputTokens, 50);
+  assert.equal(window.spentMicroUsd, before.spentMicroUsd + BigInt(200));
+  assert.equal(window.reservedMicroUsd, before.reservedMicroUsd);
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+    AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx, input)), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisSettlementError && error.code === "not_settleable");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_BUDGET_SETTLED", targetId: holdId,
+  } }), 1);
+});
+
+test("a failed CLI invocation with known usage still records Agent provider cost", async () => {
+  const { holdId } = await syntheticDispatchedHold();
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx,
+      { holdId, outcome: "invocation_failed", inputTokens: 12, outputTokens: 0 }));
+  assert.equal(result.status, "failed");
+  assert.equal(result.settledMicroUsd, "12");
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).settledMicroUsd, BigInt(12));
 });
 
 test("a price for another provider cannot reserve the confirmed model payload", async () => {

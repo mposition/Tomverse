@@ -57,6 +57,10 @@ export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE = "analysis-budget-reserve-v1
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION = "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE = "analysis-budget-expire-v1" as const;
+/** A known, capped CLI result settles agent cost; unknown usage stays held. */
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_SETTLED" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" as const;
 /** Policy v6: an unfinished idea stops at its immutable seven-day deadline. */
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
@@ -116,6 +120,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET) {
+    return AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE;
   }
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
