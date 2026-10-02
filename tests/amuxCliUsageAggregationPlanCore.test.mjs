@@ -105,11 +105,24 @@ test("one observed token value inside a five-call cell is never published", () =
 });
 
 test("unknown actual provider is isolated from named providers", () => {
-  const rows = many("07", 5, { actualProviderId: null, actualModelId: null });
+  const rows = many("07", 5, {
+    actualProviderId: null, actualModelId: "actualModelUnknown",
+  });
   const result = plan(rows, { actualProviderId: null });
   assert.equal(result.cells[0].actualProviderId, null);
-  assert.equal(result.cells[0].actualModelId, null);
+  assert.equal(result.cells[0].actualModelId, "actualModelUnknown");
   assert.throws(() => plan(rows), /source row is invalid/);
+  assert.throws(() => plan(rows.map((item) => ({ ...item, actualModelId: null }))),
+    /source row is invalid/);
+});
+
+test("multi_model remains a distinct model leaf accepted by the planner", () => {
+  const result = plan(many("08", 5, { actualModelId: "multi_model" }));
+  assert.equal(result.outcome, "planned");
+  assert.equal(result.cells[0].actualModelId, "multi_model");
+  assert.equal(result.cells[0].invocationCount, 5);
+  assert.throws(() => plan(many("08", 5, { actualModelId: "MULTI_MODEL" })),
+    /source row is invalid/);
 });
 
 test("open years and missed 13-month deletion deadlines fail closed", () => {
