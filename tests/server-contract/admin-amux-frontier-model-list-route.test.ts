@@ -13,6 +13,12 @@ const world = {
   recent: true,
   readOn: true,
   listCalls: 0,
+  checkCalls: 0,
+  checkedInput: null as unknown,
+  selection: { decision: "selection_current", approvalId: approvedModels[0].approvalId,
+    approvalVersion: 1 } as
+    | { decision: "selection_current"; approvalId: string; approvalVersion: number }
+    | { decision: "hold" | "reject"; reason: string },
   catalog: { decision: "catalog_current", models: approvedModels } as
     | { decision: "catalog_current"; models: unknown[] }
     | { decision: "hold"; reason: string },
@@ -50,6 +56,11 @@ async function loadRoute(): Promise<{ GET: (request: Request) => Promise<Respons
     } });
     mock.module(mod("lib/amux/ideaFrontierCatalogRead.ts"), { namedExports: {
       listApprovedAmuxIdeaFrontierModels: async () => { world.listCalls += 1; return world.catalog; },
+      readCurrentAmuxIdeaFrontierSelection: async (selected: unknown) => {
+        world.checkCalls += 1;
+        world.checkedInput = selected;
+        return world.selection;
+      },
     } });
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
   }
@@ -64,6 +75,10 @@ const reset = () => {
   world.recent = true;
   world.readOn = true;
   world.listCalls = 0;
+  world.checkCalls = 0;
+  world.checkedInput = null;
+  world.selection = { decision: "selection_current", approvalId: approvedModels[0].approvalId,
+    approvalVersion: 1 };
   world.catalog = { decision: "catalog_current", models: approvedModels };
 };
 
@@ -110,4 +125,54 @@ test("catalog uncertainty is a no-store hold with no candidate list", async () =
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.deepEqual(await response.json(), { state: "hold", error: "model_catalog_unverified",
     transferAuthorized: false });
+});
+
+test("exact model check is owner-only and never authorizes transfer", async () => {
+  const { GET } = await loadRoute();
+  const query = "?mode=check&provider=openai&modelId=gpt-frontier&reasoningEffort=high";
+  for (const setup of [
+    () => { world.session = null; },
+    () => { world.role = "admin"; },
+    () => { world.recent = false; },
+    () => { world.readOn = false; },
+  ]) {
+    reset(); setup();
+    const response = await GET(request(query));
+    assert.ok([404, 403, 428, 503].includes(response.status));
+    assert.equal(world.checkCalls, 0);
+  }
+  for (const bad of [
+    "?mode=check&provider=openai&modelId=gpt-frontier",
+    `${query}&reasoningEffort=high`,
+    `${query}&extra=1`,
+    "?mode=check&provider=openai&modelId=gpt-frontier&extra=1",
+  ]) {
+    reset();
+    assert.equal((await GET(request(bad))).status, 400, bad);
+    assert.equal(world.checkCalls, 0);
+  }
+  reset();
+  const response = await GET(request(query));
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.deepEqual(await response.json(), { state: "current", approvalId: approvedModels[0].approvalId,
+    approvalVersion: 1, transferAuthorized: false });
+  assert.equal(world.checkCalls, 1);
+  assert.deepEqual(world.checkedInput, { provider: "openai", modelId: "gpt-frontier",
+    reasoningEffort: "high" });
+});
+
+test("revoked and uncertain model checks fail closed", async () => {
+  const { GET } = await loadRoute();
+  const query = "?mode=check&provider=openai&modelId=gpt-frontier&reasoningEffort=high";
+  for (const selection of [
+    { decision: "reject" as const, reason: "model_not_approved" },
+    { decision: "hold" as const, reason: "model_catalog_unverified" },
+  ]) {
+    reset(); world.selection = selection;
+    const response = await GET(request(query));
+    assert.equal(response.status, selection.decision === "hold" ? 503 : 409);
+    assert.deepEqual(await response.json(), { state: selection.decision, error: selection.reason,
+      transferAuthorized: false });
+  }
 });
