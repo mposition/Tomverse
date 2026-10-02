@@ -119,13 +119,21 @@ test("an OAuth sign-up consumes its choice, and everything it implies commits to
   assert.deepEqual([shown.jurisdiction, shown.jurisdictionSource], ["AU", "ip_estimated"]);
   assert.equal((shown.evidence as { surface: string }).surface, "signup");
 
-  const requested = await prisma.consentRecord.findFirstOrThrow({
+  // Without a proof, one confirmation per purpose the box names
+  // (docs/policy/email-double-opt-in.md §14.8).
+  const requested = await prisma.consentRecord.findMany({
     where: { userId: user.id, action: "confirmation_requested" },
+    orderBy: { purpose: "asc" },
   });
-  assert.equal(requested.purpose, "product_updates");
-  assert.equal(requested.capturedVia, "signup_form");
-  assert.equal(requested.jurisdictionSource, "ip_estimated");
-  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 1);
+  assert.deepEqual(
+    requested.map((row) => row.purpose),
+    ["newsletter", "product_updates", "promotions"]
+  );
+  for (const row of requested) {
+    assert.equal(row.capturedVia, "signup_form");
+    assert.equal(row.jurisdictionSource, "ip_estimated");
+  }
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 3);
 
   // Once: the same account asking again is told it is consumed, and nothing
   // is written twice -- no second confirmation mail.
@@ -136,7 +144,7 @@ test("an OAuth sign-up consumes its choice, and everything it implies commits to
     nonce: issued.nonce,
   });
   assert.equal(again.ok, true);
-  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 1);
+  assert.equal(await prisma.emailDelivery.count({ where: { userId: user.id } }), 3);
 });
 
 test("an existing account's sign-in never consumes a choice", async () => {
@@ -306,6 +314,9 @@ test("an opt-in whose confirmation cannot be requested rolls back, and can be fi
   assert.equal(await prisma.emailPermissionEvent.count({ where: { userId: user.id } }), 0);
   assert.equal(await prisma.userSettings.count({ where: { userId: user.id } }), 0);
   assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  // Not even the default preference rows: seeding happens only on the path
+  // that goes on to request.
+  assert.equal(await prisma.emailPreference.count({ where: { userId: user.id } }), 0);
 
   await setEmailFeatureFlag(EMAIL_CONSENT_CONFIRMATION_FLAG_KEY, true);
   assert.deepEqual(
