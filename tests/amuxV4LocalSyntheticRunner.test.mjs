@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import test from "node:test";
@@ -16,7 +17,13 @@ test("AMUX local analysis refuses model CLI and oversized input before spawning"
 
 test("AMUX local synthetic runner bounds output and cleans its socket", {
   skip: process.platform !== "linux" || !existsSync("/usr/bin/bwrap"),
-}, async () => {
+}, async (t) => {
+  const probe = spawnSync("/usr/bin/bwrap", ["--unshare-all", "--die-with-parent",
+    "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+    "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
+    "--dev", "/dev", "--proc", "/proc",
+    "--", "/usr/bin/true"], { encoding: "utf8", timeout: 5_000 });
+  if (probe.status !== 0) { t.skip("user namespaces unavailable"); return; }
   const directories = async () => (await readdir("/tmp"))
     .filter((name) => name.startsWith("amux-v4-synthetic-")).sort();
   const before = await directories();
