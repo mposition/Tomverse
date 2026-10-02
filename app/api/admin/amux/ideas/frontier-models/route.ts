@@ -24,7 +24,10 @@ import {
   FrontierCatalogWriteError,
   writeFrontierCatalogDecision,
 } from "@/lib/amux/ideaFrontierCatalogWrite";
-import { listApprovedAmuxIdeaFrontierModels } from "@/lib/amux/ideaFrontierCatalogRead";
+import {
+  listApprovedAmuxIdeaFrontierModels,
+  readCurrentAmuxIdeaFrontierSelection,
+} from "@/lib/amux/ideaFrontierCatalogRead";
 import { prisma } from "@/lib/prisma";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -121,6 +124,24 @@ export async function GET(request: Request) {
           transferAuthorized: false }, { headers: noStore })
         : NextResponse.json({ error: catalog.reason, state: "hold",
           transferAuthorized: false }, { status: 503, headers: noStore });
+    }
+    if (params.get("mode") === "check" && [...params.keys()].length === 4 &&
+        ["mode", "provider", "modelId", "reasoningEffort"].every((key) => params.has(key)) &&
+        [...params.keys()].every((key) =>
+          ["mode", "provider", "modelId", "reasoningEffort"].includes(key))) {
+      const decision = await readCurrentAmuxIdeaFrontierSelection({
+        provider: params.get("provider") ?? "",
+        modelId: params.get("modelId") ?? "",
+        reasoningEffort: params.get("reasoningEffort") ?? "",
+      });
+      if (decision.decision === "selection_current") {
+        return NextResponse.json({ state: "current", approvalId: decision.approvalId,
+          approvalVersion: decision.approvalVersion, transferAuthorized: false },
+        { headers: noStore });
+      }
+      return NextResponse.json({ state: decision.decision, error: decision.reason,
+        transferAuthorized: false },
+      { status: decision.decision === "hold" ? 503 : 409, headers: noStore });
     }
     if ([...params.keys()].length !== 1 || !params.has("approvalId")) {
       return NextResponse.json({ error: "schema_rejected" }, { status: 400, headers: noStore });

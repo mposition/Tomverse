@@ -6,6 +6,8 @@ export type AvailableFrontierModel = {
   allowedEfforts: string[];
 };
 
+export type CheckedFrontierSelection = { approvalId: string; approvalVersion: number };
+
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const APPROVAL_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
@@ -33,4 +35,18 @@ export function readAvailableFrontierModels(status: number, body: unknown): Avai
       provider: row.provider, modelId: row.modelId, allowedEfforts: [...row.allowedEfforts] as string[] });
   }
   return models;
+}
+
+/** A check is a current observation only, never a transfer receipt. */
+export function readCheckedFrontierSelection(
+  status: number,
+  body: unknown,
+  selected: AvailableFrontierModel,
+): CheckedFrontierSelection | null {
+  if (status !== 200 || !body || typeof body !== "object" || Array.isArray(body)) return null;
+  const reply = body as Record<string, unknown>;
+  if (reply.state !== "current" || reply.transferAuthorized !== false ||
+      reply.approvalId !== selected.approvalId ||
+      reply.approvalVersion !== selected.approvalVersion) return null;
+  return { approvalId: selected.approvalId, approvalVersion: selected.approvalVersion };
 }
