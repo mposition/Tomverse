@@ -25,6 +25,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+<!-- development-execution -->
+## Development sessions deliver small working changes
+
+For a feature or bug fix, choose the smallest useful behavior within the approved scope, implement it, and run the relevant test or check. Keep investigation and design focused on what is needed for that next code change. Do not substitute policy revisions, plans, or repeated independent reviews for working functionality.
+
+Follow required approvals, policy gates, and independent review for the changes to which they apply. Once those requirements are clear, continue with code that is already authorized. If a decision blocks one change, name the exact blocker and complete another authorized, testable slice when available.
+
+Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
+<!-- /development-execution -->
+
 # 의미 있는 개발 사이클의 완료 보고
 
 작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
