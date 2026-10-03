@@ -142,6 +142,15 @@ jobs:
       # `continue-on-error` because a run that restored the key saves it again
       # and the action refuses a duplicate -- a refusal to write a cache must not
       # fail a required check.
+      #
+      # Known and accepted: when a pull request's first run skips the vendored
+      # server, the entry it stores holds only the root crates, and a later
+      # commit in the same pull request that brings the vendored build into scope
+      # without touching either lockfile restores that same key and re-downloads
+      # the vendor crates on every run, because the key already exists and
+      # cannot be replaced -- and `continue-on-error` is what makes that quiet.
+      # `cargo --locked` fetches what is missing, so it costs downloads rather
+      # than correctness (independent review, 2026-10-03).
       - name: Save the downloaded crates
         if: github.event_name == 'pull_request'
         continue-on-error: true
