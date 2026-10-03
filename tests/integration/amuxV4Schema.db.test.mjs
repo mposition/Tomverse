@@ -803,6 +803,80 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     assert.equal(backdateError.code, "P0001");
     assert.match(backdateError.message, /terminal clock is immutable/);
+    const beforeArchiveCard = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
+    await client.query(
+      `UPDATE public."AmuxWorkItem" SET "archivedAt" = TIMESTAMP '2000-01-01'
+       WHERE "id" = $1`, [ids.story],
+    );
+    const afterArchiveCard = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
+    const cardArchive = await client.query(
+      `SELECT "archivedAt" FROM public."AmuxWorkItem" WHERE "id" = $1`,
+      [ids.story],
+    );
+    assert.ok(cardArchive.rows[0].archivedAt.getTime() >=
+      beforeArchiveCard.rows[0].moment.getTime() - 1);
+    assert.ok(cardArchive.rows[0].archivedAt.getTime() <=
+      afterArchiveCard.rows[0].moment.getTime() + 1);
+    const rewriteArchive = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "archivedAt" = CURRENT_TIMESTAMP + INTERVAL '1 day'
+       WHERE "id" = $1`, [ids.story],
+    );
+    assert.equal(rewriteArchive.code, "P0001");
+    assert.match(rewriteArchive.message, /archive clock is immutable/);
+
+    // Only the isolated test fixture backdates the terminal clock. The live
+    // trigger can then prove the due purge succeeds and cannot be undone.
+    await client.query(
+      `ALTER TABLE public."AmuxWorkItem" DISABLE TRIGGER "AmuxWorkItem_v4_display_purge_fence"`,
+    );
+    await client.query(
+      `UPDATE public."AmuxWorkItem"
+       SET "v4TerminalAt" = CURRENT_TIMESTAMP - INTERVAL '91 days'
+       WHERE "id" = $1`, [ids.story],
+    );
+    await client.query(
+      `ALTER TABLE public."AmuxWorkItem" ENABLE TRIGGER "AmuxWorkItem_v4_display_purge_fence"`,
+    );
+    await client.query(
+      `UPDATE public."AmuxWorkItem"
+       SET "v4TitleCiphertext" = NULL, "v4TitleKeyId" = NULL,
+           "v4TitleKeyVersion" = NULL, "v4BodyCiphertext" = NULL,
+           "v4BodyKeyId" = NULL, "v4BodyKeyVersion" = NULL,
+           "v4DisplayPurgedAt" = TIMESTAMP '2000-01-01'
+       WHERE "id" = $1`, [ids.story],
+    );
+    const purged = await client.query(
+      `SELECT "v4DisplayPurgedAt", "v4TitleDigest", "v4BodyDigest"
+       FROM public."AmuxWorkItem" WHERE "id" = $1`, [ids.story],
+    );
+    assert.ok(purged.rows[0].v4DisplayPurgedAt.getTime() >
+      new Date("2026-01-01").getTime());
+    assert.equal(purged.rows[0].v4TitleDigest, titleDigest);
+    assert.equal(purged.rows[0].v4BodyDigest, digest);
+    const restored = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "v4TitleCiphertext" = $2
+       WHERE "id" = $1`, [ids.story, title],
+    );
+    assert.equal(restored.code, "P0001");
+    assert.match(restored.message, /cannot be restored/);
+
+    const legacyId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxWorkItem" ("id", "title", "status", "updatedAt")
+       VALUES ($1, 'Legacy', 'backlog', CURRENT_TIMESTAMP)`, [legacyId],
+    );
+    await client.query(
+      `UPDATE public."AmuxWorkItem" SET "title" = 'Legacy updated'
+       WHERE "id" = $1`, [legacyId],
+    );
+    const legacyTitle = await client.query(
+      `SELECT "title" FROM public."AmuxWorkItem" WHERE "id" = $1`, [legacyId],
+    );
+    assert.equal(legacyTitle.rows[0].title, "Legacy updated");
 
     // Empty-table fixture cleanup is the sole allowed TRUNCATE path.
     await client.query("ROLLBACK");

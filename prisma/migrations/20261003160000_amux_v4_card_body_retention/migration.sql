@@ -1,5 +1,9 @@
 -- Add a separately encrypted, purgeable v4 card body. Existing cards are
 -- untouched; the v4 registration code latch remains closed.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE "AmuxWorkItem" IN ACCESS EXCLUSIVE MODE;
+
 ALTER TABLE "AmuxWorkItem"
     ADD COLUMN "v4BodyCiphertext" BYTEA,
     ADD COLUMN "v4BodyKeyId" TEXT,
@@ -91,6 +95,11 @@ BEGIN
         END IF;
         RETURN NEW;
     END IF;
+    IF OLD."sourceSystem" IS DISTINCT FROM 'admin-idea-v4' AND
+       NEW."sourceSystem" = 'admin-idea-v4' THEN
+        RAISE EXCEPTION 'legacy card cannot become an AMUX v4 card'
+            USING ERRCODE = 'P0001';
+    END IF;
     IF OLD."sourceSystem" = 'admin-idea-v4' AND
        NEW."sourceSystem" IS DISTINCT FROM OLD."sourceSystem" THEN
         RAISE EXCEPTION 'AMUX v4 card source identity is immutable'
@@ -131,3 +140,5 @@ $$;
 CREATE TRIGGER "AmuxWorkItem_v4_display_purge_fence"
 BEFORE INSERT OR UPDATE ON "AmuxWorkItem"
 FOR EACH ROW EXECUTE FUNCTION amux_v4_card_display_purge_fence();
+
+COMMIT;

@@ -7071,6 +7071,7 @@ model AmuxWorkItem {
   v4BodyKeyVersion      Int?
   v4BodyDigest          String?
   v4BodyDigestKeyId     String?
+  /// DB-clocked marker for the joint title and body purge after terminal/archive +90d.
   v4DisplayPurgedAt     DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
