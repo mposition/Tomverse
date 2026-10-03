@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import {
   CACHE_FAMILIES,
+  NON_WRITE_CACHE_MODES,
   WIDELY_READABLE_BRANCHES,
   describeFinding,
   judgeCacheKeys,
@@ -49,6 +50,8 @@ console.log(
   `Actions cache check passed across ${sources.length} workflow(s): no key is declared by two of them, ` +
     `every key carries <family>-v<n>-<namespace>- in fixed text, no restore-key reaches past its own, ` +
     `no two workflows share or prefix a namespace (paths with a declared family: ` +
-    `${CACHE_FAMILIES.map((entry) => entry.family).join(", ")}), and nothing writes a cache from a run ` +
-    `that can land on ${WIDELY_READABLE_BRANCHES.join(" or ")}.`,
+    `${CACHE_FAMILIES.map((entry) => entry.family).join(", ")}), nothing writes a cache from a run ` +
+    `that can land on ${WIDELY_READABLE_BRANCHES.join(" or ")}, and every workflow that can run there ` +
+    `declares cache-mode: ${NON_WRITE_CACHE_MODES.join(" or ")} so the job's token cannot write one ` +
+    `past its declared steps.`,
 );
