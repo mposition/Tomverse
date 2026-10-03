@@ -74,6 +74,20 @@ export const WIDELY_READABLE_BRANCHES = ["main", "develop"];
 export const CACHE_MODES = ["read", "write", "write-only", "none"];
 export const NON_WRITE_CACHE_MODES = ["read", "none"];
 
+/**
+ * What each mode lets a job do, so "narrower" can be asked as a question.
+ *
+ * `read` and `write-only` grant different, non-overlapping things, which is why
+ * the comparison is a subset test rather than a position on a scale -- GitHub's
+ * own documentation makes the same point about a reusable workflow's caller.
+ */
+const CACHE_MODE_CAPABILITIES = {
+  none: [],
+  read: ["restore"],
+  "write-only": ["save"],
+  write: ["restore", "save"],
+};
+
 /** Where `cache-mode` is declared in a workflow, exactly as written. */
 export const readCacheMode = (document) => {
   if (!isObj(document)) return { workflow: undefined, jobs: [] };
@@ -126,6 +140,27 @@ export const cacheModeFailures = (document) => {
         jobId,
         detail: `cache-mode is ${JSON.stringify(value)}`,
       });
+      continue;
+    }
+    // Being non-write is not the same as being narrower. `read` under a
+    // workflow set to `none` turns restoring back on, which is an override and
+    // not a narrowing -- the only narrowing this allows is `none` under `read`.
+    // Independent review found the earlier version accepting it. Skipped when
+    // the workflow value is not one of the four, because the failure above
+    // already names that and a second finding would only obscure it.
+    if (workflowKind === "non_write") {
+      const allowed = CACHE_MODE_CAPABILITIES[declared.workflow];
+      const wanted = CACHE_MODE_CAPABILITIES[value];
+      const widened = wanted.filter((capability) => !allowed.includes(capability));
+      if (widened.length > 0) {
+        failures.push({
+          rule: "cache_mode_widened_by_job",
+          jobId,
+          detail: `cache-mode is ${JSON.stringify(value)} under a workflow set to ${JSON.stringify(
+            declared.workflow,
+          )}, which adds ${widened.join(" and ")}`,
+        });
+      }
     }
   }
   return failures;

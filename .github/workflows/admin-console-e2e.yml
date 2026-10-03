@@ -216,6 +216,78 @@ jobs:
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
 
+
+      # `scripts/run-admin-e2e.mjs` validates the database URL and pushes the
+      # Prisma schema before Playwright boots the server. The build above is
+      # why this uses the `:run` script rather than `test:e2e:admin`, which
+      # would build a second time.
+      # 20 rather than 15, from measurement rather than preference.
+      #
+      # The suite finishes this step in about 8 minutes on a healthy runner --
+      # 7m33s on run 33350642502 and 7m57s on 33351987254, both on develop --
+      # inside a job that completes in 9-10 minutes. At 15 the margin was
+      # roughly a third, which a slow runner spends: run 33349427451, also on
+      # develop, hit the cap at 15m13s with no test having failed, while
+      # PostgreSQL was logging a single checkpoint at write=55s, sync=11s over
+      # 52,974 files. The check then reports "the runner was slow" in the same
+      # red as "the suite failed", on whatever PR happened to be running.
+      #
+      # 20 keeps the whole job inside its own 25-minute cap: prep to the start
+      # of this step measured 1m46s on the run that failed, so the worst case
+      # is about 22 minutes.
+      #
+      # This is a ceiling raise and nothing else -- no retry, no test change.
+      #
+      # Reaching 20 minutes is a stop condition, not a diagnosis. It does not
+      # establish a hang; it establishes that the cause is no longer worth
+      # absorbing with a bigger number. Do not raise it a second time --
+      # investigate instead, and the candidates are not only the suite: a
+      # particular spec, the server start, the database, or runner latency of
+      # the kind seen in 33349427451.
+      #
+      # Post-change observation is NOT complete. Two runs since:
+      #
+      #   33353197874  step 7m45s  job 9m15s
+      #   33353265602  step 7m34s  job 9m15s
+      #
+      # Both sit with the pre-change readings, so no clear degradation has
+      # been introduced. That is all they show. Two green runs cannot
+      # establish that an intermittent timeout is resolved, and nothing here
+      # should be read as claiming it. The intended sample is roughly 20 runs.
+      #
+      # 2026-09-11: the cap was reached, and the instruction above was
+      # followed -- it is still 20. What the investigation found:
+      #
+      #   34600100588  develop  step 20m12s  cap reached
+      #   34600078904  main     step  7m31s  passed, started 12:41:50Z
+      #
+      # Seven seconds apart, on two runners, 2.7x apart. In the failing run
+      # every test passed: no `✘`, no `retry #`, and the last line is
+      # `✓ 207 ... (4.4s)` at 13:02:05.894Z against a kill at 13:02:09.714Z.
+      # It was not hung and no spec was slow; the whole run was slow, and it
+      # was four seconds from finishing.
+      #
+      # So the cause is the runner's disk, and what makes this suite a hostage
+      # to it is its own shape: `workers: 1` and 207 tests strictly serial,
+      # each one truncating 122 tables and re-seeding them. Three changes
+      # address that, none of them to a test or to this number:
+      #
+      #   - the service container now runs with relaxed durability (a step
+      #     above), which is what the checkpoint readings were asking for;
+      #   - `resetAdminDatabase()` truncates only the tables holding a row,
+      #     which is what wrote the 52,974 files;
+      #   - the seed is one transaction instead of thirty commits.
+      #
+      # And two that make the next one legible rather than faster:
+      # `globalTimeout` in the Playwright config, three minutes inside this
+      # cap, so a slow run ends itself and writes a report; and evidence
+      # uploaded on every run, so a healthy run is on record to compare with.
+      #
+      # Observation for this change has NOT started. The same rule applies and
+      # for the same reason: this is an intermittent tail, one green run says
+      # nothing about it, and the sample that would mean something is roughly
+      # 20 runs of the step duration -- read as a maximum and a spread, not a
+      # mean. A mean of 7 minutes was always true while the tail was failing.
       - name: Run the Admin Console E2E suite
         timeout-minutes: 20
         run: npm run test:e2e:admin:run

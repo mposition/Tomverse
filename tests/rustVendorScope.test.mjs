@@ -7,9 +7,10 @@ import { parse } from "yaml";
 
 import { vendorScope } from "../scripts/rust-vendor-scope.mjs";
 
-// The vendored AMUX server runs only when a change can affect it, and the
-// Rust lane's caches are written only by develop pushes. See the header of
-// .github/workflows/orchestrator-rust.yml.
+// The vendored AMUX server runs only when a change can affect it, and nothing
+// writes this lane's cache: the workflow can run on develop or main, so its
+// cache-mode is read and GitHub refuses the write at the token. See the header
+// of .github/workflows/orchestrator-rust.yml.
 
 test("a change under vendor/amux runs the vendored server", () => {
     assert.equal(vendorScope(["lib/foo.ts", "vendor/amux/crates/amux-server/src/lib.rs"]).vendor, true);

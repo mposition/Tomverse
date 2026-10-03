@@ -868,6 +868,11 @@ test("a job may narrow the workflow's cache-mode but not widen it", () => {
     );
   assert.deepEqual(rules([withJob("read", "none")]), []);
   assert.deepEqual(rules([withJob("read", "read")]), []);
+  assert.deepEqual(rules([withJob("none", "none")]), []);
+  // `read` under `none` is an override, not a narrowing: it turns restoring
+  // back on. Independent review found the first version of this rule accepting
+  // it, because it only asked whether the job value was non-write.
+  assert.deepEqual(rules([withJob("none", "read")]), ["cache_mode_widened_by_job"]);
   // A job-level value overrides the workflow's, so this one gets its write
   // capability back however read-only the workflow looks at the top.
   for (const jobMode of ["write", "write-only"]) {
