@@ -19,6 +19,7 @@ let priceReads = 0;
 let priceMatches = true;
 let auditValid = true;
 let policyDrift = false;
+let policyUnavailable = false;
 let stageExists = false;
 let inTransaction = false;
 const policyBytes = readFileSync(resolve(root,
@@ -44,7 +45,10 @@ mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
   adminAuditIntegrityKeys: () => ["synthetic-key"],
 } });
 mock.module(mod("lib/promptRefinerStageAdmission.ts"), { namedExports: {
-  readExactCheckoutFile: async () => policyDrift ? Buffer.from("changed policy") : policyBytes,
+  readExactCheckoutFile: async () => {
+    if (policyUnavailable) throw new Error("synthetic EACCES");
+    return policyDrift ? Buffer.from("changed policy") : policyBytes;
+  },
 } });
 mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), { namedExports: {
   promptRefinerVnextOneShotAuditReceiptIsValid: async () => auditValid,
@@ -217,6 +221,13 @@ test("lost POST response is recovered only from one signed, current owner receip
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
     stale);
   policyDrift = false;
+  policyUnavailable = true;
+  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    /preregistration_policy_unavailable/);
+  policyUnavailable = false;
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    /preregistration_runner_unavailable/);
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = "e".repeat(64);
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
     stale);

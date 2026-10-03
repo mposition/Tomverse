@@ -84,8 +84,10 @@ const assertPolicyRunnerAndPricePins = async (
     throw new Error("vnext_one_shot_preregistration_policy_mismatch");
   }
   const runnerDigest = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
-  if (!HEX_64.test(runnerDigest ?? "") ||
-      runnerDigest !== expected.runnerDigest ||
+  if (!HEX_64.test(runnerDigest ?? "")) {
+    throw new Error("vnext_one_shot_preregistration_runner_unavailable");
+  }
+  if (runnerDigest !== expected.runnerDigest ||
       expected.pricePinDigest !== PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST) {
     throw new Error("vnext_one_shot_preregistration_pin_mismatch");
   }
