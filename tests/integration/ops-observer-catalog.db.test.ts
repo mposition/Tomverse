@@ -92,8 +92,8 @@ test("the ops-observer catalogue", { skip: !rawUrl }, async (t) => {
       await seen(`DROP TRIGGER "OpsObserverTransition_guard" ON "OpsObserverTransition"`, /missing OpsObserverTransition_guard/);
       await seen(`ALTER TABLE "OpsObserverState" DROP CONSTRAINT "OpsObserverState_checkpoint_check"`, /missing OpsObserverState_checkpoint_check/);
       await seen(`DROP INDEX "OpsObserverDelivery_genesisId_ownerDate_idx"`, /missing OpsObserverDelivery_genesisId_ownerDate_idx/);
-      await seen(`ALTER TABLE "OpsObserverTransition" ALTER CONSTRAINT "OpsObserverTransition_auditLogId_fkey" DEFERRABLE INITIALLY DEFERRED`,
-        /OpsObserverTransition_auditLogId_fkey deferral/);
+      await seen(`ALTER TABLE "OpsObserverTransition" ALTER CONSTRAINT "OpsObserverTransition_genesisId_fkey" DEFERRABLE INITIALLY DEFERRED`,
+        /OpsObserverTransition_genesisId_fkey deferral/);
       await seen(`DROP TRIGGER ops_observer_state_deadline_check ON "OpsObserverState";
                   CREATE CONSTRAINT TRIGGER ops_observer_state_deadline_check AFTER INSERT OR UPDATE ON "OpsObserverState"
                     NOT DEFERRABLE FOR EACH ROW EXECUTE FUNCTION ops_observer_deadline_check()`,

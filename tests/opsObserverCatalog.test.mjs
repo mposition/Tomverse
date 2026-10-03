@@ -59,7 +59,7 @@ test("a missing, extra or altered rule is a problem", () => {
     // A deadline check made immediate, or anything else made deferrable.
     (c) => (c.triggers.find((r) => r.name === "ops_observer_state_deadline_check").initiallyDeferred = false),
     (c) => (c.constraints.find((r) => r.name === "ops_observer_genesis_deadline_check").deferrable = false),
-    (c) => (c.constraints.find((r) => r.name === "OpsObserverTransition_auditLogId_fkey").deferrable = true),
+    (c) => (c.constraints.find((r) => r.name === "OpsObserverTransition_genesisId_fkey").deferrable = true),
     (c) => (c.triggers.find((r) => r.name === "OpsObserverDelivery_guard").initiallyDeferred = true),
     // Deferrable on a shared table.
     (c) => (c.triggers.find((r) => r.table === "AdminAuditLog").deferrable = true),

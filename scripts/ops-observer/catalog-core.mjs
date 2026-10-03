@@ -82,7 +82,6 @@ export const EXPECTED_CONSTRAINTS = Object.freeze({
   OpsObserverTransition: {
     OpsObserverTransition_pkey: "p",
     OpsObserverTransition_genesisId_fkey: "f",
-    OpsObserverTransition_auditLogId_fkey: "f",
     OpsObserverTransition_auditLogId_key: "u",
     OpsObserverTransition_generation_check: "c",
     OpsObserverTransition_keysSha256_check: "c",
