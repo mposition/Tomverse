@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { amuxV4SandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
+import { planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContract.mjs";
 
 test("AMUX v4 sandbox uses a fixed isolated namespace and no inherited environment", () => {
   const args = amuxV4SandboxArgs("/tmp/amux-v4-probe-AbC123",
@@ -60,4 +61,28 @@ test("AMUX v4 CLI requires a digest-pinned private staged executable", () => {
     { path, sha256: "not-a-digest" }), TypeError);
   assert.throws(() => amuxV4SandboxArgs(socket, ["/run/amux-cli/codex", "--version"],
     { get path() { return path; }, sha256: "a".repeat(64) }), TypeError);
+});
+
+test("AMUX v4 analysis mount accepts only exact planned argv and one private auth file", () => {
+  const socket = "/tmp/amux-v4-socket-abc";
+  const selection = { provider: "openai", modelId: "gpt-5.6-sol",
+    reasoningEffort: "high" };
+  const plan = planAmuxV4AnalysisCliInvocation(selection);
+  const cliMount = { path: "/tmp/amux-v4-cli-stage-abc/codex",
+    sha256: "a".repeat(64) };
+  const analysisMount = { ...selection,
+    authPath: "/home/tommy/.codex/auth.json" };
+  const args = amuxV4SandboxArgs(socket, plan.command, cliMount, analysisMount);
+  assert.ok(args.includes("/tmp/.codex/auth.json"));
+  assert.ok(args.includes("/etc/ssl/certs"));
+  assert.ok(args.includes("CODEX_HOME"));
+  assert.equal(args.includes("DATABASE_URL"), false);
+  assert.equal(args.includes("GITHUB_TOKEN"), false);
+  assert.throws(() => amuxV4SandboxArgs(socket,
+    [...plan.command, "--dangerously-bypass-approvals-and-sandbox"],
+    cliMount, analysisMount), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, plan.command, cliMount,
+    { ...analysisMount, authPath: "/home/tommy/.ssh/id_ed25519" }), TypeError);
+  assert.throws(() => amuxV4SandboxArgs(socket, plan.command, cliMount,
+    { ...analysisMount, provider: "anthropic" }), TypeError);
 });

@@ -13,6 +13,7 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   const codex = planAmuxV4AnalysisCliInvocation(openai);
   const claude = planAmuxV4AnalysisCliInvocation(anthropic);
   assert.equal(codex.command[0], "/run/amux-cli/codex");
+  assert.deepEqual(codex.command.slice(1, 4), ["--ask-for-approval", "never", "exec"]);
   assert.ok(codex.command.includes("--ephemeral"));
   assert.ok(codex.command.includes("--ignore-user-config"));
   assert.ok(codex.command.includes("--ignore-rules"));
@@ -21,6 +22,7 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.equal(claude.command[0], "/run/amux-cli/claude");
   assert.ok(claude.command.includes("--safe-mode"));
   assert.ok(claude.command.includes("--no-session-persistence"));
+  assert.equal(claude.command.includes("--max-turns"), false);
   assert.deepEqual(claude.command.slice(-4), ["--model", anthropic.modelId,
     "--effort", anthropic.reasoningEffort]);
   assert.equal(planAmuxV4AnalysisCliInvocation({ ...openai,
@@ -79,7 +81,7 @@ test("Codex usage without served-model attestation cannot certify success", () =
   ];
   const stdout = Buffer.from(events.map((value) => JSON.stringify(value)).join("\n"));
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0),
-    { kind: "model_unverified" });
+    { kind: "model_unverified", inputTokens: 10, outputTokens: 2 });
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     Buffer.from(events.slice(0, -1).map((value) =>
       JSON.stringify(value)).join("\n")), 0), { kind: "outcome_unknown" });
