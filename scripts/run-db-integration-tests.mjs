@@ -281,6 +281,12 @@ run(
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // Dark Admin request writer rechecks source, model and idempotency under
+    // locks; neither a GitHub read nor a model call is performed.
+    "tests/integration/amux-v4-idea-collection-request-service.db.test.ts",
+    // The collector hint pages only current, pending request IDs and never
+    // returns source scope, excerpt or model text.
+    "tests/integration/amux-v4-idea-collection-queue.db.test.ts",
     // Dark local collection request binds one approved source, Frontier
     // identity, immutable request digest and bounded encrypted result.
     "tests/integration/amux-v4-idea-collection-request.db.test.mjs",
