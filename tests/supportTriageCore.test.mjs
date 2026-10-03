@@ -265,3 +265,35 @@ test("the run-table migration's literals are the core constants", async () => {
   assert.ok(sql.includes(`"batchesCompleted" <= ${core.RETENTION_BATCHES_PER_RUN_MAX})`));
   assert.ok(sql.includes(`CHECK ("kind" IN (${core.SUPPORT_TRIAGE_RUN_KINDS.map((k) => `'${k}'`).join(", ")}))`));
 });
+
+test("the suggestion migration's transitions and lists are the core's", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const sql = readFileSync(
+    new URL("../prisma/migrations/20261003150000_support_triage_suggestion/migration.sql", import.meta.url),
+    "utf8"
+  );
+  const block = /-- transitions: SupportTriageSuggestion state\n([\s\S]*?)-- end transitions/.exec(sql);
+  assert.ok(block, "the transitions block exists");
+  const pairs = [...block[1].matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}->${m[2]}`).sort();
+  assert.deepEqual(pairs, core.SUGGESTION_TRANSITIONS.map(([a, b]) => `${a}->${b}`).sort());
+  const list = (values) => values.map((v) => `'${v}'`).join(", ");
+  assert.ok(sql.includes(`CHECK ("state" IN (${list(core.SUGGESTION_STATES)}))`));
+  assert.ok(sql.includes(`"failureCode" IN (${list(core.SUGGESTION_FAILURE_CODES)})`));
+  assert.ok(sql.includes(`"lane" IN (${list(core.TRIAGE_LANES)})`));
+  assert.ok(sql.includes(`CHECK ("ownerQueueState" IN (${list(core.OWNER_QUEUE_STATES)}))`));
+  assert.ok(sql.includes(`ARRAY[${list(core.KEYWORD_FLAGS)}]::TEXT[]`));
+  assert.ok(sql.includes(`CHECK ("attemptCount" BETWEEN 0 AND ${core.SUGGESTION_MAX_ATTEMPTS})`));
+  assert.ok(sql.includes(`lease CONSTANT INTERVAL := interval '${core.SUGGESTION_LEASE_SECONDS / 60} minutes'`));
+  assert.ok(sql.includes(`OLD."state" IN (${list(core.SUGGESTION_TERMINAL_STATES)})`));
+});
+
+test("no transition leaves a terminal suggestion state", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  for (const [from] of core.SUGGESTION_TRANSITIONS) {
+    assert.ok(!core.SUGGESTION_TERMINAL_STATES.includes(from), from);
+  }
+  assert.equal(core.isSuggestionTransitionAllowed("pending", "claimed"), true);
+  assert.equal(core.isSuggestionTransitionAllowed("failed", "pending"), false);
+  assert.ok(!core.TRIAGE_LANES.includes("account_privacy_human"));
+});

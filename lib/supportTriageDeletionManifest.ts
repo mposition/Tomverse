@@ -87,6 +87,29 @@ export const SUPPORT_TRIAGE_DELETION_MANIFEST: readonly ManifestEntry[] = Object
       blocked: "lifecycle",
     }),
   }),
+  Object.freeze({
+    model: "SupportTriageSuggestion",
+    link: Object.freeze({ kind: "feedback_id", column: "feedbackId" }),
+    onAccountDeletion: "delete",
+    retentionKey: "terminal_suggestion_30_days",
+    columns: Object.freeze({
+      id: "identifier",
+      feedbackId: "identifier",
+      // Derived from the report's text: can be matched by guessing a short report.
+      inputDigest: "report_derived",
+      state: "lifecycle",
+      failureCode: "lifecycle",
+      claimToken: "lifecycle",
+      leaseExpiresAt: "lifecycle",
+      attemptCount: "lifecycle",
+      lane: "report_derived",
+      keywordFlags: "report_derived",
+      ownerQueueState: "lifecycle",
+      displayedAt: "lifecycle",
+      createdAt: "lifecycle",
+      updatedAt: "lifecycle",
+    }),
+  }),
 ]);
 
 /**

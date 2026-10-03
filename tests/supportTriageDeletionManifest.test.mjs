@@ -198,6 +198,7 @@ test("a correctly declared feedback link passes", () => {
       onAccountDeletion: "delete",
       columns: { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0].columns, feedbackId: "identifier" },
     },
+    ...SUPPORT_TRIAGE_DELETION_MANIFEST.slice(1),
   ];
   assert.deepEqual(auditDeletionManifest(edited, manifest), []);
 });

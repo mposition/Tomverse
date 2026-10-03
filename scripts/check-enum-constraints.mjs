@@ -956,6 +956,34 @@ const REGISTRY = {
     reason:
       "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
+  SupportTriageSuggestion_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_STATES",
+    reason:
+      "pending, claimed, ready and six terminal states. The guard trigger allows only the core table's transitions and never changes a terminal row.",
+  },
+  SupportTriageSuggestion_failureCode_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_FAILURE_CODES",
+    reason:
+      "Why a suggestion failed; present exactly when the state is failed. retry_exhausted is what a fourth reclaim must become, because the attempt count stops at three.",
+  },
+  SupportTriageSuggestion_lane_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "TRIAGE_LANES",
+    reason:
+      "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
+  SupportTriageSuggestion_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a ready suggestion has been shown to a person. Separate from the state, reached once and stamped by the database.",
+  },
   SupportTriageRun_kind_check: {
     owner: "list",
     module: "lib/supportTriageCore.ts",

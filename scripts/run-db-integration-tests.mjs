@@ -306,6 +306,9 @@ run(
     // batches, a cancelling row is skipped and counted, and no progress is
     // reported as such.
     "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.

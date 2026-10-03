@@ -790,7 +790,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 1,
+    writeVerbs: 2,
     reason:
       "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },

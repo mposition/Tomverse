@@ -301,3 +301,91 @@ export type SupportTriageRunOutcome = (typeof SUPPORT_TRIAGE_RUN_OUTCOMES)[numbe
 
 /** A run row may be deleted only once it is this old; younger rows are immutable evidence. */
 export const SUPPORT_TRIAGE_RUN_RETENTION_DAYS = 30;
+
+/**
+ * `SupportTriageSuggestion` (policy sections 1, 2 and 6). The lists and the
+ * transition table below are the CHECK lists and the `-- transitions:` block
+ * of migration 20261003150000_support_triage_suggestion; tests compare them.
+ */
+export const SUGGESTION_STATES = Object.freeze([
+  "pending",
+  "claimed",
+  "ready",
+  "accepted",
+  "rejected",
+  "expired",
+  "superseded",
+  "invalidated",
+  "failed",
+] as const);
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+
+/** No transition leaves a terminal state. */
+export const SUGGESTION_TERMINAL_STATES: readonly SuggestionState[] = Object.freeze([
+  "accepted",
+  "rejected",
+  "expired",
+  "superseded",
+  "invalidated",
+  "failed",
+]);
+
+export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, SuggestionState])[] =
+  Object.freeze([
+    ["pending", "claimed"],
+    // Lease reclaim: the claim token is cleared and the attempt counted.
+    ["claimed", "pending"],
+    ["claimed", "ready"],
+    ["claimed", "failed"],
+    ["ready", "accepted"],
+    ["ready", "rejected"],
+    ["ready", "expired"],
+    ["ready", "superseded"],
+    ["ready", "invalidated"],
+    ["pending", "superseded"],
+    ["claimed", "superseded"],
+    ["pending", "invalidated"],
+    ["claimed", "invalidated"],
+  ]);
+
+export const isSuggestionTransitionAllowed = (from: SuggestionState, to: SuggestionState) =>
+  SUGGESTION_TRANSITIONS.some(([a, b]) => a === from && b === to);
+
+export const SUGGESTION_FAILURE_CODES = Object.freeze([
+  "config_error",
+  "internal_error",
+  "retry_exhausted",
+] as const);
+
+/** Reclaims allowed before a claimed suggestion must fail as retry_exhausted. */
+export const SUGGESTION_MAX_ATTEMPTS = 3;
+
+/**
+ * The lanes a suggestion proposes. Account and privacy reports go to
+ * `trust_safety_human` with security, legal and self-harm reports
+ * (operator decision 2026-10-03, design section 5.6); there is no separate
+ * account lane.
+ */
+export const TRIAGE_LANES = Object.freeze([
+  "bug_verified",
+  "bug_unverified",
+  "billing_human",
+  "trust_safety_human",
+  "feature_request",
+  "other",
+] as const);
+export type TriageLane = (typeof TRIAGE_LANES)[number];
+
+/** Codes from fixed per-locale keyword lists; a report's text never becomes anything else. */
+export const KEYWORD_FLAGS = Object.freeze([
+  "money",
+  "account_privacy",
+  "security",
+  "legal",
+  "self_harm_threat",
+] as const);
+
+export const OWNER_QUEUE_STATES = Object.freeze(["not_queued", "displayed"] as const);
+
+/** A claim's lease, set by the database when a suggestion is claimed. */
+export const SUGGESTION_LEASE_SECONDS = 5 * 60;
