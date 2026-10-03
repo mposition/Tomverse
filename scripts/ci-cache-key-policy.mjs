@@ -509,6 +509,20 @@ export const judgeCacheKeys = (sources) => {
             detail: step.key,
           });
         }
+        // Restricting only restore-keys was not enough. The cross-workflow rule
+        // compares both sides as text, so an unpredictable expression in a KEY
+        // hides a collision just as well: a literal restore-key of
+        // `...-v2-pr-admin-` does not textually prefix a key of
+        // `...-v2-pr-${{ matrix.lane }}-...`, and at lane=admin it reaches it.
+        // Independent review raised this after the restore-key half was fixed.
+        for (const expression of unpredictableExpressions(step.key)) {
+          findings.push({
+            rule: "key_has_unpredictable_expression",
+            workflowPath: source.path,
+            jobId: step.jobId,
+            detail: `\${{${expression}}} in ${step.key}`,
+          });
+        }
       }
 
       if (step.key !== null) {
@@ -571,6 +585,8 @@ export const describeFinding = (finding) => {
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
       return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+    case "key_has_unpredictable_expression":
+      return `${where}: key contains ${finding.detail}, whose value this cannot predict, so whether another workflow's restore-key reaches it cannot be decided. Put the variation in the namespace segment instead, as its own namespace.`;
     case "restore_key_has_unpredictable_expression":
       return `${where}: restore-key contains ${finding.detail}, whose value this cannot predict, so whether it reaches another workflow's entry cannot be decided. A restore-key may use only runner.os and hashFiles().`;
     case "restore_key_reaches_another_workflow":

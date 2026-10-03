@@ -463,23 +463,37 @@ ${step}`;
 `), true, "setup-go caches by default");
   assert.equal(restores(`      - uses: actions/setup-go@v5
 `), true);
-  // `cache: false` alone no longer counts as switched off. setup-node v6
-  // defaults `package-manager-cache` to true and caches whenever package.json
-  // declares a package manager, so the `cache` input is not the off switch any
-  // more -- that is the latent path the cache audit recorded in its 4.2.
+  // Which input is the off switch depends on the action, and conflating the two
+  // was a finding of its own.
+  //
+  // On setup-node v6 `cache: false` does NOT switch caching off: the action
+  // defaults `package-manager-cache` to true and caches as soon as package.json
+  // names a package manager, which is the latent path the cache audit recorded
+  // in its 4.2. On every other setup action `cache` is its own switch and
+  // `package-manager-cache` is not an input it has.
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          cache: false
+`), true, "setup-node: cache: false is not the off switch");
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+`), false, "setup-node: package-manager-cache: false is");
   assert.equal(restores(`      - uses: actions/setup-go@v5
         with:
           cache: false
-`), true, "cache: false is not the off switch under package-manager-cache");
-  assert.equal(restores(`      - uses: actions/setup-node@v6
+`), false, "setup-go: its own cache input is the switch");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
         with:
           package-manager-cache: false
-`), false, "package-manager-cache: false is");
+`), true, "setup-go: an input it does not have suppresses nothing");
+  // An explicitly named cache is restored whatever else is set, so
+  // package-manager-cache does not take it away.
   assert.equal(restores(`      - uses: actions/setup-node@v6
         with:
-          cache: false
+          cache: yarn
           package-manager-cache: false
-`), false, "both off");
+`), true, "a named cache still restores");
   assert.equal(restores(`      - uses: \${{ vars.ACTION }}
 `), true, "an action named by expression");
   assert.equal(restores(`      - uses: ./.github/actions/cache

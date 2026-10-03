@@ -308,6 +308,16 @@ const VERIFIED_SETUP_CACHES: ReadonlyArray<{ action: RegExp; caches: ReadonlySet
   { action: /^actions\/setup-node@/i, caches: new Set(["npm"]) },
 ];
 
+/**
+ * Setup actions that cache without being asked, where `package-manager-cache`
+ * is the switch rather than `cache`.
+ *
+ * Only setup-node v6 behaves this way. On every other setup action the `cache`
+ * input is its own switch, and `package-manager-cache` is not an input it has,
+ * so writing it there suppresses nothing.
+ */
+const AUTOMATIC_PACKAGE_MANAGER_CACHE: readonly RegExp[] = [/^actions\/setup-node@/i];
+
 const restoredCacheKinds = (job: Obj): CacheKind[] => {
   // What cannot be read counts as restoring: a `uses` that is not a plain
   // string, is an expression, or names an action kept in this repository
@@ -341,21 +351,35 @@ const restoredCacheKinds = (job: Obj): CacheKind[] => {
       const withBlock = isObj(step.with) ? step.with : {};
       const packageManagerCache = withBlock["package-manager-cache"];
       const cache = withBlock.cache;
-      // setup-node v6 defaults `package-manager-cache` to true and caches when
-      // package.json declares a package manager, so switching that off is the
-      // only way to say "this step caches nothing"
-      // (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
-      const switchedOff =
-        packageManagerCache === false ||
-        packageManagerCache === "false" ||
-        ((cache === false || cache === "false") && packageManagerCache !== undefined);
-      if (switchedOff) continue;
-      const verified = VERIFIED_SETUP_CACHES.some(
-        (entry) => entry.action.test(uses) && typeof cache === "string" && entry.caches.has(cache.trim()),
-      );
-      // Caching with no `cache` input, or with one not on the allowlist, is a
-      // cache this cannot vouch for rather than one it may assume is checked.
-      kinds.add(verified ? "verified_package_manager" : "unverified");
+      const cacheOff = cache === false || cache === "false";
+      const named = typeof cache === "string" && cache.trim() !== "" && cache.trim() !== "false" ? cache.trim() : null;
+
+      // An explicitly named cache is restored whatever else is set. Treating
+      // `package-manager-cache: false` as switching everything off was wrong:
+      // it governs only the automatic cache, so `cache: yarn` beside it still
+      // restores, and on an action that has no such input it means nothing at
+      // all. Independent review caught both.
+      if (named !== null) {
+        const verified = VERIFIED_SETUP_CACHES.some((entry) => entry.action.test(uses) && entry.caches.has(named));
+        kinds.add(verified ? "verified_package_manager" : "unverified");
+        continue;
+      }
+
+      // No named cache. Which input decides now depends on the action.
+      const hasAutomaticCache = AUTOMATIC_PACKAGE_MANAGER_CACHE.some((pattern) => pattern.test(uses));
+      if (hasAutomaticCache) {
+        // setup-node v6 caches whenever package.json names a package manager,
+        // and `package-manager-cache: false` is the only thing that stops it --
+        // `cache: false` does not
+        // (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+        if (packageManagerCache === false || packageManagerCache === "false") continue;
+        kinds.add("unverified");
+        continue;
+      }
+      // Every other setup action: its own `cache` input is its switch, and
+      // several default it on (setup-go caches GOCACHE, which is build output).
+      if (cacheOff) continue;
+      kinds.add("unverified");
     }
   }
   return KIND_ORDER.filter((kind) => kinds.has(kind));

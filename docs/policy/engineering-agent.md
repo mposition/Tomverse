@@ -215,7 +215,15 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
      복원할 수 있다고 말한다. 그러므로 기록은 "에이전트의 PR에서 실제로 도는 자격증명
      cache 복원 job이 없다"를 따로 확인해야 하고, 그 확인은 workflow의 trigger만이
      아니라 **job의 조건식까지** 읽어야 성립한다 — trigger만 보고 판정하면 틀린다.
-     이 확인은 날짜와 함께 쓰고, 유지 여부는 §5.1의 검사가 책임진다.
+
+     **이 조건을 유지하는 장치는 아직 없다.** §5.1의 검사는 자격증명 job의
+     `unverified`·`unreadable` 복원만 거절하고 `verified_package_manager` 복원은
+     허용하므로, 에이전트 PR에서 자격증명 job이 npm cache를 복원하는 상태를 막지
+     못한다. 그 상태는 이 조건을 깨뜨린다 — 에이전트는 자기 PR에서
+     `package-lock.json`을 바꿀 수 있고, 그러면 lockfile integrity 대조는
+     에이전트가 넣은 값과 맞아떨어진다. 그러므로 **그 장치가 생기기 전에는 이
+     기록을 쓸 수 없다.** 초안은 §5.1의 검사가 이 조건을 책임진다고 적었고, 그것은
+     거짓이었다(독립 검토 지적).
 - **결과**: 자격증명을 가진 job이 있는 도달 workflow마다 그 workflow의 path filter에
   걸리는 파일이 push 금지다. filter가 없거나 해석되지 않으면 모든 변경이 금지다.
 - **사람이 검토한 제외**: 결과를 좁히는 유일한 방법은 `{workflow 경로, job id, blob
@@ -246,9 +254,13 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   가진 job은 `unverified`·`unreadable` cache를 복원할 수 없고, 이 검사는 PR Fast
   Gate의 static 단계에서 돈다. 판정은 같은 모듈(`lib/agentCredentialReachability.ts`)
   이 하므로 "어느 job이 자격증명을 가졌는가"에 답이 둘로 갈라지지 않는다.
-- **이 검사가 §5의 기록(위 "그 기록이 담아야 하는 것" 3번)의 유지 장치다.** 기록이
-  "에이전트 PR에서 도는 자격증명 cache 복원 job이 없다"를 근거로 쓸 수 있는 것은
-  이 검사가 그 상태를 계속 지키기 때문이고, 검사가 사라지면 기록도 근거를 잃는다.
+- **이 검사는 §5의 기록 3번을 유지하지 않는다.** 그것이 거절하는 것은
+  `unverified`·`unreadable`뿐이고, 자격증명 job이 `verified_package_manager`를
+  복원하는 것은 통과시킨다. 3번이 요구하는 것은 **에이전트 PR에서 도는 자격증명
+  cache 복원 job이 하나도 없다**는 더 강한 조건이므로, 이 검사를 그 근거로 쓰면
+  안 된다. 3번을 위한 장치는 "에이전트가 일으키는 이벤트에 걸리는 workflow의
+  자격증명 job은 **어떤** cache도 복원하지 않는다"를 묻는 별개 검사이고, 아직
+  없다. 그것이 생길 때까지 기록은 쓸 수 없다.
 - 검사와 보고는 **이름을 출력하지 않는다**. 저장소가 공개이므로 §16이 미해소 대상의
   목록을 여기에 두지 못하게 한다. 수치만 남기고, 목록은 운영자가 로컬에서
   `npm run report:engineering-agent-tiers`로 본다.
