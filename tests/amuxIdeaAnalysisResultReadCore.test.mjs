@@ -141,19 +141,19 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     pages: [firstPage, { ...secondPage, outcome: "reject", units: [],
       remainingScope: "One final page remains" }, thirdPage],
   }, ideaId), null);
-  const boundedPages = Array.from({ length: 16 }, (_, index) => {
+  const boundedPages = Array.from({ length: 17 }, (_, index) => {
     const localRef = `c${index}:card-0`;
     return { ...firstPage, chunkIndex: index, previewId: `preview-${index}`,
       completedAt: new Date(Date.UTC(2026, 9, 3, 0, index)).toISOString(),
       units: [{ ...firstPage.units[0], id: `unit-${index}`, localRef,
         proposal: { ...firstPage.units[0].proposal, localId: localRef } }] };
   });
-  const boundedResult = { state: "continued_partial", ideaId, pages: boundedPages };
+  const boundedResult = { state: "continued_partial", ideaId,
+    pages: boundedPages.slice(0, 16) };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, boundedResult, ideaId),
     boundedResult);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...boundedResult,
-    pages: [...boundedPages, { ...boundedPages[0], chunkIndex: 16,
-      previewId: "preview-16" }],
+    pages: boundedPages,
   }, ideaId), null);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...threePages,
     pages: [firstPage, secondPage, { ...thirdPage, previewId: secondPage.previewId }],
