@@ -226,6 +226,12 @@ Date / timezone:    ____________________
       it leaves its card behind promising something that is gone, on the first
       screen a new account sees (docs/ui-contracts/chat-starter-catalog.md)
 - [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:package-json-duplicate-keys` — proves no tracked
+      `package.json` declares the same key twice. JSON allows the repetition
+      and every reader keeps one entry, so the file stays valid, nothing else
+      in the gate reports it, and the losing entry does not exist for anything
+      reading the parsed object — a tool that parses and re-serialises the
+      file then drops it from the bytes as well
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
 - [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset

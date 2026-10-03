@@ -8,8 +8,37 @@ name: Orchestrator Rust
 # It has no path filter on purpose. This job is a required check, and a
 # path-filtered workflow reports nothing at all on a pull request that does not
 # match -- the check then sits at "expected" forever and the pull request cannot
-# merge. Every pull request pays for the product and vendored AMUX Rust
-# builds; the cache and job timeout cover the larger vendor dependency set.
+# merge. The job always runs and always reports; what is scoped is inside it.
+#
+# The vendored AMUX server (vendor/amux, since #1935) is built and tested only
+# when the change can affect it -- scripts/rust-vendor-scope.mjs decides from
+# the changed paths, and runs everything when it cannot tell. Run on every
+# change, its ~14 minutes made this the slowest check Railway's Wait for CI held
+# staging for (2026-10-03: p50 ~17 minutes, against ~2 before the vendor).
+#
+# Only the downloaded crates are cached -- `~/.cargo/registry` and
+# `~/.cargo/git` -- and only in the pull request's own scope. Compiled output is
+# not shared between runs at all. Two decisions met here, and this is what
+# satisfies both.
+#
+# Caching each `target` directory cost ~3 GiB, and saved per pull request the two
+# of them filled the repository's 10 GB cache budget, evicted develop's entries
+# along with the Next.js, npm and Playwright caches, and left every run starting
+# cold. Moving those saves to pushes to develop fixed the budget, but a `target`
+# directory is compiled output that nothing verifies, and an entry written in the
+# develop scope is restorable by every run that can see that scope -- so a
+# compromised crate's build script could plant bytes that every later run then
+# executes (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F3, P1).
+#
+# Dropping `target` removes the unverified content, and most of the size with it,
+# which leaves the pull request's own scope affordable again: an entry written
+# there is restorable only by re-runs of that pull request, so nothing is shared
+# across refs and the audit's rule needs no exception. The first run of a pull
+# request downloads its crates; its re-runs do not.
+#
+# What is not given up is the part that cost the wall clock: the vendored server
+# is still built and tested only when the change can affect it, which is what
+# took this lane's ~14 minutes off every unrelated change.
 
 on:
   pull_request:
@@ -33,6 +62,9 @@ jobs:
     name: Build and test the Rust workspace
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Incremental artefacts are never reused in CI and double the cached size.
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,22 +75,42 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Restore Rust build cache
-        # Restore always, save only on a pull-request run. This workflow can also
-        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
-        # release branch -- and an entry written in the default-branch or develop
-        # scope is restorable by every run that can see it, the required gate
-        # included. A pull-request run writes to its own merge ref, which only that
-        # pull request can restore, so it keeps the cache warm without widening
-        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+      # The base the change is measured against: the pull request's base, or the
+      # push's previous head. Anything that cannot be fetched or diffed -- a new
+      # branch, a force push, workflow_dispatch -- runs the vendored server.
+      - name: Decide whether the vendored AMUX server is in scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] \
+            && git fetch --no-tags --depth=1 origin "$base" \
+            && changed=$(git diff --name-only "$base" HEAD); then
+            printf '%s\n' "$changed" | node scripts/rust-vendor-scope.mjs
+          else
+            node scripts/rust-vendor-scope.mjs --all
+          fi
+
+      # One entry, because `~/.cargo` is one directory shared by both workspaces
+      # -- splitting it by lockfile only made sense while each half also carried
+      # its own `target`. It is keyed on both lockfiles because its contents
+      # depend on both.
+      - name: Restore the downloaded crates
+        id: crates_cache
         uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            vendor/amux/target
-          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-v2-cargo-home-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
 
       # No fmt or clippy step: the workspace has no rustfmt.toml and its source
       # is hand-formatted, so adding either here would fail on code this change
@@ -71,15 +123,35 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build vendored AMUX server
+        if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo build -p amux-server --locked
 
       - name: Test vendored AMUX server library
+        if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo test -p amux-server --lib --locked
 
-      - name: Save the Rust build cache
-        # Only the pull-request scope. See the restore step above.
+      - name: Check vendored AMUX Docker build inputs
+        if: steps.scope.outputs.vendor == 'true'
+        working-directory: vendor/amux
+        run: cargo test -p amux-server --test dockerfile_build_inputs --locked
+
+      # The pull request's own scope only, which is the whole point above: that
+      # entry is restorable by re-runs of this pull request and by nothing else.
+      # `continue-on-error` because a run that restored the key saves it again
+      # and the action refuses a duplicate -- a refusal to write a cache must not
+      # fail a required check.
+      #
+      # Known and accepted: when a pull request's first run skips the vendored
+      # server, the entry it stores holds only the root crates, and a later
+      # commit in the same pull request that brings the vendored build into scope
+      # without touching either lockfile restores that same key and re-downloads
+      # the vendor crates on every run, because the key already exists and
+      # cannot be replaced -- and `continue-on-error` is what makes that quiet.
+      # `cargo --locked` fetches what is missing, so it costs downloads rather
+      # than correctness (independent review, 2026-10-03).
+      - name: Save the downloaded crates
         if: github.event_name == 'pull_request'
         continue-on-error: true
         uses: actions/cache/save@v5
@@ -87,10 +159,4 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-            vendor/amux/target
-          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
-
-      - name: Check vendored AMUX Docker build inputs
-        working-directory: vendor/amux
-        run: cargo test -p amux-server --test dockerfile_build_inputs --locked
+          key: ${{ runner.os }}-rust-v2-cargo-home-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}

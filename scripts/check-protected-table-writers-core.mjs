@@ -179,6 +179,12 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AgentDigestItem",
+    delegate: "agentDigestItem",
+    writers: ["lib/agentDigestStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §4",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -219,6 +225,12 @@ export const PROTECTED_TABLES = [
     delegate: "promptRefinerShadowAttempt",
     writers: ["lib/promptRefinerShadowRunStore.ts"],
     contract: "docs/policy/prompt-refiner-observability.md §12",
+  },
+  {
+    table: "ProductResearchObservation",
+    delegate: "productResearchObservation",
+    writers: ["lib/productResearchObservationStore.ts"],
+    contract: "docs/policy/product-research-agent.md §4",
   },
   {
     table: "EngineeringAgentRun",
@@ -486,6 +498,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
   },
   {
+    path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "scripts/check-enum-constraints.mjs",
+    table: "AgentDigestItem",
+    tableMentions: 1,
+    writeVerbs: 16,
+    reason:
+      "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
+  },
+  {
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -508,6 +536,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 14,
     reason:
       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 16,
+    reason:
+      "The dark vNext one-shot migration keeps immutable audit IDs as plain columns and trigger-checks both linked audit rows under key-share locks. Its write verbs create or guard the new stage and slot tables, including two statement-level TRUNCATE guards; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
@@ -731,6 +767,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
+    path: "prisma/migrations/20261002150000_product_research_observation/migration.sql",
+    table: "ProductResearchObservation",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "The migration creates ProductResearchObservation, its CHECK constraints and its one guard trigger -- insert-only, inside the slot window, deletable only past the retention period; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -807,10 +851,22 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    count: 5,
+    reason:
+      "Five dynamic SELECTs in the one-shot stage and slot guards use the trigger's own schema quoted with %I and bind IDs with USING: two AdminAuditLog reads use FOR KEY SHARE, two stage-status reads use FOR SHARE, and one slot count in the deferred constraint trigger has no lock clause. The functions pin search_path to pg_catalog, pg_temp; none of these reads writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:
       "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
+    count: 5,
+    reason:
+      "Five uses in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE and calls the deadline claim function in its own schema; the state guard locks its own genesis FOR SHARE, reads whether that genesis has been superseded, and calls the same claim function. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
   },
   {
     path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",

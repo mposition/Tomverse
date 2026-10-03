@@ -232,6 +232,13 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The shared AgentDigestItem table: closed agent and kind lists, the
+    // idempotency prefix, rows born with their body, and the expiry and purge
+    // that are the only update and delete.
+    "tests/integration/agent-digest-item.db.test.ts",
+    // Its single writer: one row and one system audit entry in one transaction,
+    // a replay or a conflict writes neither, and a refusal never opens one.
+    "tests/integration/agent-digest-store.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
@@ -263,10 +270,20 @@ run(
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
     "tests/integration/engineering-agent-schema.db.test.ts",
+    // sre-ops transaction bounds: the arming function refuses a short budget,
+    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
+    // inherited transaction_timeout so the session ends at ours.
+    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
+    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
+    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
+    "tests/integration/ops-observer-genesis-state.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // vNext one-shot storage remains dark but must commit exactly 80 fixed-
+    // price slots and refuse consumption before run approval or any reuse.
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
@@ -464,6 +481,10 @@ run(
     // direct writes rather than through the store module: what they refuse is
     // exactly the write that did not go through it.
     "tests/integration/marketing-automation-schema.db.test.ts",
+    // The staging webhook shadow: the partial unique index on an event's
+    // digest refusing a second report inside the transaction that would have
+    // audited it, and one winner among deliveries racing for an armed fault.
+    "tests/integration/marketing-webhook-shadow.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

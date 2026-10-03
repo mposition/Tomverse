@@ -5907,6 +5907,48 @@ model PromptRefinerReservation {
   @@index([stageId, status, expiresAt])
 }
 
+// Separate from the v1 shadow reservation tables, whose database constraints
+// pin a different 100-slot contract and price. These rows are dark until the
+// exact one-shot admission and audit path is implemented and reviewed.
+model PromptRefinerVnextOneShotStage {
+  id                         String   @id
+  status                     String   @default("staged")
+  sourceCommitSha            String
+  sourceManifestDigest       String
+  runnerDigest               String
+  manifestRoot               String
+  runtimeDeploymentId        String
+  runtimeCommitSha           String
+  pricePinDigest             String
+  perRequestCostMicroUsd     BigInt
+  slotCount                  Int
+  costCeilingMicroUsd        BigInt
+  approvedBy                 String
+  approvedAt                 DateTime
+  stageApprovalAuditLogId    String   @unique
+  runApprovalAuditLogId      String?  @unique
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  slots PromptRefinerVnextOneShotSlot[]
+}
+
+model PromptRefinerVnextOneShotSlot {
+  id                   String    @id
+  stageId              String
+  slotIndex            Int
+  status               String    @default("reserved")
+  reservedCostMicroUsd BigInt
+  requestId            String?   @unique
+  consumedAt           DateTime?
+  createdAt            DateTime  @default(now())
+
+  stage PromptRefinerVnextOneShotStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([stageId, slotIndex])
+  @@index([stageId, status])
+}
+
 /// Where a provider actually serves a request from.
 ///
 /// Dark. Nothing writes this, nothing routes from it, and no request consults
@@ -8116,6 +8158,31 @@ model AmuxOrchestratorHalt {
   @@index([requestId])
 }
 
+/// The shared agent digest table: one row per stored digest item of any agent
+/// team, told apart by `agentKey`. Single writer: lib/agentDigestStore.ts.
+/// Triggers (migration 20261003000000_agent_digest_item) set `createdAt` and
+/// `retentionUntil` from the database clock, allow only the body expiry as an
+/// update and only the 365-day meta purge as a delete.
+model AgentDigestItem {
+  id             String    @id @db.Uuid
+  agentKey       String
+  kind           String
+  schemaVersion  Int
+  idempotencyKey String
+  payload        Json?
+  payloadSha256  String
+  sizeBytes      Int
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Overwritten by the insert trigger: createdAt plus the agent's body retention.
+  retentionUntil DateTime  @default(now()) @db.Timestamptz(3)
+  bodyDeletedAt  DateTime? @db.Timestamptz(3)
+
+  @@unique([agentKey, idempotencyKey])
+  @@index([agentKey, createdAt])
+  @@index([retentionUntil])
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the
@@ -8318,4 +8385,84 @@ model SignupConsentAttempt {
   user                       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
+}
+
+/// One scheduled observation slot of the product-research agent, written once
+/// and never changed (docs/policy/product-research-agent.md §4).
+///
+/// The database owns three things here: one row per slot (a unique constraint,
+/// so two runs of the same slot cannot both find it empty), the refusal of a
+/// submission outside the slot's one-hour window, and the refusal of an update
+/// or of a delete before the retention period. A failed slot carries no
+/// payload, which is what keeps a failure from showing an earlier success's
+/// content.
+model ProductResearchObservation {
+  id            String   @id
+  /// The scheduled UTC instant this row answers for, on a whole minute.
+  slot          DateTime @unique
+  /// ok | failed
+  outcome       String
+  /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
+  failureStage  String?
+  schemaVersion Int
+  /// The commits the report was computed from. Present on a successful slot.
+  developSha    String?
+  mainSha       String?
+  issueCount    Int?
+  /// The observation rows and the counts recomputed from them.
+  payload       Json?
+  /// sha256 of the canonical payload, computed by the route from what it
+  /// stored -- never the digest the submitter sent.
+  payloadDigest String?
+  /// The database's own clock, set by the insert trigger.
+  submittedAt   DateTime @default(now())
+
+  @@index([outcome, slot])
+  @@index([submittedAt])
+}
+
+/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
+/// only by the Admin genesis action; never updated or deleted. The migration's
+/// trigger enforces the chain: one first genesis (shadow), every later one
+/// replacing the current head -- recovery in the same mode, activation shadow
+/// to live once.
+model OpsObserverGenesis {
+  id                  String            @id @db.Uuid
+  /// The database clock, set by the trigger.
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  /// One of GENESIS_REASONS.
+  reason              String
+  /// One of GENESIS_MODES.
+  mode                String
+  /// The head this genesis replaced; null only on the first genesis.
+  supersedesGenesisId String?           @unique @db.Uuid
+  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
+  rootMarker          Int?              @unique
+  /// sha256 of the canonical genesis request the owner approved.
+  requestDigest       String
+  invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime          @db.Timestamptz(3)
+  state               OpsObserverState?
+}
+
+/// The key state of one genesis. Every update is exactly the next generation
+/// (the compare-and-set); the trigger writes the stamps and refuses a state
+/// write whose genesis has been superseded or whose run deadline has passed by
+/// COMMIT.
+model OpsObserverState {
+  genesisId                 String             @id @db.Uuid
+  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation                Int
+  keys                      Json
+  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion          Int
+  stampGeneration           Int
+  stampKeysSha256           String
+  verifiedThroughGeneration Int                @default(0)
+  verifiedThroughAuditId    String?
+  verifiedThroughAuditHash  String?
+  stampCheckpointSha256     String
+  /// The deadline the writing run claimed; checked again at COMMIT.
+  runDeadlineAt             DateTime           @db.Timestamptz(3)
 }

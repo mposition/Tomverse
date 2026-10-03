@@ -43,7 +43,6 @@ export const CACHE_FAMILIES = [
   { path: "~/.cache/ms-playwright", family: "playwright" },
 ];
 
-const RUNNER_OS = "${{ runner.os }}";
 
 /**
  * The scopes whose entries every run in the repository can reach.
@@ -285,21 +284,64 @@ export const hasOnlyNarrowPullRequestTrigger = (document) => {
 };
 
 /**
- * Expressions a restore-key may contain.
+ * Why this module stopped comparing whole keys.
  *
- * The cross-workflow prefix rule compares key text, so an expression whose
- * value this cannot predict breaks the comparison: a restore-key of
- * `...-v2-pr-${{ matrix.lane }}-` reaches `...-v2-pr-admin-...` when the lane
- * is `admin`, and `startsWith` on the raw text sees nothing. Independent review
- * caught it. `runner.os` and `hashFiles(...)` are allowed because identical
- * text means an identical value, which is what the comparison needs.
+ * Three rounds of review were spent trying to make a textual comparison of
+ * keys sound, and it cannot be. `hashFiles('package-lock.json')` and
+ * `hashFiles('./package-lock.json')` hash the same file through different
+ * text; two different glob patterns can match the same files; and canonicalising
+ * whitespace to make equal values equal text turned `hashFiles('a b.json')`
+ * into `hashFiles('ab.json')`, inventing a collision between different files.
+ * Text can neither prove nor disprove that two hash expressions agree.
+ *
+ * So the comparison moved to the part that needs no proving. A governed key is
+ * `${{ runner.os }}-<family>-v<n>-<namespace>-` followed by hashes, and that
+ * leading region is pure literal -- `key_missing_generation_and_namespace`
+ * already requires it. If two workflows hold distinct namespaces and neither is
+ * a prefix of the other, then every restore-key of one begins with its own
+ * namespace and every key of the other begins with theirs, so no restore-key
+ * can reach across. That holds whatever the hashes do, which is why the hashes
+ * no longer need to be read at all.
  */
-const PREDICTABLE_EXPRESSION = /^\s*(?:runner\.os|hashFiles\([^)]*\))\s*$/;
 
-const unpredictableExpressions = (text) =>
-  [...text.matchAll(/\$\{\{([^}]*)\}\}/g)]
-    .map((match) => match[1])
-    .filter((inner) => !PREDICTABLE_EXPRESSION.test(inner));
+
+/**
+ * Why there is no key comparator here any more.
+ *
+ * Four rounds of review were spent on one, and each round found a new way it
+ * was unsound. Canonicalising whitespace made `hashFiles('a b.json')` equal
+ * `hashFiles('ab.json')`. Treating identical expression text as an identical
+ * value is wrong across workflows, because `matrix`, `env` and `steps` are
+ * workflow-local -- two workflows writing `${{ matrix.prefix }}` mean different
+ * things. The `${{ ... }}` tokeniser mis-read a `}` inside a string literal. And
+ * a leftover expression can evaluate to the empty string, so a key running out
+ * first does not prove a restore-key is not its prefix.
+ *
+ * The pattern is not that each attempt was careless; it is that deciding
+ * whether two arbitrary GitHub expressions can agree is not a thing to decide
+ * here. So the need for it is removed instead: EVERY cache step's key must
+ * begin `${{ runner.os }}-<family>-v<n>-<namespace>-`, where everything after
+ * the leading expression is fixed text. Two workflows holding distinct,
+ * non-prefixing namespaces then cannot reach one another, because each key and
+ * each restore-key begins with its own namespace and they diverge inside text
+ * that no expression can change. Nothing after the namespace needs reading.
+ */
+
+/**
+ * `${{ runner.os }}-<family>-v<n>-<namespace>-` at the head of a key.
+ *
+ * Only that one spelling of the leading expression is accepted. GitHub also
+ * evaluates `${{ runner['os'] }}` and other equivalents, and this refuses them
+ * -- deliberately, and in the safe direction: a refusal asks the author to
+ * write the ordinary form, where letting an unrecognised spelling through would
+ * mean a head this cannot read being treated as one it can. One spelling also
+ * keeps the namespace identities comparable without normalising anything, which
+ * is the mistake four earlier rounds were spent on.
+ *
+ * Whitespace inside the expression is allowed, because it changes nothing about
+ * what the expression is.
+ */
+const KEY_HEAD = /^\$\{\{\s*runner\.os\s*\}\}-([a-z0-9]+(?:-[a-z0-9]+)*?)-(v\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)-/;
 
 /**
  * Every cache step in a workflow, as {jobId, path, key, restoreKeys, mode}.
@@ -334,6 +376,8 @@ export const readCacheSteps = (text) => {
         name: typeof step.name === "string" ? step.name : null,
         mode,
         paths,
+        // Canonical for every comparison; the raw text is kept only so a
+        // finding can quote what the author actually wrote.
         key: typeof withBlock.key === "string" ? withBlock.key.trim() : null,
         restoreKeys,
         condition: typeof step.if === "string" ? step.if.trim() : step.if === undefined ? null : "",
@@ -356,37 +400,46 @@ const familyFor = (paths) => {
 };
 
 /**
- * What a governed key must start with: `${{ runner.os }}-<family>-`.
+ * Reads a key's head: `${{ runner.os }}-<family>-v<n>-<namespace>-`.
+ *
+ * `prefix` is that head as written, so a caller can compare it against the key
+ * it came from and against the step's restore-keys. `identity` is
+ * `<family>:v<n>-<namespace>-`, which is what two workflows are compared on,
+ * and it is fixed text -- no expression can appear inside it, which is the
+ * whole reason the comparison needs nothing else (see the note above
+ * `KEY_HEAD`). `family` is what the key declared, for a caller that wants to
+ * report it.
+ *
+ * `expectedFamily` is the family CACHE_FAMILIES gives this step's path, or null
+ * when no row names it. A path with no row declares its own family token and is
+ * held to the same discipline; a listed path may not declare a different one.
+ *
+ * Covering the family token alone is NOT enough, and `restore_key_broader_than_namespace`
+ * is what says so: `Linux-next-v2-` covers it, is a prefix of its own key, and
+ * still matches every workflow's entry one generation down -- the same shared
+ * pool the family-wide fallback made, just harder to see.
  */
-const familyPrefix = (family) => `${RUNNER_OS}-${family}-`;
-
-/**
- * The literal `v<n>-<namespace>-` a governed key must carry after its family,
- * and the prefix a restore-key may therefore not be shorter than.
- *
- * It is read as the literal text between the family token and the key's first
- * `${{` expression, because that is exactly the part that identifies the
- * generation and the workflow; everything after it is a hash of inputs.
- *
- * Being longer than the family token is NOT enough. `Linux-next-v2-` is longer,
- * and is a prefix of this step's own key, and still matches every workflow's
- * entry one generation down -- which is the same shared pool the family-wide
- * fallback made, just harder to see. So the boundary is the namespace segment,
- * not a character count.
- *
- * Returns null when the key has no expression at all: the literal region cannot
- * be told apart from the whole key, so the caller requires the whole key.
- */
-export const namespacePrefix = (key, family) => {
-  const prefix = familyPrefix(family);
-  if (!key.startsWith(prefix)) return { prefix: null, problem: "key_missing_family_prefix" };
-  const rest = key.slice(prefix.length);
-  const expression = rest.indexOf("${{");
-  const literal = expression === -1 ? rest : rest.slice(0, expression);
-  if (!/^v\d+-[a-z0-9][a-z0-9-]*-$/.test(literal)) {
-    return { prefix: null, problem: "key_missing_generation_and_namespace" };
+export const namespacePrefix = (key, expectedFamily = null) => {
+  const head = KEY_HEAD.exec(key);
+  if (head === null) {
+    return { prefix: null, identity: null, family: null, problem: "key_missing_generation_and_namespace" };
   }
-  return { prefix: prefix + literal, problem: null };
+  const [matched, family, generation, namespace] = head;
+  // Nothing before the namespace may be an expression: the whole argument is
+  // that this region is fixed text. `${{ runner.os }}` is the one exception,
+  // and it sits at the very front where KEY_HEAD has already matched it.
+  if (matched.slice(matched.indexOf("}}") + 2).includes("${{")) {
+    return { prefix: null, identity: null, family: null, problem: "key_missing_generation_and_namespace" };
+  }
+  if (expectedFamily !== null && family !== expectedFamily) {
+    return { prefix: null, identity: null, family, problem: "key_family_does_not_match_path" };
+  }
+  return {
+    prefix: matched,
+    identity: `${family}:${generation}-${namespace}-`,
+    family,
+    problem: null,
+  };
 };
 
 /**
@@ -403,31 +456,41 @@ export const namespacePrefix = (key, family) => {
  *   version of this module allowed `Linux-next-v2-`, which is a prefix of its
  *   own key and still reaches every namespace one generation down. Independent
  *   review caught that, and a test had been written to permit it.
- * - `key_missing_generation_and_namespace` -- a governed key whose literal
- *   region before its first expression is not `v<n>-<namespace>-`. The rule
- *   above needs that boundary to exist, and `v<n>` is what lets a poisoned
- *   generation be abandoned without deleting entries by hand.
+ * - `key_missing_generation_and_namespace` -- a key that does not begin
+ *   `${{ runner.os }}-<family>-v<n>-<namespace>-` in fixed text. The rule above
+ *   needs that boundary to exist, `v<n>` is what lets a poisoned generation be
+ *   abandoned without deleting entries by hand, and "fixed text" is what makes
+ *   the whole argument hold without reading any expression.
+ * - `key_family_does_not_match_path` -- a key naming a family that
+ *   CACHE_FAMILIES does not give this step's path, which would take its
+ *   namespace from another family's space.
  * - `key_shared_across_workflows` -- one exact key declared by two workflow
  *   files is one entry those workflows share, so whichever writes it first in a
  *   scope every run can see owns what the others execute (F1). Sharing inside
  *   one workflow is fine: its jobs are one unit of trust.
+ * - `namespace_shared_across_workflows` and `namespace_reaches_another_workflow`
+ *   -- two workflows holding one namespace, or one whose namespace is a prefix
+ *   of another's. These are the rules that answer "can this workflow restore
+ *   another's entry", and they answer it without reading a hash.
  * - `unguarded_save_in_widely_readable_scope` -- a workflow that can run on the
  *   default branch or on `develop` must not use the combined `actions/cache`,
  *   whose post step writes, and a `save` step there must state the condition
  *   that keeps it to a pull-request run. Restoring is not the write; the write
  *   is what makes one run's output every later run's input (P1).
  *
- * The prefix and sharing rules apply to every cached path. The namespace rules
- * need CACHE_FAMILIES because only a listed family has a namespace to require,
- * and the save rule applies to every path for the same reason as sharing: the
- * scope is a property of the run, not of what is being cached.
+ * **Every rule applies to every cached path.** CACHE_FAMILIES decides only
+ * which family token a listed path must declare; a path with no row declares
+ * its own and is held to the same namespace discipline. Exempting unlisted
+ * paths was a hole both reviewers of round 9 found: the cache is keyed by key
+ * alone, so a step's paths never separated its entry from anyone else's, and
+ * exempting a path exempted it from the rules rather than from the collision.
  */
 export const judgeCacheKeys = (sources) => {
   const findings = [];
   const problems = [];
   const keyOwners = new Map();
-  /** Every restore-key with where it was declared, for the cross-workflow rule below. */
-  const restoreProbes = [];
+  /** Namespace identity -> the workflows declaring it, for the cross-workflow rules. */
+  const namespaceOwners = new Map();
 
   for (const source of sources) {
     const read = readCacheSteps(source.text);
@@ -436,6 +499,9 @@ export const judgeCacheKeys = (sources) => {
       continue;
     }
     for (const step of read.steps) {
+      // The family a listed path must declare. An unlisted path declares its own
+      // family token and is held to the same namespace discipline -- the cache
+      // is keyed by key alone, so a step's paths never separated it anyway.
       const family = familyFor(step.paths);
 
       if (step.mode !== "save" && step.key === null) {
@@ -467,16 +533,9 @@ export const judgeCacheKeys = (sources) => {
         }
       }
 
+      const parsed = step.key === null ? null : namespacePrefix(step.key, family === null ? null : family.family);
+
       for (const restoreKey of step.restoreKeys) {
-        restoreProbes.push({ workflowPath: source.path, jobId: step.jobId, restoreKey });
-        for (const expression of unpredictableExpressions(restoreKey)) {
-          findings.push({
-            rule: "restore_key_has_unpredictable_expression",
-            workflowPath: source.path,
-            jobId: step.jobId,
-            detail: `\${{${expression}}} in ${restoreKey}`,
-          });
-        }
         if (step.key !== null && !step.key.startsWith(restoreKey)) {
           findings.push({
             rule: "restore_key_not_a_prefix",
@@ -485,43 +544,31 @@ export const judgeCacheKeys = (sources) => {
             detail: restoreKey,
           });
         }
-        if (family !== null && step.key !== null) {
-          const required = namespacePrefix(step.key, family.family);
-          if (required.prefix === null) continue; // reported once below, not per restore-key
-          if (restoreKey.length < required.prefix.length) {
-            findings.push({
-              rule: "restore_key_broader_than_namespace",
-              workflowPath: source.path,
-              jobId: step.jobId,
-              detail: `${restoreKey} (must start with ${required.prefix})`,
-            });
-          }
+        // Must cover its own namespace. With the rule above, that makes every
+        // restore-key begin with its own `<family>-v<n>-<namespace>-`, which is
+        // the whole of the cross-workflow argument.
+        if (parsed !== null && parsed.prefix !== null && !restoreKey.startsWith(parsed.prefix)) {
+          findings.push({
+            rule: "restore_key_broader_than_namespace",
+            workflowPath: source.path,
+            jobId: step.jobId,
+            detail: `${restoreKey} (must start with ${parsed.prefix})`,
+          });
         }
       }
 
-      if (family !== null && step.key !== null) {
-        const required = namespacePrefix(step.key, family.family);
-        if (required.prefix === null) {
+      if (parsed !== null) {
+        if (parsed.prefix === null) {
           findings.push({
-            rule: required.problem,
+            rule: parsed.problem,
             workflowPath: source.path,
             jobId: step.jobId,
             detail: step.key,
           });
-        }
-        // Restricting only restore-keys was not enough. The cross-workflow rule
-        // compares both sides as text, so an unpredictable expression in a KEY
-        // hides a collision just as well: a literal restore-key of
-        // `...-v2-pr-admin-` does not textually prefix a key of
-        // `...-v2-pr-${{ matrix.lane }}-...`, and at lane=admin it reaches it.
-        // Independent review raised this after the restore-key half was fixed.
-        for (const expression of unpredictableExpressions(step.key)) {
-          findings.push({
-            rule: "key_has_unpredictable_expression",
-            workflowPath: source.path,
-            jobId: step.jobId,
-            detail: `\${{${expression}}} in ${step.key}`,
-          });
+        } else {
+          const owners = namespaceOwners.get(parsed.identity) ?? new Set();
+          owners.add(source.path);
+          namespaceOwners.set(parsed.identity, owners);
         }
       }
 
@@ -543,29 +590,66 @@ export const judgeCacheKeys = (sources) => {
     });
   }
 
-  // The rule that actually answers "can this workflow restore another's entry".
+  // The rule that answers "can this workflow restore another's entry", decided
+  // on the namespace rather than on the whole key.
   //
-  // Comparing namespaces was not enough, and the local namespace rule is not
-  // enough either. `Linux-next-v2-pr-` is a legitimate restore-key for a key
-  // whose namespace is `pr`, and it is also a prefix of a key whose namespace
-  // is `pr-admin`; and a key of `...-v2-pr-${{ matrix.lane }}-...` has its own
-  // namespace end at `pr-`, which collides the same way. Independent review
-  // raised both. Rather than model namespaces further, this asks the question
-  // directly: a restore-key may not be a prefix of any key another workflow
-  // declares. Within one workflow it may be -- its jobs are one unit of trust.
-  for (const probe of restoreProbes) {
-    for (const [key, owners] of keyOwners) {
-      if (!key.startsWith(probe.restoreKey)) continue;
-      const others = [...owners].filter((owner) => owner !== probe.workflowPath);
-      if (others.length === 0) continue;
+  // Every restore-key covers its own namespace prefix (the rule above) and
+  // every key begins with its own (the rule before that). So if two workflows
+  // hold namespaces that are distinct and where neither is a prefix of the
+  // other, no restore-key of one can prefix a key of the other -- they diverge
+  // at the namespace, whatever the hashes after it do. That is the whole
+  // argument, and it needs none of the hash text, which is what three rounds of
+  // review established cannot be compared soundly.
+  //
+  // Sharing inside one workflow stays legal: its jobs are one unit of trust.
+  const namespaces = [...namespaceOwners].sort(([a], [b]) => a.localeCompare(b));
+
+  // One namespace held by two workflows is one shared pool.
+  for (const [identity, owners] of namespaces) {
+    if (owners.size < 2) continue;
+    const [family, literal] = identity.split(":");
+    findings.push({
+      rule: "namespace_shared_across_workflows",
+      workflowPath: [...owners].sort().join(", "),
+      jobId: null,
+      detail: `${family} namespace "${literal}"`,
+    });
+  }
+
+  // One namespace a prefix of another's, across workflows: `pr` reaches
+  // `pr-admin`, because a restore-key stopping at `pr-` prefixes a key
+  // beginning `pr-admin-`.
+  for (const [identity, owners] of namespaces) {
+    const [family, literal] = identity.split(":");
+    for (const [otherIdentity, otherOwners] of namespaces) {
+      if (otherIdentity === identity) continue;
+      const [otherFamily, otherLiteral] = otherIdentity.split(":");
+      if (otherFamily !== family) continue;
+      if (!otherLiteral.startsWith(literal)) continue;
+      // A problem only if some workflow holding the shorter one is not the only
+      // holder of the longer one -- otherwise it is one workflow's own two keys.
+      const reaching = [...owners].filter((owner) => [...otherOwners].some((other) => other !== owner));
+      if (reaching.length === 0) continue;
       findings.push({
-        rule: "restore_key_reaches_another_workflow",
-        workflowPath: probe.workflowPath,
-        jobId: probe.jobId,
-        detail: `${probe.restoreKey} also matches a key declared by ${others.sort().join(", ")}`,
+        rule: "namespace_reaches_another_workflow",
+        workflowPath: reaching.sort().join(", "),
+        jobId: null,
+        detail: `${family} namespace "${literal}" is a prefix of "${otherLiteral}", held by ${[...otherOwners].sort().join(", ")}`,
       });
     }
   }
+
+  // One key is read by both a restore and a save step in some workflows, so the
+  // same finding can be raised twice. Report each once.
+  const seen = new Set();
+  const unique = findings.filter((finding) => {
+    const identity = `${finding.rule}\u0000${finding.workflowPath}\u0000${finding.jobId ?? ""}\u0000${finding.detail}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+  findings.length = 0;
+  findings.push(...unique);
 
   findings.sort((a, b) =>
     `${a.rule}${a.workflowPath}${a.jobId ?? ""}${a.detail}`.localeCompare(
@@ -584,15 +668,13 @@ export const describeFinding = (finding) => {
     case "restore_key_broader_than_namespace":
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
-      return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
-    case "key_has_unpredictable_expression":
-      return `${where}: key contains ${finding.detail}, whose value this cannot predict, so whether another workflow's restore-key reaches it cannot be decided. Put the variation in the namespace segment instead, as its own namespace.`;
-    case "restore_key_has_unpredictable_expression":
-      return `${where}: restore-key contains ${finding.detail}, whose value this cannot predict, so whether it reaches another workflow's entry cannot be decided. A restore-key may use only runner.os and hashFiles().`;
-    case "restore_key_reaches_another_workflow":
-      return `${where}: ${finding.detail}. Give the two namespaces names where neither is a prefix of the other.`;
-    case "key_missing_family_prefix":
-      return `${where}: key "${finding.detail}" does not start with its cache family's prefix.`;
+      return `${where}: key "${finding.detail}" must begin \${{ runner.os }}-<family>-v<n>-<namespace>- in fixed text, with no expression before the namespace. That head is what gives a restore-key a boundary to stop at and lets a poisoned generation be abandoned by bumping v<n>.`;
+    case "key_family_does_not_match_path":
+      return `${where}: key "${finding.detail}" names a family that CACHE_FAMILIES does not give this step's path, so it would take its namespace from another family's space.`;
+    case "namespace_shared_across_workflows":
+      return `${where}: these workflows hold the same ${finding.detail}, so they share one pool of entries. Give each its own.`;
+    case "namespace_reaches_another_workflow":
+      return `${where}: ${finding.detail}. A restore-key stopping at the shorter namespace prefixes the longer one's keys. Rename so neither is a prefix of the other.`;
     case "key_shared_across_workflows":
       return `${where}: these workflows declare the same cache key "${finding.detail}", so they share one entry. Give each its own namespace segment.`;
     case "unguarded_save_in_widely_readable_scope":

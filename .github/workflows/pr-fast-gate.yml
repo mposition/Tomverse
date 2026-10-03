@@ -720,6 +720,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:encoding:strict
 
+      # JSON allows an object to declare the same key twice and every reader
+      # keeps one of them, so a duplicate is invisible: the file is valid, the
+      # entry simply does not exist for anything that reads the parsed object,
+      # and a tool that parses and re-serialises the file deletes it from the
+      # bytes as well. That is how a duplicated `report:provider-data-
+      # destinations` was found in package.json. Nothing else in this stage
+      # would report it -- the file parses.
+      - name: Duplicate package.json keys
+        timeout-minutes: 5
+        run: npm run check:package-json-duplicate-keys
+
       # `npm run check` still runs both locally and in the daily audit. They
       # are split here so the step timings in this log attribute time to the
       # right stage, and so a lint failure reports without paying for a build.

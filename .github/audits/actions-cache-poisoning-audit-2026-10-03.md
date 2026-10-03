@@ -701,8 +701,11 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
 > 에이전트 PR에서 도는 자격증명 cache 복원 job이 없음을 **job의 조건식까지 읽어**
 > 따로 확인해야 한다. "Actions cache는 ref 간에 격리된다"는 거짓이라고 명시했습니다.
 >
-> 새 §5.1이 cache 종류와 그것을 유지하는 검사를 적고, 3번 항목의 근거가
-> `check:credential-cache-separation`에 달려 있음을 밝힙니다. **기록 자체를 쓰는
+> 새 §5.1이 cache 종류와 `check:credential-cache-separation`을 적고, **그 검사가
+> 3번 항목을 유지하지 않는다**는 것을 명시합니다 — 그것은 `unverified`·
+> `unreadable`만 거절하고, 3번은 자격증명 job이 **어떤** cache도 복원하지
+> 않는다는 더 강한 조건입니다. 그래서 정책은 그 장치가 생길 때까지 기록 작성을
+> 막고, 필요한 장치는 **P7**에 적었습니다. **기록 자체를 쓰는
 > 것(`cacheIsolationRecorded: true`)은 여전히 소유자의 행위이고 이 변경에
 > 포함되지 않습니다** — 호출자 둘 다 `false`로 남아 있습니다.
 

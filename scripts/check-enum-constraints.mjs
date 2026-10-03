@@ -620,6 +620,16 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_status_check: {
+    owner: "database",
+    reason:
+      "The dark one-shot stage has no active writer. The database permits staged, separately run-approved, then permanently closed; any future admission must match this closed vocabulary.",
+  },
+  PromptRefinerVnextOneShotSlot_status_check: {
+    owner: "database",
+    reason:
+      "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxWorkItem_status_check: {
     owner: "database",
@@ -834,6 +844,13 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  AgentDigestItem_agent_key_check: {
+    owner: "list",
+    module: "lib/agentDigestContract.ts",
+    list: "AGENT_DIGEST_AGENT_KEYS",
+    reason:
+      "The agents that may store digests in the shared AgentDigestItem table. Adding an agent is a reviewed migration that also gives it a kind list and a body retention; an unknown key would be a write no agent owns.",
+  },
   AmuxOrchestratorWrite_call_kind_check: {
     owner: "list",
     module: "lib/amux/orchestratorHaltCore.ts",
@@ -875,6 +892,34 @@ const REGISTRY = {
     list: "AMUX_INTAKE_APPROVAL_STATUSES",
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
+  OpsObserverGenesis_reason_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_REASONS",
+    reason:
+      "initial, recovery, activation. The trigger holds each to its place in the chain: initial only first and shadow, recovery in the head mode, activation shadow to live once. Only the Admin genesis action writes a row.",
+  },
+  OpsObserverGenesis_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. There is no path from live back to shadow; stopping is the switch, not a genesis (docs/policy/sre-ops.md §8).",
+  },
+  ProductResearchObservation_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_OUTCOMES",
+    reason:
+      "ok, failed. A failed slot has nowhere to put a payload: the shape CHECK requires every success column to be null, so a failure cannot display an earlier success content.",
+  },
+  ProductResearchObservation_failureStage_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_FAILURE_STAGES",
+    reason:
+      "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
   EngineeringAgentRun_status_check: {
     owner: "list",

@@ -81,7 +81,7 @@ const LANE_RULES = [
   // decide whether a paid turn starts at all.
   [
     "finance",
-    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
+    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
   ],
   // The agents and the review machinery around them: AMUX intake, promotion
   // and reconciliation, the engineering and marketing agents, Prompt Refiner
@@ -90,7 +90,7 @@ const LANE_RULES = [
   // Prompt Refiner suites keep the lanes they had.
   [
     "agents",
-    /^(amux-|engineering-agent-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
+    /^(amux-|engineering-agent-|ops-observer-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
   ],
 ];
 

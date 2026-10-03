@@ -20,9 +20,11 @@
 //      GitHub's own record of the PR -- even on a latched lane.
 //   2. A latched lane does nothing more until a person clears it.
 //   3. If a merge made by the train is still deploying, wait until every
-//      service that deploys the branch has deployed it. A failed, skipped,
-//      crashed or unrecognised deployment latches the lane and stops the train
-//      (exit 1) -- it never retries and never merges past a broken deploy.
+//      service that deploys the branch has deployed it. A failed, crashed or
+//      unrecognised deployment, or three SKIPPED in a row among the merge's
+//      own and later ones containing it, latches the lane and stops the train
+//      (exit 1) -- it never retries and never merges past a broken deploy. A
+//      single SKIPPED (often a CI run a later push cancelled) is a wait.
 //   4. If any service in the environment has a deployment waiting for CI,
 //      queued, building or deploying, hold.
 //   5. Otherwise pick the oldest non-draft PR whose checks all finished green
@@ -51,6 +53,7 @@ import {
   pickNextPullRequest,
   refusalReason,
   replacementCommits,
+  skippedCommits,
   withLane,
 } from "./merge-train-core.mjs";
 
@@ -317,9 +320,33 @@ function commitsContaining(sha, candidates) {
   return containing;
 }
 
+/**
+ * The commits whose CI had a check run cancelled -- a later push cut it short
+ * (cancel-in-progress). A failed lookup leaves the commit out, so its SKIPPED
+ * still counts towards the run: not knowing is not a reason to wait longer.
+ */
+function commitsWithCancelledChecks(candidates) {
+  const cancelled = new Set();
+  for (const candidate of candidates) {
+    if (!SHA_PATTERN.test(candidate)) continue;
+    try {
+      // Parsed here rather than with --jq: a filter with spaces and pipes would
+      // not survive the Windows shell (see useShell).
+      const { check_runs: runs } = runJson("gh", [
+        "api", `repos/${REPOSITORY}/commits/${candidate}/check-runs?per_page=100`,
+      ]);
+      if (runs.some((run) => run.conclusion === "cancelled")) cancelled.add(candidate);
+    } catch {
+      // Left out: see above.
+    }
+  }
+  return cancelled;
+}
+
 function followAwaitedMerge(lane, awaiting, deployments) {
   const containing = commitsContaining(awaiting.sha, replacementCommits(deployments, awaiting.sha));
-  const outcome = deploymentOutcome(deployments, awaiting.sha, lane.branch, containing);
+  const cancelled = commitsWithCancelledChecks(skippedCommits(deployments, awaiting.sha, containing));
+  const outcome = deploymentOutcome(deployments, awaiting.sha, lane.branch, containing, cancelled);
   const minutes = (Date.now() - awaiting.mergedAt) / 60000;
   const label = `#${awaiting.number} (${awaiting.sha.slice(0, 9)})`;
   const seen = outcome.deployments.length ? `: ${describeDeployments(outcome.deployments)}` : "";

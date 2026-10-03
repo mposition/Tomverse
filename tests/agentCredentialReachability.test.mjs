@@ -494,6 +494,38 @@ ${step}`;
           cache: yarn
           package-manager-cache: false
 `), true, "a named cache still restores");
+
+  // `cache: true` names no manager and still switches caching on, which is how
+  // setup-dotnet enables its NuGet cache. Read as "not named" it fell through
+  // the caches-only-when-named list and the step was classified as caching
+  // nothing -- a false negative on a credential gate, found by both reviewers
+  // of round 9.
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          cache: true
+`), true, "boolean true turns it on");
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          cache: 'true'
+`), true, "and so does the string");
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8'
+`), false, "setup-dotnet caches nothing unasked");
+  // These two cache only for a named manager, so reporting them as restoring
+  // without one was a false positive.
+  assert.equal(restores(`      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+`), false);
+  assert.equal(restores(`      - uses: actions/setup-python@v5
+        with:
+          cache: pip
+`), true);
+  assert.equal(restores(`      - uses: actions/setup-java@v4
+        with:
+          cache: gradle
+`), true);
   assert.equal(restores(`      - uses: \${{ vars.ACTION }}
 `), true, "an action named by expression");
   assert.equal(restores(`      - uses: ./.github/actions/cache

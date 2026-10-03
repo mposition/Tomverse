@@ -257,3 +257,13 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   assert.ok(guard.includes("undeclared,"));
 });
 
+test("the webhook shadow index migration names its own index", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261002120000_marketing_webhook_shadow_event_unique", "migration.sql"),
+    "utf8",
+  );
+  const declaration = presenceDeclarationIn(sql);
+  const index = /CREATE UNIQUE INDEX "([^"]+)"/.exec(sql)?.[1];
+  assert.deepEqual(declaration, { kind: "relation", relation: index });
+});
