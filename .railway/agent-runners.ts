@@ -40,6 +40,16 @@ export const AGENT_RAILWAY_PROJECT = "Tomverse Agents";
 
 export const AGENT_RAILWAY_REPOSITORY = "mposition/Tomverse";
 
+/**
+ * Where the agents run.
+ *
+ * Named rather than left to Railway, whose default for a new project is
+ * `sfo`. The approved policy's APP 8 record states the processing region, so
+ * an unnamed region is not a default -- it is a deployment somewhere the
+ * record does not say. The app's own services run here too.
+ */
+export const AGENT_RAILWAY_REGION = "asia-southeast1-eqsg3a";
+
 /** The branch each Railway environment deploys, as in the cron table. */
 export const AGENT_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
@@ -115,6 +125,7 @@ type AgentRailwayDsl<Source, Preserved, Resource> = {
       source: Source;
       start: string;
       deploy: { cronSchedule?: string; restartPolicyType: "NEVER" };
+      replicas: Record<string, number>;
       env: Record<string, Preserved>;
     }
   ) => Resource;
@@ -148,6 +159,9 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
           restartPolicyType: "NEVER",
         },
+        // One replica, placed. A cron that runs once a day needs no more, and
+        // the region is the record's, not Railway's default.
+        replicas: { [AGENT_RAILWAY_REGION]: 1 },
         env: Object.fromEntries(variables.map((name) => [name, dsl.preserve()])),
       }),
     ];

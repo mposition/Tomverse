@@ -12,6 +12,7 @@ import {
   replacementCommits,
   SKIPPED_RUN_FAILURE,
   servicesDeployingBranch,
+  skippedCommits,
   withLane,
 } from "../scripts/merge-train-core.mjs";
 
@@ -262,6 +263,35 @@ test(`SKIPPED is a failure only ${SKIPPED_RUN_FAILURE} times in a row`, () => {
   // Later SKIPPED deployments that do not contain the merge do not count.
   const unrelated = run("SKIPPED", "SKIPPED", "SKIPPED");
   assert.equal(deploymentOutcome(unrelated, commit, "develop", new Set()).state, "in_progress");
+});
+
+test("a SKIPPED whose CI a later push cancelled does not count towards the run", () => {
+  // #1965 on 2026-10-03: f421304c9 and 3ffe966b7 SKIPPED with cancelled CI,
+  // 1da560122 SKIPPED with no check runs at all -- one counted SKIPPED, a wait.
+  const [noChecks, cancelledLater] = ["7".repeat(40), "8".repeat(40)];
+  const deployments = [
+    deployment("SKIPPED", commit, "web"),
+    deployment("SKIPPED", noChecks, "web"),
+    deployment("SKIPPED", cancelledLater, "web"),
+  ];
+  const containing = new Set([noChecks, cancelledLater]);
+  assert.deepEqual(skippedCommits(deployments, commit, containing).sort(), [commit, noChecks, cancelledLater].sort());
+  assert.equal(deploymentOutcome(deployments, commit, "develop", containing).state, "failed");
+  assert.equal(
+    deploymentOutcome(deployments, commit, "develop", containing, new Set([commit, cancelledLater])).state,
+    "in_progress",
+  );
+  // A cancelled SKIPPED neither extends nor breaks a run of real ones.
+  const real = ["9", "a", "d"].map((digit) => digit.repeat(40));
+  const run = [
+    deployment("SKIPPED", commit, "web"),
+    deployment("SKIPPED", real[0], "web"),
+    deployment("SKIPPED", real[1], "web"),
+    deployment("SKIPPED", real[2], "web"),
+  ];
+  assert.equal(deploymentOutcome(run, commit, "develop", new Set(real), new Set([real[0]])).state, "failed");
+  // A SKIPPED of a commit that does not contain the merge is not asked about.
+  assert.deepEqual(skippedCommits([deployment("SKIPPED", older, "web")], commit, new Set()), []);
 });
 
 test("deploymentOutcome compares commit hashes case-insensitively", () => {

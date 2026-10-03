@@ -8,8 +8,18 @@ name: Orchestrator Rust
 # It has no path filter on purpose. This job is a required check, and a
 # path-filtered workflow reports nothing at all on a pull request that does not
 # match -- the check then sits at "expected" forever and the pull request cannot
-# merge. Every pull request pays for the product and vendored AMUX Rust
-# builds; the cache and job timeout cover the larger vendor dependency set.
+# merge. The job always runs and always reports; what is scoped is inside it.
+#
+# The vendored AMUX server (vendor/amux, since #1935) is built and tested only
+# when the change can affect it -- scripts/rust-vendor-scope.mjs decides from
+# the changed paths, and runs everything when it cannot tell. Run on every
+# change, its ~14 minutes made this the slowest check Railway's Wait for CI held
+# staging for (2026-10-03: p50 ~17 minutes, against ~2 before the vendor).
+#
+# Caches are saved only by pushes to develop. Each target directory is ~3 GiB;
+# saved per pull request they filled the repository's 10 GB cache budget, evicted
+# develop's (and the Next.js, npm and Playwright caches), and every run started
+# cold. Pull requests into develop restore develop's caches and save nothing.
 
 on:
   pull_request:
@@ -33,6 +43,9 @@ jobs:
     name: Build and test the Rust workspace
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # Incremental artefacts are never reused in CI and double the cached size.
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v6
         with:
@@ -43,15 +56,47 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Restore Rust build cache
-        uses: actions/cache@v5
+      # The base the change is measured against: the pull request's base, or the
+      # push's previous head. Anything that cannot be fetched or diffed -- a new
+      # branch, a force push, workflow_dispatch -- runs the vendored server.
+      - name: Decide whether the vendored AMUX server is in scope
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          case "$EVENT" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] \
+            && git fetch --no-tags --depth=1 origin "$base" \
+            && changed=$(git diff --name-only "$base" HEAD); then
+            printf '%s\n' "$changed" | node scripts/rust-vendor-scope.mjs
+          else
+            node scripts/rust-vendor-scope.mjs --all
+          fi
+
+      - name: Restore the workspace build cache
+        id: workspace_cache
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-            vendor/amux/target
-          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
+
+      - name: Restore the vendored AMUX build cache
+        id: vendor_cache
+        if: steps.scope.outputs.vendor == 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: vendor/amux/target
+          key: ${{ runner.os }}-rust-vendor-amux-${{ hashFiles('vendor/amux/Cargo.lock') }}
 
       # No fmt or clippy step: the workspace has no rustfmt.toml and its source
       # is hand-formatted, so adding either here would fail on code this change
@@ -64,13 +109,33 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build vendored AMUX server
+        if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo build -p amux-server --locked
 
       - name: Test vendored AMUX server library
+        if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo test -p amux-server --lib --locked
 
       - name: Check vendored AMUX Docker build inputs
+        if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo test -p amux-server --test dockerfile_build_inputs --locked
+
+      - name: Save the workspace build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.workspace_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
+
+      - name: Save the vendored AMUX build cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.scope.outputs.vendor == 'true' && steps.vendor_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: vendor/amux/target
+          key: ${{ runner.os }}-rust-vendor-amux-${{ hashFiles('vendor/amux/Cargo.lock') }}

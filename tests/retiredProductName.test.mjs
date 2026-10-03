@@ -167,6 +167,32 @@ test("the rename runbook may quote the name it retires", () => {
     assert.deepEqual(findings, []);
 });
 
+test("a Windows-separated path hits the same allowlist entry", () => {
+    // The runner builds paths with node:path, which gives `\` on Windows while
+    // every prefix is written with `/`. Unnormalised, no entry matched and the
+    // check failed on the records the allowlist exists to exempt -- locally
+    // only, since CI is Linux, which is how it stayed broken.
+    const findings = find([
+        {
+            path: ".github\\audits\\ui-insight-followup.md",
+            text: "Tomverse Insight was the name at the time.",
+        },
+    ]);
+    assert.deepEqual(findings, []);
+
+    const entry = allowlistEntryFor("docs\\release-gates\\evidence\\PACKAGE-01-2026-08-12.md");
+    assert.ok(entry);
+    assert.equal(entry.prefix, "docs/release-gates/evidence/");
+});
+
+test("a Windows-separated path outside the allowlist is still a finding", () => {
+    const findings = find([{ path: "locales\\de.ts", text: "Tomverse Insight" }]);
+    assert.equal(findings.length, 1);
+    // The path is reported as the caller spelled it: normalising is for the
+    // allowlist comparison, not for rewriting what the caller handed over.
+    assert.equal(findings[0].path, "locales\\de.ts");
+});
+
 test("every allowlist entry states a reason", () => {
     for (const entry of HISTORICAL_ALLOWLIST) {
         assert.equal(typeof entry.prefix, "string");

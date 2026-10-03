@@ -453,13 +453,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in.
  *
- * 2026-10-03: the product-research branch takes develop. Both sides had
- * repinned this -- develop for a schema change of its own, this branch for the
- * observation table -- so neither value describes the merged schema and the one
- * below is computed over it. Every note above stands.
+ * 2026-10-03: product-research and CHAT-01 changed the schema after develop
+ * was repinned. The value below covers the merged schema including the
+ * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
+ * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "8b26ddcded9716499bf0c9f1a1d0f6bdb634a93e8e6a4e89b4f95b7a15cef4de";
+  "a659a1c0704a0743a9bae22eaa2df78aa07289f6d1d0c2d8f27a06b0163d4a64";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
