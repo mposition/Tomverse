@@ -110,6 +110,19 @@ const QA_RELEASE_DIGEST_VARIABLES = [
 
 const QA_RELEASE_MONITOR_VARIABLES = ["QA_RELEASE_MONITOR_SECRET", "QA_RELEASE_CONTROL_REVISION"] as const;
 
+/**
+ * The billing-finance-ops stage W trigger's variables
+ * (docs/policy/billing-finance-ops.md §3 item 6): the run secret, the dead-man
+ * signal URL and the deployment setting, and nothing else. The same list
+ * lib/billingFinanceOpsServiceCore.ts accepts at start; the IaC test holds the
+ * two equal.
+ */
+const BILLING_FINANCE_OPS_VARIABLES = [
+  "BILLING_FINANCE_OPS_AGENT_ENABLED",
+  "BILLING_FINANCE_OPS_RUN_SECRET",
+  "BILLING_FINANCE_OPS_DEADMAN_URL",
+] as const;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -147,6 +160,20 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: QA_RELEASE_MONITOR_VARIABLES,
       staging: QA_RELEASE_MONITOR_VARIABLES,
+    },
+  },
+  {
+    key: "billing_finance_ops_deadline",
+    service: "Billing Finance Ops Deadline",
+    // Node directly, not npm run, for the same reason as the QA-release
+    // services: the start check refuses any name it does not know.
+    startCommand: "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs",
+    // docs/policy/billing-finance-ops.md §1.1: 01:00 UTC daily, two hours
+    // before the Maintenance Cron's silence check reads the day.
+    cronSchedule: "0 1 * * *",
+    environments: {
+      production: BILLING_FINANCE_OPS_VARIABLES,
+      staging: BILLING_FINANCE_OPS_VARIABLES,
     },
   },
   {

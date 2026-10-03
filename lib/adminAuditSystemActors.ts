@@ -58,6 +58,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "marketing-retention",
   "marketing-guard", "marketing-webhook",
   "prompt-refiner-shadow-runner",
+  "prompt-refiner-vnext-one-shot-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,

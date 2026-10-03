@@ -111,7 +111,7 @@ if (group) {
  * A step whose arguments name no suite at all -- the Prisma schema build -- is
  * never filtered. Each lane gets its own database and has to build it.
  */
-const run = (args, label) => {
+const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
@@ -126,7 +126,7 @@ const run = (args, label) => {
   console.log(`\n[db-integration] ${label}`);
   const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
-    env: testEnvironment,
+    env: { ...testEnvironment, ...environmentOverrides },
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -310,6 +310,10 @@ run(
     // sre-ops genesis chain and state: chain shape, compare-and-set generation,
     // checkpoint order, trigger stamps, immutability, and no late COMMIT.
     "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -648,6 +652,24 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// This suite creates and drops only its own synthetic schema. Give its Prisma
+// client that exact schema rather than letting it see the lane's public tables.
+const oneShotAuditSuite =
+  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
+  fail("the isolated one-shot audit suite requires a dedicated test database name");
+}
+const oneShotTestUrl = new URL(rawTestDatabaseUrl);
+oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    oneShotAuditSuite],
+  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
+    DATABASE_URL: oneShotTestUrl.toString(),
+    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
