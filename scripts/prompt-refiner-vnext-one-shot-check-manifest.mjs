@@ -32,18 +32,22 @@ function boundedRegularUtf8(path, maximum) {
     const after = fstatSync(descriptor, { bigint: true });
     const namedAfter = lstatSync(path, { bigint: true });
     if (before.dev !== after.dev || before.ino !== after.ino ||
-        before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
-        before.ctimeMs !== after.ctimeMs || !namedAfter.isFile() ||
+        before.size !== after.size || before.mtimeNs !== after.mtimeNs ||
+        before.ctimeNs !== after.ctimeNs || !namedAfter.isFile() ||
         namedAfter.dev !== after.dev || namedAfter.ino !== after.ino ||
-        namedAfter.size !== after.size || namedAfter.mtimeMs !== after.mtimeMs ||
-        namedAfter.ctimeMs !== after.ctimeMs) {
+        namedAfter.size !== after.size || namedAfter.mtimeNs !== after.mtimeNs ||
+        namedAfter.ctimeNs !== after.ctimeNs) {
       throw new Error("input_unavailable");
     }
-    return {
-      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-      dev: after.dev,
-      ino: after.ino,
-    };
+    try {
+      return {
+        text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+        dev: after.dev,
+        ino: after.ino,
+      };
+    } catch {
+      throw new Error("input_unavailable");
+    }
   } finally {
     closeSync(descriptor);
   }
