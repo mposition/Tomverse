@@ -4,6 +4,10 @@ import type { Prisma } from "@prisma/client";
 
 import { promptRefinerVnextOneShotApprovalAuditsAreValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
+import { assertPromptRefinerVnextOneShotActiveDeploymentForAdmission } from
+  "@/lib/promptRefinerVnextOneShotDeploymentBinding";
+import { assertPromptRefinerVnextOneShotPriceForAdmission } from
+  "@/lib/promptRefinerVnextOneShotPriceBinding";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
@@ -40,11 +44,14 @@ const ABSENT_STAGE: PromptRefinerVnextOneShotStageReadback = Object.freeze({
  * A future admission caller must take this lock before registry-price and
  * slot reads. Slot writes take a SHARE lock on the same stage row in the DB
  * trigger, so a present stage and its reservations remain stable for this
- * transaction. No admission caller is wired yet; this readback never grants
- * dispatch authorization.
+ * transaction. The active deployment is also rechecked directly before this
+ * readback returns. No dispatch caller is wired yet; this grants no authority.
  */
 export async function lockAndReadPromptRefinerVnextOneShotStage(
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  deploymentOptions: Parameters<
+    typeof assertPromptRefinerVnextOneShotActiveDeploymentForAdmission
+  >[1] = {}
 ): Promise<PromptRefinerVnextOneShotStageReadback> {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "PromptRefinerVnextOneShotStage"
@@ -58,6 +65,10 @@ export async function lockAndReadPromptRefinerVnextOneShotStage(
   if (!snapshot.stagePresent) {
     throw new Error("vnext_one_shot_stage_changed_after_lock");
   }
+  await assertPromptRefinerVnextOneShotActiveDeploymentForAdmission(
+    tx, deploymentOptions
+  );
+  await assertPromptRefinerVnextOneShotPriceForAdmission(tx);
   return snapshot;
 }
 

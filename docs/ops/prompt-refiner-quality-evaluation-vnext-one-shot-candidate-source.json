@@ -1,0 +1,21 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-candidate-source-v1",
+  "scope": "candidate_source_only",
+  "files": {
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-candidate-development.md": "b4cc54ccce2d5f53f690a6fe383e6d3433203be52234f64c2bfb1ea3e635d469",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-execution-contract-approval.md": "cd7e3dd69405e83e2eed5695df19e852a4ebbe6be8854e5ab609041d6b0a50f9",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-numeric-approval.md": "c6b2c74eeb5fdb0c594b489a2ffaa78f8d45fa79c07d3436b483b665b3502615",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-numeric-spec-draft.md": "a1ebccdbbe10c02725d73686235f379f51abd38f5cf8a6acd9e3ba294edbbfea",
+    "docs/policy/prompt-refiner-quality-evaluation-vnext-draft.md": "0690ec18c16b515909a733d7ae6de511609573ebfebce9a5b01876d1005e3051",
+    "lib/promptRefinerQualityEvaluationVnextAggregate.ts": "da78b2c9d8ba855d6b2cbff43fb37438c3c890f0f3995beefec109a68bc4c546",
+    "lib/promptRefinerQualityEvaluationVnextAllocation.ts": "28d74c486f8f4aa968c6ef6d87a01d8b0ab9b82f8e0bbac06a2782ac2d7c48ea",
+    "lib/promptRefinerQualityEvaluationVnextCandidate.ts": "297067cc24f0fe39606ba8ee5b96293314686196b4d4fc0a63209a64fcfc18b3",
+    "lib/promptRefinerQualityEvaluationVnextCore.ts": "9b00c71b51ecc743ad8a61fb04f174bc4aecde3fd98342d441bba1cda7e54f08",
+    "lib/promptRefinerQualityEvaluationVnextDevelopment.ts": "8ca5317006f97b9d0d155f6a3168aa15dff7be32ac8d838f74f4f08b5e9887b5",
+    "lib/promptRefinerQualityEvaluationVnextExecutionContract.ts": "aae45c7104a8b2205a12a72beeafc75fdfccbfd166d48a51dacb690df4e6623f",
+    "lib/providerUsageCost.ts": "7a52578f8a306562e0c43a527fb749c88d7221699214749b1a8fe3df62e3662a",
+    "lib/routerDevelopmentBenchmark.ts": "aa7b9784ba7360545ce88856ffcc2a2c0fcc2ff6d8caa8ffc9f331a3f33a54e0",
+    "tests/promptRefinerQualityEvaluationVnextCandidate.test.mjs": "aa111d68e184e1f54d03a728c2811b67881f7df744c2e00d27312b5b6c07c651",
+    "tests/promptRefinerQualityEvaluationVnextDevelopment.test.mjs": "cb7cf551dbb15afb3d34d094994c8133b693787ba8c0b88e98ba9677549782c6"
+  }
+}

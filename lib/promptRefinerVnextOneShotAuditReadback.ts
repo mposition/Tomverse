@@ -13,7 +13,7 @@ import {
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-type Stage = {
+export type PromptRefinerVnextOneShotAuditBinding = {
   id: string;
   sourceCommitSha: string;
   sourceManifestDigest: string;
@@ -25,6 +25,9 @@ type Stage = {
   perRequestCostMicroUsd: bigint;
   slotCount: number;
   costCeilingMicroUsd: bigint;
+};
+
+type Stage = PromptRefinerVnextOneShotAuditBinding & {
   approvedBy: string;
   approvedAt: Date;
   stageApprovalAuditLogId: string;
@@ -56,7 +59,10 @@ export const PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES = {
 
 // The database fixes both cost values to these small integers before an audit
 // row can be linked, so converting them into JSON numbers is lossless.
-const auditMetadata = (stage: Stage, kind: PromptRefinerVnextOneShotApprovalKind) => ({
+export const promptRefinerVnextOneShotApprovalAuditMetadata = (
+  stage: PromptRefinerVnextOneShotAuditBinding,
+  kind: PromptRefinerVnextOneShotApprovalKind
+) => ({
   approvalKind: kind,
   sourceCommitSha: stage.sourceCommitSha,
   sourceManifestDigest: stage.sourceManifestDigest,
@@ -93,6 +99,22 @@ const auditEntryHashIsValid = (entry: AuditEntry, keys: readonly string[]): bool
   });
 };
 
+/** Verify an arbitrary one-shot receipt and its immediate signed predecessor. */
+export const promptRefinerVnextOneShotAuditReceiptIsValid = async (
+  tx: Prisma.TransactionClient,
+  entry: AuditEntry,
+  keys: readonly string[] = adminAuditIntegrityKeys(process.env)
+): Promise<boolean> => {
+  if (!auditEntryHashIsValid(entry, keys)) return false;
+  if (!entry.previousHash) return true;
+  const previous = await tx.adminAuditLog.findUnique({
+    where: { entryHash: entry.previousHash },
+  });
+  return Boolean(previous && previous.entryHash === entry.previousHash &&
+    previous.createdAt.getTime() < entry.createdAt.getTime() &&
+    auditEntryHashIsValid(previous, keys));
+};
+
 /** DB triggers bind the row shape; this verifies the app-owned HMAC key. */
 export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
   stage: Stage,
@@ -118,7 +140,7 @@ export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
     (kind === "stage" && entry.createdAt.getTime() !== stage.approvedAt.getTime()) ||
     (kind === "run" && entry.createdAt.getTime() <= stage.approvedAt.getTime()) ||
     canonicalBenchmarkJson(entry.metadata ?? null) !==
-      canonicalBenchmarkJson(auditMetadata(stage, kind))
+      canonicalBenchmarkJson(promptRefinerVnextOneShotApprovalAuditMetadata(stage, kind))
   ) {
     return false;
   }

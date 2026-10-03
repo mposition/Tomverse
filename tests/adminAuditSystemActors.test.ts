@@ -65,6 +65,7 @@ test("the system actor list is closed and changes only by review", () => {
     // the sealed Prompt Refiner closure's positions do not move.
     "marketing-webhook",
     "prompt-refiner-shadow-runner",
+    "prompt-refiner-vnext-one-shot-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",
