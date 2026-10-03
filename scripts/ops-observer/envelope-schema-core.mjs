@@ -10,7 +10,10 @@
 // message, no user or trace id.
 //
 // Each section can independently be the string "unknown" when the app could not
-// compute it; then only the keys that read that section are unknown.
+// compute it; then only the keys that read that section are unknown. An empty
+// readiness object is invalid (readiness always has checks), while an empty job
+// or budget list is valid and simply leaves those keys unknown. A parsed
+// snapshot is a frozen copy, so a caller cannot change it after validation.
 
 import { S2_PAGE_SIGNALS } from "./classify-core.mjs";
 
@@ -74,7 +77,7 @@ export function parseSnapshot(value) {
     }
   }
 
-  return { ok: true, snapshot: value };
+  return { ok: true, snapshot: deepFreeze(structuredClone(value)) };
 }
 
 /**
@@ -132,6 +135,14 @@ export function digestReadinessNames(snapshot) {
     S2_PAGE_SIGNALS.filter((s) => ["P1a", "P1b", "P1c"].includes(s.id)).flatMap((s) => s.scopes),
   );
   return Object.keys(snapshot.readiness).filter((name) => !pageScopes.has(name)).sort();
+}
+
+function deepFreeze(v) {
+  if (v && typeof v === "object") {
+    for (const child of Object.values(v)) deepFreeze(child);
+    Object.freeze(v);
+  }
+  return v;
 }
 
 function isPlainObject(v) {

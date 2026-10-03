@@ -158,3 +158,13 @@ test("every non-page readiness check is listed for the digest, including ones ad
   ]);
   assert.ok(digestReadinessNames(snapshot({ readiness: { ...READINESS, brandNewCheck: false } })).includes("brandNewCheck"));
 });
+
+test("a parsed snapshot is a frozen copy", () => {
+  const input = snapshot();
+  const { snapshot: parsed } = parseSnapshot(input);
+  input.readiness.database = false;
+  assert.equal(parsed.readiness.database, true);
+  assert.throws(() => {
+    parsed.readiness.database = false;
+  }, TypeError);
+});
