@@ -232,9 +232,11 @@ test("a consent copy version that makes no promise has changed the promise in ev
 test("the published version of each document is the one approved as carrying the amendment", () => {
   // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
   // mposition on 2026-10-03.
-  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [SITEMAP_CONTENT_EVIDENCE["/privacy"].contentSha256]);
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256]);
   assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [AMENDED_DOCUMENT_EVIDENCE["/terms"].contentSha256]);
-  assert.equal(SITEMAP_CONTENT_EVIDENCE["/privacy"].date, "2026-11-16");
+  assert.equal(AMENDED_DOCUMENT_EVIDENCE["/privacy"].date, "2026-11-16");
+  // A future effective date is not a lastmod (lib/sitemapContentDates.ts).
+  assert.equal(SITEMAP_CONTENT_EVIDENCE["/privacy"], undefined);
   assert.equal(AMENDED_DOCUMENT_EVIDENCE["/terms"].date, "2026-11-16");
 });
 

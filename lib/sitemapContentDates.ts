@@ -17,7 +17,7 @@
  * - A single date for every page. That is what this replaced: 2026-07-15 on
  *   every entry, including pages that have changed many times since.
  *
- * `/privacy` qualifies: it shows "Effective: September 28, 2026" in all seven
+ * `/privacy` qualified while it showed "Effective: September 28, 2026" in all seven
  * locales. That date is the chat-provider notice, including the per-provider
  * table of recipient, place, training, retention, and sale or advertising.
  * The table is on the page only while every enrolled row is disclosable.
@@ -39,8 +39,12 @@ export type SitemapContentEvidence = {
 };
 
 export const SITEMAP_CONTENT_EVIDENCE: Readonly<Record<string, SitemapContentEvidence>> = {
-    "/privacy": {
-        date: "2026-11-16",
-        contentSha256: "5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7",
-    },
+    // /privacy is not dated while its shown date is in the future. The S10
+    // amendment (docs/policy/email-policy-amendment-draft.md) was published
+    // ahead of its 2026-11-16 effective date, and a lastmod is a claim that the
+    // content changed on that day -- a future day is not one. The page omits
+    // lastmod, which is allowed and says nothing false. Its digest is held by
+    // the publication gate instead (AMENDED_DOCUMENT_EVIDENCE in
+    // lib/emailPolicyPublication.ts), whose verifier still fails on any edit.
+    // Once 2026-11-16 has passed, the entry can come back with that date.
 };
