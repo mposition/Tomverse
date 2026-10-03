@@ -81,6 +81,35 @@ function createBundle(base, head) {
   return { path, ref, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+export const TRUSTED_BASE_REFS = ["origin/develop", "origin/main"];
+
+/**
+ * The review base: the most recent fork point between HEAD and a trusted
+ * branch (plus an explicit --base, if given). Always a fork point, never a
+ * branch tip -- a tip is no ancestor once that branch has moved on. And the
+ * nearest one: a develop branch reviewed against main's fork point drags in
+ * every commit develop has merged since, hundreds of files that are not this
+ * change and that trip the contract-path floor into two reviewers.
+ */
+export function nearestBase(head, explicit) {
+  const refs = explicit ? [explicit, ...TRUSTED_BASE_REFS] : TRUSTED_BASE_REFS;
+  const forkPoints = [];
+  for (const ref of refs) {
+    const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { encoding: "utf8" });
+    if (exists.status !== 0) {
+      if (ref === explicit) throw new Error(`--base ${ref} is not a commit`);
+      continue;
+    }
+    const fork = spawnSync("git", ["merge-base", head, ref], { encoding: "utf8" });
+    if (fork.status === 0) forkPoints.push(fork.stdout.trim());
+  }
+  if (forkPoints.length === 0) throw new Error("no fork point with origin/develop or origin/main; fetch origin first");
+  // The descendant of all the others is the nearest. Incomparable fork points
+  // cannot be ordered, so keep the first (the explicit one when given).
+  const isAncestor = (a, b) => spawnSync("git", ["merge-base", "--is-ancestor", a, b]).status === 0;
+  return forkPoints.find((candidate) => forkPoints.every((other) => isAncestor(other, candidate))) ?? forkPoints[0];
+}
+
 function transport(token, stdinPath) {
   const local = process.env.REVIEW_ORCH_LOCAL_BIN;
   let command;
@@ -112,12 +141,7 @@ async function submit(options) {
   const author = options.author;
   if (!author) throw new Error("--author is required (claude, codex, cursor, ...)");
   const head = git(["rev-parse", "--verify", `${options.head ?? "HEAD"}^{commit}`]);
-  const baseRef = options.base ?? process.env.REVIEW_ORCH_BASE ?? "origin/develop";
-  // Always the fork point: `--base origin/main` means "where this branch left
-  // main", not main's tip, which is no ancestor once main has moved on. For a
-  // base that already is an ancestor, the merge-base is that commit itself.
-  git(["rev-parse", "--verify", `${baseRef}^{commit}`]);
-  const base = git(["merge-base", head, baseRef]);
+  const base = nearestBase(head, options.base ?? process.env.REVIEW_ORCH_BASE);
   if (base === head) throw new Error("nothing to review: head equals base");
   // --focus <rev>: show the reviewer only <rev>..HEAD (say, what changed since
   // the last review round). The server checks it lies between base and HEAD.
