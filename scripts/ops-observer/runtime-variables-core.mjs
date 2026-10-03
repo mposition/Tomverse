@@ -157,6 +157,24 @@ export function isCredentialShaped(name) {
   );
 }
 
+/**
+ * Names a build environment must not contain: any runtime variable of either
+ * service that carries a secret or a destination, and anything
+ * credential-shaped. Switches and paths (`OPS_OBSERVER_ENABLED`,
+ * `OPS_OBSERVER_APP_URL`, `RAILWAY_DOCKERFILE_PATH`) are not secrets and may
+ * be present. Returns the offending names, sorted.
+ */
+export function buildEnvironmentViolations(names) {
+  if (!Array.isArray(names) || names.some((n) => typeof n !== "string")) {
+    throw new Error("ops_observer_env_names_invalid");
+  }
+  const notSecret = new Set(["OPS_OBSERVER_ENABLED", "OPS_OBSERVER_APP_URL", "RAILWAY_DOCKERFILE_PATH"]);
+  const runtimeSecrets = new Set(
+    [...SERVICE_VARIABLES.page, ...SERVICE_VARIABLES.digest].filter((name) => !notSecret.has(name)),
+  );
+  return names.filter((name) => runtimeSecrets.has(name) || isCredentialShaped(name)).sort();
+}
+
 /** The child's environment: only its listed variables that are present. */
 export function childEnvironment(service, env) {
   assertService(service);
