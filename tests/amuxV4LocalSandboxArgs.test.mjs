@@ -77,6 +77,7 @@ test("AMUX v4 analysis mount accepts only exact planned argv and dedicated crede
     args[index + 1] === "/home/tommy/.amux-cli-profiles/codex/auth.json");
   assert.ok(bindAt > 0);
   assert.equal(args[bindAt + 2], "/tmp/.codex/auth.json");
+  assert.ok(args.includes("/run/amux-cli/model-catalog.json"));
   assert.equal(args.includes("/home/tommy/.amux-cli-profiles/codex"), false);
   assert.equal(args.includes("/home/tommy/.codex/auth.json"), false);
   assert.ok(args.includes("/etc/ssl/certs"));
