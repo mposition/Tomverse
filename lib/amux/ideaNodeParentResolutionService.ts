@@ -9,7 +9,7 @@ import { amuxUnitOwnerId, AmuxUnitRejectError } from
   "./ideaUnitRejectService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
-const ROOT_REF = /^c(0|[1-9][0-9]*):node-(0|[1-9][0-9]{0,3})$/;
+const NODE_REF = /^c(0|[1-9][0-9]*):node-(0|[1-9][0-9]{0,3})$/;
 
 export class AmuxNodeParentResolutionError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "reconfirm" |
@@ -35,7 +35,7 @@ export async function resolveApprovedAmuxRootParent(
     }
     throw error;
   }
-  if (!ID.test(input.ideaId) || !ROOT_REF.test(input.parentRef)) {
+  if (!ID.test(input.ideaId) || !NODE_REF.test(input.parentRef)) {
     throw new AmuxNodeParentResolutionError("not_ready");
   }
   const isolation = await tx.$queryRaw<Array<{ level: string }>>`
@@ -64,6 +64,9 @@ export async function resolveApprovedAmuxRootParent(
   const decision = decisions[0]!;
   const readBack = await readAmuxRootNodeDecisionInTransaction(tx, session,
     decision.id, decision.prepareRequestId);
+  if (readBack.state === "not_visible") {
+    throw new AmuxNodeParentResolutionError("not_ready");
+  }
   if (readBack.state !== "created" ||
       readBack.nodeId !== decision.resolvedNodeId) {
     throw new AmuxNodeParentResolutionError("integrity_unavailable");
@@ -104,7 +107,7 @@ export async function resolveApprovedAmuxEpicParent(
     }
     throw error;
   }
-  if (!ID.test(input.ideaId) || !ROOT_REF.test(input.parentRef)) {
+  if (!ID.test(input.ideaId) || !NODE_REF.test(input.parentRef)) {
     throw new AmuxNodeParentResolutionError("not_ready");
   }
   const isolation = await tx.$queryRaw<Array<{ level: string }>>`
@@ -133,6 +136,9 @@ export async function resolveApprovedAmuxEpicParent(
   const decision = decisions[0]!;
   const readBack = await readAmuxRootNodeDecisionInTransaction(tx, session,
     decision.id, decision.prepareRequestId, "epic");
+  if (readBack.state === "not_visible") {
+    throw new AmuxNodeParentResolutionError("not_ready");
+  }
   if (readBack.state !== "created" ||
       readBack.nodeId !== decision.resolvedNodeId) {
     throw new AmuxNodeParentResolutionError("integrity_unavailable");

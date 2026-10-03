@@ -15,6 +15,8 @@ const route = readFileSync(new URL(
   "../app/api/admin/amux/ideas/root-node/route.ts", import.meta.url), "utf8");
 const epicRoute = readFileSync(new URL(
   "../app/api/admin/amux/ideas/epic-node/route.ts", import.meta.url), "utf8");
+const featureRoute = readFileSync(new URL(
+  "../app/api/admin/amux/ideas/feature-node/route.ts", import.meta.url), "utf8");
 const prepare = {
   stage: "prepare", ideaId: "idea_00000001", draftUnitId: "draft_00000001",
   decisionId: "00000000-0000-4000-8000-000000000001",
@@ -78,6 +80,13 @@ test("root node route stays dark and uncertain writes are never retry grants", (
   assert.match(epicRoute, /consumeAmuxEpicNode/);
   assert.match(epicRoute, /confirmAmuxEpicNodeNoCommit/);
   assert.match(epicRoute, /readAmuxRootNodeDecision\(auth\.session,[\s\S]*"epic"\)/);
+  assert.match(featureRoute, /amuxV4NodeCreateWritePermitted/);
+  assert.match(featureRoute, /amuxV4NodeCreateReadPermitted/);
+  assert.match(featureRoute, /assertRecentAdminAuthentication/);
+  assert.match(featureRoute, /prepareAmuxFeatureNode/);
+  assert.match(featureRoute, /consumeAmuxFeatureNode/);
+  assert.match(featureRoute, /confirmAmuxFeatureNodeNoCommit/);
+  assert.match(featureRoute, /readAmuxRootNodeDecision\(auth\.session,[\s\S]*"feature"\)/);
 });
 
 test("expired read-back distinguishes clean expiry from audited no-commit expiry", () => {

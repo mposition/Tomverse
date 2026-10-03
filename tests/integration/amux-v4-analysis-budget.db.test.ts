@@ -1257,6 +1257,10 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal(parent.level, "initiative");
     assert.equal(parent.approvedDecisionId, rootChoice.decisionId);
     assert.equal(parent.content.digest, node.contentDigest);
+    await assert.rejects(resolveApprovedAmuxEpicParent(tx, session,
+      { ideaId, parentRef: units[0]!.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready", "an Initiative is not an Epic parent");
     await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
       { ideaId, parentRef: units[1]!.localRef! }),
     (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
@@ -1310,6 +1314,10 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal(epicNode.level, "epic");
     assert.equal(epicNode.parentId, rootChoice.nodeId);
     assert.equal(epicRevision.parentIdAtApproval, rootChoice.nodeId);
+    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: units[1]!.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready", "an Epic is not an Initiative parent");
     assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
       epicChoice.decisionId, epicChoice.prepareRequestId, "epic")).state, "created");
     const featureParents = await resolveApprovedAmuxEpicParent(tx, session,
@@ -1574,7 +1582,8 @@ test("a complete first result saves independent encrypted units and closes only 
       error.code === "integrity_unavailable");
 });
 
-test("an uncertain Epic consume freezes until owner-confirmed no-commit", async () => {
+for (const level of ["epic", "feature"] as const) {
+test(`an uncertain ${level} consume freezes until owner-confirmed no-commit`, async () => {
   const { holdId, previewId } = await syntheticDispatchedHold();
   const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: previewId }, select: { ideaId: true },
@@ -1602,6 +1611,9 @@ test("an uncertain Epic consume freezes until owner-confirmed no-commit", async 
         { kind: "node", localId: "c0:node-1", level: "epic",
           parentRef: "c0:node-0", title: "Recovery Epic",
           description: "Synthetic child.", sourceRefIds: ["operator_idea"] },
+        { kind: "node", localId: "c0:node-2", level: "feature",
+          parentRef: "c0:node-1", title: "Recovery Feature",
+          description: "Synthetic leaf.", sourceRefIds: ["operator_idea"] },
       ],
     }),
   }));
@@ -1614,38 +1626,50 @@ test("an uncertain Epic consume freezes until owner-confirmed no-commit", async 
   const epicChoice = { ideaId, draftUnitId: units[1]!.id,
     decisionId: randomUUID(), prepareRequestId: randomUUID(),
     nodeId: randomUUID(), reason: "" };
+  const featureChoice = { ideaId, draftUnitId: units[2]!.id,
+    decisionId: randomUUID(), prepareRequestId: randomUUID(),
+    nodeId: randomUUID(), reason: "" };
   await assert.rejects(prisma.$transaction(async (tx) => {
     const rootPrepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: rootChoice, keys });
     await commitAmuxRootNodeConsume(tx, { session, request,
       choice: { ...rootChoice, consumeRequestId: randomUUID(),
         confirmationDigest: rootPrepared.confirmationDigest }, keys });
-    await commitAmuxEpicNodePrepare(tx,
+    const epicPrepared = await commitAmuxEpicNodePrepare(tx,
       { session, request, choice: epicChoice, keys });
+    if (level === "feature") {
+      await commitAmuxEpicNodeConsume(tx, { session, request,
+        choice: { ...epicChoice, consumeRequestId: randomUUID(),
+          confirmationDigest: epicPrepared.confirmationDigest }, keys });
+      await commitAmuxFeatureNodePrepare(tx,
+        { session, request, choice: featureChoice, keys });
+    }
+    const target = level === "epic" ? epicChoice : featureChoice;
     const consumeRequestId = randomUUID();
     assert.equal(await commitAmuxRootNodeUnknown(tx, { actorUserId,
-      decisionId: epicChoice.decisionId,
-      prepareRequestId: epicChoice.prepareRequestId,
+      decisionId: target.decisionId,
+      prepareRequestId: target.prepareRequestId,
       consumeRequestId }), true);
     assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
-      epicChoice.decisionId, epicChoice.prepareRequestId, "epic")).state,
+      target.decisionId, target.prepareRequestId, level)).state,
     "outcome_unknown");
     const confirmed = await commitAmuxRootNodeNoCommitConfirmed(tx,
-      { session, request, decisionId: epicChoice.decisionId,
-        prepareRequestId: epicChoice.prepareRequestId }, "epic");
+      { session, request, decisionId: target.decisionId,
+        prepareRequestId: target.prepareRequestId }, level);
     assert.equal(confirmed.state, "no_commit_confirmed");
     assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
-      epicChoice.decisionId, epicChoice.prepareRequestId, "epic")).state,
+      target.decisionId, target.prepareRequestId, level)).state,
     "no_commit_confirmed");
     assert.equal(await tx.amuxPortfolioNode.count({
-      where: { id: epicChoice.nodeId } }), 0);
-    throw new Error("rollback synthetic Epic no-commit recovery");
+      where: { id: target.nodeId } }), 0);
+    throw new Error("rollback synthetic node no-commit recovery");
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     maxWait: 5_000, timeout: 30_000 }),
-  /rollback synthetic Epic no-commit recovery/);
+  /rollback synthetic node no-commit recovery/);
   assert.equal(await prisma.amuxPortfolioNode.count({
     where: { id: rootChoice.nodeId } }), 0);
 });
+}
 
 test("a complete rejection closes analysis without creating proposal cards", async () => {
   const { holdId, previewId } = await syntheticDispatchedHold();

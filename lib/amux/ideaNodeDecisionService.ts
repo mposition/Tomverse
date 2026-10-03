@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { commitAmuxRootNodeConsume, commitAmuxRootNodePrepare,
   commitAmuxEpicNodeConsume, commitAmuxEpicNodePrepare,
+  commitAmuxFeatureNodeConsume, commitAmuxFeatureNodePrepare,
   commitAmuxRootNodeUnknown, commitAmuxRootNodeNoCommitConfirmed,
   AmuxNodeCreateError,
   type AmuxNodeCreatePrepare, type AmuxNodeCreateConsume } from
@@ -57,7 +58,7 @@ function knownPreCommitRefusal(error: unknown,
 }
 
 async function prepareAmuxNode(session: Session, request: Request,
-  choice: AmuxNodeCreatePrepare, level: "initiative" | "epic") {
+  choice: AmuxNodeCreatePrepare, level: "initiative" | "epic" | "feature") {
   const keys = beforeWrite(session);
   let callbackReturned = false;
   const pending: { result: Awaited<ReturnType<typeof commitAmuxRootNodePrepare>> | null } =
@@ -66,7 +67,9 @@ async function prepareAmuxNode(session: Session, request: Request,
     return await prisma.$transaction(async (tx) => {
       pending.result = await (level === "initiative"
         ? commitAmuxRootNodePrepare(tx, { session, request, choice, keys })
-        : commitAmuxEpicNodePrepare(tx, { session, request, choice, keys }));
+        : level === "epic"
+          ? commitAmuxEpicNodePrepare(tx, { session, request, choice, keys })
+          : commitAmuxFeatureNodePrepare(tx, { session, request, choice, keys }));
       callbackReturned = true;
       return pending.result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -105,15 +108,21 @@ export const prepareAmuxEpicNode = (session: Session, request: Request,
   choice: AmuxNodeCreatePrepare) => prepareAmuxNode(session, request,
     choice, "epic");
 
+export const prepareAmuxFeatureNode = (session: Session, request: Request,
+  choice: AmuxNodeCreatePrepare) => prepareAmuxNode(session, request,
+    choice, "feature");
+
 async function consumeAmuxNode(session: Session, request: Request,
-  choice: AmuxNodeCreateConsume, level: "initiative" | "epic") {
+  choice: AmuxNodeCreateConsume, level: "initiative" | "epic" | "feature") {
   const keys = beforeWrite(session);
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
       const result = await (level === "initiative"
         ? commitAmuxRootNodeConsume(tx, { session, request, choice, keys })
-        : commitAmuxEpicNodeConsume(tx, { session, request, choice, keys }));
+        : level === "epic"
+          ? commitAmuxEpicNodeConsume(tx, { session, request, choice, keys })
+          : commitAmuxFeatureNodeConsume(tx, { session, request, choice, keys }));
       callbackReturned = true;
       return result;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -170,9 +179,13 @@ export const consumeAmuxEpicNode = (session: Session, request: Request,
   choice: AmuxNodeCreateConsume) => consumeAmuxNode(session, request,
     choice, "epic");
 
+export const consumeAmuxFeatureNode = (session: Session, request: Request,
+  choice: AmuxNodeCreateConsume) => consumeAmuxNode(session, request,
+    choice, "feature");
+
 async function confirmAmuxNodeNoCommit(session: Session,
   request: Request, decisionId: string, prepareRequestId: string,
-  level: "initiative" | "epic") {
+  level: "initiative" | "epic" | "feature") {
   beforeRecovery(session);
   let callbackReturned = false;
   try {
@@ -215,3 +228,8 @@ export const confirmAmuxEpicNodeNoCommit = (session: Session,
   request: Request, decisionId: string, prepareRequestId: string) =>
   confirmAmuxNodeNoCommit(session, request, decisionId, prepareRequestId,
     "epic");
+
+export const confirmAmuxFeatureNodeNoCommit = (session: Session,
+  request: Request, decisionId: string, prepareRequestId: string) =>
+  confirmAmuxNodeNoCommit(session, request, decisionId, prepareRequestId,
+    "feature");
