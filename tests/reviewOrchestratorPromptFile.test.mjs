@@ -83,6 +83,24 @@ test("{promptFile} hands the prompt (note first) as an owner-only file and remov
   }
 });
 
+test("{promptDir} names a directory of the job's own holding prompt.md, for a CLI given only a short -p", async () => {
+  const f = fixture({ args: [FAKE, "promptfile", "{promptDir}/prompt.md"], passEnv: ["FAKE_REVIEWER_PROMPT_OUT"] });
+  const promptOut = join(f.root, "prompt.txt");
+  process.env.FAKE_REVIEWER_PROMPT_OUT = promptOut;
+  try {
+    const { jobId } = JSON.parse(f.client("submit", "--author", "claude", "--repo", "demo").stdout);
+    const orchestrator = new Orchestrator(f.config);
+    orchestrator.tick();
+    await orchestrator.idle();
+    assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).verdict, "accept");
+    assert.match(readFileSync(promptOut, "utf8"), /independent code reviewer/);
+    assert.deepEqual(readdirSync(join(f.config.stateDir, "prompts")), []);
+  } finally {
+    delete process.env.FAKE_REVIEWER_PROMPT_OUT;
+    f.cleanup();
+  }
+});
+
 test("without {promptFile} the prompt still goes on stdin, with the note first", async () => {
   const f = fixture({ args: [FAKE, "accept"], passEnv: ["FAKE_REVIEWER_PROMPT_OUT"], promptNote: "STDIN NOTE" });
   const promptOut = join(f.root, "prompt.txt");

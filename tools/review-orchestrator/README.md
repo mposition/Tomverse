@@ -152,6 +152,21 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
     끝났습니다 — 11건은 `/dev/stdin`(ENXIO), 11건은 거절된 도구 호출, `--sandbox`와 허용 명령
     지시문을 넣은 뒤의 5건도 `no_verdict_block`. 다시 켜려면 서버의 실제 job 하나가 판정까지
     나오는 것을 먼저 확인합니다(셸 pipe로 한 시험은 운영과 달랐습니다).
+- GitHub Copilot CLI(예시 설정에 **꺼진 채** 있음, 실측 전): 문서상 프롬프트는 `-p "<프롬프트>"`
+  인자로만 받습니다. 인자 하나는 Linux에서 약 128KB가 한계라 검토 프롬프트가 들어가지 않으므로,
+  `{promptFile}`에 프롬프트를 쓰고 `-p`에는 그 파일을 읽으라는 짧은 지시만, `--add-dir {promptDir}`로
+  그 job의 프롬프트 폴더 하나만 읽게 합니다. 공급사는 고른 모델로 정해지므로 **Gemini 계열**을
+  고정해 `vendor: "google"`로 둡니다(Copilot의 GPT·Claude·Grok은 기존 공급사와 겹칩니다).
+  켜기 전에 확인할 것:
+  1. 인증은 **권한이 "Copilot Requests" 하나뿐인 fine-grained PAT**을 `COPILOT_GITHUB_TOKEN`으로
+     줍니다(systemd `EnvironmentFile` + provider `passEnv`). 저장소 권한이 있는 토큰이면 내장
+     GitHub MCP 서버를 통해 reviewer가 GitHub에 쓸 수 있습니다. 내장 MCP를 끄는 플래그가 있으면
+     함께 씁니다(`copilot --help`로 확인).
+  2. `-p`에서 허용되지 않은 도구 호출이 실행을 끝내는지 계속하는지(Devin은 끝냈습니다), 쓰기와
+     네트워크(`--deny-tool`)가 막히는지.
+  3. Copilot이 읽는 `.github/instructions/`·`prompts/`·`agents/`·`chatmodes/`와
+     `.github/copilot-instructions.md`는 지시 파일로 취급되어 base 버전으로 되돌려집니다.
+  4. **서버의 실제 job 하나**가 이 provider로 배정되어 판정까지 나오는지.
 
 ## 서버 업데이트 (drain)
 

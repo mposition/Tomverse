@@ -197,7 +197,11 @@ test("instruction paths cover the files reviewer CLIs load on their own", () => 
   // The directory itself counts: it may be replaced by a symlink.
   assert.equal(isInstructionPath(".claude"), true);
   assert.equal(isInstructionPath("sub/.Cursor"), true);
-  for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt"]) {
+  // GitHub Copilot's own instruction, prompt, agent and chat-mode files.
+  for (const p of [".github/instructions/a.instructions.md", ".github/prompts/x.prompt.md", ".github/agents/r.agent.md", ".github/chatmodes/c.chatmode.md", ".github/instructions"]) {
+    assert.equal(isInstructionPath(p), true, p);
+  }
+  for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt", "docs/instructions/x.md"]) {
     assert.equal(isInstructionPath(p), false, p);
   }
 });
