@@ -381,7 +381,12 @@ test("every cache key in this repository carries a family, generation and namesp
       seen.push(`${name}#${step.jobId}:${parsed.identity}`);
     }
   }
-  assert.ok(seen.length >= 18, `expected every cache step to be found, saw ${seen.length}`);
+  // Exact, like the other counts in this file, so adding or removing a cache
+  // step is a visible change rather than a number that quietly drifts. It fell
+  // from 22 to 17 when the five save steps in the three mixed-trigger workflows
+  // were removed: with cache-mode read their token cannot reserve an entry, so
+  // each of those steps only ever spent the compression time and warned.
+  assert.equal(seen.length, 17, `expected every cache step to be found, saw ${seen.length}`);
 });
 test("restore and save variants are read, and a save step needs no key", () => {
   const restoreOnly = readCacheSteps(

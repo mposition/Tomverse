@@ -658,15 +658,69 @@ run은 실패 없이 계속된다"고 적습니다. 따라서 최악의 결과�
 PR에서 `pull_request`로 돌고, 그 run의 save 단계 로그가 mode 때문에
 건너뛰어졌는지를 말해 줍니다. 결과는 아래 "측정" 칸에 적습니다.
 
-> **측정 결과.** (이 PR의 `admin-console-e2e` / `orchestrator-rust` run 로그를
-> 읽은 뒤 채웁니다. 비어 있으면 아직 읽지 않은 것이고, 추측으로 채우지
-> 않습니다.)
+> **측정 결과 — 걸립니다.** PR #2009의 `Orchestrator Rust` run
+> (`37106375986`, `pull_request` 이벤트, `cache-mode: read`)에서 save 단계가
+> 남긴 줄입니다.
+>
+> ```
+> ##[warning]Failed to save: Unable to reserve cache with key
+> Linux-rust-v2-cargo-home-85e0d614…
+> More details: cache write denied: token has no writable scopes
+> ```
+>
+> 세 가지가 함께 확정됐습니다.
+>
+> 1. **명시 `cache-mode`는 `pull_request` run에도 적용됩니다.** 문서가
+>    "영향받지 않는다"고 적은 것은 low-trust *기본값*이고, 명시 선언은 별개
+>    입니다.
+> 2. **"token has no writable scopes" — round 12의 전제가 맞습니다.** 거부 주체가
+>    action이 아니라 **토큰**이라고 GitHub 자신이 말합니다. restore-only가 하지
+>    못한 일이 바로 이것입니다.
+> 3. **fail-safe는 맞지만 문서보다 약합니다.** 단계 결론은 `success`이고 run은
+>    실패하지 않습니다. 다만 문서가 말한 "informational message"가 아니라
+>    `##[warning]`이며, `cache/save@v5`는 **tar/zstd 압축을 모두 끝낸 뒤** 거부
+>    당합니다. 건너뛰는 것이 아니라 값을 치르고 거절당하는 것입니다.
 
-판정이 "걸린다"로 나오면 그 뒤는 **되돌릴 수 있는 비용 대 되돌릴 수 없는
-경로**의 선택이고, "검증 범위는 되돌릴 수 없는 것에 비례합니다"에 따라 기본은
-경로를 닫는 쪽입니다. 다만 CI 시간은 운영자의 것이므로, 그 선택지와 대안
-(PR 전용 warming job으로 분리, reusable workflow 호출자별 `cache-mode`)을
-함께 보고하고 결정을 넘깁니다.
+**그래서 죽은 save 단계 다섯 개를 제거했습니다**(`admin-console-e2e` 2,
+`e2e` 2, `orchestrator-rust` 1). 그 단계들이 할 수 있는 일은 매 run 압축 비용을
+쓰고 경고를 남기는 것뿐이고, 남겨 두면 **필수 gate에 상설 경고**가 생겨 사람이
+경고를 무시하도록 훈련시킵니다. 더 나쁜 것은 warming이 동작하는 것처럼 보인다는
+점입니다. restore 쪽 절반은 **남겼습니다** — 아래 세 선택지 전부가 그것을
+필요로 하고, 주석이 "지금은 아무도 쓰지 못한다"를 명시합니다.
+
+**이로써 이 저장소의 캐시 writer는 PR 전용 둘(`pr-fast-gate`,
+`review-parity-shadow`)뿐입니다.** 그리고 키 namespace 규칙상 두 writer의 항목은
+다른 workflow의 복원 키와 맞지 않으므로, **24개 workflow의 복원은 지금 영구히
+miss입니다.** 비용은 측정 가능한 것으로만 적습니다 — Next build 캐시와 Playwright
+브라우저가 `admin-console-e2e`·`e2e`의 매 run에서, cargo registry가
+`orchestrator-rust`의 매 run에서, npm 캐시가 schedule workflow 약 20개에서 다시
+만들어집니다. (이 run의 restore 로그가 이미 `Cache not found for input keys`
+입니다 — v2 키를 쓴 적이 아직 없으므로 이 변경 전에도 miss였습니다.)
+
+**warming을 되살리는 길은 셋이고, 전부 운영자 행위가 필요하거나 별도 설계입니다.**
+"검증 범위는 되돌릴 수 없는 것에 비례합니다"에 따라 경로를 닫는 것이 기본이므로
+닫은 상태로 두고, 선택은 넘깁니다.
+
+1. **writer 하나, reader 여럿** — 캐시 scope는 **ref 단위이고 workflow 단위가
+   아니므로**, PR 전용 writer가 쓴 항목은 같은 PR ref에서 도는 다른 workflow가
+   복원할 수 있습니다. 키를 공유하게 만드는 것이 조건이고, 그러려면
+   `key_shared_across_workflows`를 "선언된 writer 하나 + reader 여럿"으로
+   다시 설계해야 합니다. 그것이 안전해진 근거는 이 변경 자체입니다 — 널리 읽히는
+   scope에 쓸 수 있는 run이 더는 없으므로, 남는 위험은 정책이 이미 열려 있다고
+   기록한 **같은 PR 방향**뿐이고 그것은 PR 작성자가 자기 코드로 이미 할 수 있는
+   일입니다. 다만 writer의 캐시 **내용**이 reader에게 쓸모 있는지(예:
+   `pr-fast-gate`가 Playwright 브라우저를 받는지)는 확인이 필요합니다.
+   운영자 행위 없음, 설계 필요.
+2. **reusable workflow로 이벤트별 job 분리** — 호출자 job의 `cache-mode`가 피호출
+   workflow의 요청을 제한하므로, `pull_request` job은 선언 없이(write) 두고
+   trusted job만 `read`로 둘 수 있습니다. **필수 check 이름이 바뀌므로** 운영자가
+   branch protection을 갱신해야 합니다.
+3. **trusted trigger 제거** — `admin-console-e2e`·`orchestrator-rust`의
+   `push: [develop, main]`을 없애면 두 workflow가 PR 전용이 되어 규칙 대상에서
+   빠지고 warming이 그대로 돌아옵니다. AGENTS.md의 "main으로 가는 PR은 release와
+   hotfix뿐" 절이 같은 중복(PR과 push에서 CI 두 번)을 비용으로 적고 있으므로
+   방향은 어긋나지 않습니다. 다만 **병합 후 검증 run을 없애는 것**이고, 그것은
+   운영자 결정입니다.
 
 대상과 조건 다섯 가지입니다. 독립 검토(9장)가 넷을 추가했습니다.
 

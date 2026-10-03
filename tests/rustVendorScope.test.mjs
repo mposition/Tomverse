@@ -76,28 +76,25 @@ test("the workspace build and test are never gated", () => {
     assert.equal(step("Test").if, undefined);
 });
 
-test("caches are restored by everyone and saved only from a pull request", () => {
+test("the cache is restored and nothing in this lane saves one", () => {
     // #1990 saved on pushes to develop, because a ~3 GiB `target` per pull
     // request filled the repository's 10 GB budget and evicted develop's
-    // entries. The cache-poisoning audit's P1 forbids writing from a run that
-    // can land on main or develop at all, since such an entry is restorable by
-    // every run that can see that scope.
+    // entries. The audit's P1 forbids writing from a run that can land on main
+    // or develop at all, since such an entry is restorable by every run that can
+    // see that scope. The merge of the two resolved it by removing what the
+    // dispute was about: `target` is no longer cached, only the downloaded
+    // crates.
     //
-    // The merge of the two resolved it by removing what the dispute was about:
-    // `target` is no longer cached, only the downloaded crates, and the save is
-    // confined to the pull request's own scope -- restorable by re-runs of that
-    // pull request and nothing else. This test moved with the workflow; it was
-    // still pinning #1990's condition afterwards.
-    for (const candidate of steps.filter((s) => String(s.uses ?? "").startsWith("actions/cache"))) {
-        const uses = String(candidate.uses);
-        assert.ok(
-            uses.startsWith("actions/cache/restore@") || uses.startsWith("actions/cache/save@"),
-            `${candidate.name} uses ${uses}; the combined action saves from pull requests too`
-        );
-        if (uses.startsWith("actions/cache/save@")) {
-            assert.equal(String(candidate.if), "github.event_name == 'pull_request'", candidate.name);
-        }
-    }
+    // P1a then took the write away at the token (`cache-mode: read`), and a
+    // measured run proved it binds pull requests too -- "cache write denied:
+    // token has no writable scopes". The save step could no longer reserve an
+    // entry, so every run paid for the tar and got a warning; it is gone. This
+    // asserts the absence, because a save step added back here would be dead on
+    // arrival and would look like warming that works.
+    const cacheSteps = steps.filter((s) => String(s.uses ?? "").startsWith("actions/cache"));
+    assert.equal(cacheSteps.length, 1);
+    assert.ok(cacheSteps[0].uses.startsWith("actions/cache/restore@"), cacheSteps[0].uses);
+    assert.equal(workflow["cache-mode"], "read");
 });
 
 test("no cache step names the build output directory", () => {
