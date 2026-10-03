@@ -39,14 +39,19 @@ function boundedRegularUtf8(path, maximum) {
         namedAfter.ctimeMs !== after.ctimeMs) {
       throw new Error("input_unavailable");
     }
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return {
+      text: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      dev: after.dev,
+      ino: after.ino,
+    };
   } finally {
     closeSync(descriptor);
   }
 }
 
 function readBinding(path) {
-  const parsed = parseBenchmarkJson(boundedRegularUtf8(path, BINDING_MAX_BYTES),
+  const file = boundedRegularUtf8(path, BINDING_MAX_BYTES);
+  const parsed = parseBenchmarkJson(file.text,
     BINDING_MAX_BYTES);
   const binding = strictBenchmarkObject(parsed,
     ["version", "expectedRootDigest", "expectedPreregistrationDigest"],
@@ -58,14 +63,18 @@ function readBinding(path) {
       !HEX.test(binding.expectedPreregistrationDigest)) {
     throw new Error("binding_invalid");
   }
-  return binding;
+  return { binding, dev: file.dev, ino: file.ino };
 }
 
 export function checkManifestFiles(manifestPath, bindingPath,
   verify = verifyPromptRefinerVnextOneShotManifestEnvelope) {
-  const binding = readBinding(bindingPath);
+  const bound = readBinding(bindingPath);
   const manifest = boundedRegularUtf8(manifestPath, MANIFEST_MAX_BYTES);
-  verify(manifest, binding.expectedRootDigest, binding.expectedPreregistrationDigest);
+  if (bound.dev === manifest.dev && bound.ino === manifest.ino) {
+    throw new Error("input_alias");
+  }
+  verify(manifest.text, bound.binding.expectedRootDigest,
+    bound.binding.expectedPreregistrationDigest);
   return Object.freeze({
     structuralValidation: "pass",
     caseCount: 80,

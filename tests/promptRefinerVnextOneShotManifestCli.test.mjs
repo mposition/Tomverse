@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -78,6 +78,35 @@ test("owner CLI rejects unbound and ambiguous inputs before checking contents", 
       { cwd: root, encoding: "utf8" });
     assert.equal(sameFile.status, 2);
     assert.equal(sameFile.stderr, "usage_invalid\n");
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("owner CLI rejects aliases, invalid UTF-8 and unbounded input before verification", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "prvnext-manifest-cli-"));
+  const manifestPath = join(temporary, "manifest.json");
+  const bindingPath = join(temporary, "binding.json");
+  const aliasPath = join(temporary, "binding-alias.json");
+  try {
+    writeFileSync(bindingPath, JSON.stringify({
+      version: "prompt-refiner-vnext-one-shot-binding-v1",
+      expectedRootDigest,
+      expectedPreregistrationDigest,
+    }));
+    linkSync(bindingPath, aliasPath);
+    const unexpectedVerify = () => assert.fail("validator must not run");
+    assert.throws(() => checkManifestFiles(aliasPath, bindingPath, unexpectedVerify),
+      /input_alias/);
+    writeFileSync(manifestPath, Buffer.from([0xff]));
+    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    writeFileSync(manifestPath, "");
+    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    writeFileSync(manifestPath, Buffer.alloc(16 * 1024 * 1024 + 1));
+    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    writeFileSync(manifestPath, sentinel);
+    writeFileSync(bindingPath, "x".repeat(1025));
+    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
