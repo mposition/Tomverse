@@ -10,6 +10,7 @@ type PromptRefinerCopy = {
   previewOnly: string;
   previewAction: string;
   keepOriginal: string;
+  close: string;
   failed: string;
   retry: string;
   promptEmpty: string;
@@ -30,6 +31,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "검증용 미리보기입니다. 원문은 바뀌지 않았고 대화 메시지는 전송되지 않았습니다.",
     previewAction: "제안 미리보기 확인",
     keepOriginal: "원문 유지",
+    close: "닫기",
     failed: "문장을 제안하지 못했습니다. 원문은 바뀌지 않았습니다.",
     retry: "다시 시도",
     promptEmpty: "다듬을 문장을 먼저 입력하세요.",
@@ -48,6 +50,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "Fixture preview only. Your original is unchanged. No chat message was sent.",
     previewAction: "Confirm preview",
     keepOriginal: "Keep original",
+    close: "Close",
     failed: "A suggestion could not be prepared. Your original was not changed.",
     retry: "Try again",
     promptEmpty: "Enter wording to improve first.",
@@ -66,6 +69,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "仅供测试预览。原文未更改，未发送聊天消息。",
     previewAction: "确认预览",
     keepOriginal: "保留原文",
+    close: "关闭",
     failed: "无法生成建议，原文未被更改。",
     retry: "重试",
     promptEmpty: "请先输入需要优化的文字。",
@@ -84,6 +88,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "Aperçu de test uniquement. L’original reste inchangé. Aucun message de chat n’a été envoyé.",
     previewAction: "Confirmer l’aperçu",
     keepOriginal: "Garder l’original",
+    close: "Fermer",
     failed: "Aucune suggestion n’a pu être préparée. L’original est inchangé.",
     retry: "Réessayer",
     promptEmpty: "Saisissez d’abord le texte à clarifier.",
@@ -102,6 +107,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "Nur Testvorschau. Das Original blieb unverändert. Keine Chat-Nachricht wurde gesendet.",
     previewAction: "Vorschau bestätigen",
     keepOriginal: "Original behalten",
+    close: "Schließen",
     failed: "Kein Vorschlag möglich. Das Original wurde nicht geändert.",
     retry: "Erneut versuchen",
     promptEmpty: "Geben Sie zuerst einen Text zum Verbessern ein.",
@@ -120,6 +126,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "Solo vista previa de prueba. El original no cambió. No se envió ningún mensaje de chat.",
     previewAction: "Confirmar vista previa",
     keepOriginal: "Conservar original",
+    close: "Cerrar",
     failed: "No se pudo preparar una sugerencia. El original no cambió.",
     retry: "Reintentar",
     promptEmpty: "Escribe primero el texto que quieres mejorar.",
@@ -138,6 +145,7 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     previewOnly: "Prévia de teste apenas. O original não mudou. Nenhuma mensagem de chat foi enviada.",
     previewAction: "Confirmar prévia",
     keepOriginal: "Manter original",
+    close: "Fechar",
     failed: "Não foi possível preparar uma sugestão. O original não mudou.",
     retry: "Tentar novamente",
     promptEmpty: "Digite primeiro o texto que deseja melhorar.",

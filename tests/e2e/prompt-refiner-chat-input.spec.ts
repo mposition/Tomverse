@@ -222,6 +222,40 @@ async function expectRefinerCopyReachable(page: Page) {
   }
 }
 
+async function expectLongComparisonBounded(page: Page, preview: boolean) {
+  await expectNoHorizontalOverflow(page);
+  const prefix = preview ? "prompt-refiner-accepted-preview" : "prompt-refiner";
+  const section = page.getByTestId(preview ? prefix : "prompt-refiner-ready");
+  const sectionBox = await section.boundingBox();
+  const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  expect(sectionBox).not.toBeNull();
+  expect(sectionBox!.x).toBeGreaterThanOrEqual(-1);
+  expect(sectionBox!.x + sectionBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
+  for (const part of ["original", "proposal"]) {
+    const copy = page.getByTestId(`${prefix}-${part}`);
+    await copy.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    const geometry = await copy.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const visibleHeight = window.visualViewport?.height ?? window.innerHeight;
+      const maxScrollTop = element.scrollHeight - element.clientHeight;
+      element.scrollTop = maxScrollTop;
+      return {
+        left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom,
+        visibleHeight, clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight, scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth, maxScrollTop, scrollTop: element.scrollTop,
+      };
+    });
+    expect(geometry.left, `${part} starts outside the viewport`).toBeGreaterThanOrEqual(-1);
+    expect(geometry.right, `${part} extends outside the viewport`).toBeLessThanOrEqual(viewportWidth + 1);
+    expect(geometry.scrollWidth, `${part} scrolls horizontally`).toBeLessThanOrEqual(geometry.clientWidth + 1);
+    expect(geometry.bottom, `${part} is above the viewport`).toBeGreaterThan(0);
+    expect(geometry.top, `${part} cannot be reached below the viewport`).toBeLessThan(geometry.visibleHeight);
+    expect(geometry.scrollHeight, `${part} was not height-bounded`).toBeGreaterThan(geometry.clientHeight);
+    expect(geometry.scrollTop, `${part} cannot reach its final line`).toBe(geometry.maxScrollTop);
+  }
+}
+
 async function holdRefinerResponse(page: Page) {
   let release!: () => void;
   let observed!: () => void;
@@ -514,6 +548,7 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
 
     await page.getByTestId("prompt-refiner-request").click();
     await expect(page.getByTestId("prompt-refiner-failed")).toBeVisible();
+    await expect(page.getByTestId("prompt-refiner-dismiss-failed")).toHaveAccessibleName("닫기");
     await page.getByTestId("prompt-refiner-dismiss-failed").click();
     await expect(page.getByTestId("prompt-refiner-idle")).toBeVisible();
     await expect(textarea).toBeFocused();
@@ -532,15 +567,42 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     await page.waitForTimeout(1000);
     expect(durable.writes).not.toContain(synthetic);
     expect([...durable.drafts.values()].every((draft) => draft.text !== synthetic)).toBe(true);
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
   });
 
-  test("a maximum-length legal draft receives a bounded proposal", async ({ page }) => {
-    await enterChat(page, { offered: true });
-    await page.getByTestId("chat-textarea").fill("a".repeat(16_000));
-    await page.getByTestId("prompt-refiner-request").click();
-    await expect(page.getByTestId("prompt-refiner-ready")).toBeFocused();
-    await expect(page.getByTestId("prompt-refiner-proposal")).not.toBeEmpty();
-  });
+  for (const scenario of [
+    { name: "320px at 200% text", viewport: { width: 320, height: 640 }, font: 32 },
+    { name: "200% zoom equivalent", viewport: { width: 195, height: 340 }, font: 16 },
+  ] as const) {
+    test(`unbroken 16k original and proposal stay bounded at ${scenario.name}`, async ({ page }) => {
+      await enterChat(page, { offered: true, viewport: scenario.viewport });
+      await setRootFontSize(page, scenario.font);
+      const original = "a".repeat(16_000);
+      const proposal = "b".repeat(16_000);
+      await page.route("**/e2e/prompt-refiner-adapter", async (route) => {
+        const body = route.request().postDataJSON() as { requestId: string };
+        await route.fulfill({ json: {
+          requestId: body.requestId,
+          suggestionId: `fixture_long_${body.requestId}`,
+          refinedPrompt: proposal,
+          refinerVersion: "suggest-v1",
+          inputScope: "current_user_turn_text_only",
+        } });
+      });
+      const textarea = page.getByTestId("chat-textarea");
+      await textarea.fill(original);
+      await page.getByTestId("prompt-refiner-request").click();
+      await expect(page.getByTestId("prompt-refiner-ready")).toBeFocused();
+      await expect(page.getByTestId("prompt-refiner-original")).toHaveText(original);
+      await expect(page.getByTestId("prompt-refiner-proposal")).toHaveText(proposal);
+      await expectLongComparisonBounded(page, false);
+      await page.getByTestId("prompt-refiner-use").click();
+      await expect(textarea).toHaveValue(original);
+      await expect(page.getByTestId("prompt-refiner-accepted-preview")).toBeVisible();
+      await expectLongComparisonBounded(page, true);
+    });
+  }
 
   test("IME composition blocks mutation without resizing the status copy", async ({ page }) => {
     await enterChat(page, { offered: true });

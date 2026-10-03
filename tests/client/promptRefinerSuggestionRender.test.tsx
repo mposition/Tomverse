@@ -109,6 +109,9 @@ test("requesting and failure copy promise that the original remains unchanged", 
   assert.match(failed, /원문은 바뀌지 않았/);
   assert.equal(failed.includes("internal"), false);
   assert.equal(hasTestId(failed, "prompt-refiner-dismiss-failed"), true);
+  assert.ok(failed.includes(`aria-label="${promptRefinerCopy.ko.close}"`));
+  assert.ok(failed.includes(`>${promptRefinerCopy.ko.close}</button>`));
+  assert.equal(failed.includes(`>${promptRefinerCopy.ko.keepOriginal}</button>`), false);
   assert.equal((failed.match(/min-h-11/g) ?? []).length, 2);
 });
 
@@ -122,6 +125,16 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     assert.ok(rendered.includes(promptRefinerCopy[language].proposalLabel), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].previewAction), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].keepOriginal), language);
+    const failed = render({
+      language,
+      state: {
+        status: "failed",
+        request: { requestId: suggestion.requestId, prompt: suggestion.sourcePrompt },
+        failureCode: "internal",
+      },
+    });
+    assert.ok(failed.includes(`aria-label="${promptRefinerCopy[language].close}"`), language);
+    assert.ok(failed.includes(`>${promptRefinerCopy[language].close}</button>`), language);
     const acceptedPreview = render({
       language,
       state: { status: "accepted_preview", suggestion },

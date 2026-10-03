@@ -1187,7 +1187,7 @@ export function ChatPageClient({
   }, [promptRefinerMode, identityKey, mountedSurface, currentChatId, inputValue, resetPromptRefinerFixture]);
 
   const handlePromptRefinerDismiss = useCallback((requestId: string) => {
-    if (promptRefinerMode !== "e2e_fixture") return;
+    if (promptRefinerMode !== "e2e_fixture") return false;
     const dismissable = promptRefinerState.status === "failed"
       ? promptRefinerState.request
       : promptRefinerState.status === "accepted_preview"
@@ -1198,11 +1198,12 @@ export function ChatPageClient({
       : promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion.sourcePrompt
         : null;
-    if (!dismissable || dismissable.requestId !== requestId) return;
-    if (promptRefinerDraftRef.current !== sourcePrompt) return;
+    if (!dismissable || dismissable.requestId !== requestId) return false;
+    if (promptRefinerDraftRef.current !== sourcePrompt) return false;
     // Dismissal discards only fixture state. The controlled composer and
     // durable authored draft have never received the synthetic proposal.
     resetPromptRefinerFixture();
+    return true;
   }, [promptRefinerMode, promptRefinerState, resetPromptRefinerFixture]);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(

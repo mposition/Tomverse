@@ -93,7 +93,7 @@ Message/Router 연결을 의미하지 않는다. fixture에서 채택은 **읽�
 남긴다. 합성 제안문을 controlled composer, `useConversationDrafts`, 제품 draft PUT에
 절대 쓰지 않으며 저작 원문은 그대로 유지한다. 미리보기 동안 새 제안 요청은
 거부하고, 원문을 편집하면 미리보기와 resolution을 폐기해 새 요청을 허용한다.
-실패 상태나 미리보기에서 `원문 유지`를 누르면 fixture 상태만 닫고 같은 원문으로
+실패 상태에서 `닫기`, 미리보기에서 `원문 유지`를 누르면 fixture 상태만 닫고 같은 원문으로
 새 요청을 할 수 있다. 이 동작도 controlled composer와 durable draft를 쓰지 않는다.
 
 제어 상태는 caller가 소유한다. `onPromptRefinerDecision`을 받은 caller는 채택과

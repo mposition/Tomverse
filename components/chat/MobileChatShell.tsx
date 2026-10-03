@@ -169,7 +169,7 @@ type MobileChatShellProps = {
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
-  onPromptRefinerDismiss?: (requestId: string) => void;
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */

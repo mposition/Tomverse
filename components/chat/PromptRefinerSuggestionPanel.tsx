@@ -194,13 +194,13 @@ export function PromptRefinerSuggestionPanel({
           disabled={interactionBlocked}
           aria-label={
             interactionProblemCopy
-              ? `${copy.keepOriginal}. ${interactionProblemCopy}`
-              : copy.keepOriginal
+              ? `${copy.close}. ${interactionProblemCopy}`
+              : copy.close
           }
           onClick={() => onDismiss(visible.request.requestId)}
           className="min-h-11 shrink-0 rounded-full border border-amber-300 bg-white px-3 font-bold transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-zinc-950 dark:hover:bg-amber-950/50"
         >
-          {copy.keepOriginal}
+          {copy.close}
         </button>
         <button
           ref={failedRetryRef}
@@ -228,14 +228,14 @@ export function PromptRefinerSuggestionPanel({
         role="status"
         aria-live="polite"
         aria-label={copy.comparisonLabel}
-        className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+        className="min-w-0 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
       >
         <p className="mb-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
           {copy.originalLabel}
         </p>
         <p
           data-testid="prompt-refiner-accepted-preview-original"
-          className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+          className="min-w-0 w-full max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
         >
           {visible.suggestion.sourcePrompt}
         </p>
@@ -244,7 +244,7 @@ export function PromptRefinerSuggestionPanel({
         </p>
         <p
           data-testid="prompt-refiner-accepted-preview-proposal"
-          className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+          className="min-w-0 w-full max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
         >
           {visible.suggestion.refinedPrompt}
         </p>
@@ -279,14 +279,14 @@ export function PromptRefinerSuggestionPanel({
       aria-live="polite"
       aria-label={copy.comparisonLabel}
       tabIndex={-1}
-      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
+      className="min-w-0 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
     >
       <p className="mb-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
         {copy.originalLabel}
       </p>
       <p
         data-testid="prompt-refiner-original"
-        className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+        className="min-w-0 w-full max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
       >
         {visible.suggestion.sourcePrompt}
       </p>
@@ -296,7 +296,7 @@ export function PromptRefinerSuggestionPanel({
       </div>
       <p
         data-testid="prompt-refiner-proposal"
-        className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+        className="min-w-0 w-full max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
       >
         {visible.suggestion.refinedPrompt}
       </p>
