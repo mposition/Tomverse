@@ -16,7 +16,7 @@ export type AmuxVisibleAnalysisUnit = {
 };
 
 export type AmuxIdeaAnalysisResultView =
-  | { state: "pending" | "cancelled" }
+  | { state: "pending" | "cancelled" | "provider_failed" }
   | { state: "ready"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose" | "reject";
       coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] };
@@ -58,7 +58,8 @@ export function parseAmuxIdeaAnalysisResultView(
   status: number, body: unknown, expectedIdeaId: string,
 ): AmuxIdeaAnalysisResultView | null {
   if (status !== 200 || !ID.test(expectedIdeaId) || !record(body)) return null;
-  if (body.state === "pending" || body.state === "cancelled") {
+  if (body.state === "pending" || body.state === "cancelled" ||
+      body.state === "provider_failed") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }
   if (body.state !== "ready" || !keys(body, ["state", "ideaId", "previewId",

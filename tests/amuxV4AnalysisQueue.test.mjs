@@ -65,6 +65,74 @@ test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before
   }
 });
 
+test("AMUX v4 claim route stays dark even with its dedicated secret and write env", async () => {
+  const imported = await import("../app/api/internal/amux/v4/analysis-claim/route.ts");
+  const POST = imported.POST ?? imported.default.POST;
+  const previousSecret = process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+  const previousWrite = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE;
+  const previousSync = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  try {
+    process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
+    process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE = "enabled";
+    delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    const endpoint = "https://tomverse.example/api/internal/amux/v4/analysis-claim";
+    const body = JSON.stringify({ previewId: "preview_1" });
+    const headers = { authorization: `Bearer ${secret}`,
+      "x-amux-agent-id": AMUX_V4_ANALYSIS_AGENT_ID,
+      "content-type": "application/json" };
+    assert.equal((await POST(new Request(endpoint,
+      { method: "POST", body }))).status, 401);
+    const disabled = await POST(new Request(endpoint,
+      { method: "POST", headers, body }));
+    assert.equal(disabled.status, 409);
+    assert.match(disabled.headers.get("cache-control") ?? "", /no-store/);
+    assert.deepEqual(await disabled.json(),
+      { available: false, reason: "analysis_claim_disabled" });
+  } finally {
+    if (previousSecret === undefined) delete process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+    else process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = previousSecret;
+    if (previousWrite === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE;
+    else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE = previousWrite;
+    if (previousSync === undefined) delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    else process.env.TOMVERSE_AMUX_SYNC_SECRET = previousSync;
+  }
+});
+
+test("AMUX v4 result write and read-back routes stay dark with the agent secret", async () => {
+  const imported = await import("../app/api/internal/amux/v4/analysis-result/route.ts");
+  const POST = imported.POST ?? imported.default.POST;
+  const GET = imported.GET ?? imported.default.GET;
+  const oldSecret = process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+  const oldWrite = process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE;
+  const oldSync = process.env.TOMVERSE_AMUX_SYNC_SECRET;
+  try {
+    process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
+    process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE = "enabled";
+    delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    const endpoint = "https://tomverse.example/api/internal/amux/v4/analysis-result";
+    const headers = { authorization: `Bearer ${secret}`,
+      "x-amux-agent-id": AMUX_V4_ANALYSIS_AGENT_ID,
+      "content-type": "application/json" };
+    assert.equal((await POST(new Request(endpoint, { method: "POST" }))).status, 401);
+    const blockedWrite = await POST(new Request(endpoint,
+      { method: "POST", headers, body: "{}" }));
+    assert.equal(blockedWrite.status, 409);
+    assert.deepEqual(await blockedWrite.json(),
+      { available: false, reason: "analysis_result_disabled" });
+    const blockedRead = await GET(new Request(`${endpoint}?requestId=r1&previewId=p1`,
+      { headers }));
+    assert.equal(blockedRead.status, 409);
+    assert.match(blockedRead.headers.get("cache-control") ?? "", /no-store/);
+  } finally {
+    if (oldSecret === undefined) delete process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
+    else process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = oldSecret;
+    if (oldWrite === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE;
+    else process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE = oldWrite;
+    if (oldSync === undefined) delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
+    else process.env.TOMVERSE_AMUX_SYNC_SECRET = oldSync;
+  }
+});
+
 test("AMUX v4 analysis queue returns candidate IDs, never transfer text", async () => {
   const service = await readFile(new URL("../lib/amux/ideaAnalysisQueueService.ts", import.meta.url), "utf8");
   const route = await readFile(new URL("../app/api/internal/amux/v4/analysis-queue/route.ts", import.meta.url), "utf8");
