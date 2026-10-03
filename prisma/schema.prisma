@@ -2260,6 +2260,7 @@ model AdminAuditLog {
 
   promptRefinerReservationStage PromptRefinerReservationStage?
   amuxReviewDecision            AmuxReviewDecision?
+  opsObserverTransition         OpsObserverTransition?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8469,6 +8470,7 @@ model OpsObserverGenesis {
   runDeadlineAt       DateTime              @db.Timestamptz(3)
   state               OpsObserverState?
   deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
 }
 
 /// The key state of one genesis. Every update is exactly the next generation
@@ -8569,4 +8571,23 @@ model SupportTriageRun {
   blocked                 Int?
 
   @@index([kind, createdAt])
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004010000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  auditLogId     String             @unique
+  auditLog       AdminAuditLog      @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
 }
