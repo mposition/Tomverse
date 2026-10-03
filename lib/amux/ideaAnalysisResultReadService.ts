@@ -3,7 +3,8 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+import { auditRowActorKind, AMUX_V4_ANALYSIS_RESULT_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
@@ -63,8 +64,39 @@ export async function readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
       select: { state: true, analysisCompletedAt: true },
     });
     if (!idea) throw new AmuxIdeaAnalysisResultReadError("not_found");
+    if (idea.state === "submitted") {
+      const terminalChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
+        where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+        select: { state: true, currentPreviewId: true },
+      });
+      if (terminalChunk?.state === "awaiting_preview" &&
+          terminalChunk.currentPreviewId) {
+        const terminalPreview = await tx.amuxIdeaTransferPreview.findUnique({
+          where: { id: terminalChunk.currentPreviewId },
+          select: { state: true },
+        });
+        if (terminalPreview?.state === "provider_failed") {
+          const receipts = await tx.adminAuditLog.findMany({ where: {
+            action: AMUX_V4_ANALYSIS_RESULT_ACTION,
+            targetType: "AmuxIdeaTransferPreview",
+            targetId: terminalChunk.currentPreviewId,
+          }, take: 2 });
+          const receipt = receipts[0];
+          const metadata = receipt?.metadata;
+          if (receipts.length !== 1 || !receipt?.entryHash ||
+              auditRowActorKind(receipt) !== "system" ||
+              !metadata || typeof metadata !== "object" ||
+              Array.isArray(metadata) ||
+              (metadata as Record<string, unknown>).ideaId !== ideaId ||
+              (metadata as Record<string, unknown>).state !== "provider_failed") {
+            throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+          }
+          return { state: "provider_failed" };
+        }
+      }
+      return { state: "pending" };
+    }
     if (idea.state === "cancelled") return { state: "cancelled" };
-    if (idea.state === "submitted") return { state: "pending" };
     const analyzing = idea.state === "analyzing" && idea.analysisCompletedAt === null;
     if (!analyzing && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");

@@ -53,6 +53,14 @@ export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as con
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_RESERVED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE = "analysis-budget-reserve-v1" as const;
+/** The app consumes one confirmed preview before the isolated local attempt. */
+export const AMUX_V4_ANALYSIS_CLAIM_ACTION = "AMUX_V4_ANALYSIS_CLAIMED" as const;
+export const AMUX_V4_ANALYSIS_CLAIM_TARGET = "AmuxIdeaTransferPreview" as const;
+export const AMUX_V4_ANALYSIS_CLAIM_SCOPE = "analysis-claim-v1" as const;
+/** One fenced result receipt binds a request ID to content digest before settlement. */
+export const AMUX_V4_ANALYSIS_RESULT_ACTION = "AMUX_V4_ANALYSIS_RESULT_ACCEPTED" as const;
+export const AMUX_V4_ANALYSIS_RESULT_TARGET = "AmuxIdeaTransferPreview" as const;
+export const AMUX_V4_ANALYSIS_RESULT_SCOPE = "analysis-result-v1" as const;
 /** Expiry may release only a never-dispatched AMUX analysis hold. */
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION = "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
@@ -140,6 +148,14 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_CLAIM_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_CLAIM_TARGET) {
+    return AMUX_V4_ANALYSIS_CLAIM_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_RESULT_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_RESULT_TARGET) {
+    return AMUX_V4_ANALYSIS_RESULT_SCOPE;
   }
   if (action === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET) {

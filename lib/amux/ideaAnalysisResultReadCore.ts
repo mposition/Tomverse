@@ -27,7 +27,7 @@ export type AmuxIdeaAnalysisResultPage = {
 };
 
 export type AmuxIdeaAnalysisResultView =
-  | { state: "pending" | "cancelled" }
+  | { state: "pending" | "cancelled" | "provider_failed" }
   | { state: "ready"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose" | "reject";
       coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] }
@@ -148,7 +148,8 @@ export function parseAmuxIdeaAnalysisResultView(
     }
     return body as AmuxIdeaAnalysisResultView;
   }
-  if (body.state === "pending" || body.state === "cancelled") {
+  if (body.state === "pending" || body.state === "cancelled" ||
+      body.state === "provider_failed") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }
   const partial = body.state === "partial";

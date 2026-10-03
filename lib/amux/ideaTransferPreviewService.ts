@@ -110,15 +110,26 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
   const replacedPreview = choice.replacesPreviewId
     ? await tx.amuxIdeaTransferPreview.findUnique({ where: { id: choice.replacesPreviewId } })
     : null;
+  const replacedHold = replacedPreview
+    ? await tx.amuxIdeaAnalysisBudgetHold.findUnique({
+      where: { previewId: replacedPreview.id },
+      select: { status: true, closedAt: true },
+    }) : null;
   const nextAttempt = replacedPreview ? replacedPreview.attempt + 1 : 1;
+  const spentFailure = replacedPreview?.state === "provider_failed" &&
+    replacedPreview.consumedAt !== null &&
+    replacedPreview.confirmationAuditLogId !== null &&
+    replacedHold?.status === "failed" && replacedHold.closedAt !== null;
   const replaceable = choice.replacesPreviewId
     ? replacedPreview?.ideaId === choice.ideaId &&
       replacedPreview?.sourceScopeApprovalId === null &&
       replacedPreview?.sourcePlanRevisionId === idea?.currentSourcePlanRevisionId &&
       replacedPreview?.sourceUnitOrdinal === 0 && replacedPreview?.chunkIndex === 0 &&
-      replacedPreview?.state === "prepared" && replacedPreview.confirmedAt === null &&
-      replacedPreview.confirmationAuditLogId === null &&
-      replacedPreview.consumedAt === null && replacedPreview.expiresAt <= now &&
+      ((replacedPreview?.state === "prepared" &&
+        replacedPreview.confirmedAt === null &&
+        replacedPreview.confirmationAuditLogId === null &&
+        replacedPreview.consumedAt === null && replacedPreview.expiresAt <= now) ||
+        spentFailure) &&
       replacedPreview.attempt >= 1 && nextAttempt <= 2_147_483_647 &&
       chunk?.state === "awaiting_preview" &&
       chunk.currentPreviewId === replacedPreview.id &&
@@ -213,7 +224,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
     const expiresAt = new Date(Math.min(now.getTime() + 15 * 60_000,
       idea.analysisDeadlineAt.getTime()));
     if (expiresAt <= now) throw new IdeaTransferPreviewError("not_ready");
-    if (replacedPreview) {
+    if (replacedPreview && !spentFailure) {
       const expired = await tx.amuxIdeaTransferPreview.updateMany({
         where: { id: replacedPreview.id, ideaId: idea.id, state: "prepared",
           confirmedAt: null, confirmationAuditLogId: null, consumedAt: null,
