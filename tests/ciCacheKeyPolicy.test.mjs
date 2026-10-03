@@ -9,6 +9,7 @@ import {
   CACHE_FAMILIES,
   WIDELY_READABLE_BRANCHES,
   judgeCacheKeys,
+  namespacePrefix,
   reachesWidelyReadableScope,
   readCacheSteps,
 } from "../scripts/ci-cache-key-policy.mjs";
@@ -46,15 +47,71 @@ test("a namespaced key with a namespaced restore-key is accepted", () => {
   assert.deepEqual(result.problems, []);
 });
 
-test("a restore-key that names only the cache family is refused", () => {
-  for (const broad of [`${OS}-next-`, `${OS}-next`, `${OS}-`]) {
+test("a restore-key broader than its own generation and namespace is refused", () => {
+  // `${OS}-next-v2-` is the case an earlier version of this module allowed and
+  // an earlier version of this test asserted was fine. It is a prefix of its
+  // own key and longer than the family token, and it still matches
+  // Linux-next-v2-daily-, Linux-next-v2-admin-e2e- and every other namespace
+  // one generation down -- the same shared pool the family-wide fallback made.
+  // Independent review caught it.
+  for (const broad of [`${OS}-next-`, `${OS}-next`, `${OS}-`, `${OS}-next-v2-`, `${OS}-next-v2-p`]) {
     assert.ok(
       rules([wf("ci", oneStep({ key: `${OS}-next-v2-pr-${LOCK}-abc`, restoreKeys: [broad] }))]).includes(
-        "restore_key_names_only_the_family",
+        "restore_key_broader_than_namespace",
       ),
       `expected "${broad}" to be refused`,
     );
   }
+});
+
+test("a restore-key at exactly the namespace boundary, or narrower, is accepted", () => {
+  for (const ok of [`${OS}-next-v2-pr-`, `${OS}-next-v2-pr-${LOCK}-`]) {
+    assert.deepEqual(
+      rules([wf("ci", oneStep({ key: `${OS}-next-v2-pr-${LOCK}-abc`, restoreKeys: [ok] }))]),
+      [],
+      `expected "${ok}" to be accepted`,
+    );
+  }
+});
+
+test("a governed key must carry v<n>-<namespace>- before its first expression", () => {
+  const bad = [
+    `${OS}-next-pr-${LOCK}-src`, // no generation
+    `${OS}-next-v2-${LOCK}-src`, // no namespace
+    `${OS}-next-v2-PR-${LOCK}-src`, // upper case is not the namespace shape
+    `${OS}-next-v2-pr-literal`, // no expression at all, so no boundary can be read
+  ];
+  for (const key of bad) {
+    assert.ok(
+      rules([wf("ci", oneStep({ key }))]).includes("key_missing_generation_and_namespace"),
+      `expected "${key}" to be refused`,
+    );
+  }
+  assert.deepEqual(rules([wf("ci", oneStep({ key: `${OS}-next-v2-admin-e2e-${LOCK}-src` }))]), []);
+
+  // The shape these keys had before this policy existed, on its own family.
+  assert.ok(
+    rules([
+      wf("ci", oneStep({ path: "~/.cache/ms-playwright", key: `${OS}-playwright-${LOCK}-chromium` })),
+    ]).includes("key_missing_generation_and_namespace"),
+  );
+
+  // A key naming the wrong family for its path is its own finding, so the two
+  // failures are not reported as the same thing.
+  assert.ok(
+    rules([wf("ci", oneStep({ path: "~/.cache/ms-playwright", key: `${OS}-next-v2-pr-${LOCK}-src` }))]).includes(
+      "key_missing_family_prefix",
+    ),
+  );
+});
+
+test("namespacePrefix reads the literal region, hyphenated namespaces included", () => {
+  assert.equal(namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").prefix, `${OS}-next-v2-admin-e2e-`);
+  assert.equal(
+    namespacePrefix(`${OS}-playwright-v2-daily-${LOCK}-chromium-webkit`, "playwright").prefix,
+    `${OS}-playwright-v2-daily-`,
+  );
+  assert.equal(namespacePrefix(`${OS}-next-v2-pr-${LOCK}-src`, "playwright").problem, "key_missing_family_prefix");
 });
 
 test("a blank restore-keys entry is dropped rather than refused", () => {
@@ -80,16 +137,6 @@ test("a blank restore-keys entry is dropped rather than refused", () => {
     ].join("\n"),
   );
   assert.deepEqual(read.steps[0].restoreKeys, [`${OS}-next-v2-pr-${LOCK}-`]);
-});
-
-test("the family boundary is the whole token, not a character count", () => {
-  // `next-v` is longer than the family prefix and still narrower than a
-  // namespace, but it is not a prefix of the family token, so the prefix rule
-  // is what must catch a typo like this rather than the family rule.
-  const found = rules([
-    wf("ci", oneStep({ key: `${OS}-next-v2-pr-${LOCK}-abc`, restoreKeys: [`${OS}-next-v2-`] })),
-  ]);
-  assert.deepEqual(found, []);
 });
 
 test("a restore-key that is not a prefix of its own key is refused", () => {

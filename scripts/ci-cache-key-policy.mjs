@@ -193,22 +193,57 @@ const familyFor = (paths) => {
 };
 
 /**
- * What a governed key must start with: `${{ runner.os }}-<family>-`. Anything
- * at exactly that length names the family and nothing else, which is the pool
- * every workflow would share.
+ * What a governed key must start with: `${{ runner.os }}-<family>-`.
  */
 const familyPrefix = (family) => `${RUNNER_OS}-${family}-`;
 
 /**
+ * The literal `v<n>-<namespace>-` a governed key must carry after its family,
+ * and the prefix a restore-key may therefore not be shorter than.
+ *
+ * It is read as the literal text between the family token and the key's first
+ * `${{` expression, because that is exactly the part that identifies the
+ * generation and the workflow; everything after it is a hash of inputs.
+ *
+ * Being longer than the family token is NOT enough. `Linux-next-v2-` is longer,
+ * and is a prefix of this step's own key, and still matches every workflow's
+ * entry one generation down -- which is the same shared pool the family-wide
+ * fallback made, just harder to see. So the boundary is the namespace segment,
+ * not a character count.
+ *
+ * Returns null when the key has no expression at all: the literal region cannot
+ * be told apart from the whole key, so the caller requires the whole key.
+ */
+export const namespacePrefix = (key, family) => {
+  const prefix = familyPrefix(family);
+  if (!key.startsWith(prefix)) return { prefix: null, problem: "key_missing_family_prefix" };
+  const rest = key.slice(prefix.length);
+  const expression = rest.indexOf("${{");
+  const literal = expression === -1 ? rest : rest.slice(0, expression);
+  if (!/^v\d+-[a-z0-9][a-z0-9-]*-$/.test(literal)) {
+    return { prefix: null, problem: "key_missing_generation_and_namespace" };
+  }
+  return { prefix: prefix + literal, problem: null };
+};
+
+/**
  * Judges the cache keys across a set of workflows.
  *
- * Three rules, each from a finding:
+ * The rules, each from a finding:
  *
  * - `restore_key_not_a_prefix` -- a restore-key that is not a prefix of its own
  *   step's key cannot be a narrower fallback for that step; it is reaching for
  *   somebody else's entry.
- * - `restore_key_names_only_the_family` -- a restore-key no longer than
- *   `<os>-<family>-` matches every workflow's entry in that family (F2).
+ * - `restore_key_broader_than_namespace` -- a restore-key shorter than its own
+ *   key's `<os>-<family>-v<n>-<namespace>-` matches other workflows' entries,
+ *   which is F2. Being longer than `<os>-<family>-` is not enough: an earlier
+ *   version of this module allowed `Linux-next-v2-`, which is a prefix of its
+ *   own key and still reaches every namespace one generation down. Independent
+ *   review caught that, and a test had been written to permit it.
+ * - `key_missing_generation_and_namespace` -- a governed key whose literal
+ *   region before its first expression is not `v<n>-<namespace>-`. The rule
+ *   above needs that boundary to exist, and `v<n>` is what lets a poisoned
+ *   generation be abandoned without deleting entries by hand.
  * - `key_shared_across_workflows` -- one exact key declared by two workflow
  *   files is one entry those workflows share, so whichever writes it first in a
  *   scope every run can see owns what the others execute (F1). Sharing inside
@@ -219,8 +254,8 @@ const familyPrefix = (family) => `${RUNNER_OS}-${family}-`;
  *   that keeps it to a pull-request run. Restoring is not the write; the write
  *   is what makes one run's output every later run's input (P1).
  *
- * The prefix and sharing rules apply to every cached path. The family rule
- * needs CACHE_FAMILIES because only a listed family has a namespace to require,
+ * The prefix and sharing rules apply to every cached path. The namespace rules
+ * need CACHE_FAMILIES because only a listed family has a namespace to require,
  * and the save rule applies to every path for the same reason as sharing: the
  * scope is a property of the run, not of what is being cached.
  */
@@ -270,16 +305,29 @@ export const judgeCacheKeys = (sources) => {
             detail: restoreKey,
           });
         }
-        if (family !== null) {
-          const prefix = familyPrefix(family.family);
-          if (restoreKey.length <= prefix.length && prefix.startsWith(restoreKey)) {
+        if (family !== null && step.key !== null) {
+          const required = namespacePrefix(step.key, family.family);
+          if (required.prefix === null) continue; // reported once below, not per restore-key
+          if (restoreKey.length < required.prefix.length) {
             findings.push({
-              rule: "restore_key_names_only_the_family",
+              rule: "restore_key_broader_than_namespace",
               workflowPath: source.path,
               jobId: step.jobId,
-              detail: restoreKey,
+              detail: `${restoreKey} (must start with ${required.prefix})`,
             });
           }
+        }
+      }
+
+      if (family !== null && step.key !== null) {
+        const required = namespacePrefix(step.key, family.family);
+        if (required.prefix === null) {
+          findings.push({
+            rule: required.problem,
+            workflowPath: source.path,
+            jobId: step.jobId,
+            detail: step.key,
+          });
         }
       }
 
@@ -315,8 +363,12 @@ export const describeFinding = (finding) => {
   switch (finding.rule) {
     case "restore_key_not_a_prefix":
       return `${where}: restore-key "${finding.detail}" is not a prefix of this step's own key, so it can only match another entry.`;
-    case "restore_key_names_only_the_family":
-      return `${where}: restore-key "${finding.detail}" names the cache family and nothing else, so it matches every workflow's entry in it. Keep the namespace segment.`;
+    case "restore_key_broader_than_namespace":
+      return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
+    case "key_missing_generation_and_namespace":
+      return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+    case "key_missing_family_prefix":
+      return `${where}: key "${finding.detail}" does not start with its cache family's prefix.`;
     case "key_shared_across_workflows":
       return `${where}: these workflows declare the same cache key "${finding.detail}", so they share one entry. Give each its own namespace segment.`;
     case "unguarded_save_in_widely_readable_scope":
