@@ -273,11 +273,69 @@ test("two workflows declaring the same key are refused, and one workflow's two j
   assert.deepEqual(judgeCacheKeys([wf("a", twoJobsOneWorkflow)]).findings, []);
 });
 
-test("a cache path outside the governed families is not judged", () => {
+test("a cache path outside the governed families is not judged on its key shape", () => {
+  // No family row means no namespace to require, so the key shape and
+  // restore-key rules have nothing to say. One workflow using such a path is
+  // fine: there is nobody for it to reach.
   const result = judgeCacheKeys([
     wf("ci", oneStep({ path: "~/.cargo/registry", key: `${OS}-rust-${LOCK}`, restoreKeys: [`${OS}-`] })),
   ]);
   assert.deepEqual(result.findings, []);
+});
+
+test("two workflows may not cache the same ungoverned path", () => {
+  // The namespace argument holds only where there is a namespace, so it does
+  // not cover a path with no family row. With two workflows on such a path,
+  // nothing here can say whether one's restore-key prefixes the other's key.
+  // Found by re-reading that argument rather than by review.
+  const ungoverned = (name, key) =>
+    wf(name, oneStep({ path: "~/.cargo/registry", key }));
+  assert.ok(
+    rules([
+      ungoverned("a", `${OS}-rust-${LOCK}`),
+      ungoverned("b", `${OS}-rust-other-${LOCK}`),
+    ]).includes("ungoverned_path_shared_across_workflows"),
+  );
+  // One workflow, two jobs: still one unit of trust.
+  const twoJobs = [
+    "on: pull_request",
+    "jobs:",
+    "  a:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/cache@v5",
+    "        with:",
+    "          path: ~/.cargo/registry",
+    `          key: ${OS}-rust-a-${LOCK}`,
+    "  b:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/cache@v5",
+    "        with:",
+    "          path: ~/.cargo/registry",
+    `          key: ${OS}-rust-b-${LOCK}`,
+    "",
+  ].join("\n");
+  assert.deepEqual(rules([wf("one", twoJobs)]), []);
+});
+
+test("exactly one workflow caches each ungoverned path in this repository", () => {
+  const dir = ".github/workflows";
+  const owners = new Map();
+  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
+    const read = readCacheSteps(readFileSync(join(dir, name), "utf8"));
+    assert.ok(read.steps, `${name} must parse`);
+    for (const step of read.steps) {
+      if (CACHE_FAMILIES.some((entry) => step.paths.includes(entry.path))) continue;
+      for (const path of step.paths) {
+        owners.set(path, (owners.get(path) ?? new Set()).add(name));
+      }
+    }
+  }
+  assert.deepEqual(
+    [...owners].filter(([, names]) => names.size > 1).map(([path]) => path),
+    [],
+  );
 });
 
 test("restore and save variants are read, and a save step needs no key", () => {

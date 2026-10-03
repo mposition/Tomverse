@@ -442,6 +442,8 @@ export const judgeCacheKeys = (sources) => {
   const keyOwners = new Map();
   /** Namespace identity -> the workflows declaring it, for the cross-workflow rules. */
   const namespaceOwners = new Map();
+  /** Cached path with no family row -> the workflows using it. */
+  const unGovernedPathOwners = new Map();
 
   for (const source of sources) {
     const read = readCacheSteps(source.text);
@@ -451,6 +453,13 @@ export const judgeCacheKeys = (sources) => {
     }
     for (const step of read.steps) {
       const family = familyFor(step.paths);
+      if (family === null) {
+        for (const path of step.paths) {
+          const owners = unGovernedPathOwners.get(path) ?? new Set();
+          owners.add(source.path);
+          unGovernedPathOwners.set(path, owners);
+        }
+      }
 
       if (step.mode !== "save" && step.key === null) {
         problems.push({ workflowPath: source.path, problem: `${step.jobId}: key_missing` });
@@ -552,6 +561,24 @@ export const judgeCacheKeys = (sources) => {
   // Sharing inside one workflow stays legal: its jobs are one unit of trust.
   const namespaces = [...namespaceOwners].sort(([a], [b]) => a.localeCompare(b));
 
+  // A path with no family row has no namespace to reason about, so the argument
+  // above does not cover it. One workflow using such a path is fine -- there is
+  // nobody to reach. Two is not, because nothing here can say whether one's
+  // restore-key prefixes the other's key. The way to use a path from two
+  // workflows is to give it a CACHE_FAMILIES row and a namespace.
+  //
+  // Found while re-reading the namespace argument rather than by review: it
+  // holds only where there is a namespace.
+  for (const [path, owners] of unGovernedPathOwners) {
+    if (owners.size < 2) continue;
+    findings.push({
+      rule: "ungoverned_path_shared_across_workflows",
+      workflowPath: [...owners].sort().join(", "),
+      jobId: null,
+      detail: path,
+    });
+  }
+
   // One namespace held by two workflows is one shared pool.
   for (const [identity, owners] of namespaces) {
     if (owners.size < 2) continue;
@@ -605,6 +632,8 @@ export const describeFinding = (finding) => {
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
       return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+    case "ungoverned_path_shared_across_workflows":
+      return `${where}: these workflows both cache "${finding.detail}", which has no CACHE_FAMILIES row, so nothing here can say whether one's restore-key reaches the other's entry. Give the path a family row and each workflow its own namespace.`;
     case "namespace_shared_across_workflows":
       return `${where}: these workflows hold the same ${finding.detail}, so they share one pool of entries. Give each its own.`;
     case "namespace_reaches_another_workflow":
