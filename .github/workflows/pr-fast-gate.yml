@@ -310,6 +310,26 @@ jobs:
         timeout-minutes: 5
         run: npm run check:credential-cache-separation
 
+      # The narrower question the engineering agent's cache isolation record
+      # rests on, and a stronger answer. GitHub's cache scoping closes a pull
+      # request's entries to other refs, but re-runs of that pull request can
+      # restore them -- so the agent's own pull request is the direction
+      # isolation cannot answer for, and docs/policy/engineering-agent.md §5's
+      # record instead asserts that no credentialed cache-restoring job runs
+      # there. The check above does not keep that: it permits the package
+      # manager's cache, and the lockfile comparison which makes that kind
+      # verified is no defence when the agent can change the lockfile in the
+      # same pull request.
+      #
+      # It never reads a job's `if:` -- §5 forbids the analyser from narrowing
+      # a result that way, and reading a trigger without its condition is the
+      # mistake the audit's F5 made twice. The condition is held as a fact
+      # instead: no such job restores a cache today.
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P7.
+      - name: Agent PR cache isolation
+        timeout-minutes: 5
+        run: npm run check:agent-pr-cache-isolation
+
       # A copy-based locator that steers a branch, on copy that no longer
       # exists, neither passes nor fails -- it quietly takes the other path.
       # A brand rename left one such guard in `openSidebarOnMobile`, and the

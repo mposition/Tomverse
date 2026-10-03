@@ -681,7 +681,24 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // path rule are unchanged. All 11 remaining read `verified_package_manager`,
 // which `npm run check:credential-cache-separation` now holds.
 // .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3 and 4.2.
-const POSTURE_DIGEST = "977c24f3e564";
+//
+// ccf1976a16e4 (2026-10-03): one credentialed job gives up its npm cache, and
+// the posture improved by exactly that one fact. Cache reasons 11 -> 10 and
+// total reasons 14 -> 13; 22 credentialed jobs, 1 path rule, 8 reached
+// workflows and forbidsAll are all unchanged -- the job still holds its
+// credential, it just restores nothing now.
+//
+// It was the only credentialed cache-restoring job in a workflow an event the
+// agent raises reaches, which is the condition docs/policy/engineering-agent.md
+// §5's cache isolation record rests on and which nothing was keeping. Its own
+// `if:` already kept it off an `agent/engineering/` head, but §5 forbids the
+// analyser from reading a job condition to narrow a result, and reading a
+// trigger without its condition is the mistake the audit's F5 made twice. So
+// the owner's decision was to hold the condition as a fact rather than as an
+// exemption. `npm run check:agent-pr-cache-isolation` now keeps it, and this
+// digest is what makes the job taking a cache back visible here as well.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P7.
+const POSTURE_DIGEST = "ccf1976a16e4";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
