@@ -17,6 +17,13 @@ import {
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 import { adminFetch } from "@/lib/adminFetch";
 
+/** The waves a notice draft holds (tests/integration/campaign-audience.db.test.ts approves this shape). */
+const POLICY_NOTICE_WAVES = [
+  { kind: "launch", sequence: 1 },
+  { kind: "reminder", sequence: 1 },
+  { kind: "final_reminder", sequence: 1 },
+] as const;
+
 type Preview = {
   language: string;
   subject: string;
@@ -83,12 +90,9 @@ export function AdminPolicyNoticeComposer({
               // Two follow-ups beside the launch, all started by hand. The
               // campaign page runs only waves the draft created, and each wave
               // asks the cohort again: a follow-up reaches accounts created
-              // since and notices that did not arrive.
-              waves: [
-                { kind: "launch", sequence: 1 },
-                { kind: "reminder", sequence: 1 },
-                { kind: "reminder", sequence: 2 },
-              ],
+              // since and notices that did not arrive. Distinct kinds, because
+              // the schedule check refuses a repeated kind at approval.
+              waves: POLICY_NOTICE_WAVES,
             }),
       }),
     });

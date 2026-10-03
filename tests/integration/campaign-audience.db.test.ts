@@ -15,6 +15,7 @@ import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
+  campaignScheduleProblems,
   createCampaignDraft,
   estimateCampaignAudience,
   runCampaignWave,
@@ -616,6 +617,23 @@ test("the amendment notice reaches every owed account once, and a later wave onl
     await createdAt(noAddress, new Date("2026-02-01T00:00:00Z"));
     // On the effective day itself: the gate does not count it as owed.
     await createdAt(joinedAfter, new Date("2026-11-16T00:00:00Z"));
+
+    // The waves the console drafts pass the approval schedule check.
+    const consoleShaped = await createCampaignDraft({
+      category: "other",
+      templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+      locales: ["ko", "en"],
+      contentByLocale: { ko: {}, en: {} },
+      audienceSpec: NOTICE_COHORT,
+      createdByEmail: "ops@example.test",
+      initialWaves: [
+        { kind: "launch", sequence: 1 },
+        { kind: "reminder", sequence: 1 },
+        { kind: "final_reminder", sequence: 1 },
+      ],
+    });
+    assert.deepEqual(await campaignScheduleProblems({ campaignId: consoleShaped.id }), []);
+    await prisma.emailCampaign.delete({ where: { id: consoleShaped.id } });
 
     const first = await noticeDraft();
     const estimate = await estimateCampaignAudience({
