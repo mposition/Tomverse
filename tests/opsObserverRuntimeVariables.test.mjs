@@ -41,10 +41,37 @@ function appVariableNames() {
   return [...names];
 }
 
-test("every listed name appears in the policy text", () => {
-  for (const name of [...RUNTIME_NAMES, ...RAILWAY_NAMES, ...SERVICE_VARIABLES.page, ...SERVICE_VARIABLES.digest]) {
-    assert.ok(policy.includes(`\`${name}\``), `policy must name ${name}`);
-  }
+const backticked = (text) => [...text.matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map((m) => m[1]);
+
+// The text between two markers, which must each occur exactly once.
+function between(start, end) {
+  const from = policy.indexOf(start);
+  assert.ok(from !== -1 && policy.indexOf(start, from + 1) === -1, `policy marker: ${start}`);
+  const to = policy.indexOf(end, from + start.length);
+  assert.ok(to !== -1, `policy marker: ${end}`);
+  return policy.slice(from + start.length, to);
+}
+
+function policyRow(label) {
+  const row = policy.split("\n").find((line) => line.startsWith(`| ${label} |`));
+  assert.ok(row, `policy §7 row: ${label}`);
+  return backticked(row.slice(row.indexOf("|", 2)));
+}
+
+test("the allowlists equal the policy's §3 rule 5 lists exactly", () => {
+  assert.deepEqual(
+    [...RUNTIME_NAMES].sort(),
+    backticked(between("base image·Node의 이름:", "3. Railway가 넣는")).sort(),
+  );
+  assert.deepEqual(
+    [...RAILWAY_NAMES].sort(),
+    backticked(between("Railway가 넣는 비밀 아닌 이름:", "이 목록은 코드 상수")).sort(),
+  );
+});
+
+test("each service's variables equal its policy §7 row exactly", () => {
+  assert.deepEqual([...SERVICE_VARIABLES.page].sort(), policyRow("`Ops Observer`(page)").sort());
+  assert.deepEqual([...SERVICE_VARIABLES.digest].sort(), policyRow("`Ops Observer Digest`").sort());
 });
 
 test("a correctly configured service starts", () => {
