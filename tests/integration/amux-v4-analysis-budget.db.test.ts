@@ -755,6 +755,8 @@ test("an output-continuable first result retains its first page without completi
   });
   await prisma.$transaction((tx) => commitAmuxKnownIdeaAnalysisSettlement(tx,
     { holdId, outcome: "verified_success", inputTokens: 100, outputTokens: 50 }));
+  assert.deepEqual(await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys),
+    { state: "pending" });
   const units = [
     { kind: "node", localId: "c0:node-0", level: "initiative", parentRef: null,
       title: "Improve intake", description: "An operator idea.",
@@ -803,6 +805,16 @@ test("an output-continuable first result retains its first page without completi
   assert.equal(await prisma.amuxWorkItem.count({
     where: { sourceSystem: "admin-idea-v4" },
   }), workItemsBefore);
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { freeformCiphertext: null, freeformKeyId: null,
+      freeformKeyVersion: null, freeformPurgedAt: new Date() },
+  });
+  const afterPurge = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
+  assert.equal(afterPurge.state, "partial");
+  if (afterPurge.state !== "partial") throw new Error("retained page unavailable");
+  assert.equal(afterPurge.remainingScope, null);
+  assert.equal(afterPurge.units.length, 4);
 });
 
 test("a complete first result saves independent encrypted units and closes only its preview", async () => {

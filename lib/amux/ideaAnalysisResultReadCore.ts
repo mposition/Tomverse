@@ -64,6 +64,26 @@ export function matchesAmuxIdeaAnalysisUnitCommitments(
     });
 }
 
+/** Older dark complete-result audits predate cursor fields. Accept only the
+ * all-absent legacy shape for complete rows; partial rows require a full bind. */
+export function matchesAmuxIdeaAnalysisCursorAudit(
+  metadata: unknown,
+  cursor: { coverageStatus: string | null; continuationKind: string | null;
+    remainingStartOrdinal: number | null; remainingEndOrdinal: number | null },
+  partial: boolean,
+): boolean {
+  if (!record(metadata)) return false;
+  const fields = ["coverageStatus", "continuationKind",
+    "remainingStartOrdinal", "remainingEndOrdinal"] as const;
+  const present = fields.map((field) => Object.hasOwn(metadata, field));
+  if (present.every((value) => !value)) return !partial;
+  return present.every(Boolean) &&
+    metadata.coverageStatus === cursor.coverageStatus &&
+    metadata.continuationKind === cursor.continuationKind &&
+    metadata.remainingStartOrdinal === cursor.remainingStartOrdinal &&
+    metadata.remainingEndOrdinal === cursor.remainingEndOrdinal;
+}
+
 /** Strictly shape the same-origin response before rendering model-derived text.
  * This is a UI guard only; the app DB reader performs ownership and HMAC checks. */
 export function parseAmuxIdeaAnalysisResultView(

@@ -5,9 +5,27 @@ import test from "node:test";
 import {
   AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED,
   amuxV4AnalysisResultReadEnabled,
+  matchesAmuxIdeaAnalysisCursorAudit,
   matchesAmuxIdeaAnalysisUnitCommitments,
   parseAmuxIdeaAnalysisResultView,
 } from "../lib/amux/ideaAnalysisResultReadCore.ts";
+
+test("partial cursor audit is exact while an older complete audit remains readable", () => {
+  const cursor = { coverageStatus: "more", continuationKind: "output",
+    remainingStartOrdinal: 0, remainingEndOrdinal: 0 };
+  assert.equal(matchesAmuxIdeaAnalysisCursorAudit(cursor, cursor, true), true);
+  assert.equal(matchesAmuxIdeaAnalysisCursorAudit({}, cursor, true), false);
+  assert.equal(matchesAmuxIdeaAnalysisCursorAudit({}, {
+    ...cursor, coverageStatus: "complete", continuationKind: null,
+    remainingStartOrdinal: null, remainingEndOrdinal: null,
+  }, false), true);
+  assert.equal(matchesAmuxIdeaAnalysisCursorAudit({
+    coverageStatus: "more",
+  }, cursor, true), false);
+  assert.equal(matchesAmuxIdeaAnalysisCursorAudit({
+    ...cursor, remainingEndOrdinal: 1,
+  }, cursor, true), false);
+});
 
 test("analysis audit commitments reject a changed, missing or reordered unit", () => {
   const units = [
@@ -57,6 +75,7 @@ test("the Admin result renders proposal relationships only while its verified bo
     import.meta.url), "utf8");
   assert.match(panel, /unit\.proposal \? <AmuxIdeaProposalRelations proposal=\{unit\.proposal\} messages=\{m\} \/>/);
   assert.match(panel, /unit\.proposal\?\.kind === "card"/);
+  assert.match(panel, /view\.state === "partial"/);
   assert.doesNotMatch(panel, /dangerouslySetInnerHTML/);
 });
 
