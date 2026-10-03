@@ -466,3 +466,50 @@ test("a child process gets what a binary needs to start and nothing else", () =>
   // `undefined` value in a spawn env becomes the string "undefined".
   assert.equal(Object.hasOwn(childEnvironment({ PATH: "/usr/bin" }), "HOME"), false);
 });
+
+/**
+ * Every name the deployed image put in the environment on the first staging
+ * run, 2026-10-03. Copied from that run's output, not written from memory.
+ */
+const MEASURED_PLATFORM_NAMES = [
+  "NPM_CONFIG_PRODUCTION",
+  "CI",
+  "RAILPACK_BUILT_AT",
+  "RAILPACK_VERSION",
+  "MISE_DATA_DIR",
+  "PORT",
+  "MISE_CONFIG_DIR",
+  "__MISE_DIFF",
+  "NEXT_TELEMETRY_DISABLED",
+  "MISE_CACHE_DIR",
+  "NPM_CONFIG_UPDATE_NOTIFIER",
+  "NPM_CONFIG_FETCH_RETRIES",
+  "MISE_INSTALLS_DIR",
+  "__MISE_SHIM",
+  "NPM_CONFIG_FUND",
+  "MISE_SHIMS_DIR",
+];
+
+test("the names the real image provides do not stop the run", () => {
+  // The first staging run refused on all sixteen at once: the Railpack builder,
+  // the mise toolchain and npm's configuration each put names here that no list
+  // written from a developer machine would contain. The probe exists to measure
+  // this, and it did; these are its output.
+  const env = { PATH: "/usr/bin", HOME: "/root" };
+  for (const name of MEASURED_PLATFORM_NAMES) env[name] = "x";
+  assert.deepEqual(environmentProblems(env), []);
+
+  // Allowing the families by prefix does not weaken what the check is for: a
+  // value shaped like a database credential is refused whatever it is called.
+  for (const name of ["MISE_DATA_DIR", "NPM_CONFIG_FUND", "RAILPACK_VERSION"]) {
+    assert.deepEqual(
+      environmentProblems({ ...env, [name]: "postgresql://u:pw@host/db" }),
+      [`${name} holds what looks like a database connection string`],
+    );
+  }
+
+  // And a name outside the measured families still stops it.
+  assert.deepEqual(environmentProblems({ ...env, DATABASE_URL: "x" }), [
+    "DATABASE_URL is not a variable this service declares",
+  ]);
+});
