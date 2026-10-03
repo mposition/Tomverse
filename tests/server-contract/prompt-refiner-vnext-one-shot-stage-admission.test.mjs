@@ -52,6 +52,8 @@ test("stage binding comes from fresh app and Railway observations", async () => 
     id: "prompt-refiner-vnext-one-shot-v1", ...expected,
     perRequestCostMicroUsd: 29_918n, slotCount: 80,
     costCeilingMicroUsd: 2_393_440n,
+    sourceCommitPreregistrationVerified: false,
+    dispatchAuthorized: false,
   });
   assert.equal(sourceReads, 1);
   assert.equal(deploymentReads, 1);
@@ -88,6 +90,7 @@ test("stale or disagreeing source, deployment and price pins fail closed", async
   });
   assert.equal(laterDeployment.sourceCommitSha, expected.sourceCommitSha);
   assert.equal(laterDeployment.runtimeCommitSha, "b".repeat(40));
+  assert.equal(laterDeployment.sourceCommitPreregistrationVerified, false);
   source = { ...source, sourceCommitSha: expected.sourceCommitSha };
   deployment = { ...deployment, commitSha: expected.runtimeCommitSha };
 });

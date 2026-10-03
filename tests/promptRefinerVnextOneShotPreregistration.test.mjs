@@ -137,6 +137,7 @@ test("stage requires exactly one signed matching owner preregistration", async (
     [[], expected, "synthetic-owner", true],
     [[entry, entry], expected, "synthetic-owner", true],
     [[entry], { ...expected, runnerDigest: "e".repeat(64) }, "synthetic-owner", true],
+    [[entry], { ...expected, sourceCommitSha: "e".repeat(40) }, "synthetic-owner", true],
     [[entry], expected, "different-owner", true],
     [[entry], expected, "synthetic-owner", false],
   ]) {

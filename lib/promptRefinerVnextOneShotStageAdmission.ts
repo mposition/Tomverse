@@ -37,7 +37,10 @@ export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
  */
 export async function preparePromptRefinerVnextOneShotStageBinding(
   expected: PromptRefinerVnextOneShotStageRequestPins,
-): Promise<PromptRefinerVnextOneShotAuditBinding> {
+): Promise<PromptRefinerVnextOneShotAuditBinding & Readonly<{
+  sourceCommitPreregistrationVerified: false;
+  dispatchAuthorized: false;
+}>> {
   // The separate owner-runner supplies these content-free custody pins through
   // server configuration. A request cannot introduce a new root or runner.
   const pinnedRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
@@ -73,5 +76,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     perRequestCostMicroUsd: BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD),
     slotCount: PROMPT_REFINER_VNEXT_SLOT_COUNT,
     costCeilingMicroUsd: BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD),
+    sourceCommitPreregistrationVerified: false,
+    dispatchAuthorized: false,
   });
 }
