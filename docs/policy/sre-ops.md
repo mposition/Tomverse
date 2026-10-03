@@ -10,6 +10,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: 트랜잭션 상한 표와 버전별 무장 규칙, 늦은 advance와 재시작, 판정 가능한 단계 전환 조건, readiness 검사 이름, 상한 최대값의 유도, 서비스별 금지 변수 |
 | (미부여) | (미승인) | 세 번째 초안 — 독립 검토 반영: cron이 곧바로 `stuck`이어도 열림, 신규 열림의 날짜당 1회 강제, `abandoned` 뒤 heartbeat 보류, readiness 검사 17개 전부, 마감 판정의 시계, 무력화의 근거와 시험, 전환 조건의 근거 기록, 금지 변수 보강 |
 | (미부여) | (미승인) | 네 번째 초안 — 독립 검토 반영: 악화도 키당 날짜당 1회만 상한 밖, 환경변수는 allowlist로 판정, statement timer가 문장마다 다시 판정됨과 그 시험, `timestamptz` 비교, S3 조건을 커밋된 기록으로 |
+| (미부여) | (미승인) | 다섯 번째 초안 — 독립 검토 반영: 닫힌 runtime 이름 목록과 실행 서비스가 혼자 판정하는 모양 규칙, 악화 규칙 하나로 정리, idle timer 시험 |
 
 이 문서는 Claude가 설계하고 교차 vendor 독립 검토를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다. 내용 변경은 운영자
 승인과 정책 버전 증가가 필요합니다. 승인은 단계별 착수 조건(8절)을 없애지 않으며, 어떤 Railway 서비스·secret·webhook·
@@ -84,17 +85,29 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    한 번이며 재시도하지 않습니다. 결과를 모르는 예약은 다음 실행이 `abandoned`로 닫고 다시 보내지 않습니다.
 4. **실행 서비스는 제품 DB 자격증명을 갖지 않습니다.** 상태는 본 앱 내부 route로만 읽고 쓰며, 감시 테이블과 이 Agent의 digest
    테이블에 쓰는 것은 본 앱의 store 모듈 하나뿐입니다.
-5. **허용되지 않은 변수가 있으면 시작하지 않습니다.** 판정은 **allowlist**입니다. 서비스 진입점은 환경의 모든 이름을 (a) 7절의
-   자기 서비스 변수, (b) 코드 상수로 고정한 비밀 아닌 런타임 이름(`PATH`·`HOME`·`HOSTNAME`·`NODE_ENV`·`NODE_VERSION`·`PORT` 같은
-   base image·Node 이름과 Railway가 넣는 `RAILWAY_*` 중 비밀이 아닌 것으로 문서에 이름이 있는 것)과 대조하고, 어느 쪽에도 없는
-   이름이 **하나라도** 있으면 자식 프로세스를 띄우기 전에 구성 오류로 멈춥니다. 모르는 이름은 거절이므로 새 자격증명이 이름 모양을
-   바꿔 통과할 수 없습니다. 자식은 자기 서비스 변수 중 필요한 것만 받습니다. 아래 이름은 allowlist에 절대 넣지 않는 것이며, 두
-   번째 검사로 따로 확인합니다.
-   - 두 서비스 공통: `DATABASE_URL`, `DIRECT_URL`, `POSTGRES*`, `PG*`, `PRISMA_*`, `GITHUB_TOKEN`, `GH_*`,
-     `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_TOKEN`, `RAILWAY_TOKEN`, `ADMIN_AUDIT_INTEGRITY_*`, `NEXTAUTH_SECRET`, 그리고 본 앱
-     웹 서비스가 가진 모든 자격증명 변수.
-   - page 서비스에서만: `OPS_OBSERVER_DIGEST_SECRET`, `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`.
-   - digest 서비스에서만: `OPS_OBSERVER_SECRET`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`, `OPS_OBSERVER_HEARTBEAT_URL`.
+5. **허용되지 않은 변수가 있으면 시작하지 않습니다.** 서비스 진입점은 환경의 이름을 두 번 검사하고, 어느 하나라도 걸리면 자식
+   프로세스를 띄우기 전에 구성 오류로 멈춥니다. 두 검사 모두 실행 서비스가 자기 환경만 보고 판정합니다.
+   - **(a) allowlist.** 모든 이름이 아래 셋 중 하나여야 합니다. 그 밖의 이름이 **하나라도** 있으면 거절합니다.
+     1. 7절의 자기 서비스 변수.
+     2. base image·Node의 이름: `PATH`, `HOME`, `HOSTNAME`, `PWD`, `SHLVL`, `TERM`, `LANG`, `NODE_VERSION`,
+        `YARN_VERSION`, `NODE_ENV`, `PORT`.
+     3. Railway가 넣는 비밀 아닌 이름: `RAILWAY_ENVIRONMENT`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_ENVIRONMENT_NAME`,
+        `RAILWAY_PROJECT_ID`, `RAILWAY_PROJECT_NAME`, `RAILWAY_SERVICE_ID`, `RAILWAY_SERVICE_NAME`, `RAILWAY_DEPLOYMENT_ID`,
+        `RAILWAY_REPLICA_ID`, `RAILWAY_REPLICA_REGION`, `RAILWAY_SNAPSHOT_ID`, `RAILWAY_PUBLIC_DOMAIN`, `RAILWAY_PRIVATE_DOMAIN`,
+        `RAILWAY_STATIC_URL`, `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_GIT_AUTHOR`, `RAILWAY_GIT_BRANCH`, `RAILWAY_GIT_REPO_NAME`,
+        `RAILWAY_GIT_REPO_OWNER`, `RAILWAY_GIT_COMMIT_MESSAGE`.
+
+     이 목록은 코드 상수이고, 테스트가 이 절과 같음을 고정합니다. Railway가 목록에 없는 이름을 넣어 서비스가 멈추면 그 이름을
+     더하는 것은 정책 버전 증가이고, (b)에 걸리는 이름은 더할 수 없습니다.
+   - **(b) 모양 규칙.** 자기 서비스 변수(7절)를 **제외한** 모든 이름 중 아래에 걸리는 것이 있으면 거절합니다. (a)에 실수로 들어간
+     자격증명도 이 검사가 막습니다.
+     - 대소문자를 무시하고 `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`,
+       `ENCRYPTION_KEY`, `SIGNING_KEY`, `CREDENTIAL`, `DATABASE_URL`, `DSN`을 포함하는 이름
+     - `POSTGRES`·`PG`·`PRISMA_`·`GH_`·`ADMIN_AUDIT_INTEGRITY_`로 시작하는 이름
+     - 상대 서비스의 변수 이름. page 서비스에서는 `OPS_OBSERVER_DIGEST_SECRET`, `OPS_OBSERVER_DIGEST_WEBHOOK_URL`,
+       `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`이고, digest 서비스에서는 `OPS_OBSERVER_SECRET`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`,
+       `OPS_OBSERVER_HEARTBEAT_URL`입니다.
+   - 자식은 자기 서비스 변수 중 필요한 것만 받습니다.
 6. **빌드 단계에는 runtime 비밀값이 없습니다.** 전용 Dockerfile은 `ARG`를 선언하지 않는 단일 stage이고, 첫 실행 명령이 빌드 환경
    검사입니다.
 7. **결과를 모르면 멈춥니다.** 본 앱 요청은 재시도하지 않고, 상태를 신뢰할 수 없으면 아무것도 보내지 않고 heartbeat도
@@ -130,9 +143,9 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   - **회복**
 - 신규 열림은 키당 소유자 날짜당 1회입니다. 같은 날짜의 두 번째 열림은 경과 시간과 무관하게 재열림으로 셉니다(일광절약시간이
   끝나 25시간인 날에도 성립하도록 시간이 아니라 날짜로 셉니다).
-- 악화도 키당 소유자 날짜당 1회만 하루 상한 밖입니다. 같은 키의 같은 날짜 두 번째 악화는, 그 사건이 전날부터 이어진 것이든
-  새로 열린 것이든, 아래 6개 상한에 들어갑니다.
-- 재열림·회복, 재열림으로 시작한 사건의 악화, 그리고 위 규칙으로 넘어온 악화는 소유자 날짜당 6개입니다. **신규 열림과 날짜당 첫
+- 악화는 사건의 시작이 신규 열림이든 재열림이든, 전날부터 이어진 것이든 상관없이 **키당 소유자 날짜당 첫 1회만** 하루 상한
+  밖입니다. 같은 키의 같은 날짜 두 번째 이후 악화는 아래 상한에 들어갑니다.
+- 하루 상한 6개에 들어가는 것은 재열림, 회복, 그리고 키당 날짜당 두 번째 이후의 악화입니다. **신규 열림과 키당 날짜당 첫
   악화는 이 상한으로 막지 않습니다.**
 - **하루 최대값의 유도(S2):** 키는 8개입니다.
   - 신규 열림은 키당 소유자 날짜당 1회이므로 최대 8입니다.
@@ -196,7 +209,10 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
    - 그다음 2초를 넘는 문장이 statement timeout으로 취소됩니다(statement timer가 무장돼 있음).
    - statement 상한 아래의 짧은 문장을 반복하면 `ttArmedMs`에서 세션이 끝납니다(우리 timer가 실제로 돔).
 
-   물려받은 값 600 s에서도 마지막 단언을 합니다. `current_setting`만 보는 단언은 합격 근거가 아닙니다.
+   - 문장 사이를 `idle_in_transaction_session_timeout`보다 길게 비우면 세션이 idle timeout으로 끝납니다(idle timer도 다시 판정돼
+     무장돼 있음).
+
+   물려받은 값 600 s에서도 셋째와 넷째 단언을 합니다. `current_setting`만 보는 단언은 합격 근거가 아닙니다.
 5. **어느 버전이든**, 마감을 넘긴 트랜잭션은 commit의 deferred constraint trigger 평가 시점에 DB 시계로 abort됩니다. 성공 응답·
    전송 허가·heartbeat 전에는 별도의 짧은 트랜잭션으로 마감을 다시 확인합니다. 그 확인을 통과하지 못하면 성공을 내보내지 않습니다.
 6. 이 장치들이 덮지 못하는 구간이 있습니다.
