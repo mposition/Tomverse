@@ -112,7 +112,13 @@ const SCALAR_TYPES = new Set([
   "Bytes",
 ]);
 
-type ParsedField = { readonly name: string; readonly type: string; readonly relation: boolean };
+type ParsedField = {
+  readonly name: string;
+  readonly type: string;
+  readonly relation: boolean;
+  /** For a relation field, the local columns its `@relation(fields: [...])` names. */
+  readonly relationFields: readonly string[];
+};
 type ParsedModel = { readonly name: string; readonly fields: readonly ParsedField[]; readonly unreadable: readonly string[] };
 type ParsedSchema = {
   readonly models: ReadonlyMap<string, ParsedModel>;
@@ -122,7 +128,40 @@ type ParsedSchema = {
 
 const FIELD_LINE = /^(\w+)\s+(\w+)(\[\]|\?)?(?:\s+(.*))?$/;
 const BLOCK_OPEN = /^(model|enum|generator|datasource|view|type)\s+(\w+)\s*\{(.*)$/;
-const stripComment = (line: string) => line.replace(/\/\/.*$/, "").trim();
+const RELATION_FIELDS = /@relation\([^)]*\bfields:\s*\[([^\]]*)\]/;
+
+/**
+ * Removes `//` and `/* *\/` comments the way Prisma reads them: a comment
+ * opener inside a string is text, and a block-comment opener inside a line
+ * comment is part of that comment. Newlines are kept, so line numbers survive.
+ */
+export const stripPrismaComments = (schema: string) => {
+  let out = "";
+  let i = 0;
+  while (i < schema.length) {
+    const char = schema[i];
+    const next = schema[i + 1];
+    if (char === '"') {
+      let j = i + 1;
+      while (j < schema.length && schema[j] !== '"' && schema[j] !== "\n") {
+        j += schema[j] === "\\" ? 2 : 1;
+      }
+      out += schema.slice(i, j + 1);
+      i = j + 1;
+    } else if (char === "/" && next === "/") {
+      while (i < schema.length && schema[i] !== "\n") i += 1;
+    } else if (char === "/" && next === "*") {
+      const end = schema.indexOf("*/", i + 2);
+      const stop = end < 0 ? schema.length : end + 2;
+      out += schema.slice(i, stop).replace(/[^\n]/g, "");
+      i = stop;
+    } else {
+      out += char;
+      i += 1;
+    }
+  }
+  return out;
+};
 
 type Block = { kind: string; name: string; body: string[] };
 
@@ -132,16 +171,12 @@ type Block = { kind: string; name: string; body: string[] };
  * this audit does not read (view, type), and anything outside a block.
  */
 export const parsePrismaSchema = (schema: string): ParsedSchema => {
-  // Block comments become blank lines, so every other line keeps its number.
-  const lines = schema
-    .replace(/\r\n/g, "\n")
-    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ""))
-    .split("\n");
+  const lines = stripPrismaComments(schema.replace(/\r\n/g, "\n")).split("\n");
   const unreadable: string[] = [];
   const blocks: Block[] = [];
   let open: Block | null = null;
   for (const raw of lines) {
-    const line = stripComment(raw);
+    const line = raw.trim();
     if (open) {
       if (line === "}") {
         blocks.push(open);
@@ -181,11 +216,15 @@ export const parsePrismaSchema = (schema: string): ParsedSchema => {
         modelUnreadable.push(line);
         continue;
       }
-      const [, fieldName, type] = match;
+      const [, fieldName, type, , attributes = ""] = match;
       if (modelNames.has(type)) {
-        fields.push({ name: fieldName, type, relation: true });
+        const named = RELATION_FIELDS.exec(attributes);
+        const relationFields = named
+          ? named[1].split(",").map((column) => column.trim()).filter(Boolean)
+          : [];
+        fields.push({ name: fieldName, type, relation: true, relationFields });
       } else if (SCALAR_TYPES.has(type) || enums.has(type)) {
-        fields.push({ name: fieldName, type, relation: false });
+        fields.push({ name: fieldName, type, relation: false, relationFields: [] });
       } else {
         modelUnreadable.push(line);
       }
@@ -282,6 +321,29 @@ export const auditDeletionManifest = (
       }
       if (entry.link.kind === "via_model" && !manifestModels.has(entry.link.model)) {
         failures.push(`${entry.model}: links through ${entry.link.model}, which is not in the manifest`);
+      }
+      // The declared column must be the foreign key of a relation to the
+      // declared target, or, for an untyped link, a plain feedbackId column
+      // that no relation backs.
+      const link = entry.link;
+      const backing = model.fields.filter(
+        (field) => field.relation && field.relationFields.includes(link.column)
+      );
+      if (link.kind === "feedback_id" || link.kind === "via_model") {
+        const target = link.kind === "feedback_id" ? "Feedback" : link.model;
+        if (!backing.some((field) => field.type === target)) {
+          failures.push(
+            `${entry.model}: link column ${link.column} is not the foreign key of a relation to ${target}`
+          );
+        }
+      }
+      if (link.kind === "untyped") {
+        if (link.column !== "feedbackId") {
+          failures.push(`${entry.model}: an untyped link must be a feedbackId column`);
+        }
+        if (backing.length > 0) {
+          failures.push(`${entry.model}: link column ${link.column} is backed by a relation; declare it typed`);
+        }
       }
       if (entry.onAccountDeletion === "none") {
         failures.push(`${entry.model}: linked to a report but does nothing on account deletion`);

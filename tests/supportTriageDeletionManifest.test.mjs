@@ -6,6 +6,7 @@ import {
   SUPPORT_TRIAGE_DELETION_MANIFEST,
   auditDeletionManifest,
   parsePrismaSchema,
+  stripPrismaComments,
 } from "../lib/supportTriageDeletionManifest.ts";
 
 // docs/policy/support-triage.md §5: the manifest is the single list of what
@@ -156,4 +157,62 @@ test("negative control: other person-account columns and relations fail", () => 
     const failures = auditDeletionManifest(withRunField(line));
     assert.ok(failures.some((f) => /names a person's account/.test(f)), line);
   }
+});
+
+test("negative control: a block-comment opener inside a line comment hides nothing", () => {
+  const edited = withRunField("// example /*\n  note String?\n  // example */");
+  assert.ok(
+    auditDeletionManifest(edited).some((f) => /SupportTriageRun\.note: no classification/.test(f)),
+    "the column between the two line comments is real"
+  );
+});
+
+test("comment openers inside strings are text", () => {
+  const stripped = stripPrismaComments('a String @default("http://x/*y*/") // gone\nb Int');
+  assert.equal(stripped, 'a String @default("http://x/*y*/") \nb Int');
+  const block = stripPrismaComments("x /* one\ntwo */ y");
+  assert.equal(block, "x \n y");
+});
+
+test("negative control: a typed link must be the foreign key of a relation to its target", () => {
+  const selfId = [{ ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], link: { kind: "feedback_id", column: "id" }, onAccountDeletion: "delete" }];
+  assert.ok(
+    auditDeletionManifest(schema, selfId).some((f) => /link column id is not the foreign key of a relation to Feedback/.test(f))
+  );
+  const viaWrong = [
+    { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], link: { kind: "via_model", model: "SupportTriageRun", column: "id" }, onAccountDeletion: "cascade_from_group" },
+  ];
+  assert.ok(
+    auditDeletionManifest(schema, viaWrong).some((f) => /link column id is not the foreign key of a relation to SupportTriageRun/.test(f))
+  );
+});
+
+test("a correctly declared feedback link passes", () => {
+  const edited = schema
+    .replace(/^(model SupportTriageRun \{\n)/m, "$1  feedback Feedback @relation(fields: [feedbackId], references: [id])\n  feedbackId String\n")
+    .replace(/^(model Feedback \{\n)/m, "$1  triageRuns SupportTriageRun[]\n");
+  const manifest = [
+    {
+      ...SUPPORT_TRIAGE_DELETION_MANIFEST[0],
+      link: { kind: "feedback_id", column: "feedbackId" },
+      onAccountDeletion: "delete",
+      columns: { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0].columns, feedbackId: "identifier" },
+    },
+  ];
+  assert.deepEqual(auditDeletionManifest(edited, manifest), []);
+});
+
+test("negative control: an untyped link backed by a relation, or not named feedbackId, fails", () => {
+  const edited = schema
+    .replace(/^(model SupportTriageRun \{\n)/m, "$1  feedback Feedback @relation(fields: [feedbackId], references: [id])\n  feedbackId String\n")
+    .replace(/^(model Feedback \{\n)/m, "$1  triageRuns SupportTriageRun[]\n");
+  const manifest = [
+    {
+      ...SUPPORT_TRIAGE_DELETION_MANIFEST[0],
+      link: { kind: "untyped", column: "feedbackId" },
+      onAccountDeletion: "delete",
+      columns: { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0].columns, feedbackId: "identifier" },
+    },
+  ];
+  assert.ok(auditDeletionManifest(edited, manifest).some((f) => /backed by a relation; declare it typed/.test(f)));
 });
