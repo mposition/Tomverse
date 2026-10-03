@@ -486,6 +486,63 @@ ${step}`;
     true,
     "an action told to read the Actions cache backend",
   );
+
+  // The kinds. The rule itself is unchanged -- any restored cache still forbids
+  // every change -- but the kind is what makes a credentialed job moving from a
+  // verified package-manager cache to an unverified one a different fact rather
+  // than the same reason twice. The posture digest could not see that, and
+  // every credentialed cache-restoring job in this repository is in exactly the
+  // state where it would have been invisible.
+  const kinds = (step) => {
+    const reason = analyse([wf("nightly", nightly(step))]).reasons.find(
+      (candidate) => candidate.reason === "credential_job_restores_cache",
+    );
+    return reason === undefined ? null : reason.cacheKinds;
+  };
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+`), ["verified_package_manager"]);
+  assert.deepEqual(kinds(`      - uses: actions/cache@v5
+        with: { path: .next/cache, key: k }
+`), ["unverified"]);
+  assert.deepEqual(kinds(`      - uses: actions/cache/restore@v5
+        with: { path: .next/cache, key: k }
+`), ["unverified"]);
+  assert.deepEqual(kinds(`      - uses: \${{ vars.ACTION }}
+`), ["unreadable"]);
+  assert.deepEqual(kinds(`      - uses: docker://alpine
+`), ["unreadable"]);
+  assert.equal(kinds(`      - run: echo
+`), null, "no cache, no reason");
+  // Both in one job: the record names both rather than collapsing to the weaker
+  // one, in a fixed order so the digest is stable.
+  assert.deepEqual(
+    kinds(`      - uses: actions/setup-node@v6
+      - uses: actions/cache@v5
+        with: { path: .next/cache, key: k }
+`),
+    ["unverified", "verified_package_manager"],
+  );
+  // A save step writes and does not read, so it is not a restore.
+  assert.equal(
+    kinds(`      - uses: actions/cache/save@v5
+        with: { path: .next/cache, key: k }
+`),
+    null,
+  );
+});
+
+test("on this repository every credentialed job restores only a verified cache", () => {
+  // The separation the cache audit found by reading, as a checked fact. If this
+  // fails, an unverified cache has reached a job holding a write permission or
+  // an external secret, and npm run check:credential-cache-separation fails
+  // with it. .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4.
+  const result = analyse(committedWorkflows());
+  assert.equal(result.status, "analysed");
+  const cacheReasons = result.reasons.filter((reason) => reason.reason === "credential_job_restores_cache");
+  assert.ok(cacheReasons.length > 0, "expected the rule to be exercised");
+  for (const reason of cacheReasons) {
+    assert.deepEqual(reason.cacheKinds, ["verified_package_manager"]);
+  }
 });
 
 test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
@@ -552,7 +609,16 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // own token, on push to main only. The analysis gives it no reason and no path
 // rule: no event the agent raises reaches it. Flagged for the owner's review in
 // the pull request that adds it.
-const POSTURE_DIGEST = "62ba14563ed8";
+//
+// 2ccf7af5eb0f (2026-10-03): the summary now carries each cache reason's kinds,
+// so this pin can see a credentialed job move from a verified package-manager
+// cache to an unverified one. No workflow's posture changed: all 14 cache
+// reasons read `verified_package_manager`, 17 reasons and 22 credentialed jobs
+// as before. That measurement is the point -- the separation the cache audit
+// found by reading is now a checked fact, and
+// `npm run check:credential-cache-separation` fails if it ends.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3.
+const POSTURE_DIGEST = "2ccf7af5eb0f";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
@@ -569,8 +635,17 @@ test("on this repository's committed workflows the credential posture is the rev
 
   const summary = [
     ...result.credentialedJobs.map((job) => `job:${anonymise(job.workflowPath)}#${anonymise(job.jobId)}`),
+    // The cache kinds are part of the posture, not a detail of it. Without
+    // them, adding `.next/cache` to a credentialed job that already restores
+    // the npm cache produces the same reason string and leaves this digest
+    // unmoved -- and every credentialed cache-restoring job in this repository
+    // is in exactly that state, so the change this pin most needs to catch was
+    // the one it could not see. The kinds name no workflow, so they can be
+    // carried in the clear.
     ...result.reasons.map(
-      (r) => `reason:${anonymise(r.workflowPath)}#${r.jobId === null ? "-" : anonymise(r.jobId)}:${r.reason}`,
+      (r) =>
+        `reason:${anonymise(r.workflowPath)}#${r.jobId === null ? "-" : anonymise(r.jobId)}:${r.reason}` +
+        (r.reason === "credential_job_restores_cache" ? `:${r.cacheKinds.join("+")}` : ""),
     ),
     ...result.pathRules.map(
       (rule) => `rule:${anonymise(rule.workflowPath)}:${rule.kind}:${anonymise(rule.patterns.join("\n"))}`,

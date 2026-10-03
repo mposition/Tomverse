@@ -646,6 +646,20 @@ scope로만 감) **run의 ref가 기본 branch이거나 `develop`일 때만** �
 
 ### P3. 분리를 규칙으로 고정합니다 — 2순위, F4의 답
 
+> **구현 완료.** `lib/agentCredentialReachability.ts`가 복원하는 캐시의
+> **종류**(`verified_package_manager` · `unverified` · `unreadable`)를 판정해
+> `credential_job_restores_cache` 이유에 실어 보냅니다. **기존 규칙은 바뀌지
+> 않았습니다** — 어떤 캐시든 복원하면 여전히 모든 변경이 push 금지입니다.
+> `npm run check:credential-cache-separation`이 PR Fast Gate static 단계에서
+> 자격증명 job의 `unverified`·`unreadable` 복원을 막고, 같은 모듈을 쓰므로
+> 판정기가 둘로 갈라지지 않습니다.
+>
+> `POSTURE_DIGEST`가 이제 종류를 담습니다(`62ba14563ed8` → `2ccf7af5eb0f`).
+> 그 전환에서 **workflow의 posture는 바뀌지 않았습니다** — 캐시 이유 14건이
+> 전부 `verified_package_manager`, 이유 17건, 자격증명 job 22건으로 동일합니다.
+> 즉 4.3이 손으로 읽어 낸 분리가 이제 기계가 확인한 사실이고, 그것이 끝나는
+> 순간 digest와 검사가 함께 실패합니다.
+
 **자격증명을 가진 job은 `cache: npm` 외의 Actions 캐시를 복원하지 않는다.**
 
 구현은 새 스크립트가 **아니라** `lib/agentCredentialReachability.ts`의

@@ -58,7 +58,13 @@ type Problem = { path: string; problem: string };
 
 export type CredentialReason =
   | { workflowPath: string; jobId: string | null; reason: "credential_job_reached_without_path_filter" }
-  | { workflowPath: string; jobId: string | null; reason: "credential_job_restores_cache" }
+  | {
+      workflowPath: string;
+      jobId: string | null;
+      reason: "credential_job_restores_cache";
+      /** The kinds that job restores. An unverified or unreadable one is the gated case. */
+      cacheKinds: CacheKind[];
+    }
   | { workflowPath: string; jobId: string | null; reason: "credential_job_reached_by_chained_event" };
 
 export type PathRule =
@@ -264,28 +270,60 @@ const permissionsWrite = (permissions: Json | undefined): "write" | "read" | "un
   return "read";
 };
 
-const restoresCache = (job: Obj) => {
+/**
+ * What kind of cache a restoring step reads.
+ *
+ * The distinction is whether anything verifies the restored bytes before they
+ * are used. A package manager's own cache is content-addressed and checked
+ * against the lockfile, so a tampered entry fails or is refetched rather than
+ * installing different code. Build output and browser binaries have no such
+ * check: `npm run build` reads `.next/cache` into the server bundle it then
+ * runs, and on a cache hit `playwright install` launches the cached binaries
+ * without downloading or hashing anything.
+ *
+ * `unreadable` is neither, and is treated as the worse of the two everywhere.
+ * .github/audits/actions-cache-poisoning-audit-2026-10-03.md 3.1 and 4.4.
+ */
+export type CacheKind = "verified_package_manager" | "unverified" | "unreadable";
+
+/** The kinds a job restores, deduplicated and ordered for a stable record. */
+const KIND_ORDER: CacheKind[] = ["unreadable", "unverified", "verified_package_manager"];
+
+const restoredCacheKinds = (job: Obj): CacheKind[] => {
   // What cannot be read counts as restoring: a `uses` that is not a plain
   // string, is an expression, or names an action kept in this repository
   // (its steps are not read here). A setup action restores unless its cache
   // is switched off explicitly, because several enable it by default. GitHub
   // resolves owner and repository names case-insensitively, and so does this.
   const steps = Array.isArray(job.steps) ? job.steps : [];
-  return steps.some((step) => {
-    if (!isObj(step) || step.uses === undefined) return false;
-    if (typeof step.uses !== "string") return true;
+  const kinds = new Set<CacheKind>();
+  for (const step of steps) {
+    if (!isObj(step) || step.uses === undefined) continue;
+    if (typeof step.uses !== "string") {
+      kinds.add("unreadable");
+      continue;
+    }
     const uses = step.uses.trim();
     // A container step's work is not read here either.
-    if (uses.includes("${{") || uses.startsWith("./") || /^docker:\/\//i.test(uses)) return true;
-    if (/^actions\/cache(?:\/restore)?@/i.test(uses)) return true;
+    if (uses.includes("${{") || uses.startsWith("./") || /^docker:\/\//i.test(uses)) {
+      kinds.add("unreadable");
+      continue;
+    }
+    if (/^actions\/cache(?:\/restore)?@/i.test(uses)) {
+      kinds.add("unverified");
+      continue;
+    }
     // Any action told to read the Actions cache backend, whatever its name.
-    if (isObj(step.with) && /type\s*=\s*gha\b/i.test(JSON.stringify(step.with))) return true;
+    if (isObj(step.with) && /type\s*=\s*gha\b/i.test(JSON.stringify(step.with))) {
+      kinds.add("unverified");
+      continue;
+    }
     if (/^actions\/setup-[a-z-]+@/i.test(uses)) {
       const cache = isObj(step.with) ? step.with.cache : undefined;
-      return cache !== false && cache !== "false";
+      if (cache !== false && cache !== "false") kinds.add("verified_package_manager");
     }
-    return false;
-  });
+  }
+  return KIND_ORDER.filter((kind) => kinds.has(kind));
 };
 
 /* ------------------------------------------------------------------------- */
@@ -356,6 +394,8 @@ type JobVerdict = {
   credentialIgnoringExclusions: boolean;
   /** Restores an Actions cache, itself or through a local callee. */
   restoresCache: boolean;
+  /** Which kinds, so a change from verified-only to unverified is visible. */
+  cacheKinds: CacheKind[];
   problem: string | null;
 };
 
@@ -415,12 +455,23 @@ export const analyseCredentialReachability = (input: {
 
   const judgeJob = (workflow: Obj, path: string, jobId: string, job: Json, depth: number): JobVerdict => {
     if (!isObj(job)) {
-      return { credential: true, credentialIgnoringExclusions: true, restoresCache: false, problem: "job_not_an_object" };
+      return {
+        credential: true,
+        credentialIgnoringExclusions: true,
+        restoresCache: false,
+        cacheKinds: [],
+        problem: "job_not_an_object",
+      };
     }
-    const own = (credential: boolean, cache: boolean, problem: string | null = null): JobVerdict => ({
+    const own = (
+      credential: boolean,
+      kinds: CacheKind[],
+      problem: string | null = null,
+    ): JobVerdict => ({
       credential: credential && !excluded(path, jobId),
       credentialIgnoringExclusions: credential,
-      restoresCache: cache,
+      restoresCache: kinds.length > 0,
+      cacheKinds: kinds,
       problem,
     });
 
@@ -432,21 +483,30 @@ export const analyseCredentialReachability = (input: {
       const local = LOCAL_CALLEE.exec(job.uses);
       // A remote or computed callee cannot be read: whether it restores a cache
       // or calls further is unknown, so the analysis fails (policy §5).
-      if (local === null) return { credential: true, credentialIgnoringExclusions: true, restoresCache: true, problem: "callee_unreadable" };
+      if (local === null) {
+        return {
+          credential: true,
+          credentialIgnoringExclusions: true,
+          restoresCache: true,
+          cacheKinds: ["unreadable"],
+          problem: "callee_unreadable",
+        };
+      }
       const callee = parsed.get(local[1]);
-      if (callee === undefined || depth > 8) return own(true, false, "callee_unreadable");
-      let cache = false;
+      if (callee === undefined || depth > 8) return own(true, ["unreadable"], "callee_unreadable");
+      const reached = new Set<CacheKind>();
       for (const [calleeJobId, calleeJob] of Object.entries(callee.jobs as Obj)) {
         const verdict = judgeJob(callee, local[1], calleeJobId, calleeJob, depth + 1);
-        if (verdict.problem) return own(true, cache, verdict.problem);
-        cache = cache || verdict.restoresCache;
+        for (const kind of verdict.cacheKinds) reached.add(kind);
+        if (verdict.problem) return own(true, KIND_ORDER.filter((k) => reached.has(k)), verdict.problem);
       }
+      const cache = KIND_ORDER.filter((k) => reached.has(k));
       // An exclusion on the caller pins the caller's blob only. It holds when
       // every workflow the call reaches is local and pinned at its current blob
       // by an exclusion of its own; otherwise a changed callee would ride on
       // the caller's review.
       const reach = calleesOf(local[1], new Set());
-      if (reach === null) return own(true, true, "callee_unreadable");
+      if (reach === null) return own(true, ["unreadable"], "callee_unreadable");
       // Pinned means every job of every workflow the call reaches is covered
       // by a valid exclusion at its current blob -- a callee job left out runs
       // with the call all the same.
@@ -455,10 +515,16 @@ export const analyseCredentialReachability = (input: {
       );
       return calleesPinned
         ? own(true, cache)
-        : { credential: true, credentialIgnoringExclusions: true, restoresCache: cache, problem: null };
+        : {
+            credential: true,
+            credentialIgnoringExclusions: true,
+            restoresCache: cache.length > 0,
+            cacheKinds: cache,
+            problem: null,
+          };
     }
 
-    const cache = restoresCache(job);
+    const cache = restoredCacheKinds(job);
     const credential =
       job.secrets === "inherit" ||
       job.environment !== undefined ||
@@ -491,9 +557,20 @@ export const analyseCredentialReachability = (input: {
         credentialedJobs.push({ workflowPath: path, jobId });
       }
       // The cache rule ignores exclusions: only the recorded isolation lifts it.
+      //
+      // `cacheKinds` rides along rather than narrowing this: the rule is
+      // unchanged, and the kinds are what makes a job going from a verified
+      // package-manager cache to an unverified one a visible change instead of
+      // the same reason twice. scripts/check-credential-cache-separation.mjs is
+      // the gate that acts on the distinction.
       if (verdict.credentialIgnoringExclusions && verdict.restoresCache && !input.cacheIsolationRecorded) {
         forbidsAll = true;
-        reasons.push({ workflowPath: path, jobId, reason: "credential_job_restores_cache" });
+        reasons.push({
+          workflowPath: path,
+          jobId,
+          reason: "credential_job_restores_cache",
+          cacheKinds: verdict.cacheKinds,
+        });
       }
     }
     credentialed.set(path, jobs);

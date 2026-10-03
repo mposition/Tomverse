@@ -295,6 +295,21 @@ jobs:
         timeout-minutes: 5
         run: npm run check:ci-cache-keys
 
+      # The other half of the same question. The keys above decide who can
+      # restore an entry; this decides what a job may restore while holding a
+      # credential. Today every credentialed job restores only a package
+      # manager's cache, which npm ci verifies against the lockfile -- nothing
+      # was keeping it that way, and the existing agent push rule cannot tell,
+      # because it already fires for all of them.
+      #
+      # Same judgement as the agent push policy on purpose
+      # (lib/agentCredentialReachability.ts), so there is one answer to which
+      # jobs hold a credential rather than two that drift.
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4 and P3.
+      - name: Credential and unverified cache separation
+        timeout-minutes: 5
+        run: npm run check:credential-cache-separation
+
       # A copy-based locator that steers a branch, on copy that no longer
       # exists, neither passes nor fails -- it quietly takes the other path.
       # A brand rename left one such guard in `openSidebarOnMobile`, and the

@@ -54,6 +54,7 @@
     "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
     "check:ci-cache-keys": "node scripts/check-ci-cache-keys.mjs",
+    "check:credential-cache-separation": "node --import tsx --conditions=react-server scripts/check-credential-cache-separation.mjs",
     "check:e2e-copy-selectors": "node scripts/check-e2e-copy-selectors.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
     "check:memory-eval-run": "node scripts/check-memory-eval-run-admissibility.mjs",
