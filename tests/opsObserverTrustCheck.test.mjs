@@ -154,6 +154,39 @@ test("a missing or malformed fact fails closed rather than passing", () => {
   untrusted({});
 });
 
+test("absent approval fields never match each other", () => {
+  for (const field of ["requestDigest", "supersedesGenesisId"]) {
+    assert.equal(
+      untrusted(
+        edit((f) => {
+          delete f.genesis[field];
+          delete f.genesisAuditRows[0].metadata[field];
+        }),
+      ),
+      "state_missing",
+      field,
+    );
+  }
+  assert.equal(untrusted(edit((f) => (f.genesis.requestDigest = "A".repeat(64)))), "state_missing");
+  assert.equal(untrusted(edit((f) => (f.genesis.supersedesGenesisId = "not-a-uuid"))), "state_missing");
+  assert.equal(untrusted(edit((f) => delete f.genesis.createdAt)), "state_missing");
+});
+
+test("only the first genesis may come without a predecessor time", () => {
+  // A replacing genesis whose predecessor lookup came back empty cannot skip D5b.
+  assert.equal(untrusted(edit((f) => (f.previousGenesisCreatedAt = null))), "genesis_too_soon");
+  // A first genesis that somehow has a predecessor time is inconsistent.
+  assert.equal(
+    untrusted(
+      edit((f) => {
+        f.genesis.supersedesGenesisId = null;
+        f.genesisAuditRows[0].metadata.supersedesGenesisId = null;
+      }),
+    ),
+    "genesis_too_soon",
+  );
+});
+
 test("the first failing check in T0..T5 order names the reason", () => {
   const facts = edit((f) => {
     f.keysSchemaValid = false;
@@ -168,9 +201,12 @@ test("the first failing check in T0..T5 order names the reason", () => {
 
 test("seven days to the millisecond is the boundary of genesis_too_soon", () => {
   const previous = new Date("2026-10-01T00:00:00.000Z");
-  assert.equal(genesisTooSoon(new Date(previous.getTime() + GENESIS_MIN_INTERVAL_MS), previous), false);
-  assert.equal(genesisTooSoon(new Date(previous.getTime() + GENESIS_MIN_INTERVAL_MS - 1), previous), true);
-  assert.equal(genesisTooSoon(previous, null), false);
+  const at = (ms) => ({ createdAt: new Date(previous.getTime() + ms), supersedesGenesisId: PREVIOUS_ID });
+  assert.equal(genesisTooSoon(at(GENESIS_MIN_INTERVAL_MS), previous), false);
+  assert.equal(genesisTooSoon(at(GENESIS_MIN_INTERVAL_MS - 1), previous), true);
+  assert.equal(genesisTooSoon({ createdAt: previous, supersedesGenesisId: null }, null), false);
+  assert.equal(genesisTooSoon({ createdAt: previous, supersedesGenesisId: PREVIOUS_ID }, null), true);
+  assert.equal(genesisTooSoon({ supersedesGenesisId: null }, null), true);
 });
 
 test("the reasons are the closed list the design names", () => {

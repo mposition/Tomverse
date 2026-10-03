@@ -37,15 +37,18 @@ export const GENESIS_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const TRANSITION_VERDICTS = Object.freeze(["unaudited_transition", "checkpoint_broken", "audit_unverified"]);
 
 const isSha256 = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+const isUuid = (value) =>
+  typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 const isTime = (value) => value instanceof Date && Number.isFinite(value.getTime());
 const isCount = (value) => Number.isSafeInteger(value) && value >= 0;
 
 /**
- * T1's approval half: exactly one audit row for the genesis, written by a
+ * T1's approval half (`genesis` is already shape-checked, so no field below
+ * can match by both being absent): exactly one audit row for the genesis, written by a
  * human, whose metadata binds the same request, predecessor and mode -- and
  * then that row's own HMAC verifies. `unknown` actors are not human.
  */
-export function genesisApprovalReason(genesis, auditRows) {
+function genesisApprovalReason(genesis, auditRows) {
   if (!Array.isArray(auditRows) || auditRows.length !== 1) return "genesis_unapproved";
   const [row] = auditRows;
   if (row === null || typeof row !== "object") return "genesis_unapproved";
@@ -93,11 +96,17 @@ export function deliveryStampReason(deliveries, genesisMode) {
   return null;
 }
 
-/** T5: a genesis less than seven days after the one it followed is not trusted. */
-export function genesisTooSoon(latestCreatedAt, previousCreatedAt) {
-  if (previousCreatedAt === null) return false;
-  if (!isTime(latestCreatedAt) || !isTime(previousCreatedAt)) return true;
-  return latestCreatedAt.getTime() - previousCreatedAt.getTime() < GENESIS_MIN_INTERVAL_MS;
+/**
+ * T5: a genesis less than seven days after the one it replaced is not trusted.
+ * Only the first genesis (`supersedesGenesisId === null`) has no predecessor
+ * time; any other genesis without a valid one fails, so a predecessor lookup
+ * that came back empty cannot skip the rule.
+ */
+export function genesisTooSoon(genesis, previousCreatedAt) {
+  if (!isTime(genesis?.createdAt)) return true;
+  if (genesis.supersedesGenesisId === null) return previousCreatedAt !== null;
+  if (!isTime(previousCreatedAt)) return true;
+  return genesis.createdAt.getTime() - previousCreatedAt.getTime() < GENESIS_MIN_INTERVAL_MS;
 }
 
 /**
@@ -119,9 +128,12 @@ export function judgeTrust(facts) {
     typeof genesis !== "object" ||
     state === null ||
     typeof state !== "object" ||
-    typeof genesis.id !== "string" ||
+    !isUuid(genesis.id) ||
     state.genesisId !== genesis.id ||
-    !GENESIS_MODES.includes(genesis.mode)
+    !GENESIS_MODES.includes(genesis.mode) ||
+    !isSha256(genesis.requestDigest) ||
+    !(genesis.supersedesGenesisId === null || isUuid(genesis.supersedesGenesisId)) ||
+    !isTime(genesis.createdAt)
   ) {
     return fail("state_missing");
   }
@@ -148,7 +160,7 @@ export function judgeTrust(facts) {
   if (delivery) return fail(delivery);
 
   // T5: a genesis inside seven days of the previous one stays silent.
-  if (f.previousGenesisCreatedAt === undefined || genesisTooSoon(genesis.createdAt, f.previousGenesisCreatedAt)) {
+  if (genesisTooSoon(genesis, f.previousGenesisCreatedAt)) {
     return fail("genesis_too_soon");
   }
 
