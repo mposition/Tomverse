@@ -1,7 +1,7 @@
 import "server-only";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
-import { NOTIFICATION_KIND, enqueueNotificationDelivery } from "@/lib/notificationDeliveries";
+import { NOTIFICATION_KIND, enqueueNotificationDeliveryOnce } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
   type QaReleaseFreshnessVerdict,
@@ -33,12 +33,12 @@ const MONITOR_ROUND_BUDGET_MS = 110_000;
 const READ_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
 
 /**
- * The silence-alert write (policy section 10: at most nine statements -- the
- * audit append reads the previous entry only when the integrity key is set --
- * so 3A + 5 =
- * 32 s, Prisma five seconds more, transaction_timeout on PostgreSQL 17+):
- * the limits, the audit chain lock, the existing-alert read, the queue row,
- * the four of the audit append, and the deadline check as the last statement.
+ * The silence-alert write (policy section 10: at most nine statements, so
+ * 3A + 5 = 32 s, Prisma five seconds more, transaction_timeout on PostgreSQL
+ * 17+). It runs eight: the limits, the audit chain lock, the queue row in one
+ * statement, the four of the audit append (the previous-entry read only when
+ * the integrity key is set), and the deadline check as the last statement.
+ * The queue row is not written with Prisma's upsert, which runs three.
  */
 export const QA_RELEASE_STALE_WRITE_LIMITS = Object.freeze({
   statementMs: 2_000,
@@ -49,7 +49,7 @@ export const QA_RELEASE_STALE_WRITE_LIMITS = Object.freeze({
 });
 const ALERT_LIMITS = QA_RELEASE_STALE_WRITE_LIMITS;
 
-/** Carries the late answer out of the transaction it rolls back. */
+/** Carries the late answer out of the transaction it rolls back (both writes). */
 class StaleAlertLate extends Error {}
 
 /**
@@ -70,23 +70,22 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
       // Under the statement limit, and before any row: the same order every
       // audit writer takes.
       await takeAuditChainLock(tx);
-      const existing = await tx.notificationDelivery.findUnique({
-        where: { kind_referenceId: { kind: NOTIFICATION_KIND.qaReleaseDigestStale, referenceId } },
-        select: { id: true },
+      const queued = await enqueueNotificationDeliveryOnce(tx, {
+        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
+        referenceId,
       });
+      // A row committed by a concurrent round after this statement began:
+      // not known from here, so not reported as either answer.
+      if (queued === null) throw new Error("silence alert row not visible");
       // Every path ends with the deadline check, the one that writes nothing too.
       const late = async () => {
         const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
         return clock[0]?.late !== false;
       };
-      if (existing) {
+      if (!queued.inserted) {
         if (await late()) throw new StaleAlertLate();
         return "already_queued" as const;
       }
-      const queued = await enqueueNotificationDelivery(tx, {
-        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
-        referenceId,
-      });
       // The digest intake's listed actor: the policy names two system actors
       // for this agent, and this is the app side of the digest, not the lane.
       await writeSystemAuditLog({
@@ -105,6 +104,111 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
     },
     { maxWait: 5_000, timeout: ALERT_LIMITS.prismaMs },
   );
+}
+
+/**
+ * The monitor-failure write (policy section 10: seven statements, so 3A + 5
+ * = 26 s, Prisma five seconds more): the limits with the database's UTC
+ * date, the queue row in one statement, the four of the audit append (its
+ * chain lock first), and the deadline check as the last statement.
+ *
+ * Unlike the silence alert there is no separate chain lock before the row:
+ * an eighth statement would exceed the policy's count, and the row write is
+ * one statement on its unique key with nothing read before it to serialise.
+ * The one writer that takes the chain lock and then this same row is another
+ * failed round of the same day; were two to overlap, PostgreSQL ends one as a
+ * deadlock and that round reports failureRecorded: false.
+ */
+export const QA_RELEASE_FAILURE_WRITE_LIMITS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 7,
+  transactionMs: (3 * 7 + 5) * 1_000,
+  prismaMs: (3 * 7 + 5) * 1_000 + 5_000,
+});
+const FAILURE_LIMITS = QA_RELEASE_FAILURE_WRITE_LIMITS;
+
+/** Why a round ended without a verdict or without its alert: closed names only. */
+export type QaReleaseMonitorFailure =
+  | "monitor_read_failed"
+  | "monitor_clock_invalid"
+  | "alert_enqueue_failed"
+  | "monitor_deadline_passed";
+
+/**
+ * Records a round that could not finish (policy section 7, "감시 실패"): the
+ * day's monitor-failure alert and a system audit entry naming the closed
+ * reason, in one transaction. The queue row is one per UTC day of the
+ * database clock; every failed round still leaves its own audit entry,
+ * because each is a separate fact.
+ *
+ * The deadline is anchored the way the read anchors it: the database's time
+ * in the first statement plus what is left of the round, measured after that
+ * statement returned -- a round whose read failed has no earlier database
+ * time to use.
+ */
+async function recordMonitorFailure(
+  failure: QaReleaseMonitorFailure,
+  startedAt: number,
+  clock: () => number,
+): Promise<void> {
+  await prisma.$transaction(
+    async (tx) => {
+      // One clock reading for both the date and the deadline, so a round
+      // straddling UTC midnight cannot key one day and time another.
+      const setup = await tx.$queryRaw<{ day: string; dbNowMs: bigint }[]>`SELECT
+        set_config('statement_timeout', ${String(FAILURE_LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(FAILURE_LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(FAILURE_LIMITS.transactionMs)}, true)
+        END,
+        to_char(now_.t AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day,
+        floor(extract(epoch FROM now_.t) * 1000)::bigint AS "dbNowMs"
+        FROM (SELECT clock_timestamp() AS t) now_`;
+      const roundDeadline = new Date(Number(setup[0].dbNowMs) + MONITOR_ROUND_BUDGET_MS - (clock() - startedAt));
+      const referenceId = `monitor-failure:${setup[0].day}`;
+      const queued = await enqueueNotificationDeliveryOnce(tx, {
+        kind: NOTIFICATION_KIND.qaReleaseMonitorFailed,
+        referenceId,
+      });
+      if (queued === null) throw new Error("monitor failure row not visible");
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "qa-release-intake",
+        action: "qa_release.monitor_failed",
+        targetType: "NotificationDelivery",
+        targetId: queued.id,
+        summary: "A QA-release Monitor round could not finish.",
+        metadata: { referenceId, failure },
+      });
+      const late = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
+      if (late[0]?.late !== false) throw new StaleAlertLate();
+    },
+    { maxWait: 5_000, timeout: FAILURE_LIMITS.prismaMs },
+  );
+}
+
+/**
+ * Answers the failed round and tries to record it, when the round still has
+ * room for the write. The answer is the same whether the record landed: the
+ * failure is the fact, and `failureRecorded` says only whether it was kept.
+ */
+async function failRound(
+  failure: QaReleaseMonitorFailure,
+  startedAt: number,
+  clock: () => number,
+  extra: Record<string, unknown> = {},
+): Promise<QaReleaseMonitorAnswer> {
+  let failureRecorded = false;
+  if (qaReleaseTransactionFits("failure_write", clock() - startedAt, MONITOR_ROUND_BUDGET_MS)) {
+    try {
+      await recordMonitorFailure(failure, startedAt, clock);
+      failureRecorded = true;
+    } catch {
+      // Nothing to add: the round already failed, and nothing is retried here.
+    }
+  }
+  return answer(503, { ...extra, error: failure, failureRecorded });
 }
 
 export type QaReleaseMonitorAnswer = { status: number; body: Record<string, unknown> };
@@ -168,7 +272,7 @@ export async function runQaReleaseMonitor(
     read = await readRound();
   } catch {
     // Unknown outcome: report, never guess a verdict (policy section 6).
-    return answer(503, { error: "monitor_read_failed" });
+    return failRound("monitor_read_failed", startedAt, clock);
   }
 
   const admission = admitQaReleaseRouteCall({
@@ -194,7 +298,7 @@ export async function runQaReleaseMonitor(
       dbNowMs: read.dbNowMs,
     });
   } catch {
-    return answer(503, { error: "monitor_clock_invalid" });
+    return failRound("monitor_clock_invalid", startedAt, clock);
   }
   if (verdict !== "stale") return answer(200, { verdict });
 
@@ -216,7 +320,7 @@ export async function runQaReleaseMonitor(
     // The verdict stands; this round recorded nothing (a late round rolls
     // back, and an earlier round's alert stays as it was), and nothing is
     // retried here -- the next round tries again under the same key.
-    return answer(503, { verdict, error: error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed" });
+    return failRound(error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed", startedAt, clock, { verdict });
   }
   return answer(200, { verdict, alerted: queued === "queued" });
 }

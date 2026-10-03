@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildQaReleaseOperatorEmail, qaReleaseStaleDateFromReference } from "../lib/qaReleaseOperatorEmail.ts";
+import {
+  buildQaReleaseOperatorEmail,
+  qaReleaseMonitorFailureDateFromReference,
+  qaReleaseStaleDateFromReference,
+} from "../lib/qaReleaseOperatorEmail.ts";
+
+test("the monitor-failure alert is its own fixed subject and sentence, with the date and the Admin link", () => {
+  const email = buildQaReleaseOperatorEmail("monitor_failed", {
+    date: "2026-10-03",
+    consoleUrl: "https://tomverse.app/admin/agent-digests?tab=qa-release",
+  });
+  assert.equal(email.subject, "Tomverse QA release digest check could not finish");
+  assert.notEqual(email.text, buildQaReleaseOperatorEmail("digest_stale", { date: "2026-10-03", consoleUrl: "x" }).text);
+  assert.match(email.text, /Date \(UTC\): 2026-10-03/);
+  assert.match(email.text, /not known/);
+});
+
+test("each kind reads only its own reference shape", () => {
+  assert.equal(qaReleaseMonitorFailureDateFromReference("monitor-failure:2026-10-03"), "2026-10-03");
+  assert.equal(qaReleaseMonitorFailureDateFromReference("stale:2026-10-03"), null);
+  assert.equal(qaReleaseStaleDateFromReference("monitor-failure:2026-10-03"), null);
+  for (const reference of ["monitor-failure:", "monitor-failure:2026-1-3", "monitor-failure:2026-10-03x"]) {
+    assert.equal(qaReleaseMonitorFailureDateFromReference(reference), null, reference);
+  }
+});
 
 test("the silence alert is a fixed subject, a fixed sentence, the date and the Admin link", () => {
   const email = buildQaReleaseOperatorEmail("digest_stale", {

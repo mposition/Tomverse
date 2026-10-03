@@ -11,7 +11,7 @@ import { escapeHtml } from "@/lib/supportNotificationEmail";
  * re-renders and the provider's idempotency key needs the same payload.
  */
 
-export type QaReleaseOperatorEmailKind = "digest_stale";
+export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed";
 
 /** `stale:YYYY-MM-DD`, the reference id the Monitor enqueues under. */
 const STALE_REFERENCE = /^stale:(\d{4}-\d{2}-\d{2})$/;
@@ -19,13 +19,22 @@ const STALE_REFERENCE = /^stale:(\d{4}-\d{2}-\d{2})$/;
 export const qaReleaseStaleDateFromReference = (referenceId: string): string | null =>
   STALE_REFERENCE.exec(referenceId)?.[1] ?? null;
 
+/** `monitor-failure:YYYY-MM-DD`, the reference id a failed Monitor round enqueues under. */
+const MONITOR_FAILURE_REFERENCE = /^monitor-failure:(\d{4}-\d{2}-\d{2})$/;
+
+export const qaReleaseMonitorFailureDateFromReference = (referenceId: string): string | null =>
+  MONITOR_FAILURE_REFERENCE.exec(referenceId)?.[1] ?? null;
+
 const SUBJECTS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale: "Tomverse QA release digest has gone quiet",
+  monitor_failed: "Tomverse QA release digest check could not finish",
 };
 
 const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale:
     "The QA release digest check found no current digest while the agent is recorded as on: none has been recorded, the newest is 28 hours old or older, or the newest is dated after the database clock. Nothing was decided or changed; open the Agent digests page to see the last digest and the operator control revision.",
+  monitor_failed:
+    "The QA release digest check could not finish a round, so whether the digest is current is not known. Nothing was decided or changed; open the Agent digests page to see the last digest, and the audit log for the reason recorded.",
 };
 
 export const buildQaReleaseOperatorEmail = (

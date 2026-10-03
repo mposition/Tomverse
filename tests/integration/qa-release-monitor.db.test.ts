@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
+import { enqueueNotificationDeliveryOnce } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import { runQaReleaseMonitor } from "@/lib/qaReleaseMonitor";
 import { recordQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
@@ -61,7 +62,7 @@ const cleanup = async () => {
   try {
     await prisma.$executeRawUnsafe(`DELETE FROM "QaReleaseOperatorControl"`);
     await prisma.$executeRawUnsafe(`DELETE FROM "AgentDigestItem" WHERE "agentKey" = 'qa-release'`);
-    await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
+    await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed"] } } });
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseOperatorControl" ENABLE TRIGGER "QaReleaseOperatorControl_before_delete"`);
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_delete"`);
@@ -163,7 +164,7 @@ test("a round that ran past its budget during the read is refused on both paths,
   const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted" } });
   assert.deepEqual(await call({ clock: jumpAfterRead() }), {
     status: 503,
-    body: { verdict: "stale", error: "monitor_deadline_passed" },
+    body: { verdict: "stale", error: "monitor_deadline_passed", failureRecorded: false },
   });
   assert.equal(await prisma.notificationDelivery.count({ where: { kind: "qa_release_digest_stale" } }), 0);
   assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted" } }), auditsBefore);
@@ -172,6 +173,57 @@ test("a round that ran past its budget during the read is refused on both paths,
   assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
   assert.deepEqual(await call({ clock: jumpAfterRead() }), {
     status: 503,
-    body: { verdict: "stale", error: "monitor_deadline_passed" },
+    body: { verdict: "stale", error: "monitor_deadline_passed", failureRecorded: false },
   });
+});
+
+test("a round that fails with room left records the day's monitor-failure alert once and audits every failure", async () => {
+  // Late for the silence alert (the clock jumps after the read), then back
+  // to 0, so the failure write still fits the round and its own deadline.
+  const lateThenBack = () => {
+    let calls = 0;
+    return () => (++calls === 4 ? 200_000 : 0);
+  };
+  await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed"] } } });
+  const before = await prisma.adminAuditLog.count({ where: { action: "qa_release.monitor_failed" } });
+  for (let round = 0; round < 2; round += 1) {
+    assert.deepEqual(await call({ clock: lateThenBack() }), {
+      status: 503,
+      body: { verdict: "stale", error: "monitor_deadline_passed", failureRecorded: true },
+    });
+  }
+  assert.equal(await prisma.notificationDelivery.count({ where: { kind: "qa_release_digest_stale" } }), 0);
+  const rows = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_monitor_failed" } });
+  assert.equal(rows.length, 1);
+  const [{ day }] = await prisma.$queryRaw<{ day: string }[]>`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day`;
+  assert.equal(rows[0].referenceId, `monitor-failure:${day}`);
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "qa_release.monitor_failed", targetId: rows[0].id },
+    select: { metadata: true },
+  });
+  assert.equal(audits.length, 2);
+  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.monitor_failed" } }), before + 2);
+  for (const audit of audits) {
+    const metadata = audit.metadata as Record<string, unknown>;
+    assert.equal(metadata.failure, "monitor_deadline_passed");
+    assert.equal(metadata.referenceId, `monitor-failure:${day}`);
+    assert.equal(metadata.systemActor, "qa-release-intake");
+  }
+});
+
+test("the one-statement enqueue inserts once, leaves an existing row as it is, and stamps UTC", async () => {
+  const kind = "qa_release_monitor_failed" as const;
+  const referenceId = "monitor-failure:2000-01-01";
+  await prisma.notificationDelivery.deleteMany({ where: { kind, referenceId } });
+  const first = await prisma.$transaction((tx) => enqueueNotificationDeliveryOnce(tx, { kind, referenceId }));
+  assert.equal(first?.inserted, true);
+  await prisma.notificationDelivery.update({ where: { id: first!.id }, data: { attempts: 3 } });
+  const second = await prisma.$transaction((tx) => enqueueNotificationDeliveryOnce(tx, { kind, referenceId }));
+  assert.deepEqual(second, { id: first!.id, inserted: false });
+  const row = await prisma.notificationDelivery.findUniqueOrThrow({ where: { id: first!.id } });
+  assert.equal(row.attempts, 3);
+  assert.equal(row.status, "pending");
+  // Read back through Prisma (UTC), the stamp is the database clock within seconds.
+  assert.ok(Math.abs(row.createdAt.getTime() - Date.now()) < 60_000, row.createdAt.toISOString());
+  await prisma.notificationDelivery.deleteMany({ where: { kind, referenceId } });
 });
