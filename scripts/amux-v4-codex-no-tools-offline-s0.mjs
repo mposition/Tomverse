@@ -63,6 +63,7 @@ try {
     "model_providers.local_capture.request_max_retries=0",
     "model_providers.local_capture.stream_max_retries=0",
     'model_reasoning_effort="high"',
+    'shell_environment_policy.inherit="none"',
   ];
   const zeroToolArgs = amuxV4CodexNoToolsConfigArgs();
   const catalogOverride = zeroToolArgs.indexOf("-c");
