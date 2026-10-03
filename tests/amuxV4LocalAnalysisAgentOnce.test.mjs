@@ -51,7 +51,9 @@ test("synthetic one-shot polls, claims, passes only typed prompt, submits and st
     });
     assert.deepEqual(result, { kind: "draft_ready" });
     assert.equal(visited.length, 3);
-    assert.equal(visited[1].options.body, JSON.stringify({ previewId }));
+    const claimRequest = JSON.parse(visited[1].options.body);
+    assert.equal(claimRequest.previewId, previewId);
+    assert.match(claimRequest.requestId, /^[a-f0-9-]{36}$/);
     const submitted = JSON.parse(visited[2].options.body);
     assert.equal(submitted.holdId, "hold_1");
     assert.equal(submitted.leaseGeneration, 1);
@@ -156,18 +158,101 @@ test("synthetic one-shot does not execute after disabled or uncertain claim", as
       let calls = 0;
       const result = await runAmuxV4SyntheticAnalysisAgentOnce({
         origin: `${origin}/`, agentSecret: secret,
-        fetchImpl: async () => {
+        fetchImpl: async (url) => {
           calls += 1;
-          return calls === 1 ? response({ candidates: [candidate],
-            hasMore: false, nextCursor: null }) : claimReply;
+          if (url.endsWith("/analysis-queue")) return response({
+            candidates: [candidate], hasMore: false, nextCursor: null });
+          if (url.endsWith("/analysis-claim")) return claimReply;
+          if (url.includes("/analysis-claim?")) return response({ status: "not_found" });
+          throw new Error("unexpected path");
         },
         fakeExecute: async () => { executed += 1; throw new Error("must not execute"); },
       });
-      assert.deepEqual(result, { kind: calls === 2 && claimReply.status === 409
+      assert.deepEqual(result, { kind: claimReply.status === 409
         ? "disabled" : "claim_unknown" });
-      assert.equal(calls, 2);
+      assert.equal(calls, claimReply.status === 409 ? 2 : 3);
     }
     assert.equal(executed, 0);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
+
+test("lost claim reply reads a content-free receipt once, never invokes CLI or reclaims", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  const visited = [];
+  let claimRequestId;
+  let executed = 0;
+  try {
+    const result = await runAmuxV4SyntheticAnalysisAgentOnce({
+      origin: `${origin}/`, agentSecret: secret,
+      fetchImpl: async (url, options) => {
+        visited.push({ url, method: options.method });
+        if (url.endsWith("/analysis-queue")) return response({
+          candidates: [candidate], hasMore: false, nextCursor: null });
+        if (url.endsWith("/analysis-claim")) {
+          claimRequestId = JSON.parse(options.body).requestId;
+          throw new Error("claim response lost after commit");
+        }
+        if (url.includes("/analysis-claim?")) {
+          assert.equal(new URL(url).searchParams.get("requestId"), claimRequestId);
+          return response({ status: "committed", requestId: claimRequestId,
+            previewId, ideaId });
+        }
+        throw new Error("unexpected path");
+      },
+      fakeExecute: async () => { executed += 1; throw new Error("must not execute"); },
+    });
+    assert.deepEqual(result, { kind: "claim_committed_unexecuted" });
+    assert.deepEqual(visited.map(({ method }) => method), ["POST", "POST", "GET"]);
+    assert.equal(executed, 0);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
+
+test("absent, partial or mismatched claim read-back never permits a second claim", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  try {
+    for (const receipt of [
+      { status: "absent" }, { status: "partial" },
+      { status: "committed", ideaId: "wrong_idea" },
+    ]) {
+      let calls = 0;
+      let claimRequestId;
+      const result = await runAmuxV4SyntheticAnalysisAgentOnce({
+        origin: `${origin}/`, agentSecret: secret,
+        fetchImpl: async (url, options) => {
+          calls += 1;
+          if (url.endsWith("/analysis-queue")) return response({
+            candidates: [candidate], hasMore: false, nextCursor: null });
+          if (url.endsWith("/analysis-claim")) {
+            claimRequestId = JSON.parse(options.body).requestId;
+            throw new Error("response lost");
+          }
+          if (url.includes("/analysis-claim?")) return response({
+            requestId: claimRequestId, previewId,
+            ...(receipt.status === "committed" ? { ideaId } : {}),
+            ...receipt,
+          });
+          throw new Error("unexpected path");
+        }, fakeExecute: async () => { throw new Error("must not execute"); },
+      });
+      assert.deepEqual(result, { kind: "claim_unknown" });
+      assert.equal(calls, 3);
+    }
   } finally {
     if (previousEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousEnv;

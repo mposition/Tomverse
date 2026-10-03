@@ -10,6 +10,8 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT,
+  amuxV4AnalysisUtcDayKey } from "./ideaAnalysisInvocationLimitsCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
@@ -25,18 +27,123 @@ export class AmuxIdeaAnalysisClaimError extends Error {
   }
 }
 
-/** First idea-only attempt. This transaction body has no enabled route and
+/** Called by the only production claim entrypoint while holding the audit
+ * chain lock. The DB clock, not the app server clock, selects the UTC day. */
+export async function enforceAmuxV4DailyClaimLimit(
+  tx: Prisma.TransactionClient,
+): Promise<string> {
+  const rows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const dayUtc = amuxV4AnalysisUtcDayKey(rows[0]?.now);
+  if (!dayUtc) throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+  const count = await tx.adminAuditLog.count({ where: {
+    action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+    targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
+    metadata: { path: ["claimDayUtc"], equals: dayUtc },
+  } });
+  if (count >= AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT) {
+    throw new AmuxIdeaAnalysisClaimError("not_ready");
+  }
+  return dayUtc;
+}
+
+/** A content-free, read-only check after a claim response is lost. Even an
+ * absent claim can commit after this read, so no status permits re-POST or
+ * automatic model dispatch. A caller must stop for owner reconciliation. */
+export async function readAmuxIdeaAnalysisClaimReceipt(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; previewId: string },
+): Promise<
+  | { status: "committed"; requestId: string; previewId: string; ideaId: string }
+  | { status: "absent" | "partial"; requestId: string; previewId: string }
+> {
+  if (!input || !ID.test(input.requestId) || !ID.test(input.previewId)) {
+    throw new AmuxIdeaAnalysisClaimError("not_ready");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  const fallback = (status: "absent" | "partial") => ({ status,
+    requestId: input.requestId, previewId: input.previewId });
+  const claims = await tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+    targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
+    OR: [{ targetId: input.previewId },
+      { metadata: { path: ["requestId"], equals: input.requestId } }],
+  }, take: 2 });
+  const preview = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: input.previewId },
+    select: { ideaId: true, chunkIndex: true, attempt: true, state: true,
+      consumedAt: true, payloadDigest: true, modelId: true },
+  });
+  if (!preview) return fallback("partial");
+  const [hold, chunk, idea] = await Promise.all([
+    tx.amuxIdeaAnalysisBudgetHold.findUnique({
+      where: { previewId: input.previewId },
+      select: { id: true, namespace: true, status: true,
+        dispatchedAt: true },
+    }),
+    tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: preview.ideaId,
+        chunkIndex: preview.chunkIndex } },
+      select: { state: true, attempt: true, leaseGeneration: true,
+        currentPreviewId: true },
+    }),
+    tx.amuxIdeaSubmission.findUnique({ where: { id: preview.ideaId },
+      select: { state: true, cancelledAt: true } }),
+  ]);
+  if (!hold || hold.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
+      !chunk || !idea || idea.cancelledAt !== null ||
+      chunk.currentPreviewId !== input.previewId ||
+      chunk.attempt !== preview.attempt) return fallback("partial");
+  if (claims.length === 0) {
+    return preview.state === "confirmed" && preview.consumedAt === null &&
+      hold.status === "reserved" && hold.dispatchedAt === null &&
+      chunk.state === "awaiting_preview" && chunk.leaseGeneration === 0 &&
+      idea.state === (preview.chunkIndex === 0 ? "submitted" : "analyzing")
+      ? fallback("absent") : fallback("partial");
+  }
+  if (claims.length !== 1) return fallback("partial");
+  const claim = claims[0]!;
+  const metadata = claim.metadata;
+  if (!claim.entryHash || auditRowActorKind(claim) !== "system" ||
+      claim.targetId !== input.previewId || !metadata ||
+      typeof metadata !== "object" || Array.isArray(metadata)) {
+    return fallback("partial");
+  }
+  const record = metadata as Record<string, unknown>;
+  if (record.requestId !== input.requestId ||
+      record.previewId !== input.previewId ||
+      record.ideaId !== preview.ideaId ||
+      record.chunkIndex !== preview.chunkIndex ||
+      record.holdId !== hold.id ||
+      record.payloadDigest !== preview.payloadDigest ||
+      record.leaseGeneration !== 1 ||
+      record.modelId !== preview.modelId ||
+      record.modelCallStarted !== false ||
+      preview.state !== "in_flight" || preview.consumedAt === null ||
+      hold.status !== "in_flight" || hold.dispatchedAt === null ||
+      chunk.state !== "in_flight" || chunk.leaseGeneration !== 1 ||
+      idea.state !== "analyzing") return fallback("partial");
+  return { status: "committed", requestId: input.requestId,
+    previewId: input.previewId, ideaId: preview.ideaId };
+}
+
+/** One idea-only attempt. This transaction body has no enabled route and
  * cannot itself launch a CLI. It consumes one owner confirmation and one
  * already-reserved Agent budget hold, then gives the local supervisor only
  * the exact verified prompt. A lost claim response is outcome-unknown: the
  * caller must read back by previewId and must not claim again. */
 export async function commitAmuxIdeaOnlyAnalysisClaim(
   tx: Prisma.TransactionClient,
-  input: { previewId: string; keys: AmuxContentKeys },
+  input: { requestId: string; previewId: string; keys: AmuxContentKeys;
+    expectedClaimDayUtc?: string },
 ): Promise<{ previewId: string; ideaId: string; holdId: string;
   leaseGeneration: 1; provider: "openai" | "anthropic"; modelId: string;
   reasoningEffort: string; prompt: string; auditId: string }> {
-  if (!input || !ID.test(input.previewId)) {
+  if (!input || !ID.test(input.requestId) || !ID.test(input.previewId)) {
     throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   await tx.$queryRaw`
@@ -44,6 +151,17 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
+  // The request ID is chosen before the POST. It is bound to the claim audit
+  // so a lost HTTP response can be read without consuming the preview twice.
+  const priorClaims = await tx.adminAuditLog.findMany({ where: {
+    action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+    targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
+    OR: [{ targetId: input.previewId },
+      { metadata: { path: ["requestId"], equals: input.requestId } }],
+  }, take: 2, select: { id: true } });
+  if (priorClaims.length !== 0) {
+    throw new AmuxIdeaAnalysisClaimError("not_ready");
+  }
   const identity = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: input.previewId },
     select: { ideaId: true, chunkIndex: true },
@@ -83,6 +201,11 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
   if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
       !idea || !chunk || !preview || !hold) {
     throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+  }
+  const claimDayUtc = amuxV4AnalysisUtcDayKey(now);
+  if (!claimDayUtc || (input.expectedClaimDayUtc &&
+      input.expectedClaimDayUtc !== claimDayUtc)) {
+    throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   if (idea.state !== "submitted" || idea.cancelledAt !== null ||
       idea.analysisCompletedAt !== null || now >= idea.analysisDeadlineAt ||
@@ -263,7 +386,9 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
       action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
       targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET, targetId: preview.id,
       summary: "Consumed one exact owner-confirmed AMUX v4 analysis preview for a fenced local attempt.",
-      metadata: { ideaId: idea.id, chunkIndex: 0, previewId: preview.id,
+      metadata: { requestId: input.requestId, claimDayUtc,
+        ideaId: idea.id, chunkIndex: 0,
+        previewId: preview.id,
         holdId: hold.id, payloadDigest: preview.payloadDigest,
         sourcePlanRevisionId: plan.id, leaseGeneration: 1,
         modelId: preview.modelId, modelCallStarted: false },

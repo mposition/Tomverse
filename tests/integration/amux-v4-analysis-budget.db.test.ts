@@ -604,7 +604,7 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
     { holdId, previewId, priceVersionId, runner, keys }));
   const claim = await prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys }));
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys }));
   assert.equal(claim.holdId, holdId);
   assert.equal(claim.modelId, selectedModelId);
   assert.equal(claim.leaseGeneration, 1);
@@ -623,7 +623,7 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
     "in_flight", "in_flight"]);
   assert.equal((audit.metadata as Record<string, unknown>).modelCallStarted, false);
   await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys })),
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   // Fake local result: no provider CLI or external request occurs in this test.
@@ -690,7 +690,7 @@ async function syntheticFirstClaim() {
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
     { holdId, previewId, priceVersionId, runner, keys }));
   const claim = await prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys }));
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys }));
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
 
@@ -706,7 +706,7 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
     { holdId: randomUUID(), previewId: nextPreviewId,
       priceVersionId: hold.priceVersionId!, runner, keys }));
   await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys })),
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
@@ -725,7 +725,7 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
   assert.equal(settled.state, "draft_ready");
   await assert.rejects(prisma.$transaction(async (tx) => {
     const second = await commitAmuxIdeaOnlyAnalysisClaim(tx,
-      { previewId: nextPreviewId, keys });
+      { requestId: randomUUID(), previewId: nextPreviewId, keys });
     assert.equal(second.previewId, nextPreviewId);
     throw new Error("rollback synthetic second claim");
   }), /rollback synthetic second claim/);
