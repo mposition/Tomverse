@@ -53,6 +53,135 @@ export const CACHE_FAMILIES = [
  */
 export const WIDELY_READABLE_BRANCHES = ["main", "develop"];
 
+/**
+ * The four values GitHub accepts for `cache-mode`, and which of them can write.
+ *
+ * `cache-mode` is the only thing that takes a job's cache *write* capability
+ * away: GitHub enforces it with a scoped cache token, and the runner publishes
+ * the result as ACTIONS_CACHE_MODE. Choosing `actions/cache/restore` over the
+ * combined action is a statement about one declared step, not about the token,
+ * so a job that restores through a narrow action still holds a key with which
+ * anything running in it -- a dependency's install script, a crate build
+ * script, a `uses:` action -- can call the cache API directly and write any key
+ * it likes. The key namespaces this file governs are not a permission
+ * boundary; they only say which entry a *declared* step reaches.
+ *
+ * Omitting the key is not neutral: a trusted trigger (push, schedule,
+ * workflow_dispatch and the rest) defaults to `write`.
+ *
+ * Reference: https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching
+ */
+export const CACHE_MODES = ["read", "write", "write-only", "none"];
+export const NON_WRITE_CACHE_MODES = ["read", "none"];
+
+/** Each capability as a verb, so a finding names exactly what it found. */
+const CAPABILITY_WORDS = { restore: "restoring", save: "saving" };
+const capabilityWords = (capabilities) => capabilities.map((name) => CAPABILITY_WORDS[name]).join(" and ");
+
+/**
+ * What each mode lets a job do, so "narrower" can be asked as a question.
+ *
+ * `read` and `write-only` grant different, non-overlapping things, which is why
+ * the comparison is a subset test rather than a position on a scale -- GitHub's
+ * own documentation makes the same point about a reusable workflow's caller.
+ */
+const CACHE_MODE_CAPABILITIES = {
+  none: [],
+  read: ["restore"],
+  "write-only": ["save"],
+  write: ["restore", "save"],
+};
+
+/** Where `cache-mode` is declared in a workflow, exactly as written. */
+export const readCacheMode = (document) => {
+  if (!isObj(document)) return { workflow: undefined, jobs: [] };
+  const jobs = isObj(document.jobs) ? Object.entries(document.jobs) : [];
+  return {
+    workflow: document["cache-mode"],
+    jobs: jobs
+      .filter(([, job]) => isObj(job) && job["cache-mode"] !== undefined)
+      .map(([jobId, job]) => [jobId, job["cache-mode"]]),
+  };
+};
+
+/**
+ * Why a workflow's `cache-mode` does not keep its cache token read-only.
+ *
+ * Only asked of a workflow that reaches a widely readable scope. A workflow
+ * that can run only from a pull request is left alone: its writes land in
+ * `refs/pull/<n>/merge`, which no other ref can restore, and requiring `read`
+ * there would stop the entry its own later runs restore.
+ *
+ * The declaration is required at the *workflow* level rather than on each job,
+ * because a job added later inherits the workflow value and a job-level
+ * omission then cannot re-open writing by accident. A job may narrow it
+ * further; it may not widen it, and `write-only` is a widening even though it
+ * cannot restore.
+ */
+export const cacheModeFailures = (document) => {
+  const declared = readCacheMode(document);
+  const failures = [];
+  const classify = (value) => {
+    if (typeof value !== "string" || !CACHE_MODES.includes(value)) return "unknown";
+    return NON_WRITE_CACHE_MODES.includes(value) ? "non_write" : "write_capable";
+  };
+
+  const workflowKind = declared.workflow === undefined ? "missing" : classify(declared.workflow);
+  if (workflowKind !== "non_write") {
+    failures.push({
+      rule: "cache_mode_write_capable_in_widely_readable_scope",
+      jobId: null,
+      detail:
+        workflowKind === "missing"
+          ? "no workflow-level cache-mode, so a trusted trigger gets write by default"
+          : `workflow-level cache-mode is ${JSON.stringify(declared.workflow)}`,
+    });
+  }
+  // Being non-write is not the same as being narrower. `read` under a workflow
+  // set to `none` turns restoring back on, which is an override rather than a
+  // narrowing -- the only narrowing between two non-write modes is `none` under
+  // `read`. So every valid value goes through the same subset test, and each
+  // finding names the capabilities *this* pair would add and no others: two
+  // rounds of independent review were spent on a detail and a message that
+  // described a different case than the one they were printed for.
+  for (const [jobId, value] of declared.jobs) {
+    if (classify(value) === "unknown") {
+      failures.push({
+        rule: "cache_mode_unreadable_on_job",
+        jobId,
+        detail: `cache-mode is ${JSON.stringify(value)}`,
+      });
+      continue;
+    }
+    if (workflowKind !== "non_write") {
+      // Nothing to subtract from: the workflow-level failure above already
+      // names that, and a job value can only be reported on its own terms.
+      if (classify(value) === "write_capable") {
+        failures.push({
+          rule: "cache_mode_widened_by_job",
+          jobId,
+          detail: `cache-mode is ${JSON.stringify(value)}, which grants ${capabilityWords(
+            CACHE_MODE_CAPABILITIES[value],
+          )}`,
+        });
+      }
+      continue;
+    }
+    const allowed = CACHE_MODE_CAPABILITIES[declared.workflow];
+    const widened = CACHE_MODE_CAPABILITIES[value].filter((capability) => !allowed.includes(capability));
+    if (widened.length > 0) {
+      failures.push({
+        rule: "cache_mode_widened_by_job",
+        jobId,
+        detail: `cache-mode is ${JSON.stringify(value)} under a workflow set to ${JSON.stringify(
+          declared.workflow,
+        )}, which grants ${capabilityWords(widened)}`,
+      });
+    }
+  }
+  return failures;
+};
+
 const isObj = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** `actions/cache`, and its `restore`/`save` split, whatever the version. */
@@ -384,10 +513,16 @@ export const readCacheSteps = (text) => {
       });
     }
   }
+  const widelyReadable = reachesWidelyReadableScope(document);
   return {
     steps,
-    widelyReadable: reachesWidelyReadableScope(document),
+    widelyReadable,
     narrowPullRequestTrigger: hasOnlyNarrowPullRequestTrigger(document),
+    // Asked of every workflow that reaches a shared scope, whether or not it
+    // declares a cache step: the token is write-capable either way, and a
+    // workflow that caches nothing today is exactly where an added step, or an
+    // action that caches on its own, would start writing unnoticed.
+    cacheModeFailures: widelyReadable ? cacheModeFailures(document) : [],
   };
 };
 
@@ -497,6 +632,9 @@ export const judgeCacheKeys = (sources) => {
     if (read.problem) {
       problems.push({ workflowPath: source.path, problem: read.problem });
       continue;
+    }
+    for (const failure of read.cacheModeFailures) {
+      findings.push({ ...failure, workflowPath: source.path });
     }
     for (const step of read.steps) {
       // The family a listed path must declare. An unlisted path declares its own
@@ -677,6 +815,12 @@ export const describeFinding = (finding) => {
       return `${where}: ${finding.detail}. A restore-key stopping at the shorter namespace prefixes the longer one's keys. Rename so neither is a prefix of the other.`;
     case "key_shared_across_workflows":
       return `${where}: these workflows declare the same cache key "${finding.detail}", so they share one entry. Give each its own namespace segment.`;
+    case "cache_mode_write_capable_in_widely_readable_scope":
+      return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")} and ${finding.detail}. Restore-only steps do not take that away: the job's token can still write any key through the cache API, so anything executing in the job can plant an entry a required gate restores. Declare cache-mode: ${NON_WRITE_CACHE_MODES.join(" or ")} at the workflow level.`;
+    case "cache_mode_widened_by_job":
+      return `${where}: ${finding.detail}. A job-level value replaces the workflow's rather than combining with it, so it may only take capability away -- what it grants has to be a subset of what the workflow granted. The detail above names what this one adds and nothing else. A job that needs no narrower mode is left without one, and inherits.`;
+    case "cache_mode_unreadable_on_job":
+      return `${where}: ${finding.detail}, which is not one of GitHub's four values (${CACHE_MODES.join(", ")}). It is refused because nothing can say what it grants, rather than for what it grants; an expression counts here, since the documented key takes a literal.`;
     case "unguarded_save_in_widely_readable_scope":
       return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")}, where a written entry is restorable by every run that can see that scope — ${finding.detail}. Use actions/cache/restore, and if a save is needed give it an if: on github.event_name or github.ref.`;
     default:

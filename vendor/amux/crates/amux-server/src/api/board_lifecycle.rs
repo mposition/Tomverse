@@ -929,8 +929,16 @@ mod tests {
         let store=Arc::new(crate::db::Store::open(&temp.path().join("invalid.db")).unwrap());
         store.write_async(|c|{receipt(c,1,"Produce the fixture reports and check them");Ok(WriteOutcome{applied:true,events:vec![]})}).await.unwrap();
         let state=AppState{store,started:std::time::Instant::now(),build_hash:"test".into(),auth_token:None,reconciled:Arc::new(std::sync::atomic::AtomicBool::new(true))};
+        let before = chrono::Utc::now().timestamp();
         assert!(capture_inner(&state,1,"fixture",Arc::new(Invalid)).await.is_err());
+        let after = chrono::Utc::now().timestamp();
         let c=state.store.read().unwrap();
+        let (called_at, retry_at): (i64, i64) = c.query_row(
+            "SELECT intake_called_at, intake_retry_at FROM cmd_history WHERE id=1", [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert!((before..=after).contains(&called_at), "intake call must use epoch seconds");
+        assert_eq!(retry_at - called_at, 300, "retry deadline must remain five minutes later");
         let raw:String=c.query_row("SELECT intake_result FROM cmd_history WHERE id=1",[],|r|r.get(0)).unwrap();
         let saved:Value=serde_json::from_str(&raw).unwrap();
         assert_eq!(saved["response"],"not JSON");

@@ -81,6 +81,19 @@ export type CredentialAnalysis =
       voidExclusions: HumanExclusion[];
       /** Every job judged to hold a writable credential, for the record of what was analysed. */
       credentialedJobs: Array<{ workflowPath: string; jobId: string }>;
+      /**
+       * Every workflow an event the agent raises reaches, directly or through a
+       * `workflow_run` chain, sorted.
+       *
+       * The cache rule above deliberately ignores this: a credentialed job that
+       * restores a cache forbids every change wherever it lives (policy §5).
+       * This set answers the narrower question policy §5's isolation record
+       * needs instead -- which of those jobs can run on the agent's own pull
+       * request -- and is reported rather than recomputed so there is one
+       * reachability judgement rather than two
+       * (.github/audits/actions-cache-poisoning-audit-2026-10-03.md P3 and P7).
+       */
+      reachedWorkflows: string[];
     };
 
 /* ------------------------------------------------------------------------- */
@@ -771,7 +784,15 @@ export const analyseCredentialReachability = (input: {
     }
   }
 
-  return { status: "analysed", forbidsAll, reasons, pathRules, voidExclusions, credentialedJobs };
+  return {
+    status: "analysed",
+    forbidsAll,
+    reasons,
+    pathRules,
+    voidExclusions,
+    credentialedJobs,
+    reachedWorkflows: [...reached].sort(),
+  };
 };
 
 /**

@@ -6,7 +6,10 @@ import {
   expansionRefusal,
   hasAudience,
   nextBatchPlan,
+  NOTICE_SENT_IN_FLIGHT_DAYS,
+  policyChangeNoticePairingProblem,
   readExpansionSpec,
+  readIsoDay,
 } from "../lib/emailAudienceExpansionCore.ts";
 
 // The decisions a fan-out makes (EM-01).
@@ -240,4 +243,72 @@ test("model ids are trimmed, because a stray space is a model that does not exis
     }).cohort,
     cohortSpec
   );
+});
+
+// The amendment notice cohort (S10).
+
+test("a notice cohort is read only with a real calendar day", () => {
+  assert.deepEqual(
+    readExpansionSpec({
+      cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-16" },
+    }).cohort,
+    { kind: "policy_change_notice", effectiveDate: "2026-11-16" }
+  );
+  for (const effectiveDate of ["2026-02-30", "2026-11-16T00:00:00Z", " 2026-11-16", 20261116, null]) {
+    assert.equal(
+      readExpansionSpec({ cohort: { kind: "policy_change_notice", effectiveDate } }).cohort,
+      undefined,
+      String(effectiveDate)
+    );
+  }
+  assert.equal(readIsoDay("2028-02-29"), "2028-02-29");
+  assert.equal(readIsoDay("2027-02-29"), null);
+});
+
+test("a sent notice with no delivery report is on its way for a few days, not for ever", () => {
+  // Without a bound, a report that never comes would leave the account out of
+  // every later wave while the gate counts it untold.
+  assert.ok(NOTICE_SENT_IN_FLIGHT_DAYS > 0 && NOTICE_SENT_IN_FLIGHT_DAYS <= 7);
+});
+
+const pairing = (templateKey, audienceSpec, noticeEffectiveDate = "2026-11-16") =>
+  policyChangeNoticePairingProblem({
+    templateKey,
+    noticeTemplateKey: "policy_change_notice",
+    noticeEffectiveDate,
+    spec: readExpansionSpec(audienceSpec),
+  });
+const noticeCohort = { cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-16" } };
+
+test("the notice and its cohort go out together and only together", () => {
+  assert.equal(pairing("policy_change_notice", noticeCohort), null);
+  // The cohort reaches people who turned email off; it may not carry anything else.
+  assert.match(pairing("product_announcement", noticeCohort), /carries only policy_change_notice/);
+  // The notice to a consent cohort or a hand-picked list would leave owed accounts out.
+  assert.match(
+    pairing("policy_change_notice", { cohort: { kind: "marketing_consent", purpose: "product_updates" } }),
+    /its own cohort/
+  );
+  assert.match(pairing("policy_change_notice", { userIds: ["u1"] }), /its own cohort/);
+  assert.match(pairing("policy_change_notice", { ...noticeCohort, userIds: ["u1"] }), /its own cohort/);
+  // An unreadable cohort is no cohort.
+  assert.match(
+    pairing("policy_change_notice", { cohort: { kind: "policy_change_notice", effectiveDate: "soon" } }),
+    /its own cohort/
+  );
+  // Other templates and cohorts are untouched.
+  assert.equal(
+    pairing("product_announcement", { cohort: { kind: "marketing_consent", purpose: "product_updates" } }),
+    null
+  );
+});
+
+test("the notice cohort must name the date the notice announces", () => {
+  assert.match(
+    pairing("policy_change_notice", {
+      cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-15" },
+    }),
+    /announces 2026-11-16; this campaign names 2026-11-15/
+  );
+  assert.match(pairing("policy_change_notice", noticeCohort, null), /no effective date/);
 });

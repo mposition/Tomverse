@@ -238,6 +238,14 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
     },
   },
+  "agent-digests": {
+    label: "Agent digest",
+    description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
+    aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision"],
+    tabs: {
+      "qa-release": { label: "QA·릴리스", description: "일일 릴리스 준비 digest와 운영자 제어 revision" },
+    },
+  },
   "email-campaigns": {
     label: "이메일 캠페인",
     description: "캠페인 초안, 각 캠페인이 기다리는 것, 발송 예정 wave",

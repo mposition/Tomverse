@@ -1,4 +1,11 @@
 name: Admin Console E2E
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # The admin suite (`npm run test:e2e:admin`) runs the real Admin Console
 # against a real NextAuth session and a real PostgreSQL database. It is the
@@ -154,13 +161,13 @@ jobs:
 
       - name: Restore Next.js build cache
         continue-on-error: true
-        # Restore always, save only on a pull-request run. This workflow can also
-        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
-        # release branch -- and an entry written in the default-branch or develop
-        # scope is restorable by every run that can see it, the required gate
-        # included. A pull-request run writes to its own merge ref, which only that
-        # pull request can restore, so it keeps the cache warm without widening
-        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        # Restore only. Nothing can write this entry any more: this workflow can
+        # run on develop or main, so its cache-mode is read and GitHub refuses the
+        # write at the token (measured -- "cache write denied: token has no
+        # writable scopes"). The save step that used to sit after this one spent
+        # the compression time and then warned, every run, so it is gone. The
+        # reader half stays because every way of warming this again needs it:
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
         uses: actions/cache/restore@v5
         with:
           path: .next/cache
@@ -183,24 +190,15 @@ jobs:
         timeout-minutes: 15
         run: npm run build
 
-      - name: Save the Next.js build cache
-        # Only the pull-request scope. See the restore step above.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-next-v2-admin-e2e-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
-
       - name: Restore Playwright Chromium cache
         continue-on-error: true
-        # Restore always, save only on a pull-request run. This workflow can also
-        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
-        # release branch -- and an entry written in the default-branch or develop
-        # scope is restorable by every run that can see it, the required gate
-        # included. A pull-request run writes to its own merge ref, which only that
-        # pull request can restore, so it keeps the cache warm without widening
-        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        # Restore only. Nothing can write this entry any more: this workflow can
+        # run on develop or main, so its cache-mode is read and GitHub refuses the
+        # write at the token (measured -- "cache write denied: token has no
+        # writable scopes"). The save step that used to sit after this one spent
+        # the compression time and then warned, every run, so it is gone. The
+        # reader half stays because every way of warming this again needs it:
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
@@ -218,14 +216,6 @@ jobs:
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
 
-      - name: Save the Playwright Chromium cache
-        # Only the pull-request scope. See the restore step above.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-v2-admin-e2e-${{ hashFiles('package-lock.json') }}-chromium
 
       # `scripts/run-admin-e2e.mjs` validates the database URL and pushes the
       # Prisma schema before Playwright boots the server. The build above is

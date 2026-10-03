@@ -217,14 +217,17 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
      cache 복원 job이 없다"를 따로 확인해야 하고, 그 확인은 workflow의 trigger만이
      아니라 **job의 조건식까지** 읽어야 성립한다 — trigger만 보고 판정하면 틀린다.
 
-     **이 조건을 유지하는 장치는 아직 없다.** §5.1의 검사는 자격증명 job의
+     **이 조건을 유지하는 장치는 `npm run check:agent-pr-cache-isolation`이다**
+     (§5.2). §5.1의 검사는 이 조건을 유지하지 못한다 — 그것은 자격증명 job의
      `unverified`·`unreadable` 복원만 거절하고 `verified_package_manager` 복원은
      허용하므로, 에이전트 PR에서 자격증명 job이 npm cache를 복원하는 상태를 막지
      못한다. 그 상태는 이 조건을 깨뜨린다 — 에이전트는 자기 PR에서
      `package-lock.json`을 바꿀 수 있고, 그러면 lockfile integrity 대조는
-     에이전트가 넣은 값과 맞아떨어진다. 그러므로 **그 장치가 생기기 전에는 이
-     기록을 쓸 수 없다.** 초안은 §5.1의 검사가 이 조건을 책임진다고 적었고, 그것은
-     거짓이었다(독립 검토 지적).
+     에이전트가 넣은 값과 맞아떨어진다. 초안은 §5.1의 검사가 이 조건을 책임진다고
+     적었고, 그것은 거짓이었다(독립 검토 지적).
+
+     **그 검사가 실패하는 동안에는 이 기록을 쓸 수 없다.** 검사가 통과한다는 것은
+     이 조건이 오늘 참이라는 뜻이고, 기록이 근거로 쓸 수 있는 것은 그것뿐이다.
 - **결과**: 자격증명을 가진 job이 있는 도달 workflow마다 그 workflow의 path filter에
   걸리는 파일이 push 금지다. filter가 없거나 해석되지 않으면 모든 변경이 금지다.
 - **사람이 검토한 제외**: 결과를 좁히는 유일한 방법은 `{workflow 경로, job id, blob
@@ -260,11 +263,40 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   복원하는 것은 통과시킨다. 3번이 요구하는 것은 **에이전트 PR에서 도는 자격증명
   cache 복원 job이 하나도 없다**는 더 강한 조건이므로, 이 검사를 그 근거로 쓰면
   안 된다. 3번을 위한 장치는 "에이전트가 일으키는 이벤트에 걸리는 workflow의
-  자격증명 job은 **어떤** cache도 복원하지 않는다"를 묻는 별개 검사이고, 아직
-  없다. 그것이 생길 때까지 기록은 쓸 수 없다.
+  자격증명 job은 **어떤** cache도 복원하지 않는다"를 묻는 별개 검사이고, 그것이
+  §5.2다.
 - 검사와 보고는 **이름을 출력하지 않는다**. 저장소가 공개이므로 §16이 미해소 대상의
   목록을 여기에 두지 못하게 한다. 수치만 남기고, 목록은 운영자가 로컬에서
   `npm run report:engineering-agent-tiers`로 본다.
+
+### 5.2 에이전트 PR의 cache 격리를 유지하는 검사
+
+`npm run check:agent-pr-cache-isolation`이 §5 기록 3번의 조건을 유지한다.
+**에이전트가 일으키는 이벤트에 걸리는 workflow의 자격증명 job은 어떤 cache도
+복원하지 않는다** — `verified_package_manager`도 포함한다. PR Fast Gate의 static
+단계에서 돈다.
+
+- **§5.1의 검사와 묻는 것이 다르다.** §5.1은 모든 workflow를 보면서 종류 둘만
+  거절하고, 이 검사는 도달하는 workflow만 보면서 종류 전부를 거절한다. 어느
+  쪽도 다른 쪽을 포함하지 않으므로 둘 다 필요하다.
+- **lockfile 대조는 이 주체에 대한 방어가 아니다.** 에이전트는 자기 PR에서
+  `package-lock.json`을 바꿀 수 있고, 그러면 `npm ci`의 integrity 대조는
+  에이전트가 넣은 값과 맞아떨어진다. 그래서 여기서는 package manager 자신의
+  cache도 거절한다.
+- **판정은 `lib/agentCredentialReachability.ts`가 한다.** 도달 여부·자격증명
+  여부·cache 종류를 다시 계산하지 않고 그 모듈이 보고한 `reachedWorkflows`와
+  cache 이유를 교차한다. 판정기를 둘로 만들면 숫자가 어긋난다(감사 P3).
+- **분석기는 여전히 job의 조건식을 해석하지 않는다.** §5의 "사람이 검토한 제외"
+  규칙은 그대로이고, 이 검사는 제외 목록을 하나도 쓰지 않는다. 조건식으로
+  통과하는 길을 만들지 않은 이유는 F5가 두 번 틀린 지점이 바로 trigger만 읽고
+  조건식을 읽지 않은 것이기 때문이다. **그래서 조건이 면제가 아니라 사실로
+  유지된다** — 2026-10-03에 도달 workflow 안에서 npm cache를 복원하던 자격증명
+  job 하나는 조건식으로 제외하지 않고 그 job에서 cache를 뗐다(소유자 결정).
+- **검사는 기록을 읽지 않는다.** 분석을 `cacheIsolationRecorded: false`로 받는다.
+  `true`로 받으면 분석기가 cache 이유를 보고하지 않으므로, 기록을 쓰는 순간 그
+  기록을 참으로 유지하는 장치가 꺼진다. `tests/agentPrCacheIsolation.test.mjs`가
+  이것을 고정한다.
+- 이 검사도 **이름을 출력하지 않는다**(§16). 수치만 남긴다.
 
 ## 6. 신뢰 경계와 외부 텍스트
 

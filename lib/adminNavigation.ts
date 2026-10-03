@@ -608,6 +608,22 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "agent-digests",
+    label: "Agent digests",
+    href: "/admin/agent-digests",
+    description: "What each agent reported each day, and the operator control it runs under",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision"],
+    tabs: [
+      {
+        id: "qa-release",
+        label: "QA and release",
+        description: "The daily release-readiness digest and the operator control revision",
+      },
+    ],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",
