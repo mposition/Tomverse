@@ -15,6 +15,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ESLint } from "eslint";
 
+import {
+  COMPILER_SPECIFIER,
+  missingCompilerProblem,
+  resolveCompiler,
+} from "../scripts/check-shared-packages-core.mjs";
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packagesDir = join(root, "packages");
 const RULE = "no-restricted-imports";
@@ -250,6 +256,41 @@ for (const name of packageNames) {
     assert.equal(parsed.compilerOptions.paths, undefined);
   });
 }
+
+test("an unresolvable compiler is reported as the check not running", () => {
+    // The branch the runner cannot be made to take: relocating it to a tree
+    // without `typescript` also loses `eslint`, which it imports at load. So
+    // the decision lives in the core and the stub is the only way in.
+    const asking = [];
+    const resolved = resolveCompiler((specifier) => {
+        asking.push(specifier);
+        throw Object.assign(new Error("not found"), { code: "MODULE_NOT_FOUND" });
+    });
+
+    assert.equal(resolved, null, "a resolver that throws is an answer, not a crash");
+    assert.deepEqual(asking, [COMPILER_SPECIFIER], "it asks by specifier, never by path");
+
+    const problem = missingCompilerProblem(2);
+    assert.match(problem, /npm ci/, "it names the remedy");
+    assert.match(problem, /\b2 package\(s\)/, "it says how many went unchecked");
+    assert.match(
+        problem,
+        /not a boundary failure/,
+        "the whole point: a missing compiler is not the packages failing to type-check"
+    );
+    assert.doesNotMatch(
+        problem,
+        /does not type-check/,
+        "that phrase is the conclusion this message exists to avoid"
+    );
+});
+
+test("a resolvable compiler is passed through unchanged", () => {
+    assert.equal(
+        resolveCompiler(() => "/somewhere/typescript/bin/tsc"),
+        "/somewhere/typescript/bin/tsc"
+    );
+});
 
 test("the checker finds the compiler the way Node finds anything else", () => {
     // The standalone type-check is only evidence if the compiler was actually
