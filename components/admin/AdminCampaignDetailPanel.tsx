@@ -917,14 +917,18 @@ export function AdminCampaignDetailPanel({
                     {wave.kind}
                     {wave.sequence > 1 ? ` #${wave.sequence}` : ""}
                   </p>
-                  <p className="text-xs text-zinc-500">
-                    {m.audience.considered(wave.total)}
-                  </p>
+                  {wave.keepsLedger ? (
+                    <p className="text-xs text-zinc-500">
+                      {m.audience.considered(wave.total)}
+                    </p>
+                  ) : null}
                 </div>
 
                 {!wave.keepsLedger ? (
                   <p className="mt-2 text-sm text-zinc-400">
-                    {m.audience.noLedger(wave.deliveries)}
+                    {wave.dryRun
+                      ? m.audience.noLedgerDryRun(wave.deliveries)
+                      : m.audience.noLedger(wave.deliveries)}
                   </p>
                 ) : wave.total === 0 ? (
                   <p className="mt-2 text-sm text-zinc-400">

@@ -80,7 +80,15 @@ export function AdminPolicyNoticeComposer({
                 cohort: { kind: "policy_change_notice", effectiveDate },
               },
               triggerMode: "manual",
-              waves: [{ kind: "launch", sequence: 1 }],
+              // Two follow-ups beside the launch, all started by hand. The
+              // campaign page runs only waves the draft created, and each wave
+              // asks the cohort again: a follow-up reaches accounts created
+              // since and notices that did not arrive.
+              waves: [
+                { kind: "launch", sequence: 1 },
+                { kind: "reminder", sequence: 1 },
+                { kind: "reminder", sequence: 2 },
+              ],
             }),
       }),
     });

@@ -20,6 +20,7 @@ import {
   type CampaignEmailPreview,
 } from "@/lib/emailCampaignContent";
 import {
+  CampaignContentError,
   deliveryContentForLanguage,
   localizedCampaignEventPayload,
   type CampaignContentByLocale,
@@ -168,7 +169,8 @@ export const createCampaignDraft = async (input: CampaignDraft) => {
     noticeEffectiveDate: POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
     spec: expansion,
   });
-  if (pairing) throw new Error(pairing);
+  // A content error so the route answers 400 with the reason, not a bare 500.
+  if (pairing) throw new CampaignContentError(pairing);
   if (
     expansion.cohort?.kind === "marketing_consent" &&
     definition.purpose !== expansion.cohort.purpose
@@ -1096,11 +1098,16 @@ export const estimateCampaignAudience = async (input: {
       ],
     };
     const audience = policyChangeNoticeAudienceWhere(effectiveDate, input.now ?? new Date());
-    const [owed, pending, withEmail] = await Promise.all([
-      prisma.user.count({ where: owedWhere }),
-      prisma.user.count({ where: audience }),
-      prisma.user.count({ where: { AND: [audience, { email: { not: null } }] } }),
-    ]);
+    // One snapshot, so the two differences below cannot go negative when an
+    // account or a notice row lands between the counts.
+    const [owed, pending, withEmail] = await prisma.$transaction(
+      [
+        prisma.user.count({ where: owedWhere }),
+        prisma.user.count({ where: audience }),
+        prisma.user.count({ where: { AND: [audience, { email: { not: null } }] } }),
+      ],
+      { isolationLevel: "RepeatableRead" }
+    );
     const summary: PolicyChangeNoticeAudienceSummary = {
       kind: "policy_change_notice",
       effectiveDate,
