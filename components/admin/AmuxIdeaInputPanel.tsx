@@ -107,6 +107,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [recentError, setRecentError] = useState(false);
   const recentRequestGeneration = useRef(0);
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
+  const [continuationSelection, setContinuationSelection] = useState<{
+    ideaId: string; chunkIndex: number; pinnedTargetRefs: string[] } | null>(null);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
     setPlanReadyIdeaId(committedIdeaId);
   }, []);
@@ -635,10 +637,15 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         operatorId={operatorId}
+        continuationSelection={continuationSelection?.ideaId ===
+          (submission.kind === "submitted" ? submission.ideaId : null) ?
+          continuationSelection : null}
         onCheckedCollectionModel={setCheckedCollectionModel}
       />
       {analysisResultAvailable && submission.kind === "submitted" ?
-        <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId} /> : null}
+        <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId}
+          onContinuationSelection={(value) => setContinuationSelection(value ? {
+            ...value, ideaId: submission.ideaId } : null)} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>

@@ -88,7 +88,8 @@ async function loadSource(tx: Prisma.TransactionClient, session: Session,
     where: { id: draftUnitId }, select: { chunkIndex: true },
   });
   const chunkIndex = target?.chunkIndex;
-  if (chunkIndex !== 0 && chunkIndex !== 1) {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex === undefined ||
+      chunkIndex < 0 || chunkIndex >= 2_147_483_647) {
     throw new AmuxUnitRejectError("not_ready");
   }
   const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
@@ -179,14 +180,18 @@ async function loadSource(tx: Prisma.TransactionClient, session: Session,
       previewMeta.payloadDigestKeyId !== preview.payloadDigestKeyId) {
     throw new AmuxUnitRejectError("integrity_unavailable");
   }
-  if (chunkIndex === 1) {
+  if (chunkIndex >= 1) {
+    const startChunkIndex = chunkIndex < 16
+      ? 0 : Math.floor(chunkIndex / 16) * 16;
     const result = await readAmuxIdeaAnalysisResultInTransaction(
-      tx, session, ideaId, keys);
-    if (result.state !== "continued_ready" ||
-        result.pages[1]?.previewId !== preview.id) {
+      tx, session, ideaId, keys, startChunkIndex);
+    if (result.state !== "continued_ready" &&
+        (result.state !== "continued_window" || !result.complete)) {
       throw new AmuxUnitRejectError("not_ready");
     }
-    const visible = result.pages[1].units.find((entry) => entry.id === unit.id);
+    const page = result.pages.find((entry) => entry.chunkIndex === chunkIndex);
+    if (page?.previewId !== preview.id) throw new AmuxUnitRejectError("not_ready");
+    const visible = page.units.find((entry) => entry.id === unit.id);
     if (!visible?.proposal || visible.decisionState !== "proposed" ||
         visible.bodyDigest !== unit.bodyDigest ||
         visible.bodyDigestKeyId !== unit.bodyDigestKeyId ||

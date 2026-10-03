@@ -53,12 +53,19 @@ export async function GET(request: Request): Promise<Response> {
     });
     const params = new URL(request.url).searchParams;
     const ideaId = params.get("ideaId");
-    if (params.size !== 1 || !ideaId || !isAmuxIdeaRequestId(ideaId)) {
+    const cursor = params.get("startChunkIndex");
+    const startChunkIndex = cursor === null ? 0 : Number(cursor);
+    if ((params.size !== 1 && params.size !== 2) ||
+        (params.size === 2 && cursor === null) ||
+        !ideaId || !isAmuxIdeaRequestId(ideaId) ||
+        (cursor !== null && (!/^(0|[1-9][0-9]*)$/.test(cursor) ||
+          !Number.isSafeInteger(startChunkIndex) ||
+          startChunkIndex >= 2_147_483_647))) {
       return NextResponse.json({ error: "schema_rejected" },
         { status: 400, headers: noStore });
     }
     const result = await readAmuxIdeaAnalysisResult(session, ideaId,
-      loadCurrentAmuxContentKeys(process.env));
+      loadCurrentAmuxContentKeys(process.env), startChunkIndex);
     return NextResponse.json(result, { headers: noStore });
   } catch (error) {
     if (error instanceof AmuxIdeaAnalysisResultReadError) {

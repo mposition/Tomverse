@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { amuxAnalysisTextSafe, inspectAmuxAnalysisChunk,
   inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import { readVerifiedAmuxOwnerInputHold } from "./ideaAnalysisOwnerInputReadService.ts";
 import { matchesAmuxIdeaAnalysisCursorAudit,
   matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
@@ -20,7 +21,8 @@ import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
 export class AmuxIdeaAnalysisResultReadError extends Error {
-  constructor(readonly code: "not_found" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "integrity_unavailable" |
+    "reference_selection_required") {
     super(code);
     this.name = "AmuxIdeaAnalysisResultReadError";
   }
@@ -104,6 +106,9 @@ export async function readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
     const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     });
+    if (analyzing && chunk?.state === "owner_input") {
+      return readVerifiedAmuxOwnerInputHold(tx, actorUserId, ideaId, 0, keys);
+    }
     if (analyzing && (!chunk || chunk.state !== "draft_ready")) {
       return { state: "pending" };
     }

@@ -40,10 +40,11 @@ const receiptStore = (): Storage | null => {
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  ideaId, planReady,
+  ideaId, planReady, continuationSelection,
   declaredExternalSources, operatorId, onCheckedCollectionModel }: {
   available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
   ideaId: string | null;
+  continuationSelection?: { chunkIndex: number; pinnedTargetRefs: string[] } | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   onCheckedCollectionModel?: (model: CheckedCollectionModel | null) => void;
 }) {
@@ -60,6 +61,15 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
+  const receiptScopeId = ideaId && continuationSelection ?
+    `${ideaId}:c${continuationSelection.chunkIndex}` : ideaId;
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setPreview({ kind: "idle" });
+      setConfirmation({ kind: "idle" });
+    });
+  }, [continuationSelection?.chunkIndex]);
 
   useEffect(() => {
     selectionVersion.current += 1;
@@ -192,7 +202,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   useEffect(() => {
     if (!ideaId || !previewAvailable) return;
-    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, receiptScopeId ?? ideaId);
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -204,7 +214,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       }
     });
     return () => { active = false; };
-  }, [ideaId, operatorId, previewAvailable, readBack]);
+  }, [ideaId, operatorId, previewAvailable, readBack, receiptScopeId]);
 
   const refresh = () => {
     selectionVersion.current += 1;
@@ -264,7 +274,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     const effort = selectedEffort;
     const previewId = crypto.randomUUID();
     const previous = preview.kind === "expired"
-      ? readPreviewReceipt(receiptStore(), operatorId, ideaId) : null;
+      ? readPreviewReceipt(receiptStore(), operatorId, receiptScopeId ?? ideaId) : null;
     if (previous?.kind === "present" &&
         readConfirmationAttemptForPreview(receiptStore(), operatorId,
           previous.previewId, ideaId).kind !== "absent") {
@@ -272,10 +282,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       return;
     }
     const receiptReady = previous?.kind === "present"
-      ? replacePreviewReceipt(receiptStore(), operatorId, ideaId,
+      ? replacePreviewReceipt(receiptStore(), operatorId, receiptScopeId ?? ideaId,
         previous.previewId, previewId, model, effort)
       : previous === null && reservePreviewReceipt(receiptStore(), operatorId,
-        ideaId, previewId, model, effort);
+        receiptScopeId ?? ideaId, previewId, model, effort);
     if (!receiptReady) {
       setPreview({ kind: "recovery_unavailable" });
       return;
@@ -285,6 +295,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       const response = await adminFetch("/api/admin/amux/ideas/transfer-preview", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ version: 1, previewId, ideaId,
+          ...(continuationSelection ? { chunkIndex: continuationSelection.chunkIndex,
+            ...(continuationSelection.pinnedTargetRefs.length ? {
+              pinnedTargetRefs: continuationSelection.pinnedTargetRefs } : {}) } : {}),
           ...(previous?.kind === "present"
             ? { replacesPreviewId: previous.previewId } : {}),
           provider: model.provider, modelId: model.modelId,
@@ -297,9 +310,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
       if (definitiveRefusal) {
         const released = previous?.kind === "present"
-          ? replacePreviewReceipt(receiptStore(), operatorId, ideaId,
+          ? replacePreviewReceipt(receiptStore(), operatorId, receiptScopeId ?? ideaId,
             previewId, previous.previewId, previous.model, previous.effort)
-          : clearRefusedPreviewReceipt(receiptStore(), operatorId, ideaId, previewId);
+          : clearRefusedPreviewReceipt(receiptStore(), operatorId,
+            receiptScopeId ?? ideaId, previewId);
         if (!released) {
           setPreview({ kind: "unknown" });
           return;
@@ -323,7 +337,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   const recoverPreview = () => {
     if (!ideaId) return;
-    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, receiptScopeId ?? ideaId);
     if (receipt.kind !== "present") {
       setPreview({ kind: "recovery_unavailable" });
       return;
@@ -392,6 +406,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         {m.frontierModelsTitle}
       </h3>
       <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
+      {continuationSelection ? <p role="status">{m.analysisResultPinPreviewHint}
+        {` #${continuationSelection.chunkIndex + 1} · `}
+        {continuationSelection.pinnedTargetRefs.join(", ") || "—"}</p> : null}
       {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
       {available ? <button type="button" onClick={refresh} disabled={loading || checking}
         className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
@@ -483,7 +500,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {confirmation.kind === "unknown" ? <div className="space-y-2">
         <p role="alert">{m.transferConfirmUnknown}</p>
         <button type="button" onClick={() => {
-          const receipt = ideaId ? readPreviewReceipt(receiptStore(), operatorId, ideaId) : null;
+          const receipt = receiptScopeId ? readPreviewReceipt(receiptStore(), operatorId,
+            receiptScopeId) : null;
           const attempt = receipt?.kind === "present" && ideaId ?
             readConfirmationAttemptForPreview(receiptStore(), operatorId,
               receipt.previewId, ideaId) : null;

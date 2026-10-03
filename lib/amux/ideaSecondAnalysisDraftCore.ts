@@ -16,8 +16,9 @@ type SecondDraftResult =
   | { decision: "ready" | "partial"; draft: SealedAmuxAnalysisDraft;
       coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: number;
       remainingStartOrdinal: 0 | null; remainingEndOrdinal: 0 | null }
-  | { decision: "hold"; reason: "invalid_result" | "owner_input" |
-      "continuation_required" };
+  | { decision: "hold"; reason: "invalid_result" | "continuation_required" }
+  | { decision: "hold"; reason: "owner_input"; ownerQuestion: string;
+      remainingScope: string | null };
 
 /** Pure, bounded continuation after one verified first output page. The caller
  * must prove the confirmed preview belongs to ideaId, the response came from
@@ -79,8 +80,11 @@ function prepareCheckedDraft(input: Parameters<typeof prepareIdeaOnlyOutputAnaly
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
     history,
   });
-  if (!inspected.ok) return { decision: "hold",
-    reason: inspected.stage === "owner_input" ? "owner_input" : "invalid_result" };
+  if (!inspected.ok) return inspected.stage === "owner_input" ?
+    { decision: "hold", reason: "owner_input",
+      ownerQuestion: inspected.parsed.chunk.ownerQuestion!,
+      remainingScope: inspected.parsed.chunk.remainingScope } :
+    { decision: "hold", reason: "invalid_result" };
   const complete = inspected.cursor.nextCursor === null &&
     inspected.parsed.chunk.coverageStatus === "complete" &&
     inspected.parsed.chunk.continuationKind === null;

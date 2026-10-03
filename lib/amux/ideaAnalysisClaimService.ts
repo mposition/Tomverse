@@ -7,7 +7,9 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_CLAIM_TARGET,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
-  AMUX_V4_IDEA_SYSTEM_ACTOR } from
+  AMUX_V4_IDEA_SYSTEM_ACTOR, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET, AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+  AMUX_V4_SECOND_DRAFT_SAVED_TARGET } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
@@ -25,7 +27,7 @@ export class AmuxIdeaAnalysisClaimError extends Error {
   }
 }
 
-/** First idea-only attempt. This transaction body has no enabled route and
+/** One idea-only attempt. This transaction body has no enabled route and
  * cannot itself launch a CLI. It consumes one owner confirmation and one
  * already-reserved Agent budget hold, then gives the local supervisor only
  * the exact verified prompt. A lost claim response is outcome-unknown: the
@@ -48,7 +50,8 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
     where: { id: input.previewId },
     select: { ideaId: true, chunkIndex: true },
   });
-  if (!identity || identity.chunkIndex !== 0) {
+  if (!identity || !Number.isSafeInteger(identity.chunkIndex) ||
+      identity.chunkIndex < 0 || identity.chunkIndex >= 2_147_483_647) {
     throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
@@ -57,18 +60,23 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
   `;
   const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${identity.ideaId} AND "chunkIndex" = 0 FOR UPDATE
+    WHERE "ideaId" = ${identity.ideaId}
+      AND "chunkIndex" <= ${identity.chunkIndex}
+    ORDER BY "chunkIndex" FOR UPDATE
   `;
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaTransferPreview"
     WHERE "id" = ${input.previewId} FOR UPDATE
   `;
-  if (ideaLock.length !== 1 || chunkLock.length !== 1 || previewLock.length !== 1) {
+  if (ideaLock.length !== 1 || chunkLock.length !== identity.chunkIndex + 1 ||
+      chunkLock.some((row, index) => row.chunkIndex !== index) ||
+      previewLock.length !== 1) {
     throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: identity.ideaId } });
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId: identity.ideaId, chunkIndex: 0 } },
+      where: { ideaId_chunkIndex: { ideaId: identity.ideaId,
+        chunkIndex: identity.chunkIndex } },
     });
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: input.previewId },
@@ -84,10 +92,12 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
       !idea || !chunk || !preview || !hold) {
     throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
   }
-  if (idea.state !== "submitted" || idea.cancelledAt !== null ||
+  if (idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
+      idea.cancelledAt !== null ||
       idea.analysisCompletedAt !== null || now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId ||
-      chunk.state !== "awaiting_preview" || chunk.chunkIndex !== 0 ||
+      chunk.state !== "awaiting_preview" ||
+      chunk.chunkIndex !== identity.chunkIndex ||
       chunk.attempt !== preview.attempt || chunk.leaseGeneration !== 0 ||
       chunk.currentPreviewId !== preview.id ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
@@ -107,7 +117,8 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
   const receipt = checkAmuxIdeaTransferReceipt({ ...preview,
     state: preview.state as "confirmed" }, {
     previewId: preview.id, ideaId: idea.id,
-    sourceScopeApprovalId: null, chunkIndex: 0, attempt: preview.attempt,
+    sourceScopeApprovalId: null, chunkIndex: identity.chunkIndex,
+    attempt: preview.attempt,
     actorUserId: idea.actorUserId, modelId: preview.modelId,
     payloadDigest: preview.payloadDigest,
     payloadDigestKeyId: preview.payloadDigestKeyId, databaseNow: now,
@@ -136,8 +147,45 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
       (metadata as Record<string, unknown>).payloadDigestKeyId !==
         preview.payloadDigestKeyId ||
       (metadata as Record<string, unknown>).sourcePlanRevisionId !== plan.id ||
-      (metadata as Record<string, unknown>).modelId !== preview.modelId) {
+      (metadata as Record<string, unknown>).modelId !== preview.modelId ||
+      (identity.chunkIndex > 0 &&
+        (metadata as Record<string, unknown>).chunkIndex !== identity.chunkIndex)) {
     throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+  }
+  if (identity.chunkIndex > 0) {
+    const priorChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: idea.id,
+        chunkIndex: identity.chunkIndex - 1 } },
+    });
+    const priorAudits = await tx.adminAuditLog.findMany({ where: {
+      action: identity.chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_ACTION :
+        AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+      targetType: identity.chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_TARGET :
+        AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+      targetId: `${idea.id}:${identity.chunkIndex - 1}`,
+    }, take: 2, select: { entryHash: true } });
+    const preparedAudits = await tx.adminAuditLog.findMany({ where: {
+      action: "amux.v4.transfer_preview.prepared",
+      targetType: "AmuxIdeaTransferPreview", targetId: preview.id,
+      actorUserId: idea.actorUserId,
+    }, take: 2 });
+    const preparedMeta = preparedAudits[0]?.metadata;
+    if (priorChunk?.state !== "draft_ready" ||
+        priorChunk.outputPending !== true ||
+        priorChunk.sourcePlanRevisionId !== plan.id ||
+        priorAudits.length !== 1 || !priorAudits[0]?.entryHash ||
+        preparedAudits.length !== 1 ||
+        !preparedAudits[0]?.entryHash ||
+        auditRowActorKind(preparedAudits[0]) !== "human" ||
+        !preparedMeta || typeof preparedMeta !== "object" ||
+        Array.isArray(preparedMeta) ||
+        (preparedMeta as Record<string, unknown>).previousChunkAuditHash !==
+          priorAudits[0].entryHash ||
+        (preparedMeta as Record<string, unknown>).payloadDigest !==
+          preview.payloadDigest ||
+        (preparedMeta as Record<string, unknown>).sourcePlanRevisionId !== plan.id) {
+      throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+    }
   }
   let raw: Buffer;
   try {
@@ -263,7 +311,8 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
       action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
       targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET, targetId: preview.id,
       summary: "Consumed one exact owner-confirmed AMUX v4 analysis preview for a fenced local attempt.",
-      metadata: { ideaId: idea.id, chunkIndex: 0, previewId: preview.id,
+      metadata: { ideaId: idea.id, chunkIndex: identity.chunkIndex,
+        previewId: preview.id,
         holdId: hold.id, payloadDigest: preview.payloadDigest,
         sourcePlanRevisionId: plan.id, leaseGeneration: 1,
         modelId: preview.modelId, modelCallStarted: false },
@@ -278,16 +327,17 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
         data: { status: "in_flight", dispatchedAt: now },
     });
     const startedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({
-        where: { ideaId: idea.id, chunkIndex: 0,
+        where: { ideaId: idea.id, chunkIndex: identity.chunkIndex,
           state: "awaiting_preview", leaseGeneration: 0,
           currentPreviewId: preview.id },
         data: { state: "in_flight", leaseGeneration: 1 },
     });
-    const startedIdea = await tx.amuxIdeaSubmission.updateMany({
-        where: { id: idea.id, state: "submitted", cancelledAt: null,
-          analysisDeadlineAt: { gt: now } },
-        data: { state: "analyzing" },
-    });
+    const startedIdea = identity.chunkIndex === 0
+      ? await tx.amuxIdeaSubmission.updateMany({
+          where: { id: idea.id, state: "submitted", cancelledAt: null,
+            analysisDeadlineAt: { gt: now } },
+          data: { state: "analyzing" },
+        }) : { count: 1 };
     if ([consumed, dispatched, startedChunk, startedIdea]
       .some((row) => row.count !== 1)) {
       throw new AmuxIdeaAnalysisClaimError("not_ready");

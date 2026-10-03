@@ -86,6 +86,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261003160000_amux_v4_card_body_retention",
   // V4 registration remains dark, but the card's approved hierarchy is fenced.
   "20261003170000_amux_v4_card_hierarchy_guard",
+  "20261003180000_amux_v4_idea_collection_request",
+  "20261004180000_amux_v4_analysis_owner_input_hold",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -326,13 +328,18 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("no AMUX internal route opens its own transaction except the catalog tasks route", () => {
+test("only the catalog route and dark bounded analysis routes own AMUX transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The tasks route upserts catalog cards and records no execution success,
-  // so it has no deadline to keep and is outside the commit deadline check.
-  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts"]);
+  // The catalog route records no execution success. The two analysis routes
+  // have hard-off code latches, bounded transactions, and delegate writes to
+  // services that enforce the commit deadline and unknown-outcome contract.
+  assert.deepEqual(direct, [
+    "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v4/analysis-claim/route.ts",
+    "app/api/internal/amux/v4/analysis-result/route.ts",
+  ]);
 });
 
 test("the push harnesses install the migration's own function and trigger, idempotently", () => {

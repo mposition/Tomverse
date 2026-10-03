@@ -17,7 +17,7 @@ const previewId = "123e4567-e89b-42d3-a456-426614174001";
 const reply = { state: "prepared", previewId, expiresAt: "2099-10-02T12:00:00.000Z",
   payloadDigest: "a".repeat(64), payloadDigestKeyId: "synthetic-key",
   transferAuthorized: false,
-  payload: { version: 1, previewId, ideaId, templateVersion: "amux-v4-analysis-prompt-v3",
+  payload: { version: 1, previewId, ideaId, templateVersion: "amux-v4-analysis-prompt-v4",
     prompt: "synthetic exact prompt", selection: {
       provider: model.provider, modelId: model.modelId, reasoningEffort: "high",
       approvalId: model.approvalId, approvalVersion: model.approvalVersion,
@@ -90,6 +90,7 @@ test("definite pre-write refusals release only their exact receipt; unknown outc
     [429, { code: "API_RATE_LIMITED" }],
     [409, { error: "not_ready" }],
     [409, { error: "model_changed" }],
+    [409, { error: "reference_selection_required" }],
     [503, { error: "preview_disabled" }],
   ]) assert.equal(definitivePreviewPrewriteRefusal(status, body), true);
   for (const [status, body] of [
@@ -127,9 +128,9 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   const page = readFileSync(new URL("../app/(site)/(application)/admin/amux-backlog/page.tsx", import.meta.url), "utf8");
   assert.match(panel, /!previewAvailable \|\| !planReady \|\| declaredExternalSources/);
   assert.match(panel, /reservePreviewReceipt\(receiptStore\(\), operatorId,/);
-  assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, ideaId,/);
+  assert.match(panel, /replacePreviewReceipt\(receiptStore\(\), operatorId, receiptScopeId \?\? ideaId,/);
   assert.match(panel, /readPreviewWriteReply\(response\)/);
-  assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId, ideaId, previewId\)/);
+  assert.match(panel, /clearRefusedPreviewReceipt\(receiptStore\(\), operatorId,[\s\S]*?receiptScopeId \?\? ideaId, previewId\)/);
   assert.match(panel, /if \(previous\?\.kind === "present"\) \{[\s\S]*?await readBack\(previous\.previewId, previous\.model, previous\.effort\);/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);

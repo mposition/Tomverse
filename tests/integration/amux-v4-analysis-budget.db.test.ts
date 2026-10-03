@@ -113,11 +113,12 @@ process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = keys.digestKey.toString("base64");
 after(async () => { await prisma.$disconnect(); });
 
 async function confirmedPreviewId(modelId: string,
-  frontierApprovalId = randomUUID()): Promise<string> {
+  frontierApprovalId = randomUUID(),
+  ideaText = `SYNTHETIC_BUDGET_${randomUUID()}`): Promise<string> {
   const ideaId = randomUUID();
   const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
     version: 1, requestId: randomUUID(), input: { version: 1,
-      idea: `SYNTHETIC_BUDGET_${randomUUID()}`, repositories: [], pullRequests: [] },
+      idea: ideaText, repositories: [], pullRequests: [] },
   }));
   if (!inspected.ok) throw new Error(inspected.code);
   await prisma.$transaction((tx) => commitIdeaSubmission(tx,
@@ -696,7 +697,7 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   } }), 0);
 });
 
-async function syntheticFirstClaim() {
+async function syntheticFirstClaim(ideaText?: string) {
   const selectedModelId = modelId();
   const frontierApprovalId = randomUUID();
   const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1,
@@ -707,7 +708,8 @@ async function syntheticFirstClaim() {
   if (!frontier.ok) throw new Error("synthetic frontier request invalid");
   await prisma.$transaction((tx) => commitFrontierCatalogDecision(tx,
     { session, request, decision: frontier.request }));
-  const previewId = await confirmedPreviewId(selectedModelId, frontierApprovalId);
+  const previewId = await confirmedPreviewId(selectedModelId, frontierApprovalId,
+    ideaText);
   const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
   await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
     where: { namespace_monthStart: { namespace, monthStart } },
@@ -721,6 +723,389 @@ async function syntheticFirstClaim() {
     commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys }));
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
+
+test("a verified owner question settles measured usage and remains a distinct owner hold", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  const requestId = randomUUID();
+  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "needs_information",
+    coverageStatus: "needs_owner_input", continuationKind: null,
+    ownerQuestion: "Which feature should own this proposal?",
+    coveredScope: "The requested hierarchy is ambiguous.",
+    remainingScope: null, units: [] });
+  const input = { requestId, ideaId: claim.ideaId, previewId, holdId,
+    leaseGeneration: 1, outcome: "verified_success" as const,
+    rawModelOutput, inputTokens: 100, outputTokens: 50, keys };
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, input));
+  assert.equal(result.state, "owner_input");
+  assert.equal((await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisResultReceipt(tx, { requestId, previewId }))).status,
+  "committed");
+  const visible = await readAmuxIdeaAnalysisResult(session, claim.ideaId, keys);
+  assert.deepEqual(visible, { state: "owner_input", ideaId: claim.ideaId,
+    chunkIndex: 0, ownerQuestion: "Which feature should own this proposal?",
+    remainingScope: null });
+  const [preview, chunk, hold] = await Promise.all([
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+  ]);
+  assert.deepEqual([preview.state, chunk.state, hold.status],
+    ["owner_input", "owner_input", "succeeded"]);
+  assert.ok(hold.settledMicroUsd && hold.settledMicroUsd > BigInt(0));
+  assert.ok(chunk.freeformCiphertext && chunk.freeformPurgeAfter);
+  assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId: claim.ideaId } }), 0);
+  assert.equal((await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, input))).duplicate, true);
+  await prisma.amuxIdeaAnalysisChunk.update({ where: {
+    ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 },
+  }, data: { freeformPurgeAfter: new Date(Date.now() - 60_000) } });
+  assert.deepEqual(await readAmuxIdeaAnalysisResult(session, claim.ideaId, keys),
+    { state: "owner_input", ideaId: claim.ideaId, chunkIndex: 0,
+      ownerQuestion: null, remainingScope: null },
+  "a delayed purge job cannot expose an expired owner question");
+});
+
+async function verifyEighteenChunkIdea(ideaText?: string) {
+  const { claim, previewId, holdId, selectedModelId,
+    frontierApprovalId } = await syntheticFirstClaim(ideaText);
+  const initialOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "propose", coverageStatus: "more",
+    continuationKind: "output", ownerQuestion: null,
+    coveredScope: "The first bounded part is proposed.",
+    remainingScope: "Seventeen more bounded parts remain.",
+    units: [
+      { kind: "node", localId: "c0:node-0", level: "initiative",
+        parentRef: null, title: "Synthetic initiative",
+        description: "The whole synthetic idea.", sourceRefIds: ["operator_idea"] },
+      { kind: "node", localId: "c0:node-1", level: "epic",
+        parentRef: "c0:node-0", title: "Synthetic epic",
+        description: "A bounded epic.", sourceRefIds: ["operator_idea"] },
+      { kind: "node", localId: "c0:node-2", level: "feature",
+        parentRef: "c0:node-1", title: "Synthetic feature",
+        description: "A bounded feature.", sourceRefIds: ["operator_idea"] },
+      { kind: "card", localId: "c0:card-0", cardType: "story",
+        storyKind: "general", title: "First synthetic story",
+        problem: "The idea has more than eight cards.",
+        scopeIn: ["Propose the first part"], scopeOut: ["Do not register it"],
+        completionCriteria: ["The first part is separately reviewable"],
+        featureRef: "c0:node-2", parentStoryRef: null,
+        dependencyRefs: [], duplicateCandidateRefs: [],
+        taskRole: null, executionGrade: null, executionBrief: null,
+        sourceRefIds: ["operator_idea"] },
+    ] });
+  const firstReceipt = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
+      outcome: "verified_success", rawModelOutput: initialOutput,
+      inputTokens: 100, outputTokens: 50, keys }),
+  { maxWait: 5_000, timeout: 30_000 });
+  assert.equal(firstReceipt.state, "draft_ready");
+  const initialPrice = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId }, select: { priceVersionId: true },
+  });
+  assert.ok(initialPrice.priceVersionId);
+  const previewIds = [previewId];
+  const holdIds = [holdId];
+  for (let index = 1; index <= 17; index += 1) {
+    const nextPreviewId = randomUUID();
+    const choice = { previewId: nextPreviewId, ideaId: claim.ideaId,
+      chunkIndex: index, provider: "openai" as const,
+      modelId: selectedModelId, reasoningEffort: "high" as const,
+      approvalId: frontierApprovalId, approvalVersion: 1,
+      ...((index === 16 || index === 17) && ideaText
+        ? { pinnedTargetRefs: ["c4:card-0"] } : {}) };
+    if (index === 17) {
+      await assert.rejects(prisma.$transaction((tx) =>
+        commitFirstOutputContinuationTransferPreview(tx, {
+          session, request, choice: { ...choice, previewId: randomUUID(),
+            pinnedTargetRefs: ["c999:card-0"] }, keys, browserNonce,
+        })), (error: unknown) => error instanceof Error &&
+          error.message === "reference_selection_required");
+    }
+    const prepared = await prisma.$transaction((tx) =>
+      commitFirstOutputContinuationTransferPreview(tx, {
+        session, request, choice, keys, browserNonce,
+      }), { maxWait: 5_000, timeout: 30_000 });
+    if (index === 1) {
+      await assert.rejects(prisma.$transaction((tx) =>
+        commitFirstOutputContinuationTransferPreview(tx, {
+          session, request, choice: { ...choice, chunkIndex: 2,
+            previewId: randomUUID() }, keys, browserNonce,
+        })), (error: unknown) => error instanceof Error &&
+          error.message === "not_ready",
+      "an uncreated later chunk cannot skip the previous page");
+    }
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxIdeaAnalysisBudgetReservation(tx, {
+        holdId: randomUUID(), previewId: nextPreviewId,
+        priceVersionId: initialPrice.priceVersionId!, runner, keys,
+      })), (error: unknown) => error instanceof AmuxIdeaAnalysisReservationError &&
+        error.code === "not_ready",
+    "a prepared but unconfirmed page cannot spend Agent budget");
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitIdeaTransferConfirmation(tx, { session, request,
+        choice: { previewId: nextPreviewId, ideaId: claim.ideaId,
+          payloadDigest: randomBytes(32).toString("hex"),
+          payloadDigestKeyId: prepared.payloadDigestKeyId },
+        browserNonce, keys,
+      })), (error: unknown) => error instanceof Error &&
+        error.message === "digest_changed",
+    "the owner cannot confirm a different transfer digest");
+    await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx, {
+      session, request, choice: { previewId: nextPreviewId,
+        ideaId: claim.ideaId, payloadDigest: prepared.payloadDigest,
+        payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys,
+    }), { maxWait: 5_000, timeout: 30_000 });
+    const nextHoldId = randomUUID();
+    if (index === 2) {
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const window = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+          where: { namespace_monthStart: { namespace, monthStart } },
+        });
+        await tx.amuxIdeaAnalysisBudgetWindow.update({
+          where: { namespace_monthStart: { namespace, monthStart } },
+          data: { spentMicroUsd: window.limitMicroUsd - window.reservedMicroUsd },
+        });
+        await assert.rejects(commitAmuxIdeaAnalysisBudgetReservation(tx, {
+          holdId: nextHoldId, previewId: nextPreviewId,
+          priceVersionId: initialPrice.priceVersionId!, runner, keys,
+        }), (error: unknown) =>
+          error instanceof AmuxIdeaAnalysisReservationError &&
+          error.code === "budget_hold");
+        const visible = await readAmuxIdeaAnalysisResultInTransaction(
+          tx, session, claim.ideaId, keys);
+        assert.equal(visible.state, "continued_partial");
+        throw new Error("rollback synthetic exhausted monthly budget");
+      }, { maxWait: 5_000, timeout: 30_000 }),
+      /rollback synthetic exhausted monthly budget/);
+    }
+    await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx, {
+      holdId: nextHoldId, previewId: nextPreviewId,
+      priceVersionId: initialPrice.priceVersionId!, runner, keys,
+    }), { maxWait: 5_000, timeout: 30_000 });
+    const nextClaim = await prisma.$transaction((tx) =>
+      commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys }),
+    { maxWait: 5_000, timeout: 30_000 });
+    assert.equal(nextClaim.holdId, nextHoldId);
+    assert.match(nextClaim.prompt, new RegExp(`"chunkIndex":${index}`));
+    assert.equal(prepared.payload.prompt, nextClaim.prompt,
+      "the owner-reviewed preview is the exact synthetic runner payload");
+    const unit = index === 1
+      ? { kind: "card", localId: "c1:card-0", cardType: "story",
+        storyKind: "general", title: "Second synthetic story",
+        problem: "One story does not cover the remaining scope.",
+        scopeIn: ["Propose another story"], scopeOut: ["Do not register it"],
+        completionCriteria: ["The second part is separately reviewable"],
+        featureRef: "c0:node-2", parentStoryRef: null,
+        dependencyRefs: [], duplicateCandidateRefs: [],
+        taskRole: null, executionGrade: null, executionBrief: null,
+        sourceRefIds: ["operator_idea"] }
+      : { kind: "card", localId: `c${index}:card-0`, cardType: "task",
+        storyKind: null, title: `Synthetic task ${index}`,
+        problem: "The idea needs a separately testable task.",
+        scopeIn: [`Verify part ${index}`], scopeOut: ["Do not execute it"],
+        completionCriteria: [`Part ${index} is separately testable`],
+        featureRef: "c0:node-2", parentStoryRef: "c1:card-0",
+        dependencyRefs: index === 3 ? ["c2:card-0"] :
+          (index === 16 || index === 17) && ideaText ? ["c4:card-0"] : [],
+        duplicateCandidateRefs: [], taskRole: "verify",
+        executionGrade: "routine", executionBrief: "Use a synthetic test only.",
+        sourceRefIds: ["operator_idea"] };
+    const complete = index === 17;
+    const units = index >= 4 ? Array.from({ length: 8 }, (_, ordinal) => ({
+      ...unit, localId: `c${index}:card-${ordinal}`,
+      title: `Synthetic task ${index}.${ordinal}`,
+    })) : [unit];
+    const output = JSON.stringify({ schemaVersion: 2,
+      previewId: nextPreviewId, chunkIndex: index, outcome: "propose",
+      coverageStatus: complete ? "complete" : "more",
+      continuationKind: complete ? null : "output", ownerQuestion: null,
+      coveredScope: `Part ${index} is proposed.`,
+      remainingScope: complete ? null : `Part ${index + 1} remains.`,
+      units });
+    if (index === 2) {
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const unknown = await commitAmuxIdeaAnalysisResult(tx, {
+          requestId: randomUUID(), ideaId: claim.ideaId,
+          previewId: nextPreviewId, holdId: nextHoldId,
+          leaseGeneration: nextClaim.leaseGeneration,
+          outcome: "outcome_unknown", rawModelOutput: null,
+          inputTokens: null, outputTokens: null, keys,
+        });
+        assert.equal(unknown.state, "outcome_unknown");
+        assert.equal((await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+          where: { id: nextHoldId }, select: { status: true },
+        })).status, "outcome_unknown");
+        const visible = await readAmuxIdeaAnalysisResultInTransaction(
+          tx, session, claim.ideaId, keys);
+        assert.equal(visible.state, "continued_partial");
+        throw new Error("rollback synthetic continuation unknown outcome");
+      }, { maxWait: 5_000, timeout: 30_000 }),
+      /rollback synthetic continuation unknown outcome/);
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const failed = await commitAmuxIdeaAnalysisResult(tx, {
+          requestId: randomUUID(), ideaId: claim.ideaId,
+          previewId: nextPreviewId, holdId: nextHoldId,
+          leaseGeneration: nextClaim.leaseGeneration,
+          outcome: "verified_success",
+          rawModelOutput: output.replaceAll("c0:node-2", "forged-node"),
+          inputTokens: 100, outputTokens: 50, keys,
+        });
+        assert.equal(failed.state, "provider_failed");
+        assert.equal((await readAmuxIdeaAnalysisResultInTransaction(
+          tx, session, claim.ideaId, keys)).state, "continued_partial");
+        throw new Error("rollback synthetic malformed second continuation");
+      }, { maxWait: 5_000, timeout: 30_000 }),
+      /rollback synthetic malformed second continuation/);
+    }
+    if (index === 17) {
+      const transferData = nextClaim.prompt.split(
+        "BEGIN_CONFIRMED_DATA_JSON\n")[1]!.split(
+        "\nEND_CONFIRMED_DATA_JSON")[0]!;
+      const transferred = JSON.parse(transferData) as {
+        omittedTargetSummary: { count: number; firstChunkIndex: number;
+          lastChunkIndex: number } | null;
+        permittedTargetRefs: Array<{ ref: string }>;
+      };
+      assert.ok(transferred.omittedTargetSummary?.count);
+      assert.ok(Buffer.byteLength(transferData, "utf8") <= 16 * 1024);
+      if (ideaText) assert.ok(transferred.permittedTargetRefs.length < 96,
+        "the long source forces exact JSON-byte-based reference trimming");
+      assert.ok(transferred.omittedTargetSummary!.firstChunkIndex <= 4);
+      assert.ok(transferred.omittedTargetSummary!.lastChunkIndex >= 4);
+      assert.equal(transferred.permittedTargetRefs.some((target) =>
+        target.ref === "c4:card-0"), Boolean(ideaText));
+      const forged = JSON.parse(output) as { units: Array<{
+        dependencyRefs: string[] }> };
+      forged.units[0]!.dependencyRefs = [ideaText ? "c4:card-1" : "c4:card-0"];
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const failed = await commitAmuxIdeaAnalysisResult(tx, {
+          requestId: randomUUID(), ideaId: claim.ideaId,
+          previewId: nextPreviewId, holdId: nextHoldId,
+          leaseGeneration: nextClaim.leaseGeneration,
+          outcome: "verified_success", rawModelOutput: JSON.stringify(forged),
+          inputTokens: 100, outputTokens: 50, keys,
+        });
+        assert.equal(failed.state, "provider_failed");
+        throw new Error("rollback synthetic omitted reference");
+      }, { maxWait: 5_000, timeout: 30_000 }),
+      /rollback synthetic omitted reference/);
+    }
+    const requestId = randomUUID();
+    const result = await prisma.$transaction((tx) =>
+      commitAmuxIdeaAnalysisResult(tx, { requestId,
+        ideaId: claim.ideaId, previewId: nextPreviewId,
+        holdId: nextHoldId, leaseGeneration: nextClaim.leaseGeneration,
+        outcome: "verified_success", rawModelOutput: output,
+        inputTokens: 100, outputTokens: 50, keys }),
+    { maxWait: 5_000, timeout: 30_000 });
+    assert.equal(result.state, "draft_ready");
+    if (index === 16 && ideaText) {
+      const retained = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+        where: { id: nextPreviewId },
+      });
+      await prisma.amuxIdeaTransferPreview.update({ where: { id: nextPreviewId },
+        data: { payloadCiphertext: null, payloadKeyId: null,
+          payloadKeyVersion: null, payloadPurgedAt: new Date(),
+          payloadPurgeAfter: new Date(Date.now() - 1_000) } });
+      assert.ok(retained.payloadDigest,
+        "the prior sealed payload has a keyed digest even after its body is purged");
+    }
+    assert.equal((await prisma.$transaction((tx) =>
+      readAmuxIdeaAnalysisResultReceipt(tx, { requestId,
+        previewId: nextPreviewId }))).status, "committed");
+    previewIds.push(nextPreviewId);
+    holdIds.push(nextHoldId);
+    const visible = await readAmuxIdeaAnalysisResult(session, claim.ideaId, keys);
+    if (index >= 16) {
+      assert.equal(visible.state, "continued_window");
+      if (visible.state !== "continued_window") throw new Error("missing first window");
+      assert.equal(visible.nextChunkIndex, 16);
+      assert.deepEqual(visible.pages.map((page) => page.chunkIndex),
+        Array.from({ length: 16 }, (_, ordinal) => ordinal));
+    } else {
+      assert.equal(visible.state, "continued_partial");
+    }
+    const latest = index >= 16
+      ? await readAmuxIdeaAnalysisResult(session, claim.ideaId, keys, 16)
+      : visible;
+    if (latest.state !== "continued_ready" &&
+        latest.state !== "continued_partial" &&
+        latest.state !== "continued_window") throw new Error("missing pages");
+    assert.deepEqual(latest.pages.map((page) => page.chunkIndex),
+      Array.from({ length: index >= 16 ? index - 15 : index + 1 },
+        (_, ordinal) => ordinal + (index >= 16 ? 16 : 0)));
+    if (latest.state === "continued_window") {
+      assert.equal(latest.complete, complete);
+      assert.equal(latest.nextChunkIndex, null);
+    }
+    assert.equal(latest.pages.at(-1)?.remainingScope,
+      complete ? null : `Part ${index + 1} remains.`);
+  }
+  for (const [index, candidate] of previewIds.entries()) {
+    const [preview, hold, chunk] = await Promise.all([
+      prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: candidate } }),
+      prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdIds[index] } }),
+      prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+        ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: index },
+      } }),
+    ]);
+    assert.deepEqual([preview.state, hold.status, chunk.state],
+      ["completed", "succeeded", "draft_ready"]);
+    assert.equal(preview.chunkIndex, index);
+    assert.equal(hold.previewId, candidate);
+  }
+  const finalIdea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: claim.ideaId }, select: { analysisCompletedAt: true },
+  });
+  assert.ok(finalIdea.analysisCompletedAt);
+  const deadline = finalIdea.analysisCompletedAt.getTime() + 24 * 60 * 60_000;
+  const earlierChunks = await prisma.amuxIdeaAnalysisChunk.findMany({
+    where: { ideaId: claim.ideaId, chunkIndex: { lt: 17 } },
+    orderBy: { chunkIndex: "asc" },
+  });
+  assert.equal(earlierChunks.length, 17);
+  for (const chunk of earlierChunks) {
+    assert.ok(chunk.freeformPurgeAfter);
+    assert.ok(Math.abs(chunk.freeformPurgeAfter.getTime() - deadline) < 5_000,
+      `the prior partial chunk ${chunk.chunkIndex} purges 24h after completion`);
+  }
+  for (const chunkIndex of [1, 17]) {
+    const unit = await prisma.amuxIdeaDraftUnit.findFirstOrThrow({
+      where: { ideaId: claim.ideaId, chunkIndex, unitKind: "card" },
+      orderBy: { unitIndex: "asc" },
+    });
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      const choice = { ideaId: claim.ideaId, draftUnitId: unit.id,
+        decisionId: randomUUID(), prepareRequestId: randomUUID(),
+        reason: "Synthetic owner rejection in a paged completed idea." };
+      const prepared = await commitAmuxUnitRejectPrepare(tx,
+        { session, request, choice, keys });
+      const consumed = await commitAmuxUnitRejectConsume(tx, {
+        session, request, choice: { ...choice,
+          consumeRequestId: randomUUID(),
+          confirmationDigest: prepared.confirmationDigest }, keys,
+      });
+      assert.equal(consumed.state, "rejected");
+      throw new Error(`rollback synthetic rejection page ${chunkIndex}`);
+    }, { maxWait: 5_000, timeout: 30_000 }),
+    new RegExp(`rollback synthetic rejection page ${chunkIndex}`));
+  }
+  assert.equal(await prisma.amuxWorkItem.count({ where: {
+    sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
+  } }), 0, "analysis must not register backlog cards");
+}
+
+test("one idea continues through eighteen separately approved and settled chunks", async () => {
+  await verifyEighteenChunkIdea();
+});
+
+test("an eight KiB idea still continues after reference and JSON byte trimming", async () => {
+  await verifyEighteenChunkIdea(`SYNTHETIC_LONG_${"A".repeat(7_600)}`);
+});
 
 test("an unresolved in-flight result blocks a second Agent claim", async () => {
   const { claim, previewId, holdId, selectedModelId,

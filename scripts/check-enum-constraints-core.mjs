@@ -54,7 +54,7 @@ export const readEnumConstraints = (migrations) => {
       // that also permits NULL is still a closed list, and the failure it
       // guards against -- code accepting a value the constraint rejects, so a
       // 500 lands where a 400 belongs -- is the same one.
-      /ALTER\s+TABLE\s+(?:ONLY\s+)?"([^"]+)"[^;]*?ADD\s+CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([^;]*?)\)\s*\)/gi;
+      /ALTER\s+TABLE\s+(?:ONLY\s+)?"([^"]+)"[^;]*?ADD\s+CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([^()]*)\)\s*(?:\)|OR\s*\()/gi;
     for (const match of sql.matchAll(addPattern)) {
       const values = Array.from(match[4].matchAll(/'([^']*)'/g), (item) => item[1]);
       if (values.length === 0) continue;
@@ -70,7 +70,7 @@ export const readEnumConstraints = (migrations) => {
     // The inline form, inside CREATE TABLE. Only taken when the constraint is
     // not already known, so a later ALTER always wins.
     const inlinePattern =
-      /CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([\s\S]*?)\)\s*\)/gi;
+      /CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([^()]*)\)\s*(?:\)|OR\s*\()/gi;
     for (const match of sql.matchAll(inlinePattern)) {
       if (constraints.has(match[1])) continue;
       const values = Array.from(match[3].matchAll(/'([^']*)'/g), (item) => item[1]);

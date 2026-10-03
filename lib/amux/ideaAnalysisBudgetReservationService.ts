@@ -8,7 +8,9 @@ import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-  AMUX_V4_FIRST_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+  AMUX_V4_SECOND_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
@@ -58,7 +60,10 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
     select: { ideaId: true, chunkIndex: true },
   });
-  if (!identity || ![0, 1].includes(identity.chunkIndex)) refuse("not_ready");
+  if (!identity || !Number.isSafeInteger(identity.chunkIndex) ||
+      identity.chunkIndex < 0 || identity.chunkIndex >= 2_147_483_647) {
+    refuse("not_ready");
+  }
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${identity.ideaId} FOR UPDATE
@@ -163,23 +168,29 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       (preparedMetadata as Record<string, unknown>).transferAuthorized !== false) {
     refuse("integrity_unavailable");
   }
-  if (identity.chunkIndex === 1) {
-    const first = await tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId: idea.id, chunkIndex: 0 } },
+  if (identity.chunkIndex >= 1) {
+    const prior = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: idea.id,
+        chunkIndex: identity.chunkIndex - 1 } },
     });
     const priorAudits = await tx.adminAuditLog.findMany({
-      where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-        targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
-        targetId: `${idea.id}:0` }, take: 2,
+      where: { action: identity.chunkIndex === 1 ?
+          AMUX_V4_FIRST_DRAFT_SAVED_ACTION : AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+        targetType: identity.chunkIndex === 1 ?
+          AMUX_V4_FIRST_DRAFT_SAVED_TARGET : AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+        targetId: `${idea.id}:${identity.chunkIndex - 1}` }, take: 2,
       select: { entryHash: true },
     });
-    if (first?.state !== "draft_ready" || first.outputPending !== true ||
-        first.sourcePlanRevisionId !== preview.sourcePlanRevisionId ||
-        first.analysisCompletedAt === null || priorAudits.length !== 1 ||
+    if (prior?.state !== "draft_ready" || prior.outputPending !== true ||
+        prior.coverageStatus !== "more" || prior.continuationKind !== "output" ||
+        prior.outputPartIndex !== identity.chunkIndex - 1 ||
+        prior.sourcePlanRevisionId !== preview.sourcePlanRevisionId ||
+        prior.analysisCompletedAt === null || priorAudits.length !== 1 ||
         !priorAudits[0]?.entryHash ||
         (preparedMetadata as Record<string, unknown>).previousChunkAuditHash !==
           priorAudits[0].entryHash ||
-        (confirmationMetadata as Record<string, unknown>).chunkIndex !== 1) {
+        (confirmationMetadata as Record<string, unknown>).chunkIndex !==
+          identity.chunkIndex) {
       refuse("integrity_unavailable");
     }
   }

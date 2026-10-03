@@ -35,7 +35,7 @@ export function readPreparedIdeaTransferPreview(
   const model = choice as Record<string, unknown>;
   if (record.version !== 1 || record.previewId !== expectedPreviewId ||
       record.ideaId !== expectedIdeaId ||
-      record.templateVersion !== "amux-v4-analysis-prompt-v3" ||
+      record.templateVersion !== "amux-v4-analysis-prompt-v4" ||
       typeof record.prompt !== "string" || record.prompt.length === 0 ||
       new TextEncoder().encode(record.prompt).length > 65_536 ||
       model.provider !== selected.provider || model.modelId !== selected.modelId ||
@@ -135,7 +135,8 @@ export function definitivePreviewPrewriteRefusal(status: number, body: unknown):
   if (status === 415) return error === "content_type_refused";
   if (status === 428) return error === "ADMIN_REAUTHENTICATION_REQUIRED";
   if (status === 429) return code === "API_RATE_LIMITED";
-  if (status === 409) return error === "not_ready" || error === "model_changed";
+  if (status === 409) return error === "not_ready" || error === "model_changed" ||
+    error === "reference_selection_required";
   return status === 503 && error === "preview_disabled";
 }
 

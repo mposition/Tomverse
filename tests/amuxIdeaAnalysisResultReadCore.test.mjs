@@ -125,6 +125,13 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     pages: [firstPage, { ...secondPage, remainingScope: "One more page" }] };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, continuedPartial, ideaId),
     continuedPartial);
+  const ownerInput = { state: "owner_input", ideaId, chunkIndex: 2,
+    ownerQuestion: "Which feature owns this work?",
+    remainingScope: "The next task needs a parent feature." };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, ownerInput, ideaId),
+    ownerInput);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...ownerInput,
+    ideaId: "another-idea" }, ideaId), null);
   const thirdPage = { ...secondPage, chunkIndex: 2, previewId: "preview-03",
     completedAt: "2026-10-03T00:01:00.000Z", coveredScope: "Final page",
     units: [{ ...secondPage.units[0], id: "unit-03", localRef: "c2:card-0",
@@ -155,6 +162,20 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...boundedResult,
     pages: boundedPages,
   }, ideaId), null);
+  const firstWindow = { state: "continued_window", ideaId,
+    startChunkIndex: 0, nextChunkIndex: 16, complete: false,
+    pages: boundedPages.slice(0, 16) };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, firstWindow, ideaId),
+    firstWindow);
+  const finalWindow = { state: "continued_window", ideaId,
+    startChunkIndex: 16, nextChunkIndex: null, complete: true,
+    pages: [{ ...boundedPages[16], remainingScope: null }] };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, finalWindow, ideaId),
+    finalWindow);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...finalWindow,
+    startChunkIndex: 15 }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...firstWindow,
+    nextChunkIndex: 17 }, ideaId), null);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...threePages,
     pages: [firstPage, secondPage, { ...thirdPage, previewId: secondPage.previewId }],
   }, ideaId), null);

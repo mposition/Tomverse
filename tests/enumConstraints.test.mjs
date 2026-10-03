@@ -110,6 +110,36 @@ test("a non-enum CHECK is ignored", () => {
   assert.deepEqual(constraints, []);
 });
 
+test("a compound CHECK is not mistaken for a single-column closed list", () => {
+  const constraints = readEnumConstraints([
+    migration(
+      "0001",
+      `CREATE TABLE "Thing" (
+         "provider" TEXT NOT NULL,
+         "effort" TEXT NOT NULL,
+         CONSTRAINT "Thing_model_check" CHECK (
+           "provider" IN ('openai', 'anthropic') AND
+           "effort" IN ('low', 'high')
+         ),
+         CONSTRAINT "Thing_state_check" CHECK ("state" IN ('pending', 'done'))
+       );`,
+    ),
+  ]);
+  assert.deepEqual(constraints.map(({ constraint, values }) => ({ constraint, values })), [
+    { constraint: "Thing_state_check", values: ["pending", "done"] },
+  ]);
+});
+
+test("an OR exemption retains its registered enum-shaped status subset", () => {
+  const constraints = readEnumConstraints([
+    migration("0001", `ALTER TABLE "Campaign" ADD CONSTRAINT "Campaign_approval_check"
+      CHECK ("status" IN ('draft', 'cancelled') OR ("approvedAt" IS NOT NULL));`),
+  ]);
+  assert.deepEqual(constraints.map(({ constraint, values }) => ({ constraint, values })), [
+    { constraint: "Campaign_approval_check", values: ["draft", "cancelled"] },
+  ]);
+});
+
 const constraint = (values) => [
   { constraint: "Thing_state_check", table: "Thing", column: "state", values, migration: "0001" },
 ];

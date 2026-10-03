@@ -28,6 +28,8 @@ export type AmuxIdeaAnalysisResultPage = {
 
 export type AmuxIdeaAnalysisResultView =
   | { state: "pending" | "cancelled" | "provider_failed" }
+  | { state: "owner_input"; ideaId: string; chunkIndex: number;
+      ownerQuestion: string | null; remainingScope: string | null }
   | { state: "ready"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose" | "reject";
       coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] }
@@ -37,7 +39,10 @@ export type AmuxIdeaAnalysisResultView =
       units: AmuxVisibleAnalysisUnit[] }
   | { state: "continued_ready" | "continued_partial"; ideaId: string;
       pages: [AmuxIdeaAnalysisResultPage, AmuxIdeaAnalysisResultPage,
-        ...AmuxIdeaAnalysisResultPage[]] };
+        ...AmuxIdeaAnalysisResultPage[]] }
+  | { state: "continued_window"; ideaId: string; startChunkIndex: number;
+      nextChunkIndex: number | null; complete: boolean;
+      pages: AmuxIdeaAnalysisResultPage[] };
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -106,11 +111,21 @@ export function parseAmuxIdeaAnalysisResultView(
   status: number, body: unknown, expectedIdeaId: string,
 ): AmuxIdeaAnalysisResultView | null {
   if (status !== 200 || !ID.test(expectedIdeaId) || !record(body)) return null;
-  if (body.state === "continued_ready" || body.state === "continued_partial") {
-    if (!keys(body, ["state", "ideaId", "pages"]) ||
+  if (body.state === "continued_ready" || body.state === "continued_partial" ||
+      body.state === "continued_window") {
+    const window = body.state === "continued_window";
+    if (!keys(body, window ? ["state", "ideaId", "startChunkIndex",
+      "nextChunkIndex", "complete", "pages"] : ["state", "ideaId", "pages"]) ||
         body.ideaId !== expectedIdeaId || !Array.isArray(body.pages) ||
-        body.pages.length < 2 ||
-        body.pages.length > MAX_VISIBLE_RESULT_PAGES) return null;
+        body.pages.length < (window ? 1 : 2) ||
+        body.pages.length > MAX_VISIBLE_RESULT_PAGES ||
+        (window && (!Number.isSafeInteger(body.startChunkIndex) ||
+          (body.startChunkIndex as number) < 0 ||
+          typeof body.complete !== "boolean" ||
+          (body.nextChunkIndex !== null &&
+            body.nextChunkIndex !== (body.startChunkIndex as number) + body.pages.length) ||
+          (body.nextChunkIndex === null && !body.complete &&
+            (body.startChunkIndex as number) + body.pages.length < 2)))) return null;
     const ids = new Set<string>();
     const refs = new Set<string>();
     const previews = new Set<string>();
@@ -118,14 +133,16 @@ export function parseAmuxIdeaAnalysisResultView(
     for (const [index, page] of body.pages.entries()) {
       if (!record(page) || !keys(page, ["chunkIndex", "previewId", "completedAt",
         "outcome", "coveredScope", "remainingScope", "units"]) ||
-          page.chunkIndex !== index || !ref(page.previewId) ||
+          page.chunkIndex !== (window ? body.startChunkIndex as number : 0) + index ||
+          !ref(page.previewId) ||
           previews.has(page.previewId)) return null;
       previews.add(page.previewId);
       const completedAt = Date.parse(String(page.completedAt));
       if (!Number.isFinite(completedAt) || completedAt < previousCompletedAt) return null;
       previousCompletedAt = completedAt;
       const partial = index < body.pages.length - 1 ||
-        body.state === "continued_partial";
+        body.state === "continued_partial" ||
+        (window && (body.nextChunkIndex !== null || !body.complete));
       const nested = parseAmuxIdeaAnalysisResultView(200, partial ? {
         state: "partial", ideaId: expectedIdeaId,
         previewId: page.previewId, completedAt: page.completedAt,
@@ -151,6 +168,14 @@ export function parseAmuxIdeaAnalysisResultView(
   if (body.state === "pending" || body.state === "cancelled" ||
       body.state === "provider_failed") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
+  }
+  if (body.state === "owner_input") {
+    return keys(body, ["state", "ideaId", "chunkIndex", "ownerQuestion",
+      "remainingScope"]) && body.ideaId === expectedIdeaId &&
+      Number.isSafeInteger(body.chunkIndex) && Number(body.chunkIndex) >= 0 &&
+      (body.ownerQuestion === null || text(body.ownerQuestion)) &&
+      (body.remainingScope === null || text(body.remainingScope)) ?
+      body as AmuxIdeaAnalysisResultView : null;
   }
   const partial = body.state === "partial";
   if ((body.state !== "ready" && !partial) ||

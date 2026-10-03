@@ -58,7 +58,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     where: { id: choice.previewId }, select: { ideaId: true, chunkIndex: true },
   });
   if (!identity || identity.ideaId !== choice.ideaId ||
-      ![0, 1].includes(identity.chunkIndex)) {
+      !Number.isSafeInteger(identity.chunkIndex) || identity.chunkIndex < 0 ||
+      identity.chunkIndex >= 2_147_483_647) {
     throw new IdeaTransferConfirmationError("not_found");
   }
   const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
@@ -110,13 +111,17 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       row.consumedAt !== null) {
     throw new IdeaTransferConfirmationError("not_ready");
   }
-  if (identity.chunkIndex === 1) {
-    const first = await tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId: idea.id, chunkIndex: 0 } },
+  if (identity.chunkIndex >= 1) {
+    const prior = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: idea.id,
+        chunkIndex: identity.chunkIndex - 1 } },
     });
-    if (first?.state !== "draft_ready" || first.outputPending !== true ||
-        first.sourcePlanRevisionId !== row.sourcePlanRevisionId ||
-        first.analysisCompletedAt === null) {
+    if (prior?.state !== "draft_ready" || prior.outputPending !== true ||
+        prior.coverageStatus !== "more" ||
+        prior.continuationKind !== "output" ||
+        prior.outputPartIndex !== identity.chunkIndex - 1 ||
+        prior.sourcePlanRevisionId !== row.sourcePlanRevisionId ||
+        prior.analysisCompletedAt === null) {
       throw new IdeaTransferConfirmationError("not_ready");
     }
   }

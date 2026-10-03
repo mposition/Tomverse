@@ -6,26 +6,29 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-  AMUX_V4_FIRST_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET, AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+  AMUX_V4_SECOND_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { ideaTransferBrowserDigest } from "./ideaTransferBrowserCore.ts";
 import {
-  openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
+  amuxContentDigest, openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys,
 } from "./ideaCrypto.ts";
 import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
-import { readAmuxFirstIdeaAnalysisResultInTransaction } from
-  "./ideaAnalysisResultReadService.ts";
+import { AmuxIdeaAnalysisResultReadError } from "./ideaAnalysisResultReadService.ts";
+import { readVerifiedAmuxIdeaAnalysisContinuationContext } from
+  "./ideaContinuedAnalysisResultReadService.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
   buildAmuxIdeaAnalysisPrompt,
-  buildFirstOutputContinuationPrompt,
+  buildIdeaOnlyOutputContinuationPrompt,
 } from "./ideaAnalysisPromptCore.ts";
-import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
+import type { AmuxAnalysisChunk } from
+  "./ideaAnalysisChunkCore.ts";
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
 import {
@@ -36,7 +39,8 @@ import {
 
 export class IdeaTransferPreviewError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "integrity_unavailable" |
-    "model_changed" | "preview_disabled" | "outcome_unknown") {
+    "model_changed" | "preview_disabled" | "outcome_unknown" |
+    "reference_selection_required") {
     super(code);
     this.name = "IdeaTransferPreviewError";
   }
@@ -217,6 +221,8 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
     };
     payloadBytes = Buffer.from(amuxCanonicalJson(payload), "utf8");
     const sealed = sealAmuxContent(payloadBytes, "transfer_payload", choice.previewId, input.keys);
+    const finalRefs = amuxContentDigest(Buffer.from("[]", "utf8"),
+      "transfer_payload", choice.previewId, input.keys);
     const browserBindingDigest = ideaTransferBrowserDigest({
       previewId: choice.previewId, nonce: input.browserNonce,
       authenticatedAt: input.session.user?.authenticatedAt, key: input.keys,
@@ -261,6 +267,9 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       metadata: { ideaId: idea.id, chunkIndex: 0, sourcePlanRevisionId: plan.id,
         modelApprovalId: choice.approvalId, modelApprovalVersion: choice.approvalVersion,
         payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId,
+        finalPermittedTargetRefs: [],
+        finalPermittedTargetRefsDigest: finalRefs.digest,
+        finalPermittedTargetRefsDigestKeyId: finalRefs.digestKeyId,
         browserBindingDigest,
         ...(replacedPreview ? { replacesPreviewId: replacedPreview.id } : {}),
         transferAuthorized: false },
@@ -285,6 +294,11 @@ export async function commitFirstOutputContinuationTransferPreview(
   payloadDigest: string; payloadDigestKeyId: string }> {
   const actorUserId = ownerId(input.session);
   const { choice } = input;
+  const chunkIndex = choice.chunkIndex ?? 1;
+  if (!Number.isSafeInteger(chunkIndex) ||
+      chunkIndex < 1 || chunkIndex >= 2_147_483_647) {
+    throw new IdeaTransferPreviewError("not_ready");
+  }
   await takeAuditChainLock(tx);
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
@@ -294,10 +308,12 @@ export async function commitFirstOutputContinuationTransferPreview(
   const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
     WHERE "ideaId" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
-      AND "chunkIndex" IN (0, 1) ORDER BY "chunkIndex" FOR UPDATE
+      AND "chunkIndex" <= ${chunkIndex} ORDER BY "chunkIndex" FOR UPDATE
   `;
-  if (chunkLocks.length !== 2 || chunkLocks[0]?.chunkIndex !== 0 ||
-      chunkLocks[1]?.chunkIndex !== 1) throw new IdeaTransferPreviewError("not_ready");
+  if (chunkLocks.length !== chunkIndex + 1 ||
+      chunkLocks.some((row, index) => row.chunkIndex !== index)) {
+    throw new IdeaTransferPreviewError("not_ready");
+  }
   if (choice.replacesPreviewId) {
     const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "AmuxIdeaTransferPreview"
@@ -315,7 +331,7 @@ export async function commitFirstOutputContinuationTransferPreview(
   }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: choice.ideaId } });
   const nextChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 1 } },
+    where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex } },
   });
   const replacedPreview = choice.replacesPreviewId
     ? await tx.amuxIdeaTransferPreview.findUnique({ where: { id: choice.replacesPreviewId } })
@@ -329,7 +345,8 @@ export async function commitFirstOutputContinuationTransferPreview(
     ? replacedPreview?.ideaId === choice.ideaId &&
       replacedPreview.sourcePlanRevisionId === idea?.currentSourcePlanRevisionId &&
       replacedPreview.sourceScopeApprovalId === null &&
-      replacedPreview.sourceUnitOrdinal === 0 && replacedPreview.chunkIndex === 1 &&
+      replacedPreview.sourceUnitOrdinal === 0 &&
+      replacedPreview.chunkIndex === chunkIndex &&
       ["prepared", "confirmed", "expired"].includes(replacedPreview.state) &&
       replacedPreview.consumedAt === null && replacedPreview.outcomeUnknownAt === null &&
       replacedPreview.expiresAt <= now && existingHold === null &&
@@ -347,7 +364,8 @@ export async function commitFirstOutputContinuationTransferPreview(
       !idea.rawDigest || !idea.rawDigestKeyId ||
       nextChunk.actorUserId !== actorUserId || !replaceable ||
       nextChunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
-      nextChunk.planStartChunkIndex !== 0 || nextChunk.revisionChunkIndex !== 1) {
+      nextChunk.planStartChunkIndex !== 0 ||
+      nextChunk.revisionChunkIndex !== chunkIndex) {
     throw new IdeaTransferPreviewError("not_ready");
   }
   const plan = await tx.amuxIdeaSourcePlanRevision.findUnique({
@@ -367,17 +385,30 @@ export async function commitFirstOutputContinuationTransferPreview(
       !matchesInitialPlanSystemAudit(planAudit.metadata, plan.manifestDigest)) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
-  const first = await readAmuxFirstIdeaAnalysisResultInTransaction(
-    tx, input.session, choice.ideaId, input.keys);
-  if (first.state !== "partial" || !first.coveredScope || !first.remainingScope ||
-      first.units.some((unit) => !unit.proposal || unit.decisionState !== "proposed")) {
+  const context = await readVerifiedAmuxIdeaAnalysisContinuationContext(
+    tx, actorUserId, choice.ideaId, input.keys, choice.pinnedTargetRefs ?? [])
+    .catch((error: unknown) => {
+      if (error instanceof AmuxIdeaAnalysisResultReadError &&
+          (error.code === "not_found" ||
+            error.code === "reference_selection_required")) {
+        throw new IdeaTransferPreviewError("reference_selection_required");
+      }
+      throw error;
+    });
+  if (context.pageCount !== chunkIndex || context.complete ||
+      !context.previous.remainingScope) {
     throw new IdeaTransferPreviewError("not_ready");
   }
-  const priorUnits = first.units.map((unit) => unit.proposal) as
+  const previous = context.previous;
+  const previousUnits = previous.units.map((unit) => unit.proposal!) as
     AmuxAnalysisChunk["units"];
+  const priorPermittedTargetRefs = context.priorTargets;
   const priorAudits = await tx.adminAuditLog.findMany({
-    where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET, targetId: `${idea.id}:0` },
+    where: { action: chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_ACTION :
+        AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+      targetType: chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_TARGET :
+        AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+      targetId: `${idea.id}:${chunkIndex - 1}` },
     take: 2, select: { entryHash: true },
   });
   const previousAuditHash = priorAudits[0]?.entryHash;
@@ -417,17 +448,24 @@ export async function commitFirstOutputContinuationTransferPreview(
         throw new IdeaTransferPreviewError("integrity_unavailable");
       }
     } finally { ideaBytes.fill(0); }
-    const prompt = buildFirstOutputContinuationPrompt({
-      previewId: choice.previewId, previousPreviewId: first.previewId,
+    const prompt = buildIdeaOnlyOutputContinuationPrompt({
+      previewId: choice.previewId, previousPreviewId: previous.previewId,
       previousRaw: JSON.stringify({ schemaVersion: 2,
-        previewId: first.previewId, chunkIndex: 0, outcome: "propose",
+        previewId: previous.previewId, chunkIndex: chunkIndex - 1,
+        outcome: "propose",
         coverageStatus: "more", continuationKind: "output", ownerQuestion: null,
-        coveredScope: first.coveredScope, remainingScope: first.remainingScope,
-        units: priorUnits }),
-      previousAuditHash, ideaText: parsed.input.idea,
+        coveredScope: previous.coveredScope, remainingScope: previous.remainingScope,
+        units: previousUnits }),
+      previousAuditHash, previousChunkIndex: chunkIndex - 1,
+      priorPermittedTargetRefs, ideaText: parsed.input.idea,
+      previousPagePermittedTargetRefs: context.validationTargets,
+      nextPermittedTargetRefs: context.targets,
+      pinnedTargetRefs: choice.pinnedTargetRefs,
+      omittedTargetSummary: context.omittedTargetSummary,
     });
     if (prompt.status !== "prompt_candidate") {
-      throw new IdeaTransferPreviewError("not_ready");
+      throw new IdeaTransferPreviewError(prompt.reason === "required_refs_exceed_limit"
+        ? "reference_selection_required" : "not_ready");
     }
     const payload: PreviewPayload = {
       version: 1, previewId: choice.previewId, ideaId: choice.ideaId,
@@ -438,6 +476,10 @@ export async function commitFirstOutputContinuationTransferPreview(
     };
     payloadBytes = Buffer.from(amuxCanonicalJson(payload), "utf8");
     const sealed = sealAmuxContent(payloadBytes, "transfer_payload", choice.previewId, input.keys);
+    const finalPermittedTargetRefs = prompt.selectedTargetRefs ?? context.targets;
+    const finalRefs = amuxContentDigest(Buffer.from(
+      amuxCanonicalJson(finalPermittedTargetRefs), "utf8"),
+    "transfer_payload", choice.previewId, input.keys);
     const browserBindingDigest = ideaTransferBrowserDigest({
       previewId: choice.previewId, nonce: input.browserNonce,
       authenticatedAt: input.session.user?.authenticatedAt, key: input.keys,
@@ -458,7 +500,7 @@ export async function commitFirstOutputContinuationTransferPreview(
         action: "amux.v4.transfer_preview.expired_for_replacement",
         targetType: "AmuxIdeaTransferPreview", targetId: replacedPreview.id,
         summary: "Owner replaced one expired analysis transfer preview; no model was called.",
-        metadata: { ideaId: idea.id, chunkIndex: 1,
+        metadata: { ideaId: idea.id, chunkIndex,
           replacementPreviewId: choice.previewId,
           priorState: replacedPreview.state,
           confirmationRecorded: replacedPreview.confirmationAuditLogId !== null },
@@ -467,7 +509,7 @@ export async function commitFirstOutputContinuationTransferPreview(
     await tx.amuxIdeaTransferPreview.create({ data: {
       id: choice.previewId, ideaId: idea.id,
       sourcePlanRevisionId: plan.id, sourceUnitOrdinal: 0,
-      chunkIndex: 1, attempt: nextAttempt, state: "prepared",
+      chunkIndex, attempt: nextAttempt, state: "prepared",
       modelId: choice.modelId, templateVersion: prompt.version,
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
@@ -475,7 +517,7 @@ export async function commitFirstOutputContinuationTransferPreview(
       payloadPurgeAfter: new Date(expiresAt.getTime() + 24 * 60 * 60_000),
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
-      where: { ideaId: idea.id, chunkIndex: 1, actorUserId,
+      where: { ideaId: idea.id, chunkIndex, actorUserId,
         state: replacedPreview ? "awaiting_preview" : "pending",
         attempt: replacedPreview?.attempt ?? 0,
         currentPreviewId: replacedPreview?.id ?? null,
@@ -488,10 +530,14 @@ export async function commitFirstOutputContinuationTransferPreview(
       action: "amux.v4.transfer_preview.prepared",
       targetType: "AmuxIdeaTransferPreview", targetId: choice.previewId,
       summary: "Owner prepared one output-continuation transfer preview; no model was called.",
-      metadata: { ideaId: idea.id, chunkIndex: 1, sourcePlanRevisionId: plan.id,
+      metadata: { ideaId: idea.id, chunkIndex, sourcePlanRevisionId: plan.id,
         previousChunkAuditHash: previousAuditHash,
+        pinnedTargetRefs: choice.pinnedTargetRefs ?? [],
         modelApprovalId: choice.approvalId, modelApprovalVersion: choice.approvalVersion,
         payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId,
+        finalPermittedTargetRefs,
+        finalPermittedTargetRefsDigest: finalRefs.digest,
+        finalPermittedTargetRefsDigestKeyId: finalRefs.digestKeyId,
         browserBindingDigest,
         ...(replacedPreview ? { replacesPreviewId: replacedPreview.id } : {}),
         transferAuthorized: false },

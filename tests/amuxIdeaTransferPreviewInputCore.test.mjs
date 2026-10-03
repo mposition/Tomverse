@@ -76,7 +76,28 @@ test("a second output page is explicit and can name one expired predecessor", ()
     ...input, chunkIndex: 1,
     replacesPreviewId: "123e4567-e89b-42d3-a456-426614174004",
   })).ok, true);
-  for (const changed of [{ chunkIndex: 0 }, { chunkIndex: 2 },
+  assert.equal(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+    ...input, chunkIndex: 2,
+  })).ok, true);
+  assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+    ...input, chunkIndex: 17, pinnedTargetRefs: ["c4:card-0"],
+  })), { ok: true, request: {
+    previewId: input.previewId, ideaId: input.ideaId, chunkIndex: 17,
+    pinnedTargetRefs: ["c4:card-0"], provider: input.provider,
+    modelId: input.modelId, reasoningEffort: input.reasoningEffort,
+    approvalId: input.approvalId, approvalVersion: input.approvalVersion,
+  } });
+  for (const pinnedTargetRefs of [[], ["c4:card-0", "c4:card-0"],
+    ["not-verified"], Array.from({ length: 7 }, (_, i) => `c${i}:card-0`)]) {
+    assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+      ...input, chunkIndex: 17, pinnedTargetRefs,
+    })), { ok: false, code: "schema_rejected" });
+  }
+  assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+    ...input, pinnedTargetRefs: ["c4:card-0"],
+  })), { ok: false, code: "schema_rejected" });
+  for (const changed of [{ chunkIndex: 0 }, { chunkIndex: -1 },
+    { chunkIndex: 2_147_483_647 }, { chunkIndex: 1.5 },
     { chunkIndex: 1, replacesPreviewId: input.previewId }]) {
     assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
       ...input, ...changed,

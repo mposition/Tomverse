@@ -56,7 +56,8 @@ async function owner(): Promise<Session | NextResponse> {
 function failure(error: unknown): Response {
   if (error instanceof IdeaTransferPreviewError) {
     const status = error.code === "not_found" ? 404 :
-      error.code === "not_ready" || error.code === "model_changed" ? 409 : 503;
+      error.code === "not_ready" || error.code === "model_changed" ||
+      error.code === "reference_selection_required" ? 409 : 503;
     return NextResponse.json({ error: error.code, transferAuthorized: false },
       { status, headers: noStore });
   }
@@ -101,7 +102,7 @@ export async function POST(request: Request) {
       return response;
     };
     try {
-      const prepare = inspected.request.chunkIndex === 1
+      const prepare = inspected.request.chunkIndex !== undefined
         ? prepareFirstOutputContinuationTransferPreview : prepareIdeaOnlyTransferPreview;
       const result = await prepare(session, request, inspected.request, browserNonce);
       return attachBrowserCookie(NextResponse.json(

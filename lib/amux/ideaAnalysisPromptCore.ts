@@ -19,7 +19,7 @@ import {
  * runner must bind this exact data to an owner-confirmed, unconsumed receipt,
  * repeat current source/model/budget checks, and spawn a tool-less CLI in a
  * credential-free sandbox. No live runner imports this module today. */
-export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v3" as const;
+export const AMUX_V4_ANALYSIS_PROMPT_VERSION = "amux-v4-analysis-prompt-v4" as const;
 export const AMUX_V4_ANALYSIS_DATA_MAX_BYTES = 16 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES = 8 * 1024;
 export const AMUX_V4_ANALYSIS_SOURCE_CAP = 12;
@@ -47,6 +47,8 @@ export type AmuxIdeaAnalysisPromptInput = {
   };
   sourceTexts: readonly AmuxIdeaAnalysisSourceText[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
+  omittedTargetSummary?: { count: number; firstChunkIndex: number;
+    lastChunkIndex: number } | null;
 };
 
 /** Copy continuation metadata from one already-validated and DB-bound chunk.
@@ -109,7 +111,12 @@ export function buildIdeaOnlyOutputContinuationPrompt(input: {
   previousAuditHash: string;
   previousChunkIndex: number;
   priorPermittedTargetRefs: readonly AmuxPermittedTargetRef[];
+  previousPagePermittedTargetRefs?: readonly AmuxPermittedTargetRef[];
+  nextPermittedTargetRefs?: readonly AmuxPermittedTargetRef[];
+  pinnedTargetRefs?: readonly string[];
   ideaText: string;
+  omittedTargetSummary?: { count: number; firstChunkIndex: number;
+    lastChunkIndex: number } | null;
 }): AmuxIdeaAnalysisPromptResult {
   try {
     if (!Number.isSafeInteger(input.previousChunkIndex) ||
@@ -124,7 +131,8 @@ export function buildIdeaOnlyOutputContinuationPrompt(input: {
       expectedRevisionChunkIndex: input.previousChunkIndex,
       previousContinuationKind: input.previousChunkIndex === 0 ? null : "output",
       permittedSourceRefIds: ["operator_idea"],
-      permittedTargetRefs: input.priorPermittedTargetRefs,
+      permittedTargetRefs: input.previousPagePermittedTargetRefs ??
+        input.priorPermittedTargetRefs,
     });
     if (!previous.ok || previous.chunk.outcome !== "propose" ||
         previous.chunk.coverageStatus !== "more" ||
@@ -142,14 +150,46 @@ export function buildIdeaOnlyOutputContinuationPrompt(input: {
         featureRef: unit.featureRef }];
       return [];
     });
-    return buildAmuxIdeaAnalysisPrompt({
-      previewId: input.previewId, chunkIndex: input.previousChunkIndex + 1,
-      revisionChunkIndex: input.previousChunkIndex + 1,
-      continuation,
-      sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
-        text: input.ideaText }],
-      permittedTargetRefs: [...input.priorPermittedTargetRefs, ...currentTargets],
-    });
+    const targetRefs = [...(input.nextPermittedTargetRefs ??
+      [...input.priorPermittedTargetRefs, ...currentTargets])];
+    let omitted = input.omittedTargetSummary ?? null;
+    const currentIds = new Set(currentTargets.map((target) => target.ref));
+    const pinnedIds = new Set(input.pinnedTargetRefs ?? []);
+    if (pinnedIds.size !== (input.pinnedTargetRefs?.length ?? 0) ||
+        [...pinnedIds].some((ref) => !targetRefs.some((target) => target.ref === ref))) {
+      return { status: "hold", reason: "prompt_data_unverified" };
+    }
+    for (;;) {
+      const built = buildAmuxIdeaAnalysisPrompt({
+        previewId: input.previewId, chunkIndex: input.previousChunkIndex + 1,
+        revisionChunkIndex: input.previousChunkIndex + 1,
+        continuation,
+        sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
+          text: input.ideaText }],
+        permittedTargetRefs: targetRefs, omittedTargetSummary: omitted,
+      });
+      if (built.status === "prompt_candidate") {
+        return { ...built, selectedTargetRefs: targetRefs,
+          omittedTargetSummary: omitted };
+      }
+      if (built.reason !== "prompt_data_too_large" ||
+          input.nextPermittedTargetRefs === undefined) return built;
+      const removable = targetRefs.findIndex((target) =>
+        !currentIds.has(target.ref) && !pinnedIds.has(target.ref) &&
+        target.kind === "card" &&
+        target.cardType === "task");
+      // A structural parent may be needed for the next card. Never silently
+      // discard one merely to fit the byte cap after the owner saw a preview.
+      if (removable < 0) return { status: "hold", reason: "required_refs_exceed_limit" };
+      const removed = targetRefs.splice(removable, 1)[0]!;
+      const index = Number(/^c([0-9]+):/.exec(removed.ref)?.[1]);
+      if (!Number.isSafeInteger(index)) {
+        return { status: "hold", reason: "prompt_data_unverified" };
+      }
+      omitted = { count: (omitted?.count ?? 0) + 1,
+        firstChunkIndex: Math.min(omitted?.firstChunkIndex ?? index, index),
+        lastChunkIndex: Math.max(omitted?.lastChunkIndex ?? index, index) };
+    }
   } catch {
     return { status: "hold", reason: "prompt_data_unverified" };
   }
@@ -157,8 +197,12 @@ export function buildIdeaOnlyOutputContinuationPrompt(input: {
 
 export type AmuxIdeaAnalysisPromptResult =
   | { status: "prompt_candidate"; version: typeof AMUX_V4_ANALYSIS_PROMPT_VERSION;
-      prompt: string; dataBytes: number }
-  | { status: "hold"; reason: "prompt_data_unverified" | "prompt_data_too_large" };
+      prompt: string; dataBytes: number;
+      selectedTargetRefs?: AmuxPermittedTargetRef[];
+      omittedTargetSummary?: { count: number; firstChunkIndex: number;
+        lastChunkIndex: number } | null }
+  | { status: "hold"; reason: "prompt_data_unverified" | "prompt_data_too_large" |
+      "required_refs_exceed_limit" };
 
 const DATA_BEGIN = "BEGIN_CONFIRMED_DATA_JSON";
 const DATA_END = "END_CONFIRMED_DATA_JSON";
@@ -210,6 +254,8 @@ Return exactly one JSON object and no Markdown. Its top-level keys are schemaVer
 
 Each unit must have a localId beginning c<chunkIndex>: followed by its matching kind and a canonical nonnegative integer, for example c<chunkIndex>:card-0; no leading zeroes. Each unit needs at least one sourceRefId listed in the confirmed data. References may point only to confirmed permittedTargetRefs or units in this same output. permittedTargetRefs may include prior-chunk Story or Task proposal IDs, so an output-continuation Task can refer to an earlier Story or dependency without duplicating it. Such refs establish only identity and type within this package, never approval, registration, or execution permission. Use at most ${AMUX_ANALYSIS_CHUNK_CARD_CAP} card units, ${AMUX_ANALYSIS_CHUNK_NODE_CAP} node units, and ${AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP} evidence units. Do not treat those per-chunk limits as an idea-wide card limit.
 
+If omittedTargetSummary is present, the listed prior references are only a bounded selection. The summary tells how many older reference identities from which chunk-index range were withheld, not that those cards or their remaining work vanished. Do not invent a link to an omitted reference. Continue only independently verifiable scope that can use the listed references; if a missing parent or dependency is necessary, ask the owner to resolve it through needs_information and preserve the unfinished range in remainingScope.
+
 Node keys: kind="node", localId, level (initiative|epic|feature), parentRef (null for initiative), title, description, sourceRefIds.
 Card keys: kind="card", localId, cardType (story|task), storyKind (general|bug for Story, null for Task), title, problem, scopeIn, scopeOut, completionCriteria, featureRef, parentStoryRef (nullable for Task, null for Story), dependencyRefs (Task dependencies; required empty array for Story), duplicateCandidateRefs, taskRole (design|implement|test|review|verify|investigate|operate for Task, null for Story), executionGrade (routine|advanced|frontier for Task, null for Story), executionBrief (nonempty for Task, null for Story), sourceRefIds.
 Evidence keys: kind="evidence", localId, evidenceType (observed_error|source_finding), summary, cardRef, sourceRefIds. An observed_error belongs to a Bug Story.
@@ -225,7 +271,8 @@ function buildCheckedPrompt(
 ): AmuxIdeaAnalysisPromptResult {
   if (!input) return { status: "hold", reason: "prompt_data_unverified" };
   const { previewId, chunkIndex, revisionChunkIndex, continuation: rawContinuation,
-    sourceTexts: rawSources, permittedTargetRefs: rawTargets } = input;
+    sourceTexts: rawSources, permittedTargetRefs: rawTargets,
+    omittedTargetSummary: rawOmitted } = input;
   const continuation = rawContinuation === null ? null : (() => {
     if (!amuxExactDataKeys(rawContinuation,
       ["previousChunkIndex", "previousChunkDigest", "previousContinuationKind",
@@ -294,6 +341,19 @@ function buildCheckedPrompt(
         permittedTargetRefs.length) {
     return { status: "hold", reason: "prompt_data_unverified" };
   }
+  const omittedTargetSummary = rawOmitted ?? null;
+  if (omittedTargetSummary !== null &&
+      (!amuxExactDataKeys(omittedTargetSummary,
+        ["count", "firstChunkIndex", "lastChunkIndex"]) ||
+        !Number.isSafeInteger(omittedTargetSummary.count) ||
+        omittedTargetSummary.count < 1 ||
+        !Number.isSafeInteger(omittedTargetSummary.firstChunkIndex) ||
+        omittedTargetSummary.firstChunkIndex < 0 ||
+        !Number.isSafeInteger(omittedTargetSummary.lastChunkIndex) ||
+        omittedTargetSummary.lastChunkIndex < omittedTargetSummary.firstChunkIndex ||
+        omittedTargetSummary.lastChunkIndex >= chunkIndex)) {
+    return { status: "hold", reason: "prompt_data_unverified" };
+  }
   const dataJson = amuxCanonicalJson({
     previewId,
     chunkIndex,
@@ -304,6 +364,7 @@ function buildCheckedPrompt(
       ? { ref: target.ref, kind: target.kind, level: target.level }
       : { ref: target.ref, kind: target.kind, cardType: target.cardType,
           storyKind: target.storyKind, featureRef: target.featureRef }),
+    omittedTargetSummary,
   });
   const dataBytes = Buffer.byteLength(dataJson, "utf8");
   if (dataBytes > AMUX_V4_ANALYSIS_DATA_MAX_BYTES) {

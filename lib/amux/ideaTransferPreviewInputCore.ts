@@ -15,7 +15,8 @@ export const transferPreviewReadPermitted = (value: string | undefined): boolean
 export type IdeaOnlyTransferPreviewRequest = {
   previewId: string;
   ideaId: string;
-  chunkIndex?: 1;
+  chunkIndex?: number;
+  pinnedTargetRefs?: string[];
   replacesPreviewId?: string;
   provider: "openai" | "anthropic";
   modelId: string;
@@ -30,6 +31,8 @@ const FIELDS = ["version", "previewId", "ideaId", "provider", "modelId",
   "reasoningEffort", "approvalId", "approvalVersion"];
 const REPLACEMENT_FIELD = "replacesPreviewId";
 const CONTINUATION_FIELD = "chunkIndex";
+const PINNED_FIELD = "pinnedTargetRefs";
+const TARGET_REF = /^c[0-9]+:(?:node|card)-[0-9]+$/;
 
 export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   | { ok: true; request: IdeaOnlyTransferPreviewRequest }
@@ -45,7 +48,9 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   const value = parsed as Record<string, unknown>;
   const replacing = Object.hasOwn(value, REPLACEMENT_FIELD);
   const continuing = Object.hasOwn(value, CONTINUATION_FIELD);
-  if (Object.keys(value).length !== FIELDS.length + Number(replacing) + Number(continuing) ||
+  const pinning = Object.hasOwn(value, PINNED_FIELD);
+  if (Object.keys(value).length !== FIELDS.length + Number(replacing) +
+      Number(continuing) + Number(pinning) ||
       !FIELDS.every((field) => Object.hasOwn(value, field)) ||
       value.version !== 1 ||
       typeof value.previewId !== "string" || !isAmuxIdeaRequestId(value.previewId) ||
@@ -53,7 +58,13 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
       (replacing && (typeof value.replacesPreviewId !== "string" ||
         !isAmuxIdeaRequestId(value.replacesPreviewId) ||
         value.replacesPreviewId === value.previewId)) ||
-      (continuing && value.chunkIndex !== 1) ||
+      (continuing && (!Number.isSafeInteger(value.chunkIndex) ||
+        Number(value.chunkIndex) < 1 || Number(value.chunkIndex) >= 2_147_483_647)) ||
+      (pinning && (!continuing || !Array.isArray(value.pinnedTargetRefs) ||
+        value.pinnedTargetRefs.length < 1 || value.pinnedTargetRefs.length > 6 ||
+        value.pinnedTargetRefs.some((ref: unknown) =>
+          typeof ref !== "string" || ref.length > 64 || !TARGET_REF.test(ref)) ||
+        new Set(value.pinnedTargetRefs).size !== value.pinnedTargetRefs.length)) ||
       (value.provider !== "openai" && value.provider !== "anthropic") ||
       typeof value.modelId !== "string" || !MODEL_ID.test(value.modelId) ||
       typeof value.reasoningEffort !== "string" || !EFFORTS.has(value.reasoningEffort) ||
@@ -63,7 +74,8 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   }
   return { ok: true, request: {
     previewId: value.previewId, ideaId: value.ideaId,
-    ...(continuing ? { chunkIndex: 1 as const } : {}),
+    ...(continuing ? { chunkIndex: value.chunkIndex as number } : {}),
+    ...(pinning ? { pinnedTargetRefs: value.pinnedTargetRefs as string[] } : {}),
     ...(replacing ? { replacesPreviewId: value.replacesPreviewId as string } : {}),
     provider: value.provider, modelId: value.modelId,
     reasoningEffort: value.reasoningEffort as IdeaOnlyTransferPreviewRequest["reasoningEffort"],

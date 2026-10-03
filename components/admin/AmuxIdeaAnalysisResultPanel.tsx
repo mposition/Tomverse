@@ -17,20 +17,26 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
 
 /** Owner-only page section. All model-derived text is rendered as React text,
  * never as HTML. No approval, registration, or model request originates here. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationSelection }: {
+  ideaId: string;
+  onContinuationSelection?: (value: { chunkIndex: number;
+    pinnedTargetRefs: string[] } | null) => void;
+}) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<AmuxIdeaAnalysisResultView | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
+  const [pinnedTargetRefs, setPinnedTargetRefs] = useState<string[]>([]);
 
-  const refresh = async () => {
+  const refresh = async (startChunkIndex = 0) => {
     if (loading) return;
     setLoading(true);
     setUnavailable(false);
     setNeedsReauthentication(false);
     try {
       const params = new URLSearchParams({ ideaId });
+      if (startChunkIndex > 0) params.set("startChunkIndex", String(startChunkIndex));
       const response = await adminFetch(`/api/admin/amux/ideas/analysis-result?${params}`,
         { cache: "no-store" });
       if (response.status === 428) {
@@ -41,13 +47,25 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
       const parsed = parseAmuxIdeaAnalysisResultView(response.status,
         await response.json(), ideaId);
       if (!parsed) { setView(null); setUnavailable(true); }
-      else setView(parsed);
+      else {
+        setView(parsed);
+        const last = parsed.state === "partial" ? 0 :
+          parsed.state === "continued_partial" ? parsed.pages.at(-1)?.chunkIndex :
+            parsed.state === "continued_window" && !parsed.complete &&
+              parsed.nextChunkIndex === null ? parsed.pages.at(-1)?.chunkIndex : null;
+        if (last !== null && last !== undefined) {
+          onContinuationSelection?.({ chunkIndex: last + 1, pinnedTargetRefs });
+        } else if (parsed.state === "ready" || parsed.state === "continued_ready" ||
+            (parsed.state === "continued_window" && parsed.complete)) {
+          onContinuationSelection?.(null);
+        }
+      }
     } catch { setView(null); setUnavailable(true); }
     finally { setLoading(false); }
   };
 
   const pages: AmuxIdeaAnalysisResultPage[] = view?.state === "continued_ready" ||
-    view?.state === "continued_partial" ? view.pages :
+    view?.state === "continued_partial" || view?.state === "continued_window" ? view.pages :
     view?.state === "ready" || view?.state === "partial" ? [{
       chunkIndex: 0, previewId: view.previewId, completedAt: view.completedAt,
       outcome: view.outcome, coveredScope: view.coveredScope,
@@ -74,6 +92,12 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
     {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
+    {view?.state === "owner_input" ? <div role="alert"
+      className="space-y-2 rounded-lg border border-amber-300 p-3 dark:border-amber-700">
+      <p>{m.analysisResultOwnerInput}</p>
+      <p className="whitespace-pre-wrap">{view.ownerQuestion ?? m.analysisResultScopeExpired}</p>
+      <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
+    </div> : null}
     {pages.length > 0 ? <div className="space-y-3">
       {pages.map((page, pageIndex) => <div key={page.previewId} className="space-y-3">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
@@ -81,7 +105,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
       </p>
       <p>{page.coveredScope ?? m.analysisResultScopeExpired}</p>
       {(view?.state === "partial" ||
-        (view?.state === "continued_partial" && pageIndex === pages.length - 1)) ?
+        (view?.state === "continued_partial" && pageIndex === pages.length - 1) ||
+        (view?.state === "continued_window" && !view.complete &&
+          view.nextChunkIndex === null && pageIndex === pages.length - 1)) ?
         <p role="status" className="rounded-lg border border-amber-300 p-3 dark:border-amber-700">
         {m.analysisResultPartial} {page.remainingScope ?? m.analysisResultScopeExpired}
       </p> : null}
@@ -92,6 +118,24 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
           <p className="text-xs text-zinc-600 dark:text-zinc-400">
             {unit.localRef} · {unit.decisionState}
           </p>
+          {unit.proposal && unit.proposal.kind !== "evidence" ? <label className="flex gap-2 text-xs">
+            <input type="checkbox" checked={pinnedTargetRefs.includes(unit.localRef)}
+              disabled={!pinnedTargetRefs.includes(unit.localRef) && pinnedTargetRefs.length >= 6}
+              onChange={(event) => {
+                const next = event.target.checked ? [...pinnedTargetRefs, unit.localRef] :
+                  pinnedTargetRefs.filter((ref) => ref !== unit.localRef);
+                setPinnedTargetRefs(next);
+                const last = pages.at(-1)?.chunkIndex;
+                if (last !== undefined && ((view?.state === "partial") ||
+                    view?.state === "continued_partial" ||
+                    (view?.state === "continued_window" && !view.complete &&
+                      view.nextChunkIndex === null))) {
+                  onContinuationSelection?.({ chunkIndex: last + 1,
+                    pinnedTargetRefs: next });
+                }
+              }} />
+            {m.analysisResultPinReference}
+          </label> : null}
           {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
           {unit.proposal?.kind === "node" ? <div className="space-y-1">
             <h4 className="font-semibold">{unit.proposal.title}</h4>
@@ -123,6 +167,18 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
         </li>)}
       </ol>
       </div>)}
+      {view?.state === "continued_window" && view.startChunkIndex > 0 ?
+        <button type="button" disabled={loading}
+          onClick={() => void refresh(Math.max(0, view.startChunkIndex - 16))}
+          className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+          {m.analysisResultPreviousWindow}
+        </button> : null}
+      {view?.state === "continued_window" && view.nextChunkIndex !== null ?
+        <button type="button" disabled={loading}
+          onClick={() => void refresh(view.nextChunkIndex!)}
+          className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+          {m.analysisResultNextWindow}
+        </button> : null}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;

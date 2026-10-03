@@ -127,6 +127,30 @@ test("a second output page yields a third prompt without recreating earlier refs
       ...unit, localId: "c2:card-0",
     })) }) }),
   { status: "hold", reason: "prompt_data_unverified" });
+  const projected = buildIdeaOnlyOutputContinuationPrompt({ ...input,
+    previousPagePermittedTargetRefs: priorPermittedTargetRefs,
+    nextPermittedTargetRefs: [{ ref: "c1:card-0", kind: "card",
+      cardType: "task", storyKind: null, featureRef: "c0:node-0" }],
+    omittedTargetSummary: { count: 2, firstChunkIndex: 0,
+      lastChunkIndex: 0 } });
+  assert.equal(projected.status, "prompt_candidate",
+    "the previous page is validated against its historical refs, not the next projection");
+  if (projected.status === "prompt_candidate") {
+    const bounded = JSON.parse(projected.prompt.split(
+      "BEGIN_CONFIRMED_DATA_JSON\n")[1].split(
+      "\nEND_CONFIRMED_DATA_JSON")[0]);
+    assert.deepEqual(bounded.permittedTargetRefs.map((target) => target.ref),
+      ["c1:card-0"]);
+    assert.deepEqual(bounded.omittedTargetSummary,
+      { count: 2, firstChunkIndex: 0, lastChunkIndex: 0 });
+  }
+  assert.deepEqual(buildIdeaOnlyOutputContinuationPrompt({ ...input,
+    previousPagePermittedTargetRefs: [priorPermittedTargetRefs[0]],
+    nextPermittedTargetRefs: [{ ref: "c1:card-0", kind: "card",
+      cardType: "task", storyKind: null, featureRef: "c0:node-0" }],
+    omittedTargetSummary: { count: 2, firstChunkIndex: 0,
+      lastChunkIndex: 0 } }),
+  { status: "hold", reason: "prompt_data_unverified" });
 });
 
 test("prompt candidate states the bounded proposal schema and no write authority", () => {

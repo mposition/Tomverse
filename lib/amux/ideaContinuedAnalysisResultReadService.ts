@@ -3,14 +3,19 @@ import "server-only";
 import { Prisma, type AmuxIdeaAnalysisChunk } from "@prisma/client";
 import type { Session } from "next-auth";
 
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET, AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
   AMUX_V4_SECOND_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
-import { amuxAnalysisTextSafe, inspectAmuxStoredAnalysisUnit } from
+import { amuxAnalysisTextSafe, amuxPermittedTargetRefSafe,
+  inspectAmuxStoredAnalysisUnit, snapshotAmuxPermittedTarget } from
   "./ideaAnalysisChunkCore.ts";
+import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
-import { readAmuxFirstIdeaAnalysisResultInTransaction,
+import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { readVerifiedAmuxOwnerInputHold } from "./ideaAnalysisOwnerInputReadService.ts";
+import { readVerifiedAmuxFirstIdeaAnalysisResultInTransaction,
   AmuxIdeaAnalysisResultReadError } from "./ideaAnalysisResultReadService.ts";
 import { matchesAmuxIdeaAnalysisCursorAudit,
   matchesAmuxIdeaAnalysisUnitCommitments } from "./ideaAnalysisResultReadCore.ts";
@@ -19,18 +24,20 @@ import type { AmuxIdeaAnalysisResultPage, AmuxIdeaAnalysisResultView,
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 
-/** Owner-only consistent read of the first two bounded pages. A completed
+/** Owner-only consistent read of bounded pages. A completed
  * continuation is not represented as a completed first page: each stored page
  * keeps its own audit, digest, expiry and independently purgeable unit bodies. */
 export async function readAmuxIdeaAnalysisResult(
   session: Session, ideaId: string, keys: AmuxContentKeys,
+  startChunkIndex = 0,
 ): Promise<AmuxIdeaAnalysisResultView> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '3000', true) AS statement_limit,
              set_config('idle_in_transaction_session_timeout', '6000', true) AS idle_limit
     `;
-    return readAmuxIdeaAnalysisResultInTransaction(tx, session, ideaId, keys);
+    return readAmuxIdeaAnalysisResultInTransaction(tx, session, ideaId, keys,
+      startChunkIndex);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 10_000 });
 }
@@ -38,76 +45,361 @@ export async function readAmuxIdeaAnalysisResult(
 /** Shared transaction body for owner read-back and atomic writer tests. */
 export async function readAmuxIdeaAnalysisResultInTransaction(
   tx: Prisma.TransactionClient, session: Session, ideaId: string,
+  keys: AmuxContentKeys, startChunkIndex = 0,
+): Promise<AmuxIdeaAnalysisResultView> {
+    const actorUserId = session.user?.id;
+    if (!actorUserId || !isAdminSession(session) ||
+        getAdminRole(session) !== "owner") {
+      throw new AmuxIdeaAnalysisResultReadError("not_found");
+    }
+    if (!Number.isSafeInteger(startChunkIndex) || startChunkIndex < 0 ||
+        startChunkIndex >= 2_147_483_647) {
+      throw new AmuxIdeaAnalysisResultReadError("not_found");
+    }
+    return startChunkIndex === 0
+      ? readVerifiedAmuxIdeaAnalysisResultInTransaction(tx, actorUserId, ideaId, keys)
+      : readVerifiedAmuxIdeaAnalysisResultWindowInTransaction(
+        tx, actorUserId, ideaId, keys, startChunkIndex);
+}
+
+export async function readVerifiedAmuxIdeaAnalysisResultWindowInTransaction(
+  tx: Prisma.TransactionClient, actorUserId: string, ideaId: string,
+  keys: AmuxContentKeys, startChunkIndex: number,
+): Promise<AmuxIdeaAnalysisResultView> {
+  if (!Number.isSafeInteger(startChunkIndex) || startChunkIndex < 1 ||
+      startChunkIndex >= 2_147_483_647) {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
+  const pages: AmuxIdeaAnalysisResultPage[] = [];
+  const scan = await scanVerifiedAmuxIdeaAnalysisPagesInTransaction(
+    tx, actorUserId, ideaId, keys, (page) => {
+      if (page.chunkIndex >= startChunkIndex && pages.length < 16) pages.push(page);
+    });
+  if (pages.length === 0 || scan.pageCount < startChunkIndex + pages.length) {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
+  if (!scan.complete) {
+    const next = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: scan.pageCount } },
+      select: { state: true },
+    });
+    if (next?.state === "owner_input") {
+      return readVerifiedAmuxOwnerInputHold(tx, actorUserId, ideaId,
+        scan.pageCount, keys);
+    }
+  }
+  return { state: "continued_window", ideaId, startChunkIndex,
+    nextChunkIndex: scan.pageCount > startChunkIndex + pages.length
+      ? startChunkIndex + pages.length : null,
+    complete: scan.complete, pages };
+}
+
+/** Internal read after a caller has already bound the locked idea to an
+ * authenticated actor. It never grants owner access on its own. */
+export async function readVerifiedAmuxIdeaAnalysisResultInTransaction(
+  tx: Prisma.TransactionClient, actorUserId: string, ideaId: string,
   keys: AmuxContentKeys,
 ): Promise<AmuxIdeaAnalysisResultView> {
-    const first = await readAmuxFirstIdeaAnalysisResultInTransaction(
-      tx, session, ideaId, keys);
-    if (first.state !== "partial") return first;
+    const pages: AmuxIdeaAnalysisResultPage[] = [];
+    const scan = await scanVerifiedAmuxIdeaAnalysisPagesInTransaction(
+      tx, actorUserId, ideaId, keys, (page) => {
+        if (pages.length < 16) pages.push(page);
+      });
+    if (scan.first.state !== "partial") return scan.first;
+    if (!scan.complete) {
+      const next = await tx.amuxIdeaAnalysisChunk.findUnique({
+        where: { ideaId_chunkIndex: { ideaId, chunkIndex: scan.pageCount } },
+        select: { state: true },
+      });
+      if (next?.state === "owner_input") {
+        return readVerifiedAmuxOwnerInputHold(tx, actorUserId, ideaId,
+          scan.pageCount, keys);
+      }
+    }
+    if (scan.pageCount === 1) return scan.first;
+    if (scan.pageCount > 16) {
+      return { state: "continued_window", ideaId, startChunkIndex: 0,
+        nextChunkIndex: 16, complete: scan.complete,
+        pages: pages as [AmuxIdeaAnalysisResultPage,
+          AmuxIdeaAnalysisResultPage, ...AmuxIdeaAnalysisResultPage[]] };
+    }
+    return { state: scan.complete ? "continued_ready" : "continued_partial",
+      ideaId, pages: pages as [AmuxIdeaAnalysisResultPage,
+        AmuxIdeaAnalysisResultPage, ...AmuxIdeaAnalysisResultPage[]] };
+}
+
+/** Verify every predecessor in cursor order while retaining only a bounded
+ * caller-selected projection. No proposal page history is assembled in RAM. */
+export async function scanVerifiedAmuxIdeaAnalysisPagesInTransaction(
+  tx: Prisma.TransactionClient, actorUserId: string, ideaId: string,
+  keys: AmuxContentKeys, onPage: (page: AmuxIdeaAnalysisResultPage) => void,
+): Promise<{ first: AmuxIdeaAnalysisResultView; pageCount: number;
+  lastPage: AmuxIdeaAnalysisResultPage | null; complete: boolean }> {
+    const first = await readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
+      tx, actorUserId, ideaId, keys);
+    if (first.state !== "partial") {
+      return { first, pageCount: 0, lastPage: null, complete: first.state === "ready" };
+    }
     const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId } });
     const firstChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     });
-    const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
-    });
-    if (!idea || idea.actorUserId !== session.user?.id || !firstChunk || !chunk ||
+    if (!idea || idea.actorUserId !== actorUserId || !firstChunk ||
         firstChunk.currentPreviewId !== first.previewId) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
-    if (chunk.state !== "draft_ready") {
-      if (idea.state === "analyzing") return first;
-      throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
-    }
-    const partial = idea.state === "analyzing" && idea.analysisCompletedAt === null;
-    if (!partial && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
-      throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
-    }
-    const page = await readVerifiedSecondPage(tx, {
-      ideaId, actorUserId: idea.actorUserId, keys,
-      firstSourcePlanRevisionId: firstChunk.sourcePlanRevisionId,
-      ideaCompletedAt: idea.analysisCompletedAt, partial,
-      chunk,
-    });
     const firstPage: AmuxIdeaAnalysisResultPage = {
       chunkIndex: 0, previewId: first.previewId,
       completedAt: first.completedAt, outcome: "propose",
       coveredScope: first.coveredScope, remainingScope: first.remainingScope,
       units: first.units,
     };
-    return { state: partial ? "continued_partial" : "continued_ready", ideaId,
-      pages: [firstPage, page] };
+    onPage(firstPage);
+    let pageCount = 1;
+    let lastPage = firstPage;
+    while (pageCount < 2_147_483_647) {
+      const batch = await tx.amuxIdeaAnalysisChunk.findMany({
+        where: { ideaId, chunkIndex: { gte: pageCount } },
+        orderBy: { chunkIndex: "asc" }, take: 16,
+      });
+      if (batch.length === 0) throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+      for (const chunk of batch) {
+        const chunkIndex = pageCount;
+        if (chunk.chunkIndex !== chunkIndex) {
+          throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+        }
+        if (chunk.state !== "draft_ready") {
+          if (idea.state !== "analyzing" || idea.analysisCompletedAt !== null) {
+            throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+          }
+          return { first, pageCount, lastPage, complete: false };
+        }
+        const partial = chunk.outputPending === true;
+        if (!partial && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
+          throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+        }
+        const page = await readVerifiedContinuedPage(tx, {
+          ideaId, actorUserId: idea.actorUserId, keys, chunkIndex,
+          firstSourcePlanRevisionId: firstChunk.sourcePlanRevisionId,
+          ideaCompletedAt: idea.analysisCompletedAt, partial, chunk,
+        });
+        onPage(page);
+        pageCount += 1;
+        lastPage = page;
+        if (!partial) return { first, pageCount, lastPage, complete: true };
+      }
+    }
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
 }
 
-async function readVerifiedSecondPage(tx: Prisma.TransactionClient, input: {
+/** Continuation writers retain only the last page and a bounded reference
+ * projection, never the entire sequence of decrypted proposal pages. */
+export async function readVerifiedAmuxIdeaAnalysisContinuationContext(
+  tx: Prisma.TransactionClient, actorUserId: string, ideaId: string,
+  keys: AmuxContentKeys,
+  pinnedRefs: readonly string[] = [],
+): Promise<{ pageCount: number; previous: AmuxIdeaAnalysisResultPage;
+  priorTargets: AmuxPermittedTargetRef[];
+  validationTargets: AmuxPermittedTargetRef[];
+  targets: AmuxPermittedTargetRef[]; complete: boolean;
+  omittedTargetSummary: { count: number; firstChunkIndex: number;
+    lastChunkIndex: number } | null }> {
+  const targets: AmuxPermittedTargetRef[] = [];
+  let priorTargets: AmuxPermittedTargetRef[] = [];
+  let previous: AmuxIdeaAnalysisResultPage | null = null;
+  let pinnedCount = 0;
+  let omittedCount = 0;
+  let firstOmittedChunk = Number.MAX_SAFE_INTEGER;
+  let lastOmittedChunk = -1;
+  const wanted = new Set(pinnedRefs);
+  if (wanted.size !== pinnedRefs.length || wanted.size > 6) {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  // The preceding page was admitted under the final target selection in its
+  // owner-confirmed, sealed transfer preview. A later default 96-ref window
+  // may omit a pinned old Task; it cannot be used to revalidate that page.
+  const latest = await tx.amuxIdeaAnalysisChunk.findFirst({
+    where: { ideaId, actorUserId, state: "draft_ready" },
+    orderBy: { chunkIndex: "desc" },
+    select: { chunkIndex: true, currentPreviewId: true },
+  });
+  const priorPreview = latest?.currentPreviewId
+    ? await tx.amuxIdeaTransferPreview.findUnique({
+      where: { id: latest.currentPreviewId },
+      select: { ideaId: true, chunkIndex: true, state: true,
+        payloadDigest: true, payloadDigestKeyId: true },
+    }) : null;
+  const preparedAudits = latest?.currentPreviewId
+    ? await tx.adminAuditLog.findMany({ where: {
+      action: "amux.v4.transfer_preview.prepared",
+      targetType: "AmuxIdeaTransferPreview",
+      targetId: latest.currentPreviewId, actorUserId,
+    }, take: 2 }) : [];
+  const preparedAudit = preparedAudits[0];
+  const metadata = preparedAudit?.metadata;
+  const meta = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown> : null;
+  if (!latest?.currentPreviewId || !priorPreview ||
+      priorPreview.ideaId !== ideaId ||
+      priorPreview.chunkIndex !== latest.chunkIndex ||
+      priorPreview.state !== "completed" ||
+      preparedAudits.length !== 1 || !preparedAudit?.entryHash ||
+      auditRowActorKind(preparedAudit) !== "human" || !meta ||
+      meta.ideaId !== ideaId || meta.chunkIndex !== latest.chunkIndex ||
+      meta.payloadDigest !== priorPreview.payloadDigest ||
+      meta.payloadDigestKeyId !== priorPreview.payloadDigestKeyId ||
+      !Array.isArray(meta.finalPermittedTargetRefs) ||
+      meta.finalPermittedTargetRefs.length > 96 ||
+      typeof meta.finalPermittedTargetRefsDigest !== "string" ||
+      typeof meta.finalPermittedTargetRefsDigestKeyId !== "string") {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  const targetBytes = Buffer.from(amuxCanonicalJson(meta.finalPermittedTargetRefs), "utf8");
+  if (targetBytes.length > 16 * 1024 || !verifyAmuxContentDigest(targetBytes,
+    "transfer_payload", latest.currentPreviewId,
+    meta.finalPermittedTargetRefsDigest,
+    meta.finalPermittedTargetRefsDigestKeyId, keys)) {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  const validationTargets = meta.finalPermittedTargetRefs.map((value: unknown) =>
+    snapshotAmuxPermittedTarget(value));
+  if (validationTargets.some((value) => !value ||
+      !amuxPermittedTargetRefSafe(value, latest.chunkIndex)) ||
+      new Set(validationTargets.map((value) => value?.ref)).size !==
+        validationTargets.length) {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  const expected = new Map(validationTargets.map((value) =>
+    [value!.ref, amuxCanonicalJson(value)]));
+  const observed = new Set<string>();
+  const verifiedPins = new Map<string, AmuxPermittedTargetRef>();
+  const scan = await scanVerifiedAmuxIdeaAnalysisPagesInTransaction(
+    tx, actorUserId, ideaId, keys, (page) => {
+      if (!page.coveredScope ||
+          page.units.some((unit) => unit.decisionState !== "proposed" ||
+            !unit.proposal)) {
+        throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+      }
+      const currentRefs = new Set<string>();
+      for (const entry of page.units) {
+        const unit = entry.proposal!;
+        let target: AmuxPermittedTargetRef | null = null;
+        if (unit.kind === "node") target = { ref: unit.localId,
+          kind: "node", level: unit.level };
+        if (unit.kind === "card") target = { ref: unit.localId,
+          kind: "card", cardType: unit.cardType,
+          storyKind: unit.storyKind, featureRef: unit.featureRef };
+        if (target) {
+          const expectedIdentity = expected.get(target.ref);
+          if (expectedIdentity !== undefined) {
+            if (page.chunkIndex >= latest.chunkIndex ||
+                expectedIdentity !== amuxCanonicalJson(target)) {
+              throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+            }
+            observed.add(target.ref);
+          }
+          if (wanted.has(target.ref)) verifiedPins.set(target.ref, target);
+          currentRefs.add(target.ref);
+          if (targets.length === 96) {
+            const displacedPinned = pinnedCount === targets.length;
+            const displaced = targets.splice(displacedPinned ? 0 : pinnedCount, 1)[0];
+            if (!displaced) {
+              throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+            }
+            if (displacedPinned) pinnedCount -= 1;
+            const sourceChunk = Number(/^c([0-9]+):/.exec(displaced.ref)?.[1]);
+            if (!Number.isSafeInteger(sourceChunk)) {
+              throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+            }
+            omittedCount += 1;
+            firstOmittedChunk = Math.min(firstOmittedChunk, sourceChunk);
+            lastOmittedChunk = Math.max(lastOmittedChunk, sourceChunk);
+          }
+          if (target.kind === "node" ||
+              (target.kind === "card" && target.cardType === "story")) {
+            targets.splice(pinnedCount, 0, target);
+            pinnedCount += 1;
+          } else {
+            targets.push(target);
+          }
+        }
+      }
+      priorTargets = targets.filter((target) => !currentRefs.has(target.ref));
+      previous = page;
+    });
+  if (scan.first.state !== "partial" || !previous) {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  const finalPrevious = previous as AmuxIdeaAnalysisResultPage;
+  if (latest.chunkIndex !== scan.pageCount - 1 ||
+      latest.currentPreviewId !== finalPrevious.previewId ||
+      observed.size !== expected.size) {
+    throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+  }
+  if (verifiedPins.size !== wanted.size) {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
+  const currentRefs = new Set(finalPrevious.units.map((unit) => unit.localRef));
+  for (const ref of pinnedRefs) {
+    if (targets.some((target) => target.ref === ref)) continue;
+    const pin = verifiedPins.get(ref)!;
+    const victim = targets.findIndex((target) =>
+      !wanted.has(target.ref) && !currentRefs.has(target.ref) &&
+      target.kind === "card" && target.cardType === "task");
+    if (victim < 0) {
+      throw new AmuxIdeaAnalysisResultReadError("reference_selection_required");
+    }
+    const displaced = targets.splice(victim, 1, pin)[0]!;
+    const sourceChunk = Number(/^c([0-9]+):/.exec(displaced.ref)?.[1]);
+    if (!Number.isSafeInteger(sourceChunk)) {
+      throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+    }
+    firstOmittedChunk = Math.min(firstOmittedChunk, sourceChunk);
+    lastOmittedChunk = Math.max(lastOmittedChunk, sourceChunk);
+  }
+  return { pageCount: scan.pageCount, previous,
+    priorTargets, validationTargets: validationTargets as AmuxPermittedTargetRef[],
+    targets, complete: scan.complete,
+    omittedTargetSummary: omittedCount > 0 ? {
+      count: omittedCount, firstChunkIndex: firstOmittedChunk,
+      lastChunkIndex: lastOmittedChunk,
+    } : null };
+}
+
+async function readVerifiedContinuedPage(tx: Prisma.TransactionClient, input: {
   ideaId: string; actorUserId: string; keys: AmuxContentKeys;
+  chunkIndex: number;
   firstSourcePlanRevisionId: string | null;
   ideaCompletedAt: Date | null; partial: boolean;
   chunk: AmuxIdeaAnalysisChunk;
 }): Promise<AmuxIdeaAnalysisResultPage> {
-  const { ideaId, actorUserId, chunk, keys, partial } = input;
+  const { ideaId, actorUserId, chunk, keys, partial, chunkIndex } = input;
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
   const now = clock[0]?.now;
   const units = await tx.amuxIdeaDraftUnit.findMany({
-    where: { ideaId, actorUserId, chunkIndex: 1 }, orderBy: { unitIndex: "asc" },
+    where: { ideaId, actorUserId, chunkIndex }, orderBy: { unitIndex: "asc" },
   });
   const audits = await tx.adminAuditLog.findMany({
     where: { action: AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
       targetType: AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
-      targetId: `${ideaId}:1` }, take: 2,
+      targetId: `${ideaId}:${chunkIndex}` }, take: 2,
   });
   const firstAudits = await tx.adminAuditLog.findMany({
-    where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
-      targetId: `${ideaId}:0` }, take: 2, select: { entryHash: true },
+    where: { action: chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_ACTION :
+        AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+      targetType: chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_TARGET :
+        AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+      targetId: `${ideaId}:${chunkIndex - 1}` }, take: 2,
+    select: { entryHash: true },
   });
   const preview = chunk.currentPreviewId
     ? await tx.amuxIdeaTransferPreview.findUnique({
       where: { id: chunk.currentPreviewId },
     }) : null;
   const nextChunk = partial ? await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 2 } },
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: chunkIndex + 1 } },
   }) : null;
   const audit = audits[0];
   const metadata = audit?.metadata;
@@ -120,23 +412,25 @@ async function readVerifiedSecondPage(tx: Prisma.TransactionClient, input: {
       chunk.actorUserId !== actorUserId || chunk.state !== "draft_ready" ||
       chunk.draftVersion !== 2 || chunk.draftCiphertext !== null ||
       !chunk.currentPreviewId || !chunk.analysisCompletedAt ||
-      chunk.revisionChunkIndex !== 1 || chunk.planStartChunkIndex !== 0 ||
+      chunk.chunkIndex !== chunkIndex || chunk.revisionChunkIndex !== chunkIndex ||
+      chunk.planStartChunkIndex !== 0 ||
       chunk.sourcePlanRevisionId !== input.firstSourcePlanRevisionId ||
       chunk.coveredStartOrdinal !== 0 || chunk.coveredEndOrdinal !== 0 ||
-      chunk.outputPartIndex !== 1 ||
+      chunk.outputPartIndex !== chunkIndex ||
       (partial ? chunk.coverageStatus !== "more" ||
         chunk.continuationKind !== "output" || chunk.outputPending !== true ||
         chunk.remainingStartOrdinal !== 0 || chunk.remainingEndOrdinal !== 0 ||
-        meta?.nextChunkIndex !== 2 || !nextChunk ||
+        meta?.nextChunkIndex !== chunkIndex + 1 || !nextChunk ||
         nextChunk.actorUserId !== actorUserId ||
         nextChunk.sourcePlanRevisionId !== chunk.sourcePlanRevisionId ||
-        nextChunk.planStartChunkIndex !== 0 || nextChunk.revisionChunkIndex !== 2 :
+        nextChunk.planStartChunkIndex !== 0 ||
+        nextChunk.revisionChunkIndex !== chunkIndex + 1 :
         chunk.coverageStatus !== "complete" || chunk.continuationKind !== null ||
         chunk.outputPending !== false || chunk.remainingStartOrdinal !== null ||
         chunk.remainingEndOrdinal !== null ||
         chunk.analysisCompletedAt.getTime() !== input.ideaCompletedAt?.getTime() ||
         meta?.nextChunkIndex !== null) ||
-      !preview || preview.ideaId !== ideaId || preview.chunkIndex !== 1 ||
+      !preview || preview.ideaId !== ideaId || preview.chunkIndex !== chunkIndex ||
       preview.state !== "completed" ||
       preview.sourcePlanRevisionId !== chunk.sourcePlanRevisionId ||
       meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||
@@ -174,7 +468,7 @@ async function readVerifiedSecondPage(tx: Prisma.TransactionClient, input: {
         throw new Error("freeform structure mismatch");
       }
       const record = value as Record<string, unknown>;
-      if (record.previewId !== chunk.currentPreviewId || record.chunkIndex !== 1 ||
+      if (record.previewId !== chunk.currentPreviewId || record.chunkIndex !== chunkIndex ||
           record.outcome !== meta.outcome ||
           record.coverageStatus !== chunk.coverageStatus ||
           record.continuationKind !== chunk.continuationKind ||
@@ -217,7 +511,7 @@ async function readVerifiedSecondPage(tx: Prisma.TransactionClient, input: {
         throw new Error("proposal digest mismatch");
       }
       const inspected = inspectAmuxStoredAnalysisUnit({
-        raw: plain.toString("utf8"), chunkIndex: 1,
+        raw: plain.toString("utf8"), chunkIndex,
         permittedSourceRefIds: ["operator_idea"],
       });
       if (!inspected.ok || inspected.unit.localId !== unit.localRef ||
@@ -229,7 +523,7 @@ async function readVerifiedSecondPage(tx: Prisma.TransactionClient, input: {
         decisionState: unit.state as AmuxVisibleAnalysisUnit["decisionState"],
         proposal: inspected.unit });
     }
-    return { chunkIndex: 1, previewId: chunk.currentPreviewId,
+    return { chunkIndex, previewId: chunk.currentPreviewId,
       completedAt: chunk.analysisCompletedAt.toISOString(),
       outcome: meta.outcome as "propose" | "reject",
       coveredScope, remainingScope, units: visibleUnits };

@@ -675,6 +675,11 @@ const REGISTRY = {
     reason:
       "The dark v4 source-plan revision has a closed prepared/active/terminal lifecycle. A future single writer must own matching runtime validation before activation.",
   },
+  AmuxIdeaCollectionRequest_state_check: {
+    owner: "database",
+    reason:
+      "The dark v4 GitHub collection request has a bounded pending/claimed/preview-ready/hold/expired/unknown lifecycle; its writer validates each transition before recording the state.",
+  },
   AmuxIdeaSourceScopeApproval_status_check: {
     owner: "database",
     reason:

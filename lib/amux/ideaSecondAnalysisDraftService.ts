@@ -8,11 +8,10 @@ import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_SECOND_DRAFT_SAVED_ACTION, AMUX_V4_SECOND_DRAFT_SAVED_TARGET } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
-import type { AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
-import { readVerifiedAmuxFirstIdeaAnalysisResultInTransaction } from
-  "./ideaAnalysisResultReadService.ts";
-import { buildFirstOutputContinuationPrompt } from "./ideaAnalysisPromptCore.ts";
-import { prepareSecondIdeaOnlyAnalysisDraft } from "./ideaSecondAnalysisDraftCore.ts";
+import { readVerifiedAmuxIdeaAnalysisContinuationContext } from
+  "./ideaContinuedAnalysisResultReadService.ts";
+import { buildIdeaOnlyOutputContinuationPrompt } from "./ideaAnalysisPromptCore.ts";
+import { prepareIdeaOnlyOutputAnalysisDraft } from "./ideaSecondAnalysisDraftCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
@@ -38,8 +37,23 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
 ): Promise<{ ideaId: string; previewId: string; unitCount: number;
   coverageStatus: "complete" | "more"; nextChunkIndex: number | null;
   analysisCompletedAt: string | null; auditId: string }> {
+  return commitAmuxContinuedIdeaAnalysisDraft(tx, { ...input, chunkIndex: 1 });
+}
+
+/** Every continuation stays on the original source plan and is independently
+ * owner-previewed, charged, audited and sealed. No model is called here. */
+export async function commitAmuxContinuedIdeaAnalysisDraft(
+  tx: Prisma.TransactionClient,
+  input: { ideaId: string; previewId: string; holdId: string;
+    chunkIndex: number; leaseGeneration: number; rawModelOutput: string;
+    keys: AmuxContentKeys },
+): Promise<{ ideaId: string; previewId: string; unitCount: number;
+  coverageStatus: "complete" | "more"; nextChunkIndex: number | null;
+  analysisCompletedAt: string | null; auditId: string }> {
   if (!input || !ID.test(input.ideaId) || !ID.test(input.previewId) ||
       !ID.test(input.holdId) || !Number.isSafeInteger(input.leaseGeneration) ||
+      !Number.isSafeInteger(input.chunkIndex) || input.chunkIndex < 1 ||
+      input.chunkIndex >= 2_147_483_647 ||
       input.leaseGeneration < 1 || typeof input.rawModelOutput !== "string" ||
       Buffer.byteLength(input.rawModelOutput, "utf8") > 65_536) {
     throw new AmuxSecondAnalysisDraftError("not_ready");
@@ -60,7 +74,7 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
   `;
   const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${input.ideaId} AND "chunkIndex" IN (0, 1)
+    WHERE "ideaId" = ${input.ideaId} AND "chunkIndex" <= ${input.chunkIndex}
     ORDER BY "chunkIndex" FOR UPDATE
   `;
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
@@ -71,8 +85,8 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
     SELECT "id" FROM "AmuxIdeaAnalysisBudgetHold"
     WHERE "id" = ${input.holdId} FOR UPDATE
   `;
-  if (ideaLock.length !== 1 || chunkLocks.length !== 2 ||
-      chunkLocks[0]?.chunkIndex !== 0 || chunkLocks[1]?.chunkIndex !== 1 ||
+  if (ideaLock.length !== 1 || chunkLocks.length !== input.chunkIndex + 1 ||
+      chunkLocks.some((row, index) => row.chunkIndex !== index) ||
       previewLock.length !== 1 || holdLock.length !== 1) {
     throw new AmuxSecondAnalysisDraftError("not_ready");
   }
@@ -86,7 +100,7 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
       ideaId_chunkIndex: { ideaId: input.ideaId, chunkIndex: 0 },
     } }),
     tx.amuxIdeaAnalysisChunk.findUnique({ where: {
-      ideaId_chunkIndex: { ideaId: input.ideaId, chunkIndex: 1 },
+      ideaId_chunkIndex: { ideaId: input.ideaId, chunkIndex: input.chunkIndex },
     } }),
     tx.amuxIdeaTransferPreview.findUnique({ where: { id: input.previewId } }),
     tx.amuxIdeaAnalysisBudgetHold.findUnique({ where: { id: input.holdId } }),
@@ -106,16 +120,17 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
       firstChunk.coveredEndOrdinal !== 0 || firstChunk.remainingStartOrdinal !== 0 ||
       firstChunk.remainingEndOrdinal !== 0 || !firstChunk.analysisCompletedAt ||
       firstChunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
-      chunk.state !== "in_flight" || chunk.chunkIndex !== 1 ||
+      chunk.state !== "in_flight" || chunk.chunkIndex !== input.chunkIndex ||
       chunk.actorUserId !== idea.actorUserId ||
       chunk.leaseGeneration !== input.leaseGeneration ||
       chunk.analysisCompletedAt !== null || chunk.freeformCiphertext !== null ||
       chunk.currentPreviewId !== preview.id ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
-      chunk.planStartChunkIndex !== 0 || chunk.revisionChunkIndex !== 1 ||
+      chunk.planStartChunkIndex !== 0 ||
+      chunk.revisionChunkIndex !== input.chunkIndex ||
       chunk.attempt !== preview.attempt ||
       preview.state !== "in_flight" || preview.ideaId !== idea.id ||
-      preview.chunkIndex !== 1 ||
+      preview.chunkIndex !== input.chunkIndex ||
       preview.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       preview.sourceScopeApprovalId !== null || preview.sourceUnitOrdinal !== 0 ||
       preview.confirmedByUserId !== idea.actorUserId ||
@@ -142,23 +157,25 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
       targetType: "AmuxIdeaTransferPreview", targetId: preview.id,
       actorUserId: idea.actorUserId }, take: 2,
   });
-  const firstAudits = await tx.adminAuditLog.findMany({
-    where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
-      targetId: `${idea.id}:0` }, take: 2,
+  const priorAudits = await tx.adminAuditLog.findMany({
+    where: { action: input.chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_ACTION :
+        AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+      targetType: input.chunkIndex === 1 ? AMUX_V4_FIRST_DRAFT_SAVED_TARGET :
+        AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+      targetId: `${idea.id}:${input.chunkIndex - 1}` }, take: 2,
   });
   const confirmationMeta = confirmation?.metadata as Record<string, unknown> | null;
   const preparedMeta = preparedAudits[0]?.metadata as Record<string, unknown> | null;
-  const firstAuditHash = firstAudits[0]?.entryHash;
+  const priorAuditHash = priorAudits[0]?.entryHash;
   if (!plan || plan.ideaId !== idea.id || plan.actorUserId !== idea.actorUserId ||
       plan.state !== "active" || plan.revisionNumber !== 1 ||
       plan.startChunkIndex !== 0 || plan.sourceUnitCount !== 1 ||
-      firstAudits.length !== 1 || !firstAuditHash ||
+      priorAudits.length !== 1 || !priorAuditHash ||
       preparedAudits.length !== 1 || !preparedAudits[0]?.entryHash ||
       auditRowActorKind(preparedAudits[0]) !== "human" ||
       !preparedMeta || typeof preparedMeta !== "object" ||
       Array.isArray(preparedMeta) ||
-      preparedMeta.previousChunkAuditHash !== firstAuditHash ||
+      preparedMeta.previousChunkAuditHash !== priorAuditHash ||
       preparedMeta.sourcePlanRevisionId !== plan.id ||
       preparedMeta.payloadDigest !== preview.payloadDigest ||
       preparedMeta.payloadDigestKeyId !== preview.payloadDigestKeyId ||
@@ -170,36 +187,58 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
       confirmation.targetId !== preview.id ||
       !confirmationMeta || typeof confirmationMeta !== "object" ||
       Array.isArray(confirmationMeta) ||
-      confirmationMeta.chunkIndex !== 1 ||
+      confirmationMeta.chunkIndex !== input.chunkIndex ||
       confirmationMeta.sourcePlanRevisionId !== plan.id ||
       confirmationMeta.payloadDigest !== preview.payloadDigest ||
       confirmationMeta.payloadDigestKeyId !== preview.payloadDigestKeyId ||
       confirmationMeta.modelId !== preview.modelId ||
       await tx.amuxIdeaDraftUnit.count({ where: { ideaId: idea.id,
-        chunkIndex: 1 } }) !== 0 ||
+        chunkIndex: input.chunkIndex } }) !== 0 ||
       await tx.adminAuditLog.count({ where: {
         action: AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
         targetType: AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
-        targetId: `${idea.id}:1`,
+        targetId: `${idea.id}:${input.chunkIndex}`,
       } }) !== 0) {
     throw new AmuxSecondAnalysisDraftError("integrity_unavailable");
   }
-  const first = await readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
-    tx, idea.actorUserId, idea.id, input.keys);
-  if (first.state !== "partial" || !first.coveredScope ||
-      !first.remainingScope || first.units.some((unit) =>
-        !unit.proposal || unit.decisionState !== "proposed")) {
+  const pinnedTargetRefs = preparedMeta.pinnedTargetRefs === undefined ? [] :
+    preparedMeta.pinnedTargetRefs;
+  if (!Array.isArray(pinnedTargetRefs) || pinnedTargetRefs.length > 6 ||
+      pinnedTargetRefs.some((ref: unknown) => typeof ref !== "string" ||
+        !/^c[0-9]+:(?:node|card)-[0-9]+$/.test(ref)) ||
+      new Set(pinnedTargetRefs).size !== pinnedTargetRefs.length) {
+    throw new AmuxSecondAnalysisDraftError("integrity_unavailable");
+  }
+  const context = await readVerifiedAmuxIdeaAnalysisContinuationContext(
+    tx, idea.actorUserId, idea.id, input.keys, pinnedTargetRefs as string[]);
+  if (context.pageCount !== input.chunkIndex || context.complete ||
+      !context.previous.remainingScope) {
     throw new AmuxSecondAnalysisDraftError("not_ready");
   }
-  const firstUnits = first.units.map((unit) => unit.proposal!);
-  const targets: AmuxPermittedTargetRef[] = firstUnits.flatMap<AmuxPermittedTargetRef>((unit) => {
-    if (unit.kind === "node") return [{ ref: unit.localId,
-      kind: "node" as const, level: unit.level }];
-    if (unit.kind === "card") return [{ ref: unit.localId,
-      kind: "card" as const, cardType: unit.cardType,
-      storyKind: unit.storyKind, featureRef: unit.featureRef }];
-    return [];
+  const previous = context.previous;
+  const previousUnits = previous.units.map((unit) => unit.proposal!);
+  const priorTargets = context.priorTargets;
+  const historyRows = await tx.amuxIdeaAnalysisChunk.findMany({
+    where: { ideaId: idea.id, chunkIndex: { lt: input.chunkIndex } },
+    orderBy: { chunkIndex: "asc" },
   });
+  if (historyRows.length !== input.chunkIndex || historyRows.some((row, index) =>
+    row.chunkIndex !== index || row.state !== "draft_ready" ||
+    row.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
+    row.outputPending !== true || row.coverageStatus !== "more" ||
+    row.continuationKind !== "output" || row.outputPartIndex !== index ||
+    row.coveredStartOrdinal !== 0 || row.coveredEndOrdinal !== 0 ||
+    row.remainingStartOrdinal !== 0 || row.remainingEndOrdinal !== 0)) {
+    throw new AmuxSecondAnalysisDraftError("integrity_unavailable");
+  }
+  const history = historyRows.map((row) => ({ chunkIndex: row.chunkIndex,
+    coveredStartOrdinal: row.coveredStartOrdinal!,
+    coveredEndOrdinal: row.coveredEndOrdinal!,
+    remainingStartOrdinal: row.remainingStartOrdinal!,
+    remainingEndOrdinal: row.remainingEndOrdinal!,
+    coverageStatus: "more" as const, outputPartIndex: row.outputPartIndex!,
+    outputPending: true as const }));
+  let selectedTargets = context.targets;
   let payload: Buffer | undefined;
   let raw: Buffer | undefined;
   try {
@@ -219,15 +258,20 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
     const parsed = inspectAmuxIdeaInput(raw.toString("utf8"));
     if (!parsed.ok || parsed.input.repositories.length !== 0 ||
         parsed.input.pullRequests.length !== 0) throw new Error("invalid source");
-    const priorRaw = JSON.stringify({ schemaVersion: 2, previewId: first.previewId,
-      chunkIndex: 0, outcome: "propose", coverageStatus: "more",
+    const priorRaw = JSON.stringify({ schemaVersion: 2, previewId: previous.previewId,
+      chunkIndex: input.chunkIndex - 1, outcome: "propose", coverageStatus: "more",
       continuationKind: "output", ownerQuestion: null,
-      coveredScope: first.coveredScope, remainingScope: first.remainingScope,
-      units: firstUnits });
-    const rebuilt = buildFirstOutputContinuationPrompt({
-      previewId: preview.id, previousPreviewId: first.previewId,
-      previousRaw: priorRaw, previousAuditHash: firstAuditHash,
-      ideaText: parsed.input.idea,
+      coveredScope: previous.coveredScope, remainingScope: previous.remainingScope,
+      units: previousUnits });
+    const rebuilt = buildIdeaOnlyOutputContinuationPrompt({
+      previewId: preview.id, previousPreviewId: previous.previewId,
+      previousRaw: priorRaw, previousAuditHash: priorAuditHash,
+      previousChunkIndex: input.chunkIndex - 1,
+      priorPermittedTargetRefs: priorTargets, ideaText: parsed.input.idea,
+      previousPagePermittedTargetRefs: context.validationTargets,
+      nextPermittedTargetRefs: context.targets,
+      pinnedTargetRefs: pinnedTargetRefs as string[],
+      omittedTargetSummary: context.omittedTargetSummary,
     });
     if (rebuilt.status !== "prompt_candidate" ||
         stored.version !== 1 || stored.previewId !== preview.id ||
@@ -242,16 +286,13 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
           preparedMeta.modelApprovalVersion) {
       throw new Error("preview mismatch");
     }
+    selectedTargets = rebuilt.selectedTargetRefs ?? context.targets;
   } catch { throw new AmuxSecondAnalysisDraftError("integrity_unavailable"); }
   finally { payload?.fill(0); raw?.fill(0); }
-  const prepared = prepareSecondIdeaOnlyAnalysisDraft({
+  const prepared = prepareIdeaOnlyOutputAnalysisDraft({
     ideaId: idea.id, previewId: preview.id, raw: input.rawModelOutput,
-    keys: input.keys,
-    priorPage: { chunkIndex: 0, coveredStartOrdinal: 0,
-      coveredEndOrdinal: 0, remainingStartOrdinal: 0,
-      remainingEndOrdinal: 0, coverageStatus: "more", outputPartIndex: 0,
-      outputPending: true },
-    permittedTargetRefs: targets,
+    keys: input.keys, chunkIndex: input.chunkIndex, history,
+    permittedTargetRefs: selectedTargets,
   });
   if (prepared.decision === "hold") {
     throw new AmuxSecondAnalysisDraftError("invalid_result");
@@ -269,17 +310,17 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
     targetType: AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
-    targetId: `${idea.id}:1`,
+    targetId: `${idea.id}:${input.chunkIndex}`,
     summary: "Stored one bounded AMUX v4 output continuation as independently purgeable units.",
     metadata: { ideaId: idea.id, previewId: preview.id,
-      sourcePlanRevisionId: plan.id, previousChunkAuditHash: firstAuditHash,
+      sourcePlanRevisionId: plan.id, previousChunkAuditHash: priorAuditHash,
       leaseGeneration: chunk.leaseGeneration, unitCount: prepared.draft.units.length,
       outcome: prepared.draft.outcome,
       coverageStatus: prepared.draft.coverageStatus,
       continuationKind: prepared.draft.continuationKind,
       remainingStartOrdinal: prepared.remainingStartOrdinal,
       remainingEndOrdinal: prepared.remainingEndOrdinal,
-      nextChunkIndex: prepared.decision === "partial" ? 2 : null,
+      nextChunkIndex: prepared.decision === "partial" ? input.chunkIndex + 1 : null,
       freeformDigest: prepared.draft.freeform.digest,
       freeformDigestKeyId: prepared.draft.freeform.digestKeyId,
       unitCommitments: prepared.draft.units.map((unit) => ({
@@ -288,7 +329,7 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
       })), cardRegistrationStarted: false },
   });
   const updatedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({
-    where: { ideaId: idea.id, chunkIndex: 1, state: "in_flight",
+    where: { ideaId: idea.id, chunkIndex: input.chunkIndex, state: "in_flight",
       currentPreviewId: preview.id, leaseGeneration: input.leaseGeneration,
       analysisCompletedAt: null },
     data: { state: "draft_ready", analysisCompletedAt: now,
@@ -311,7 +352,7 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
     const created = await tx.amuxIdeaDraftUnit.createMany({
       data: prepared.draft.units.map((unit) => ({
         id: unit.id, ideaId: idea.id, actorUserId: idea.actorUserId,
-        chunkIndex: 1, unitIndex: unit.unitIndex,
+        chunkIndex: input.chunkIndex, unitIndex: unit.unitIndex,
         localRef: unit.localRef, unitKind: unit.unitKind,
         state: "proposed", expiresAt: firstDecisionDeadline,
         bodyCiphertext: Uint8Array.from(unit.body.ciphertext),
@@ -326,9 +367,10 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
   if (prepared.decision === "partial") {
     await tx.amuxIdeaAnalysisChunk.create({ data: {
       ideaId: idea.id, actorUserId: idea.actorUserId,
-      chunkIndex: 2, state: "pending", attempt: 0, leaseGeneration: 0,
+      chunkIndex: input.chunkIndex + 1, state: "pending", attempt: 0,
+      leaseGeneration: 0,
       sourcePlanRevisionId: plan.id, planStartChunkIndex: 0,
-      revisionChunkIndex: 2,
+      revisionChunkIndex: input.chunkIndex + 1,
     } });
   }
   const closedPreview = await tx.amuxIdeaTransferPreview.updateMany({
@@ -348,7 +390,8 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
   }
   if (prepared.decision === "ready") {
     await tx.amuxIdeaAnalysisChunk.updateMany({
-      where: { ideaId: idea.id, chunkIndex: 0,
+      where: { ideaId: idea.id, chunkIndex: { lt: input.chunkIndex },
+        state: "draft_ready", outputPending: true,
         freeformPurgeAfter: { gt: nextDay } },
       data: { freeformPurgeAfter: nextDay },
     });
@@ -356,7 +399,7 @@ export async function commitAmuxSecondIdeaAnalysisDraft(
   return { ideaId: idea.id, previewId: preview.id,
     unitCount: prepared.draft.units.length,
     coverageStatus: prepared.decision === "ready" ? "complete" : "more",
-    nextChunkIndex: prepared.decision === "partial" ? 2 : null,
+    nextChunkIndex: prepared.decision === "partial" ? input.chunkIndex + 1 : null,
     analysisCompletedAt: prepared.decision === "ready" ? now.toISOString() : null,
     auditId };
 }

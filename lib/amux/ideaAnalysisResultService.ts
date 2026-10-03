@@ -12,9 +12,19 @@ import { commitAmuxKnownIdeaAnalysisSettlement } from
   "./ideaAnalysisBudgetSettlementService.ts";
 import { commitAmuxIdeaAnalysisUnknownOutcome } from
   "./ideaAnalysisUnknownOutcomeService.ts";
-import { amuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
+import { amuxContentDigest, openAmuxContent, sealAmuxContent, verifyAmuxContentDigest,
+  type AmuxContentKeys } from "./ideaCrypto.ts";
+import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import { amuxCanonicalJson } from "./boardImportCore.ts";
+import { snapshotAmuxPermittedTarget,
+  type AmuxPermittedTargetRef } from "./ideaAnalysisChunkCore.ts";
 import { prepareFirstIdeaOnlyAnalysisDraft } from "./ideaFirstAnalysisDraftCore.ts";
 import { commitAmuxFirstIdeaAnalysisDraft } from "./ideaFirstAnalysisDraftService.ts";
+import { prepareIdeaOnlyOutputAnalysisDraft } from "./ideaSecondAnalysisDraftCore.ts";
+import { commitAmuxContinuedIdeaAnalysisDraft } from
+  "./ideaSecondAnalysisDraftService.ts";
+import { readVerifiedAmuxIdeaAnalysisContinuationContext } from
+  "./ideaContinuedAnalysisResultReadService.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 type Outcome = "verified_success" | "invocation_failed" | "outcome_unknown";
@@ -23,7 +33,7 @@ type Input = { requestId: string; ideaId: string; previewId: string;
   rawModelOutput: string | null; inputTokens: number | null;
   outputTokens: number | null; keys: AmuxContentKeys };
 type Receipt = { previewId: string; ideaId: string;
-  state: "draft_ready" | "provider_failed" | "outcome_unknown";
+  state: "draft_ready" | "provider_failed" | "outcome_unknown" | "owner_input";
   duplicate: boolean; auditId: string };
 
 export class AmuxIdeaAnalysisResultError extends Error {
@@ -92,7 +102,7 @@ async function receiptFor(tx: Prisma.TransactionClient, input: Input,
   }
   const state = record.state;
   if (state !== "draft_ready" && state !== "provider_failed" &&
-      state !== "outcome_unknown") {
+      state !== "outcome_unknown" && state !== "owner_input") {
     throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
   }
   return { previewId: input.previewId, ideaId: input.ideaId,
@@ -126,7 +136,7 @@ export async function readAmuxIdeaAnalysisResultReceipt(
       typeof record.ideaId !== "string" || !ID.test(record.ideaId) ||
       typeof record.holdId !== "string" || !ID.test(record.holdId) ||
       record.leaseGeneration !== 1 || !["draft_ready", "provider_failed",
-        "outcome_unknown"].includes(String(record.state))) {
+        "outcome_unknown", "owner_input"].includes(String(record.state))) {
     throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
   }
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
@@ -137,7 +147,8 @@ export async function readAmuxIdeaAnalysisResultReceipt(
     where: { id: record.holdId }, select: { previewId: true, status: true },
   });
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId: record.ideaId, chunkIndex: 0 } },
+    where: { ideaId_chunkIndex: { ideaId: record.ideaId,
+      chunkIndex: preview?.chunkIndex ?? -1 } },
     select: { state: true, leaseGeneration: true,
       currentPreviewId: true, attempt: true },
   });
@@ -153,7 +164,7 @@ export async function readAmuxIdeaAnalysisResultReceipt(
       chunk.state === "awaiting_preview" && chunk.leaseGeneration === 0 &&
       chunk.attempt === preview.attempt) ||
     (newerPreview && newerPreview.ideaId === record.ideaId &&
-      newerPreview.chunkIndex === 0 &&
+      newerPreview.chunkIndex === preview.chunkIndex &&
       newerPreview.attempt === chunk.attempt &&
       newerPreview.attempt > preview.attempt));
   if (!preview || preview.ideaId !== record.ideaId || !hold ||
@@ -167,6 +178,11 @@ export async function readAmuxIdeaAnalysisResultReceipt(
         hold.status !== "failed" || !failedPositionValid)) ||
       (state === "outcome_unknown" && (preview.state !== "outcome_unknown" ||
         hold.status !== "outcome_unknown" || chunk.state !== "outcome_unknown" ||
+        chunk.leaseGeneration !== 1 ||
+        chunk.currentPreviewId !== input.previewId ||
+        chunk.attempt !== preview.attempt)) ||
+      (state === "owner_input" && (preview.state !== "owner_input" ||
+        hold.status !== "succeeded" || chunk.state !== "owner_input" ||
         chunk.leaseGeneration !== 1 ||
         chunk.currentPreviewId !== input.previewId ||
         chunk.attempt !== preview.attempt))) {
@@ -199,7 +215,9 @@ export async function commitAmuxIdeaAnalysisResult(
     where: { id: input.holdId },
     select: { previewId: true, namespace: true, monthStart: true },
   });
-  if (!identity || identity.ideaId !== input.ideaId || identity.chunkIndex !== 0 ||
+  if (!identity || identity.ideaId !== input.ideaId ||
+      !Number.isSafeInteger(identity.chunkIndex) || identity.chunkIndex < 0 ||
+      identity.chunkIndex >= 2_147_483_647 ||
       !holdIdentity || holdIdentity.previewId !== input.previewId ||
       holdIdentity.namespace !== AMUX_V4_ANALYSIS_NAMESPACE) {
     throw new AmuxIdeaAnalysisResultError("not_ready");
@@ -210,11 +228,14 @@ export async function commitAmuxIdeaAnalysisResult(
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${input.ideaId} FOR UPDATE
   `;
-  const chunkLock = await tx.$queryRaw<Array<{ leaseGeneration: number;
+  const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number;
+    leaseGeneration: number;
     currentPreviewId: string | null; state: string }>>`
-    SELECT "leaseGeneration", "currentPreviewId", "state"
+    SELECT "chunkIndex", "leaseGeneration", "currentPreviewId", "state"
     FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${input.ideaId} AND "chunkIndex" = 0 FOR UPDATE
+    WHERE "ideaId" = ${input.ideaId}
+      AND "chunkIndex" <= ${identity.chunkIndex}
+    ORDER BY "chunkIndex" FOR UPDATE
   `;
   const previewLock = await tx.$queryRaw<Array<{ state: string }>>`
     SELECT "state" FROM "AmuxIdeaTransferPreview"
@@ -229,11 +250,12 @@ export async function commitAmuxIdeaAnalysisResult(
     SELECT "status" FROM "AmuxIdeaAnalysisBudgetHold"
     WHERE "id" = ${input.holdId} FOR UPDATE
   `;
-  if (ideaLock.length !== 1 || chunkLock.length !== 1 ||
+  if (ideaLock.length !== 1 || chunkLock.length !== identity.chunkIndex + 1 ||
+      chunkLock.some((row, index) => row.chunkIndex !== index) ||
       previewLock.length !== 1 || windowLock.length !== 1 || holdLock.length !== 1 ||
-      chunkLock[0]!.state !== "in_flight" ||
-      chunkLock[0]!.currentPreviewId !== input.previewId ||
-      chunkLock[0]!.leaseGeneration !== input.leaseGeneration ||
+      chunkLock[identity.chunkIndex]!.state !== "in_flight" ||
+      chunkLock[identity.chunkIndex]!.currentPreviewId !== input.previewId ||
+      chunkLock[identity.chunkIndex]!.leaseGeneration !== input.leaseGeneration ||
       previewLock[0]!.state !== "in_flight" ||
       holdLock[0]!.status !== "in_flight") {
     throw new AmuxIdeaAnalysisResultError("not_ready");
@@ -250,6 +272,8 @@ export async function commitAmuxIdeaAnalysisResult(
       Array.isArray(claimMetadata) ||
       (claimMetadata as Record<string, unknown>).holdId !== input.holdId ||
       (claimMetadata as Record<string, unknown>).ideaId !== input.ideaId ||
+      (claimMetadata as Record<string, unknown>).chunkIndex !==
+        identity.chunkIndex ||
       (claimMetadata as Record<string, unknown>).leaseGeneration !==
         input.leaseGeneration) {
     throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
@@ -257,12 +281,108 @@ export async function commitAmuxIdeaAnalysisResult(
   // A verified invocation can still produce unusable text. It consumed real
   // tokens, so settle its measured cost as a failed invocation instead of
   // rolling the reservation back to in_flight. The response body is not saved.
-  const prepared = input.outcome === "verified_success"
-    ? prepareFirstIdeaOnlyAnalysisDraft({ ideaId: input.ideaId,
-      previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys })
-    : null;
+  const prepared = input.outcome !== "verified_success" ? null :
+    identity.chunkIndex === 0
+      ? prepareFirstIdeaOnlyAnalysisDraft({ ideaId: input.ideaId,
+        previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys })
+      : await (async () => {
+        const idea = await tx.amuxIdeaSubmission.findUnique({
+          where: { id: input.ideaId }, select: { actorUserId: true },
+        });
+        if (!idea) throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
+        const context = await readVerifiedAmuxIdeaAnalysisContinuationContext(tx,
+          idea.actorUserId, input.ideaId, input.keys);
+        if (context.pageCount !== identity.chunkIndex || context.complete) {
+          throw new AmuxIdeaAnalysisResultError("not_ready");
+        }
+        const historyRows = await tx.amuxIdeaAnalysisChunk.findMany({
+          where: { ideaId: input.ideaId,
+            chunkIndex: { lt: identity.chunkIndex } },
+          orderBy: { chunkIndex: "asc" },
+        });
+        if (historyRows.length !== identity.chunkIndex || historyRows.some((row, index) =>
+          row.chunkIndex !== index || row.coverageStatus !== "more" ||
+          row.continuationKind !== "output" || row.outputPending !== true ||
+          row.outputPartIndex !== index || row.coveredStartOrdinal !== 0 ||
+          row.coveredEndOrdinal !== 0 || row.remainingStartOrdinal !== 0 ||
+          row.remainingEndOrdinal !== 0)) {
+          throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
+        }
+        const preview = await tx.amuxIdeaTransferPreview.findUnique({
+          where: { id: input.previewId },
+        });
+        if (!preview?.payloadCiphertext || !preview.payloadKeyId ||
+            !preview.payloadKeyVersion || !preview.payloadDigest ||
+            !preview.payloadDigestKeyId) {
+          throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
+        }
+        let payload: Buffer;
+        try {
+          payload = openAmuxContent({ ciphertext: Buffer.from(preview.payloadCiphertext),
+            keyId: preview.payloadKeyId, keyVersion: preview.payloadKeyVersion },
+          "transfer_payload", preview.id, input.keys);
+        } catch { throw new AmuxIdeaAnalysisResultError("integrity_unavailable"); }
+        let selectedTargets: AmuxPermittedTargetRef[];
+        try {
+          if (!verifyAmuxContentDigest(payload, "transfer_payload", preview.id,
+            preview.payloadDigest, preview.payloadDigestKeyId, input.keys)) {
+            throw new Error("preview digest mismatch");
+          }
+          const stored = JSON.parse(payload.toString("utf8")) as { prompt?: string };
+          const data = typeof stored.prompt === "string" ? JSON.parse(stored.prompt.split(
+            "BEGIN_CONFIRMED_DATA_JSON\n")[1]?.split(
+            "\nEND_CONFIRMED_DATA_JSON")[0] ?? "null") as {
+            previewId?: unknown; chunkIndex?: unknown;
+            permittedTargetRefs?: unknown;
+          } : null;
+          if (!data || data.previewId !== input.previewId ||
+              data.chunkIndex !== identity.chunkIndex ||
+              !Array.isArray(data.permittedTargetRefs) ||
+              data.permittedTargetRefs.length > 96) {
+            throw new Error("invalid preview targets");
+          }
+          selectedTargets = data.permittedTargetRefs.map((value: unknown) => {
+            const target = snapshotAmuxPermittedTarget(value);
+            if (!target) throw new Error("unconfirmed target");
+            return target;
+          });
+          if (new Set(selectedTargets.map((target) => target.ref)).size !==
+              selectedTargets.length) throw new Error("duplicate target");
+          const available = new Map(context.targets.map((target) =>
+            [target.ref, amuxCanonicalJson(target)]));
+          const missing = selectedTargets.filter((target) => !available.has(target.ref))
+            .map((target) => target.ref);
+          if (missing.length > 6) throw new Error("too many selected targets");
+          if (missing.length > 0) {
+            const withPinned = await readVerifiedAmuxIdeaAnalysisContinuationContext(
+              tx, idea.actorUserId, input.ideaId, input.keys, missing);
+            if (withPinned.pageCount !== identity.chunkIndex || withPinned.complete) {
+              throw new Error("stale target chain");
+            }
+            for (const target of withPinned.targets) {
+              available.set(target.ref, amuxCanonicalJson(target));
+            }
+          }
+          if (selectedTargets.some((target) =>
+            available.get(target.ref) !== amuxCanonicalJson(target))) {
+            throw new Error("unconfirmed target");
+          }
+        } catch { throw new AmuxIdeaAnalysisResultError("integrity_unavailable"); }
+        finally { payload.fill(0); }
+        return prepareIdeaOnlyOutputAnalysisDraft({ ideaId: input.ideaId,
+          previewId: input.previewId, raw: input.rawModelOutput!,
+          keys: input.keys, chunkIndex: identity.chunkIndex,
+          history: historyRows.map((row) => ({ chunkIndex: row.chunkIndex,
+            coveredStartOrdinal: 0, coveredEndOrdinal: 0,
+            remainingStartOrdinal: 0, remainingEndOrdinal: 0,
+            coverageStatus: "more" as const, outputPartIndex: row.outputPartIndex!,
+            outputPending: true as const })),
+          permittedTargetRefs: selectedTargets });
+      })();
   const invalidReason = prepared?.decision === "hold" ? prepared.reason : null;
-  const proposedOutcome = invalidReason ? "invocation_failed" : input.outcome;
+  const ownerInput = prepared?.decision === "hold" &&
+    prepared.reason === "owner_input" ? prepared : null;
+  const proposedOutcome = invalidReason && !ownerInput ? "invocation_failed" : input.outcome;
   const basis = await tx.amuxIdeaAnalysisBudgetHold.findUnique({
     where: { id: input.holdId },
   });
@@ -280,8 +400,20 @@ export async function commitAmuxIdeaAnalysisResult(
   const usageUnverified = charge !== null &&
     charge.decision !== "settlement_candidate";
   const effectiveOutcome = usageUnverified ? "outcome_unknown" : proposedOutcome;
-  const state = effectiveOutcome === "verified_success" ? "draft_ready" :
+  const state = effectiveOutcome === "verified_success" ?
+    ownerInput ? "owner_input" : "draft_ready" :
     effectiveOutcome === "invocation_failed" ? "provider_failed" : "outcome_unknown";
+  let ownerInputSealed: ReturnType<typeof sealAmuxContent> | null = null;
+  if (state === "owner_input" && ownerInput) {
+    const plain = Buffer.from(amuxCanonicalJson({
+      ownerQuestion: ownerInput.ownerQuestion,
+      remainingScope: ownerInput.remainingScope,
+    }), "utf8");
+    try {
+      ownerInputSealed = sealAmuxContent(plain, "analysis_freeform",
+        amuxAnalysisFreeformSubjectId(input.ideaId, input.previewId), input.keys);
+    } finally { plain.fill(0); }
+  }
   const auditId = await writeSystemAuditLog({ tx,
     systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_ANALYSIS_RESULT_ACTION,
@@ -294,6 +426,8 @@ export async function commitAmuxIdeaAnalysisResult(
       outcome: input.outcome, effectiveOutcome, state,
       failureReason: usageUnverified ? "usage_unverified" : invalidReason ??
         (effectiveOutcome === "invocation_failed" ? "invocation_failed" : null),
+      ...(ownerInputSealed ? { ownerInputDigest: ownerInputSealed.digest,
+        ownerInputDigestKeyId: ownerInputSealed.digestKeyId } : {}),
       retryAutomatically: false },
   });
   if (effectiveOutcome === "outcome_unknown") {
@@ -301,7 +435,8 @@ export async function commitAmuxIdeaAnalysisResult(
       { holdId: input.holdId,
         reason: usageUnverified ? "usage_unverified" : "invocation_unverified" });
     const halted = await tx.amuxIdeaAnalysisChunk.updateMany({ where: {
-      ideaId: input.ideaId, chunkIndex: 0, state: "in_flight",
+      ideaId: input.ideaId, chunkIndex: identity.chunkIndex,
+      state: "in_flight",
       currentPreviewId: input.previewId,
       leaseGeneration: input.leaseGeneration,
     }, data: { state: "outcome_unknown" } });
@@ -312,24 +447,53 @@ export async function commitAmuxIdeaAnalysisResult(
     await commitAmuxKnownIdeaAnalysisSettlement(tx, { holdId: input.holdId,
       outcome: effectiveOutcome, inputTokens: input.inputTokens,
       outputTokens: input.outputTokens });
-    if (effectiveOutcome === "verified_success") {
-      await commitAmuxFirstIdeaAnalysisDraft(tx, {
-        ideaId: input.ideaId, previewId: input.previewId,
-        holdId: input.holdId, leaseGeneration: input.leaseGeneration,
-        rawModelOutput: input.rawModelOutput!, keys: input.keys,
-      });
+    if (state === "owner_input" && ownerInputSealed) {
+      const now = new Date();
+      const stoppedPreview = await tx.amuxIdeaTransferPreview.updateMany({ where: {
+        id: input.previewId, state: "in_flight", consumedAt: { not: null },
+        outcomeUnknownAt: null,
+      }, data: { state: "owner_input" } });
+      const stoppedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({ where: {
+        ideaId: input.ideaId, chunkIndex: identity.chunkIndex,
+        state: "in_flight", currentPreviewId: input.previewId,
+        leaseGeneration: input.leaseGeneration,
+      }, data: { state: "owner_input",
+        freeformCiphertext: Uint8Array.from(ownerInputSealed.ciphertext),
+        freeformKeyId: ownerInputSealed.keyId,
+        freeformKeyVersion: ownerInputSealed.keyVersion,
+        freeformPurgeAfter: new Date(now.getTime() + 24 * 60 * 60_000) } });
+      if (stoppedPreview.count !== 1 || stoppedChunk.count !== 1) {
+        throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
+      }
+    } else if (effectiveOutcome === "verified_success") {
+      if (identity.chunkIndex === 0) {
+        await commitAmuxFirstIdeaAnalysisDraft(tx, {
+          ideaId: input.ideaId, previewId: input.previewId,
+          holdId: input.holdId, leaseGeneration: input.leaseGeneration,
+          rawModelOutput: input.rawModelOutput!, keys: input.keys,
+        });
+      } else {
+        await commitAmuxContinuedIdeaAnalysisDraft(tx, {
+          ideaId: input.ideaId, previewId: input.previewId,
+          holdId: input.holdId, chunkIndex: identity.chunkIndex,
+          leaseGeneration: input.leaseGeneration,
+          rawModelOutput: input.rawModelOutput!, keys: input.keys,
+        });
+      }
     } else {
       // Return to an owner-only re-preview boundary, not an executable retry.
       // A new attempt needs a new preview id, owner confirmation and budget.
       const stoppedChunk = await tx.amuxIdeaAnalysisChunk.updateMany({ where: {
-        ideaId: input.ideaId, chunkIndex: 0, state: "in_flight",
+        ideaId: input.ideaId, chunkIndex: identity.chunkIndex,
+        state: "in_flight",
         currentPreviewId: input.previewId,
         leaseGeneration: input.leaseGeneration,
       }, data: { state: "awaiting_preview", leaseGeneration: 0 } });
-      const stoppedIdea = await tx.amuxIdeaSubmission.updateMany({ where: {
-        id: input.ideaId, state: "analyzing", cancelledAt: null,
-        analysisCompletedAt: null,
-      }, data: { state: "submitted" } });
+      const stoppedIdea = identity.chunkIndex === 0
+        ? await tx.amuxIdeaSubmission.updateMany({ where: {
+          id: input.ideaId, state: "analyzing", cancelledAt: null,
+          analysisCompletedAt: null,
+        }, data: { state: "submitted" } }) : { count: 1 };
       if (stoppedChunk.count !== 1 || stoppedIdea.count !== 1) {
         throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
       }
