@@ -71,16 +71,31 @@
     },
     {
       "id": "copilot",
-      "vendor": "google",
-      "enabled": false,
+      "vendor": "moonshot",
+      "enabled": true,
       "maxConcurrent": 2,
-      "model": "MEASURE: a Gemini model id from /model",
+      "model": "kimi-k3",
       "command": "copilot",
       "args": [
         "-p", "Read the file {promptFile} completely. It is your whole task: follow it exactly and end with the json block it asks for.",
         "--add-dir", "{promptDir}",
-        "--model", "{model}",
-        "-s"
+        "--disable-builtin-mcps",
+        "--no-custom-instructions",
+        "--no-ask-user",
+        "--no-auto-update",
+        "--no-remote",
+        "--no-remote-export",
+        "--disallow-temp-dir",
+        "--secret-env-vars", "COPILOT_GITHUB_TOKEN",
+        "--deny-tool", "write",
+        "--deny-tool", "url",
+        "--allow-tool", "shell(grep)",
+        "--allow-tool", "shell(rg)",
+        "--allow-tool", "shell(git log:*)",
+        "--allow-tool", "shell(git show:*)",
+        "--max-ai-credits", "50",
+        "-s",
+        "--model", "{model}"
       ],
       "passEnv": ["COPILOT_GITHUB_TOKEN"]
     }

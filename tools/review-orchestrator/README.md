@@ -152,21 +152,26 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
     끝났습니다 — 11건은 `/dev/stdin`(ENXIO), 11건은 거절된 도구 호출, `--sandbox`와 허용 명령
     지시문을 넣은 뒤의 5건도 `no_verdict_block`. 다시 켜려면 서버의 실제 job 하나가 판정까지
     나오는 것을 먼저 확인합니다(셸 pipe로 한 시험은 운영과 달랐습니다).
-- GitHub Copilot CLI(예시 설정에 **꺼진 채** 있음, 실측 전): 문서상 프롬프트는 `-p "<프롬프트>"`
-  인자로만 받습니다. 인자 하나는 Linux에서 약 128KB가 한계라 검토 프롬프트가 들어가지 않으므로,
-  `{promptFile}`에 프롬프트를 쓰고 `-p`에는 그 파일을 읽으라는 짧은 지시만, `--add-dir {promptDir}`로
-  그 job의 프롬프트 폴더 하나만 읽게 합니다. 공급사는 고른 모델로 정해지므로 **Gemini 계열**을
-  고정해 `vendor: "google"`로 둡니다(Copilot의 GPT·Claude·Grok은 기존 공급사와 겹칩니다).
-  켜기 전에 확인할 것:
-  1. 인증은 **권한이 "Copilot Requests" 하나뿐인 fine-grained PAT**을 `COPILOT_GITHUB_TOKEN`으로
-     줍니다(systemd `EnvironmentFile` + provider `passEnv`). 저장소 권한이 있는 토큰이면 내장
-     GitHub MCP 서버를 통해 reviewer가 GitHub에 쓸 수 있습니다. 내장 MCP를 끄는 플래그가 있으면
-     함께 씁니다(`copilot --help`로 확인).
-  2. `-p`에서 허용되지 않은 도구 호출이 실행을 끝내는지 계속하는지(Devin은 끝냈습니다), 쓰기와
-     네트워크(`--deny-tool`)가 막히는지.
-  3. Copilot이 읽는 `.github/instructions/`·`prompts/`·`agents/`·`chatmodes/`와
-     `.github/copilot-instructions.md`는 지시 파일로 취급되어 base 버전으로 되돌려집니다.
-  4. **서버의 실제 job 하나**가 이 provider로 배정되어 판정까지 나오는지.
+- GitHub Copilot CLI(2026-10-03 실측, v1.0.91, Copilot Pro+): **Kimi K3**(`kimi-k3`, Moonshot)로
+  고정해 `vendor: "moonshot"`으로 둡니다. GitHub 문서상 Kimi K3는 GitHub이 Fireworks AI에서 운영하고,
+  데이터 미보관 계약이 있으며 프롬프트가 Moonshot에 가지 않습니다. Copilot의 GPT·Claude·Grok은
+  기존 공급사와 겹칩니다.
+  - 프롬프트는 `-p` 인자로만 받습니다. 인자 하나는 Linux에서 약 128KB가 한계라, `{promptFile}`에
+    프롬프트를 쓰고 `-p`에는 그 파일을 읽으라는 지시만 주며 `--add-dir {promptDir}`로 그 job의 폴더
+    하나만 읽게 합니다.
+  - 인증은 **권한이 "Copilot Requests"(Read-only) 하나뿐인 fine-grained PAT**(`github_pat_`)을
+    `COPILOT_GITHUB_TOKEN`으로 줍니다(systemd `EnvironmentFile` + provider `passEnv`). classic 토큰은
+    지원되지 않습니다. `--disable-builtin-mcps`로 내장 GitHub MCP를 끕니다.
+  - 실측: 허용한 `shell(grep)`은 실행, `bash`의 curl과 `web_fetch`는 `--deny-tool url`로 거절(JSON
+    이벤트로 확인 — 응답 문장의 HTML은 모델이 지어낸 것이었습니다), 작업 폴더 밖 읽기는 기본 경로
+    제한으로 거절, 쓰기는 `--deny-tool write`로 거절. **거절된 뒤에도 답을 마치고 판정 블록을 냅니다**
+    (Devin과 다른 점). 첫 실제 검토 8건이 모두 판정(accept 6, reject 2)으로 끝났습니다.
+  - **쓰지 않는 옵션**: `--allow-all`·`--yolo`·`--allow-all-tools`·`--allow-all-paths`·`--allow-all-urls`,
+    `--share-gist`, 그리고 환경변수 `COPILOT_ALLOW_ALL=true` — 이 값은 작업 폴더를 신뢰해 그 폴더의
+    hooks(셸 명령)까지 불러옵니다. 작업 폴더는 검토 대상 브랜치입니다. 그래서 `.github/hooks`·`skills`·
+    `plugins`·`.copilot/`·`.mcp.json`도 base 버전으로 되돌립니다.
+  - `--max-ai-credits 50`은 검토 한 건의 상한입니다. 월 credit(Pro+ 3,900, flex 포함 7,000)은
+    GitHub의 Copilot 사용량 화면에서 봅니다.
 
 ## 서버 업데이트 (drain)
 

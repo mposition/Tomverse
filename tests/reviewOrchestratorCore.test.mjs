@@ -151,10 +151,19 @@ test("the shipped example config validates and names the repository the client d
   assert.ok(config.repos[repoNameFromRemote(config.repos.tomverse.url)]);
   // Every enabled provider is on its own model vendor. Devin ships disabled: on
   // 2026-10-02/03 it never returned a verdict on the server (see README).
+  // Copilot on Kimi K3 (Moonshot) returned a verdict on all of its first eight.
   const enabled = config.providers.filter((p) => p.enabled);
-  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "openai", "xai"]);
+  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "moonshot", "openai", "xai"]);
   assert.equal(config.providers.find((p) => p.id === "devin").enabled, false);
-  assert.equal(independentVendorCount(config.providers, "anthropic"), 2);
+  assert.equal(independentVendorCount(config.providers, "anthropic"), 3);
+  // The Copilot provider never runs with blanket permissions or GitHub's MCP.
+  const copilot = config.providers.find((p) => p.id === "copilot");
+  for (const forbidden of ["--allow-all", "--allow-all-tools", "--allow-all-paths", "--allow-all-urls", "--yolo", "--share-gist"]) {
+    assert.equal(copilot.args.includes(forbidden), false, forbidden);
+  }
+  for (const required of ["--disable-builtin-mcps", "--no-custom-instructions", "--disallow-temp-dir"]) {
+    assert.ok(copilot.args.includes(required), required);
+  }
 });
 
 test("config fails closed on an enabled provider without a measured vendor", () => {
