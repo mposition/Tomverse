@@ -15,5 +15,5 @@ test("runner stop route synthetic contract", () => {
   ], { encoding: "utf8", env });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /# pass 3\b/);
+  assert.match(result.stdout, /# pass 4\b/);
 });

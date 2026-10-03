@@ -9,6 +9,16 @@ import { stopPromptRefinerVnextOneShotUnknown } from
   "@/lib/promptRefinerVnextOneShotOutcomeRecovery";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
+const DEFINITE_REFUSALS = new Set([
+  "vnext_one_shot_unknown_input_invalid",
+  "vnext_one_shot_unknown_stage_lock_unavailable",
+  "vnext_one_shot_unknown_stage_not_running",
+  "vnext_one_shot_unknown_stage_mismatch",
+  "vnext_one_shot_unknown_slot_mismatch",
+  "vnext_one_shot_unknown_consumption_audit_invalid",
+  "vnext_one_shot_unknown_consumption_audit_mismatch",
+  "vnext_one_shot_unknown_close_conflict",
+]);
 const bodySchema = z.object({
   requestId: z.string().regex(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
   slotIndex: z.number().int().min(0).max(79),
@@ -47,6 +57,11 @@ export async function POST(request: Request) {
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
+    }
+    if (error instanceof Error && DEFINITE_REFUSALS.has(error.message)) {
+      return NextResponse.json({ code: "ONE_SHOT_STOP_REFUSED",
+        retryAuthorized: false, humanReviewRequired: true },
+      { status: 409, headers });
     }
     // A commit or transport failure may be ambiguous. Read the content-free
     // stage/slot/audit state and hand off; never resend this stop blindly.
