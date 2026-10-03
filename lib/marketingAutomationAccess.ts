@@ -518,7 +518,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * SupportTriageRun and its two audit actors remain included in the merged schema.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "838db90370ebc0fd40382638064d7d92165aee3b3a68a9e9db42badff9abded2";
+  "b42b514588eafb84574e106dab6737a1ff61c640aae8334642143e357caba53c";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
