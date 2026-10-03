@@ -426,6 +426,25 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
   const proposal = stored?.nodeProposal;
   const nodeProposal = proposal && typeof proposal === "object" &&
     !Array.isArray(proposal) ? proposal as Record<string, unknown> : null;
+  const hierarchy = Array.isArray(stored?.hierarchy) ? stored.hierarchy : null;
+  const parentValue = hierarchy?.length === 1 ? hierarchy[0] : null;
+  const parent = parentValue && typeof parentValue === "object" &&
+    !Array.isArray(parentValue) ? parentValue as Record<string, unknown> : null;
+  const parentContentValue = parent?.content;
+  const parentContent = parentContentValue &&
+    typeof parentContentValue === "object" &&
+    !Array.isArray(parentContentValue)
+    ? parentContentValue as Record<string, unknown> : null;
+  const rootShape = nodeProposal?.level === "initiative" &&
+    nodeProposal.parentId === null && hierarchy?.length === 0 &&
+    row.baseNodeId === null && row.baseNodeRevision === null &&
+    row.baseNodeDigest === null && row.baseNodeDigestKeyId === null;
+  const epicShape = nodeProposal?.level === "epic" &&
+    parent?.level === "initiative" && parent.parentId === null &&
+    parent.state === "active" && parent.id === nodeProposal.parentId &&
+    parent.id === row.baseNodeId && parent.revision === row.baseNodeRevision &&
+    parentContent?.digest === row.baseNodeDigest &&
+    parentContent.keyId === row.baseNodeDigestKeyId;
   if (!prepared?.entryHash || auditRowActorKind(prepared) !== "human" ||
       prepared.actorUserId !== input.actorUserId ||
       prepared.action !== PREPARE_ACTION ||
@@ -437,8 +456,7 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
       meta.confirmationDigestKeyId !== row.confirmationDigestKeyId ||
       stored?.decisionId !== row.id || stored.actorUserId !== row.actorUserId ||
       stored.action !== "create_node" ||
-      nodeProposal?.level !== "initiative" ||
-      nodeProposal.parentId !== null ||
+      !(rootShape || epicShape) ||
       !UUID.test(String(nodeProposal.id))) {
     throw new AmuxNodeCreateError("integrity_unavailable");
   }
@@ -476,6 +494,7 @@ export async function commitAmuxRootNodeNoCommitConfirmed(
   tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; decisionId: string;
     prepareRequestId: string },
+  expectedLevel: NodeLevel = "initiative",
 ) {
   const actorUserId = ownerId(input.session);
   if (!UUID.test(input.decisionId) || !UUID.test(input.prepareRequestId)) {
@@ -493,7 +512,7 @@ export async function commitAmuxRootNodeNoCommitConfirmed(
   `;
   if (locked.length !== 1) throw new AmuxNodeCreateError("not_found");
   const status = await readAmuxRootNodeDecisionInTransaction(tx,
-    input.session, input.decisionId, input.prepareRequestId);
+    input.session, input.decisionId, input.prepareRequestId, expectedLevel);
   if (status.state !== "outcome_unknown") {
     throw new AmuxNodeCreateError(status.state === "partial"
       ? "integrity_unavailable" : "reconfirm");
@@ -520,7 +539,7 @@ export async function commitAmuxRootNodeNoCommitConfirmed(
   const auditId = await writeAdminAuditLog({ tx, session: input.session,
     request: input.request, action: "amux.v4.unit.no_commit_confirmed",
     targetType: TARGET, targetId: row.id,
-    summary: "Owner confirmed an AMUX v4 root node attempt did not commit.",
+    summary: `Owner confirmed an AMUX v4 ${expectedLevel} node attempt did not commit.`,
     metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
       prepareRequestId: row.prepareRequestId,
       consumeRequestId: row.outcomeUnknownConsumeRequestId,

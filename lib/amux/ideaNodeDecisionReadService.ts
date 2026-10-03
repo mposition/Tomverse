@@ -87,6 +87,7 @@ async function validNoCommitAudit(tx: Prisma.TransactionClient,
 export async function readAmuxRootNodeDecisionInTransaction(
   tx: Prisma.TransactionClient, session: Session,
   decisionId: string, prepareRequestId: string,
+  expectedLevel: "initiative" | "epic" = "initiative",
 ) {
   const actorUserId = ownerId(session);
   if (!UUID.test(decisionId) || !UUID.test(prepareRequestId)) {
@@ -161,6 +162,7 @@ export async function readAmuxRootNodeDecisionInTransaction(
       !(rootShape || epicShape)) {
     return { state: "partial" } as const;
   }
+  if (proposal.level !== expectedLevel) return { state: "not_visible" } as const;
   if (row.state === "prepared" && !row.finalAuditLogId &&
       row.consumeRequestId === null && row.resolvedNodeId === null) {
     if (audits.some((audit) => audit.action === CONSUME)) {
@@ -260,14 +262,15 @@ export async function readAmuxRootNodeDecisionInTransaction(
 }
 
 export async function readAmuxRootNodeDecision(session: Session,
-  decisionId: string, prepareRequestId: string) {
+  decisionId: string, prepareRequestId: string,
+  expectedLevel: "initiative" | "epic" = "initiative") {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
              set_config('idle_in_transaction_session_timeout', '5000', true) AS idle_limit
     `;
     return readAmuxRootNodeDecisionInTransaction(tx, session,
-      decisionId, prepareRequestId);
+      decisionId, prepareRequestId, expectedLevel);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 8_000 });
 }
