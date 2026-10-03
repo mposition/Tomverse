@@ -65,3 +65,21 @@ test("closed history, forged targets and a cardless rejection fail closed", () =
   assert.deepEqual(prepare(chunk({ outcome: "reject", units: [] })),
   { decision: "hold", reason: "invalid_result" });
 });
+
+test("a mutable caller cannot change the response between cursor judgement and sealing", () => {
+  let reads = 0;
+  const input = { ideaId: "idea-01", previewId: "preview-02", keys,
+    priorPage, permittedTargetRefs: [feature] };
+  Object.defineProperty(input, "raw", { get() {
+    reads += 1;
+    return JSON.stringify(reads === 1 ? chunk() :
+      chunk({ outcome: "reject", units: [] }));
+  } });
+  const result = prepareSecondIdeaOnlyAnalysisDraft(input);
+  assert.equal(reads, 1);
+  assert.equal(result.decision, "ready");
+  if (result.decision === "ready") {
+    assert.equal(result.draft.outcome, "propose");
+    assert.equal(result.draft.units.length, 1);
+  }
+});
