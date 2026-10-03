@@ -15,6 +15,7 @@ import { boundedRegularUtf8, checkManifestFiles, readBinding } from
 const MANIFEST_MAX_BYTES = 16 * 1024 * 1024;
 const OWNER_KEY = /^(?:[0-9a-f]{2}){32,64}$/;
 const CONFIRMATION = "I_AM_MPOSITION_AND_VERIFIED_EVERY_LABEL_AND_PRIVACY_EXCLUSION";
+export const OWNER_SEAL_CLEANUP_UNKNOWN = "owner_seal_cleanup_unknown";
 
 export function sealOwnerManifestFiles(input) {
   const { manifestPath, bindingPath, outputPath, ownerKeyHex, confirmation,
@@ -79,7 +80,7 @@ export function sealOwnerManifestFiles(input) {
     if (cleanupErrors.length) {
       throw new AggregateError(
         operationError ? [operationError, ...cleanupErrors] : cleanupErrors,
-        "owner_seal_cleanup_unknown");
+        OWNER_SEAL_CLEANUP_UNKNOWN);
     }
   }
   if (operationError) throw operationError;
@@ -88,8 +89,8 @@ export function sealOwnerManifestFiles(input) {
 
 export function ownerSealFailureCode(error) {
   return error instanceof AggregateError &&
-    error.message === "owner_seal_cleanup_unknown"
-    ? "owner_seal_cleanup_unknown" : "owner_seal_unavailable";
+    error.message === OWNER_SEAL_CLEANUP_UNKNOWN
+    ? OWNER_SEAL_CLEANUP_UNKNOWN : "owner_seal_unavailable";
 }
 
 function main(args) {

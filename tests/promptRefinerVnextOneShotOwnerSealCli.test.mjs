@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { verifyPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
-import { ownerSealFailureCode } from
+import { OWNER_SEAL_CLEANUP_UNKNOWN, ownerSealFailureCode } from
   "../scripts/prompt-refiner-vnext-one-shot-owner-seal.mjs";
 import { syntheticManifest } from
   "./support/promptRefinerVnextOneShotSyntheticManifest.mjs";
@@ -22,7 +22,7 @@ const keyHex = "42".repeat(32);
 test("cleanup ambiguity has a distinct content-free stop code", () => {
   assert.equal(ownerSealFailureCode(new AggregateError(
     [new Error("write"), new Error("unlink")],
-    "owner_seal_cleanup_unknown")), "owner_seal_cleanup_unknown");
+    OWNER_SEAL_CLEANUP_UNKNOWN)), OWNER_SEAL_CLEANUP_UNKNOWN);
   assert.equal(ownerSealFailureCode(new Error("write")), "owner_seal_unavailable");
 });
 
