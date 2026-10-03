@@ -61,3 +61,31 @@ export function assertQaReleaseDigestEndpoint(candidate: string): void {
   const exact = allowedUrls.includes(candidate) && url.href === candidate && url.protocol === "https:";
   if (!exact) throw new Error("qa_release_digest_endpoint_not_allowed");
 }
+
+export const QA_RELEASE_MONITOR_PATHNAME = "/api/internal/agents/qa-release/monitor";
+
+/**
+ * The Monitor service's one destination: the same fixed origins and Railway
+ * name rule as the digest, its own exact path, and the same written-form
+ * comparison before the request is built.
+ */
+export function qaReleaseMonitorEndpoint(env: Record<string, string | undefined>): string {
+  const origin = QA_RELEASE_DIGEST_ENDPOINTS[qaReleaseDigestEnvironment(env)];
+  const url = `${origin}${QA_RELEASE_MONITOR_PATHNAME}`;
+  assertQaReleaseMonitorEndpoint(url);
+  return url;
+}
+
+export function assertQaReleaseMonitorEndpoint(candidate: string): void {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("qa_release_monitor_endpoint_invalid");
+  }
+  const allowedUrls: readonly string[] = Object.values(QA_RELEASE_DIGEST_ENDPOINTS).map(
+    (origin) => `${origin}${QA_RELEASE_MONITOR_PATHNAME}`,
+  );
+  const exact = allowedUrls.includes(candidate) && url.href === candidate && url.protocol === "https:";
+  if (!exact) throw new Error("qa_release_monitor_endpoint_not_allowed");
+}

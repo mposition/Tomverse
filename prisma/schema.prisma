@@ -8176,6 +8176,30 @@ model AgentDigestItem {
   @@index([retentionUntil])
 }
 
+/// The QA-release agent's operator control record (docs/policy/qa-release-agent.md
+/// section 6): numbered, append-only revisions of what the operator decided,
+/// with rotation times and never secret values. Single writer:
+/// lib/qaReleaseOperatorControlStore.ts. Triggers (migration
+/// 20261003010000_qa_release_operator_control) require consecutive revisions
+/// and a same-transaction audit row by a person, set `createdAt` from the
+/// database clock, and refuse every update, delete and truncate.
+model QaReleaseOperatorControl {
+  revision                 Int       @id
+  digestEnabled            Boolean
+  mergeLaneEnabled         Boolean
+  developLaneOn            Boolean
+  iacCommit                String?
+  digestSecretRotatedAt    DateTime? @db.Timestamptz(3)
+  monitorSecretRotatedAt   DateTime? @db.Timestamptz(3)
+  mergeLaneSecretRotatedAt DateTime? @db.Timestamptz(3)
+  githubAppKeyRotatedAt    DateTime? @db.Timestamptz(3)
+  railwayTokenRotatedAt    DateTime? @db.Timestamptz(3)
+  githubReadTokenRotatedAt DateTime? @db.Timestamptz(3)
+  auditLogId               String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the

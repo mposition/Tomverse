@@ -121,6 +121,9 @@ export const QA_RELEASE_NOT_CHECKED_CODES = [
   "release_lane_overflow",
   "checks_overflow",
   "applicability_unknown_overflow",
+  // GitHub was read, but not all of the window (a page cap) or a job name
+  // matched no known pattern: the CI rows are a partial list.
+  "ci_collection_incomplete",
   // The builder had no previous snapshot, so gates.changed is not a diff.
   "gates_changed_not_compared",
   "digest_too_large",
