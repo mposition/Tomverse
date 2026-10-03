@@ -24,8 +24,11 @@ export type AmuxExternalTransferPromptCandidate =
  * bytes. This is a display candidate only: caller provenance, owner approval,
  * current source, encrypted storage and one-time send authorization remain
  * separate checks. A source-scope approval alone must never call this a send.
+ * The caller must use the same normalized idea snapshot that produced the
+ * scanned excerpt candidate; this function does not authenticate provenance.
  */
-function compose(previewId: string, idea: IdeaInput,
+export function composeAmuxExternalTransferPromptCandidate(previewId: string,
+  idea: IdeaInput,
   excerpt: AmuxGitHubExcerptPreviewResult): AmuxExternalTransferPromptCandidate {
   if (excerpt.status !== "preview_candidate") return excerpt;
   const sourceTexts = [
@@ -62,7 +65,7 @@ export function buildAmuxScopedRepositoryTransferPromptCandidate(input: {
 }): AmuxExternalTransferPromptCandidate {
   const idea = snapshotIdea(input.idea);
   if (!idea) return { status: "hold", reason: "idea_unverified" };
-  return compose(input.previewId, idea,
+  return composeAmuxExternalTransferPromptCandidate(input.previewId, idea,
     prepareAmuxScopedRepositoryExcerptPreview(idea, input.scopeJson,
       input.repositoryIds, input.modelId, input.selections, input.digestSecret));
 }
@@ -75,7 +78,7 @@ export function buildAmuxScopedPullRequestTransferPromptCandidate(input: {
 }): AmuxExternalTransferPromptCandidate {
   const idea = snapshotIdea(input.idea);
   if (!idea) return { status: "hold", reason: "idea_unverified" };
-  return compose(input.previewId, idea,
+  return composeAmuxExternalTransferPromptCandidate(input.previewId, idea,
     prepareAmuxScopedPullRequestExcerptPreview(idea, input.scopeJson,
       input.repositoryIdentities, input.modelId, input.selections, input.digestSecret));
 }
