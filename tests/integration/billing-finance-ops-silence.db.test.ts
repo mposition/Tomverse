@@ -5,6 +5,7 @@ import { BILLING_FINANCE_OPS_CONTROL_KEY } from "@/lib/billingFinanceOpsControl"
 import { billingFinanceOpsIdempotencyKey } from "@/lib/billingFinanceOpsDigest";
 import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
+import { type ObservedOperationalIncident, observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 
 // docs/policy/billing-finance-ops.md §1.3 signal 2 against PostgreSQL. The
@@ -21,6 +22,26 @@ const requireDedicatedTestDatabase = () => {
 requireDedicatedTestDatabase();
 
 const ENV = { APP_ENV: "staging" };
+
+/** The verdict and every incident the check raised while producing it. */
+const check = async () => {
+  const incidents: ObservedOperationalIncident[] = [];
+  const stop = observeOperationalIncidents((incident) => incidents.push(incident));
+  try {
+    return { verdict: await checkBillingFinanceOpsSilence(ENV), incidents };
+  } finally {
+    stop();
+  }
+};
+
+/** An alert names the environment and the date and nothing else of the run. */
+const assertAlert = (incidents: ObservedOperationalIncident[], code: string, today: string) => {
+  assert.equal(incidents.length, 1);
+  const [incident] = incidents;
+  assert.equal(incident.code, code);
+  assert.equal(incident.severity, "warning");
+  assert.deepEqual(incident.context, { component: "billing-finance-ops-agent", environment: "staging", date: today });
+};
 let savedSwitch: string | null = null;
 
 const setSwitch = (value: string) =>
@@ -58,21 +79,32 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test("off is off, and an unreadable or missing switch is control_unreadable", async () => {
+test("off raises nothing; an unreadable or missing switch raises control_unreadable", async () => {
+  const { today } = await dbToday();
   await setSwitch(JSON.stringify({ enabled: false, revision: 0, enabledAt: null }));
-  assert.equal(await checkBillingFinanceOpsSilence(ENV), "off");
+  const off = await check();
+  assert.equal(off.verdict, "off");
+  assert.equal(off.incidents.length, 0);
+
   await setSwitch("{");
-  assert.equal(await checkBillingFinanceOpsSilence(ENV), "control_unreadable");
+  const malformed = await check();
+  assert.equal(malformed.verdict, "control_unreadable");
+  assertAlert(malformed.incidents, "BILLING_FINANCE_OPS_CONTROL_UNREADABLE", today);
+
   await prisma.appSetting.deleteMany({ where: { key: BILLING_FINANCE_OPS_CONTROL_KEY } });
-  assert.equal(await checkBillingFinanceOpsSilence(ENV), "control_unreadable");
+  const missing = await check();
+  assert.equal(missing.verdict, "control_unreadable");
+  assertAlert(missing.incidents, "BILLING_FINANCE_OPS_CONTROL_UNREADABLE", today);
 });
 
 test("enabled: no row today is silent, today's row is recorded", async () => {
   await setSwitch(JSON.stringify({ enabled: true, revision: 1, enabledAt: "2026-01-01T00:00:00.000Z" }));
   const { now, today } = await dbToday();
   const due = now >= Date.parse(`${today}T02:00:00.000Z`);
-  const before = await checkBillingFinanceOpsSilence(ENV);
-  assert.equal(before, due ? "silent" : "not_due");
+  const before = await check();
+  assert.equal(before.verdict, due ? "silent" : "not_due");
+  if (due) assertAlert(before.incidents, "BILLING_FINANCE_OPS_DEADLINE_SILENT", today);
+  else assert.equal(before.incidents.length, 0);
 
   const recorded = await recordAgentDigestItem({
     agentKey: "billing-finance-ops",
@@ -82,5 +114,7 @@ test("enabled: no row today is silent, today's row is recorded", async () => {
     payload: { environment: "staging", computedAtDate: today, verdict: "quiet", items: [], rejectedFields: [] },
   });
   assert.equal(recorded.status, "created");
-  assert.equal(await checkBillingFinanceOpsSilence(ENV), due ? "recorded" : "not_due");
+  const after = await check();
+  assert.equal(after.verdict, due ? "recorded" : "not_due");
+  assert.equal(after.incidents.length, 0);
 });
