@@ -109,18 +109,26 @@ test("a finished row is final and identity and deadline never change", async () 
   await startRun("r1", "retention");
   for (const data of [
     { kind: "worker" },
+    { id: "r1-renamed" },
+    { sequence: BigInt(999_999) },
     { deadlineAt: new Date("2099-01-01T00:00:00Z") },
     { createdAt: new Date("2000-01-01T00:00:00Z") },
   ]) {
     await assert.rejects(
       prisma.supportTriageRun.update({ where: { id: "r1" }, data }),
       /immutable/,
-      JSON.stringify(data)
+      Object.keys(data).join(",")
     );
   }
 });
 
-test("a retention run that reports nine batches is refused at finish", async () => {
+test("a retention run may report exactly eight batches, never nine", async () => {
+  await startRun("r8", "retention");
+  const eight = await prisma.supportTriageRun.update({
+    where: { id: "r8" },
+    data: { outcome: "success", batchesCompleted: 8 },
+  });
+  assert.equal(eight.batchesCompleted, 8);
   await startRun("r1", "retention");
   await assert.rejects(
     prisma.supportTriageRun.update({
@@ -155,6 +163,13 @@ test("the 53rd run of a kind in one UTC day is refused; the other kind is not", 
   }
   await assert.rejects(startRun("r-over", "retention"), /daily_cap_exceeded/);
   await startRun("w1", "worker");
+});
+
+test("the worker kind has its own cap of 52", async () => {
+  for (let i = 0; i < DAILY_RUN_CAP.worker; i += 1) {
+    await startRun(`w${i}`, "worker");
+  }
+  await assert.rejects(startRun("w-over", "worker"), /daily_cap_exceeded/);
 });
 
 test("yesterday's runs do not count toward today's cap, whatever the session time zone", async () => {
