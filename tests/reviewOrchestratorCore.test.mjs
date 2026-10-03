@@ -198,7 +198,13 @@ test("instruction paths cover the files reviewer CLIs load on their own", () => 
   assert.equal(isInstructionPath(".claude"), true);
   assert.equal(isInstructionPath("sub/.Cursor"), true);
   // GitHub Copilot's own instruction, prompt, agent and chat-mode files.
-  for (const p of [".github/instructions/a.instructions.md", ".github/prompts/x.prompt.md", ".github/agents/r.agent.md", ".github/chatmodes/c.chatmode.md", ".github/instructions"]) {
+  // ...and the skills, hooks and plugins it loads (a hook is a shell command),
+  // plus project MCP server configuration.
+  for (const p of [
+    ".github/instructions/a.instructions.md", ".github/prompts/x.prompt.md", ".github/agents/r.agent.md",
+    ".github/chatmodes/c.chatmode.md", ".github/instructions", ".github/hooks/pre.json", ".github/skills/s/SKILL.md",
+    ".github/plugins/p/plugin.json", ".copilot/mcp-config.json", ".mcp.json", ".vscode/mcp.json",
+  ]) {
     assert.equal(isInstructionPath(p), true, p);
   }
   for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt", "docs/instructions/x.md"]) {
