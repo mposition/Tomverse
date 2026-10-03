@@ -48,9 +48,11 @@ export type AgentPolicyApprovalFacts = {
   policyPath: string;
   header: AgentPolicyHeader;
   /**
-   * The policy version at the parent of the last change: a number, "new" when
-   * the file did not exist there or carried no version (an unapproved draft),
-   * or "unknown" when it could not be read.
+   * The previous approved version, read on develop just before the policy PR
+   * merged (previousApprovedPolicyVersion): a number, "new" when the file was
+   * absent there or was a draft naming neither approver nor version, or
+   * "unknown" when it could not be read or named an approver without a
+   * readable version.
    */
   previousVersion: number | "new" | "unknown";
   /** The last commit that changed the policy file. */

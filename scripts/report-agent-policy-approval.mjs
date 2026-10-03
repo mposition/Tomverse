@@ -114,8 +114,8 @@ const mergedIntoDevelop = pullRequests?.filter((pr) => pr.baseRef === "develop" 
 // The previous approved version is what develop held just before the policy
 // PR merged -- the first parent of its merge commit -- not the parent of the
 // PR's last commit, which in a multi-commit PR is one of its own drafts.
-// "new" only when git says the path is absent there; any other failure is
-// "unknown", never a first version.
+// A merge commit not on the ref, or anything git cannot answer, is
+// "unknown"; what the file says there is previousApprovedPolicyVersion's call.
 const previousVersion = (() => {
   const mergeCommit = mergedIntoDevelop.length === 1 ? mergedIntoDevelop[0].mergeCommitSha : null;
   if (!mergeCommit) return "unknown";
