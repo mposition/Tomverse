@@ -73,6 +73,32 @@ test("the approval instant must be a UTC instant, not a day or a local time", ()
   assert.equal(cacheIsolationRecordSignature(signed({ approvedAt: "2026-10-04T00:00Z" })).signed, true);
 });
 
+test("a date that only looks like one is refused", () => {
+  // The shape is not enough for a record whose whole claim is that it is
+  // dated, and these two fields are typed by hand. Independent review raised
+  // it with `2026-99-99T99:99:99Z`.
+  for (const approvedAt of [
+    "2026-99-99T99:99:99Z",
+    "2026-13-01T00:00:00Z",
+    "2026-02-30T00:00:00Z",
+    "2026-10-04T24:00:00Z",
+    "2026-10-04T00:60:00Z",
+    "2026-10-04T00:00:60Z",
+  ]) {
+    const verdict = cacheIsolationRecordSignature(signed({ approvedAt }));
+    assert.equal(verdict.signed, false, approvedAt);
+    assert.ok(verdict.problems.includes("approved_at_not_a_utc_instant"), approvedAt);
+  }
+  // A leap year still has its 29th.
+  assert.equal(cacheIsolationRecordSignature(signed({ approvedAt: "2024-02-29T00:00:00Z" })).signed, true);
+
+  for (const verifiedOn of ["2026-99-99", "2026-02-30", "2026-13-01"]) {
+    const verdict = cacheIsolationRecordSignature(signed({ verifiedOn }));
+    assert.equal(verdict.signed, false, verifiedOn);
+    assert.ok(verdict.problems.includes("verified_on_not_a_utc_day"), verifiedOn);
+  }
+});
+
 /* ------------------------------------------------------------------------- */
 /* What the record has to say                                                */
 /* ------------------------------------------------------------------------- */

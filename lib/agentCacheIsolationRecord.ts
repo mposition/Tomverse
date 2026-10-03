@@ -122,8 +122,42 @@ export type CacheIsolationSignature = {
   problems: string[];
 };
 
-const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?Z$/;
+const UTC_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?Z$/;
+const UTC_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * Whether a UTC day exists in the calendar, rather than merely looking like
+ * one. `2026-99-99` matches the shape and is not a date, and the owner types
+ * these two fields by hand, so the shape is not enough for a record whose whole
+ * claim is that it is dated.
+ */
+const isRealUtcDay = (value: string): boolean => {
+  const parts = UTC_DAY.exec(value);
+  if (parts === null) return false;
+  const [, year, month, day] = parts;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  // Round-tripping is what rejects a day the month does not have: Date would
+  // otherwise be free to carry 2026-02-30 over into March.
+  return (
+    parsed.getUTCFullYear() === Number(year) &&
+    parsed.getUTCMonth() + 1 === Number(month) &&
+    parsed.getUTCDate() === Number(day)
+  );
+};
+
+/** The same question for an instant, including the hour, minute and second. */
+const isRealUtcInstant = (value: string): boolean => {
+  const parts = UTC_INSTANT.exec(value);
+  if (parts === null) return false;
+  const [, year, month, day, hour, minute, second] = parts;
+  if (!isRealUtcDay(`${year}-${month}-${day}`)) return false;
+  // A leap second is not representable here, and 24:00 is a day this record
+  // would be ambiguous about, so both are refused.
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second ?? "0") > 59) return false;
+  return !Number.isNaN(new Date(value).getTime());
+};
 
 /**
  * Whether the record is signed, and whether it says what §5 requires.
@@ -140,10 +174,10 @@ export const cacheIsolationRecordSignature = (
 
   if (record.approvedBy.trim() === "") problems.push("unsigned_approved_by");
   if (record.approvedAt.trim() === "") problems.push("unsigned_approved_at");
-  else if (!UTC_INSTANT.test(record.approvedAt.trim())) problems.push("approved_at_not_a_utc_instant");
+  else if (!isRealUtcInstant(record.approvedAt.trim())) problems.push("approved_at_not_a_utc_instant");
 
   if (!COMMIT_SHA.test(record.verifiedAtCommit)) problems.push("verified_commit_not_a_full_sha");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(record.verifiedOn)) problems.push("verified_on_not_a_utc_day");
+  if (!isRealUtcDay(record.verifiedOn)) problems.push("verified_on_not_a_utc_day");
 
   const names = Object.keys(CACHE_ISOLATION_DIRECTION_FACTS) as CacheIsolationDirectionName[];
   for (const name of names) {
