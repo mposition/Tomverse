@@ -89,8 +89,71 @@ test("the parser reads list, optional, enum and relation fields", () => {
     "enum Colour {\n  red\n}\nmodel A {\n  id String @id\n  tags String[]\n  colour Colour?\n  b B? @relation(fields: [bId], references: [id])\n  bId String?\n  @@index([bId])\n}\nmodel B {\n  id String @id\n  as A[]\n}\n"
   );
   assert.deepEqual(
-    models.get("A").fields.map((f) => [f.name, f.relation]),
+    models.models.get("A").fields.map((f) => [f.name, f.relation]),
     [["id", false], ["tags", false], ["colour", false], ["b", true], ["bId", false]]
   );
-  assert.deepEqual(models.get("A").unreadable, []);
+  assert.deepEqual(models.models.get("A").unreadable, []);
+  assert.deepEqual(models.unreadable, []);
+});
+
+test("block comments are skipped without hiding the lines around them", () => {
+  const parsed = parsePrismaSchema("model A {\n  /**\n   * a note\n   */\n  id String @id\n}\n");
+  assert.deepEqual(parsed.models.get("A").fields.map((f) => f.name), ["id"]);
+  assert.deepEqual(parsed.models.get("A").unreadable, []);
+});
+
+test("negative control: a comment after the opening brace cannot hide a model", () => {
+  const edited = schema + "\nmodel SupportTriageGhost { // looks harmless\n  id String @id\n  feedbackId String\n}\n";
+  const failures = auditDeletionManifest(edited);
+  assert.ok(failures.some((f) => /SupportTriageGhost: a support-triage model missing/.test(f)), JSON.stringify(failures));
+  assert.ok(failures.some((f) => /SupportTriageGhost: reaches Feedback/.test(f)), JSON.stringify(failures));
+});
+
+test("negative control: text after an opening brace is reported", () => {
+  const edited = schema + "\nmodel Odd { id String @id\n}\n";
+  assert.ok(auditDeletionManifest(edited).some((f) => /text after the opening brace/.test(f)));
+});
+
+test("negative control: an unreadable line in a model outside the manifest still fails", () => {
+  const edited = schema.replace(/^(model User \{\n)/m, '$1  weird Unsupported("x")\n');
+  assert.ok(auditDeletionManifest(edited).some((f) => /^User: unreadable schema line/.test(f)));
+});
+
+test("negative control: a view or type block is reported, not skipped", () => {
+  assert.ok(auditDeletionManifest(schema + "\nview FeedbackView {\n  feedbackId String\n}\n").some((f) => /view FeedbackView/.test(f)));
+  assert.ok(auditDeletionManifest(schema + "\ntype Shape {\n  feedbackId String\n}\n").some((f) => /type Shape/.test(f)));
+});
+
+test("negative control: a link to Feedback from either side contradicts link none", () => {
+  const edited = schema
+    .replace(/^(model SupportTriageRun \{\n)/m, "$1  reports Feedback[]\n")
+    .replace(/^(model Feedback \{\n)/m, "$1  triageRun SupportTriageRun? @relation(fields: [triageRunId], references: [id])\n  triageRunId String?\n");
+  assert.ok(
+    auditDeletionManifest(edited).some((f) => /SupportTriageRun: declared link none but the schema connects it to Feedback/.test(f))
+  );
+});
+
+test("negative control: a linked model must delete on account deletion and link through an identifier", () => {
+  const manifest = [
+    {
+      ...SUPPORT_TRIAGE_DELETION_MANIFEST[0],
+      link: { kind: "feedback_id", column: "kind" },
+      onAccountDeletion: "none",
+    },
+  ];
+  const failures = auditDeletionManifest(schema, manifest);
+  assert.ok(failures.some((f) => /link column kind must be an identifier/.test(f)));
+  assert.ok(failures.some((f) => /linked to a report but does nothing on account deletion/.test(f)));
+});
+
+test("negative control: an unknown retention key fails", () => {
+  const manifest = [{ ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], retentionKey: "run_31_days" }];
+  assert.ok(auditDeletionManifest(schema, manifest).some((f) => /unknown retention key run_31_days/.test(f)));
+});
+
+test("negative control: other person-account columns and relations fail", () => {
+  for (const line of ["adminId String?", "authorId String", "operatorId String?", "session Session? @relation(fields: [id], references: [id])"]) {
+    const failures = auditDeletionManifest(withRunField(line));
+    assert.ok(failures.some((f) => /names a person's account/.test(f)), line);
+  }
 });

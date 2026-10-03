@@ -44,12 +44,25 @@ export type AccountDeletionAction =
   | "cascade_from_group"
   | "delete_parent_record";
 
+/** The rows of the retention table in docs/policy/support-triage.md §5, one key each. */
+export const RETENTION_KEYS = Object.freeze([
+  "terminal_suggestion_30_days",
+  "membership_while_report_open",
+  "group_signal_while_group_open",
+  "terminal_group_30_days",
+  "not_queued_7_days",
+  "group_key_tombstone_7_days",
+  "run_30_days",
+  "decision_record_12_months",
+  "agent_digest_90_365_days",
+] as const);
+export type RetentionKey = (typeof RETENTION_KEYS)[number];
+
 export type ManifestEntry = {
   readonly model: string;
   readonly link: ManifestLink;
   readonly onAccountDeletion: AccountDeletionAction;
-  /** The retention rule in docs/policy/support-triage.md §5 this model follows. */
-  readonly retentionKey: string;
+  readonly retentionKey: RetentionKey;
   readonly columns: Readonly<Record<string, ColumnClass>>;
 };
 
@@ -101,25 +114,71 @@ const SCALAR_TYPES = new Set([
 
 type ParsedField = { readonly name: string; readonly type: string; readonly relation: boolean };
 type ParsedModel = { readonly name: string; readonly fields: readonly ParsedField[]; readonly unreadable: readonly string[] };
+type ParsedSchema = {
+  readonly models: ReadonlyMap<string, ParsedModel>;
+  /** Lines outside any block, or blocks of a kind this audit does not read. */
+  readonly unreadable: readonly string[];
+};
 
 const FIELD_LINE = /^(\w+)\s+(\w+)(\[\]|\?)?(?:\s+(.*))?$/;
+const BLOCK_OPEN = /^(model|enum|generator|datasource|view|type)\s+(\w+)\s*\{(.*)$/;
+const stripComment = (line: string) => line.replace(/\/\/.*$/, "").trim();
 
-/** Reads models and enums from a Prisma schema. A line it cannot read is reported, never skipped. */
-export const parsePrismaSchema = (schema: string) => {
-  const text = schema.replace(/\r\n/g, "\n");
-  const enums = new Set([...text.matchAll(/^enum\s+(\w+)\s*\{/gm)].map((m) => m[1]));
-  const blocks = [...text.matchAll(/^model\s+(\w+)\s*\{\n([\s\S]*?)^\}/gm)];
-  const modelNames = new Set(blocks.map((m) => m[1]));
+type Block = { kind: string; name: string; body: string[] };
+
+/**
+ * Reads a Prisma schema line by line. Every non-empty, non-comment line is
+ * either understood or reported: text after an opening brace, a block kind
+ * this audit does not read (view, type), and anything outside a block.
+ */
+export const parsePrismaSchema = (schema: string): ParsedSchema => {
+  // Block comments become blank lines, so every other line keeps its number.
+  const lines = schema
+    .replace(/\r\n/g, "\n")
+    .replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, ""))
+    .split("\n");
+  const unreadable: string[] = [];
+  const blocks: Block[] = [];
+  let open: Block | null = null;
+  for (const raw of lines) {
+    const line = stripComment(raw);
+    if (open) {
+      if (line === "}") {
+        blocks.push(open);
+        open = null;
+      } else {
+        open.body.push(line);
+      }
+      continue;
+    }
+    if (line === "") continue;
+    const start = BLOCK_OPEN.exec(line);
+    if (!start) {
+      unreadable.push(line);
+      continue;
+    }
+    const [, kind, name, rest] = start;
+    open = { kind, name, body: [] };
+    if (rest.trim() !== "") unreadable.push(`${kind} ${name}: text after the opening brace "${rest.trim()}"`);
+  }
+  if (open) unreadable.push(`${open.kind} ${open.name}: no closing brace`);
+  for (const block of blocks) {
+    if (block.kind === "view" || block.kind === "type") {
+      unreadable.push(`${block.kind} ${block.name}: a block kind this audit does not read`);
+    }
+  }
+  const enums = new Set(blocks.filter((block) => block.kind === "enum").map((block) => block.name));
+  const modelNames = new Set(blocks.filter((block) => block.kind === "model").map((block) => block.name));
   const models = new Map<string, ParsedModel>();
-  for (const [, name, body] of blocks) {
+  for (const block of blocks) {
+    if (block.kind !== "model") continue;
     const fields: ParsedField[] = [];
-    const unreadable: string[] = [];
-    for (const raw of body.split("\n")) {
-      const line = raw.replace(/\/\/.*$/, "").trim();
+    const modelUnreadable: string[] = [];
+    for (const line of block.body) {
       if (line === "" || line.startsWith("@@")) continue;
       const match = FIELD_LINE.exec(line);
       if (!match) {
-        unreadable.push(line);
+        modelUnreadable.push(line);
         continue;
       }
       const [, fieldName, type] = match;
@@ -128,18 +187,21 @@ export const parsePrismaSchema = (schema: string) => {
       } else if (SCALAR_TYPES.has(type) || enums.has(type)) {
         fields.push({ name: fieldName, type, relation: false });
       } else {
-        unreadable.push(line);
+        modelUnreadable.push(line);
       }
     }
-    models.set(name, { name, fields, unreadable });
+    models.set(block.name, { name: block.name, fields, unreadable: modelUnreadable });
   }
-  return models;
+  return { models, unreadable };
 };
 
-const PERSON_COLUMN = /^(userId|ownerId)$|(userId|UserId)$/;
+/** Models that are a person's account or sign-in. */
+const PERSON_MODELS = new Set(["User", "Account", "Session"]);
+/** Scalar names that conventionally hold a person's id. A renamed one is code review's (T11). */
+const PERSON_COLUMN = /(^|[a-z])(user|owner|admin|author|actor|operator|decider|reviewer|account)Id$/i;
 
 /** Every model reachable from `Feedback` through relation fields that point at it. */
-export const feedbackRelationClosure = (models: ReadonlyMap<string, ParsedModel>) => {
+export const feedbackRelationClosure = (models: ParsedSchema["models"]) => {
   const reached = new Set<string>();
   const queue = ["Feedback"];
   while (queue.length > 0) {
@@ -164,9 +226,18 @@ export const auditDeletionManifest = (
   manifest: readonly ManifestEntry[] = SUPPORT_TRIAGE_DELETION_MANIFEST
 ) => {
   const failures: string[] = [];
-  const models = parsePrismaSchema(schema);
+  const parsed = parsePrismaSchema(schema);
+  const models = parsed.models;
   const manifestModels = new Set(manifest.map((entry) => entry.model));
   if (manifestModels.size !== manifest.length) failures.push("a model is listed twice");
+
+  // Nothing in the schema may be skipped silently, inside the manifest or not.
+  for (const line of parsed.unreadable) failures.push(`schema: unreadable "${line}"`);
+  for (const model of models.values()) {
+    if (manifestModels.has(model.name)) continue;
+    for (const line of model.unreadable) failures.push(`${model.name}: unreadable schema line "${line}"`);
+  }
+  const feedback = models.get("Feedback");
 
   for (const entry of manifest) {
     const model = models.get(entry.model);
@@ -186,8 +257,34 @@ export const auditDeletionManifest = (
       if (!COLUMN_CLASSES.includes(columnClass)) failures.push(`${entry.model}.${column}: unknown class ${columnClass}`);
     }
     for (const field of model.fields) {
-      if ((field.relation && field.type === "User") || PERSON_COLUMN.test(field.name)) {
+      if ((field.relation && PERSON_MODELS.has(field.type)) || (!field.relation && PERSON_COLUMN.test(field.name))) {
         failures.push(`${entry.model}.${field.name}: names a person's account`);
+      }
+    }
+    if (!RETENTION_KEYS.includes(entry.retentionKey)) {
+      failures.push(`${entry.model}: unknown retention key ${entry.retentionKey}`);
+    }
+
+    // The declared link must agree with the schema in both directions: a
+    // relation to Feedback on either side, or a feedbackId column, is a link.
+    const reachesFeedback =
+      model.fields.some(
+        (field) => (field.relation && field.type === "Feedback") || (!field.relation && field.name === "feedbackId")
+      ) || Boolean(feedback?.fields.some((field) => field.relation && field.type === entry.model));
+    if (entry.link.kind === "none" && reachesFeedback) {
+      failures.push(`${entry.model}: declared link none but the schema connects it to Feedback`);
+    }
+    if (entry.link.kind !== "none") {
+      if (!(entry.link.column in entry.columns)) {
+        failures.push(`${entry.model}: link column ${entry.link.column} is not a classified column`);
+      } else if (entry.columns[entry.link.column] !== "identifier") {
+        failures.push(`${entry.model}: link column ${entry.link.column} must be an identifier`);
+      }
+      if (entry.link.kind === "via_model" && !manifestModels.has(entry.link.model)) {
+        failures.push(`${entry.model}: links through ${entry.link.model}, which is not in the manifest`);
+      }
+      if (entry.onAccountDeletion === "none") {
+        failures.push(`${entry.model}: linked to a report but does nothing on account deletion`);
       }
     }
     if (entry.link.kind === "none") {
