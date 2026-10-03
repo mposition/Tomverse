@@ -363,6 +363,17 @@ function beforeWrite(session: Session) {
   catch { throw new AmuxUnitRejectError("integrity_unavailable"); }
 }
 
+function knownPreCommitRefusal(error: unknown,
+  phase: "prepare" | "consume"): AmuxUnitRejectError | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return null;
+  if (error.code === "P2002") {
+    return new AmuxUnitRejectError(phase === "prepare"
+      ? "already_prepared" : "reconfirm");
+  }
+  if (error.code === "P2004") return new AmuxUnitRejectError("integrity_unavailable");
+  return null;
+}
+
 export async function prepareAmuxUnitReject(session: Session, request: Request,
   choice: AmuxUnitRejectPrepare) {
   const keys = beforeWrite(session);
@@ -376,6 +387,10 @@ export async function prepareAmuxUnitReject(session: Session, request: Request,
     }, { maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxUnitRejectError) throw error;
+    if (!callbackReturned) {
+      const known = knownPreCommitRefusal(error, "prepare");
+      if (known) throw known;
+    }
     throw new AmuxUnitRejectError("outcome_unknown");
   }
 }
@@ -393,6 +408,10 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
     }, { maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxUnitRejectError) throw error;
+    if (!callbackReturned) {
+      const known = knownPreCommitRefusal(error, "consume");
+      if (known) throw known;
+    }
     throw new AmuxUnitRejectError("outcome_unknown");
   }
 }
