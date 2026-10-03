@@ -7,6 +7,7 @@ import { parse as parseYaml } from "yaml";
 
 import {
   ALLOWED_SAVE_CONDITIONS,
+  canonicaliseKey,
   CACHE_FAMILIES,
   WIDELY_READABLE_BRANCHES,
   judgeCacheKeys,
@@ -40,6 +41,7 @@ const rules = (sources) => judgeCacheKeys(sources).findings.map((finding) => fin
 
 const OS = "${{ runner.os }}";
 const LOCK = "${{ hashFiles('package-lock.json') }}";
+const CANON_OS = "${{runner.os}}";
 
 test("a namespaced key with a namespaced restore-key is accepted", () => {
   const result = judgeCacheKeys([
@@ -108,12 +110,55 @@ test("a governed key must carry v<n>-<namespace>- before its first expression", 
 });
 
 test("namespacePrefix reads the literal region, hyphenated namespaces included", () => {
-  assert.equal(namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").prefix, `${OS}-next-v2-admin-e2e-`);
+  // The prefix comes back canonical, because that is the form every comparison
+  // uses -- see canonicaliseKey.
+  assert.equal(
+    namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").prefix,
+    `${CANON_OS}-next-v2-admin-e2e-`,
+  );
   assert.equal(
     namespacePrefix(`${OS}-playwright-v2-daily-${LOCK}-chromium-webkit`, "playwright").prefix,
-    `${OS}-playwright-v2-daily-`,
+    `${CANON_OS}-playwright-v2-daily-`,
   );
   assert.equal(namespacePrefix(`${OS}-next-v2-pr-${LOCK}-src`, "playwright").problem, "key_missing_family_prefix");
+  // Spacing inside an expression does not change the answer.
+  assert.equal(
+    namespacePrefix(`\${{  runner.os  }}-next-v2-pr-${LOCK}-src`, "next").prefix,
+    `${CANON_OS}-next-v2-pr-`,
+  );
+});
+
+test("keys are canonicalised, so equal values are not read as separate entries", () => {
+  // `hashFiles('a')` and `hashFiles( 'a' )` are different text and the same
+  // value. Comparing raw text would read two workflows sharing one entry as
+  // two entries. Independent review caught it.
+  const spaced = `${OS}-next-v2-shared-\${{ hashFiles( 'package-lock.json' ) }}`;
+  const tight = `${OS}-next-v2-shared-\${{hashFiles('package-lock.json')}}`;
+  const quoted = `${OS}-next-v2-shared-\${{ hashFiles("package-lock.json") }}`;
+  assert.equal(canonicaliseKey(spaced), canonicaliseKey(tight));
+  assert.equal(canonicaliseKey(quoted), canonicaliseKey(tight));
+  for (const other of [tight, quoted]) {
+    assert.deepEqual(
+      rules([wf("a", oneStep({ key: spaced })), wf("b", oneStep({ key: other }))]),
+      ["key_shared_across_workflows"],
+      other,
+    );
+  }
+});
+
+test("hashFiles arguments must be string literals, not expressions", () => {
+  // `hashFiles(matrix.lane)` passed a loose `hashFiles(...)` match while being
+  // no more predictable than the matrix itself.
+  for (const key of [
+    `${OS}-next-v2-pr-\${{ hashFiles(matrix.lane) }}`,
+    `${OS}-next-v2-pr-\${{ hashFiles(env.LOCKFILE) }}`,
+    `${OS}-next-v2-pr-\${{ hashFiles() }}`,
+  ]) {
+    assert.ok(rules([wf("a", oneStep({ key }))]).includes("key_has_unpredictable_expression"), key);
+  }
+  // Several literals are fine, and so is the repository's own single-literal form.
+  assert.deepEqual(rules([wf("a", oneStep({ key: `${OS}-next-v2-pr-\${{ hashFiles('a.json', 'b.json') }}` }))]), []);
+  assert.deepEqual(rules([wf("a", oneStep({ key: `${OS}-next-v2-pr-${LOCK}-src` }))]), []);
 });
 
 test("a blank restore-keys entry is dropped rather than refused", () => {
@@ -138,7 +183,9 @@ test("a blank restore-keys entry is dropped rather than refused", () => {
       "",
     ].join("\n"),
   );
-  assert.deepEqual(read.steps[0].restoreKeys, [`${OS}-next-v2-pr-${LOCK}-`]);
+  // Canonical, because that is the form the rules compare.
+  assert.deepEqual(read.steps[0].restoreKeys, [canonicaliseKey(`${OS}-next-v2-pr-${LOCK}-`)]);
+  assert.deepEqual(read.steps[0].restoreKeysRaw, [`${OS}-next-v2-pr-${LOCK}-`]);
 });
 
 test("a restore-key that is not a prefix of its own key is refused", () => {
@@ -158,7 +205,7 @@ test("two workflows declaring the same key are refused, and one workflow's two j
     shared.findings.map((finding) => finding.rule),
     ["key_shared_across_workflows"],
   );
-  assert.equal(shared.findings[0].detail, key);
+  assert.equal(shared.findings[0].detail, canonicaliseKey(key));
 
   const twoJobsOneWorkflow = [
     "on: pull_request",
@@ -244,7 +291,8 @@ test("every governed cache step in this repository carries a namespace segment",
     for (const step of read.steps) {
       const family = CACHE_FAMILIES.find((entry) => step.paths.includes(entry.path));
       if (!family || step.key === null) continue;
-      const prefix = `${OS}-${family.family}-`;
+      // `readCacheSteps` hands back canonical keys, so the prefix is canonical too.
+      const prefix = `${CANON_OS}-${family.family}-`;
       assert.ok(step.key.startsWith(prefix), `${name} # ${step.jobId}: key must start with ${prefix}`);
       const rest = step.key.slice(prefix.length);
       // `v<n>-<namespace>-` at minimum: the version lets a poisoned generation
@@ -252,7 +300,7 @@ test("every governed cache step in this repository carries a namespace segment",
       // namespace is what keeps two workflows off one entry.
       assert.match(
         rest,
-        /^v\d+-[a-z0-9-]+-\$\{\{ hashFiles/,
+        /^v\d+-[a-z0-9-]+-\$\{\{hashFiles/,
         `${name} # ${step.jobId}: expected v<n>-<namespace>- after ${prefix}, got "${rest}"`,
       );
       seen.push(`${name}#${step.jobId}`);

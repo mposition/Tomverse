@@ -43,7 +43,11 @@ export const CACHE_FAMILIES = [
   { path: "~/.cache/ms-playwright", family: "playwright" },
 ];
 
-const RUNNER_OS = "${{ runner.os }}";
+/**
+ * `runner.os` in its canonical form, because every key is canonicalised before
+ * any comparison and the family prefix has to be on the same footing.
+ */
+const RUNNER_OS = "${{runner.os}}";
 
 /**
  * The scopes whose entries every run in the repository can reach.
@@ -294,12 +298,32 @@ export const hasOnlyNarrowPullRequestTrigger = (document) => {
  * caught it. `runner.os` and `hashFiles(...)` are allowed because identical
  * text means an identical value, which is what the comparison needs.
  */
-const PREDICTABLE_EXPRESSION = /^\s*(?:runner\.os|hashFiles\([^)]*\))\s*$/;
+const STRING_LITERAL = `(?:'[^']*'|"[^"]*")`;
+const PREDICTABLE_EXPRESSION = new RegExp(
+  `^(?:runner\\.os|hashFiles\\(${STRING_LITERAL}(?:,${STRING_LITERAL})*\\))$`,
+);
+
+/** Inner expression text with whitespace removed and quotes normalised. */
+const canonicaliseExpression = (inner) => inner.replace(/\s+/g, "").replace(/"([^"]*)"/g, "'$1'");
+
+/**
+ * A key with every expression canonicalised, so that textual equality means
+ * equal values for the expressions this module allows.
+ *
+ * Being on the allowed list is not enough on its own: `hashFiles('a.json')` and
+ * `hashFiles( 'a.json' )` are different text and the same value, so a textual
+ * comparison would read two workflows sharing one entry as separate ones.
+ * Independent review caught that, and that a loose `hashFiles(...)` match also
+ * admitted `hashFiles(matrix.lane)`, whose value is no more predictable than
+ * the matrix. Hence the literal-only argument list above.
+ */
+export const canonicaliseKey = (text) =>
+  text.replace(/\$\{\{([^}]*)\}\}/g, (_match, inner) => `\${{${canonicaliseExpression(inner)}}}`);
 
 const unpredictableExpressions = (text) =>
   [...text.matchAll(/\$\{\{([^}]*)\}\}/g)]
     .map((match) => match[1])
-    .filter((inner) => !PREDICTABLE_EXPRESSION.test(inner));
+    .filter((inner) => !PREDICTABLE_EXPRESSION.test(canonicaliseExpression(inner)));
 
 /**
  * Every cache step in a workflow, as {jobId, path, key, restoreKeys, mode}.
@@ -334,8 +358,12 @@ export const readCacheSteps = (text) => {
         name: typeof step.name === "string" ? step.name : null,
         mode,
         paths,
-        key: typeof withBlock.key === "string" ? withBlock.key.trim() : null,
-        restoreKeys,
+        // Canonical for every comparison; the raw text is kept only so a
+        // finding can quote what the author actually wrote.
+        key: typeof withBlock.key === "string" ? canonicaliseKey(withBlock.key.trim()) : null,
+        keyRaw: typeof withBlock.key === "string" ? withBlock.key.trim() : null,
+        restoreKeys: restoreKeys.map((entry) => canonicaliseKey(entry)),
+        restoreKeysRaw: restoreKeys,
         condition: typeof step.if === "string" ? step.if.trim() : step.if === undefined ? null : "",
       });
     }
@@ -377,7 +405,10 @@ const familyPrefix = (family) => `${RUNNER_OS}-${family}-`;
  * Returns null when the key has no expression at all: the literal region cannot
  * be told apart from the whole key, so the caller requires the whole key.
  */
-export const namespacePrefix = (key, family) => {
+export const namespacePrefix = (rawKey, family) => {
+  // Canonicalise here too, so calling this directly answers the same question
+  // the rules do rather than a near-miss of it.
+  const key = canonicaliseKey(rawKey);
   const prefix = familyPrefix(family);
   if (!key.startsWith(prefix)) return { prefix: null, problem: "key_missing_family_prefix" };
   const rest = key.slice(prefix.length);
