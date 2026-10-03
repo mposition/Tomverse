@@ -277,6 +277,9 @@ run(
     // sre-ops genesis chain and state: chain shape, compare-and-set generation,
     // checkpoint order, trigger stamps, immutability, and no late COMMIT.
     "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

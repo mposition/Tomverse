@@ -1,0 +1,87 @@
+// The ops-observer transaction wrapper against a migrated database
+// (docs/policy/sre-ops.md §6): READ COMMITTED with the kind's timers armed by
+// statement 1, the inherited transaction_timeout logged, the statement ceiling
+// rolling the whole transaction back, a short budget refused, and
+// assertNotLate refusing at or past the deadline.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+const rawUrl = process.env.TEST_DATABASE_URL?.trim();
+
+test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
+  const { prisma } = await import("@/lib/prisma");
+  const { withOpsObserverTransaction, assertNotLate, OpsObserverLateError } = await import("@/lib/opsObserverTransaction");
+  const inSeconds = (s: number) => new Date(Date.now() + s * 1000);
+  const probe = `ops_observer_wrapper_probe_${process.pid}`;
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${probe}" (x int)`);
+
+  try {
+    await t.test("statement 1 arms the kind's timers in a READ COMMITTED transaction, and the inherited timer is logged", async () => {
+      const logged: string[] = [];
+      const original = console.info;
+      console.info = (line: string) => logged.push(line);
+      try {
+        const { result, armed } = await withOpsObserverTransaction("confirm", inSeconds(170), async (tx) => {
+          const rows = await tx.$queryRaw<{ iso: string; st: string; idle: string }[]>`
+            SELECT current_setting('transaction_isolation') AS iso,
+                   current_setting('statement_timeout') AS st,
+                   current_setting('idle_in_transaction_session_timeout') AS idle`;
+          return rows[0];
+        });
+        assert.deepEqual(result, { iso: "read committed", st: "2s", idle: "1s" });
+        if (armed.serverVersion >= 170000) {
+          assert.equal(armed.ttArmed, true);
+          assert.ok(armed.ttArmedMs! >= 51_000 && armed.ttArmedMs! <= 55_000);
+        } else {
+          assert.equal(armed.ttArmed, false);
+        }
+        const entry = logged.map((l) => JSON.parse(l)).find((e) => e.event === "ops_observer_transaction_armed");
+        assert.ok(entry, "the arming is logged");
+        assert.equal(entry.kind, "confirm");
+        assert.ok("priorTxTimeoutMs" in entry);
+      } finally {
+        console.info = original;
+      }
+    });
+
+    await t.test("the statement past the ceiling rolls the whole transaction back", async () => {
+      // `assert` allows A = 3, so the callback may send 2 after the arming statement.
+      const error = await withOpsObserverTransaction("assert", inSeconds(60), async (tx) => {
+        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (1)`);
+        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (2)`);
+        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (3)`);
+      }).then(() => null, (e: Error & { code?: string }) => e);
+      assert.equal(error?.code, "statement_ceiling_exceeded");
+      const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${probe}"`);
+      assert.equal(rows[0].n, 0);
+    });
+
+    await t.test("a method not known to be one statement is refused", async () => {
+      const error = await withOpsObserverTransaction("confirm", inSeconds(170), async (tx) => {
+        await (tx as unknown as { $transaction: () => Promise<void> }).$transaction();
+      }).then(() => null, (e: Error & { code?: string }) => e);
+      assert.equal(error?.code, "statement_ceiling_unknown_method");
+    });
+
+    await t.test("a budget under C_guarded + 250 ms is refused before anything runs", async () => {
+      let ran = false;
+      const error = await withOpsObserverTransaction("confirm", inSeconds(40), async () => {
+        ran = true;
+      }).then(() => null, (e: Error) => e);
+      assert.match(String(error?.message), /deadline_budget_insufficient/);
+      assert.equal(ran, false);
+    });
+
+    await t.test("assertNotLate passes with time to spare and refuses at or past the deadline", async () => {
+      await assertNotLate(inSeconds(30));
+      for (const deadline of [inSeconds(2), inSeconds(-1)]) {
+        const error = await assertNotLate(deadline).then(() => null, (e: Error) => e);
+        assert.ok(error instanceof OpsObserverLateError, String(error));
+      }
+    });
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${probe}"`);
+    await prisma.$disconnect();
+  }
+});
