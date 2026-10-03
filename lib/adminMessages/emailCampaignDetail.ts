@@ -147,6 +147,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
         `${count} of them could be moved automatically.`,
       malformed: (count: number) =>
         `${count} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`,
+      noticeBreakdown: (owed: number, reached: number, noAddress: number) =>
+        `${owed} accounts are owed the notice; ${reached} already hold one that arrived or is on its way, and ${noAddress} of the rest have no address. Each wave asks again, so a later wave reaches accounts created since and notices that did not arrive.`,
       consentBreakdown: (consented: number, active: number, withEmail: number) =>
         `${consented} have a timestamped opt-in; ${active} are active and ${withEmail} currently have an address. Suppression and jurisdiction are checked at send time.`,
       counting: "Counting…",
@@ -162,6 +164,10 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       empty: "No wave has expanded yet, so nobody has been considered.",
       considered: (count: number) => `${count} considered`,
       notExpanded: "This wave has not expanded.",
+      noLedger: (deliveries: number) =>
+        `This audience keeps no per-person record here; the delivery rows are its record. ${deliveries} delivery rows written so far. An account with no address gets no row.`,
+      noLedgerDryRun: (deliveries: number) =>
+        `This audience keeps no per-person record here; the delivery rows are its record. This was a dry run: ${deliveries} delivery rows were written as skipped and nothing was sent.`,
       dryRunWritten:
         "would have been written to — this was a dry run, so every one of those deliveries was skipped and nothing was sent.",
       written: "had a delivery row written.",
@@ -349,6 +355,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       autoMigratable: (count: number) => `그중 ${count}명은 자동으로 옮길 수 있습니다.`,
       malformed: (count: number) =>
         `${count}명은 옮길 수 없습니다. parser가 읽을 수 없는 저장값은 다시 쓰지 않고 보존하므로, 그 계정들에 자동 변경을 약속하면 사실이 아니게 됩니다.`,
+      noticeBreakdown: (owed: number, reached: number, noAddress: number) =>
+        `고지 대상 계정은 ${owed}개입니다. ${reached}개는 도착했거나 발송 중인 고지가 이미 있고, 나머지 중 ${noAddress}개는 이메일 주소가 없습니다. wave마다 대상을 다시 계산하므로, 다음 wave는 그 사이 가입한 계정과 고지가 도착하지 않은 계정에 보냅니다.`,
       consentBreakdown: (consented: number, active: number, withEmail: number) =>
         `${consented}명이 시각이 기록된 동의를 했고, 그중 ${active}명이 활성 계정이며 ${withEmail}명은 현재 이메일 주소가 있습니다. 수신 차단과 관할권은 발송 시점에 확인합니다.`,
       counting: "세는 중…",
@@ -364,6 +372,10 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       empty: "아직 확장된 wave가 없어 검토된 사람이 없습니다.",
       considered: (count: number) => `${count}명 검토됨`,
       notExpanded: "이 wave는 확장되지 않았습니다.",
+      noLedger: (deliveries: number) =>
+        `이 대상은 여기에 사람별 기록을 남기지 않고, delivery 행이 그 기록입니다. 지금까지 delivery 행 ${deliveries}개를 썼습니다. 주소가 없는 계정에는 행이 없습니다.`,
+      noLedgerDryRun: (deliveries: number) =>
+        `이 대상은 여기에 사람별 기록을 남기지 않고, delivery 행이 그 기록입니다. dry run이었으므로 delivery 행 ${deliveries}개는 모두 skipped로 기록되었고 아무것도 발송되지 않았습니다.`,
       dryRunWritten:
         "명에게 기록될 예정이었습니다 — dry run이었으므로 해당 delivery는 모두 skipped 처리되었고 아무것도 발송되지 않았습니다.",
       written: "명에게 delivery 행이 기록되었습니다.",
