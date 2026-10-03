@@ -25,6 +25,41 @@ export type PromptRefinerVnextOneShotStageReadback = Readonly<{
   dispatchAuthorized: false;
 }>;
 
+const ABSENT_STAGE: PromptRefinerVnextOneShotStageReadback = Object.freeze({
+  stagePresent: false,
+  stageStatus: null,
+  slotCount: 0,
+  reservedSlots: 0,
+  consumedSlots: 0,
+  reservationShapeValid: false,
+  approvalAuditsValid: false,
+  dispatchAuthorized: false,
+});
+
+/**
+ * Admission callers must take this lock before registry-price and slot reads.
+ * Slot writes take a SHARE lock on the same stage row in the DB trigger, so a
+ * present stage and its reservations remain stable for this transaction.
+ * This is still only a readback, never a dispatch authorization.
+ */
+export async function lockAndReadPromptRefinerVnextOneShotStage(
+  tx: Prisma.TransactionClient
+): Promise<PromptRefinerVnextOneShotStageReadback> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+    WHERE "id" = ${STAGE_ID} FOR UPDATE NOWAIT
+  `;
+  if (rows.length === 0) return ABSENT_STAGE;
+  if (rows.length !== 1 || rows[0]?.id !== STAGE_ID) {
+    throw new Error("vnext_one_shot_stage_lock_mismatch");
+  }
+  const snapshot = await readPromptRefinerVnextOneShotStage(tx);
+  if (!snapshot.stagePresent) {
+    throw new Error("vnext_one_shot_stage_changed_after_lock");
+  }
+  return snapshot;
+}
+
 /** Content-free diagnostic only; never grants stage, run, or dispatch authority. */
 export async function readPromptRefinerVnextOneShotStage(
   tx: Prisma.TransactionClient
@@ -33,16 +68,7 @@ export async function readPromptRefinerVnextOneShotStage(
     where: { id: STAGE_ID },
   });
   if (!stage) {
-    return Object.freeze({
-      stagePresent: false,
-      stageStatus: null,
-      slotCount: 0,
-      reservedSlots: 0,
-      consumedSlots: 0,
-      reservationShapeValid: false,
-      approvalAuditsValid: false,
-      dispatchAuthorized: false,
-    });
+    return ABSENT_STAGE;
   }
 
   const slots = await tx.promptRefinerVnextOneShotSlot.findMany({
