@@ -10,6 +10,7 @@ import {
   amuxV4AnalysisQueueReadEnabled,
   isAmuxV4AnalysisAgentAuthorized,
 } from "../lib/amux/ideaAnalysisQueueCore.ts";
+import { AMUX_V4_IDEA_AGENT_ID } from "../lib/amux/ideaIdentityCore.ts";
 import {
   encodeAmuxV4AnalysisQueueCursor,
   parseAmuxV4AnalysisQueueCursor,
@@ -24,6 +25,7 @@ const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
   });
 
 test("AMUX v4 analysis queue uses a dedicated identity and stays dark", () => {
+  assert.equal(AMUX_V4_ANALYSIS_AGENT_ID, AMUX_V4_IDEA_AGENT_ID);
   assert.equal(AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH, false);
   assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), secret), true);

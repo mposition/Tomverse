@@ -145,7 +145,7 @@ const performs = (source, name) => {
 
 /** The `@/lib` modules a route imports, as text. One level, not transitive. */
 const importedSources = (routeSource) =>
-  [...routeSource.matchAll(/from "@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+  [...routeSource.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
     .map((match) => `${LIB_DIR}${match[1]}.ts`)
     .filter((path) => existsSync(path))
     .map((path) => withoutComments(readFileSync(path, "utf8")));
@@ -306,6 +306,13 @@ test("the sweep sees the admin API, so a silent pass is impossible", () => {
     writeRoutes.length >= 40,
     `only ${writeRoutes.length} admin write route(s) matched; the export pattern has probably drifted`
   );
+});
+
+test("the v4 unit rejection route reaches its transactional audit writer", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "amux/ideas/unit-rejection/route.ts");
+  assert.ok(route);
+  assert.equal(route.reaches("writeAdminAuditLog"), true);
 });
 
 test("every admin route decides whether the caller is an administrator", () => {
