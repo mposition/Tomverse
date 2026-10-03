@@ -30,8 +30,11 @@ export function verifyPromptRefinerVnextOneShotOwnerSeal(input: Readonly<{
   now: Date;
 }>): Readonly<{
   structuralValidation: "pass";
-  ownerConfirmationValid: true;
+  ownerKeyBindingVerified: true;
   caseCount: 80;
+  semanticTruthVerified: false;
+  independentAuthorshipVerified: false;
+  privacyExclusionVerified: false;
   dispatchAuthorized: false;
 }> {
   if (!input || !SHA256.test(input.expectedRootDigest) ||
@@ -89,8 +92,12 @@ export function verifyPromptRefinerVnextOneShotOwnerSeal(input: Readonly<{
   }
   return Object.freeze({
     structuralValidation: "pass",
-    ownerConfirmationValid: true,
+    // The signature proves key possession, not human review of the cases.
+    ownerKeyBindingVerified: true,
     caseCount: 80,
+    semanticTruthVerified: false,
+    independentAuthorshipVerified: false,
+    privacyExclusionVerified: false,
     dispatchAuthorized: false,
   });
 }

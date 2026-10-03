@@ -59,8 +59,10 @@ test("owner-only synthetic CLI seals once and prints no root or case data", (t) 
     expectedPreregistrationDigest: binding.expectedPreregistrationDigest,
     ownerHmacKey: Buffer.from(keyHex, "hex"), now: new Date(),
   }), {
-    structuralValidation: "pass", ownerConfirmationValid: true,
+    structuralValidation: "pass", ownerKeyBindingVerified: true,
     caseCount: 80, dispatchAuthorized: false,
+    semanticTruthVerified: false, independentAuthorshipVerified: false,
+    privacyExclusionVerified: false,
   });
   const duplicate = run(files);
   assert.equal(duplicate.status, 1);

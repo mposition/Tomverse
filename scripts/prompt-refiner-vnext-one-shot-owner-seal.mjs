@@ -1,7 +1,9 @@
 // Run only in mposition's restricted owner environment. The seal file contains
 // the root and is never an app receipt, PR artifact, or dispatch permission.
-import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
-import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { closeSync, fsyncSync, linkSync, openSync, readFileSync, unlinkSync,
+  writeSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createPromptRefinerVnextOneShotOwnerSeal,
@@ -36,24 +38,37 @@ export function sealOwnerManifestFiles(input) {
     expectedPreregistrationDigest: binding.expectedPreregistrationDigest,
     ownerHmacKey, now, confirmation,
   });
+  const tempPath = join(dirname(outputPath), `.${basename(outputPath)}.${randomUUID()}.tmp`);
   let descriptor;
+  let tempCreated = false;
   try {
-    // Exclusive creation prevents replacing any existing owner-held seal.
+    // Write and verify a fresh sibling before an atomic no-overwrite hardlink.
     // The owner must use a separately access-controlled directory; mode alone
     // is not an OS-independent custody boundary (notably on Windows).
-    descriptor = openSync(outputPath, "wx", 0o600);
-    writeSync(descriptor, attestationText + "\n");
+    descriptor = openSync(tempPath, "wx", 0o600);
+    tempCreated = true;
+    const bytes = Buffer.from(attestationText + "\n", "utf8");
+    let written = 0;
+    while (written < bytes.length) {
+      const count = writeSync(descriptor, bytes, written, bytes.length - written);
+      if (count <= 0) throw new Error("owner_seal_write_incomplete");
+      written += count;
+    }
     fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    verifyPromptRefinerVnextOneShotOwnerSeal({
+      manifestText,
+      attestationText: readFileSync(tempPath, "utf8"),
+      expectedRootDigest: binding.expectedRootDigest,
+      expectedPreregistrationDigest: binding.expectedPreregistrationDigest,
+      ownerHmacKey, now,
+    });
+    linkSync(tempPath, outputPath);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
+    if (tempCreated) unlinkSync(tempPath);
   }
-  verifyPromptRefinerVnextOneShotOwnerSeal({
-    manifestText,
-    attestationText: readFileSync(outputPath, "utf8"),
-    expectedRootDigest: binding.expectedRootDigest,
-    expectedPreregistrationDigest: binding.expectedPreregistrationDigest,
-    ownerHmacKey, now,
-  });
   return Object.freeze({ sealed: true, caseCount: 80, dispatchAuthorized: false });
 }
 

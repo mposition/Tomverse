@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 
-import { verifyPromptRefinerVnextOneShotOwnerSeal } from
+import { createPromptRefinerVnextOneShotOwnerSeal,
+  verifyPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
 import { canonicalBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
 import { syntheticManifest } from
@@ -40,8 +41,10 @@ const input = (overrides = {}) => ({
 test("synthetic owner confirmation and all 80 structural cases verify without content output", () => {
   const result = verifyPromptRefinerVnextOneShotOwnerSeal(input());
   assert.deepEqual(result, {
-    structuralValidation: "pass", ownerConfirmationValid: true,
+    structuralValidation: "pass", ownerKeyBindingVerified: true,
     caseCount: 80, dispatchAuthorized: false,
+    semanticTruthVerified: false, independentAuthorshipVerified: false,
+    privacyExclusionVerified: false,
   });
   assert.ok(!JSON.stringify(result).includes(fixture.rootDigest));
   assert.ok(!JSON.stringify(result).includes("synthetic ko source"));
@@ -54,6 +57,11 @@ test("missing, stale or forged owner confirmation refuses without leaking detail
     { attestationText: attest({ ...signed, rootDigest: "c".repeat(64) }) },
     { attestationText: attest({ ...signed, confirmedAt: "2026-07-01T00:00:00.000Z" }) },
     { attestationText: attest(signed, Buffer.alloc(32, 0x43)) },
+    { attestationText: attest({ ...signed, confirmedAt: "2026-10-04T00:00:01.000Z" }) },
+    { attestationText: JSON.stringify({ ...JSON.parse(attest()), extra: true }) },
+    { attestationText: JSON.stringify(signed) },
+    { attestationText: JSON.stringify({ ...JSON.parse(attest()), hmacSha256: "g".repeat(64) }) },
+    { attestationText: attest().padEnd(2049, " ") },
     { ownerHmacKey: Buffer.alloc(31) },
     { expectedPreregistrationDigest: "c".repeat(64) },
     { manifestText: syntheticManifest((manifest) => {
@@ -65,4 +73,7 @@ test("missing, stale or forged owner confirmation refuses without leaking detail
     assert.throws(() => verifyPromptRefinerVnextOneShotOwnerSeal(input(change)),
       { message: "vnext_one_shot_owner_seal_unavailable" });
   }
+  assert.throws(() => createPromptRefinerVnextOneShotOwnerSeal({
+    ...input(), confirmation: "NOT_OWNER_CONFIRMED",
+  }), { message: "vnext_one_shot_owner_seal_unavailable" });
 });
