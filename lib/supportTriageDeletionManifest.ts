@@ -135,12 +135,18 @@ const BLOCK_OPEN = /^(model|enum|generator|datasource|view|type)\s+(\w+)\s*\{(.*
  * `null` when the attributes cannot be read that way.
  */
 export const relationFieldsOf = (attributes: string): readonly string[] | null => {
-  const start = attributes.indexOf("@relation(");
-  if (start < 0) return [];
+  // Whitespace may sit between the attribute and its parenthesis (comments are
+  // already stripped). A bare `@relation` with no argument list names no field.
+  // Find it outside strings: a default value may spell "@relation(" too.
+  const masked = attributes.replace(/"(?:[^"\\]|\\.)*"/g, (text) => " ".repeat(text.length));
+  const call = /@relation\b\s*(\()?/.exec(masked);
+  if (!call) return [];
+  if (!call[1]) return [];
+  const openParen = call.index + call[0].length - 1;
   const args: string[] = [];
   let depth = 0;
   let current = "";
-  let i = start + "@relation(".length;
+  let i = openParen + 1;
   for (; i < attributes.length; i += 1) {
     const char = attributes[i];
     if (char === '"') {

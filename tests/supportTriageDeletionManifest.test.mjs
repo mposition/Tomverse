@@ -238,3 +238,20 @@ test("negative control: a relation name that spells fields: is not a foreign key
     auditDeletionManifest(edited, manifest).some((f) => /link column id is not the foreign key of a relation to Feedback/.test(f))
   );
 });
+
+test("whitespace or a stripped comment between @relation and its arguments still names the foreign key", async () => {
+  const { relationFieldsOf, parsePrismaSchema } = await import("../lib/supportTriageDeletionManifest.ts");
+  assert.deepEqual(relationFieldsOf("@relation (fields: [feedbackId], references: [id])"), ["feedbackId"]);
+  const parsed = parsePrismaSchema(
+    "model A {\n  id String @id\n  f Feedback @relation /* owning */ (fields: [fid], references: [id])\n  fid String\n}\nmodel Feedback {\n  id String @id\n  as A[]\n}\n"
+  );
+  assert.deepEqual(parsed.models.get("A").fields.find((f) => f.name === "f").relationFields, ["fid"]);
+});
+
+test("an @relation spelled inside a string is not the relation attribute", async () => {
+  const { relationFieldsOf } = await import("../lib/supportTriageDeletionManifest.ts");
+  assert.deepEqual(
+    relationFieldsOf('@default("@relation(fields: [id])") @relation(fields: [realFk], references: [id])'),
+    ["realFk"]
+  );
+});
