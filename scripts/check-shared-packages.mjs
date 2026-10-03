@@ -41,6 +41,11 @@ import { fileURLToPath } from "node:url";
 
 import { ESLint } from "eslint";
 
+import {
+  missingCompilerProblem,
+  resolveCompiler,
+} from "./check-shared-packages-core.mjs";
+
 const RULE = "no-restricted-imports";
 const METRIC = "forbidden_nextjs_imports_in_shared_packages";
 
@@ -141,31 +146,13 @@ for (const { name, configured } of configuredFor) {
 
 // --- 2. Each package with TypeScript type-checks standalone -----------------
 
-/**
- * The compiler, found the way Node finds anything else.
- *
- * A hard-coded `<root>/node_modules/typescript/bin/tsc` is only right when the
- * checkout installed its own dependencies. A git worktree does not: Node
- * resolves up to the parent checkout's `node_modules`, which is how every other
- * script here reaches `tsx`, and the literal path pointed at a file that was
- * never there. The spawn then failed with a loader stack trace that landed in
- * the problem text below, so a missing compiler was reported as a package that
- * does not type-check -- the one conclusion the evidence did not support.
- */
-const tscBin = (() => {
-  try {
-    return createRequire(import.meta.url).resolve("typescript/bin/tsc");
-  } catch {
-    return null;
-  }
-})();
+// Where the compiler is, and what a missing one means, are both decided in
+// check-shared-packages-core.mjs -- see that file for why they are not inline.
+const require_ = createRequire(import.meta.url);
+const tscBin = resolveCompiler((specifier) => require_.resolve(specifier));
 
 if (tscBin === null && scriptPackages.length > 0) {
-  problems.push(
-    "typescript is not resolvable from this checkout, so nothing type-checked " +
-      `the ${scriptPackages.length} package(s) with TypeScript sources. Run ` +
-      "`npm ci`. This is the check being unable to run, not a boundary failure."
-  );
+  problems.push(missingCompilerProblem(scriptPackages.length));
 }
 
 for (const entry of tscBin === null ? [] : scriptPackages) {
