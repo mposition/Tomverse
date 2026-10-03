@@ -1170,8 +1170,16 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
   **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
   의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
-  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`도 route에서만 읽습니다. 게시물은
-  바꾸지 않습니다 — 적용은 S2f이고 staging 서명 이후입니다.
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`은 route와,
+  운영자가 staging에서 실행하는 검증 기록 생성기의 서명 변조 probe에서만 읽습니다(값은 출력하지
+  않고 HMAC 계산에만 씁니다, 운영자 승인 2026-10-02). 게시물은 바꾸지 않습니다 — 적용은 S2f이고
+  staging 서명 이후입니다.
+- **S2e-verification(검증 기록과 서명)**: `lib/marketingWebhookRecordDraft.ts`,
+  `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
+  `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
+  답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
+  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
+  강제합니다.
 
 # 엔지니어링 Agent
 
@@ -1703,8 +1711,9 @@ Non-negotiable requirements:
      `codex`, Cursor는 `cursor`이고, Cursor는 실제로 쓴 모델의 공급사를
      `--author-vendor`(`anthropic`·`openai`·`xai`·`google` 등)로 함께 적습니다.
      서버가 이 값으로 같은 공급사를 빼므로, 다른 앱의 이름을 쓰지 않습니다.
-   - base 기본값은 `origin/develop`과의 분기점입니다. main에서 나온 브랜치는
-     `--base origin/main`을 붙입니다. base는 develop이나 main의 이력 안에 있어야 합니다.
+   - base는 클라이언트가 고릅니다. `origin/develop`과 `origin/main`의 분기점 중 **더 가까운 것**이
+     base가 되므로 `--base`는 붙이지 않습니다. 먼 기준점은 이미 병합된 남의 변경을 끌고 와서
+     reviewer를 둘로 늘리고 대기열을 막습니다(2026-10-02, 대기 20건 전부가 그랬습니다).
    - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
      올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
    - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.

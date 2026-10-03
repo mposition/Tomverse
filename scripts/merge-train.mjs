@@ -20,9 +20,11 @@
 //      GitHub's own record of the PR -- even on a latched lane.
 //   2. A latched lane does nothing more until a person clears it.
 //   3. If a merge made by the train is still deploying, wait until every
-//      service that deploys the branch has deployed it. A failed, skipped,
-//      crashed or unrecognised deployment latches the lane and stops the train
-//      (exit 1) -- it never retries and never merges past a broken deploy.
+//      service that deploys the branch has deployed it. A failed, crashed or
+//      unrecognised deployment, or three SKIPPED in a row among the merge's
+//      own and later ones containing it, latches the lane and stops the train
+//      (exit 1) -- it never retries and never merges past a broken deploy. A
+//      single SKIPPED (often a CI run a later push cancelled) is a wait.
 //   4. If any service in the environment has a deployment waiting for CI,
 //      queued, building or deploying, hold.
 //   5. Otherwise pick the oldest non-draft PR whose checks all finished green

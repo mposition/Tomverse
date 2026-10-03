@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
@@ -31,6 +31,19 @@ export class UsageError extends Error {
 const mirrorLock = (config) => join(config.stateDir, "mirror.lock");
 
 /**
+ * Drain mode is a flag file in the state directory, so it survives a restart:
+ * an update drains, waits for the running reviews, restarts, then lifts the
+ * drain, and no review is cut off and closed as unknown.
+ */
+const drainFlag = (config) => join(config.stateDir, "drain");
+export const isDraining = (config) => existsSync(drainFlag(config));
+export function setDraining(config, on) {
+  mkdirSync(config.stateDir, { recursive: true });
+  if (on) writeFileSync(drainFlag(config), `${new Date().toISOString()}\n`);
+  else rmSync(drainFlag(config), { force: true });
+}
+
+/**
  * Accept one review request. `bundlePath` is the client's git bundle already
  * written to disk. Everything is checked before the job becomes visible, so a
  * rejected submit leaves no job behind.
@@ -51,6 +64,23 @@ function checkFocus(mirror, base, head, focus) {
     throw new UsageError("focus_not_in_range", "focus must be on the path from base to head");
   }
   return focus;
+}
+
+/**
+ * Has a finished job on this server reviewed exactly up to `head`? Finished
+ * means every slot returned a verdict (accept or reject): an unknown, a
+ * cancellation or a pending slot is not a review.
+ */
+function reviewedHead(store, repoName, head) {
+  return store
+    .listJobs()
+    .some(
+      ({ job, slots }) =>
+        job.repo === repoName &&
+        job.head === head &&
+        slots.length > 0 &&
+        slots.every((slot) => slot.status === "done" && (slot.verdict === "accept" || slot.verdict === "reject")),
+    );
 }
 
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
@@ -99,7 +129,12 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       if (files.length === 0) throw new UsageError("empty_change");
       const focusFiles = focus ? changedFiles(repo.mirror, focus, head) : files;
       if (focusFiles.length === 0) throw new UsageError("empty_focus", "focus..head changes no file");
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
+      // The contract-path floor counts from the focus only when this server has
+      // itself finished reviewing up to it. A focus nobody reviewed could hide a
+      // contract change before it, so then the whole base..head range counts.
+      const focusReviewed = focus !== null && reviewedHead(store, repoName, focus);
+      const contractFiles = focusReviewed ? focusFiles : files;
+      const { reviewers, touchesContract } = requiredReviewers(config, requested, contractFiles);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
         throw new UsageError(
@@ -120,6 +155,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
         focusFileCount: focusFiles.length,
+        focusReviewed,
         submittedAt: now.getTime(),
       };
       store.publish(job);
@@ -189,6 +225,25 @@ export class Orchestrator {
     return expired.length;
   }
 
+  /**
+   * Operator cancel: close every queued slot of a job as unknown. A running
+   * slot is left to finish -- killing it would be an unknown outcome of its
+   * own. Returns how many slots were closed.
+   */
+  cancel(jobId) {
+    const entry = this.store.readJob(jobId);
+    if (!entry) throw new UsageError("job_not_found");
+    let closed = 0;
+    for (const listed of entry.slots) {
+      // Re-read right before writing: the daemon may have just started it.
+      const slot = this.store.readSlot(jobId, listed.index);
+      if (slot.status !== "queued") continue;
+      this.store.writeSlot(jobId, { ...slot, status: "done", verdict: "unknown", reason: "cancelled_by_operator", findings: [], endedAt: this.now() });
+      closed += 1;
+    }
+    return closed;
+  }
+
   recoverOrphans() {
     let recovered = 0;
     for (const { job, slots } of this.store.listJobs()) {
@@ -202,6 +257,9 @@ export class Orchestrator {
   }
 
   tick() {
+    // Draining: start nothing new, let running reviews finish. Submits are still
+    // accepted and wait in the queue until the drain is lifted.
+    if (isDraining(this.config)) return [];
     const jobs = this.store.listJobs();
     const now = this.now();
     const decisions = planAssignments({

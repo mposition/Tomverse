@@ -47,9 +47,25 @@ export type MarketingWebhookReceiverDeps = {
   /** For the status query a shadow report compares against; null without a key. */
   readonly adapter: MarketingPublishAdapter | null;
   readonly consumeFaultArm: (eventIdDigest: string) => Promise<{ readonly consumed: boolean }>;
-  readonly shadowEnabled: () => Promise<boolean>;
-  /** The one channel holding this platform account, or null for none or several. */
-  readonly resolveChannel: (accountId: string) => Promise<{ readonly id: string } | null>;
+  /**
+   * This build's webhook pipeline fingerprint. Every answer carries it, so
+   * Zernio's delivery log -- which keeps each response body -- shows which
+   * build handled which attempt. A verification record counts only attempts
+   * the current build answered (policy §8.1.1: a change re-opens verification).
+   */
+  readonly pipelineFingerprint: string;
+  /**
+   * One read of the configuration a signed delivery is handled under: the
+   * shadow switch's stored value, the Zernio channels and the digest of both
+   * (with the environment). The stamp, the shadow decision and the channel
+   * lookup all come from this one read, so an answer can never name a
+   * configuration other than the one that decided it.
+   */
+  readonly readSnapshot: () => Promise<{
+    readonly shadowValue: string | null;
+    readonly channels: ReadonlyArray<{ readonly id: string; readonly externalAccountRef: string }>;
+    readonly configDigest: string;
+  }>;
   readonly recordShadow: (input: {
     readonly eventIdDigest: string;
     readonly eventType: string;
@@ -106,20 +122,25 @@ export async function handleZernioWebhook(
   if (!deps.isStaging()) {
     return json({ code: "not_found" }, 404);
   }
+  // Every answer from here names the build that gave it; Zernio's log keeps it.
+  const pipeline = deps.pipelineFingerprint;
+  const unsigned = (answer: Record<string, unknown>, status: number) =>
+    json({ ...answer, pipeline }, status);
+
   // The kill switch, before the body is read: nothing is consumed, recorded or
   // asked of the provider. A 2xx, so the provider does not spend its retries on
   // a stop an operator chose.
   if (deps.killSwitchOn()) {
-    return json({ status: "kill_switch" }, 200);
+    return unsigned({ status: "kill_switch" }, 200);
   }
 
   const raw = await readBody(request);
-  if (raw === null) return json({ code: "body_too_large" }, 413);
+  if (raw === null) return unsigned({ code: "body_too_large" }, 413);
 
   if (!verifyZernioWebhookSignature(raw, request.headers.get("x-zernio-signature"), deps.secret)) {
     // Counted in the log by code only: no header value, no body, no secret.
     console.warn("marketing_webhook_signature_refused");
-    return json({ code: "signature_invalid" }, 401);
+    return unsigned({ code: "signature_invalid" }, 401);
   }
 
   const parsed = parseZernioWebhookEnvelope(raw, request.headers.get("x-zernio-event-id"));
@@ -127,10 +148,17 @@ export async function handleZernioWebhook(
     if (parsed.refusal === "event_not_recorded" || parsed.refusal === "multiple_targets") {
       // Signed, and not something a single channel of ours can answer for. 2xx
       // so the provider does not retry something nobody wants.
-      return json({ status: "ignored", reason: parsed.refusal }, 200);
+      return unsigned({ status: "ignored", reason: parsed.refusal }, 200);
     }
-    return json({ code: parsed.refusal }, 400);
+    return unsigned({ code: parsed.refusal }, 400);
   }
+
+  // A signed event of ours from here, so the answer also carries the
+  // configuration it ran under -- read once, before the latch, and used for
+  // every decision below.
+  const snapshot = await deps.readSnapshot();
+  const signed = (answer: Record<string, unknown>, status: number) =>
+    json({ ...answer, pipeline, config: snapshot.configDigest }, status);
   const envelope = parsed.envelope;
   const eventIdDigest = marketingWebhookEventIdDigest(MARKETING_WEBHOOK_PROVIDER, envelope.eventId);
 
@@ -138,16 +166,20 @@ export async function handleZernioWebhook(
   // the deliberate failure is answered only after the latch is spent.
   const fault = await deps.consumeFaultArm(eventIdDigest);
   if (fault.consumed) {
-    return json({ code: "deliberate_fault", eventIdDigest }, 503);
+    return signed({ code: "deliberate_fault", eventIdDigest }, 503);
   }
 
-  if (!(await deps.shadowEnabled())) {
-    return json({ status: "shadow_off" }, 200);
+  if (snapshot.shadowValue !== "true") {
+    return signed({ status: "shadow_off" }, 200);
   }
 
-  const channel = await deps.resolveChannel(envelope.accountId);
+  // One account, one channel. None is not ours; several is not one answer.
+  const holders = snapshot.channels.filter(
+    (candidate) => candidate.externalAccountRef === envelope.accountId,
+  );
+  const channel = holders.length === 1 ? holders[0] : null;
   if (!channel) {
-    return json({ status: "channel_unknown" }, 200);
+    return signed({ status: "channel_unknown" }, 200);
   }
 
   const derivedStatus = MARKETING_WEBHOOK_DERIVED_STATUS[envelope.eventType];
@@ -168,5 +200,5 @@ export async function handleZernioWebhook(
     derivedStatus,
     statusQueryMatch: marketingWebhookStatusQueryMatch(derivedStatus, state),
   });
-  return json({ status: outcome }, 200);
+  return signed({ status: outcome }, 200);
 }

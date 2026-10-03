@@ -30,6 +30,10 @@ const REVIEWED_NOT_TREE_WRITERS = new Map([
     "tests/stampPromotionMetadataCore.test.mjs",
     "searches a script's source text for its writeFileSync call; writes nothing",
   ],
+  [
+    "tests/issueBacklogShaMode.test.mjs",
+    "writes only inside the temporary repository tests/support/issueBacklogFixtureRepo.mjs creates with mkdtempSync; the mkdtemp call is in the helper, so this file's own source does not show one",
+  ],
 ]);
 
 function testFiles() {
