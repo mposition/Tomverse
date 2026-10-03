@@ -5,6 +5,7 @@ import {
   AMUX_V4_ANALYSIS_DATA_MAX_BYTES,
   AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES,
   buildFirstOutputContinuationPrompt,
+  buildIdeaOnlyOutputContinuationPrompt,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
@@ -81,6 +82,50 @@ test("a first output page yields a bounded second prompt with prior proposal ref
   { status: "hold", reason: "prompt_data_unverified" });
   assert.deepEqual(buildFirstOutputContinuationPrompt({ ...input,
     previousAuditHash: "not_a_digest" }),
+  { status: "hold", reason: "prompt_data_unverified" });
+});
+
+test("a second output page yields a third prompt without recreating earlier refs", () => {
+  const priorPermittedTargetRefs = [
+    { ref: "c0:node-0", kind: "node", level: "feature" },
+    { ref: "c0:card-0", kind: "card", cardType: "story", storyKind: "general",
+      featureRef: "c0:node-0" },
+  ];
+  const previous = {
+    schemaVersion: 2, previewId: "preview_second", chunkIndex: 1,
+    outcome: "propose", coverageStatus: "more", continuationKind: "output",
+    ownerQuestion: null, coveredScope: "One design task was proposed.",
+    remainingScope: "Implementation and verification tasks remain.",
+    units: [{ kind: "card", localId: "c1:card-0", cardType: "task",
+      storyKind: null, title: "Design the workflow", problem: "The workflow needs a design.",
+      scopeIn: ["Define the route"], scopeOut: [],
+      completionCriteria: ["Reviewable route contract"], featureRef: "c0:node-0",
+      parentStoryRef: "c0:card-0", dependencyRefs: [], duplicateCandidateRefs: [],
+      taskRole: "design", executionGrade: "advanced",
+      executionBrief: "Create a bounded design for the route.",
+      sourceRefIds: ["operator_idea"] }],
+  };
+  const input = { previewId: "preview_third", previousPreviewId: "preview_second",
+    previousRaw: JSON.stringify(previous), previousAuditHash: "b".repeat(64),
+    previousChunkIndex: 1, priorPermittedTargetRefs,
+    ideaText: "Create a reviewable workflow in several tasks." };
+  const built = buildIdeaOnlyOutputContinuationPrompt(input);
+  assert.equal(built.status, "prompt_candidate");
+  if (built.status !== "prompt_candidate") return;
+  const data = JSON.parse(built.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
+    .split("\nEND_CONFIRMED_DATA_JSON")[0]);
+  assert.equal(data.chunkIndex, 2);
+  assert.equal(data.revisionChunkIndex, 2);
+  assert.equal(data.continuation.previousChunkIndex, 1);
+  assert.deepEqual(data.permittedTargetRefs.map((target) => target.ref),
+    ["c0:node-0", "c0:card-0", "c1:card-0"]);
+  assert.deepEqual(buildIdeaOnlyOutputContinuationPrompt({ ...input,
+    priorPermittedTargetRefs: [priorPermittedTargetRefs[0]] }),
+  { status: "hold", reason: "prompt_data_unverified" });
+  assert.deepEqual(buildIdeaOnlyOutputContinuationPrompt({ ...input,
+    previousRaw: JSON.stringify({ ...previous, units: previous.units.map((unit) => ({
+      ...unit, localId: "c2:card-0",
+    })) }) }),
   { status: "hold", reason: "prompt_data_unverified" });
 });
 

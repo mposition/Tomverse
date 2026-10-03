@@ -79,7 +79,7 @@ export function continuationFromAmuxAnalysisChunk(
       remainingScope: remaining,
     };
     return Number.isSafeInteger(index + 1) &&
-      validContinuation(continuation, index + 1, 1) ? continuation : null;
+      validContinuation(continuation, index + 1, index + 1) ? continuation : null;
   } catch {
     return null;
   }
@@ -95,12 +95,36 @@ export function buildFirstOutputContinuationPrompt(input: {
   previousAuditHash: string;
   ideaText: string;
 }): AmuxIdeaAnalysisPromptResult {
+  return buildIdeaOnlyOutputContinuationPrompt({ ...input,
+    previousChunkIndex: 0, priorPermittedTargetRefs: [] });
+}
+
+/** Continue the same confirmed idea-only source after any output page. The
+ * caller must reconstruct priorPermittedTargetRefs from digest-verified stored
+ * pages; model text alone cannot introduce an earlier proposal identity. */
+export function buildIdeaOnlyOutputContinuationPrompt(input: {
+  previewId: string;
+  previousPreviewId: string;
+  previousRaw: string;
+  previousAuditHash: string;
+  previousChunkIndex: number;
+  priorPermittedTargetRefs: readonly AmuxPermittedTargetRef[];
+  ideaText: string;
+}): AmuxIdeaAnalysisPromptResult {
   try {
+    if (!Number.isSafeInteger(input.previousChunkIndex) ||
+        input.previousChunkIndex < 0 ||
+        !Array.isArray(input.priorPermittedTargetRefs) ||
+        !Number.isSafeInteger(input.previousChunkIndex + 1)) {
+      return { status: "hold", reason: "prompt_data_unverified" };
+    }
     const previous = inspectAmuxAnalysisChunk({
       raw: input.previousRaw, expectedPreviewId: input.previousPreviewId,
-      expectedChunkIndex: 0, expectedRevisionChunkIndex: 0,
-      previousContinuationKind: null,
-      permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
+      expectedChunkIndex: input.previousChunkIndex,
+      expectedRevisionChunkIndex: input.previousChunkIndex,
+      previousContinuationKind: input.previousChunkIndex === 0 ? null : "output",
+      permittedSourceRefIds: ["operator_idea"],
+      permittedTargetRefs: input.priorPermittedTargetRefs,
     });
     if (!previous.ok || previous.chunk.outcome !== "propose" ||
         previous.chunk.coverageStatus !== "more" ||
@@ -110,7 +134,7 @@ export function buildFirstOutputContinuationPrompt(input: {
     const continuation = continuationFromAmuxAnalysisChunk(
       previous.chunk, input.previousAuditHash);
     if (!continuation) return { status: "hold", reason: "prompt_data_unverified" };
-    const permittedTargetRefs = previous.chunk.units.flatMap<AmuxPermittedTargetRef>((unit) => {
+    const currentTargets = previous.chunk.units.flatMap<AmuxPermittedTargetRef>((unit) => {
       if (unit.kind === "node") return [{ ref: unit.localId, kind: "node" as const,
         level: unit.level }];
       if (unit.kind === "card") return [{ ref: unit.localId, kind: "card" as const,
@@ -119,11 +143,12 @@ export function buildFirstOutputContinuationPrompt(input: {
       return [];
     });
     return buildAmuxIdeaAnalysisPrompt({
-      previewId: input.previewId, chunkIndex: 1, revisionChunkIndex: 1,
+      previewId: input.previewId, chunkIndex: input.previousChunkIndex + 1,
+      revisionChunkIndex: input.previousChunkIndex + 1,
       continuation,
       sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
         text: input.ideaText }],
-      permittedTargetRefs,
+      permittedTargetRefs: [...input.priorPermittedTargetRefs, ...currentTargets],
     });
   } catch {
     return { status: "hold", reason: "prompt_data_unverified" };
