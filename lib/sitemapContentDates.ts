@@ -40,7 +40,7 @@ export type SitemapContentEvidence = {
 
 export const SITEMAP_CONTENT_EVIDENCE: Readonly<Record<string, SitemapContentEvidence>> = {
     "/privacy": {
-        date: "2026-09-28",
-        contentSha256: "c91c1d98f0b7e9c94561fb73f067947ac29b3193e500556b0928968bd9488b64",
+        date: "2026-11-16",
+        contentSha256: "5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7",
     },
 };

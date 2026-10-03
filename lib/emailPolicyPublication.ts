@@ -60,7 +60,13 @@ import {
  * before the gate counts it, because the gate cannot tell an edit that keeps the
  * amendment from one that removes it.
  */
-export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]>> = {};
+export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]>> = {
+  // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
+  // mposition on 2026-10-03: the email clause in seven languages, the terms
+  // clause in en, ko and zh, both effective 2026-11-16.
+  "/privacy": ["5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7"],
+  "/terms": ["5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709"],
+};
 
 /**
  * The current state of each amended document that is not a sitemap page.
@@ -81,8 +87,8 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   Record<string, { date: string; contentSha256: string }>
 > = {
   "/terms": {
-    date: "2026-07-15",
-    contentSha256: "6bd214059b552e38abd9c89d41eecd6fdfa98cad3a8705f7dec54f0f84929932",
+    date: "2026-11-16",
+    contentSha256: "5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709",
   },
 };
 

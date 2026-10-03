@@ -566,7 +566,7 @@ export const allTemplateDefinitions = () => [...definitions];
  * out. A payload date made the approved hash and the sent bytes two different
  * things. A test holds it equal to the documents' effective date once set.
  */
-export const POLICY_CHANGE_NOTICE_EFFECTIVE_DATE: string | null = null;
+export const POLICY_CHANGE_NOTICE_EFFECTIVE_DATE: string | null = "2026-11-16";
 
 type NoticeLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
