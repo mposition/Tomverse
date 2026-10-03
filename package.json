@@ -36,6 +36,7 @@
     "validate:assistant-knowledge-guide": "node scripts/validate-assistant-knowledge-guide.mjs",
     "capture:assistant-knowledge-tutorial": "node --import tsx scripts/capture-assistant-knowledge-tutorial.mjs",
     "capture:amux-staging-evidence": "node --conditions=react-server --import tsx scripts/capture-amux-staging-evidence.mjs",
+    "verify:amux-ubuntu-reboot": "node scripts/verify-amux-ubuntu-reboot.mjs",
     "local:amux-intake": "node --import tsx scripts/local-amux-intake.mjs",
     "local:amux-v22-task-sidecar": "node --import tsx scripts/amux-v22-task-sidecar.mjs",
     "smoke:amux-v22-one-shot": "node --import tsx scripts/smoke-amux-v22-one-shot.mjs",
