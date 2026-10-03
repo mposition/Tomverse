@@ -8490,3 +8490,24 @@ model OpsObserverState {
   /// The deadline the writing run claimed; checked again at COMMIT.
   runDeadlineAt             DateTime           @db.Timestamptz(3)
 }
+
+/// Support-triage run record (docs/policy/support-triage.md §4, §8). One row per
+/// worker or retention run, content-free. Triggers in migration
+/// 20261003120000_support_triage_run own createdAt and deadlineAt, cap runs at
+/// 52 per kind per UTC day, downgrade a late success to deadline_exceeded, make
+/// a finished row final and refuse deleting a row younger than 30 days.
+model SupportTriageRun {
+  id                      String    @id
+  sequence                BigInt    @unique @default(autoincrement())
+  kind                    String
+  outcome                 String    @default("running")
+  createdAt               DateTime  @default(now())
+  deadlineAt              DateTime
+  finishedAt              DateTime?
+  batchesCompleted        Int?
+  overdueRemaining        Int?
+  oldestOverdueAgeSeconds Int?
+  blocked                 Int?
+
+  @@index([kind, createdAt])
+}
