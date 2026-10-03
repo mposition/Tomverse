@@ -8684,12 +8684,12 @@ model AmuxIdeaAnalysisPriceVersion {
   createdAt                DateTime  @default(now()) @db.Timestamptz(3)
   updatedAt                DateTime  @updatedAt @db.Timestamptz(3)
 
-  approvalAudit   AdminAuditLog  @relation("AmuxV4AnalysisPriceApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  revocationAudit AdminAuditLog? @relation("AmuxV4AnalysisPriceRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit   AdminAuditLog  @relation("AmuxV4AnalysisPriceApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisPriceVersion_approvalAudit_fkey")
+  revocationAudit AdminAuditLog? @relation("AmuxV4AnalysisPriceRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisPriceVersion_revocationAudit_fkey")
   budgetHolds     AmuxIdeaAnalysisBudgetHold[]
 
-  @@unique([provider, modelId, mode, version])
-  @@index([provider, modelId, mode, status])
+  @@unique([provider, modelId, mode, version], map: "AmuxIdeaAnalysisPriceVersion_provider_model_mode_version_key")
+  @@index([provider, modelId, mode, status], map: "AmuxIdeaAnalysisPriceVersion_lookup_idx")
 }
 
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown
@@ -8718,11 +8718,11 @@ model AmuxIdeaAnalysisBudgetHold {
   dispatchedAt             DateTime?
   closedAt                 DateTime?
 
-  window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict)
-  preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_window_fkey")
+  preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_preview_fkey")
+  priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_priceVersion_fkey")
 
-  @@index([namespace, monthStart, status])
+  @@index([namespace, monthStart, status], map: "AmuxIdeaAnalysisBudgetHold_window_status_idx")
   @@index([priceVersionId])
 }
 

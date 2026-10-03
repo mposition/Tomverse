@@ -125,6 +125,22 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     pages: [firstPage, { ...secondPage, remainingScope: "One more page" }] };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, continuedPartial, ideaId),
     continuedPartial);
+  const thirdPage = { ...secondPage, chunkIndex: 2, previewId: "preview-03",
+    completedAt: "2026-10-03T00:01:00.000Z", coveredScope: "Final page",
+    units: [{ ...secondPage.units[0], id: "unit-03", localRef: "c2:card-0",
+      proposal: { ...secondPage.units[0].proposal, localId: "c2:card-0" } }] };
+  const threePages = { ...continued, pages: [firstPage,
+    { ...secondPage, remainingScope: "One final page remains" }, thirdPage] };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, threePages, ideaId), threePages);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...threePages,
+    pages: [firstPage, secondPage, { ...thirdPage, previewId: secondPage.previewId }],
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...threePages,
+    pages: [firstPage, secondPage, { ...thirdPage, chunkIndex: 3 }],
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...threePages,
+    pages: [firstPage, secondPage, { ...thirdPage, units: firstPage.units }],
+  }, ideaId), null);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
     ...partial, outcome: "reject",
   }, ideaId), null);

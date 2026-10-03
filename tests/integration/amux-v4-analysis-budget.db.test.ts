@@ -1315,31 +1315,50 @@ test("two confirmed previews cannot reserve the last monthly allowance twice", a
   const previews = await Promise.all([
     confirmedPreviewId(selectedModelId), confirmedPreviewId(selectedModelId),
   ]);
-  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+  const previousWindow = await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
     where: { namespace_monthStart: { namespace, monthStart } },
-    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000),
-      spentMicroUsd: BigInt(49_995_000) },
-    update: { spentMicroUsd: BigInt(49_995_000), reservedMicroUsd: BigInt(0) },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
   });
   const holds = previews.map(() => randomUUID());
-  const results = await Promise.allSettled(previews.map((previewId, index) =>
-    prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
-      { holdId: holds[index]!, previewId, priceVersionId, runner, keys }))));
-  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-  const rejected = results.find((result) => result.status === "rejected");
-  assert(rejected?.status === "rejected" &&
-    rejected.reason instanceof AmuxIdeaAnalysisReservationError &&
-    rejected.reason.code === "budget_hold" &&
-    rejected.reason.reason === "monthly_cap_exceeded");
-  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
-    where: { namespace_monthStart: { namespace, monthStart } },
-  })).reservedMicroUsd, BigInt(5_000));
-  assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({
-    where: { id: { in: holds } },
-  }), 1);
-  assert.equal(await prisma.adminAuditLog.count({
-    where: { action: "AMUX_V4_ANALYSIS_BUDGET_RESERVED", targetId: { in: holds } },
-  }), 1);
+  try {
+    await prisma.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { spentMicroUsd: previousWindow.limitMicroUsd -
+        previousWindow.reservedMicroUsd - BigInt(5_000) },
+    });
+    const results = await Promise.allSettled(previews.map((previewId, index) =>
+      prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+        { holdId: holds[index]!, previewId, priceVersionId, runner, keys }))));
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+    const rejected = results.find((result) => result.status === "rejected");
+    assert(rejected?.status === "rejected" &&
+      rejected.reason instanceof AmuxIdeaAnalysisReservationError &&
+      rejected.reason.code === "budget_hold" &&
+      rejected.reason.reason === "monthly_cap_exceeded");
+    assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    })).reservedMicroUsd, previousWindow.reservedMicroUsd + BigInt(5_000));
+    assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({
+      where: { id: { in: holds } },
+    }), 1);
+    assert.equal(await prisma.adminAuditLog.count({
+      where: { action: "AMUX_V4_ANALYSIS_BUDGET_RESERVED", targetId: { in: holds } },
+    }), 1);
+  } finally {
+    const reservedHolds = await prisma.amuxIdeaAnalysisBudgetHold.findMany({
+      where: { id: { in: holds }, status: "reserved" }, select: { id: true },
+    });
+    for (const hold of reservedHolds) {
+      await prisma.$transaction((tx) =>
+        commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+          { session, request, holdId: hold.id }));
+    }
+    await prisma.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { spentMicroUsd: previousWindow.spentMicroUsd },
+    });
+  }
 });
 
 test("budget window rejects another namespace or a larger monthly cap", async () => {

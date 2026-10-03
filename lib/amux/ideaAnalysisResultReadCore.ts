@@ -36,7 +36,8 @@ export type AmuxIdeaAnalysisResultView =
       coveredScope: string | null; remainingScope: string | null;
       units: AmuxVisibleAnalysisUnit[] }
   | { state: "continued_ready" | "continued_partial"; ideaId: string;
-      pages: [AmuxIdeaAnalysisResultPage, AmuxIdeaAnalysisResultPage] };
+      pages: [AmuxIdeaAnalysisResultPage, AmuxIdeaAnalysisResultPage,
+        ...AmuxIdeaAnalysisResultPage[]] };
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -105,18 +106,22 @@ export function parseAmuxIdeaAnalysisResultView(
   if (body.state === "continued_ready" || body.state === "continued_partial") {
     if (!keys(body, ["state", "ideaId", "pages"]) ||
         body.ideaId !== expectedIdeaId || !Array.isArray(body.pages) ||
-        body.pages.length !== 2) return null;
+        body.pages.length < 2) return null;
     const ids = new Set<string>();
     const refs = new Set<string>();
+    const previews = new Set<string>();
     let previousCompletedAt = 0;
     for (const [index, page] of body.pages.entries()) {
       if (!record(page) || !keys(page, ["chunkIndex", "previewId", "completedAt",
         "outcome", "coveredScope", "remainingScope", "units"]) ||
-          page.chunkIndex !== index) return null;
+          page.chunkIndex !== index || !ref(page.previewId) ||
+          previews.has(page.previewId)) return null;
+      previews.add(page.previewId);
       const completedAt = Date.parse(String(page.completedAt));
       if (!Number.isFinite(completedAt) || completedAt < previousCompletedAt) return null;
       previousCompletedAt = completedAt;
-      const partial = index === 0 || body.state === "continued_partial";
+      const partial = index < body.pages.length - 1 ||
+        body.state === "continued_partial";
       const nested = parseAmuxIdeaAnalysisResultView(200, partial ? {
         state: "partial", ideaId: expectedIdeaId,
         previewId: page.previewId, completedAt: page.completedAt,
@@ -130,7 +135,7 @@ export function parseAmuxIdeaAnalysisResultView(
       }, expectedIdeaId);
       if (!nested || (nested.state !== "partial" && nested.state !== "ready") ||
           nested.state !== (partial ? "partial" : "ready") ||
-          (index === 1 && !partial && page.remainingScope !== null)) return null;
+          (!partial && page.remainingScope !== null)) return null;
       for (const unit of nested.units) {
         if (ids.has(unit.id) || refs.has(unit.localRef)) return null;
         ids.add(unit.id);
