@@ -90,7 +90,7 @@ const LANE_RULES = [
   // Prompt Refiner suites keep the lanes they had.
   [
     "agents",
-    /^(amux-|engineering-agent-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
+    /^(amux-|engineering-agent-|ops-observer-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
   ],
 ];
 
