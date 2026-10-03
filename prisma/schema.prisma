@@ -2260,7 +2260,6 @@ model AdminAuditLog {
 
   promptRefinerReservationStage PromptRefinerReservationStage?
   amuxReviewDecision            AmuxReviewDecision?
-  opsObserverTransition         OpsObserverTransition?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8580,8 +8579,9 @@ model OpsObserverTransition {
   genesisId      String             @db.Uuid
   genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
   auditLogId     String             @unique
-  auditLog       AdminAuditLog      @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditEntryHash String
   keysSha256     String
   /// The deadline the advancing run claimed; checked again at COMMIT.

@@ -186,16 +186,22 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
           /ops_observer_transition_audit_mismatch/,
         );
       }
+      // An id with no audit entry at all: there is no foreign key, so the guard is what refuses it.
+      await refused(
+        inTransaction(async () => {
+          const state = await advanceState(head);
+          await append({ genesisId: head, generation: state.generation, auditLogId: randomUUID(), auditEntryHash: "d".repeat(64), keysSha256: state.stampKeysSha256 });
+        }),
+        /ops_observer_transition_audit_mismatch/,
+      );
     });
 
-    await t.test("rows never change, are never truncated, and keep their audit entry", async () => {
+    await t.test("rows never change and are never truncated", async () => {
       await refused(q(`UPDATE "OpsObserverTransition" SET "keysSha256" = $2 WHERE "genesisId" = $1 AND generation = 1`, [g, "e".repeat(64)]),
         /ops_observer_transition_immutable/);
       await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [g]),
         /ops_observer_transition_retained/);
       await refused(q(`TRUNCATE "OpsObserverTransition"`), /ops_observer_transition_retained/);
-      const { rows } = await q(`SELECT "auditLogId" FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [g]);
-      await refused(q(`DELETE FROM "AdminAuditLog" WHERE id = $1`, [rows[0].auditLogId]), /foreign key/);
     });
 
     await t.test("a seven-year-old row goes only once it is behind the verified checkpoint", async () => {

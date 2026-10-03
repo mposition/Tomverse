@@ -552,10 +552,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261004010000_ops_observer_transition/migration.sql",
     table: "AdminAuditLog",
-    tableMentions: 2,
-    writeVerbs: 12,
+    tableMentions: 1,
+    writeVerbs: 10,
     reason:
-      "The sre-ops transition ledger migration adds a restrictive foreign key from the ledger to AdminAuditLog and reads the linked audit row (hash, action, target) under a key-share lock in the ledger's insert guard. Its write verbs create or guard the ledger table, including a statement-level TRUNCATE guard; it never writes AdminAuditLog.",
+      "The sre-ops transition ledger migration keeps the audit entry id as a plain column (no foreign key; AdminAuditLog is append-only already) and reads the linked audit row (hash, action, target) under a key-share lock in the ledger's insert guard. Its write verbs create or guard the ledger table, including a statement-level TRUNCATE guard; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",

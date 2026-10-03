@@ -15,16 +15,19 @@
 --      can never be deleted (rule 4), so "the previous row exists" is the whole
 --      rule; there is no purged gap to allow for.
 --   3. The row names an existing, signed audit entry of the state advance of
---      the same genesis, and copies its hash. The foreign key restricts the
---      audit row's deletion while the ledger row exists.
+--      the same genesis, and copies its hash. The id is a plain column, not a
+--      foreign key: AdminAuditLog already refuses UPDATE and DELETE of every
+--      row (20260918090000_admin_audit_log_append_only), so a restricting key
+--      would repeat that rule, and it would add a relation to the audit
+--      table's schema block that other features fingerprint.
 --   4. Rows never change and the table is never truncated. A row is deleted
 --      only seven years after it was
 --      written and only behind its genesis's verified checkpoint, so the
 --      ledger never loses a generation the trust check has not yet verified.
 --      Deleting the ledger of a superseded genesis needs the retirement record
 --      of a later slice; until it exists that delete is refused, which is the
---      conservative direction (a row kept, never a row lost). No path deletes
---      AdminAuditLog rows today, so the restricting key holds back nothing yet.
+--      conservative direction (a row kept, never a row lost). The ledger never
+--      holds an audit row back: it has no key into the audit table (rule 3).
 --   5. A claimed run deadline is required and at most 180 s ahead, and the
 --      deferred constraint trigger of the genesis and state migration aborts
 --      the COMMIT of a row written past it. The limit stated there about
@@ -52,8 +55,6 @@ CREATE TABLE "OpsObserverTransition" (
 ALTER TABLE "OpsObserverTransition"
     ADD CONSTRAINT "OpsObserverTransition_genesisId_fkey" FOREIGN KEY ("genesisId")
         REFERENCES "OpsObserverGenesis"("id") ON DELETE RESTRICT ON UPDATE RESTRICT,
-    ADD CONSTRAINT "OpsObserverTransition_auditLogId_fkey" FOREIGN KEY ("auditLogId")
-        REFERENCES "AdminAuditLog"("id") ON DELETE RESTRICT ON UPDATE RESTRICT,
     ADD CONSTRAINT "OpsObserverTransition_auditLogId_key" UNIQUE ("auditLogId"),
     ADD CONSTRAINT "OpsObserverTransition_generation_check" CHECK ("generation" >= 1),
     ADD CONSTRAINT "OpsObserverTransition_keysSha256_check" CHECK ("keysSha256" ~ '^[0-9a-f]{64}$');
