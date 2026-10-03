@@ -72,7 +72,8 @@ import {
  * compares. A migration that adds only a partial or expression index, a CHECK
  * constraint, a trigger or a function matches before it is applied as well as
  * after, so on its own it would always be refused. Such a migration names the
- * relation it creates (`-- baseline-check: present-if-relation "Name"`); when
+ * relation it creates (`-- baseline-check: present-if-relation "Name"`), or the
+ * function (`present-if-function "name"`) when it creates only a function; when
  * every pending migration names one and every one is proven absent, the deploy
  * goes on.
  * See `scripts/baseline-presence-core.mjs`.
@@ -233,12 +234,12 @@ try {
       const verdict = presenceVerdict(pending, answers);
       if (verdict.proceed) {
         log(
-          "Pending migrations change nothing schema.prisma describes, and the relation each one declares is absent. Letting migrate deploy apply them.",
+          "Pending migrations change nothing schema.prisma describes, and the relation or function each one declares is absent. Letting migrate deploy apply them.",
           { pending }
         );
       } else {
         fail(
-          "This database already matches schema.prisma, and the relations these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
+          "This database already matches schema.prisma, and the relations or functions these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
           { pending, notProvenAbsent: verdict.notProvenAbsent }
         );
       }

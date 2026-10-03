@@ -229,9 +229,11 @@ test("the guard asks one fixed question with the name bound, and accepts one boo
   });
   const { functionPresenceQuery, presenceQueryFor } = await import("../scripts/baseline-presence-core.mjs");
   const fn = functionPresenceQuery("f_x");
-  assert.deepEqual(fn.values, ["f_x"]);
-  assert.equal(fn.rowMode, "array");
-  assert.ok(!fn.text.includes("f_x"), "the name is bound, never interpolated");
+  assert.deepEqual(fn, {
+    text: "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1) AS \"present\"",
+    values: ["f_x"],
+    rowMode: "array",
+  });
   assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x" }), fn);
   assert.deepEqual(presenceQueryFor({ name: "m", relation: "X_key" }), presenceQuery("X_key"));
   assert.equal(presenceAnswer([[false]]), false);
