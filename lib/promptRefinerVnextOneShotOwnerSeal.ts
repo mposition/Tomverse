@@ -94,3 +94,36 @@ export function verifyPromptRefinerVnextOneShotOwnerSeal(input: Readonly<{
     dispatchAuthorized: false,
   });
 }
+
+/** Returned bytes are restricted owner material; never log, publish, or send to the app. */
+export function createPromptRefinerVnextOneShotOwnerSeal(input: Readonly<{
+  manifestText: string;
+  expectedRootDigest: string;
+  expectedPreregistrationDigest: string;
+  ownerHmacKey: Uint8Array;
+  now: Date;
+  confirmation: string;
+}>): string {
+  if (input.confirmation !== "I_AM_MPOSITION_AND_VERIFIED_EVERY_LABEL_AND_PRIVACY_EXCLUSION") {
+    return refuse();
+  }
+  const signed = {
+    version: "prompt-refiner-vnext-one-shot-owner-seal-v1",
+    ownerId: "mposition",
+    confirmedAt: input.now.toISOString(),
+    rootDigest: input.expectedRootDigest,
+    preregistrationDigest: input.expectedPreregistrationDigest,
+    independentAuthorshipConfirmed: true,
+    semanticLabelsConfirmed: true,
+    privacyExclusionConfirmed: true,
+  };
+  const attestationText = JSON.stringify({
+    ...signed,
+    hmacSha256: createHmac("sha256", input.ownerHmacKey)
+      .update(canonicalBenchmarkJson(signed), "utf8").digest("hex"),
+  });
+  verifyPromptRefinerVnextOneShotOwnerSeal({
+    ...input, attestationText,
+  });
+  return attestationText;
+}
