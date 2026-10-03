@@ -164,6 +164,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       empty: "No wave has expanded yet, so nobody has been considered.",
       considered: (count: number) => `${count} considered`,
       notExpanded: "This wave has not expanded.",
+      noLedger: (deliveries: number) =>
+        `This audience keeps no per-person record here; the delivery rows are its record. ${deliveries} delivery rows written so far. An account with no address gets no row.`,
       dryRunWritten:
         "would have been written to — this was a dry run, so every one of those deliveries was skipped and nothing was sent.",
       written: "had a delivery row written.",
@@ -368,6 +370,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       empty: "아직 확장된 wave가 없어 검토된 사람이 없습니다.",
       considered: (count: number) => `${count}명 검토됨`,
       notExpanded: "이 wave는 확장되지 않았습니다.",
+      noLedger: (deliveries: number) =>
+        `이 대상은 여기에 사람별 기록을 남기지 않고, delivery 행이 그 기록입니다. 지금까지 delivery 행 ${deliveries}개를 썼습니다. 주소가 없는 계정에는 행이 없습니다.`,
       dryRunWritten:
         "명에게 기록될 예정이었습니다 — dry run이었으므로 해당 delivery는 모두 skipped 처리되었고 아무것도 발송되지 않았습니다.",
       written: "명에게 delivery 행이 기록되었습니다.",

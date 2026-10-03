@@ -127,6 +127,8 @@ type AudienceView = {
   malformed: number;
   excluded: Record<string, number>;
   cohorts: Record<string, number>;
+  keepsLedger: boolean;
+  deliveries: number;
 };
 
 type DetailResponse = {
@@ -920,7 +922,11 @@ export function AdminCampaignDetailPanel({
                   </p>
                 </div>
 
-                {wave.total === 0 ? (
+                {!wave.keepsLedger ? (
+                  <p className="mt-2 text-sm text-zinc-400">
+                    {m.audience.noLedger(wave.deliveries)}
+                  </p>
+                ) : wave.total === 0 ? (
                   <p className="mt-2 text-sm text-zinc-400">
                     {m.audience.notExpanded}
                   </p>

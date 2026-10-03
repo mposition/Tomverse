@@ -9,6 +9,7 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { prisma } from "@/lib/prisma";
+import { waveAudienceBreakdown } from "@/lib/adminEmailCampaigns";
 import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
@@ -646,6 +647,12 @@ test("the amendment notice reaches every owed account once, and a later wave onl
     // because the delivery row is this cohort's record.
     assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
     assert.equal((await ledger(first.id)).length, 0);
+    // The console reads the delivery rows for this audience, not an empty ledger.
+    const [launchWave] = await waveAudienceBreakdown(first.id);
+    assert.deepEqual(
+      { keepsLedger: launchWave.keepsLedger, deliveries: launchWave.deliveries },
+      { keepsLedger: false, deliveries: 3 }
+    );
 
     // Asked again, the cohort holds nobody: each of them has a notice on its way.
     const again = await runCampaignWave({ campaignId: first.id, kind: "reminder" });
