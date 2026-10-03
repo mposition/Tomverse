@@ -33,6 +33,7 @@ test("the system actor list is closed and changes only by review", () => {
     // the sealed Prompt Refiner closure's positions do not move.
     "marketing-webhook",
     "prompt-refiner-shadow-runner",
+    "prompt-refiner-vnext-one-shot-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "engineering-agent-runner",
@@ -48,6 +49,8 @@ test("the system actor list is closed and changes only by review", () => {
     "product-research-retention",
     // docs/policy/qa-release-agent.md section 5: the digest intake route.
     "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

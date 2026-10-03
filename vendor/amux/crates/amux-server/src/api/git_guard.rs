@@ -6563,6 +6563,11 @@ mod tests {
         assert_eq!(before.0["cotenants"], json!([reader]));
         assert_eq!(before.0["observations"], json!([]));
         assert_eq!(before.0["unclaimed"].as_array().unwrap().len(), paths.len());
+        let verdict_id = before.0["verdict_id"].as_i64().expect("guard must record this verdict");
+        let verdict_ts: f64 = store.read().unwrap().query_row(
+            "SELECT ts FROM guard_verdicts WHERE id=?1", [verdict_id], |r| r.get(0),
+        ).unwrap();
+        assert!((now_epoch() - verdict_ts).abs() < 60.0, "guard verdict must use epoch seconds");
 
         let now = now_epoch();
         // Compute this once, so both sides of the assertion below read one
@@ -6732,6 +6737,10 @@ mod tests {
         assert_eq!(code, StatusCode::OK);
         assert_eq!(body.0["attached"], true);
         assert_eq!(body.0["link"], "marker");
+        let outcome_ts: f64 = store.read().unwrap().query_row(
+            "SELECT outcome_ts FROM guard_verdicts WHERE id=2", [], |r| r.get(0),
+        ).unwrap();
+        assert!((now_epoch() - outcome_ts).abs() < 60.0, "guard outcome must use epoch seconds");
         let row = |id: i64| -> (Option<String>, Option<String>, Option<String>) {
             store
                 .read()

@@ -6,6 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import pg from "pg";
 
+import { lockAndReadPromptRefinerVnextOneShotStage } from
+  "../../lib/promptRefinerVnextOneShotStageReadback";
+
 const migration = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
@@ -131,6 +134,61 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
        WHERE stage."id" = $1
     `, [stage]);
     assert.equal(approvalClock.rows[0].audit_owned, true);
+    const contender = new pg.Client({ connectionString: rawUrl });
+    await contender.connect();
+    try {
+      await contender.query(`SET search_path TO "${schema}"`);
+      await client.query("BEGIN");
+      await client.query(`
+        SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+         WHERE "id" = $1 FOR NO KEY UPDATE NOWAIT
+      `, [stage]);
+      await contender.query("BEGIN");
+      // Bound a regression that drops NOWAIT, but require the immediate row-lock error.
+      await contender.query("SET LOCAL lock_timeout = '500ms'");
+      let unlockedReadCount = 0;
+      const blockedReadbackTx = {
+        async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+          const sql = strings.reduce((query, part, index) =>
+            query + part + (index < values.length ? `$${index + 1}` : ""), "");
+          return (await contender.query(sql, values)).rows;
+        },
+        promptRefinerVnextOneShotStage: { async findUnique() {
+          unlockedReadCount++;
+          throw new Error("stage_read_without_lock");
+        } },
+        promptRefinerVnextOneShotSlot: { async findMany() {
+          unlockedReadCount++;
+          throw new Error("slots_read_without_lock");
+        } },
+      } as unknown as Parameters<typeof lockAndReadPromptRefinerVnextOneShotStage>[0];
+      await assert.rejects(
+        lockAndReadPromptRefinerVnextOneShotStage(blockedReadbackTx),
+        (error: unknown) =>
+          (error as { code?: string }).code === "55P03" &&
+          /could not obtain lock on row/.test((error as Error).message),
+      );
+      assert.equal(unlockedReadCount, 0);
+      await contender.query("ROLLBACK");
+      await contender.query("BEGIN");
+      await contender.query("SET LOCAL lock_timeout = '200ms'");
+      await assert.rejects(contender.query(`
+        UPDATE "PromptRefinerVnextOneShotSlot"
+           SET "status" = 'consumed', "requestId" = 'lock-test-request',
+               "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 0
+      `, [stage]), /lock timeout/);
+      await contender.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await assert.rejects(contender.query(`
+        UPDATE "PromptRefinerVnextOneShotSlot"
+           SET "status" = 'consumed', "requestId" = 'lock-test-request',
+               "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 0
+      `, [stage]), /run approval is required/);
+    } finally {
+      await contender.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await contender.end();
+    }
     await insertAudit("past-stage-audit", "stage", { createdAt: "2020-01-01" });
     await assert.rejects(createStage("past-stage-audit"),
       /stage approval audit is stale/);
