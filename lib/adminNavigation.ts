@@ -558,7 +558,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Engineering agent",
     href: "/admin/engineering-agent",
     description:
-      "T2 drafts waiting on a decision, runs, the pull requests the agent opened, and its mode",
+      "The agents' record: engineering T2 drafts and runs, and the product-research observation slots",
     group: "Operations",
     writeRoles: ["owner", "ops"],
     aliases: [
@@ -570,6 +570,13 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "publisher",
       "runner",
       "freeze",
+      // The product-research section lives on this screen as a tab
+      // (docs/policy/product-research-agent.md §4), so the palette has to find
+      // it under its own words rather than under the engineering agent's.
+      "product research",
+      "observation",
+      "issue backlog",
+      "slot",
     ],
     tabs: [
       {
@@ -591,6 +598,12 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "settings",
         label: "Mode",
         description: "Mode, freeze, the kill switch and the owner queue against its caps",
+      },
+      {
+        id: "product-research",
+        label: "Product research",
+        description:
+          "Observation slots, the newest one's rows, and the staging and production windows",
       },
     ],
   },
