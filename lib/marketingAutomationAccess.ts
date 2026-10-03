@@ -205,8 +205,8 @@ const canonicalPipelinePath = (value: string): string => {
 };
 
 /**
- * The schema models the receiver path reads or writes. Only these blocks, and
- * the enums their fields name, enter the fingerprint (operator decision
+ * The schema models the receiver path reads or writes. These blocks, their
+ * enums, datasource and generator enter the fingerprint (operator decision
  * 2026-10-03): an unrelated model added elsewhere in the schema no longer
  * stales a signed record, and a change to any of these still does.
  */
