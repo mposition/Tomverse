@@ -5,6 +5,8 @@ import { runAmuxV4SyntheticAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { runAmuxV4LocalAnalysisAdmissionForTest } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
+import { runAmuxV4LocalAnalysisAgentOnce } from
+  "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
 
@@ -19,6 +21,15 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   prompt: `{"previewId":"${previewId}","source":"synthetic"}`,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
+
+test("live connector refuses before queue, claim or CLI while code latch is off", async () => {
+  let called = 0;
+  const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
+    agentSecret: secret, fetchImpl: async () => { called += 1;
+      throw new Error("live connector must remain closed"); } });
+  assert.deepEqual(result, { kind: "refused" });
+  assert.equal(called, 0);
+});
 
 test("unapproved local CLI catalog stops before claim and model execution", async () => {
   const previousEnv = process.env.NODE_ENV;
