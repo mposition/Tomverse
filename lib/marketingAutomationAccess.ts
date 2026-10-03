@@ -453,9 +453,9 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in.
  *
- * 2026-10-03: product-research and CHAT-01 changed the schema after develop
- * was repinned. The value below covers the merged schema including the
- * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
+ * 2026-10-03: product-research, CHAT-01 and the sre-ops genesis and state
+ * tables changed the schema after develop was repinned. The value below covers
+ * the merged schema; older fingerprints are intentionally stale.
  * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =

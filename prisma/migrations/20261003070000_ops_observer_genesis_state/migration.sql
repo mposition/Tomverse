@@ -29,12 +29,17 @@
 --      can run SQL in the transaction could equally disable the trigger, so
 --      the database cannot hold this against the code that writes: no source
 --      file may issue SET CONSTRAINTS (tests/opsObserverNoSetConstraints), and
---      the store re-checks the deadline in its own short transaction before it
---      reports success (policy §6 item 5).
+--      policy §6 item 5 requires the store, written in a later slice, to
+--      re-check the deadline in its own short transaction before it reports
+--      success. This migration installs neither of those; it states the limit.
 --   6. A state write and a genesis replacing the genesis it belongs to are
 --      serialised: the genesis insert locks the head FOR UPDATE, and the state
 --      guard locks its own genesis FOR SHARE before asking whether it has been
---      superseded, so whichever commits second sees the first.
+--      superseded, so whichever commits second sees the first. That second
+--      look is a fresh snapshot only under READ COMMITTED -- REPEATABLE READ
+--      and SERIALIZABLE keep the transaction's first snapshot and would miss a
+--      replacement that committed while the lock was awaited -- so both guards
+--      refuse any other isolation level.
 --
 -- Trigger functions pin search_path to pg_catalog, pg_temp and reach tables
 -- only through the schema of the table that fired them, so a session's
@@ -130,6 +135,9 @@ BEGIN
   IF TG_OP <> 'INSERT' THEN
     RAISE EXCEPTION 'ops_observer_genesis_immutable' USING ERRCODE = 'OB020';
   END IF;
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ops_observer_isolation_not_read_committed' USING ERRCODE = 'OB040';
+  END IF;
 
   NEW."createdAt"        := clock_timestamp();
   NEW."invariantVersion" := 1;
@@ -178,6 +186,9 @@ DECLARE
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'ops_observer_state_not_deletable' USING ERRCODE = 'OB030';
+  END IF;
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ops_observer_isolation_not_read_committed' USING ERRCODE = 'OB040';
   END IF;
 
   -- Lock first, then look: a genesis replacing this one holds its row FOR

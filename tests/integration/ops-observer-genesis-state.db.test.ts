@@ -248,6 +248,23 @@ test("genesis chain, state compare-and-set and late-commit refusal", { skip: !ra
       }
     });
 
+    for (const level of ["REPEATABLE READ", "SERIALIZABLE"]) {
+      await t.test(`genesis and state writes refuse ${level}, where the superseded check would read a stale snapshot`, async () => {
+        const current = await head();
+        const existing = await q(`SELECT 1 FROM "OpsObserverState" WHERE "genesisId" = $1`, [current.id]);
+        if (existing.rowCount === 0) await insertState(current.id);
+        await q(`BEGIN ISOLATION LEVEL ${level}`);
+        await refused(
+          q(`UPDATE "OpsObserverState" SET generation = generation + 1, "runDeadlineAt" = ${soon(60)} WHERE "genesisId" = $1`, [current.id]),
+          /ops_observer_isolation_not_read_committed/,
+        );
+        await q("ROLLBACK");
+        await q(`BEGIN ISOLATION LEVEL ${level}`);
+        await refused(q(genesisSql(), [randomUUID(), "recovery", current.mode, current.id, DIGEST]), /ops_observer_isolation_not_read_committed/);
+        await q("ROLLBACK");
+      });
+    }
+
     await t.test("trigger functions pin search_path", async () => {
       const { rows } = await q(
         `SELECT p.proname, p.proconfig FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
