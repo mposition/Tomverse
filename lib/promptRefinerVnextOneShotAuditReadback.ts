@@ -99,6 +99,22 @@ const auditEntryHashIsValid = (entry: AuditEntry, keys: readonly string[]): bool
   });
 };
 
+/** Verify an arbitrary one-shot receipt and its immediate signed predecessor. */
+export const promptRefinerVnextOneShotAuditReceiptIsValid = async (
+  tx: Prisma.TransactionClient,
+  entry: AuditEntry,
+  keys: readonly string[] = adminAuditIntegrityKeys(process.env)
+): Promise<boolean> => {
+  if (!auditEntryHashIsValid(entry, keys)) return false;
+  if (!entry.previousHash) return true;
+  const previous = await tx.adminAuditLog.findUnique({
+    where: { entryHash: entry.previousHash },
+  });
+  return Boolean(previous && previous.entryHash === entry.previousHash &&
+    previous.createdAt.getTime() < entry.createdAt.getTime() &&
+    auditEntryHashIsValid(previous, keys));
+};
+
 /** DB triggers bind the row shape; this verifies the app-owned HMAC key. */
 export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
   stage: Stage,
