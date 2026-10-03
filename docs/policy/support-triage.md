@@ -25,7 +25,7 @@ IaC 항목·feature flag 변경도 그 자체로 허가하지 않는다.
 
 | # | 판정 |
 |---|---|
-| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같고, 그 commit부터 base까지 그 목록 파일의 모든 변경이 그 파일 3절의 규칙(version 증가, 그 파일만 바꾼 PR, 이전 목록에 있는 계정의 승인, `to-develop` 브랜치 아님)을 따랐다 |
+| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같고, 그 commit부터 base까지 그 목록 파일의 모든 변경이 그 파일 3절의 규칙(version 증가, 그 파일만 바꾼 PR, 이전 목록에 있는 계정이 승인하고 병합, `to-develop` 브랜치 아님)을 따랐다. 목록 파일 자신의 변경도 아래 1~7번과 같은 절차(PR 하나, 병합자 = 승인자, 승인일 = 병합 UTC 날짜, 작성자가 사람)로 판정한다 |
 | 0a | 이 정책 파일의 `approvedBy`·`approvedAt`·정책 버전이 채워져 있고, 정책 버전이 직전 승인 버전보다 크다 |
 | 1 | 이 정책 파일을 마지막으로 바꾼 commit을 찾는다 |
 | 2 | 그 commit을 `develop`에 넣은 PR이 **정확히 하나**다 |
@@ -161,8 +161,8 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 | `SupportTriageDecisionRecord`·`SupportTriageDecisionRecordLink` | **결정 뒤 12개월**(X2). link된 신고 중 하나라도 계정 삭제 대상이면 record와 모든 link를 즉시 삭제. 링크만 끊고 행을 남기는 상태는 없다. 목적은 결정의 결과 digest를 본문 삭제 뒤에도 남기는 것이다 |
 | 공통 `AgentDigestItem`(이 Agent 몫) | 본문 `payloadRetentionDays = 90`, 메타 행 `metaRetentionDays = 365`(팀 3 공통값) |
 
-- **보존 회차의 처리 능력.** 한 배치 transaction은 manifest의 모든 부류를 **부류마다 문장 하나**로, 문장마다 그 부류에서 최대 500행(바닥 125행)을 지운다. 그래서 하루 필요한 배치 수는 부류의 합계가 아니라 **가장 큰 부류**가 정하고, 그 부류는 그룹 신호 행(하루 31,200, 8절)이다 — 정상 크기 63배치, 바닥 크기 250배치. suggestion·멤버십·그룹·tombstone·run·결정 record와 link는 같은 배치 안의 자기 문장이 지우며, 각자 하루 생성량이 신호보다 작다.
-  하루 능력 48회 × 8배치 = 384배치는 **성공 배치 수가 아니라 시작할 수 있는 배치 수**이고, abort된 배치도 이 수를 쓴다. 바닥 요구 250을 빼고 남는 134배치가 abort 여유다. 이 산수는 배치 500행이 400ms 안에 끝난다는 측정되지 않은 전제 위에 있으므로, **P0c의 7일 관측이 (a) 완료 배치 0인 retention 회차 0회, (b) 관측 기간 마지막 회차의 `overdueRemaining = 0`, (c) `oldestOverdueAgeSeconds` 최대 86,400초 미만, (d) retention 요청 p95 ≤ 120초를 보이기 전에는 "삭제 기한을 맞춘다"를 확인된 것으로 취급하지 않고 P1을 시작하지 않는다.** 실패하면 원인이 처리량인지 독성 행인지 먼저 가르고, 처리량이면 배치 크기와 `C_guarded`를 다시 측정해 이 정책의 새 버전으로 고친다.
+- **보존 회차의 처리 능력.** 한 배치 transaction은 manifest의 모든 부류를 **부류마다 문장 하나**로, 문장마다 그 부류에서 최대 500행(바닥 125행)을 지운다. 그래서 하루 필요한 배치 수는 부류의 합계가 아니라 **가장 큰 부류**가 정하고, 그 부류는 그룹 신호 행(하루 31,200, 8절)이다 — 정상 크기 63배치, 바닥 크기 250배치. suggestion·멤버십·그룹·tombstone·run·결정 record와 link는 같은 배치 안의 자기 문장이 지운다. 앞의 다섯은 8절의 유도 상한이 신호보다 작다. **결정 record와 link에는 상한이 없다**(사람 결정 수는 DB가 막지 않고, 결정당 link ≤ 50). 그래서 이 처리 능력 주장은 **결정 link의 하루 생성량이 31,200 이하**라는 전제 위에 있고, 일일 digest가 그날 생성한 link 수를 보이며, 그 수가 31,200을 넘는 날이 생기면 이 주장은 성립하지 않으므로 이 정책의 새 버전으로 다시 유도한다.
+  하루 능력 48회 × 8배치 = 384배치는 **성공 배치 수가 아니라 시작할 수 있는 배치 수**이고, abort된 배치도 이 수를 쓴다. 바닥 요구 250을 빼고 남는 134배치가 abort 여유다. 이 산수는 부류별 DELETE 문장이 `statement_timeout`(400ms) 안에, 배치 하나가 `C_guarded`(10.3초) 안에 끝난다는 **측정되지 않은 전제** 위에 있다. 그래서 "삭제 기한을 맞춘다"는 두 번 확인한다. **(1) P1 착수 전, staging 부하 시험** — P1 전에는 triage flag가 꺼져 production에 지울 행이 없으므로, staging에 8절의 하루 유도 상한만큼(신호 31,200행과 다른 부류의 상한) **보존 기한이 이미 지난 행**을 seed하고 예정 회차를 24시간 돌려 (a) `batchesCompleted = 0 AND overdueRemaining > 0`으로 끝난 회차 0회, (b) 24시간 뒤 `overdueRemaining = 0`, (c) `oldestOverdueAgeSeconds` 최대 86,400초 미만, (d) abort된 배치 수 ≤ 134를 기록한다. 밀린 행을 다 비운 뒤의 배치 0 회차는 실패가 아니다. **(2) P1d 착수 전, production 7일 관측** — 같은 (a)~(d)를 실제 부하로 다시 본다. 어느 쪽이든 실패하면 원인이 처리량인지 독성 행인지 먼저 가르고, 처리량이면 배치 크기와 `C_guarded`를 다시 측정해 이 정책의 새 버전으로 고친다.
 - 한 배치가 `statement_timeout`으로 abort되면 다음 배치 크기를 500 → 250 → 125로 줄인다. 바닥에서 같은 회차에
   두 번 abort되면 커서를 그 창 너머로 전진시키고 `blocked`를 센다. 건너뛴 행은 다음 회차가 다시 시도한다.
 - **지워지지 않는 행은 수용 대상이 아니라 경보다.** 어떤 행이 자기 삭제 기한을 24시간 넘기면
@@ -175,7 +175,7 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 - **owner-bound 상한**: P1 동안 표본 판정 7일당 최대 10건, P1d 동안 표시된 결정 대기(WIP) 최대 10건, 각 7일 만료.
   상한에 닿으면 사람에게 보이는 자리로의 승격을 멈추고(P1 표본은 추출 자체를 멈춤) 만료된 항목은 `expired`로
   기록한다. 상한 계수와 승격·추출은 같은 Serializable transaction에서만 한다. 상한은 어떤 경우에도 넘지 않는다.
-- **배치 크기**: worker claim 배치 10건, pass 50건(배치 5개). lease 5분, 갱신 없음. 실행은 single-flight가 아니다 — 예정 회차와 수동 재실행이 겹칠 수 있고, lease가 만료되면 다른 회차가 그 행을 다시 claim한다. 정확성은 단일 실행이 아니라 **fencing**이 진다: 쓰기는 `(id, state = claimed, claimToken)` 조건부 갱신이므로 새 claim 뒤에 도착한 옛 회차의 쓰기는 0행이 되고, 옛 회차가 자기 `deadlineAt`을 넘긴 transaction은 마지막 라운드트립의 마감 검사로 전체 rollback된다(4절). 겹친 두 pass에서도 owner-bound 상한과 그룹 key unique는 유지된다(통합 테스트가 두 연결로 고정).
+- **배치 크기**: worker claim 배치 10건, pass 50건(배치 5개). lease 5분, 갱신 없음. 실행은 single-flight가 아니다 — 예정 회차와 수동 재실행이 겹칠 수 있고, lease가 만료되면 다른 회차가 그 행을 다시 claim한다. 정확성은 단일 실행이 아니라 **fencing**이 진다: result transaction의 첫 쓰기는 `(id, state = claimed, claimToken)` 조건부 갱신이고, **그 갱신이 RETURNING한 신고만** 같은 transaction의 멤버십·그룹·신호 문장의 입력 집합이 된다. 그래서 claim을 잃은 옛 회차는 deadline이 남아 있어도 그 신고에 대해 어떤 triage 행도 쓰지 못하고(`stale_claim`), 옛 회차가 자기 `deadlineAt`을 넘긴 transaction은 마지막 라운드트립의 마감 검사로 전체 rollback된다(4절). 겹친 두 pass에서도 owner-bound 상한과 그룹 key unique는 유지된다(통합 테스트가 두 연결로 고정).
 - **그룹 모델(Q20).** 그룹은 `primaryKind` 하나의 동치류이고, 그룹 행과 멤버 행이 같은 `primarySnapshotDigest`를
   들며 복합 FK가 이를 강제한다. 신호는 `(groupId, kind)` 한 행이다. 멤버 상한 50. 부차 kind의 신호 행은 그 값을
   멤버 전원이 공유할 때만 쓴다.
@@ -231,9 +231,9 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 | P0a | 이 정책의 승인·병합 | — |
 | P0b | 구조 경계: adapter·정적 검사·삭제 manifest와 파생 테스트·감사 content-negative 테스트·timeout wrapper와 그 16/17 테스트·회차 상한 trigger·보존 회차·heartbeat 판정. flag는 모두 꺼진 상태 | 0절 판정 통과. 이 단계의 migration·삭제 계약은 `contract` 역할로 한다 |
 | P0c | 두 Railway 서비스 IaC apply(운영자), heartbeat·run·retention route 배포, 독립 감시 drill | P0b. P0b가 측정한 값이 수용 기준 이하임을 기록하고 운영자가 수용 |
-| P1 | `SUPPORT_TRIAGE_ENABLED`: 저장만, 인박스에 숨김. 표본 판정 목록만 표시 | P0c와 그 retention 7일 관측 통과(5절), 팀 3 공통 digest store·제출 경로·공통 Agent digest 영역의 배포, **Q15(7팀 합산 owner-bound 상한과 계수 방식)와 Q16(팀 3이 감시자 감시·heartbeat page 키·caller actor 계약을 제공)의 운영자 결정** — 지금은 미결이며 결정 전에는 P1을 시작하지 않는다 |
+| P1 | `SUPPORT_TRIAGE_ENABLED`: 저장만, 인박스에 숨김. 표본 판정 목록만 표시 | P0c와 retention staging 부하 시험 통과(5절 (1)), 팀 3 공통 digest store·제출 경로·공통 Agent digest 영역의 배포, **Q15(7팀 합산 owner-bound 상한과 계수 방식)와 Q16(팀 3이 감시자 감시·heartbeat page 키·caller actor 계약을 제공)의 운영자 결정** — 지금은 미결이며 결정 전에는 P1을 시작하지 않는다 |
 | P1.5 | synthetic suggestion만으로 "보기 → 적용 → confirm" E2E | P0b, 템플릿 문구 승인 |
-| P1d | `SUPPORT_TRIAGE_DISPLAY_ENABLED`: 제안 표시 | P1의 30일·표본 30건 이상·lane 일치율 80% 이상·사람 lane 누락 0, P1.5 |
+| P1d | `SUPPORT_TRIAGE_DISPLAY_ENABLED`: 제안 표시 | P1의 30일·표본 30건 이상·lane 일치율 80% 이상·사람 lane 누락 0, retention production 7일 관측 통과(5절 (2)), P1.5 |
 
 - 발송 자동화 단계와 LLM 단계는 없다. 각 단계는 flag 제거로 즉시 이전 단계로 돌아가며, 외부로 나간 데이터가
   없으므로 되돌릴 수 없는 단계가 없다.
