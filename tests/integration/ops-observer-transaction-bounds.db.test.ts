@@ -1,8 +1,9 @@
 // The arming function's guarantees, observed on a real PostgreSQL
 // (docs/policy/sre-ops.md §6). Every fixture that ends a session gets its own
 // connection. Fixtures marked "17" run where server_version_num >= 170000 and
-// the rest everywhere: CI's database is PostgreSQL 16, and a PostgreSQL 17 job
-// runs the same file.
+// the rest everywhere. The DB integration lanes run PostgreSQL 17; the
+// "Ops observer transaction bounds (PostgreSQL 16)" job runs this file on 16
+// and sets OPS_OBSERVER_EXPECT_SERVER_MAJOR so it cannot pass on the wrong one.
 //
 // Nothing here trusts current_setting() alone: a timer whose setting changed
 // but was not armed reads the same as one that was, so the 17 fixtures watch
@@ -109,6 +110,30 @@ test.after(async () => {
   }
 });
 
+test("the server is the major version this job expects", { skip: !rawUrl }, async () => {
+  await setup();
+  const expected = process.env.OPS_OBSERVER_EXPECT_SERVER_MAJOR?.trim();
+  const version = await serverVersion();
+  if (expected) assert.equal(Math.floor(version / 10_000), Number(expected));
+  assert.ok(version >= 160000, "PostgreSQL 16 or later");
+});
+
+test("a NULL argument is refused before any timer is set", { skip: !rawUrl }, async () => {
+  await setup();
+  const args = armArguments("assert", deadlineIn(60_000));
+  for (let i = 0; i < args.length; i += 1) {
+    const client = await connect();
+    try {
+      await client.query("BEGIN");
+      const withNull = args.map((v, j) => (j === i ? null : v));
+      await expectRejection(client.query(ARM_CALL, withNull), /arm_argument_null/);
+      await client.query("ROLLBACK");
+    } finally {
+      await client.end();
+    }
+  }
+});
+
 test("the arming function has no SET clause, is SECURITY INVOKER and has no EXCEPTION block", { skip: !rawUrl }, async () => {
   await setup();
   const client = await connect();
@@ -146,11 +171,15 @@ test("every kind refuses to start without C_guarded + 250 ms of budget, and writ
   for (const kind of Object.keys(TRANSACTION_BOUNDS) as Kind[]) {
     const client = await connect();
     try {
+      await client.query(`CREATE TABLE IF NOT EXISTS probe (kind text)`);
       await client.query("BEGIN");
-      await client.query(`CREATE TEMP TABLE probe (x int) ON COMMIT DROP`);
+      await client.query(`INSERT INTO probe VALUES ($1)`, [kind]);
       const short = deadlineIn(TRANSACTION_BOUNDS[kind].cGuardedMs + ARM_MARGIN_MS - 200);
       await expectRejection(client.query(ARM_CALL, armArguments(kind, short)), /deadline_budget_insufficient/);
-      await client.query("ROLLBACK");
+      // COMMIT of an aborted transaction rolls back: the write before the refusal is gone.
+      await client.query("COMMIT");
+      const { rows } = await client.query(`SELECT count(*)::int AS n FROM probe WHERE kind = $1`, [kind]);
+      assert.equal(rows[0].n, 0, kind);
     } finally {
       await client.end();
     }
@@ -206,65 +235,63 @@ async function only17(t: { skip: (message: string) => void }): Promise<boolean> 
 }
 
 /**
- * Arm `assert` (statement 1 s, idle 0.5 s, transaction 6 s) in a session that
- * inherited `inherited`, and return the client inside the open transaction.
+ * A profile with the shape of the policy's two-second kinds (statement 2 s,
+ * idle 1 s) and a transaction timer short enough to watch expire: A = 2, so
+ * C_guarded = 6 s, and the timer is 8 s. The real constants are pinned by
+ * tests/opsObserverTransactionConstants.test.mjs; this fixture is about what
+ * the database does with whatever the function arms.
  */
-async function armedAssertSession(inherited: string | null) {
-  const client = await connect(inherited ? `-c transaction_timeout=${inherited}` : "");
+const PROFILE = { st: 2_000, idle: 1_000, tt: 8_000, guarded: 6_000 };
+
+async function armedSession(inherited: string) {
+  const client = await connect(`-c transaction_timeout=${inherited}`);
   await client.query("BEGIN");
-  const { rows } = await client.query(ARM_CALL, armArguments("assert", deadlineIn(60_000)));
+  const { rows } = await client.query(ARM_CALL, [
+    PROFILE.st, PROFILE.idle, PROFILE.tt, PROFILE.guarded, ARM_MARGIN_MS, deadlineIn(60_000).toISOString(),
+  ]);
   return { client, armed: rows[0] };
 }
 
-for (const inherited of ["200ms", "600s"]) {
-  test(`17: inherited ${inherited} -- ours is re-armed and actually ends the transaction`, async (t) => {
+for (const [inherited, inheritedMs] of [["200ms", 200], ["600s", 600_000]] as const) {
+  test(`17: inherited ${inherited} -- every timer is armed and ours ends the transaction`, async (t) => {
     if (!(await only17(t))) return;
 
-    if (inherited === "200ms") {
-      // Survives past the inherited 200 ms: ours replaced it.
-      const { client, armed } = await armedAssertSession(inherited);
-      assert.equal(armed.priorTxTimeoutMs, 200);
-      await client.query(`SELECT pg_sleep(0.6)`);
-      await client.query(`SELECT pg_sleep(0.6)`);
-      await client.end();
+    // Survives pg_sleep(1): past an inherited 200 ms, so ours replaced it.
+    const first = await armedSession(inherited);
+    assert.equal(first.armed.priorTxTimeoutMs, inheritedMs);
+    assert.equal(first.armed.ttArmedMs, PROFILE.tt);
+    await first.client.query(`SELECT pg_sleep(1)`);
+    await first.client.query("ROLLBACK");
+    await first.client.end();
 
-      // A statement longer than statement_timeout (1 s) is cancelled: the statement timer is armed.
-      const second = await armedAssertSession(inherited);
-      await expectRejection(second.client.query(`SELECT pg_sleep(1.5)`), /statement timeout/);
-      await second.client.end().catch(() => {});
+    // A statement longer than two seconds is cancelled: the statement timer is armed.
+    const second = await armedSession(inherited);
+    const cancelled = await second.client.query(`SELECT pg_sleep(2.5)`).then(() => null, (e: Error) => e);
+    assert.ok(cancelled, "the long statement must be cancelled");
+    assert.match(reasons(second.client, cancelled!), /statement timeout/);
+    await second.client.end().catch(() => {});
 
-      // An idle gap longer than 0.5 s ends the session: the idle timer is armed.
-      const third = await armedAssertSession(inherited);
-      await new Promise((resolve) => setTimeout(resolve, 1_200));
-      const idleEnd = await third.client.query(`SELECT 1`).then(() => null, (error: Error) => error);
-      assert.ok(idleEnd, "the idle gap must end the session");
-      assert.match(reasons(third.client, idleEnd), /idle-in-transaction timeout/);
-      await third.client.end().catch(() => {});
-    } else {
-      const { armed, client } = await armedAssertSession(inherited);
-      assert.equal(armed.priorTxTimeoutMs, 600_000);
-      await client.end();
-    }
+    // A gap longer than the idle timeout ends the session: the idle timer is armed.
+    const third = await armedSession(inherited);
+    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    const idleEnd = await third.client.query(`SELECT 1`).then(() => null, (e: Error) => e);
+    assert.ok(idleEnd, "the idle gap must end the session");
+    assert.match(reasons(third.client, idleEnd!), /idle-in-transaction timeout/);
+    await third.client.end().catch(() => {});
 
-    // Short statements under every per-statement timer still end at ttArmedMs.
-    const { client, armed } = await armedAssertSession(inherited);
+    // Short statements under every per-statement timer still end at our 8 s.
+    const fourth = await armedSession(inherited);
     const started = Date.now();
-    const ended = await (async () => {
-      for (let i = 0; i < 40; i += 1) {
-        try {
-          await client.query(`SELECT pg_sleep(0.3)`);
-        } catch (error) {
-          return error as Error;
-        }
-      }
-      return null;
-    })();
+    let ended: Error | null = null;
+    for (let i = 0; i < 40 && !ended; i += 1) {
+      ended = await fourth.client.query(`SELECT pg_sleep(0.5)`).then(() => null, (e: Error) => e);
+    }
     const elapsed = Date.now() - started;
     assert.ok(ended, "the transaction must be ended by our timer");
-    assert.match(reasons(client, ended!), /due to transaction timeout/);
-    assert.doesNotMatch(reasons(client, ended!), /statement timeout|idle-in-transaction/);
-    assert.ok(elapsed >= armed.ttArmedMs - 500 && elapsed <= armed.ttArmedMs + 2_000, `ended after ${elapsed} ms, armed ${armed.ttArmedMs}`);
-    await client.end().catch(() => {});
+    assert.match(reasons(fourth.client, ended!), /due to transaction timeout/);
+    assert.doesNotMatch(reasons(fourth.client, ended!), /statement timeout|idle-in-transaction/);
+    assert.ok(elapsed >= PROFILE.tt - 500 && elapsed <= PROFILE.tt + 2_000, `ended after ${elapsed} ms`);
+    await fourth.client.end().catch(() => {});
   });
 }
 
@@ -286,7 +313,7 @@ test("17: the postcondition refuses a timer armed too late (a delayed copy of th
   if (!(await only17(t))) return;
   const source = await readFile(migrationPath, "utf8");
   const original = source.slice(source.indexOf("CREATE FUNCTION ops_observer_arm_timeouts"));
-  const armLine = `    PERFORM set_config('transaction_timeout', "ttArmedMs"::text, true);`;
+  const armLine = `    PERFORM pg_catalog.set_config('transaction_timeout', "ttArmedMs"::text, true);`;
   assert.equal(original.split(armLine).length, 2, "the arm line occurs once");
   const delayed = original
     .replace("CREATE FUNCTION ops_observer_arm_timeouts", "CREATE FUNCTION ops_observer_arm_timeouts_delayed")
@@ -311,5 +338,26 @@ test("17: the postcondition refuses a timer armed too late (a delayed copy of th
     await client.query("ROLLBACK");
   } finally {
     await client.end().catch(() => {});
+  }
+});
+
+test("a set_config() earlier on the caller's search_path cannot stand in for the real one", { skip: !rawUrl }, async () => {
+  await setup();
+  const decoy = `${schema}_decoy`;
+  const client = await connect();
+  try {
+    await client.query(`CREATE SCHEMA "${decoy}"`);
+    await client.query(
+      `CREATE FUNCTION "${decoy}".set_config(text, text, boolean) RETURNS text LANGUAGE sql AS $$ SELECT ''::text $$`,
+    );
+    await client.query(`SET search_path TO "${decoy}", pg_catalog, "${schema}"`);
+    await client.query("BEGIN");
+    await client.query(ARM_CALL, armArguments("assert", deadlineIn(60_000)));
+    const { rows } = await client.query(`SELECT pg_catalog.current_setting('statement_timeout') AS st`);
+    assert.equal(rows[0].st, "1s");
+    await client.query("ROLLBACK");
+  } finally {
+    await client.query(`DROP SCHEMA IF EXISTS "${decoy}" CASCADE`).catch(() => {});
+    await client.end();
   }
 });

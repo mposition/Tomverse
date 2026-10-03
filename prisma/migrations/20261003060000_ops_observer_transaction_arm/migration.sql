@@ -12,13 +12,20 @@
 -- integration test.
 --
 -- transaction_timeout exists from PostgreSQL 17. Its name is passed as text to
--- set_config() inside an IF branch that PL/pgSQL does not execute on 16, and
--- its previous value is read from pg_settings, which simply has no row on 16.
--- Writing the name as a literal SET would abort the whole transaction on 16.
+-- set_config() and its previous value is read from pg_settings, both inside an
+-- IF branch that PL/pgSQL does not execute on 16, so on 16 the name is neither
+-- read nor written. Writing it as a literal SET would abort the whole
+-- transaction on 16.
+--
+-- Every system function and view is qualified with pg_catalog, so a caller's
+-- search_path cannot substitute its own set_config() or pg_settings and make
+-- the function report a timer it never armed. Every argument is required: a
+-- NULL deadline or budget would make each comparison below unknown, and an
+-- unknown comparison is skipped, so a NULL is refused before anything is set.
 
 CREATE FUNCTION ops_observer_sha256_hex(input text) RETURNS text
 LANGUAGE sql IMMUTABLE STRICT AS $$
-  SELECT encode(sha256(convert_to(input, 'UTF8')), 'hex')
+  SELECT pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(input, 'UTF8')), 'hex')
 $$;
 
 CREATE FUNCTION ops_observer_arm_timeouts(
@@ -38,17 +45,18 @@ DECLARE
   remaining_ms int;
   after_arm    timestamptz;
 BEGIN
-  "serverVersion"    := current_setting('server_version_num')::int;
-  -- pg_settings has no such row on 16, so this is NULL there instead of an
-  -- error; its setting column is a unitless integer in the base unit.
-  "priorTxTimeoutMs" := (SELECT setting::int FROM pg_settings
-                           WHERE name = 'transaction_timeout');
+  IF st_ms IS NULL OR idle_ms IS NULL OR tt_cap_ms IS NULL OR c_guarded_ms IS NULL
+     OR arm_margin_ms IS NULL OR run_deadline IS NULL THEN
+    RAISE EXCEPTION 'arm_argument_null' USING ERRCODE = 'OB003';
+  END IF;
 
-  PERFORM set_config('statement_timeout',                   st_ms::text,   true);
-  PERFORM set_config('idle_in_transaction_session_timeout',  idle_ms::text, true);
+  "serverVersion" := pg_catalog.current_setting('server_version_num')::int;
 
-  "txStart"    := clock_timestamp();
-  remaining_ms := floor(extract(epoch FROM (run_deadline - "txStart")) * 1000)::int;
+  PERFORM pg_catalog.set_config('statement_timeout',                   st_ms::text,   true);
+  PERFORM pg_catalog.set_config('idle_in_transaction_session_timeout',  idle_ms::text, true);
+
+  "txStart"    := pg_catalog.clock_timestamp();
+  remaining_ms := pg_catalog.floor(extract(epoch FROM (run_deadline - "txStart")) * 1000)::int;
 
   -- Refuse to start without enough budget, on every version.
   IF remaining_ms < c_guarded_ms + arm_margin_ms THEN
@@ -57,26 +65,31 @@ BEGIN
   END IF;
 
   IF "serverVersion" >= 170000 THEN
+    -- The setting column is a unitless integer in the base unit (ms);
+    -- current_setting() would return text with a unit.
+    "priorTxTimeoutMs" := (SELECT setting::int FROM pg_catalog.pg_settings
+                             WHERE name = 'transaction_timeout');
     -- A positive timer set again to a positive value is not re-armed, so an
     -- inherited timer is turned off first and ours is armed from zero.
-    PERFORM set_config('transaction_timeout', '0', true);
+    PERFORM pg_catalog.set_config('transaction_timeout', '0', true);
     -- Measured from the clock just before arming, not from txStart.
     "ttArmedMs" := least(tt_cap_ms,
-        floor(extract(epoch FROM (run_deadline - clock_timestamp())) * 1000)::int
+        pg_catalog.floor(extract(epoch FROM (run_deadline - pg_catalog.clock_timestamp())) * 1000)::int
         - arm_margin_ms);
     IF "ttArmedMs" < c_guarded_ms THEN
       RAISE EXCEPTION 'deadline_budget_insufficient'
         USING ERRCODE = 'OB001', DETAIL = "ttArmedMs"::text;
     END IF;
-    PERFORM set_config('transaction_timeout', "ttArmedMs"::text, true);
+    PERFORM pg_catalog.set_config('transaction_timeout', "ttArmedMs"::text, true);
     -- Postcondition: read after arming, so passing proves expiry <= deadline.
-    after_arm := clock_timestamp();
-    IF after_arm + make_interval(secs => "ttArmedMs" / 1000.0) > run_deadline THEN
+    after_arm := pg_catalog.clock_timestamp();
+    IF after_arm + pg_catalog.make_interval(secs => "ttArmedMs" / 1000.0) > run_deadline THEN
       RAISE EXCEPTION 'transaction_timeout_arm_overshoot'
         USING ERRCODE = 'OB002';
     END IF;
     "ttArmed" := true;
   ELSE
+    "priorTxTimeoutMs" := NULL;
     "ttArmedMs" := NULL;
     "ttArmed"   := false;
   END IF;

@@ -188,6 +188,52 @@ jobs:
       # read, that code can read. The alert lives in `report-red-lane` below,
       # which never runs this tree.
 
+  # The sre-ops transaction arming function branches on the server version
+  # (docs/policy/sre-ops.md §6 item 3): on PostgreSQL 16 it must neither read
+  # nor set transaction_timeout, and production's version is not known to this
+  # repository. Every other lane runs PostgreSQL 17, so this job is the only
+  # place the 16 branch is observed. It runs one file, which installs the
+  # migration into a throwaway schema itself, and holds no secret.
+  ops-observer-pg16:
+    name: Ops observer transaction bounds (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tomverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tomverse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "16"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the transaction bounds suite on PostgreSQL 16
+        run: node --conditions=react-server --import tsx --test tests/integration/ops-observer-transaction-bounds.db.test.ts
+
   # Only the release-branch lane is worth an alert, and the notifier enforces
   # that itself rather than trusting this condition -- a run on any other
   # branch is refused by `resolveReleaseLaneAlert` on the branch name.
