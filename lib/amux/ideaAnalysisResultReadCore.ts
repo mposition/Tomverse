@@ -103,6 +103,7 @@ export function parseAmuxIdeaAnalysisResultView(
           !text(proposal.title, 200) || !text(proposal.description) ||
           !optionalRef(proposal.parentRef) ||
           (proposal.level === "initiative") !== (proposal.parentRef === null) ||
+          proposal.parentRef === value.localRef ||
           !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "card") {
       if (!keys(proposal, ["kind", "localId", "cardType", "storyKind", "title",

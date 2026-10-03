@@ -96,7 +96,8 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     { featureRef: "contains,comma" }, { sourceRefIds: ["\u202eunsafe"] },
     { sourceRefIds: ["source-1", "source-1"] },
     { scopeIn: [] }, { completionCriteria: [] },
-    { dependencyRefs: ["c0:card-0"] },
+    { dependencyRefs: ["c0:card-0"] }, { dependencyRefs: ["other-task"] },
+    { parentStoryRef: "other-story" },
     { duplicateCandidateRefs: ["c0:card-0"] },
     { unexpected: "extra field" },
   ]) {
@@ -112,7 +113,7 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   }, ideaId)?.state, "ready");
   for (const malformed of [
     { taskRole: "unapproved_role" }, { executionGrade: "unapproved_grade" },
-    { executionBrief: null }, { storyKind: "bug" },
+    { executionBrief: null }, { storyKind: "bug" }, { taskRole: null },
     { dependencyRefs: ["c0:card-0"] },
   ]) {
     assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
@@ -132,6 +133,8 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     [node.localId, node, { parentRef: "contains,comma" }],
     [node.localId, { ...node, level: "epic", parentRef: "c0:node-1" },
       { parentRef: null }],
+    [node.localId, { ...node, level: "epic", parentRef: "c0:node-1" },
+      { parentRef: node.localId }],
     [evidence.localId, evidence, { evidenceType: "freeform" }],
     [evidence.localId, evidence, { cardRef: null }],
     [evidence.localId, evidence, { cardRef: "\u202eunsafe" }],
