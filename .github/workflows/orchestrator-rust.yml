@@ -1,5 +1,12 @@
 name: Orchestrator Rust
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 # The Rust workspace (crates/amux-core, apps/tomverse-orchestrator) had no CI
 # lane, so its tests only ever ran on a developer's machine. A regression test
 # nobody runs is not a defence: this lane makes the workspace's own tests a
@@ -16,10 +23,37 @@ name: Orchestrator Rust
 # change, its ~14 minutes made this the slowest check Railway's Wait for CI held
 # staging for (2026-10-03: p50 ~17 minutes, against ~2 before the vendor).
 #
-# Caches are saved only by pushes to develop. Each target directory is ~3 GiB;
-# saved per pull request they filled the repository's 10 GB cache budget, evicted
-# develop's (and the Next.js, npm and Playwright caches), and every run started
-# cold. Pull requests into develop restore develop's caches and save nothing.
+# Only the downloaded crates are named by the cache step -- `~/.cargo/registry`
+# and `~/.cargo/git`. Compiled output is not shared between runs at all. Two
+# decisions met here, and this is what satisfied both; a third then took the
+# write away entirely, which the last paragraph of this block records.
+#
+# Caching each `target` directory cost ~3 GiB, and saved per pull request the two
+# of them filled the repository's 10 GB cache budget, evicted develop's entries
+# along with the Next.js, npm and Playwright caches, and left every run starting
+# cold. Moving those saves to pushes to develop fixed the budget, but a `target`
+# directory is compiled output that nothing verifies, and an entry written in the
+# develop scope is restorable by every run that can see that scope -- so a
+# compromised crate's build script could plant bytes that every later run then
+# executes (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F3, P1).
+#
+# Dropping `target` removes the unverified content, and most of the size with it,
+# which left the pull request's own scope affordable again: an entry written
+# there is restorable only by re-runs of that pull request, so nothing is shared
+# across refs and the audit's rule needed no exception.
+#
+# That is no longer how it ends. `cache-mode: read` above takes the write away
+# at the token, and a measured run proved the declaration binds pull requests
+# too -- "cache write denied: token has no writable scopes". So nothing writes
+# this key any more, the save step is gone, and every run downloads its crates.
+# What it buys is that no run which can land on develop or main can plant an
+# entry a required gate later restores, whatever executes inside it. The three
+# ways to warm this again are in the audit's P1a; each needs a decision rather
+# than a workflow edit.
+#
+# What is not given up is the part that cost the wall clock: the vendored server
+# is still built and tested only when the change can affect it, which is what
+# took this lane's ~14 minutes off every unrelated change.
 
 on:
   pull_request:
@@ -80,23 +114,26 @@ jobs:
             node scripts/rust-vendor-scope.mjs --all
           fi
 
-      - name: Restore the workspace build cache
-        id: workspace_cache
+      # One entry, because `~/.cargo` is one directory shared by both workspaces
+      # -- splitting it by lockfile only made sense while each half also carried
+      # its own `target`. It is keyed on both lockfiles because its contents
+      # depend on both.
+      #
+      # Restore only. Nothing can write this entry any more: this workflow can
+      # run on develop or main, so its cache-mode is read and GitHub refuses the
+      # write at the token (measured here -- "cache write denied: token has no
+      # writable scopes"). The save step that used to sit at the end of this job
+      # spent the compression time and then warned, every run, so it is gone.
+      # The reader half stays because every way of warming this again needs it:
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+      - name: Restore the downloaded crates
+        id: crates_cache
         uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
-
-      - name: Restore the vendored AMUX build cache
-        id: vendor_cache
-        if: steps.scope.outputs.vendor == 'true'
-        uses: actions/cache/restore@v5
-        with:
-          path: vendor/amux/target
-          key: ${{ runner.os }}-rust-vendor-amux-${{ hashFiles('vendor/amux/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-v2-cargo-home-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
 
       # No fmt or clippy step: the workspace has no rustfmt.toml and its source
       # is hand-formatted, so adding either here would fail on code this change
@@ -122,20 +159,3 @@ jobs:
         if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo test -p amux-server --test dockerfile_build_inputs --locked
-
-      - name: Save the workspace build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.workspace_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
-
-      - name: Save the vendored AMUX build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.scope.outputs.vendor == 'true' && steps.vendor_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: vendor/amux/target
-          key: ${{ runner.os }}-rust-vendor-amux-${{ hashFiles('vendor/amux/Cargo.lock') }}

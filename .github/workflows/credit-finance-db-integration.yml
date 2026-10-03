@@ -1,5 +1,12 @@
 name: Credit Finance DB Integration
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -243,6 +250,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment
+          # package.json declares a package manager, without this file changing.
+          # This job holds a credential, so that would quietly put a cache next
+          # to it (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
 
       - name: Report the red lane
         env:
