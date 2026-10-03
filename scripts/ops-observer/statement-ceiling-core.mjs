@@ -54,22 +54,31 @@ export function rawCallIsSingleStatement(args) {
   return true;
 }
 
-/** A proxy under which every function refuses. */
-function refusingProxy(target) {
-  return new Proxy(target, {
-    get(object, property) {
-      const value = Reflect.get(object, property);
-      if (typeof value === "function") return () => refuse("statement_ceiling_unknown_method");
-      if (value !== null && typeof value === "object") return refusingProxy(value);
-      return value;
-    },
+/**
+ * Something that refuses whatever is done with it: calling it, or reaching any
+ * property on it (which is again a refuser). Its target is a fresh empty
+ * function, so neither descriptors nor the prototype chain lead anywhere real.
+ * `then` reads as absent so that an accidental `await` does not call it.
+ */
+function refuser() {
+  // An arrow function: callable, so apply works, and without a prototype property.
+  const self = new Proxy(() => {}, {
+    apply: () => refuse("statement_ceiling_unknown_method"),
+    construct: () => refuse("statement_ceiling_unknown_method"),
+    get: (_target, property) => (property === "then" ? undefined : self),
   });
+  return self;
 }
 
 /**
  * Wrap `tx` so that at most `allowed` statements can be sent through it.
  * Returns `{ client, used }`: `client` is what the callback may use, and
  * `used()` reports how many statements were taken.
+ *
+ * The client is a facade, not a view of `tx`: its Proxy target is an empty,
+ * frozen, prototype-less object, and `tx` lives only in the closures of the two
+ * methods. A descriptor, `Object.keys`, `Reflect.ownKeys` or the prototype
+ * chain on the client therefore finds nothing of the real client to call.
  */
 export function countingClient(tx, allowed) {
   if (!Number.isInteger(allowed) || allowed < 0) throw new Error("ops_observer_statement_allowance_invalid");
@@ -78,20 +87,19 @@ export function countingClient(tx, allowed) {
     if (used >= allowed) refuse("statement_ceiling_exceeded");
     used += 1;
   };
+  const counted = (name) => (...args) => {
+    if (!rawCallIsSingleStatement(args)) refuse("statement_ceiling_not_single_statement");
+    const method = tx[name];
+    if (typeof method !== "function") refuse("statement_ceiling_unknown_method");
+    take();
+    return method.apply(tx, args);
+  };
+  const methods = { $queryRaw: counted("$queryRaw"), $executeRaw: counted("$executeRaw") };
 
-  const client = new Proxy(tx, {
-    get(object, property) {
-      const value = Reflect.get(object, property);
-      if (ONE_STATEMENT_RAW_METHODS.includes(property) && typeof value === "function") {
-        return (...args) => {
-          if (!rawCallIsSingleStatement(args)) refuse("statement_ceiling_not_single_statement");
-          take();
-          return value.apply(object, args);
-        };
-      }
-      if (typeof value === "function") return () => refuse("statement_ceiling_unknown_method");
-      if (value !== null && typeof value === "object") return refusingProxy(value);
-      return value;
+  const client = new Proxy(Object.freeze(Object.create(null)), {
+    get: (_target, property) => {
+      if (property === "then") return undefined;
+      return Object.hasOwn(methods, property) ? methods[property] : refuser();
     },
   });
 

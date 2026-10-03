@@ -86,6 +86,22 @@ test("model delegates, unsafe and internal entry points, and nested functions al
   assert.deepEqual(sent, []);
 });
 
+test("descriptors, keys and the prototype chain on the client reach nothing real", () => {
+  const { tx, sent } = fakeTx();
+  const { client, used } = countingClient(tx, 0);
+  assert.equal(Object.getOwnPropertyDescriptor(client, "$queryRaw"), undefined);
+  assert.equal(Object.getOwnPropertyDescriptor(client, "opsObserverState"), undefined);
+  assert.deepEqual(Reflect.ownKeys(client), []);
+  assert.equal(Object.getPrototypeOf(client), null);
+  const delegate = client.opsObserverState;
+  assert.equal(Object.getOwnPropertyDescriptor(delegate, "findUnique"), undefined);
+  assert.equal(Object.getOwnPropertyDescriptor(delegate, "prototype"), undefined);
+  assert.throws(() => client.opsObserverState.findUnique.call(tx, {}), refusedWith("statement_ceiling_unknown_method"));
+  assert.equal(client.then, undefined);
+  assert.equal(used(), 0);
+  assert.deepEqual(sent, []);
+});
+
 test("nothing on the result hands out the real client", () => {
   const { tx } = fakeTx();
   const result = countingClient(tx, 5);
