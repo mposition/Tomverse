@@ -541,6 +541,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, both in the
  * receiver's import closure. The receiver's calls and the rows it writes are
  * unchanged; the fingerprint moves because the closure's bytes did.
+ *
+ * 2026-10-10, CHAT-01 production selective integration adds the vNext
+ * one-shot dark tables to the watched Prisma schema. The receiver's calls,
+ * descriptor and admission decisions remain unchanged; the closure bytes
+ * move and the fingerprint is repinned after the full reviewed closure lands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
   "b4419522a0de528f91375dc1037b093199dcf695e7dc6842bc84711dd5a37092";

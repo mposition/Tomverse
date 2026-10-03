@@ -1,0 +1,28 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v2",
+  "requirement": "Formal successor to the preserved v1 on_hold exchange. Complete the dark, content-free N80 PostgreSQL reservation slice under the owner-approved CHAT-01 one-shot v2 policy. No real stage, holdout content, provider call, flag, or product traffic is introduced. Claude Code Max first-party subscription CLI independently reviews the source and test evidence; Anthropic API is not used.",
+  "completionCriteria": [
+    "The migration and schema admit one exact stage and exactly 80 fixed-price slots for the entire one-shot slice, with immutable source/root/deployment/price and audit pins, separate stage/run approval, reserved-only slot insertion, database-owned timestamps, and irreversible slot consumption without changing the v1 100-slot authority.",
+    "Audit references are checked under key-share locks by the stage trigger, with no foreign key that blocks existing test-only AdminAuditLog truncation; the protected-table-writer exact count and explanation match the migration.",
+    "The PostgreSQL-connecting test exists only in the integration lane and uses the runner's database-or-schema test marker; the unit lane has no new DB-connecting test.",
+    "The v1 reservation and admission integration suites, new vNext suite, and DB group registry all pass on a disposable PostgreSQL 17 test database; Prisma validation, typecheck, lint, enum and protected-writer guards, and whitespace checks pass.",
+    "Distinct stage/run audit, singleton stage, stale approval-audit, and stage deletion guards have negative tests; all inherited and earlier-round findings are addressed without changing an operation gate or dispatch path. Claude returns zero findings and the controller passes."
+  ],
+  "baseCommit": "da75d6184d7d7d91fcd3029122e31e7e250935d2",
+  "writableScope": [
+    "prisma/schema.prisma",
+    "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    "scripts/run-db-integration-tests.mjs",
+    "scripts/db-integration-groups.mjs",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/check-protected-table-writers-core.mjs",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v2.task.json"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-durable-slots-v1/exchange.json"
+  }
+}

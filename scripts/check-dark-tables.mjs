@@ -43,6 +43,8 @@ const DARK_TABLES = [
     "RoutingSnapshotCeilingApproval",
     "AvailabilityRollupApplication",
     "DeploymentPriceSnapshot",
+    "PromptRefinerVnextOneShotStage",
+    "PromptRefinerVnextOneShotSlot",
 ];
 
 /**
