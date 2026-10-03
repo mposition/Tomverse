@@ -27,9 +27,6 @@
 //
 // Pure: no database, no Prisma import. The wrapper passes the real client.
 
-/** The only client methods the callback may call directly. */
-export const ONE_STATEMENT_RAW_METHODS = Object.freeze(["$queryRaw", "$executeRaw"]);
-
 export class StatementCeilingError extends Error {
   constructor(code) {
     super(code);
@@ -87,14 +84,22 @@ export function countingClient(tx, allowed) {
     if (used >= allowed) refuse("statement_ceiling_exceeded");
     used += 1;
   };
-  const counted = (name) => (...args) => {
+  const admit = (args) => {
     if (!rawCallIsSingleStatement(args)) refuse("statement_ceiling_not_single_statement");
-    const method = tx[name];
-    if (typeof method !== "function") refuse("statement_ceiling_unknown_method");
     take();
-    return method.apply(tx, args);
   };
-  const methods = { $queryRaw: counted("$queryRaw"), $executeRaw: counted("$executeRaw") };
+  // Written out, not looked up by name: a computed member on the client is
+  // what the protected-table writer check refuses, and rightly.
+  const methods = {
+    $queryRaw: (...args) => {
+      admit(args);
+      return tx.$queryRaw(...args);
+    },
+    $executeRaw: (...args) => {
+      admit(args);
+      return tx.$executeRaw(...args);
+    },
+  };
 
   const client = new Proxy(Object.freeze(Object.create(null)), {
     get: (_target, property) => {
