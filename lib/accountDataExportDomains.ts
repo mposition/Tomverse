@@ -559,7 +559,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "PromptRefinerVnextOneShotStage",
     state: "excluded",
     exclusionReason:
-      "Content-free, immutable one-shot stage approval evidence. It records exact source, deployment, manifest and bounded cost identities with the approving operator id, but no customer id, prompt, answer or provider prose. Operator access requests use the manual PrivacyRequest path because the linked audit entry is tamper-evident and retained.",
+      "Content-free one-shot stage evidence with immutable approval identities. It records exact source, deployment, manifest and bounded cost identities with the approving operator id, but no customer id, prompt, answer or provider prose. Operator access requests use the manual PrivacyRequest path because the linked audit entry is tamper-evident and retained.",
   },
   {
     domain: "promptRefinerShadowRun",

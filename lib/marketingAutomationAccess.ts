@@ -456,10 +456,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-03: the product-research branch takes develop. Both sides had
  * repinned this -- develop for a schema change of its own, this branch for the
  * observation table -- so neither value describes the merged schema and the one
- * below is computed over it. Every note above stands.
+ * below is computed over it. The CHAT-01 one-shot dark tables added later
+ * change the same schema bytes, so this digest is repinned after that change.
+ * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "dc6272c7ff190206a369bb9b5e3a52a92a6ec94564be9e67dae37a571937e622";
+  "999ee26f79a9aabcba1a44221f4372864d78f04de067757f4ec1829148e8af80";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

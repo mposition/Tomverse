@@ -1156,7 +1156,8 @@ domains:
     retention:
       retentionPolicyRef: "TBD-security-retention-schedule"
       legalBasis: >-
-        Immutable, content-free evidence that a named administrator approved
+        Content-free evidence with immutable approval identities showing that
+        a named administrator approved
         one bounded evaluation stage against exact source, deployment, manifest
         and cost identities. Retention supports security investigation,
         spending-control audit and defence of related legal claims under GDPR
