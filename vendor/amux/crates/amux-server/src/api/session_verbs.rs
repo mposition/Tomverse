@@ -23660,9 +23660,11 @@ mod tests {
         }
         let mut headers = HeaderMap::new();
         headers.insert("x-amux-worker", "peer-steer-caller".parse().unwrap());
+        let before = now_i64() * 1000;
         let response = steer_mutate(&st, "peer-steer-recipient", &Method::POST, &headers,
             &json!({"text":"Rebuild the shard index for tenant 42 and report the residual count",
                 "record_history":true, "no_board":true})).await;
+        let after = now_i64() * 1000;
         assert_eq!(response.status(), StatusCode::OK);
         let body: Value = serde_json::from_slice(
             &axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
@@ -23673,6 +23675,10 @@ mod tests {
             [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
         assert_eq!((kind.as_str(), origin.as_str(), pending, card),
             ("session", "peer-steer-caller", 0, None));
+        let queued_at: i64 = conn.query_row(
+            "SELECT queued_at FROM cmd_history WHERE session='peer-steer-recipient'", [], |r| r.get(0),
+        ).unwrap();
+        assert!((before..=after).contains(&queued_at), "queued history must use epoch milliseconds");
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM issues WHERE session='peer-steer-recipient'",
             [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
