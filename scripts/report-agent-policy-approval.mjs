@@ -17,6 +17,7 @@ import {
   judgeAgentPolicyApproval,
   parseAgentPolicyHeader,
   parseAllowlist,
+  previousApprovedPolicyVersion,
 } from "../lib/agentPolicyApprovalCore.ts";
 
 const REPOSITORY = "mposition/Tomverse";
@@ -42,6 +43,9 @@ const gitOrNull = (...gitArgs) => {
     return null;
   }
 };
+
+/** Whether a git command exits 0 -- for questions answered by the exit code. */
+const gitSucceeds = (...gitArgs) => gitOrNull(...gitArgs) !== null;
 
 const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 
@@ -115,17 +119,18 @@ const mergedIntoDevelop = pullRequests?.filter((pr) => pr.baseRef === "develop" 
 const previousVersion = (() => {
   const mergeCommit = mergedIntoDevelop.length === 1 ? mergedIntoDevelop[0].mergeCommitSha : null;
   if (!mergeCommit) return "unknown";
+  // Squash and rebase merges leave a merge_commit_sha that need not be on the
+  // ref; an older tree there would read an older version. Only a merge commit
+  // in the ref's history is develop as it stood before the merge.
+  if (!gitSucceeds("merge-base", "--is-ancestor", mergeCommit, ref)) return "unknown";
   // A root commit has no parent, so the file was new there.
   const parents = gitOrNull("rev-list", "--parents", "-n", "1", mergeCommit);
   if (parents === null) return "unknown";
-  if (parents.split(" ").length === 1) return "new";
+  if (parents.split(" ").length === 1) return previousApprovedPolicyVersion({ present: false });
   const listed = gitOrNull("ls-tree", "--name-only", `${mergeCommit}^1`, "--", policyPath);
   if (listed === null) return "unknown";
-  if (listed === "") return "new";
-  const text = gitOrNull("show", `${mergeCommit}^1:${policyPath}`);
-  if (text === null) return "unknown";
-  // A draft that carried no version number had no approved version before.
-  return parseAgentPolicyHeader(text).version ?? "new";
+  if (listed === "") return previousApprovedPolicyVersion({ present: false });
+  return previousApprovedPolicyVersion({ present: true, text: gitOrNull("show", `${mergeCommit}^1:${policyPath}`) });
 })();
 
 const developPr = mergedIntoDevelop;

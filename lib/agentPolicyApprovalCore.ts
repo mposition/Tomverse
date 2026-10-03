@@ -99,6 +99,23 @@ export function parseAgentPolicyHeader(text: string): AgentPolicyHeader {
   return { approvedBy, approvedAt, version: version === undefined ? null : Number(version), allowlistGenesisCommit: genesis };
 }
 
+/**
+ * The previous approved version, from the policy file as develop held it just
+ * before the policy PR merged (the caller reads that tree). Absent there, or a
+ * draft that names neither an approver nor a version, is "new". A file that
+ * names an approver but no readable version is an unread record: "unknown",
+ * never a first approval. `text` null means git could not answer.
+ */
+export function previousApprovedPolicyVersion(
+  before: { present: false } | { present: true; text: string | null },
+): number | "new" | "unknown" {
+  if (!before.present) return "new";
+  if (before.text === null) return "unknown";
+  const header = parseAgentPolicyHeader(before.text);
+  if (header.version !== null) return header.version;
+  return header.approvedBy === null ? "new" : "unknown";
+}
+
 /** The accounts and version of the allowlist file's text. */
 export function parseAllowlist(text: string): { accounts: string[]; version: number | null } {
   const section = text.split(/^## 2\./m)[1]?.split(/^## /m)[0] ?? "";
