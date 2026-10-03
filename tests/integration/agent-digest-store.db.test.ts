@@ -220,16 +220,30 @@ test("the billing-finance-ops switch row exists and starts off", async () => {
   assert.deepEqual(JSON.parse(setting.value), { enabled: false, revision: 0, enabledAt: null });
 });
 
+// The function returns void, so it is called with $executeRawUnsafe (as the
+// support_triage_assert_deadline tests do) rather than selected as a value.
+// The boundary itself -- a run is refused only when the clock is strictly past
+// the deadline -- cannot be hit with a live clock, so it is pinned on the
+// function's text in tests/agentDigestContract.test.mjs; here the two sides of
+// it are shown with a margin.
 test("billing_finance_ops_assert_deadline passes before the deadline and raises after it or on NULL", async () => {
-  await prisma.$queryRawUnsafe(
-    `SELECT billing_finance_ops_assert_deadline(clock_timestamp() + interval '1 minute')::text AS ok`,
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline(clock_timestamp() + interval '1 minute')`,
+  );
+  // A deadline passed from the application goes as an ISO instant with its Z.
+  // Prisma sends a JS Date as a timestamp without a zone, which `::timestamptz`
+  // then reads in the session's time zone -- on a +10:00 server that moved
+  // this one-minute deadline ten hours into the past.
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline($1::timestamptz)`,
+    new Date(Date.now() + 60_000).toISOString(),
   );
   await assert.rejects(
-    prisma.$queryRawUnsafe(`SELECT billing_finance_ops_assert_deadline(clock_timestamp() - interval '1 second')::text AS ok`),
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(clock_timestamp() - interval '1 second')`),
     /billing_finance_ops_deadline_passed/,
   );
   await assert.rejects(
-    prisma.$queryRawUnsafe(`SELECT billing_finance_ops_assert_deadline(NULL)::text AS ok`),
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(NULL)`),
     /billing_finance_ops_deadline_passed/,
   );
 });
