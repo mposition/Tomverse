@@ -39,7 +39,9 @@ const control = (digestEnabled: boolean) => ({
 
 let revision = 0;
 
-const call = (overrides: { env?: Record<string, string>; headers?: Record<string, string> } = {}) =>
+const call = (
+  overrides: { env?: Record<string, string>; headers?: Record<string, string>; clock?: () => number } = {},
+) =>
   runQaReleaseMonitor(
     new Request("https://staging.tomverse.app/api/internal/agents/qa-release/monitor", {
       method: "POST",
@@ -50,6 +52,7 @@ const call = (overrides: { env?: Record<string, string>; headers?: Record<string
       },
     }),
     overrides.env ?? env,
+    overrides.clock,
   );
 
 const cleanup = async () => {
@@ -118,8 +121,10 @@ test("a digest just stored is fresh, and the same digest 28 hours later is stale
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
   }
-  // Today's alert was queued by the earlier stale round; this one writes nothing.
-  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: false } });
+  // Whether today's alert already exists is the next test's subject.
+  const stale = await call();
+  assert.equal(stale.status, 200);
+  assert.equal(stale.body.verdict, "stale");
 });
 
 test("a stale verdict queues one silence alert per UTC date, however often the Monitor runs", async () => {
@@ -134,4 +139,15 @@ test("a stale verdict queues one silence alert per UTC date, however often the M
   assert.equal(rows[0].referenceId, `stale:${day}`);
   const audits = await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted", targetId: rows[0].id } });
   assert.equal(audits, 1);
+});
+
+test("the round deadline follows the database clock, so app clock skew neither drops nor admits an alert", async () => {
+  // The application clock ten minutes behind, then ten minutes ahead, of the
+  // database: either way the round is fresh by the database's own clock.
+  for (const skewMs of [-600_000, 600_000]) {
+    await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
+    const skewed = () => Date.now() + skewMs;
+    assert.deepEqual(await call({ clock: skewed }), { status: 200, body: { verdict: "stale", alerted: true } }, String(skewMs));
+    assert.deepEqual(await call({ clock: skewed }), { status: 200, body: { verdict: "stale", alerted: false } }, String(skewMs));
+  }
 });

@@ -33,7 +33,9 @@ const MONITOR_ROUND_BUDGET_MS = 110_000;
 const READ_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
 
 /**
- * The silence-alert write (policy section 10: nine statements, so 3A + 5 =
+ * The silence-alert write (policy section 10: at most nine statements -- the
+ * audit append reads the previous entry only when the integrity key is set --
+ * so 3A + 5 =
  * 32 s, Prisma five seconds more, transaction_timeout on PostgreSQL 17+):
  * the limits, the audit chain lock, the existing-alert read, the queue row,
  * the four of the audit append, and the deadline check as the last statement.
@@ -72,7 +74,15 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
         where: { kind_referenceId: { kind: NOTIFICATION_KIND.qaReleaseDigestStale, referenceId } },
         select: { id: true },
       });
-      if (existing) return "already_queued" as const;
+      // Every path ends with the deadline check, the one that writes nothing too.
+      const late = async () => {
+        const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
+        return clock[0]?.late !== false;
+      };
+      if (existing) {
+        if (await late()) throw new StaleAlertLate();
+        return "already_queued" as const;
+      }
       const queued = await enqueueNotificationDelivery(tx, {
         kind: NOTIFICATION_KIND.qaReleaseDigestStale,
         referenceId,
@@ -90,8 +100,7 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
       });
       // The last statement: a round past its deadline is not recorded as a
       // success (policy section 3); the database clock decides.
-      const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
-      if (clock[0]?.late !== false) throw new StaleAlertLate();
+      if (await late()) throw new StaleAlertLate();
       return "queued" as const;
     },
     { maxWait: 5_000, timeout: ALERT_LIMITS.prismaMs },
@@ -155,6 +164,7 @@ export async function runQaReleaseMonitor(
     return answer(503, { error: "monitor_budget_exhausted" });
   }
   let read: RoundRead;
+  const readStartedElapsedMs = clock() - startedAt;
   try {
     read = await readRound();
   } catch {
@@ -194,7 +204,11 @@ export async function runQaReleaseMonitor(
   }
   let queued: "queued" | "already_queued";
   try {
-    queued = await enqueueStaleAlert(read.dbNowMs, new Date(startedAt + MONITOR_ROUND_BUDGET_MS));
+    // The deadline on the database clock, the clock that checks it: the
+    // database's time at the read plus what was left of the round then. App
+    // and database clocks never meet, so skew between them cannot move it.
+    const roundDeadline = new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - readStartedElapsedMs);
+    queued = await enqueueStaleAlert(read.dbNowMs, roundDeadline);
   } catch (error) {
     // The verdict stands; the alert was not recorded, and is not retried
     // here -- the next round tries again under the same key.

@@ -18,7 +18,7 @@ test("the silence-alert write uses the policy's nine statements: 32 s, Prisma 37
   assert.match(SOURCE, /set_config\('transaction_timeout'/);
 });
 
-test("the write locks after the limits, audits in the same transaction, and checks the deadline last", () => {
+test("the write locks after the limits, audits in the same transaction, and checks the deadline last on every path", () => {
   const fn = SOURCE.slice(SOURCE.indexOf("async function enqueueStaleAlert"), SOURCE.indexOf("export type QaReleaseMonitorAnswer"));
   const order = [
     "set_config('statement_timeout'",
@@ -26,8 +26,20 @@ test("the write locks after the limits, audits in the same transaction, and chec
     "tx.notificationDelivery.findUnique(",
     "await enqueueNotificationDelivery(tx,",
     "await writeSystemAuditLog({",
-    "clock_timestamp() >= ",
+    'return "queued" as const;',
   ].map((marker) => fn.indexOf(marker));
   assert.ok(order.every((at) => at > 0), JSON.stringify(order));
-  assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  assert.deepEqual(order, [...order].sort((x, y) => x - y));
+  // The deadline is the last statement on the queued path and on the
+  // already-queued path alike.
+  const marker = "if (await late()) throw new StaleAlertLate();";
+  const lateChecks = [];
+  for (let at = fn.indexOf(marker); at >= 0; at = fn.indexOf(marker, at + 1)) lateChecks.push(at);
+  assert.equal(lateChecks.length, 2);
+  assert.ok(lateChecks[0] < fn.indexOf('return "already_queued" as const;'));
+  assert.ok(lateChecks[1] > fn.indexOf("await writeSystemAuditLog({") && lateChecks[1] < fn.indexOf('return "queued" as const;'));
+});
+
+test("the round deadline is anchored on the database clock", () => {
+  assert.ok(SOURCE.includes("new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - readStartedElapsedMs)"));
 });
