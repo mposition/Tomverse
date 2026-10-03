@@ -1236,6 +1236,11 @@ test("a complete first result saves independent encrypted units and closes only 
     const prepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: unknownChoice, keys });
     const consumeRequestId = randomUUID();
+    assert.equal(await commitAmuxRootNodeUnknown(tx, {
+      actorUserId: randomUUID(), decisionId: unknownChoice.decisionId,
+      prepareRequestId: unknownChoice.prepareRequestId,
+      consumeRequestId }), false,
+    "another actor cannot freeze a prepared decision");
     assert.equal(await commitAmuxRootNodeUnknown(tx, { actorUserId,
       decisionId: unknownChoice.decisionId,
       prepareRequestId: unknownChoice.prepareRequestId,
@@ -1257,6 +1262,19 @@ test("a complete first result saves independent encrypted units and closes only 
         prepareRequestId: randomUUID(), nodeId: randomUUID() }, keys }),
     (error: unknown) => error instanceof AmuxNodeCreateError &&
       error.code === "already_prepared");
+    const resolvedAuditId = await writeAdminAuditLog({ tx, session, request,
+      action: "amux.v4.unit.no_commit_confirmed",
+      targetType: "AmuxIdeaUnitDecision", targetId: unknownChoice.decisionId,
+      summary: "Synthetic no-commit confirmation for root node read-back." });
+    await tx.amuxIdeaUnitDecision.update({
+      where: { id: unknownChoice.decisionId },
+      data: { outcomeUnknownResolvedAt: new Date(),
+        outcomeUnknownResolution: "no_commit",
+        outcomeUnknownResolvedAuditLogId: resolvedAuditId },
+    });
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
+      unknownChoice.decisionId, unknownChoice.prepareRequestId)).state,
+    "no_commit_confirmed");
     throw new Error("rollback synthetic unknown root node decision");
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     maxWait: 5_000, timeout: 30_000 }),

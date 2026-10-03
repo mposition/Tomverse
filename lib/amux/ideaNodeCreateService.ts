@@ -35,7 +35,7 @@ const ACTOR_ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxNodeCreateError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "already_prepared" | "reconfirm" |
-    "integrity_unavailable") {
+    "integrity_unavailable" | "write_disabled" | "outcome_unknown") {
     super(code);
     this.name = "AmuxNodeCreateError";
   }
@@ -406,7 +406,8 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
     summary: "Froze an AMUX v4 root node decision after an unverified consume result; no retry occurred.",
     metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
       prepareRequestId: row.prepareRequestId,
-      consumeRequestId: input.consumeRequestId, retryAllowed: false },
+      consumeRequestId: input.consumeRequestId, action: "create_node",
+      confirmationDigest: row.confirmationDigest, retryAllowed: false },
   });
   const updated = await tx.amuxIdeaUnitDecision.updateMany({
     where: { id: row.id, actorUserId: input.actorUserId, state: "prepared",

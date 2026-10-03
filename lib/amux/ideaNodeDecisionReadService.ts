@@ -57,7 +57,11 @@ export async function readAmuxRootNodeDecisionInTransaction(
       action: { in: [PREPARE, CONSUME] } },
   });
   if (!row) {
-    if (audits.some((audit) => audit.actorUserId !== actorUserId)) {
+    const matchingPrepare = audits.some((audit) =>
+      audit.action === PREPARE && audit.actorUserId === actorUserId &&
+      meta(audit.metadata)?.prepareRequestId === prepareRequestId);
+    if (audits.some((audit) => audit.actorUserId !== actorUserId) ||
+        (audits.length > 0 && !matchingPrepare)) {
       return { state: "not_visible" } as const;
     }
     return { state: audits.length ? "partial" : "absent" } as const;
@@ -122,8 +126,27 @@ export async function readAmuxRootNodeDecisionInTransaction(
           unknownMeta.draftUnitId !== row.draftUnitId ||
           unknownMeta.prepareRequestId !== row.prepareRequestId ||
           unknownMeta.consumeRequestId !== row.outcomeUnknownConsumeRequestId ||
+          unknownMeta.action !== "create_node" ||
+          unknownMeta.confirmationDigest !== row.confirmationDigest ||
           unknownMeta.retryAllowed !== false) {
         return { state: "partial" } as const;
+      }
+      if (row.outcomeUnknownResolvedAt !== null) {
+        const resolvedAudit = row.outcomeUnknownResolvedAuditLogId
+          ? await tx.adminAuditLog.findUnique({
+            where: { id: row.outcomeUnknownResolvedAuditLogId },
+          }) : null;
+        if (row.outcomeUnknownResolution !== "no_commit" ||
+            !resolvedAudit?.entryHash ||
+            auditRowActorKind(resolvedAudit) !== "human" ||
+            resolvedAudit.actorUserId !== actorUserId ||
+            resolvedAudit.action !== "amux.v4.unit.no_commit_confirmed" ||
+            resolvedAudit.targetType !== TARGET ||
+            resolvedAudit.targetId !== row.id) {
+          return { state: "partial" } as const;
+        }
+        return { state: "no_commit_confirmed", decisionId: row.id,
+          draftUnitId: row.draftUnitId } as const;
       }
       return { state: "outcome_unknown", decisionId: row.id } as const;
     }
