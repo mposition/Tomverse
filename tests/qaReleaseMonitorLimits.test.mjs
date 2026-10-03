@@ -41,5 +41,5 @@ test("the write locks after the limits, audits in the same transaction, and chec
 });
 
 test("the round deadline is anchored on the database clock", () => {
-  assert.ok(SOURCE.includes("new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - readStartedElapsedMs)"));
+  assert.ok(SOURCE.includes("new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - elapsedAfterReadMs)"));
 });

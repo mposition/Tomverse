@@ -164,7 +164,6 @@ export async function runQaReleaseMonitor(
     return answer(503, { error: "monitor_budget_exhausted" });
   }
   let read: RoundRead;
-  const readStartedElapsedMs = clock() - startedAt;
   try {
     read = await readRound();
   } catch {
@@ -205,13 +204,18 @@ export async function runQaReleaseMonitor(
   let queued: "queued" | "already_queued";
   try {
     // The deadline on the database clock, the clock that checks it: the
-    // database's time at the read plus what was left of the round then. App
-    // and database clocks never meet, so skew between them cannot move it.
-    const roundDeadline = new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - readStartedElapsedMs);
+    // database's time during the read plus what is left of the round now,
+    // measured after the read returned. The elapsed time is the later of the
+    // two app-side readings, so any wait before the database took its time
+    // shortens the deadline rather than lengthening it. App and database
+    // clocks never meet, so skew between them cannot move it.
+    const elapsedAfterReadMs = clock() - startedAt;
+    const roundDeadline = new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - elapsedAfterReadMs);
     queued = await enqueueStaleAlert(read.dbNowMs, roundDeadline);
   } catch (error) {
-    // The verdict stands; the alert was not recorded, and is not retried
-    // here -- the next round tries again under the same key.
+    // The verdict stands; this round recorded nothing (a late round rolls
+    // back, and an earlier round's alert stays as it was), and nothing is
+    // retried here -- the next round tries again under the same key.
     return answer(503, { verdict, error: error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed" });
   }
   return answer(200, { verdict, alerted: queued === "queued" });

@@ -151,3 +151,27 @@ test("the round deadline follows the database clock, so app clock skew neither d
     assert.deepEqual(await call({ clock: skewed }), { status: 200, body: { verdict: "stale", alerted: false } }, String(skewMs));
   }
 });
+
+test("a round that ran past its budget during the read is refused on both paths, and records nothing", async () => {
+  // The clock reads 0 until the read has returned, then 200 s: the remaining
+  // budget is already negative, so the deadline lies in the database's past.
+  const jumpAfterRead = () => {
+    let calls = 0;
+    return () => (++calls >= 4 ? 200_000 : 0);
+  };
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
+  const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted" } });
+  assert.deepEqual(await call({ clock: jumpAfterRead() }), {
+    status: 503,
+    body: { verdict: "stale", error: "monitor_deadline_passed" },
+  });
+  assert.equal(await prisma.notificationDelivery.count({ where: { kind: "qa_release_digest_stale" } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted" } }), auditsBefore);
+
+  // With today's alert already queued, a late round is still not a success.
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
+  assert.deepEqual(await call({ clock: jumpAfterRead() }), {
+    status: 503,
+    body: { verdict: "stale", error: "monitor_deadline_passed" },
+  });
+});
