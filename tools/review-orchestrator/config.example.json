@@ -58,11 +58,13 @@
       "enabled": true,
       "maxConcurrent": 2,
       "model": "swe-2-high",
+      "promptNote": "Tool rule for this run: read files with your file tools; for search use only grep, rg, find, ls, cat, head, tail, wc, git log, git show, git blame, git status or git ls-files. Any other command, any file write and any network access is rejected and ends the review before the verdict. If you cannot check something, say so in a finding.",
       "command": "devin",
       "args": [
         "-p",
-        "--prompt-file", "/dev/stdin",
+        "--prompt-file", "{promptFile}",
         "--respect-workspace-trust", "false",
+        "--sandbox",
         "--permission-mode", "auto",
         "--model", "{model}"
       ]
