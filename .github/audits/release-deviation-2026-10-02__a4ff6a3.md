@@ -51,12 +51,17 @@ server, imported by no app route, build step or migration), its tests,
 prices or migrations. The tool itself was exercised end to end on the review
 server under its dedicated account on 2026-10-02 (two live reviews).
 
-## What a person still owns
+## Review
 
-- [ ] Confirm or correct the statement above that this release needed no staging
+- [x] Confirm or correct the statement above that this release needed no staging
       measurement, and sign below.
 
 ```
-Reviewed by:   ____________________
-Reviewed on:   ____________________
+Reviewed by:   mposition
+Reviewed on:   2026-10-03
 ```
+
+**Signed.** `mposition` reviewed this record and gave the signature above in the
+session on 2026-10-03; the agent transcribed it. The signature confirms the
+record's account of the gap and the risk judgement. It is not a staging
+measurement of the RC, which did not happen.
