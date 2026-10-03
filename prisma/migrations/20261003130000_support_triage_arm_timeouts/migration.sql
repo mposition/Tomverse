@@ -1,5 +1,7 @@
 -- Support-triage transaction timeouts (docs/policy/support-triage.md §4).
 --
+-- baseline-check: present-if-function "support_triage_arm_timeouts"
+--
 -- support_triage_arm_timeouts() is the first round trip of every support-triage
 -- transaction. In that one call it reads the server version, the inherited
 -- session transaction_timeout and the database clock, then arms
