@@ -67,11 +67,11 @@ run; roll forward instead.
 
 ### After the merge
 
-- [ ] Production serves the merge commit, and `/api/ready` answers 200.
+- [x] Production serves the merge commit, and `/api/ready` answers 200. #2029 merged as `04246af7a` at 22:12Z on 2026-10-03; `/api/build-info` reports `04246af`, deployment success, deployed 22:40Z; `/api/ready` 200, `/api/health` 200.
 - [ ] Seal decision F's cohort (`npm run email:seal-risk-accepted-cohort`, dry run then `--apply --confirm-cohort`), **before** the notice.
 - [ ] Turn on `feature.emailCampaignsEnabled`; in the console preview the notice, draft it, measure the audience, approve it, start the launch wave, so it arrives before 2026-10-18 00:00 UTC.
 - [ ] After 2026-10-18, start the reminder wave for accounts created since and notices that did not arrive.
-- [ ] Section 5: ancestry. `develop` already has #2011, so the back-merge should change no file.
+- [ ] Section 5: ancestry. The automated back-merge (https://github.com/mposition/Tomverse/actions/runs/37157615308) **conflicted** on six files, none from #2011: `main` holds earlier selective-release copies whose context differs from `develop`. `main` carries nothing `develop` lacks: `fcaec7d9c` is the `-x` cherry-pick of `e3e181e38`, the #2009 copy has the patch id of `eed7cef30`, and the #1964 copy has the same added and removed lines as `5a49ebec5`. A manual `-s ours` back-merge is open as #2048 (tree equal to `develop`); ancestry holds once it merges.
 
 
 ## 1. Automated gates
@@ -589,9 +589,9 @@ with `if: always()`. Your job here is to confirm it did, not to do it.
       `main` carries work `develop` never had, such as a hotfix landed directly)
 
 ```
-Release merge SHA:  ____________________
-Back-merge run URL: ____________________
-Ancestry verified:  ____________________
+Release merge SHA:  04246af7a14c8c59739718d5851074b9e735089a
+Back-merge run URL: https://github.com/mposition/Tomverse/actions/runs/37157615308 -- conflicted on six files; manual back-merge #2048
+Ancestry verified:  not yet -- after #2048 merges
 ```
 
 ### When it does not land on its own
@@ -1095,7 +1095,7 @@ RC SHA:             fcaec7d9c377a8bf89ca0bb282091247427e8a6b
 Verified on:        ____________________
 Verified by / how:  ____________________
 Rollback SHA:       ddcea77c1
-Back-merge run:     ____________________   (post-merge)
+Back-merge run:     37157615308, conflicted; manual back-merge #2048 (tree equal to develop)
 ```
 
 Done this way, a selective release is a release. It gets a record under
