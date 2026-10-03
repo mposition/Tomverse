@@ -190,9 +190,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    runbook이 없으면 S-M2에 들어가지 않습니다.
 4. **hold와 추적.** staging 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`·
    `BUILDING`·`DEPLOYING`이면 병합하지 않습니다. 병합 직전에 다시 읽고 head를 고정해 병합합니다(3절의 `sha` 인자). develop을
-   배포하는 서비스 **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는 실패입니다. **(버전 4) 완료와 실패의
-   판정은 merge train과 같은 `deploymentOutcome`입니다**(5항): merge commit을 담은 뒤의 commit이 서비스 중이어도 완료이고, `SKIPPED`는
-   취소되지 않은 것이 연속 3건일 때 실패이며 그보다 적으면 대기입니다. 이 문단과 앞 문장이 다르면 이 문단이 규범입니다.
+   배포하는 서비스 **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는 실패입니다. **(버전 4) 완료와 실패는
+   merge train과 같은 `deploymentOutcome`의 `succeeded`·`failed`이고, 그 밖의 상태는 5항이 다룹니다.** 이 판정에 대해서는 앞 문장이
+   아니라 그 함수가 규범입니다.
 5. **결과 불명.** 병합 전에 "시도 중"을 기록하고, 결과를 모르거나 배포가 실패하면 레인을 latch합니다. latch는 사람이 Admin에서
    풉니다(10절의 "사람의 latch 해제" 트랜잭션, Admin 행위로 같은 트랜잭션에 사람 감사). **레인당 시도는 하나입니다** — "시도 중" 행은 레인당 하나만 존재할 수 있게 DB가 강제하고(조건부 단일 점유), 두 회차가
    겹쳐 둘 다 유휴를 읽어도 두 번째는 점유에 실패해 병합하지 않습니다. **(버전 4) 시도는 배포 결과가 나올 때까지 열려 있습니다.**
@@ -206,9 +206,10 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      train의 기본값과 같음), 그 시간이 지나면 latch하고 열어 둡니다. 두 목록이나 Railway를 읽지 못하면 latch하고 열어 둡니다.
    - **병합 결과 실패**(GitHub가 병합을 거절)이면 닫습니다.
    - **병합 결과가 불명**이거나 **결과 보고가 오지 않은 시도**(지시 발급·소비 상태로 지시 만료와 hard timeout을 합한 12분이 지난
-     것)는 latch하고, 다음 회차부터 PR을 다시 읽어 정합니다: develop에 병합되어 있고 그 merge commit이 develop 이력에 있으면 **PR에서
-     읽은 merge commit SHA를 기록하고** "병합됨, 배포 대기"로 옮깁니다. 병합되지 않은 채 열려 있거나 닫혀 있으면 닫습니다. PR을 읽지
-     못하면 열어 둔 채 다음 회차에 다시 읽습니다.
+     것)는 latch하고, 다음 회차부터 PR을 다시 읽어 정하며, 경우는 넷뿐입니다: (가) 병합되었고 base가 develop이며 그 merge commit이 develop 이력에 있으면 **PR에서 읽은 merge
+     commit SHA를 기록하고** "병합됨, 배포 대기"로 옮깁니다. (나) 병합되었지만 base가 develop이 아니거나 merge commit이 develop
+     이력에 없으면 닫으면서 latch하고 알립니다(3절의 결과 불명과 같음). (다) 병합되지 않았으면(열려 있든 닫혀 있든) 닫습니다.
+     (라) PR·merge commit·develop 이력 중 하나라도 읽지 못하면 열어 둔 채 다음 회차에 다시 읽습니다.
    - **latch는 시도를 닫지 않습니다.** 사람이 latch를 풀어도 열린 시도가 있으면 레인은 새 지시를 발급하지 않고, 위 규칙으로 그
      시도를 먼저 끝냅니다. 그래서 배포가 남아 있는 동안 다음 병합이 쌓이지 않습니다. 위 규칙들은 latch가 걸린 동안에도 시도를
      판정하고 기록하며(병합 호출은 하지 않음), 다시 latch가 필요하면 알립니다.
