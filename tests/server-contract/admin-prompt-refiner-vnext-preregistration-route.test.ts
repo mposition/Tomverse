@@ -20,6 +20,7 @@ let writes = 0;
 let reads = 0;
 let recordFailure: string | null = null;
 let readFailure: string | null = null;
+let currentPinsMatch = true;
 let mocksInstalled = false;
 const pins = {
   sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
@@ -72,7 +73,7 @@ async function loadRoute() {
       reads++;
       if (readFailure) throw new Error(readFailure);
       return { preregistrationRecorded: true,
-        preregistrationAuditLogId: "opaque-audit-id", currentPinsMatch: true,
+        preregistrationAuditLogId: "opaque-audit-id", currentPinsMatch,
         dispatchAuthorized: false };
     },
     preparePromptRefinerVnextOneShotPreregistration: async (input: unknown) => {
@@ -163,12 +164,18 @@ test("read-back is owner-only, recent-auth, no-store and available with writes o
   } });
   assert.equal(reads, 1);
   assert.equal(writes, writesBefore);
-  readFailure = "vnext_one_shot_preregistration_price_mismatch";
+  currentPinsMatch = false;
   const drift = await route.GET(get);
-  assert.equal(drift.status, 409);
-  assert.deepEqual(await drift.json(), { code: "PREREGISTRATION_PIN_MISMATCH" });
-  readFailure = "vnext_one_shot_preregistration_source_mismatch";
-  assert.equal((await route.GET(get)).status, 409);
+  assert.equal(drift.status, 200);
+  assert.deepEqual(await drift.json(), { readback: {
+    preregistrationRecorded: true, preregistrationAuditLogId: "opaque-audit-id",
+    currentPinsMatch: false, dispatchAuthorized: false,
+  } });
+  currentPinsMatch = true;
+  readFailure = "vnext_one_shot_preregistration_record_unverifiable";
+  const corrupt = await route.GET(get);
+  assert.equal(corrupt.status, 409);
+  assert.deepEqual(await corrupt.json(), { code: "PREREGISTRATION_RECORD_UNVERIFIABLE" });
   readFailure = "vnext_one_shot_preregistration_source_unavailable";
   assert.equal((await route.GET(get)).status, 503);
   readFailure = "private database detail";

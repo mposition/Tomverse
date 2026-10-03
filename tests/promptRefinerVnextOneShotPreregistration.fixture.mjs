@@ -20,6 +20,7 @@ let priceMatches = true;
 let auditValid = true;
 let policyDrift = false;
 let stageExists = false;
+let inTransaction = false;
 const policyBytes = readFileSync(resolve(root,
   "docs/policy/prompt-refiner-quality-evaluation-vnext-one-shot-v2.md"));
 const tx = {
@@ -27,7 +28,10 @@ const tx = {
 };
 
 mock.module(mod("lib/prisma.ts"), { namedExports: {
-  prisma: { $transaction: async (callback) => callback(tx) },
+  prisma: { $transaction: async (callback) => {
+    inTransaction = true;
+    try { return await callback(tx); } finally { inTransaction = false; }
+  } },
 } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
   takeAuditChainLock: async () => {},
@@ -53,6 +57,7 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
     },
     verifyPromptRefinerVnextOneShotCandidateSourceAtRoot: async (
       rootPath, runtimeCommitSha, pin) => {
+      assert.equal(inTransaction, false, "checkout files are read outside the DB transaction");
       assert.equal(rootPath, process.cwd());
       assert.match(runtimeCommitSha, /^[0-9a-f]{40}$/);
       assert.equal(pin.sourceCommitSha, expected.sourceCommitSha);
@@ -73,6 +78,7 @@ mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports
 } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
   namedExports: { readPromptRefinerVnextOneShotPrice: async () => {
+    assert.equal(inTransaction, true, "registry price is read inside the DB transaction");
     priceReads++;
     return { pricePinMatchesRegistry: priceMatches,
       problems: priceMatches ? [] : ["price_pin_mismatch"] };
@@ -191,38 +197,41 @@ test("lost POST response is recovered only from one signed, current owner receip
   });
   existing = [entry, entry];
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_unavailable/);
+    /preregistration_record_unverifiable/);
   existing = [entry];
   auditValid = false;
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_unavailable/);
+    /preregistration_record_unverifiable/);
   auditValid = true;
   existing = [{ ...entry, actorUserId: "different-owner" }];
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_unavailable/);
+    /preregistration_record_unverifiable/);
+  const stale = { preregistrationRecorded: true,
+    preregistrationAuditLogId: "audit-prereg-1", currentPinsMatch: false,
+    dispatchAuthorized: false };
   existing = [{ ...entry, metadata: { ...entry.metadata, slotCount: 81 } }];
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_unavailable/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   existing = [entry];
   policyDrift = true;
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_policy_mismatch/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   policyDrift = false;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = "e".repeat(64);
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_pin_mismatch/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = expected.runnerDigest;
   priceMatches = false;
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_price_mismatch/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   priceMatches = true;
   source.sourceManifestDigest = "e".repeat(64);
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_source_mismatch/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   source.sourceManifestDigest = expected.sourceManifestDigest;
   sourceFailure = "vnext_one_shot_candidate_file_drift";
-  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
-    /preregistration_source_mismatch/);
+  assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    stale);
   sourceFailure = "vnext_one_shot_candidate_source_unavailable";
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
     /preregistration_source_unavailable/);

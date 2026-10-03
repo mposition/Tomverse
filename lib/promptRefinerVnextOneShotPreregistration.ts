@@ -157,23 +157,19 @@ export async function readPromptRefinerVnextOneShotPreregistration(
   if (!accessorUserId || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_preregistration_unavailable");
   }
-  return prisma.$transaction(async (tx) => {
+  const receipt = await prisma.$transaction(async (tx) => {
     const entries = await tx.adminAuditLog.findMany({
       where: { action: ACTION, targetType: TARGET_TYPE, targetId: STAGE_ID },
       take: 2,
     });
-    if (entries.length === 0) {
-      return Object.freeze({ preregistrationRecorded: false,
-        preregistrationAuditLogId: null, currentPinsMatch: false,
-        dispatchAuthorized: false as const });
-    }
+    if (entries.length === 0) return null;
     const entry = entries[0];
     const metadata = entry.metadata;
     if (entries.length !== 1 || entry.actorUserId !== accessorUserId ||
         entry.summary !== SUMMARY || !metadata || typeof metadata !== "object" ||
         Array.isArray(metadata) ||
         !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
-      throw new Error("vnext_one_shot_preregistration_unavailable");
+      throw new Error("vnext_one_shot_preregistration_record_unverifiable");
     }
     const stored = metadata as Record<string, unknown>;
     const pins = {
@@ -186,34 +182,50 @@ export async function readPromptRefinerVnextOneShotPreregistration(
         typeof pins.sourceManifestDigest !== "string" ||
         typeof pins.runnerDigest !== "string" ||
         typeof pins.pricePinDigest !== "string") {
-      throw new Error("vnext_one_shot_preregistration_unavailable");
-    }
-    if (canonicalBenchmarkJson(metadata) !==
-        canonicalBenchmarkJson(metadataFor(pins as PromptRefinerVnextOneShotPreregistrationPins,
-          accessorUserId))) {
-      throw new Error("vnext_one_shot_preregistration_unavailable");
+      throw new Error("vnext_one_shot_preregistration_record_unverifiable");
     }
     const pinned = pins as PromptRefinerVnextOneShotPreregistrationPins;
-    await assertPolicyRunnerAndPricePins(pinned);
-    try {
-      await verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(process.cwd(),
-        process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase(), pinned);
-    } catch (error) {
-      if (error instanceof Error && (
-        error.message === "vnext_one_shot_candidate_manifest_drift" ||
-        error.message === "vnext_one_shot_candidate_file_drift")) {
-        throw new Error("vnext_one_shot_preregistration_source_mismatch");
-      }
-      throw new Error("vnext_one_shot_preregistration_source_unavailable");
-    }
-    const price = await readPromptRefinerVnextOneShotPrice(tx);
-    if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
-      throw new Error("vnext_one_shot_preregistration_price_mismatch");
-    }
-    return Object.freeze({ preregistrationRecorded: true,
-      preregistrationAuditLogId: entry.id, currentPinsMatch: true,
-      dispatchAuthorized: false as const });
+    const metadataMatches = canonicalBenchmarkJson(metadata) ===
+      canonicalBenchmarkJson(metadataFor(pinned, accessorUserId));
+    const price = metadataMatches ? await readPromptRefinerVnextOneShotPrice(tx) : null;
+    return { auditLogId: entry.id, pinned, metadataMatches,
+      priceMatches: price !== null && price.pricePinMatchesRegistry &&
+        price.problems.length === 0 };
   }, { maxWait: 5_000, timeout: 15_000 });
+  if (receipt === null) {
+    return Object.freeze({ preregistrationRecorded: false,
+      preregistrationAuditLogId: null, currentPinsMatch: false,
+      dispatchAuthorized: false as const });
+  }
+  const recorded = (currentPinsMatch: boolean) => Object.freeze({
+    preregistrationRecorded: true,
+    preregistrationAuditLogId: receipt.auditLogId,
+    currentPinsMatch,
+    dispatchAuthorized: false as const,
+  });
+  if (!receipt.metadataMatches || !receipt.priceMatches) return recorded(false);
+  try {
+    await assertPolicyRunnerAndPricePins(receipt.pinned);
+  } catch (error) {
+    if (error instanceof Error && (
+      error.message === "vnext_one_shot_preregistration_policy_mismatch" ||
+      error.message === "vnext_one_shot_preregistration_pin_mismatch")) {
+      return recorded(false);
+    }
+    throw error;
+  }
+  try {
+    await verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(process.cwd(),
+      process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase(), receipt.pinned);
+  } catch (error) {
+    if (error instanceof Error && (
+      error.message === "vnext_one_shot_candidate_manifest_drift" ||
+      error.message === "vnext_one_shot_candidate_file_drift")) {
+      return recorded(false);
+    }
+    throw new Error("vnext_one_shot_preregistration_source_unavailable");
+  }
+  return recorded(true);
 }
 
 /** A stage must match the one signed preregistration, not request assertions. */

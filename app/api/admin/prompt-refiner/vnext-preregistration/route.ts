@@ -65,12 +65,9 @@ export async function GET(request: Request) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    if (error instanceof Error && (
-      error.message === "vnext_one_shot_preregistration_pin_mismatch" ||
-      error.message === "vnext_one_shot_preregistration_source_mismatch" ||
-      error.message === "vnext_one_shot_preregistration_policy_mismatch" ||
-      error.message === "vnext_one_shot_preregistration_price_mismatch")) {
-      return NextResponse.json({ code: "PREREGISTRATION_PIN_MISMATCH" },
+    if (error instanceof Error &&
+        error.message === "vnext_one_shot_preregistration_record_unverifiable") {
+      return NextResponse.json({ code: "PREREGISTRATION_RECORD_UNVERIFIABLE" },
         { status: 409, headers });
     }
     return NextResponse.json({ code: "PREREGISTRATION_READBACK_UNAVAILABLE" },
