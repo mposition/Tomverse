@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -113,7 +115,11 @@ const run = (args, label) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
@@ -282,6 +288,10 @@ run(
     // at 52 per kind per UTC day under concurrency, downgrades a late success
     // and refuses deleting a row younger than 30 days.
     "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
