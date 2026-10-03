@@ -19,9 +19,12 @@
    `--author cursor --author-vendor anthropic`이고, Claude reviewer는 제외됩니다.
 2. `vendor`가 `unknown`이거나 `enabled: false`인 provider는 배정하지 않습니다.
    enabled인데 vendor를 모르면 설정 오류로 서버가 시작하지 않습니다.
-3. 순서: 진행 중 건수 → 최근 24시간 배정 수 → 가장 오래 쉰 provider → id.
-   provider마다 동시 실행은 `maxConcurrent`(기본 1)까지이고, 모두 바쁘면 대기합니다.
-   막힌 작업이 뒤의 작업을 막지 않습니다.
+3. 순서: `priority`(기본 0, 작을수록 먼저) → 진행 중 건수 → 최근 24시간 배정 수 → 가장 오래 쉰
+   provider → id. provider마다 동시 실행은 `maxConcurrent`(기본 1)까지이고, 모두 바쁘면 대기합니다.
+   막힌 작업이 뒤의 작업을 막지 않습니다. 요청마다 credit을 쓰는 provider(Copilot, 검토 1건 약
+   34 credit)는 `priority: 1`로 두어 **예비**로 씁니다 — 다른 공급사가 모두 상한이거나 독립성 규칙으로
+   빠질 때만 배정되므로, 배정 수가 적다는 이유로 일을 끌어오지 않습니다(2026-10-03, 첫 50분에
+   12건·412 credit을 쓴 뒤 도입).
 4. reviewer는 기본 1명입니다. 바뀐 파일이 `contractPaths`에 걸리면 서버가 2명으로
    올리며, 두 명은 반드시 서로 다른 공급사입니다. 집계는 reject 하나라도 있으면
    reject, 그다음 unknown, 모두 accept여야 accept입니다.

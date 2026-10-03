@@ -73,6 +73,7 @@
       "id": "copilot",
       "vendor": "moonshot",
       "enabled": true,
+      "priority": 1,
       "maxConcurrent": 2,
       "model": "kimi-k3",
       "command": "copilot",
