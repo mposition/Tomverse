@@ -8,6 +8,7 @@ import { parse as parseYaml } from "yaml";
 import {
   ALLOWED_SAVE_CONDITIONS,
   CACHE_FAMILIES,
+  describeFinding,
   WIDELY_READABLE_BRANCHES,
   judgeCacheKeys,
   namespacePrefix,
@@ -107,6 +108,41 @@ test("every key must carry <family>-v<n>-<namespace>- in fixed text", () => {
       "key_family_does_not_match_path",
     ),
   );
+});
+
+test("every rule a finding can carry has its own message", () => {
+  // A rule with no `case` falls to the generic default, which prints the rule
+  // name and nothing an author can act on. Independent review found
+  // `key_family_does_not_match_path` in that state and a dead case left behind
+  // for a rule that had been removed.
+  const cases = [
+    ["restore_key_not_a_prefix", "x"],
+    ["restore_key_broader_than_namespace", "x"],
+    ["key_missing_generation_and_namespace", "x"],
+    ["key_family_does_not_match_path", "x"],
+    ["key_shared_across_workflows", "x"],
+    ["namespace_shared_across_workflows", "x"],
+    ["namespace_reaches_another_workflow", "x"],
+    ["unguarded_save_in_widely_readable_scope", "x"],
+  ];
+  for (const [rule, detail] of cases) {
+    const message = describeFinding({ rule, workflowPath: "w", jobId: "j", detail });
+    assert.ok(!message.includes(rule), `${rule} has no message of its own`);
+    assert.ok(message.length > 40, `${rule}'s message says too little`);
+  }
+  // And the generic default still exists for a rule nobody has described yet.
+  assert.ok(describeFinding({ rule: "future_rule", workflowPath: "w", jobId: null, detail: "d" }).includes("future_rule"));
+});
+
+test("only the ordinary spelling of the leading expression is accepted", () => {
+  // GitHub evaluates `${{ runner['os'] }}` the same way, and this refuses it.
+  // Deliberate, and in the safe direction: a refusal asks for the ordinary
+  // form, where accepting an unrecognised spelling would mean treating a head
+  // this cannot read as one it can.
+  assert.equal(namespacePrefix(`\${{ runner['os'] }}-next-v2-pr-${LOCK}`, "next").problem, "key_missing_generation_and_namespace");
+  assert.equal(namespacePrefix(`\${{ runner.OS }}-next-v2-pr-${LOCK}`, "next").problem, "key_missing_generation_and_namespace");
+  assert.equal(namespacePrefix(`\${{ runner.os }}-next-v2-pr-${LOCK}`, "next").problem, null);
+  assert.equal(namespacePrefix(`\${{runner.os}}-next-v2-pr-${LOCK}`, "next").problem, null);
 });
 
 test("namespacePrefix reads the fixed head and gives it an identity", () => {

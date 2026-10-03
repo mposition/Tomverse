@@ -327,7 +327,20 @@ export const hasOnlyNarrowPullRequestTrigger = (document) => {
  * that no expression can change. Nothing after the namespace needs reading.
  */
 
-/** `${{ runner.os }}-<family>-v<n>-<namespace>-` at the head of a key. */
+/**
+ * `${{ runner.os }}-<family>-v<n>-<namespace>-` at the head of a key.
+ *
+ * Only that one spelling of the leading expression is accepted. GitHub also
+ * evaluates `${{ runner['os'] }}` and other equivalents, and this refuses them
+ * -- deliberately, and in the safe direction: a refusal asks the author to
+ * write the ordinary form, where letting an unrecognised spelling through would
+ * mean a head this cannot read being treated as one it can. One spelling also
+ * keeps the namespace identities comparable without normalising anything, which
+ * is the mistake four earlier rounds were spent on.
+ *
+ * Whitespace inside the expression is allowed, because it changes nothing about
+ * what the expression is.
+ */
 const KEY_HEAD = /^\$\{\{\s*runner\.os\s*\}\}-([a-z0-9]+(?:-[a-z0-9]+)*?)-(v\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)-/;
 
 /**
@@ -387,22 +400,24 @@ const familyFor = (paths) => {
 };
 
 /**
- * The literal `v<n>-<namespace>-` a governed key carries after its family, and
- * the prefix a restore-key may therefore not be shorter than.
+ * Reads a key's head: `${{ runner.os }}-<family>-v<n>-<namespace>-`.
  *
- * It is the literal text between the family token and the key's first `${{`,
- * because that is exactly the part identifying the generation and the workflow.
- * Everything after it is a hash, and this module deliberately does not read
- * those -- see the note above `familyPrefixPattern`.
+ * `prefix` is that head as written, so a caller can compare it against the key
+ * it came from and against the step's restore-keys. `identity` is
+ * `<family>:v<n>-<namespace>-`, which is what two workflows are compared on,
+ * and it is fixed text -- no expression can appear inside it, which is the
+ * whole reason the comparison needs nothing else (see the note above
+ * `KEY_HEAD`). `family` is what the key declared, for a caller that wants to
+ * report it.
  *
- * Covering the family token is NOT enough. `Linux-next-v2-` covers it, is a
- * prefix of its own key, and still matches every workflow's entry one
- * generation down -- the same shared pool the family-wide fallback made, just
- * harder to see.
+ * `expectedFamily` is the family CACHE_FAMILIES gives this step's path, or null
+ * when no row names it. A path with no row declares its own family token and is
+ * held to the same discipline; a listed path may not declare a different one.
  *
- * `prefix` is the text as written, so a caller can compare it against the key
- * it came from. `identity` is `<family>:<literal>`, which is what two workflows
- * are compared on, and it carries no expression at all.
+ * Covering the family token alone is NOT enough, and `restore_key_broader_than_namespace`
+ * is what says so: `Linux-next-v2-` covers it, is a prefix of its own key, and
+ * still matches every workflow's entry one generation down -- the same shared
+ * pool the family-wide fallback made, just harder to see.
  */
 export const namespacePrefix = (key, expectedFamily = null) => {
   const head = KEY_HEAD.exec(key);
@@ -441,24 +456,34 @@ export const namespacePrefix = (key, expectedFamily = null) => {
  *   version of this module allowed `Linux-next-v2-`, which is a prefix of its
  *   own key and still reaches every namespace one generation down. Independent
  *   review caught that, and a test had been written to permit it.
- * - `key_missing_generation_and_namespace` -- a governed key whose literal
- *   region before its first expression is not `v<n>-<namespace>-`. The rule
- *   above needs that boundary to exist, and `v<n>` is what lets a poisoned
- *   generation be abandoned without deleting entries by hand.
+ * - `key_missing_generation_and_namespace` -- a key that does not begin
+ *   `${{ runner.os }}-<family>-v<n>-<namespace>-` in fixed text. The rule above
+ *   needs that boundary to exist, `v<n>` is what lets a poisoned generation be
+ *   abandoned without deleting entries by hand, and "fixed text" is what makes
+ *   the whole argument hold without reading any expression.
+ * - `key_family_does_not_match_path` -- a key naming a family that
+ *   CACHE_FAMILIES does not give this step's path, which would take its
+ *   namespace from another family's space.
  * - `key_shared_across_workflows` -- one exact key declared by two workflow
  *   files is one entry those workflows share, so whichever writes it first in a
  *   scope every run can see owns what the others execute (F1). Sharing inside
  *   one workflow is fine: its jobs are one unit of trust.
+ * - `namespace_shared_across_workflows` and `namespace_reaches_another_workflow`
+ *   -- two workflows holding one namespace, or one whose namespace is a prefix
+ *   of another's. These are the rules that answer "can this workflow restore
+ *   another's entry", and they answer it without reading a hash.
  * - `unguarded_save_in_widely_readable_scope` -- a workflow that can run on the
  *   default branch or on `develop` must not use the combined `actions/cache`,
  *   whose post step writes, and a `save` step there must state the condition
  *   that keeps it to a pull-request run. Restoring is not the write; the write
  *   is what makes one run's output every later run's input (P1).
  *
- * The prefix and sharing rules apply to every cached path. The namespace rules
- * need CACHE_FAMILIES because only a listed family has a namespace to require,
- * and the save rule applies to every path for the same reason as sharing: the
- * scope is a property of the run, not of what is being cached.
+ * **Every rule applies to every cached path.** CACHE_FAMILIES decides only
+ * which family token a listed path must declare; a path with no row declares
+ * its own and is held to the same namespace discipline. Exempting unlisted
+ * paths was a hole both reviewers of round 9 found: the cache is keyed by key
+ * alone, so a step's paths never separated its entry from anyone else's, and
+ * exempting a path exempted it from the rules rather than from the collision.
  */
 export const judgeCacheKeys = (sources) => {
   const findings = [];
@@ -643,13 +668,13 @@ export const describeFinding = (finding) => {
     case "restore_key_broader_than_namespace":
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
-      return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+      return `${where}: key "${finding.detail}" must begin \${{ runner.os }}-<family>-v<n>-<namespace>- in fixed text, with no expression before the namespace. That head is what gives a restore-key a boundary to stop at and lets a poisoned generation be abandoned by bumping v<n>.`;
+    case "key_family_does_not_match_path":
+      return `${where}: key "${finding.detail}" names a family that CACHE_FAMILIES does not give this step's path, so it would take its namespace from another family's space.`;
     case "namespace_shared_across_workflows":
       return `${where}: these workflows hold the same ${finding.detail}, so they share one pool of entries. Give each its own.`;
     case "namespace_reaches_another_workflow":
       return `${where}: ${finding.detail}. A restore-key stopping at the shorter namespace prefixes the longer one's keys. Rename so neither is a prefix of the other.`;
-    case "key_missing_family_prefix":
-      return `${where}: key "${finding.detail}" does not start with its cache family's prefix.`;
     case "key_shared_across_workflows":
       return `${where}: these workflows declare the same cache key "${finding.detail}", so they share one entry. Give each its own namespace segment.`;
     case "unguarded_save_in_widely_readable_scope":
