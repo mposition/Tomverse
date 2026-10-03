@@ -160,9 +160,10 @@ async function enqueueDailyAlert(
  * Unlike the silence alert there is no separate chain lock before the row:
  * an eighth statement would exceed the policy's count, and the row write is
  * one statement on its unique key with nothing read before it to serialise.
- * The one writer that takes the chain lock and then this same row is another
- * failed round of the same day; were two to overlap, PostgreSQL ends one as a
- * deadlock and that round reports failureRecorded: false.
+ * The only other writer of this row is another failed round of the same day,
+ * which also takes the row before the chain lock; were two to overlap, the
+ * second waits on the first's insert, finds the conflict but not the row
+ * (the queue write answers null), and reports failureRecorded: false.
  */
 export const QA_RELEASE_FAILURE_WRITE_LIMITS = Object.freeze({
   statementMs: 2_000,
