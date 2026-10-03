@@ -216,6 +216,11 @@ async function loadSource(tx: Prisma.TransactionClient, session: Session,
   } finally { plain.fill(0); }
 }
 
+/** Shared locked source boundary for the next owner decision actions. The
+ * caller must keep the audit-chain-first lock order and validate its own
+ * proposal kind before preparing or consuming a decision. */
+export { loadSource as loadAmuxUnitDecisionSource, ownerId as amuxUnitOwnerId };
+
 function confirmation(input: {
   actorUserId: string; authenticatedAt: string; ideaId: string;
   draftUnitId: string; decisionId: string; prepareRequestId: string;

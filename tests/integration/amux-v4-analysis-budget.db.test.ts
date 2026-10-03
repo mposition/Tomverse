@@ -5,7 +5,8 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 import { Prisma } from "@prisma/client";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog,
+  writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
@@ -51,6 +52,9 @@ import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
   commitAmuxUnitRejectUnknown,
   readAmuxUnitRejectDecision, AmuxUnitRejectError } from
   "@/lib/amux/ideaUnitRejectService";
+import { commitAmuxRootNodePrepare, commitAmuxRootNodeConsume,
+  AmuxNodeCreateError } from "@/lib/amux/ideaNodeCreateService";
+import { sealAmuxNodeText } from "@/lib/amux/ideaNodeContentCore";
 import { openAmuxContent } from "@/lib/amux/ideaCrypto";
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
@@ -1128,6 +1132,85 @@ test("a complete first result saves independent encrypted units and closes only 
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
     error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 4);
+
+  const rootChoice = { ideaId, draftUnitId: units[0]!.id,
+    decisionId: randomUUID(), prepareRequestId: randomUUID(),
+    nodeId: randomUUID(), reason: "" };
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const prepared = await commitAmuxRootNodePrepare(tx,
+      { session, request, choice: rootChoice, keys });
+    assert.equal(prepared.decisionId, rootChoice.decisionId);
+    await assert.rejects(commitAmuxRootNodeConsume(tx, { session, request,
+      choice: { ...rootChoice, consumeRequestId: randomUUID(),
+        confirmationDigest: randomBytes(32).toString("hex") }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "reconfirm");
+    const registered = await commitAmuxRootNodeConsume(tx, { session, request,
+      choice: { ...rootChoice, consumeRequestId: randomUUID(),
+        confirmationDigest: prepared.confirmationDigest }, keys });
+    assert.equal(registered.state, "created");
+    assert.equal(registered.nodeId, rootChoice.nodeId);
+    const node = await tx.amuxPortfolioNode.findUniqueOrThrow({
+      where: { id: rootChoice.nodeId },
+    });
+    const revision = await tx.amuxPortfolioNodeRevision.findFirstOrThrow({
+      where: { nodeId: rootChoice.nodeId },
+    });
+    const decision = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: rootChoice.decisionId },
+    });
+    const unit = await tx.amuxIdeaDraftUnit.findUniqueOrThrow({
+      where: { id: units[0]!.id },
+    });
+    assert.equal(node.level, "initiative");
+    assert.equal(node.parentId, null);
+    assert.equal(revision.decisionId, decision.id);
+    assert.equal(revision.contentDigest, node.contentDigest);
+    assert.equal(decision.state, "consumed");
+    assert.equal(unit.state, "approved");
+    assert.equal(await tx.amuxWorkItem.count({
+      where: { sourceSystem: "admin-idea-v4" } }), 0);
+    throw new Error("rollback synthetic root node decision");
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000, timeout: 30_000 }),
+  /rollback synthetic root node decision/);
+  assert.equal(await prisma.amuxPortfolioNode.count({
+    where: { id: rootChoice.nodeId } }), 0);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const changedChoice = { ...rootChoice, decisionId: randomUUID(),
+      prepareRequestId: randomUUID(), nodeId: randomUUID() };
+    const prepared = await commitAmuxRootNodePrepare(tx,
+      { session, request, choice: changedChoice, keys });
+    const rivalId = randomUUID();
+    const rivalAuditId = await writeAdminAuditLog({ tx, session, request,
+      action: "amux.v4.synthetic.rival", targetType: "AmuxPortfolioNode",
+      targetId: rivalId, summary: "Synthetic duplicate candidate" });
+    const sealedRival = sealAmuxNodeText(rivalId,
+      { title: nodes[0]!.title, description: "Synthetic rival" }, keys);
+    await tx.amuxPortfolioNode.create({ data: {
+      id: rivalId, level: "initiative", parentId: null,
+      state: "active", revision: 0,
+      titleCiphertext: Uint8Array.from(sealedRival.titleCiphertext),
+      descriptionCiphertext: Uint8Array.from(sealedRival.descriptionCiphertext),
+      contentKeyId: sealedRival.contentKeyId,
+      contentKeyVersion: sealedRival.contentKeyVersion,
+      contentDigest: sealedRival.contentDigest,
+      contentDigestKeyId: sealedRival.contentDigestKeyId,
+      approvedByUserId: actorUserId,
+      authorizationAuditLogId: rivalAuditId,
+    } });
+    await assert.rejects(commitAmuxRootNodeConsume(tx, { session, request,
+      choice: { ...changedChoice, consumeRequestId: randomUUID(),
+        confirmationDigest: prepared.confirmationDigest }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "reconfirm");
+    assert.equal((await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: changedChoice.decisionId },
+    })).state, "prepared");
+    throw new Error("rollback synthetic changed duplicate scan");
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000, timeout: 30_000 }),
+  /rollback synthetic changed duplicate scan/);
 
   const decisionId = randomUUID();
   const prepareRequestId = randomUUID();
