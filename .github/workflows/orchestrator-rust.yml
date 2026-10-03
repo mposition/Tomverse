@@ -58,7 +58,7 @@ jobs:
             ~/.cargo/git
             target
             vendor/amux/target
-          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-v2-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
 
       # No fmt or clippy step: the workspace has no rustfmt.toml and its source
       # is hand-formatted, so adding either here would fail on code this change
@@ -89,7 +89,7 @@ jobs:
             ~/.cargo/git
             target
             vendor/amux/target
-          key: ${{ runner.os }}-rust-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
+          key: ${{ runner.os }}-rust-v2-workspaces-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}
 
       - name: Check vendored AMUX Docker build inputs
         working-directory: vendor/amux

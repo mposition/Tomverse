@@ -47,7 +47,8 @@ if (findings.length > 0) {
 
 console.log(
   `Actions cache check passed across ${sources.length} workflow(s): no key is declared by two of them, ` +
-    `no restore-key reaches past its own generation and namespace, no two workflows share or prefix a namespace and none shares an ungoverned path ` +
-    `(families: ${CACHE_FAMILIES.map((entry) => entry.family).join(", ")}), and nothing writes a cache from a run ` +
+    `every key carries <family>-v<n>-<namespace>- in fixed text, no restore-key reaches past its own, ` +
+    `no two workflows share or prefix a namespace (paths with a declared family: ` +
+    `${CACHE_FAMILIES.map((entry) => entry.family).join(", ")}), and nothing writes a cache from a run ` +
     `that can land on ${WIDELY_READABLE_BRANCHES.join(" or ")}.`,
 );

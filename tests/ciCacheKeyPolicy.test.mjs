@@ -14,7 +14,6 @@ import {
   reachesWidelyReadableScope,
   saveConditionKeepsToPullRequest,
   readCacheSteps,
-  restoreKeyCouldPrefix,
 } from "../scripts/ci-cache-key-policy.mjs";
 
 const wf = (name, body) => ({ path: `.github/workflows/${name}.yml`, text: body });
@@ -77,50 +76,54 @@ test("a restore-key at exactly the namespace boundary, or narrower, is accepted"
   }
 });
 
-test("a governed key must carry v<n>-<namespace>- before its first expression", () => {
+test("every key must carry <family>-v<n>-<namespace>- in fixed text", () => {
   const bad = [
     `${OS}-next-pr-${LOCK}-src`, // no generation
     `${OS}-next-v2-${LOCK}-src`, // no namespace
     `${OS}-next-v2-PR-${LOCK}-src`, // upper case is not the namespace shape
-    `${OS}-next-v2-pr-literal`, // no expression at all, so no boundary can be read
+    `${OS}-playwright-${LOCK}-chromium`, // the shape before this policy existed
+    // The three shapes round 10 used to defeat the comparator this replaced.
+    // None of them can reach the namespace region any more, because an
+    // expression may not appear before it.
+    `\${{ matrix.prefix }}a-${LOCK}`,
+    `\${{ 'a}b' }}-next-v2-pr-${LOCK}`,
+    `abc\${{ '' }}-next-v2-pr-${LOCK}`,
   ];
   for (const key of bad) {
     assert.ok(
-      rules([wf("ci", oneStep({ key }))]).includes("key_missing_generation_and_namespace"),
+      rules([wf("ci", oneStep({ path: "node_modules", key }))]).includes("key_missing_generation_and_namespace"),
       `expected "${key}" to be refused`,
     );
   }
   assert.deepEqual(rules([wf("ci", oneStep({ key: `${OS}-next-v2-admin-e2e-${LOCK}-src` }))]), []);
+  // A key that is entirely fixed text is fine as long as the head is there --
+  // the discipline is about the head, not about having a hash after it.
+  assert.deepEqual(rules([wf("ci", oneStep({ key: `${OS}-next-v2-pr-literal` }))]), []);
 
-  // The shape these keys had before this policy existed, on its own family.
-  assert.ok(
-    rules([
-      wf("ci", oneStep({ path: "~/.cache/ms-playwright", key: `${OS}-playwright-${LOCK}-chromium` })),
-    ]).includes("key_missing_generation_and_namespace"),
-  );
-
-  // A key naming the wrong family for its path is its own finding, so the two
-  // failures are not reported as the same thing.
+  // A listed path must declare the family the table names for it, so a key
+  // cannot borrow another family's namespace space.
   assert.ok(
     rules([wf("ci", oneStep({ path: "~/.cache/ms-playwright", key: `${OS}-next-v2-pr-${LOCK}-src` }))]).includes(
-      "key_missing_family_prefix",
+      "key_family_does_not_match_path",
     ),
   );
 });
 
-test("namespacePrefix reads the literal region and gives it an identity", () => {
-  assert.equal(
-    namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").prefix,
-    `${OS}-next-v2-admin-e2e-`,
-  );
+test("namespacePrefix reads the fixed head and gives it an identity", () => {
+  assert.equal(namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").prefix, `${OS}-next-v2-admin-e2e-`);
   assert.equal(namespacePrefix(`${OS}-next-v2-admin-e2e-${LOCK}-src`, "next").identity, "next:v2-admin-e2e-");
   assert.equal(
     namespacePrefix(`${OS}-playwright-v2-daily-${LOCK}-chromium-webkit`, "playwright").identity,
     "playwright:v2-daily-",
   );
-  assert.equal(namespacePrefix(`${OS}-next-v2-pr-${LOCK}-src`, "playwright").problem, "key_missing_family_prefix");
-  // Whitespace inside the expression does not stop the family prefix matching,
-  // and the identity is the literal region, which carries no expression at all.
+  assert.equal(
+    namespacePrefix(`${OS}-next-v2-pr-${LOCK}-src`, "playwright").problem,
+    "key_family_does_not_match_path",
+  );
+  // The family comes from the key when no path declares one, which is how a
+  // path with no table row is held to the same discipline.
+  assert.equal(namespacePrefix(`${OS}-rust-v2-workspaces-${LOCK}`).identity, "rust:v2-workspaces-");
+  // Whitespace inside the leading expression does not stop the head matching.
   assert.equal(namespacePrefix(`\${{  runner.os  }}-next-v2-pr-${LOCK}-src`, "next").identity, "next:v2-pr-");
 });
 
@@ -175,14 +178,12 @@ test("an expression after the namespace is no longer anyone's business", () => {
 });
 
 test("one namespace that prefixes another's is refused across workflows, allowed within one", () => {
-  // Both rules fire and both are right. The namespace one names the fix; the
-  // all-paths one is what would still catch it on a path with no family row.
   assert.deepEqual(
     rules([
       wf("a", oneStep({ key: `${OS}-next-v2-pr-${LOCK}`, restoreKeys: [`${OS}-next-v2-pr-`] })),
       wf("b", oneStep({ key: `${OS}-next-v2-pr-admin-${LOCK}` })),
-    ]).sort(),
-    ["namespace_reaches_another_workflow", "restore_key_may_reach_another_workflow"],
+    ]),
+    ["namespace_reaches_another_workflow"],
   );
   const bothInOne = [
     "on: pull_request",
@@ -276,120 +277,73 @@ test("two workflows declaring the same key are refused, and one workflow's two j
   assert.deepEqual(judgeCacheKeys([wf("a", twoJobsOneWorkflow)]).findings, []);
 });
 
-test("a cache path outside the governed families is not judged on its key shape", () => {
-  // No family row means no namespace to require, so the key shape and
-  // restore-key rules have nothing to say. One workflow using such a path is
-  // fine: there is nobody for it to reach.
-  const result = judgeCacheKeys([
-    wf("ci", oneStep({ path: "~/.cargo/registry", key: `${OS}-rust-${LOCK}`, restoreKeys: [`${OS}-`] })),
-  ]);
-  assert.deepEqual(result.findings, []);
-});
-
-test("a restore-key is judged for reach whatever path its step caches", () => {
-  // The cache is keyed by key alone: the paths a step caches are not part of
-  // the entry's identity. So a step caching `node_modules` -- which has no
-  // family row and therefore no namespace requirement -- can declare a
-  // restore-key that reaches every governed `next` entry in every other
-  // workflow. Deleting the all-paths rule in favour of namespace comparison
-  // alone reopened exactly that, and both reviewers of round 9 found it.
-  const found = rules([
-    wf("a", oneStep({ path: "node_modules", key: `${OS}-next-v2-x-${LOCK}`, restoreKeys: [`${OS}-next-v2-`] })),
-    wf("b", oneStep({ path: ".next/cache", key: `${OS}-next-v2-pr-${LOCK}`, restoreKeys: [`${OS}-next-v2-pr-${LOCK}-`] })),
-  ]);
-  assert.ok(found.includes("restore_key_may_reach_another_workflow"), found.join(","));
-
-  // And on an ungoverned path between two workflows, where there is no
-  // namespace rule to fall back on.
+test("a path with no family row is held to the same discipline", () => {
+  // The cache is keyed by key alone: a step's paths are never what separated
+  // its entry from anyone else's. So a path with no table row declares its own
+  // family token and obeys the same namespace rules. Exempting such paths was
+  // the hole both reviewers of round 9 found -- a `node_modules` step could
+  // take a restore-key of `Linux-next-v2-` and reach every governed `next`
+  // entry in the repository.
   assert.ok(
-    rules([
-      wf("a", oneStep({ path: "target", key: `${OS}-rust-a-${LOCK}`, restoreKeys: [`${OS}-rust-a-`] })),
-      wf("b", oneStep({ path: "target", key: `${OS}-rust-a-admin-${LOCK}` })),
-    ]).includes("restore_key_may_reach_another_workflow"),
+    rules([wf("ci", oneStep({ path: "~/.cargo/registry", key: `${OS}-rust-${LOCK}` }))]).includes(
+      "key_missing_generation_and_namespace",
+    ),
   );
-});
-
-test("restoreKeyCouldPrefix answers no only when fixed text proves it", () => {
-  // Sound in one direction: "no" must mean no. Identical expression text
-  // counts as equal; different expression text counts as unknown, which
-  // resolves towards "could" -- the opposite of the canonicalisation that
-  // treated unequal text as unequal values and produced a false negative.
-  const cases = [
-    // Diverges inside literal text, which is the proof.
-    [`${OS}-next-v2-pr-`, `${OS}-next-v2-daily-${LOCK}`, false],
-    [`${OS}-next-v2-one-\${{ hashFiles('a b.json') }}`, `${OS}-next-v2-two-\${{ hashFiles('ab.json') }}`, false],
-    // A prefix in the literal region.
-    [`${OS}-next-v2-pr-`, `${OS}-next-v2-pr-admin-${LOCK}`, true],
-    [`${OS}-next-v2-`, `${OS}-next-v2-pr-${LOCK}`, true],
-    // Same literal region, different expression text: unknown, so "could".
-    [
-      `${OS}-next-v2-shared-${LOCK}-`,
-      `${OS}-next-v2-shared-\${{ hashFiles('./package-lock.json') }}-x`,
-      true,
-    ],
-    // The key runs out first, so the restore-key cannot be its prefix.
-    [`${OS}-next-v2-pr-${LOCK}-extra`, `${OS}-next-v2-pr-${LOCK}`, false],
-  ];
-  for (const [restoreKey, key, expected] of cases) {
-    assert.equal(restoreKeyCouldPrefix(restoreKey, key), expected, `${restoreKey} vs ${key}`);
-  }
-});
-
-test("two workflows may not cache the same ungoverned path", () => {
-  // The namespace argument holds only where there is a namespace, so it does
-  // not cover a path with no family row. With two workflows on such a path,
-  // nothing here can say whether one's restore-key prefixes the other's key.
-  // Found by re-reading that argument rather than by review.
-  const ungoverned = (name, key) =>
-    wf(name, oneStep({ path: "~/.cargo/registry", key }));
-  assert.ok(
-    rules([
-      ungoverned("a", `${OS}-rust-${LOCK}`),
-      ungoverned("b", `${OS}-rust-other-${LOCK}`),
-    ]).includes("ungoverned_path_shared_across_workflows"),
-  );
-  // One workflow, two jobs: still one unit of trust.
-  const twoJobs = [
-    "on: pull_request",
-    "jobs:",
-    "  a:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - uses: actions/cache@v5",
-    "        with:",
-    "          path: ~/.cargo/registry",
-    `          key: ${OS}-rust-a-${LOCK}`,
-    "  b:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - uses: actions/cache@v5",
-    "        with:",
-    "          path: ~/.cargo/registry",
-    `          key: ${OS}-rust-b-${LOCK}`,
-    "",
-  ].join("\n");
-  assert.deepEqual(rules([wf("one", twoJobs)]), []);
-});
-
-test("exactly one workflow caches each ungoverned path in this repository", () => {
-  const dir = ".github/workflows";
-  const owners = new Map();
-  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
-    const read = readCacheSteps(readFileSync(join(dir, name), "utf8"));
-    assert.ok(read.steps, `${name} must parse`);
-    for (const step of read.steps) {
-      if (CACHE_FAMILIES.some((entry) => step.paths.includes(entry.path))) continue;
-      for (const path of step.paths) {
-        owners.set(path, (owners.get(path) ?? new Set()).add(name));
-      }
-    }
-  }
   assert.deepEqual(
-    [...owners].filter(([, names]) => names.size > 1).map(([path]) => path),
+    rules([wf("ci", oneStep({ path: "~/.cargo/registry", key: `${OS}-rust-v2-workspaces-${LOCK}` }))]),
+    [],
+  );
+  // And a restore-key on such a path may not reach past its own namespace.
+  assert.ok(
+    rules([
+      wf("ci", oneStep({ path: "node_modules", key: `${OS}-next-v2-x-${LOCK}`, restoreKeys: [`${OS}-next-v2-`] })),
+    ]).includes("restore_key_broader_than_namespace"),
+  );
+});
+
+test("two workflows on one path are separated by their namespaces, not by the path", () => {
+  const onPath = (name, key, restoreKeys = []) =>
+    wf(name, oneStep({ path: "~/.cargo/registry", key, restoreKeys }));
+  // Same namespace: one pool.
+  assert.ok(
+    rules([onPath("a", `${OS}-rust-v2-ws-${LOCK}`), onPath("b", `${OS}-rust-v2-ws-${LOCK}`)]).includes(
+      "namespace_shared_across_workflows",
+    ),
+  );
+  // One namespace a prefix of the other's: reachable.
+  assert.ok(
+    rules([
+      onPath("a", `${OS}-rust-v2-ws-${LOCK}`, [`${OS}-rust-v2-ws-`]),
+      onPath("b", `${OS}-rust-v2-ws-extra-${LOCK}`),
+    ]).includes("namespace_reaches_another_workflow"),
+  );
+  // Distinct, non-prefixing namespaces on the same path: fine. The path was
+  // never the thing keeping them apart.
+  assert.deepEqual(
+    rules([
+      onPath("a", `${OS}-rust-v2-one-${LOCK}`, [`${OS}-rust-v2-one-`]),
+      onPath("b", `${OS}-rust-v2-two-${LOCK}`, [`${OS}-rust-v2-two-`]),
+    ]),
     [],
   );
 });
 
+test("every cache key in this repository carries a family, generation and namespace", () => {
+  const dir = ".github/workflows";
+  const seen = [];
+  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
+    const read = readCacheSteps(readFileSync(join(dir, name), "utf8"));
+    assert.ok(read.steps, `${name} must parse`);
+    for (const step of read.steps) {
+      if (step.key === null) continue;
+      const family = CACHE_FAMILIES.find((entry) => step.paths.includes(entry.path));
+      const parsed = namespacePrefix(step.key, family ? family.family : null);
+      assert.equal(parsed.problem, null, `${name} # ${step.jobId}: ${parsed.problem} for "${step.key}"`);
+      seen.push(`${name}#${step.jobId}:${parsed.identity}`);
+    }
+  }
+  assert.ok(seen.length >= 18, `expected every cache step to be found, saw ${seen.length}`);
+});
 test("restore and save variants are read, and a save step needs no key", () => {
   const restoreOnly = readCacheSteps(
     oneStep({ key: `${OS}-next-v2-pr-${LOCK}-abc`, uses: "actions/cache/restore@v5" }),
@@ -727,7 +681,7 @@ test("the write rule covers every cached path, not only the namespaced families"
         "          path: |",
         "            ~/.cargo/registry",
         "            target",
-        `          key: ${OS}-rust-${LOCK}`,
+        `          key: ${OS}-rust-v2-workspaces-${LOCK}`,
       ]),
     ),
   ]);
