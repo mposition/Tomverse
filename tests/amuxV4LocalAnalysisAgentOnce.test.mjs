@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { runAmuxV4SyntheticAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
+import { runAmuxV4LocalAnalysisAdmissionForTest } from
+  "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
 
@@ -17,6 +19,33 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   prompt: `{"previewId":"${previewId}","source":"synthetic"}`,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
+
+test("unapproved local CLI catalog stops before claim and model execution", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  const visited = [];
+  try {
+    const result = await runAmuxV4LocalAnalysisAdmissionForTest({
+      origin: `${origin}/`, agentSecret: secret,
+      fetchImpl: async (url) => {
+        visited.push(url);
+        if (url.endsWith("/analysis-queue")) return response({
+          candidates: [candidate], hasMore: false, nextCursor: null });
+        throw new Error("unapproved catalog consumed a claim");
+      },
+      fakeExecute: async () => { throw new Error("unapproved model invoked"); },
+    });
+    assert.deepEqual(result, { kind: "catalog_unapproved" });
+    assert.equal(visited.length, 1);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
 
 test("synthetic one-shot polls, claims, passes only typed prompt, submits and stops", async () => {
   const previousEnv = process.env.NODE_ENV;
