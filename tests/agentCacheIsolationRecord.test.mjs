@@ -28,13 +28,28 @@ const signed = (overrides = {}) => ({
   ...overrides,
 });
 
+/**
+ * An unsigned copy, for the tests about what an unsigned record does.
+ *
+ * Those tests must not read the committed record: asserting that the real one
+ * is unsigned would mean the owner's signature breaks this suite, and the
+ * signature would stop being one edit in one file -- which is the contract this
+ * whole change exists to provide. Independent review caught that.
+ */
+const unsigned = (overrides = {}) => ({
+  ...CACHE_ISOLATION_RECORD,
+  approvedBy: "",
+  approvedAt: "",
+  ...overrides,
+});
+
 /* ------------------------------------------------------------------------- */
 /* The signature                                                             */
 /* ------------------------------------------------------------------------- */
 
-test("the committed record is unsigned, so it lifts nothing", () => {
-  const verdict = cacheIsolationRecordSignature();
-  assert.equal(verdict.signed, false, "the record in the tree must not be signed by a change like this one");
+test("an unsigned record lifts nothing, and says which half is missing", () => {
+  const verdict = cacheIsolationRecordSignature(unsigned());
+  assert.equal(verdict.signed, false);
   assert.deepEqual(verdict.problems, ["unsigned_approved_at", "unsigned_approved_by"]);
 });
 
@@ -178,6 +193,29 @@ test("the record's verified commit is a full sha this repository has", () => {
   // A record whose measurement cannot be located is not evidence.
   const type = git(["cat-file", "-t", CACHE_ISOLATION_RECORD.verifiedAtCommit]).trim();
   assert.equal(type, "commit");
+});
+
+test("a signed record was measured somewhere in this history", () => {
+  // Only once it is signed: while the record is a draft its commit is simply
+  // the one the counts were taken at. Signed, it is the evidence, and evidence
+  // measured on a commit this branch does not contain describes another tree.
+  if (!cacheIsolationRecordSignature().signed) return;
+  // `--is-ancestor` answers with its exit code, so the answer is whether this
+  // throws, not what it returns.
+  let ancestor = true;
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", CACHE_ISOLATION_RECORD.verifiedAtCommit, "HEAD"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+  } catch {
+    ancestor = false;
+  }
+  assert.equal(
+    ancestor,
+    true,
+    "the signed record names a commit this history does not contain, so its counts describe another tree",
+  );
 });
 
 test("applying the record is blind-first, so signing cannot hide its own evidence", () => {
