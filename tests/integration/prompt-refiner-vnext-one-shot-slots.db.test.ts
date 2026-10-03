@@ -131,6 +131,34 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
        WHERE stage."id" = $1
     `, [stage]);
     assert.equal(approvalClock.rows[0].audit_owned, true);
+    const contender = new pg.Client({ connectionString: rawUrl });
+    await contender.connect();
+    try {
+      await contender.query(`SET search_path TO "${schema}"`);
+      await client.query("BEGIN");
+      await client.query(`
+        SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+         WHERE "id" = $1 FOR NO KEY UPDATE NOWAIT
+      `, [stage]);
+      await contender.query("BEGIN");
+      await contender.query("SET LOCAL lock_timeout = '200ms'");
+      await assert.rejects(contender.query(`
+        UPDATE "PromptRefinerVnextOneShotSlot"
+           SET "status" = 'consumed', "requestId" = 'lock-test-request',
+               "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 0
+      `, [stage]), /lock timeout/);
+      await contender.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await assert.rejects(contender.query(`
+        UPDATE "PromptRefinerVnextOneShotSlot"
+           SET "status" = 'consumed', "requestId" = 'lock-test-request',
+               "consumedAt" = NULL WHERE "stageId" = $1 AND "slotIndex" = 0
+      `, [stage]), /run approval is required/);
+    } finally {
+      await contender.query("ROLLBACK");
+      await client.query("ROLLBACK");
+      await contender.end();
+    }
     await insertAudit("past-stage-audit", "stage", { createdAt: "2020-01-01" });
     await assert.rejects(createStage("past-stage-audit"),
       /stage approval audit is stale/);
