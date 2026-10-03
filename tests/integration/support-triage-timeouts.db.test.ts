@@ -3,6 +3,8 @@ import { after, test } from "node:test";
 
 import pg from "pg";
 
+import { resolvePostgresConnectionConfig } from "@/lib/postgresConnectionConfigCore.mjs";
+
 import { prisma } from "@/lib/prisma";
 import { LANE_TIMEOUTS } from "@/lib/supportTriageCore";
 import {
@@ -36,7 +38,13 @@ const readSettings = async (client: { query: (sql: string) => Promise<{ rows: un
 const directClient = async () => {
   const url = process.env.DATABASE_URL;
   assert.ok(url, "DATABASE_URL must point at the test database");
-  const client = new pg.Client({ connectionString: url });
+  // The same resolution lib/prisma.ts uses, so a ?schema= URL reaches the
+  // schema the migrations built rather than public.
+  const config = resolvePostgresConnectionConfig(url, { requireTestMarker: true });
+  const client = new pg.Client({
+    connectionString: config.connectionString,
+    options: config.poolOptions,
+  });
   await client.connect();
   return client;
 };
@@ -178,7 +186,8 @@ const armUnderInherited = async (inheritedMs: number) => {
     await client.query(`SET transaction_timeout = ${inheritedMs}`);
     await client.query("BEGIN");
     try {
-      return await armSupportTriageTransaction(onConnection(client), "retention");
+      const armed = await armSupportTriageTransaction(onConnection(client), "retention");
+      return { armed, settings: await readSettings(client) };
     } finally {
       await client.query("ROLLBACK");
     }
@@ -199,8 +208,13 @@ test("on 17 the wrapper refuses a short inherited timeout and proceeds under a l
     assert.equal(error.reason, "inherited_transaction_timeout_too_short");
     return true;
   });
+  // A long inherited timeout is left in place: the setting still reads the
+  // inherited value, the timer that actually runs.
   const long = await armUnderInherited(60_000);
-  assert.deepEqual(long.decision, { action: "proceed", armedBy: "inherited" });
+  assert.deepEqual(long.armed.decision, { action: "proceed", armedBy: "inherited" });
+  assert.equal(Number(long.settings.transaction), 60_000);
+  assert.equal(Number(long.settings.statement), LANE_TIMEOUTS.retention.statementTimeoutMs);
   const none = await armUnderInherited(0);
-  assert.deepEqual(none.decision, { action: "proceed", armedBy: "policy" });
+  assert.deepEqual(none.armed.decision, { action: "proceed", armedBy: "policy" });
+  assert.equal(Number(none.settings.transaction), LANE_TIMEOUTS.retention.transactionTimeoutMs);
 });

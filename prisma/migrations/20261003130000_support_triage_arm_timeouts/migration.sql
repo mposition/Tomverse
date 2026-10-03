@@ -4,7 +4,12 @@
 -- transaction. In that one call it reads the server version, the inherited
 -- session transaction_timeout and the database clock, then arms
 -- statement_timeout and idle_in_transaction_session_timeout and, on
--- PostgreSQL 17 only, transaction_timeout, all transaction-local.
+-- PostgreSQL 17 only and only when the session inherited 0, transaction_timeout,
+-- all transaction-local. A positive inherited transaction_timeout is left as it
+-- is: its timer started with the transaction and set_config would not move it,
+-- only make the reported setting disagree with the timer that actually runs.
+-- The caller refuses the transaction when that inherited value is at or below
+-- the lane's largest C_guarded (docs/policy/support-triage.md §4, Q22).
 --
 -- Three rules this function must keep, each checked by
 -- tests/integration/support-triage-timeouts.db.test.ts:
@@ -59,7 +64,7 @@ BEGIN
 
     PERFORM pg_catalog.set_config('statement_timeout', statement_ms::TEXT, true);
     PERFORM pg_catalog.set_config('idle_in_transaction_session_timeout', idle_ms::TEXT, true);
-    IF version_num >= 170000 THEN
+    IF version_num >= 170000 AND inherited = 0 THEN
         PERFORM pg_catalog.set_config('transaction_timeout', transaction_ms::TEXT, true);
     END IF;
 

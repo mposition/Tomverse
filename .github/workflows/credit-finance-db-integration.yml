@@ -140,6 +140,13 @@ jobs:
           - finance
           - agents
           - accounts
+        # Not a lane: the support-triage timeout suites again, on PostgreSQL
+        # 16, where transaction_timeout does not exist (docs/policy/
+        # support-triage.md §4). The suites it runs are listed in
+        # scripts/db-integration-groups.mjs as POSTGRES16_COMPAT_SUITES.
+        include:
+          - group: postgres16
+            postgres_image: postgres:16-alpine
 
     # Bounds a hang, not the runtime. The largest lane holds under a third of
     # the suites, and a test fails if the rules drift far enough to change
@@ -148,7 +155,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17-alpine
+        image: ${{ matrix.postgres_image || 'postgres:17-alpine' }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
