@@ -1,4 +1,11 @@
 name: Back-merge main into develop
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # Releases reach `main` as squash commits, which leaves `main` outside
 # `develop`'s ancestry: the trees agree, but git holds no commit connecting
@@ -98,13 +105,6 @@ concurrency:
   # Never two back-merges at once: they would race on the same develop ref.
   group: back-merge-main-to-develop
   cancel-in-progress: false
-
-# `cache-mode` is the token-level control, and a restore-only action is not: it
-# narrows one declared step while the job keeps a cache key anything running in
-# it can write any entry with. This workflow can run on develop or main, where a
-# written entry is restorable by every run, so its token gets no write at all.
-# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
-cache-mode: read
 
 jobs:
   back-merge:

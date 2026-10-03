@@ -1,5 +1,12 @@
 name: Daily Security Audit
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 on:
   schedule:
     # 07:00 Australia/Brisbane (21:00 UTC on the previous day, no DST).
@@ -13,13 +20,6 @@ permissions:
 concurrency:
   group: daily-security-audit-${{ github.ref }}
   cancel-in-progress: false
-
-# `cache-mode` is the token-level control, and a restore-only action is not: it
-# narrows one declared step while the job keeps a cache key anything running in
-# it can write any entry with. This workflow can run on develop or main, where a
-# written entry is restorable by every run, so its token gets no write at all.
-# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
-cache-mode: read
 
 jobs:
   # Everything that needs neither a browser nor two hours. This job also warms

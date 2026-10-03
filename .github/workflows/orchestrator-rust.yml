@@ -1,5 +1,12 @@
 name: Orchestrator Rust
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 # The Rust workspace (crates/amux-core, apps/tomverse-orchestrator) had no CI
 # lane, so its tests only ever ran on a developer's machine. A regression test
 # nobody runs is not a defence: this lane makes the workspace's own tests a
@@ -16,10 +23,10 @@ name: Orchestrator Rust
 # change, its ~14 minutes made this the slowest check Railway's Wait for CI held
 # staging for (2026-10-03: p50 ~17 minutes, against ~2 before the vendor).
 #
-# Only the downloaded crates are cached -- `~/.cargo/registry` and
-# `~/.cargo/git` -- and only in the pull request's own scope. Compiled output is
-# not shared between runs at all. Two decisions met here, and this is what
-# satisfies both.
+# Only the downloaded crates are named by the cache step -- `~/.cargo/registry`
+# and `~/.cargo/git`. Compiled output is not shared between runs at all. Two
+# decisions met here, and this is what satisfied both; a third then took the
+# write away entirely, which the last paragraph of this block records.
 #
 # Caching each `target` directory cost ~3 GiB, and saved per pull request the two
 # of them filled the repository's 10 GB cache budget, evicted develop's entries
@@ -31,10 +38,18 @@ name: Orchestrator Rust
 # executes (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F3, P1).
 #
 # Dropping `target` removes the unverified content, and most of the size with it,
-# which leaves the pull request's own scope affordable again: an entry written
+# which left the pull request's own scope affordable again: an entry written
 # there is restorable only by re-runs of that pull request, so nothing is shared
-# across refs and the audit's rule needs no exception. The first run of a pull
-# request downloads its crates; its re-runs do not.
+# across refs and the audit's rule needed no exception.
+#
+# That is no longer how it ends. `cache-mode: read` above takes the write away
+# at the token, and a measured run proved the declaration binds pull requests
+# too -- "cache write denied: token has no writable scopes". So nothing writes
+# this key any more, the save step is gone, and every run downloads its crates.
+# What it buys is that no run which can land on develop or main can plant an
+# entry a required gate later restores, whatever executes inside it. The three
+# ways to warm this again are in the audit's P1a; each needs a decision rather
+# than a workflow edit.
 #
 # What is not given up is the part that cost the wall clock: the vendored server
 # is still built and tested only when the change can affect it, which is what
@@ -55,13 +70,6 @@ permissions:
 concurrency:
   group: orchestrator-rust-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
-# `cache-mode` is the token-level control, and a restore-only action is not: it
-# narrows one declared step while the job keeps a cache key anything running in
-# it can write any entry with. This workflow can run on develop or main, where a
-# written entry is restorable by every run, so its token gets no write at all.
-# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
-cache-mode: read
 
 jobs:
   workspace:
@@ -151,18 +159,3 @@ jobs:
         if: steps.scope.outputs.vendor == 'true'
         working-directory: vendor/amux
         run: cargo test -p amux-server --test dockerfile_build_inputs --locked
-
-      # The pull request's own scope only, which is the whole point above: that
-      # entry is restorable by re-runs of this pull request and by nothing else.
-      # `continue-on-error` because a run that restored the key saves it again
-      # and the action refuses a duplicate -- a refusal to write a cache must not
-      # fail a required check.
-      #
-      # Known and accepted: when a pull request's first run skips the vendored
-      # server, the entry it stores holds only the root crates, and a later
-      # commit in the same pull request that brings the vendored build into scope
-      # without touching either lockfile restores that same key and re-downloads
-      # the vendor crates on every run, because the key already exists and
-      # cannot be replaced -- and `continue-on-error` is what makes that quiet.
-      # `cargo --locked` fetches what is missing, so it costs downloads rather
-      # than correctness (independent review, 2026-10-03).

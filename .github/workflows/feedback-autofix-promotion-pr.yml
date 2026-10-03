@@ -21,6 +21,13 @@
 #   - a rerun reuses the existing branch and PR instead of making another.
 name: Feedback Auto-Fix Promotion PR
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 on:
   pull_request:
     types: [closed]
@@ -43,13 +50,6 @@ concurrency:
 
 env:
   TOMVERSE_APP_URL: https://tomverse.app
-
-# `cache-mode` is the token-level control, and a restore-only action is not: it
-# narrows one declared step while the job keeps a cache key anything running in
-# it can write any entry with. This workflow can run on develop or main, where a
-# written entry is restorable by every run, so its token gets no write at all.
-# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
-cache-mode: read
 
 jobs:
   promotion-pr:
