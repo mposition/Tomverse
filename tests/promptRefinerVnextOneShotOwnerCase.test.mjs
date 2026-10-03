@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { createPromptRefinerVnextOneShotOwnerSeal } from
@@ -38,10 +38,10 @@ function fixture(t) {
     synthetic };
 }
 
-test("owner case reader rehashes sealed N80 input and maps each slot by case ID", (t) => {
+test("owner case reader rehashes sealed N80 input and maps every slot by case ID", (t) => {
   const input = fixture(t);
   const cases = JSON.parse(input.synthetic.manifestText).cases;
-  for (const slotIndex of [0, 39, 40, 79]) {
+  for (let slotIndex = 0; slotIndex < 80; slotIndex++) {
     const selected = readVerifiedPromptRefinerVnextOneShotOwnerCase({
       ...input, slotIndex,
     });
@@ -61,7 +61,17 @@ test("changed manifest, binding, seal or key fails closed before selecting text"
     ...input, slotIndex: 0, ...overrides,
   });
   assert.throws(() => read({ slotIndex: 80 }), { message: "owner_case_unavailable" });
+  assert.throws(() => read({ slotIndex: -1 }), { message: "owner_case_unavailable" });
+  assert.throws(() => read({ slotIndex: 0.5 }), { message: "owner_case_unavailable" });
+  assert.throws(() => read({ sealPath: input.manifestPath }),
+    { message: "owner_case_unavailable" });
   assert.throws(() => read({ ownerKeyHex: "11".repeat(32) }),
+    { message: "owner_case_unavailable" });
+  assert.throws(() => read({ ownerKeyHex: "not-hex" }),
+    { message: "owner_case_unavailable" });
+  assert.throws(() => read({ now: new Date("2026-09-30T00:00:00.000Z") }),
+    { message: "owner_case_unavailable" });
+  assert.throws(() => read({ now: new Date("2026-12-03T00:00:00.000Z") }),
     { message: "owner_case_unavailable" });
   writeFileSync(input.manifestPath,
     readFileSync(input.manifestPath, "utf8").replace("synthetic ko source", "changed ko source"));
@@ -71,7 +81,27 @@ test("changed manifest, binding, seal or key fails closed before selecting text"
     input.synthetic.bindingText.replace(/a{64}/, "b".repeat(64)));
   assert.throws(() => read(), { message: "owner_case_unavailable" });
   writeFileSync(input.bindingPath, input.synthetic.bindingText);
-  writeFileSync(input.sealPath, readFileSync(input.sealPath, "utf8").replace(
-    /[0-9a-f]{64}(?="\s*})/, "0".repeat(64)));
+  const originalSeal = readFileSync(input.sealPath, "utf8");
+  const tamperedSeal = originalSeal.replace(
+    /[0-9a-f]{64}(?="\s*})/, "0".repeat(64));
+  assert.notEqual(tamperedSeal, originalSeal);
+  writeFileSync(input.sealPath, tamperedSeal);
   assert.throws(() => read(), { message: "owner_case_unavailable" });
+});
+
+test("symlinked owner inputs are refused where supported", (t) => {
+  const input = fixture(t);
+  const linkPath = join(dirname(input.manifestPath), "manifest-link.json");
+  try {
+    symlinkSync(input.manifestPath, linkPath, "file");
+  } catch (error) {
+    if (error?.code === "EPERM" || error?.code === "EACCES") {
+      t.skip("this host cannot create file symlinks");
+      return;
+    }
+    throw error;
+  }
+  assert.throws(() => readVerifiedPromptRefinerVnextOneShotOwnerCase({
+    ...input, manifestPath: linkPath, slotIndex: 0,
+  }), { message: "owner_case_unavailable" });
 });
