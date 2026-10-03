@@ -893,6 +893,20 @@ const REGISTRY = {
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
+  OpsObserverGenesis_reason_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_REASONS",
+    reason:
+      "initial, recovery, activation. The trigger holds each to its place in the chain: initial only first and shadow, recovery in the head mode, activation shadow to live once. Only the Admin genesis action writes a row.",
+  },
+  OpsObserverGenesis_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. There is no path from live back to shadow; stopping is the switch, not a genesis (docs/policy/sre-ops.md §8).",
+  },
   ProductResearchObservation_outcome_check: {
     owner: "list",
     module: "lib/productResearchObservationCore.mjs",
