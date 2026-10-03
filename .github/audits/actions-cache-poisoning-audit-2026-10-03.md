@@ -577,6 +577,156 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 > save는 `github.event_name`이나 `github.ref`를 이름 대야 합니다. 읽을 수 없는
 > trigger는 "닿는다"로 봅니다(fail-closed). 쓰기가 허용된 workflow 목록도
 > 테스트가 고정하므로 새 writer는 조용히 생기지 않습니다.
+>
+> **보강(round 12).** 위 문단은 **선언된 단계**에 대해서만 참이었습니다. 아래
+> P1a가 그 차이와, 토큰 자체에서 쓰기를 거두는 조치를 적습니다.
+
+#### P1a. 선언을 좁히는 것은 **토큰**을 좁히는 것이 아닙니다 — `cache-mode`
+
+> **구현 완료.** `main`·`develop`에 닿을 수 있는 workflow **24개 전부**가
+> 최상위에 `cache-mode: read`를 선언합니다. 같은 검사가
+> `cache_mode_write_capable_in_widely_readable_scope`와
+> `cache_mode_widened_by_job`으로 이를 유지하며, 선언 누락·`write`·
+> `write-only`·GitHub이 정의하지 않은 값(식 포함)을 모두 거절합니다.
+
+**독립 검토 round 12가 reject한 지점이고, 지적이 맞습니다.**
+
+`actions/cache/restore`를 고르고 save에 `if:`를 붙이는 것은 **그 단계가 무엇을
+하는지**에 대한 진술입니다. job의 캐시 **토큰**은 그대로 쓰기가 가능하고,
+GitHub의 기본값은 trusted trigger(`push`·`schedule`·`workflow_dispatch` 등)에
+대해 `write`입니다. 그러므로 그 job 안에서 실행되는 어떤 것이든 — 의존성의
+install script, crate build script, `uses:`로 불러온 action — 캐시 API를 직접
+호출해 **아무 키로든** 항목을 쓸 수 있습니다. 이 감사가 F3에서 적은 "제3자
+install script를 실행하는 `main`·`develop` writer"가 바로 그 실행 지점입니다.
+
+**이 문서가 만든 키 namespace는 권한 경계가 아닙니다.** namespace가 말하는 것은
+*선언된* 단계가 어느 항목에 닿는지뿐이고, API를 직접 부르는 코드에는 아무
+제약도 걸지 않습니다. 따라서 **부분 적용은 완화가 아닙니다** — 쓰기 가능한
+토큰이 `main` scope에 하나라도 남아 있으면, 그 하나를 통해 다른 모든
+workflow의 키를 쓸 수 있습니다.
+
+토큰 수준의 유일한 통제는 `cache-mode`입니다(workflow 또는 job 수준,
+`read`·`write`·`write-only`·`none`, scoped cache token으로 강제되고 runner가
+`ACTIONS_CACHE_MODE`로 노출). 근거:
+<https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching>
+
+적용 규칙과 그 근거:
+
+1. **`main`·`develop`에 닿을 수 있는 workflow는 `read` 또는 `none`을 선언합니다.**
+   판정은 P1이 이미 쓰던 `reachesWidelyReadableScope()`를 그대로 씁니다. 두
+   번째 판정기를 만들지 않습니다.
+2. **캐시를 전혀 쓰지 않는 workflow도 포함합니다.** 2.3이 "유지해야 할 모양"
+   으로 적은 그 workflow들도 토큰은 쓰기 가능합니다. 캐시 단계가 없다는 것은
+   오늘의 사실이고, 단계 하나가 추가되거나 `uses:`가 스스로 캐시하는 순간
+   아무도 결정하지 않은 쓰기가 생깁니다.
+   - **그 workflow에도 `none`이 아니라 `read`를 썼습니다.** `none`이 더 좁지만,
+     "이 workflow는 캐시를 안 쓴다"를 증명하려면 **불러온 action이 스스로 캐시하지
+     않는다**까지 증명해야 하고(4.2의 `setup-node` 기본값이 바로 그 사례입니다),
+     틀렸을 때 `none`은 그 action의 복원을 끊습니다. 반면 `read`로 얻지 못하는
+     보안은 없습니다 — 이 감사가 닫는 것은 **쓰기** 경로이고, `read`는 그것을
+     전부 거둡니다. 검사가 `none`도 받으므로, 어느 workflow를 `none`으로 좁히는
+     것은 나중에 공짜로 할 수 있습니다.
+3. **선언 위치는 job이 아니라 workflow 최상위입니다.** job 수준 값이 workflow
+   값을 덮으므로, 최상위에 두면 나중에 추가된 job이 **상속**합니다. job 수준
+   선언은 좁히는 것만 허용하고(`read` 아래의 `none`), 넓히는 것은 거절합니다 —
+   `write-only`는 복원을 못 하지만 쓰기를 되돌려 주므로 넓히는 것입니다.
+4. **PR 전용 workflow에는 요구하지 않습니다.** 그 run의 쓰기는
+   `refs/pull/<n>/merge`에 들어가고 다른 ref가 복원하지 못합니다(1장). 거기에
+   `read`를 요구하면 이 감사가 **일부러 남긴** warming — 같은 PR의 다음 run이
+   복원하는 항목 — 이 사라집니다.
+5. **값은 네 literal만 받습니다.** 식(`${{ … }}`)은 공식 문서가 정의하지 않고
+   GitHub이 받아 줄지도 확인되지 않았으므로, 이 검사는 거절합니다. 틀릴 수 있는
+   방향이 한쪽뿐이기 때문입니다.
+
+**비용과 아직 측정되지 않은 것.** `cache-mode: read`는 fail-safe입니다 — 공식
+문서는 "mode 때문에 건너뛴 캐시 동작은 informational message를 남기고 step과
+run은 실패 없이 계속된다"고 적습니다. 따라서 최악의 결과는 느려지는 것이고
+깨지는 것이 아닙니다. 다만 **명시 선언이 `pull_request` run에도 걸리는지는
+문서가 답하지 않습니다.** 문서가 "`pull_request` 이벤트는 영향을 받지 않는다"고
+적은 곳은 *low-trust 기본값* 절이고, 기본값과 명시 선언은 다른 것입니다. 이것이
+중요한 이유는 혼합 trigger 셋(`admin-console-e2e`·`e2e`·`orchestrator-rust`)
+입니다. 그 셋은 `read`를 선언하면서 PR 조건부 save도 그대로 갖고 있습니다.
+
+- 명시 선언이 PR run에 걸리지 **않으면**: 선언은 trusted run의 쓰기만 거두고 PR
+  warming은 그대로입니다. 비용 0.
+- 걸리**면**: 그 셋의 save는 informational message를 남기고 건너뛰어지며, 캐시
+  warming이 사라집니다. 그 경우 남은 save·restore 단계는 죽은 코드이므로
+  제거하는 것이 정직하고, 비용은 저장소에서 가장 무거운 gate 둘이 매 run 차가운
+  캐시로 도는 것입니다.
+
+**이 PR 자신이 그 측정입니다.** `admin-console-e2e`와 `orchestrator-rust`는 이
+PR에서 `pull_request`로 돌고, 그 run의 save 단계 로그가 mode 때문에
+건너뛰어졌는지를 말해 줍니다. 결과는 아래 "측정" 칸에 적습니다.
+
+> **측정 결과 — 걸립니다.** PR #2009의 `Orchestrator Rust` run
+> (`37106375986`, `pull_request` 이벤트, `cache-mode: read`)에서 save 단계가
+> 남긴 줄입니다.
+>
+> ```
+> ##[warning]Failed to save: Unable to reserve cache with key
+> Linux-rust-v2-cargo-home-85e0d614…
+> More details: cache write denied: token has no writable scopes
+> ```
+>
+> 세 가지가 함께 확정됐습니다.
+>
+> 1. **명시 `cache-mode`는 `pull_request` run에도 적용됩니다.** 문서가
+>    "영향받지 않는다"고 적은 것은 low-trust *기본값*이고, 명시 선언은 별개
+>    입니다.
+> 2. **"token has no writable scopes" — round 12의 전제가 맞습니다.** 거부 주체가
+>    action이 아니라 **토큰**이라고 GitHub 자신이 말합니다. restore-only가 하지
+>    못한 일이 바로 이것입니다.
+> 3. **fail-safe는 맞지만 문서보다 약합니다.** 단계 결론은 `success`이고 run은
+>    실패하지 않습니다. 다만 문서가 말한 "informational message"가 아니라
+>    `##[warning]`이며, `cache/save@v5`는 **tar/zstd 압축을 모두 끝낸 뒤** 거부
+>    당합니다. 건너뛰는 것이 아니라 값을 치르고 거절당하는 것입니다.
+>
+> **관측은 하나가 아닙니다.** 같은 PR의 `Admin Console E2E` run
+> (`37106376116`)에서 `.next/cache`와 Playwright 캐시 양쪽이 같은 거부를
+> 받았습니다. 즉 경로·workflow·캐시 종류에 따른 특수 사례가 아니라 토큰의
+> 성질입니다. 같은 run의 restore는 `Cache not found for input keys`였습니다 —
+> v2 키로 쓰인 항목이 아직 없었다는 뜻이고, 이 변경 이전에도 miss였습니다.
+
+**그래서 죽은 save 단계 다섯 개를 제거했습니다**(`admin-console-e2e` 2,
+`e2e` 2, `orchestrator-rust` 1). 그 단계들이 할 수 있는 일은 매 run 압축 비용을
+쓰고 경고를 남기는 것뿐이고, 남겨 두면 **필수 gate에 상설 경고**가 생겨 사람이
+경고를 무시하도록 훈련시킵니다. 더 나쁜 것은 warming이 동작하는 것처럼 보인다는
+점입니다. restore 쪽 절반은 **남겼습니다** — 아래 세 선택지 전부가 그것을
+필요로 하고, 주석이 "지금은 아무도 쓰지 못한다"를 명시합니다.
+
+**이로써 이 저장소의 캐시 writer는 PR 전용 둘(`pr-fast-gate`,
+`review-parity-shadow`)뿐입니다.** 그리고 키 namespace 규칙상 두 writer의 항목은
+다른 workflow의 복원 키와 맞지 않으므로, **24개 workflow의 복원은 지금 영구히
+miss입니다.** 비용은 측정 가능한 것으로만 적습니다 — Next build 캐시와 Playwright
+브라우저가 `admin-console-e2e`·`e2e`의 매 run에서, cargo registry가
+`orchestrator-rust`의 매 run에서, npm 캐시가 schedule workflow 약 20개에서 다시
+만들어집니다. (이 run의 restore 로그가 이미 `Cache not found for input keys`
+입니다 — v2 키를 쓴 적이 아직 없으므로 이 변경 전에도 miss였습니다.)
+
+**warming을 되살리는 길은 셋이고, 전부 운영자 행위가 필요하거나 별도 설계입니다.**
+"검증 범위는 되돌릴 수 없는 것에 비례합니다"에 따라 경로를 닫는 것이 기본이므로
+닫은 상태로 두고, 선택은 넘깁니다.
+
+1. **writer 하나, reader 여럿** — 캐시 scope는 **ref 단위이고 workflow 단위가
+   아니므로**, PR 전용 writer가 쓴 항목은 같은 PR ref에서 도는 다른 workflow가
+   복원할 수 있습니다. 키를 공유하게 만드는 것이 조건이고, 그러려면
+   `key_shared_across_workflows`를 "선언된 writer 하나 + reader 여럿"으로
+   다시 설계해야 합니다. 그것이 안전해진 근거는 이 변경 자체입니다 — 널리 읽히는
+   scope에 쓸 수 있는 run이 더는 없으므로, 남는 위험은 정책이 이미 열려 있다고
+   기록한 **같은 PR 방향**뿐이고 그것은 PR 작성자가 자기 코드로 이미 할 수 있는
+   일입니다. 다만 writer의 캐시 **내용**이 reader에게 쓸모 있는지(예:
+   `pr-fast-gate`가 Playwright 브라우저를 받는지)는 확인이 필요합니다.
+   운영자 행위 없음, 설계 필요.
+2. **reusable workflow로 이벤트별 job 분리** — 호출자 job의 `cache-mode`가 피호출
+   workflow의 요청을 제한하므로, `pull_request` job은 선언 없이(write) 두고
+   trusted job만 `read`로 둘 수 있습니다. **필수 check 이름이 바뀌므로** 운영자가
+   branch protection을 갱신해야 합니다.
+3. **trusted trigger 제거** — `admin-console-e2e`·`orchestrator-rust`의
+   `push: [develop, main]`을 없애면 두 workflow가 PR 전용이 되어 규칙 대상에서
+   빠지고 warming이 그대로 돌아옵니다. AGENTS.md의 "main으로 가는 PR은 release와
+   hotfix뿐" 절이 같은 중복(PR과 push에서 CI 두 번)을 비용으로 적고 있으므로
+   방향은 어긋나지 않습니다. 다만 **병합 후 검증 run을 없애는 것**이고, 그것은
+   운영자 결정입니다.
 
 대상과 조건 다섯 가지입니다. 독립 검토(9장)가 넷을 추가했습니다.
 
@@ -590,9 +740,14 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
    `target/`의 build script 바이너리에 무결성 검증이 없고, 그 workflow는 `push`
    로 `main`·`develop`에 모두 닿으며, 복원한 것을 `cargo`가 실행합니다. 모델이
    다른 것은 **누가 심는가**이고, 바뀌지 않는 것은 **쓰인 곳이 모든 run에서
-   읽힌다**는 점입니다. 키 namespace 규칙은 Rust에 적용하지 않습니다 — 그 캐시는
-   한 workflow만 쓰고 restore-keys가 없어서 공유 규칙이 잡을 것이 없고, 키를
-   고치는 것은 얻는 것 없는 변경입니다. 쓰기 규칙은 모든 경로에 적용됩니다.
+   읽힌다**는 점입니다. 키 namespace 규칙은 Rust에 적용하지 않는다는 것이
+   초안의 판단이었습니다 — 한 workflow만 쓰고 restore-keys가 없어서 공유 규칙이
+   잡을 것이 없다고 봤습니다. **최종 구현은 적용했습니다.** 캐시는 **키만으로**
+   식별되므로 경로를 근거로 한 면제는 면제된 단계가 다른 workflow의 키를 쓰는
+   길이 되고(독립 검토 round 9), 그래서 검사는 `actions/cache`의 **모든** 경로에
+   적용됩니다. Rust 키도 `${{ runner.os }}-rust-v2-cargo-home-`을 갖고,
+   `target/`은 운영자의 병합 결정으로 캐시에서 빠졌습니다(9장 round 11 뒤의
+   병합 기록). 쓰기 규칙은 모든 경로에 적용됩니다.
 3. **기존 항목은 전환만으로 사라지지 않습니다.** restore-only로 바꾼 뒤에도
    이미 `main`·`develop` scope에 있는 항목은 퇴출될 때까지 복원 후보로 남습니다
    (1장). 그러므로 **일회성 삭제**(캐시 관리 API/UI) 또는 **key namespace
@@ -661,11 +816,17 @@ scope로만 감) **run의 ref가 기본 branch이거나 `develop`일 때만** �
 > 자격증명 job의 `unverified`·`unreadable` 복원을 막고, 같은 모듈을 쓰므로
 > 판정기가 둘로 갈라지지 않습니다.
 >
-> `POSTURE_DIGEST`가 이제 종류를 담습니다(`62ba14563ed8` → `2ccf7af5eb0f`).
-> 그 전환에서 **workflow의 posture는 바뀌지 않았습니다** — 캐시 이유 14건이
-> 전부 `verified_package_manager`, 이유 17건, 자격증명 job 22건으로 동일합니다.
-> 즉 4.3이 손으로 읽어 낸 분리가 이제 기계가 확인한 사실이고, 그것이 끝나는
-> 순간 digest와 검사가 함께 실패합니다.
+> `POSTURE_DIGEST`가 이제 종류를 담습니다(`62ba14563ed8` → `2ccf7af5eb0f` →
+> `977c24f3e564`). **첫** 전환에서 workflow의 posture는 바뀌지 않았습니다 —
+> 캐시 이유 14건이 전부 `verified_package_manager`, 이유 17건, 자격증명 job
+> 22건이었습니다. **두 번째**는 같은 작업의 결과입니다: 4.2가 가리킨 bare
+> `setup-node` 세 곳에 `package-manager-cache: false`를 넣었으므로 캐시 이유가
+> 14 → 11건, 이유 합계가 17 → 14건으로 줄고, 자격증명 job 22건과 경로 규칙
+> 1건은 그대로입니다. 즉 4.3이 손으로 읽어 낸 **11건**이 이제 기계가 확인한
+> 사실이고, 그것이 끝나는 순간 digest와 검사가 함께 실패합니다.
+>
+> (초안은 이 칸에 `2ccf7af5eb0f`와 14건을 적어 둔 채였습니다. 독립 검토
+> round 12가 최종 상태와 다르다고 지적했고, 위 숫자가 최종입니다.)
 
 **자격증명을 가진 job은 `cache: npm` 외의 Actions 캐시를 복원하지 않는다.**
 
@@ -755,6 +916,34 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 
 ### P7. 후속 — P4가 쓰려는 기록의 세 번째 조건에는 유지 장치가 없습니다
 
+> **구현 완료.** `npm run check:agent-pr-cache-isolation`이 그 장치입니다 —
+> **에이전트가 일으키는 이벤트에 걸리는 workflow의 자격증명 job은 어떤 cache도
+> 복원하지 않는다**를 묻고, `verified_package_manager`까지 거절합니다. 판정은
+> `lib/agentCredentialReachability.ts`가 새로 보고하는 `reachedWorkflows`와 cache
+> 이유의 교차이며(P3대로 판정기를 둘로 만들지 않았습니다), 판정 코드는
+> `scripts/agent-pr-cache-isolation-policy.mjs`, 고정은
+> `tests/agentPrCacheIsolation.test.mjs`입니다. PR Fast Gate static 단계에서 돕니다.
+>
+> **아래가 설계를 요구한 지점 — 조건식 — 은 분석기가 읽지 않습니다.**
+> `docs/policy/engineering-agent.md` §5의 제약을 그대로 두고, 대신 조건을 면제가
+> 아니라 사실로 만들었습니다(소유자 결정, 2026-10-03). 실측에서 cache 이유 11건
+> 중 도달 workflow 안에 있던 것은 **1건**이고, 그 job의 `if:`가 에이전트 branch를
+> 배제하지만 그것을 근거로 쓰지 않고 그 job에서 npm cache를 뗐습니다. 그래서
+> 검사는 도달 workflow 8개의 자격증명 job 5개에 대해 복원 0으로 통과합니다.
+> cache 이유는 11 → 10이 되었고 전부 도달하지 않는 workflow에 있으며, §5는
+> 그것들에 대해 여전히 모든 변경을 금지합니다.
+>
+> `docs/policy/engineering-agent.md`에 §5.2가 생기고, §5 기록 3번과 §5.1의
+> "장치가 아직 없다"가 그것을 가리키도록 바뀌었습니다. **기록 자체를 쓰는
+> 것(`cacheIsolationRecorded: true`)은 여전히 소유자의 행위이고 이 변경에
+> 포함되지 않습니다** — 호출자 둘 다 `false`로 남아 있습니다.
+>
+> 독립 검토: 검토 서버 job `r-20261003-015621-25b789`, contract 경로이므로
+> reviewer 2명(Codex `openai`, Cursor `xai`), 양쪽 **accept**, finding 0.
+> 검토 뒤에 주석 두 곳의 문구만 줄였습니다 — §16이 금지하는 "현재 실패하고 있는
+> 대상의 이름"에 걸리지 않도록, 특정 job이 자격증명을 갖고 도달한다고 단정하던
+> 문장을 규칙 서술로 바꾼 것이고 판정 코드는 바뀌지 않았습니다.
+
 **이 항목은 감사의 원래 권고가 아니라 P4를 구현하는 동안 독립 검토가 찾아낸
 선행 조건입니다.** 분모에 넣지 않고 여기에 기록해 잃지 않게 합니다.
 
@@ -774,6 +963,10 @@ workflow의 자격증명 job은 어떤 cache도 복원하지 않는다.** 그것
 
 **그 장치가 없는 동안 정책은 기록 작성을 막습니다.** 그것이 지금의 안전한
 상태이고, 이 항목은 기록을 쓰고 싶어질 때 먼저 해야 할 일입니다.
+
+장치가 생긴 뒤에도 **정책은 기록을 자동으로 열어 주지 않습니다.** 검사가 통과하는
+것은 3번 조건이 오늘 참이라는 사실일 뿐이고, 1번·2번의 근거와 함께 날짜 있는
+기록을 쓰는 것은 소유자의 행위로 남습니다.
 
 ## 8. 이 감사가 증명하지 못한 것
 
@@ -796,13 +989,36 @@ workflow의 자격증명 job은 어떤 cache도 복원하지 않는다.** 그것
 
 ## 9. 독립 검토
 
-**두 round를 돌았고, 판정은 하나뿐입니다.**
+**문서에 대한 round와, 구현 전체에 대한 round를 함께 적습니다.** 구현 slice
+각각에 대한 round 3–11은 이 문서가 아니라 그 slice의 코드와 테스트에 반영돼
+있고(각 테스트가 "independent review caught it"으로 그 사례를 고정합니다),
+여기 적는 것은 **판정이 이 문서의 내용을 바꾼 round**입니다.
 
 | round | 대상 | 경로 | reviewer | 결과 |
 |---|---|---|---|---|
 | 0 | rev 1 (`3882fdb6f`) | Codex 직접 (서버 큐 `queue_full`) | Codex `gpt-5.6-sol` / xhigh | **reject** — 지적 전부 반영 |
 | 1 | rev 2 (`5abcb4ef7`) | 검토 서버 `r-20261002-223406-84907a` | **devin** (vendor `cognition`) | **unknown** — `reviewer_exit_1`, findings 0건 |
 | 2 | rev 2 (`7598ff881`) | 검토 서버 `r-20261002-223916-d7532b` | **codex** (vendor `openai`) | **reject** — major 2, minor 1. 전부 반영 → rev 3 |
+| 12 | 구현 전체 diff (`2e831bbd7`, PR #1964) | 검토 서버 `r-20261003-055900-4e006a` | 2명 (contract 경로) | **reject** — major 1, minor 1. 전부 반영 → P1a |
+
+### round 12 — reject, 완화의 전제가 틀렸습니다
+
+**처음으로 끝난 전체를 본 round이고, 그 전까지의 accept 하나(round 11)는 마지막
+slice 하나에 대한 것이었습니다.**
+
+- **major — 선언을 좁히는 것은 토큰을 좁히는 것이 아닙니다.**
+  `actions/cache/restore`로 바꾸고 save에 PR 조건을 붙여도 job의 캐시 쓰기
+  권한은 남고, trusted trigger의 기본값은 `write`입니다. 그래서 `main`·`develop`
+  에서 도는 악성 install script가 캐시 API를 직접 불러 필수 gate가 복원하는
+  공개된 `v2` 키에 오염 항목을 쓸 수 있습니다. 토큰 수준 통제는 `cache-mode`이고
+  별도로 적용해야 합니다. **반영: P1a** — 해당 workflow 24개 전부에
+  `cache-mode: read`, 검사 규칙 둘, 테스트 6건.
+  - 이 지적이 이 감사가 반복한 실패의 세 번째 사례입니다. F5를 두 번 틀린 이유도
+    같았습니다 — **선언을 읽고 권한을 읽지 않은 것**(round 0: 분석기가 묻는 질문을
+    읽지 않음, round 2: job `if:`를 읽지 않음, round 12: 토큰을 읽지 않음).
+- **minor — 구현 완료 칸이 최종 상태와 달랐습니다.** `POSTURE_DIGEST`와 캐시
+  이유 건수, Rust 키 namespace 적용 여부가 초안 시점 관측으로 남아 있었습니다.
+  **반영**: 두 칸 모두 최종값으로 갱신하고, 초안 관측과 구분해 적었습니다.
 
 ### round 2 — reject, 전부 반영
 
