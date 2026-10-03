@@ -1,5 +1,7 @@
 -- Support-triage deadline check (docs/policy/support-triage.md §4).
 --
+-- baseline-check: present-if-function "support_triage_assert_deadline"
+--
 -- support_triage_assert_deadline() is the last round trip of every
 -- support-triage mutation transaction other than finishing a run. It reads the
 -- database clock once and raises when the run's deadline has passed, so the
