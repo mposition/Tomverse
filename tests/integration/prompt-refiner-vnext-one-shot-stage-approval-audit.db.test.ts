@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
@@ -13,6 +15,8 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { approvePromptRefinerVnextOneShotRun } from
+  "@/lib/promptRefinerVnextOneShotRunApproval";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { createPromptRefinerVnextOneShotStageWithSlots } from
@@ -21,14 +25,17 @@ import { createPromptRefinerVnextOneShotStageWithSlots } from
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const fixtureKey = "synthetic-chat01-a06-audit-integrity-key";
 const stageId = "prompt-refiner-vnext-one-shot-v1";
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const binding = {
   id: stageId,
   sourceCommitSha: "a".repeat(40),
-  sourceManifestDigest: "b".repeat(64),
+  sourceManifestDigest: createHash("sha256").update(readFileSync(path.join(
+    projectRoot, "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-candidate-source.json"
+  ))).digest("hex"),
   runnerDigest: "c".repeat(64),
   manifestRoot: "d".repeat(64),
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
-  runtimeCommitSha: "e".repeat(40),
+  runtimeCommitSha: "a".repeat(40),
   pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
   perRequestCostMicroUsd: BigInt(29_918),
   slotCount: 80,
@@ -266,6 +273,132 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
       assert.equal(await prisma.adminAuditLog.count(), 1);
+
+      // A09 reobserves the same source/deployment/price under the stage lock;
+      // neither a bad pin nor a failed audit may advance the run state.
+      const envPins = {
+        APP_ENV: "staging",
+        RAILWAY_ENVIRONMENT_NAME: "staging",
+        RAILWAY_DEPLOYMENT_ID: binding.runtimeDeploymentId,
+        RAILWAY_GIT_COMMIT_SHA: binding.runtimeCommitSha,
+        RAILWAY_PROJECT_ID: "12345678-1234-1234-1234-123456789abd",
+        RAILWAY_SERVICE_ID: "12345678-1234-1234-1234-123456789abe",
+        RAILWAY_ENVIRONMENT_ID: "12345678-1234-1234-1234-123456789abf",
+        RAILWAY_API_TOKEN: "synthetic-read-only-token",
+        PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT: binding.manifestRoot,
+        PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST: binding.runnerDigest,
+      };
+      const priorEnv = Object.fromEntries(Object.keys(envPins).map((key) =>
+        [key, process.env[key]]));
+      Object.assign(process.env, envPins);
+      let activeDeploymentId = binding.runtimeDeploymentId;
+      const fetchStub = mock.method(globalThis, "fetch", async () => Response.json({
+        data: {
+          deployment: { id: binding.runtimeDeploymentId, status: "SUCCESS",
+            meta: { commitHash: binding.runtimeCommitSha } },
+          deployments: { edges: [{ node: {
+            id: activeDeploymentId, status: "SUCCESS",
+          } }] },
+        },
+      }));
+      const expected = {
+        stageApprovalAuditLogId: auditLogId,
+        sourceCommitSha: binding.sourceCommitSha,
+        sourceManifestDigest: binding.sourceManifestDigest,
+        runnerDigest: binding.runnerDigest,
+        manifestRoot: binding.manifestRoot,
+        runtimeDeploymentId: binding.runtimeDeploymentId,
+        runtimeCommitSha: binding.runtimeCommitSha,
+        pricePinDigest: binding.pricePinDigest,
+      };
+      try {
+        await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
+          where: { id: stageId },
+          data: { status: "run_approved", runApprovalAuditLogId: "forged-run-audit" },
+        }), /one-shot run approval audit is missing/);
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session: { ...session, user: { id: "other-owner", email: "other@example.test" } },
+          request, expected,
+        }), /run_binding_mismatch/);
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session, request, expected: { ...expected, manifestRoot: "f".repeat(64) },
+        }), /run_binding_mismatch/);
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        })).status, "staged");
+
+        activeDeploymentId = "12345678-1234-1234-1234-123456789aca";
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session, request, expected,
+        }), /active_deployment_unverified/);
+        activeDeploymentId = binding.runtimeDeploymentId;
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+
+        await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+          data: { inputUsdPerMillionTokens: 0.01 } });
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session, request, expected,
+        }), /price/i);
+        await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+          data: { inputUsdPerMillionTokens: null } });
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+
+        await setup.query(`CREATE FUNCTION reject_run_audit() RETURNS trigger AS $$
+          BEGIN
+            IF NEW."action" = 'prompt_refiner.vnext_one_shot.run_approved' THEN
+              RAISE EXCEPTION 'synthetic run audit failure';
+            END IF;
+            RETURN NEW;
+          END;
+        $$ LANGUAGE plpgsql`);
+        await setup.query(`CREATE TRIGGER reject_run_audit_trigger BEFORE INSERT
+          ON "AdminAuditLog" FOR EACH ROW EXECUTE FUNCTION reject_run_audit()`);
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session, request, expected,
+        }), /synthetic run audit failure/);
+        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        })).status, "staged");
+        await setup.query(`DROP TRIGGER reject_run_audit_trigger ON "AdminAuditLog"`);
+        await setup.query(`DROP FUNCTION reject_run_audit()`);
+
+        const run = await approvePromptRefinerVnextOneShotRun({
+          session, request, expected,
+        });
+        assert.equal(run.dispatchAuthorized, false);
+        const advanced = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        });
+        assert.equal(advanced.status, "run_approved");
+        assert.equal(advanced.runApprovalAuditLogId, run.runApprovalAuditLogId);
+        assert.notEqual(advanced.runApprovalAuditLogId, auditLogId);
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+        const runAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+          where: { id: run.runApprovalAuditLogId },
+        });
+        assert.equal(runAudit.previousHash, audit.entryHash);
+        assert.ok(runAudit.createdAt.getTime() > advanced.approvedAt.getTime());
+        assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+        const afterRun = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
+        assert.equal(afterRun.approvalAuditsValid, true);
+        assert.equal(afterRun.reservationShapeValid, true);
+        assert.equal(afterRun.reservedSlots, 80);
+        assert.equal(afterRun.consumedSlots, 0);
+        await assert.rejects(approvePromptRefinerVnextOneShotRun({
+          session, request, expected,
+        }), /run_stage_not_ready/);
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+      } finally {
+        fetchStub.mock.restore();
+        for (const [key, value] of Object.entries(priorEnv)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
     } finally {
       await prisma.$disconnect();
       await setup.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
