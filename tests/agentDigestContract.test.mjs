@@ -109,10 +109,22 @@ test("the billing-finance-ops registration widens the three per-agent values and
     ["AgentDigestItem_agent_key_check", "AgentDigestItem_kind_check"],
   );
   assert.deepEqual(
-    [...code.matchAll(/CREATE (?:OR REPLACE )?FUNCTION (\w+)\(\)/g)].map((m) => m[1]),
-    ["agent_digest_item_before_insert"],
+    [...code.matchAll(/CREATE (?:OR REPLACE )?FUNCTION "?(\w+)"?\(/g)].map((m) => m[1]),
+    ["agent_digest_item_before_insert", "billing_finance_ops_assert_deadline"],
   );
-  assert.match(code, /LANGUAGE plpgsql\s+SET search_path = pg_catalog, pg_temp/);
+  assert.match(code, /agent_digest_item_before_insert\(\) RETURNS trigger\s+LANGUAGE plpgsql\s+SET search_path = pg_catalog, pg_temp/);
+  // The deadline check has the support_triage_assert_deadline() shape: no SET
+  // clause, SECURITY INVOKER, a schema-qualified clock, raising on a NULL.
+  const deadline = code.match(/FUNCTION "billing_finance_ops_assert_deadline"\(deadline TIMESTAMPTZ\)([\s\S]*?)\$\$;/);
+  assert.ok(deadline, "deadline function not found");
+  assert.doesNotMatch(deadline[1], /\bSET\b/);
+  assert.match(deadline[1], /SECURITY INVOKER/);
+  assert.match(deadline[1], /deadline IS NULL OR pg_catalog\.clock_timestamp\(\) > deadline/);
+  assert.match(deadline[1], /ERRCODE = 'check_violation'/);
+  assert.doesNotMatch(deadline[1], /EXCEPTION\s+WHEN/);
+  // The baseline guard probes for that function, since nothing else here is
+  // visible to prisma migrate diff.
+  assert.match(sql, /^-- baseline-check: present-if-function "billing_finance_ops_assert_deadline"$/m);
   assert.doesNotMatch(code, /\b(?:DROP TABLE|DROP TRIGGER|CREATE TRIGGER|ALTER COLUMN|DELETE FROM|UPDATE "AgentDigestItem")\b/);
   // The app switch row starts off; only the Admin control route changes it.
   assert.match(code, /'billingFinanceOps\.control',\s*json_build_object\('enabled', false, 'revision', 0, 'enabledAt', NULL\)::text/);

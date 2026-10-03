@@ -1,5 +1,8 @@
 -- Registers the billing-finance-ops agent on the shared AgentDigestItem table
--- (docs/policy/billing-finance-ops.md §1.1, §7 W1a) and seeds its app switch.
+-- (docs/policy/billing-finance-ops.md §1.1, §7 W1a), adds the stage W deadline
+-- check and seeds the agent's app switch.
+--
+-- baseline-check: present-if-function "billing_finance_ops_assert_deadline"
 --
 -- Only the three per-agent values change: the agentKey list, that agent's
 -- kind list and its body retention. Every other column, CHECK and trigger of
@@ -45,6 +48,28 @@ BEGIN
   NEW."createdAt" := clock_timestamp();
   NEW."retentionUntil" := NEW."createdAt" + retention;
   RETURN NEW;
+END;
+$$;
+
+-- billing_finance_ops_assert_deadline() is the last statement of the stage W
+-- digest transaction (policy §1.1 item 4). It reads the database clock and
+-- raises when the run's deadline has passed, so the digest row and its audit
+-- entry roll back together and a late run is never recorded as a success. A
+-- NULL deadline also raises. Same shape as support_triage_assert_deadline():
+-- no SET clause, SECURITY INVOKER, no EXCEPTION handler, schema-qualified
+-- calls. It is also the name the baseline guard above probes for, since every
+-- other change here is invisible to prisma migrate diff.
+CREATE OR REPLACE FUNCTION "billing_finance_ops_assert_deadline"(deadline TIMESTAMPTZ)
+RETURNS VOID
+LANGUAGE plpgsql
+VOLATILE
+SECURITY INVOKER
+AS $$
+BEGIN
+  IF deadline IS NULL OR pg_catalog.clock_timestamp() > deadline THEN
+    RAISE EXCEPTION 'billing_finance_ops_deadline_passed'
+      USING ERRCODE = 'check_violation';
+  END IF;
 END;
 $$;
 

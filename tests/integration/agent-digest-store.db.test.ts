@@ -219,3 +219,17 @@ test("the billing-finance-ops switch row exists and starts off", async () => {
   assert.ok(setting, "the registration migration seeds the switch row");
   assert.deepEqual(JSON.parse(setting.value), { enabled: false, revision: 0, enabledAt: null });
 });
+
+test("billing_finance_ops_assert_deadline passes before the deadline and raises after it or on NULL", async () => {
+  await prisma.$queryRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline(clock_timestamp() + interval '1 minute')::text AS ok`,
+  );
+  await assert.rejects(
+    prisma.$queryRawUnsafe(`SELECT billing_finance_ops_assert_deadline(clock_timestamp() - interval '1 second')::text AS ok`),
+    /billing_finance_ops_deadline_passed/,
+  );
+  await assert.rejects(
+    prisma.$queryRawUnsafe(`SELECT billing_finance_ops_assert_deadline(NULL)::text AS ok`),
+    /billing_finance_ops_deadline_passed/,
+  );
+});
