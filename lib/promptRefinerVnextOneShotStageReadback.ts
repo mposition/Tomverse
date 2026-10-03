@@ -6,6 +6,8 @@ import { promptRefinerVnextOneShotApprovalAuditsAreValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { assertPromptRefinerVnextOneShotActiveDeploymentForAdmission } from
   "@/lib/promptRefinerVnextOneShotDeploymentBinding";
+import { assertPromptRefinerVnextOneShotPriceForAdmission } from
+  "@/lib/promptRefinerVnextOneShotPriceBinding";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
@@ -66,6 +68,7 @@ export async function lockAndReadPromptRefinerVnextOneShotStage(
   await assertPromptRefinerVnextOneShotActiveDeploymentForAdmission(
     tx, deploymentOptions
   );
+  await assertPromptRefinerVnextOneShotPriceForAdmission(tx);
   return snapshot;
 }
 
