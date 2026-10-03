@@ -9,6 +9,7 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { prisma } from "@/lib/prisma";
+import { POLICY_NOTICE_CAMPAIGN_WAVES } from "@/lib/emailAudienceExpansionCore";
 import { waveAudienceBreakdown } from "@/lib/adminEmailCampaigns";
 import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
@@ -626,12 +627,13 @@ test("the amendment notice reaches every owed account once, and a later wave onl
       contentByLocale: { ko: {}, en: {} },
       audienceSpec: NOTICE_COHORT,
       createdByEmail: "ops@example.test",
-      initialWaves: [
-        { kind: "launch", sequence: 1 },
-        { kind: "reminder", sequence: 1 },
-        { kind: "final_reminder", sequence: 1 },
-      ],
+      initialWaves: POLICY_NOTICE_CAMPAIGN_WAVES,
     });
+    assert.ok(POLICY_NOTICE_CAMPAIGN_WAVES.length >= 2);
+    assert.equal(
+      await prisma.emailCampaignWave.count({ where: { campaignId: consoleShaped.id } }),
+      POLICY_NOTICE_CAMPAIGN_WAVES.length
+    );
     assert.deepEqual(await campaignScheduleProblems({ campaignId: consoleShaped.id }), []);
     await prisma.emailCampaign.delete({ where: { id: consoleShaped.id } });
 

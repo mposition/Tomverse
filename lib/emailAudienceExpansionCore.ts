@@ -161,6 +161,19 @@ export type AudienceCohortSpec =
  */
 export const NOTICE_SENT_IN_FLIGHT_DAYS = 3;
 
+/**
+ * The waves an amendment notice draft holds, all started by hand.
+ *
+ * Distinct kinds, because the schedule check refuses a repeated kind at
+ * approval. Each wave asks the cohort again, so the two follow-ups reach
+ * accounts created since and notices that did not arrive.
+ */
+export const POLICY_NOTICE_CAMPAIGN_WAVES = [
+  { kind: "launch", sequence: 1 },
+  { kind: "reminder", sequence: 1 },
+  { kind: "final_reminder", sequence: 1 },
+] as const;
+
 /** YYYY-MM-DD naming a real calendar day, or null. */
 export const readIsoDay = (raw: unknown): string | null => {
   if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
