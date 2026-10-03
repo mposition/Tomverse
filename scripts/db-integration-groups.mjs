@@ -119,6 +119,20 @@ const LANE_RULES = [
  */
 export const DB_INTEGRATION_FALLBACK_GROUP = "accounts";
 
+/**
+ * A compatibility job, not a lane. CI's lanes run PostgreSQL 17; production's
+ * version is not known to this repository, and docs/policy/support-triage.md
+ * §4 requires the support-triage timeout suites to run on 16 as well, where
+ * transaction_timeout does not exist. These suites also run in their own lane
+ * on 17, so this list is outside the lane partition: it never removes a suite
+ * from a lane, and `dbIntegrationGroupOf` never returns it.
+ */
+export const POSTGRES16_COMPAT_GROUP = "postgres16";
+export const POSTGRES16_COMPAT_SUITES = Object.freeze([
+  "tests/integration/support-triage-run.db.test.ts",
+  "tests/integration/support-triage-timeouts.db.test.ts",
+]);
+
 export const DB_INTEGRATION_GROUPS = [
   ...LANE_RULES.map(([id]) => id),
   DB_INTEGRATION_FALLBACK_GROUP,
