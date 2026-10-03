@@ -10,6 +10,10 @@ const localRefMigration = readFileSync(
   new URL("../prisma/migrations/20261001102400_amux_v4_draft_local_ref/migration.sql", import.meta.url),
   "utf8",
 );
+const originExpiryMigration = readFileSync(
+  new URL("../prisma/migrations/20261003150000_amux_v4_draft_origin_expiry/migration.sql", import.meta.url),
+  "utf8",
+);
 const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
 
 test("v4 proposal units are independently encrypted and cannot coexist with a monolithic draft body", () => {
@@ -52,4 +56,14 @@ test("v4 draft local references are idea-unique, kind- and chunk-bound, and immu
   assert.match(localRefMigration, /UNIQUE INDEX "AmuxIdeaDraftUnit_ideaId_localRef_key"/);
   assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_required_check/);
   assert.match(localRefMigration, /AmuxIdeaDraftUnit_local_ref_immutable_check/);
+});
+
+test("later analysis pages inherit the first page's absolute 30-day decision deadline", () => {
+  assert.match(originExpiryMigration, /CREATE OR REPLACE FUNCTION amux_v4_draft_unit_guard\(\)/);
+  assert.match(originExpiryMigration, /first_chunk\."chunkIndex" = 0/);
+  assert.match(originExpiryMigration, /NEW\."expiresAt" := first_completed_at \+ INTERVAL '30 days'/);
+  assert.match(originExpiryMigration, /db_now >= first_completed_at \+ INTERVAL '30 days'/);
+  assert.match(originExpiryMigration, /AmuxIdeaDraftUnit_origin_expiry_precheck/);
+  assert.doesNotMatch(originExpiryMigration,
+    /NEW\."expiresAt" := completed_at \+ INTERVAL '30 days'/);
 });

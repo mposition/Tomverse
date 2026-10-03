@@ -69,6 +69,10 @@ export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-
 export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
 export const AMUX_V4_FIRST_DRAFT_SAVED_SCOPE = "first-analysis-draft-save-v1" as const;
+/** An independently normalized output continuation is bound to its first page. */
+export const AMUX_V4_SECOND_DRAFT_SAVED_ACTION = "AMUX_V4_SECOND_ANALYSIS_DRAFT_SAVED" as const;
+export const AMUX_V4_SECOND_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
+export const AMUX_V4_SECOND_DRAFT_SAVED_SCOPE = "second-analysis-draft-save-v1" as const;
 /** Policy v6: an unfinished idea stops at its immutable seven-day deadline. */
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
@@ -140,6 +144,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
       targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {
     return AMUX_V4_FIRST_DRAFT_SAVED_SCOPE;
+  }
+  if (action === AMUX_V4_SECOND_DRAFT_SAVED_ACTION &&
+      targetType === AMUX_V4_SECOND_DRAFT_SAVED_TARGET) {
+    return AMUX_V4_SECOND_DRAFT_SAVED_SCOPE;
   }
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {

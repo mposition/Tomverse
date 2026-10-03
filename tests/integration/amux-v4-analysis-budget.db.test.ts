@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
@@ -13,6 +13,8 @@ import { auditRowActorKind,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+  AMUX_V4_SECOND_DRAFT_SAVED_SCOPE,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
@@ -38,6 +40,8 @@ import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
 import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
+import { commitAmuxSecondIdeaAnalysisDraft,
+  AmuxSecondAnalysisDraftError } from "@/lib/amux/ideaSecondAnalysisDraftService";
 import { readAmuxFirstIdeaAnalysisResult,
   AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
 import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
@@ -1345,4 +1349,161 @@ test("budget window rejects another namespace or a larger monthly cap", async ()
     data: { namespace, monthStart: invalidMonth,
       limitMicroUsd: BigInt(50_000_001) },
   }), /AmuxIdeaAnalysisBudgetWindow_amount_check/);
+});
+
+test("a verified second page closes the idea without admitting a card or restarting draft expiry", async () => {
+  const workItemsBefore = await prisma.amuxWorkItem.count({
+    where: { sourceSystem: "admin-idea-v4" },
+  });
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const firstPreview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { ideaId: true, modelId: true },
+  });
+  const ideaId = firstPreview.ideaId;
+  await prisma.amuxIdeaSubmission.update({
+    where: { id: ideaId }, data: { state: "analyzing" },
+  });
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { state: "in_flight", leaseGeneration: 1 },
+  });
+  await prisma.$transaction((tx) => commitAmuxKnownIdeaAnalysisSettlement(tx,
+    { holdId, outcome: "verified_success", inputTokens: 100, outputTokens: 50 }));
+  const firstUnits = [
+    { kind: "node", localId: "c0:node-0", level: "initiative", parentRef: null,
+      title: "Improve intake", description: "An operator idea.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "node", localId: "c0:node-1", level: "epic", parentRef: "c0:node-0",
+      title: "Analyze ideas", description: "A bounded proposal.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "node", localId: "c0:node-2", level: "feature", parentRef: "c0:node-1",
+      title: "Review proposals", description: "A bounded proposal.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "card", localId: "c0:card-0", cardType: "story", storyKind: "general",
+      title: "Review a first card", problem: "The owner needs a proposal.",
+      scopeIn: ["Show the first page"], scopeOut: ["Do not register cards"],
+      completionCriteria: ["The first page is visible"], featureRef: "c0:node-2",
+      parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
+      taskRole: null, executionGrade: null, executionBrief: null,
+      sourceRefIds: ["operator_idea"] },
+  ];
+  await prisma.$transaction((tx) => commitAmuxFirstIdeaAnalysisDraft(tx, {
+    ideaId, previewId, holdId, leaseGeneration: 1, keys,
+    rawModelOutput: JSON.stringify({ schemaVersion: 2, previewId, chunkIndex: 0,
+      outcome: "propose", coverageStatus: "more", continuationKind: "output",
+      ownerQuestion: null, coveredScope: "First page", remainingScope: "More cards remain",
+      units: firstUnits }),
+  }));
+  const firstCompletedAt = (await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+  })).analysisCompletedAt!;
+  const nextPreviewId = randomUUID();
+  const choice = { previewId: nextPreviewId, ideaId, provider: "openai" as const,
+    modelId: firstPreview.modelId, reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  const nextPreview = await prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice, keys, browserNonce,
+    }));
+  await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx, {
+    session, request, choice: { previewId: nextPreviewId, ideaId,
+      payloadDigest: nextPreview.payloadDigest,
+      payloadDigestKeyId: nextPreview.payloadDigestKeyId }, browserNonce, keys,
+  }));
+  const firstHold = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId }, select: { priceVersionId: true },
+  });
+  assert.ok(firstHold.priceVersionId);
+  const nextHoldId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx, {
+    holdId: nextHoldId, previewId: nextPreviewId,
+    priceVersionId: firstHold.priceVersionId!, runner, keys,
+  }));
+  const confirmed = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: nextPreviewId }, select: { confirmedAt: true },
+  });
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: nextPreviewId },
+    data: { state: "in_flight", consumedAt: confirmed.confirmedAt },
+  });
+  await prisma.amuxIdeaAnalysisBudgetHold.update({
+    where: { id: nextHoldId },
+    data: { status: "in_flight", dispatchedAt: new Date() },
+  });
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
+    data: { state: "in_flight", leaseGeneration: 1 },
+  });
+  await prisma.$transaction((tx) => commitAmuxKnownIdeaAnalysisSettlement(tx,
+    { holdId: nextHoldId, outcome: "verified_success",
+      inputTokens: 100, outputTokens: 50 }));
+  const secondOutput = JSON.stringify({ schemaVersion: 2,
+    previewId: nextPreviewId, chunkIndex: 1, outcome: "propose",
+    coverageStatus: "complete", continuationKind: null,
+    ownerQuestion: null, coveredScope: "Remaining cards", remainingScope: null,
+    units: [{ kind: "card", localId: "c1:card-0", cardType: "story",
+      storyKind: "general", title: "Review another card",
+      problem: "The first page was bounded.", scopeIn: ["Show the second page"],
+      scopeOut: ["Do not register cards"],
+      completionCriteria: ["The second page is visible"],
+      featureRef: "c0:node-2", parentStoryRef: null,
+      dependencyRefs: [], duplicateCandidateRefs: [],
+      taskRole: null, executionGrade: null, executionBrief: null,
+      sourceRefIds: ["operator_idea"] }],
+  });
+  const input = { ideaId, previewId: nextPreviewId, holdId: nextHoldId,
+    leaseGeneration: 1, rawModelOutput: secondOutput, keys };
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSecondIdeaAnalysisDraft(tx, { ...input, leaseGeneration: 0 })),
+  (error: unknown) => error instanceof AmuxSecondAnalysisDraftError &&
+    error.code === "not_ready");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSecondIdeaAnalysisDraft(tx, { ...input,
+      rawModelOutput: secondOutput.replace("c0:node-2", "forged-node") })),
+  (error: unknown) => error instanceof AmuxSecondAnalysisDraftError &&
+    error.code === "invalid_result");
+  assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: {
+    ideaId, chunkIndex: 1,
+  } }), 0);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSecondIdeaAnalysisDraft(tx, input),
+  { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }),
+  (error: unknown) => error instanceof AmuxSecondAnalysisDraftError &&
+    error.code === "not_ready");
+  const saved = await prisma.$transaction((tx) =>
+    commitAmuxSecondIdeaAnalysisDraft(tx, input));
+  assert.equal(saved.coverageStatus, "complete");
+  assert.equal(saved.unitCount, 1);
+  assert.equal(saved.nextChunkIndex, null);
+  const [idea, second, units, first, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
+    }),
+    prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId, chunkIndex: 1 } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: saved.auditId } }),
+  ]);
+  assert.equal(idea.state, "awaiting_owner");
+  assert.ok(idea.analysisCompletedAt);
+  assert.equal(second.state, "draft_ready");
+  assert.equal(second.outputPartIndex, 1);
+  assert.equal(second.outputPending, false);
+  assert.equal(units[0]?.localRef, "c1:card-0");
+  assert.equal(units[0]?.expiresAt.getTime(),
+    firstCompletedAt.getTime() + 30 * 24 * 60 * 60_000);
+  assert.ok(first.freeformPurgeAfter!.getTime() <=
+    idea.analysisCompletedAt!.getTime() + 24 * 60 * 60_000);
+  assert.equal(audit.action, AMUX_V4_SECOND_DRAFT_SAVED_ACTION);
+  assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+    AMUX_V4_SECOND_DRAFT_SAVED_SCOPE);
+  assert.equal(await prisma.amuxWorkItem.count({
+    where: { sourceSystem: "admin-idea-v4" },
+  }), workItemsBefore);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxSecondIdeaAnalysisDraft(tx, input)),
+  (error: unknown) => error instanceof AmuxSecondAnalysisDraftError &&
+    error.code === "not_ready");
 });

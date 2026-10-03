@@ -20,6 +20,9 @@ import {
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+  AMUX_V4_SECOND_DRAFT_SAVED_SCOPE,
+  AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
   AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
   AMUX_V4_IDEA_AUTO_CANCEL_SCOPE,
   AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
@@ -154,6 +157,20 @@ test("the system actor list is closed and changes only by review", () => {
       actorScope: AMUX_V4_FIRST_DRAFT_SAVED_SCOPE },
   })), "system");
   assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_SECOND_DRAFT_SAVED_ACTION, AMUX_V4_SECOND_DRAFT_SAVED_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+    targetType: AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_SECOND_DRAFT_SAVED_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+    targetType: AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_FIRST_DRAFT_SAVED_SCOPE },
+  })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
     AMUX_V4_IDEA_AUTO_CANCEL_ACTION, AMUX_V4_IDEA_AUTO_CANCEL_TARGET), true);
   assert.equal(auditRowActorKind(row({
     action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
@@ -264,7 +281,11 @@ test("no administrator audit call site names the reserved key", () => {
   // free of it, so a future caller that needs both has to come through review.
   // It reads source text only: metadata built at runtime (a parsed body, a
   // result object) is covered by the writer's own refusal, not by this scan.
-  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
+  // This reviewed AMUX service contains both audit writers. Its system
+  // entries name the marker as a writer argument, not administrator metadata;
+  // writeAdminAuditLog still rejects the reserved metadata key at runtime.
+  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts",
+    "lib/amux/ideaUnitRejectService.ts"]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
     .map((path) => relative(ROOT, path).split("\\").join("/"))

@@ -37,6 +37,20 @@ export async function readAmuxFirstIdeaAnalysisResultInTransaction(
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
     throw new AmuxIdeaAnalysisResultReadError("not_found");
   }
+  return readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
+    tx, actorUserId, ideaId, keys);
+}
+
+/** Internal only: the caller must already bind actorUserId to a locked idea
+ * and independently authenticate its fenced invocation. This helper grants
+ * no owner permission and is never exposed by an HTTP route. */
+export async function readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
+  tx: Prisma.TransactionClient, actorUserId: string, ideaId: string,
+  keys: AmuxContentKeys,
+): Promise<AmuxIdeaAnalysisResultView> {
+  if (!actorUserId || !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
+    throw new AmuxIdeaAnalysisResultReadError("not_found");
+  }
     const clock = await tx.$queryRaw<Array<{ now: Date }>>`
       SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
