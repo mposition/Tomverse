@@ -191,6 +191,18 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/qa-release-agent.md §6",
   },
   {
+    table: "QaReleaseMergeAttempt",
+    delegate: "qaReleaseMergeAttempt",
+    writers: ["lib/qaReleaseMergeLaneStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
+    table: "QaReleaseMergeLaneLatch",
+    delegate: "qaReleaseMergeLaneLatch",
+    writers: ["lib/qaReleaseMergeLaneStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -516,6 +528,51 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 4,
     reason:
       "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the instruction-issue transaction counted statement by statement: one constant SELECT that reads the newest operator control revision and switch, the newest latch event and whether an attempt is open, in one snapshot, and one constant INSERT ... RETURNING of the attempt row with bound values, so the trigger-set expiry comes back in the same statement. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the instruction-issue transaction counted statement by statement: one constant SELECT that reads the newest operator control revision and switch, the newest latch event and whether an attempt is open, in one snapshot, and one constant INSERT ... RETURNING of the attempt row with bound values, so the trigger-set expiry comes back in the same statement. No table name is interpolated; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the instruction-issue transaction counted statement by statement: one constant SELECT that reads the newest operator control revision and switch, the newest latch event and whether an attempt is open, in one snapshot, and one constant INSERT ... RETURNING of the attempt row with bound values, so the trigger-set expiry comes back in the same statement. No table name is interpolated; every value is a bound parameter. It reads the newest latch event here and writes none in this slice.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 18,
+    writeVerbs: 13,
+    reason:
+      "Creates the attempt table, its partial unique index and the triggers that constrain its insert and update and refuse delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      "The latch table's foreign key names the attempt an event concerns. It writes no attempt row; its write verbs constrain or refuse the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 12,
+    writeVerbs: 9,
+    reason:
+      "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",

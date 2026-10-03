@@ -260,6 +260,9 @@ run(
     // The merge lane's latch: consecutive events, set by the lane and
     // released by a person in the same transaction, nothing changed.
     "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
     // The Admin Agent digest reader: counts and codes, expired and
     // unreadable bodies shown as such.
     "tests/integration/agent-digest-console.db.test.ts",
