@@ -28,6 +28,7 @@ import {
 } from "@/lib/amux/ideaTransferPreviewInputCore";
 import {
   IdeaTransferPreviewError,
+  prepareFirstOutputContinuationTransferPreview,
   prepareIdeaOnlyTransferPreview,
   readIdeaOnlyTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewService";
@@ -100,8 +101,9 @@ export async function POST(request: Request) {
       return response;
     };
     try {
-      const result = await prepareIdeaOnlyTransferPreview(session, request, inspected.request,
-        browserNonce);
+      const prepare = inspected.request.chunkIndex === 1
+        ? prepareFirstOutputContinuationTransferPreview : prepareIdeaOnlyTransferPreview;
+      const result = await prepare(session, request, inspected.request, browserNonce);
       return attachBrowserCookie(NextResponse.json(
         { state: "prepared", ...result, transferAuthorized: false },
         { status: 201, headers: noStore }));

@@ -846,6 +846,17 @@ test("an output-continuable first result retains its first page without completi
   if (readback.state !== "prepared") throw new Error("continuation preview unavailable");
   assert.equal(readback.transferAuthorized, false);
   assert.equal(readback.payloadDigest, continued.payloadDigest);
+  const confirmed = await prisma.$transaction((tx) =>
+    commitIdeaTransferConfirmation(tx, { session, request,
+      choice: { previewId: nextPreviewId, ideaId,
+        payloadDigest: continued.payloadDigest,
+        payloadDigestKeyId: continued.payloadDigestKeyId },
+      browserNonce, keys,
+    }));
+  assert.equal(confirmed.previewId, nextPreviewId);
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: nextPreviewId },
+  })).state, "confirmed");
   await assert.rejects(prisma.$transaction((tx) =>
     commitFirstOutputContinuationTransferPreview(tx, {
       session, request, choice: { ...choice, previewId: randomUUID() },

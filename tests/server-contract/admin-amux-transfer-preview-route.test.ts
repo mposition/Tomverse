@@ -10,6 +10,7 @@ const ideaId = "123e4567-e89b-42d3-a456-426614174002";
 const approvalId = "123e4567-e89b-42d3-a456-426614174003";
 const choice = { version: 1, previewId, ideaId, provider: "openai",
   modelId: "gpt-frontier", reasoningEffort: "high", approvalId, approvalVersion: 1 };
+const continuationChoice = { ...choice, chunkIndex: 1 };
 class FakeIdeaTransferPreviewError extends Error {
   constructor(readonly code: string) { super(code); }
 }
@@ -21,6 +22,7 @@ const world = {
   writeOn: true,
   catalogOn: true,
   writes: 0,
+  continuations: 0,
   unknown: false,
   reads: 0,
   body: JSON.stringify(choice),
@@ -59,8 +61,11 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
       AMUX_V4_TRANSFER_PREVIEW_MAX_BYTES: 1024,
       AMUX_V4_TRANSFER_PREVIEW_READ_ENV: "TRANSFER_READ_TEST",
       AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV: "TRANSFER_WRITE_TEST",
-      inspectIdeaOnlyTransferPreviewRequest: (raw: string) => raw === JSON.stringify(choice)
-        ? { ok: true, request: choice } : { ok: false, code: "schema_rejected" },
+      inspectIdeaOnlyTransferPreviewRequest: (raw: string) =>
+        raw === JSON.stringify(choice) ? { ok: true, request: choice } :
+        raw === JSON.stringify(continuationChoice)
+          ? { ok: true, request: continuationChoice }
+          : { ok: false, code: "schema_rejected" },
       transferPreviewReadPermitted: () => world.readOn,
       transferPreviewWritePermitted: () => world.writeOn,
     } });
@@ -70,6 +75,11 @@ async function route(): Promise<{ POST: (request: Request) => Promise<Response>;
         world.writes += 1;
         if (world.unknown) throw new FakeIdeaTransferPreviewError("outcome_unknown");
         return { previewId, expiresAt: new Date("2026-10-02T10:00:00Z"), payload: { prompt: "synthetic" } };
+      },
+      prepareFirstOutputContinuationTransferPreview: async () => {
+        world.continuations += 1;
+        return { previewId, expiresAt: new Date("2026-10-02T10:00:00Z"),
+          payload: { prompt: "synthetic-continuation" } };
       },
       readIdeaOnlyTransferPreview: async () => {
         world.reads += 1;
@@ -89,7 +99,7 @@ const reset = () => {
   world.session = { user: { id: "owner-1" } };
   world.role = "owner"; world.recent = true;
   world.readOn = true; world.writeOn = true; world.catalogOn = true;
-  world.writes = 0; world.reads = 0; world.unknown = false;
+  world.writes = 0; world.continuations = 0; world.reads = 0; world.unknown = false;
   world.body = JSON.stringify(choice);
 };
 
@@ -138,6 +148,16 @@ test("prepared preview is no-store and never represents transfer permission", as
     const malformed = query.startsWith("?") ? query : `?${query}`;
     assert.equal((await GET(get(malformed))).status, 400);
   }
+});
+
+test("explicit second-page request prepares only the continuation preview", async () => {
+  const { POST } = await route();
+  reset(); world.body = JSON.stringify(continuationChoice);
+  const response = await POST(post());
+  assert.equal(response.status, 201);
+  assert.equal(world.writes, 0);
+  assert.equal(world.continuations, 1);
+  assert.equal((await response.json()).transferAuthorized, false);
 });
 
 test("unknown write keeps the same browser receipt for exact-ID read-back", async () => {

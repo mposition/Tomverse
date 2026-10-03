@@ -54,12 +54,23 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     FOR UPDATE
   `;
   if (owned.length !== 1) throw new IdeaTransferConfirmationError("not_found");
-  const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
+  const identity = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: choice.previewId }, select: { ideaId: true, chunkIndex: true },
+  });
+  if (!identity || identity.ideaId !== choice.ideaId ||
+      ![0, 1].includes(identity.chunkIndex)) {
+    throw new IdeaTransferConfirmationError("not_found");
+  }
+  const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
     WHERE "ideaId" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
-      AND "chunkIndex" = 0 FOR UPDATE
+      AND "chunkIndex" <= ${identity.chunkIndex}
+    ORDER BY "chunkIndex" FOR UPDATE
   `;
-  if (chunkLock.length !== 1) throw new IdeaTransferConfirmationError("not_ready");
+  if (chunkLocks.length !== identity.chunkIndex + 1 ||
+      chunkLocks.some((row, index) => row.chunkIndex !== index)) {
+    throw new IdeaTransferConfirmationError("not_ready");
+  }
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaTransferPreview"
     WHERE "id" = ${choice.previewId} AND "ideaId" = ${choice.ideaId}
@@ -76,7 +87,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
   const [idea, chunk, row] = await Promise.all([
     tx.amuxIdeaSubmission.findUnique({ where: { id: choice.ideaId } }),
     tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 0 } },
+      where: { ideaId_chunkIndex: { ideaId: choice.ideaId,
+        chunkIndex: identity.chunkIndex } },
     }),
     tx.amuxIdeaTransferPreview.findUnique({ where: { id: choice.previewId } }),
   ]);
@@ -84,14 +96,27 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       row.ideaId !== idea.id || row.sourceScopeApprovalId !== null ||
       !row.sourcePlanRevisionId || !row.payloadCiphertext || !row.payloadKeyId ||
       !row.payloadKeyVersion || row.payloadPurgedAt !== null ||
-      idea.state !== "submitted" || now >= idea.analysisDeadlineAt ||
+      idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
+      idea.analysisCompletedAt !== null || idea.cancelledAt !== null ||
+      now >= idea.analysisDeadlineAt ||
       idea.currentSourcePlanRevisionId !== row.sourcePlanRevisionId ||
+      row.chunkIndex !== identity.chunkIndex ||
       chunk.actorUserId !== actorUserId || chunk.state !== "awaiting_preview" ||
       chunk.currentPreviewId !== row.id || chunk.attempt !== row.attempt ||
       chunk.sourcePlanRevisionId !== row.sourcePlanRevisionId ||
       row.state !== "prepared" || row.confirmedAt !== null ||
       row.consumedAt !== null) {
     throw new IdeaTransferConfirmationError("not_ready");
+  }
+  if (identity.chunkIndex === 1) {
+    const first = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: idea.id, chunkIndex: 0 } },
+    });
+    if (first?.state !== "draft_ready" || first.outputPending !== true ||
+        first.sourcePlanRevisionId !== row.sourcePlanRevisionId ||
+        first.analysisCompletedAt === null) {
+      throw new IdeaTransferConfirmationError("not_ready");
+    }
   }
   if (now >= row.expiresAt) throw new IdeaTransferConfirmationError("expired");
   if (!sameDigest(choice.payloadDigest, row.payloadDigest) ||
@@ -116,7 +141,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       Array.isArray(metadata) ||
       (metadata as Record<string, unknown>).payloadDigest !== row.payloadDigest ||
       (metadata as Record<string, unknown>).payloadDigestKeyId !== row.payloadDigestKeyId ||
-      (metadata as Record<string, unknown>).sourcePlanRevisionId !== row.sourcePlanRevisionId) {
+      (metadata as Record<string, unknown>).sourcePlanRevisionId !== row.sourcePlanRevisionId ||
+      (metadata as Record<string, unknown>).chunkIndex !== row.chunkIndex) {
     throw new IdeaTransferConfirmationError("integrity_unavailable");
   }
   const browserBindingDigest = (metadata as Record<string, unknown>).browserBindingDigest;
@@ -161,7 +187,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     request: input.request, action: "amux.v4.transfer_preview.confirmed",
     targetType: "AmuxIdeaTransferPreview", targetId: row.id,
     summary: "Owner confirmed one exact AMUX v4 idea-only model input; no model was called.",
-    metadata: { ideaId: idea.id, sourcePlanRevisionId: row.sourcePlanRevisionId,
+    metadata: { ideaId: idea.id, chunkIndex: row.chunkIndex,
+      sourcePlanRevisionId: row.sourcePlanRevisionId,
       payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
       modelId: row.modelId, modelCallStarted: false },
   });

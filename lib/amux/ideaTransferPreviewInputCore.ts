@@ -15,6 +15,7 @@ export const transferPreviewReadPermitted = (value: string | undefined): boolean
 export type IdeaOnlyTransferPreviewRequest = {
   previewId: string;
   ideaId: string;
+  chunkIndex?: 1;
   replacesPreviewId?: string;
   provider: "openai" | "anthropic";
   modelId: string;
@@ -28,6 +29,7 @@ const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const FIELDS = ["version", "previewId", "ideaId", "provider", "modelId",
   "reasoningEffort", "approvalId", "approvalVersion"];
 const REPLACEMENT_FIELD = "replacesPreviewId";
+const CONTINUATION_FIELD = "chunkIndex";
 
 export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   | { ok: true; request: IdeaOnlyTransferPreviewRequest }
@@ -42,7 +44,8 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   }
   const value = parsed as Record<string, unknown>;
   const replacing = Object.hasOwn(value, REPLACEMENT_FIELD);
-  if (Object.keys(value).length !== FIELDS.length + Number(replacing) ||
+  const continuing = Object.hasOwn(value, CONTINUATION_FIELD);
+  if (Object.keys(value).length !== FIELDS.length + Number(replacing) + Number(continuing) ||
       !FIELDS.every((field) => Object.hasOwn(value, field)) ||
       value.version !== 1 ||
       typeof value.previewId !== "string" || !isAmuxIdeaRequestId(value.previewId) ||
@@ -50,6 +53,7 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
       (replacing && (typeof value.replacesPreviewId !== "string" ||
         !isAmuxIdeaRequestId(value.replacesPreviewId) ||
         value.replacesPreviewId === value.previewId)) ||
+      (continuing && (value.chunkIndex !== 1 || replacing)) ||
       (value.provider !== "openai" && value.provider !== "anthropic") ||
       typeof value.modelId !== "string" || !MODEL_ID.test(value.modelId) ||
       typeof value.reasoningEffort !== "string" || !EFFORTS.has(value.reasoningEffort) ||
@@ -59,6 +63,7 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   }
   return { ok: true, request: {
     previewId: value.previewId, ideaId: value.ideaId,
+    ...(continuing ? { chunkIndex: 1 as const } : {}),
     ...(replacing ? { replacesPreviewId: value.replacesPreviewId as string } : {}),
     provider: value.provider, modelId: value.modelId,
     reasoningEffort: value.reasoningEffort as IdeaOnlyTransferPreviewRequest["reasoningEffort"],

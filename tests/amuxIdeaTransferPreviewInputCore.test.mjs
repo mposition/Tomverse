@@ -62,3 +62,20 @@ test("expired preview replacement names one different prior receipt", () => {
     })), { ok: false, code: "schema_rejected" });
   }
 });
+
+test("a second output page is explicit and cannot also replace a first preview", () => {
+  assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+    ...input, chunkIndex: 1,
+  })), { ok: true, request: {
+    previewId: input.previewId, ideaId: input.ideaId, chunkIndex: 1,
+    provider: input.provider, modelId: input.modelId,
+    reasoningEffort: input.reasoningEffort,
+    approvalId: input.approvalId, approvalVersion: input.approvalVersion,
+  } });
+  for (const changed of [{ chunkIndex: 0 }, { chunkIndex: 2 },
+    { chunkIndex: 1, replacesPreviewId: "123e4567-e89b-42d3-a456-426614174004" }]) {
+    assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+      ...input, ...changed,
+    })), { ok: false, code: "schema_rejected" });
+  }
+});

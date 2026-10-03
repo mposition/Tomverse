@@ -37,10 +37,6 @@ export async function readAmuxFirstIdeaAnalysisResultInTransaction(
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
     throw new AmuxIdeaAnalysisResultReadError("not_found");
   }
-    await tx.$queryRaw`
-      SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
-             set_config('idle_in_transaction_session_timeout', '5000', true) AS idle_limit
-    `;
     const clock = await tx.$queryRaw<Array<{ now: Date }>>`
       SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
@@ -224,8 +220,13 @@ export async function readAmuxFirstIdeaAnalysisResultInTransaction(
 export async function readAmuxFirstIdeaAnalysisResult(
   session: Session, ideaId: string, keys: AmuxContentKeys,
 ): Promise<AmuxIdeaAnalysisResultView> {
-  return prisma.$transaction((tx) => readAmuxFirstIdeaAnalysisResultInTransaction(
-    tx, session, ideaId, keys),
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
+             set_config('idle_in_transaction_session_timeout', '5000', true) AS idle_limit
+    `;
+    return readAmuxFirstIdeaAnalysisResultInTransaction(tx, session, ideaId, keys);
+  },
   { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 8_000 });
 }
