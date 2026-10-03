@@ -4,9 +4,13 @@ import type { Prisma } from "@prisma/client";
 
 import { promptRefinerVnextOneShotApprovalAuditsAreValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
+import {
+  PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
+  PROMPT_REFINER_VNEXT_SLOT_COUNT,
+} from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
-const SLOT_COST_MICRO_USD = BigInt(29_918);
+const SLOT_COST_MICRO_USD = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 
 type StageStatus = "staged" | "run_approved" | "closed";
 
@@ -57,7 +61,7 @@ export async function readPromptRefinerVnextOneShotStage(
   let slotsValid = true;
   for (const slot of slots) {
     if (!Number.isInteger(slot.slotIndex) || slot.slotIndex < 0 ||
-      slot.slotIndex >= 80 || indices.has(slot.slotIndex) ||
+      slot.slotIndex >= PROMPT_REFINER_VNEXT_SLOT_COUNT || indices.has(slot.slotIndex) ||
       slot.reservedCostMicroUsd !== SLOT_COST_MICRO_USD) {
       slotsValid = false;
     }
@@ -78,8 +82,11 @@ export async function readPromptRefinerVnextOneShotStage(
     slotCount: slots.length,
     reservedSlots,
     consumedSlots,
-    reservationShapeValid: slotsValid && stageStatus !== null && stage.slotCount === 80 &&
-      slots.length === 80 && indices.size === 80 && reservedSlots + consumedSlots === 80,
+    reservationShapeValid: slotsValid && stageStatus !== null &&
+      stage.slotCount === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
+      slots.length === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
+      indices.size === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
+      reservedSlots + consumedSlots === PROMPT_REFINER_VNEXT_SLOT_COUNT,
     approvalAuditsValid: stageStatus !== null &&
       await promptRefinerVnextOneShotApprovalAuditsAreValid(tx, stage),
     dispatchAuthorized: false,

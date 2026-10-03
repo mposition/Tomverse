@@ -56,7 +56,8 @@ async function loadRoute() {
   mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
     readPromptRefinerVnextOneShotStage: async () => {
       reads++;
-      return { stagePresent: false, reservationShapeValid: false,
+      return { stagePresent: false, stageStatus: null, slotCount: 0,
+        reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
         approvalAuditsValid: false, dispatchAuthorized: false };
     },
   } });
@@ -100,7 +101,8 @@ test("response is content-free; database failure does not leak details", async (
   assert.equal(rateLimits, 1);
   assert.equal(reads, 1);
   assert.deepEqual(await response.json(), { readback: {
-    stagePresent: false, reservationShapeValid: false,
+    stagePresent: false, stageStatus: null, slotCount: 0,
+    reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
     approvalAuditsValid: false, dispatchAuthorized: false,
   } });
   readError = true;
