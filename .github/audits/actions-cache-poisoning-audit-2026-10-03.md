@@ -688,6 +688,17 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
 
 ### P4. `cacheIsolationRecorded` 기록의 문구를 한정합니다 — 3순위, F5의 답
 
+> **구현 완료.** `docs/policy/engineering-agent.md` §5에 "그 기록이 담아야 하는
+> 것" 세 항목을 넣었습니다 — PR → 다른 ref는 닫혀 있다(근거: 공식 규칙), 기본·
+> base → PR은 열려 있고 **격리를 근거로 쓸 수 없다**, 같은 PR 안은 열려 있으므로
+> 에이전트 PR에서 도는 자격증명 cache 복원 job이 없음을 **job의 조건식까지 읽어**
+> 따로 확인해야 한다. "Actions cache는 ref 간에 격리된다"는 거짓이라고 명시했습니다.
+>
+> 새 §5.1이 cache 종류와 그것을 유지하는 검사를 적고, 3번 항목의 근거가
+> `check:credential-cache-separation`에 달려 있음을 밝힙니다. **기록 자체를 쓰는
+> 것(`cacheIsolationRecorded: true`)은 여전히 소유자의 행위이고 이 변경에
+> 포함되지 않습니다** — 호출자 둘 다 `false`로 남아 있습니다.
+
 **초안은 이 항목을 2순위이자 P3의 선행 조건으로 두었습니다. 독립 검토(9장)가
 그 판단을 뒤집었으므로 3순위로 내리고 내용을 줄입니다.**
 

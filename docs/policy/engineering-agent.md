@@ -199,6 +199,23 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push 금지**다. 이 가정을
   푸는 방법은 job별 제외가 아니라, cache의 ref 간 공유 범위에 대한 날짜 있는 확인
   기록 하나를 분석기 설정에 고정하는 것뿐이다.
+  분석기는 복원하는 cache의 **종류**도 함께 보고하지만(§5.1), 그것이 이 규칙을
+  좁히지는 않는다 — 어떤 종류든 복원하면 금지다.
+- **그 기록이 담아야 하는 것**(§5.1): 기록은 **방향을 구분해서** 써야 하고, 아래
+  세 문장을 각각 근거와 함께 담지 않은 기록은 이 규칙을 풀지 못한다.
+  1. **PR run → 다른 ref: 닫혀 있다.** 근거는 GitHub의 cache scope 규칙이다 —
+     PR run의 cache는 merge ref scope에 만들어지고 그 PR의 re-run만 복원한다.
+     에이전트가 심을 수 있는 cache는 자기 PR의 것뿐이므로, 이 한 문장이 "에이전트가
+     심은 cache가 자격증명 job에 도달하는가"에 답한다.
+  2. **기본 branch·base → PR: 열려 있다.** 기본 branch의 항목은 모든 run이, base의
+     항목은 그 base를 향한 모든 PR이 복원할 수 있다. 이 방향은 주체가 에이전트가
+     아니므로 이 규칙이 다루는 위협이 아니고, 근거를 격리에서 가져올 수 없다.
+     **"Actions cache는 ref 간에 격리된다"고 쓰면 거짓이다.**
+  3. **같은 PR 안: 열려 있다.** 위 규칙의 같은 문장이 "re-runs of the pull request"는
+     복원할 수 있다고 말한다. 그러므로 기록은 "에이전트의 PR에서 실제로 도는 자격증명
+     cache 복원 job이 없다"를 따로 확인해야 하고, 그 확인은 workflow의 trigger만이
+     아니라 **job의 조건식까지** 읽어야 성립한다 — trigger만 보고 판정하면 틀린다.
+     이 확인은 날짜와 함께 쓰고, 유지 여부는 §5.1의 검사가 책임진다.
 - **결과**: 자격증명을 가진 job이 있는 도달 workflow마다 그 workflow의 path filter에
   걸리는 파일이 push 금지다. filter가 없거나 해석되지 않으면 모든 변경이 금지다.
 - **사람이 검토한 제외**: 결과를 좁히는 유일한 방법은 `{workflow 경로, job id, blob
@@ -209,6 +226,32 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   변경이 push 금지다.
 
 **아직 해소되지 않은 도달 경로의 구체 목록은 이 문서에 싣지 않는다**(§16).
+
+### 5.1 cache 종류와 그것을 유지하는 검사
+
+이 분석은 저장소 전체 CI의 cache 위생 감사에서 나온 결과를 함께 쓴다
+(`.github/audits/actions-cache-poisoning-audit-2026-10-03.md`).
+
+- **분석기는 복원하는 cache의 종류를 보고한다.** `verified_package_manager`는
+  package manager 자신의 cache이고, `npm ci`가 lockfile의 integrity와 대조하므로
+  조작된 항목은 실패하거나 다시 내려받는다. `unverified`는 build 산출물과 browser
+  binary처럼 **아무것도 검증하지 않는** 것이고, job이 그것을 그대로 실행한다.
+  `unreadable`은 읽을 수 없는 것이며 둘 중 나쁜 쪽으로 취급한다.
+- **종류는 §5의 cache 규칙을 좁히지 않는다.** 어떤 종류든 복원하면 모든 변경이
+  push 금지다. 종류를 보고하는 이유는 하나다 — 자격증명 job이 verified에서
+  unverified로 옮겨 가는 것이 **같은 reason의 반복이 아니라 다른 사실**이 되게
+  하는 것. 그 전환은 `tests/agentCredentialReachability.test.mjs`의 posture digest가
+  본다.
+- **`npm run check:credential-cache-separation`이 그 전환을 막는다.** 자격증명을
+  가진 job은 `unverified`·`unreadable` cache를 복원할 수 없고, 이 검사는 PR Fast
+  Gate의 static 단계에서 돈다. 판정은 같은 모듈(`lib/agentCredentialReachability.ts`)
+  이 하므로 "어느 job이 자격증명을 가졌는가"에 답이 둘로 갈라지지 않는다.
+- **이 검사가 §5의 기록(위 "그 기록이 담아야 하는 것" 3번)의 유지 장치다.** 기록이
+  "에이전트 PR에서 도는 자격증명 cache 복원 job이 없다"를 근거로 쓸 수 있는 것은
+  이 검사가 그 상태를 계속 지키기 때문이고, 검사가 사라지면 기록도 근거를 잃는다.
+- 검사와 보고는 **이름을 출력하지 않는다**. 저장소가 공개이므로 §16이 미해소 대상의
+  목록을 여기에 두지 못하게 한다. 수치만 남기고, 목록은 운영자가 로컬에서
+  `npm run report:engineering-agent-tiers`로 본다.
 
 ## 6. 신뢰 경계와 외부 텍스트
 
