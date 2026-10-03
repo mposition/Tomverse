@@ -65,6 +65,9 @@ export async function readAmuxFirstIdeaAnalysisResult(
     if (partial && (!chunk || chunk.state !== "draft_ready")) {
       return { state: "pending" };
     }
+    const nextChunk = partial ? await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
+    }) : null;
     const units = await tx.amuxIdeaDraftUnit.findMany({
       where: { ideaId, actorUserId, chunkIndex: 0 },
       orderBy: { unitIndex: "asc" },
@@ -95,6 +98,11 @@ export async function readAmuxFirstIdeaAnalysisResult(
         meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||
         meta.unitCount !== units.length ||
         !matchesAmuxIdeaAnalysisCursorAudit(metadata, chunk, partial) ||
+        (partial ? meta.nextChunkIndex !== 1 || !nextChunk ||
+          nextChunk.actorUserId !== actorUserId ||
+          nextChunk.sourcePlanRevisionId !== chunk.sourcePlanRevisionId ||
+          nextChunk.planStartChunkIndex !== 0 || nextChunk.revisionChunkIndex !== 1 :
+          Object.hasOwn(meta, "nextChunkIndex") && meta.nextChunkIndex !== null) ||
         !matchesAmuxIdeaAnalysisUnitCommitments(meta.unitCommitments, units) ||
         meta.cardRegistrationStarted !== false ||
         !["propose", "reject"].includes(String(meta.outcome)) ||
