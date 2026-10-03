@@ -12,6 +12,8 @@ import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
+import { createPromptRefinerVnextOneShotStageWithSlots } from
+  "@/lib/promptRefinerVnextOneShotStageWriter";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const fixtureKey = "synthetic-chat01-a06-audit-integrity-key";
@@ -147,23 +149,81 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(await prisma.adminAuditLog.count(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
 
-      const { auditLogId } = await prisma.$transaction(async (tx) => {
-        const approval = await append(tx);
-        await insertStage(tx, approval.auditLogId, approval.approvedBy, 80);
-        return approval;
-      });
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const { auditLogId, approvedBy } = await append(tx);
+        await insertStage(tx, auditLogId, approvedBy, 81);
+      }), /slot|index|constraint/i);
+      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
+
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request,
+        binding: { ...binding, costCeilingMicroUsd: BigInt(2_393_441) },
+      }), /stage_audit_binding_invalid/);
+      assert.equal(await prisma.adminAuditLog.count(), 0);
+
+      // Exercise the actual A07 writer, not only a hand-built transaction.
+      await setup.query(`CREATE FUNCTION reject_slot_forty() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."slotIndex" = 40 THEN RAISE EXCEPTION 'synthetic slot failure'; END IF;
+          RETURN NEW;
+        END;
+      $$ LANGUAGE plpgsql`);
+      await setup.query(`CREATE TRIGGER reject_slot_forty_trigger BEFORE INSERT
+        ON "PromptRefinerVnextOneShotSlot" FOR EACH ROW
+        EXECUTE FUNCTION reject_slot_forty()`);
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }), /synthetic slot failure/);
+      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
+      await setup.query(`DROP TRIGGER reject_slot_forty_trigger
+        ON "PromptRefinerVnextOneShotSlot"`);
+      await setup.query(`DROP FUNCTION reject_slot_forty()`);
+
+      const extraFields = { ...binding, status: "run_approved",
+        runApprovalAuditLogId: "forged-audit-id" };
+      const competing = await Promise.allSettled(Array.from({ length: 2 }, () =>
+        createPromptRefinerVnextOneShotStageWithSlots({
+          session, request, binding: extraFields,
+        })
+      ));
+      const committed = competing.filter((result) => result.status === "fulfilled");
+      const refused = competing.filter((result) => result.status === "rejected");
+      assert.equal(committed.length, 1, "only one concurrent stage may commit");
+      assert.equal(refused.length, 1, "the duplicate stage must be refused");
+      assert.match(String((refused[0] as PromiseRejectedResult).reason),
+        /unique|P2002|duplicate/i);
+      const { stageApprovalAuditLogId: auditLogId, slotCount } =
+        (committed[0] as PromiseFulfilledResult<Awaited<ReturnType<
+          typeof createPromptRefinerVnextOneShotStageWithSlots>>>).value;
+      assert.equal(slotCount, 80);
       const stage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: stageId },
       });
+      assert.equal(stage.status, "staged");
+      assert.equal(stage.runApprovalAuditLogId, null);
       const audit = await prisma.adminAuditLog.findUniqueOrThrow({
         where: { id: auditLogId },
       });
       assert.equal(stage.stageApprovalAuditLogId, audit.id);
       assert.equal(stage.approvedAt.getTime(), audit.createdAt.getTime());
       assert.match(audit.entryHash ?? "", /^[0-9a-f]{64}$/);
-      assert.equal((await prisma.$transaction(readPromptRefinerVnextOneShotStage))
-        .approvalAuditsValid, true);
+      const readback = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
+      assert.equal(readback.approvalAuditsValid, true);
+      assert.equal(readback.reservationShapeValid, true);
+      assert.equal(readback.reservedSlots, 80);
+      assert.equal(readback.dispatchAuthorized, false);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      assert.equal(await prisma.adminAuditLog.count(), 1,
+        "the refused concurrent approval must not leave an audit row");
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }));
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      assert.equal(await prisma.adminAuditLog.count(), 1);
     } finally {
       await prisma.$disconnect();
       await setup.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
