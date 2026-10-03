@@ -53,6 +53,11 @@ import {
   AMUX_V4_ANALYSIS_RESULT_READ_ENV,
   amuxV4AnalysisResultReadEnabled,
 } from "@/lib/amux/ideaAnalysisResultReadCore";
+import { AMUX_V4_COLLECTION_REQUEST_READ_ENV, AMUX_V4_COLLECTION_REQUEST_WRITE_ENV,
+  collectionRequestReadPermitted, collectionRequestWritePermitted,
+} from "@/lib/amux/ideaCollectionRequestService";
+import { AMUX_V4_COLLECTION_PREVIEW_READ_ENV, collectionPreviewReadPermitted,
+} from "@/lib/amux/ideaCollectionPreviewCore";
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
@@ -131,6 +136,11 @@ export default async function AdminAmuxBacklogPage({
           sourceScopeApprovalAvailable={sourceScopeApprovalAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
+          collectionRequestAvailable={sourceScopeApprovalAvailable && frontierModelsAvailable &&
+            collectionRequestReadPermitted(process.env[AMUX_V4_COLLECTION_REQUEST_READ_ENV]) &&
+            collectionRequestWritePermitted(process.env[AMUX_V4_COLLECTION_REQUEST_WRITE_ENV])}
+          collectionPreviewReadAvailable={collectionPreviewReadPermitted(
+            process.env[AMUX_V4_COLLECTION_PREVIEW_READ_ENV])}
           transferPreviewAvailable={transferPreviewAvailable}
           transferConfirmAvailable={transferConfirmAvailable}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(

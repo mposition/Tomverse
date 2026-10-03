@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -33,16 +33,19 @@ type ConfirmState =
   | { kind: "idle" | "pending" | "unknown" | "expired" | "refused" }
   | { kind: "confirmed"; value: ConfirmedIdeaTransfer };
 
+export type CheckedCollectionModel = AvailableFrontierModel & { reasoningEffort: string };
+
 const receiptStore = (): Storage | null => {
   try { return window.sessionStorage; } catch { return null; }
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
   ideaId, planReady,
-  declaredExternalSources, operatorId }: {
+  declaredExternalSources, operatorId, onCheckedCollectionModel }: {
   available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
+  onCheckedCollectionModel?: (model: CheckedCollectionModel | null) => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const { locale } = useAdminLocale();
@@ -53,9 +56,16 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const [selectedEffort, setSelectedEffort] = useState("");
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
+  const selectionVersion = useRef(0);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
+
+  useEffect(() => {
+    selectionVersion.current += 1;
+    onCheckedCollectionModel?.(null);
+    return () => { selectionVersion.current += 1; };
+  }, [ideaId, onCheckedCollectionModel]);
 
   const readConfirmation = useCallback(async (pendingId: string,
     expectedIdeaId: string, expectedDigest: string, expectedDigestKeyId: string):
@@ -197,6 +207,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   }, [ideaId, operatorId, previewAvailable, readBack]);
 
   const refresh = () => {
+    selectionVersion.current += 1;
+    onCheckedCollectionModel?.(null);
+    setChecking(false);
     setLoading(true);
     setFailure(null);
     setModels(null);
@@ -208,8 +221,10 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   const checkSelection = async () => {
     if (!selected || !selected.allowedEfforts.includes(selectedEffort) || checking) return;
+    const version = selectionVersion.current;
     setChecking(true);
     setChecked(false);
+    onCheckedCollectionModel?.(null);
     setFailure(null);
     try {
       const params = new URLSearchParams({ mode: "check", provider: selected.provider,
@@ -217,22 +232,27 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       const response = await adminFetch(`/api/admin/amux/ideas/frontier-models?${params}`,
         { cache: "no-store" });
       if (!response.ok) {
-        setFailure(await readAdminApiFailure(response, {
+        const reason = await readAdminApiFailure(response, {
           fallback: m.frontierSelectionUnavailable, locale,
-        }));
+        });
+        if (version === selectionVersion.current) setFailure(reason);
         return;
       }
       const result = readCheckedFrontierSelection(response.status, await response.json(), selected);
+      if (version !== selectionVersion.current) return;
       if (!result) {
         setFailure({ message: m.frontierModelsInvalid, tone: "error",
           requiresReauthentication: false, approvalId: null });
         return;
       }
       setChecked(true);
+      onCheckedCollectionModel?.({ ...selected, reasoningEffort: selectedEffort });
     } catch {
-      setFailure({ message: m.frontierSelectionUnavailable, tone: "error",
-        requiresReauthentication: false, approvalId: null });
-    } finally { setChecking(false); }
+      if (version === selectionVersion.current) {
+        setFailure({ message: m.frontierSelectionUnavailable, tone: "error",
+          requiresReauthentication: false, approvalId: null });
+      }
+    } finally { if (version === selectionVersion.current) setChecking(false); }
   };
 
   const preparePreview = async () => {
@@ -385,7 +405,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           <label className="flex flex-col gap-1">
             {m.frontierSelectionModel}
             <select value={selectedApprovalId} disabled={checking}
-              onChange={(event) => { setSelectedApprovalId(event.target.value); setSelectedEffort(""); setChecked(false); }}
+              onChange={(event) => { selectionVersion.current += 1; onCheckedCollectionModel?.(null); setSelectedApprovalId(event.target.value); setSelectedEffort(""); setChecked(false); }}
               className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
               <option value="">{m.frontierSelectionChoose}</option>
               {models.map((model) => <option key={model.approvalId} value={model.approvalId}>
@@ -396,7 +416,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
           {selected ? <label className="flex flex-col gap-1">
             {m.frontierModelsEfforts}
             <select value={selectedEffort} disabled={checking}
-              onChange={(event) => { setSelectedEffort(event.target.value); setChecked(false); }}
+              onChange={(event) => { selectionVersion.current += 1; onCheckedCollectionModel?.(null); setSelectedEffort(event.target.value); setChecked(false); }}
               className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
               <option value="">{m.frontierSelectionChoose}</option>
               {selected.allowedEfforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}

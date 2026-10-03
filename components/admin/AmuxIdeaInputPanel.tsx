@@ -5,8 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPanel";
+import type { CheckedCollectionModel } from "@/components/admin/AmuxFrontierModelsPanel";
+import { AmuxCollectionRequestPanel } from "@/components/admin/AmuxCollectionRequestPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
 import { AmuxSourceScopeApprovalPanel } from "@/components/admin/AmuxSourceScopeApprovalPanel";
+import type { ApprovedCollectionScope } from "@/components/admin/AmuxSourceScopeApprovalPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -77,11 +80,13 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   sourceScopeApprovalAvailable,
-  initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
+  initialPlanAvailable, frontierModelsAvailable, collectionRequestAvailable,
+  collectionPreviewReadAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisResultAvailable, recentAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   sourceScopeApprovalAvailable: boolean;
-  initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
+  initialPlanAvailable: boolean; frontierModelsAvailable: boolean; collectionRequestAvailable: boolean;
+  collectionPreviewReadAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisResultAvailable: boolean;
   recentAvailable: boolean; operatorId: string;
@@ -115,6 +120,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [sourcePath, setSourcePath] = useState("");
   const [sourceScopePending, setSourceScopePending] = useState(false);
   const [sourceScopeResult, setSourceScopeResult] = useState<SourceScopeResult>({ kind: "idle" });
+  const [approvedCollectionScope, setApprovedCollectionScope] = useState<ApprovedCollectionScope | null>(null);
+  const [checkedCollectionModel, setCheckedCollectionModel] = useState<CheckedCollectionModel | null>(null);
+  const invalidateSourceScope = () => {
+    setSourceScopeResult({ kind: "idle" });
+    setApprovedCollectionScope(null);
+  };
   const inputRevision = useRef(0);
   const inFlight = useRef(false);
 
@@ -151,6 +162,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourceSide("head");
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
+    setApprovedCollectionScope(null);
+    setCheckedCollectionModel(null);
     setSubmission({ kind: "idle" });
   };
 
@@ -165,7 +178,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         number: Number(sourcePrNumber), baseSha: sourceBaseSha.trim(),
         headSha: sourceHeadSha.trim(), side: sourceSide, path: sourcePath.trim() };
     setSourceScopePending(true);
-    setSourceScopeResult({ kind: "idle" });
+    invalidateSourceScope();
+    setApprovedCollectionScope(null);
+    setCheckedCollectionModel(null);
     try {
       const response = await adminFetch("/api/admin/amux/ideas/source-scope-preview", {
         method: "POST",
@@ -280,6 +295,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     setSourceSide("head");
     setSourcePath("");
     setSourceScopeResult({ kind: "idle" });
+    setApprovedCollectionScope(null);
+    setCheckedCollectionModel(null);
     inFlight.current = true;
     setSubmission({ kind: "selection_pending", requestId });
     void readBack(requestId, "selection");
@@ -618,6 +635,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         operatorId={operatorId}
+        onCheckedCollectionModel={setCheckedCollectionModel}
       />
       {analysisResultAvailable && submission.kind === "submitted" ?
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId} /> : null}
@@ -629,7 +647,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             {messages.sourceKindLabel}
             <select value={sourceKind} onChange={(event) => {
               setSourceKind(event.target.value as "repository_file" | "pull_request_file");
-              setSourceScopeResult({ kind: "idle" });
+              invalidateSourceScope();
             }} disabled={sourceScopePending}
             className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900">
               <option value="repository_file">{messages.sourceRepositoryFile}</option>
@@ -639,35 +657,35 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           <div className="grid gap-3 md:grid-cols-3">
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourceRepositoryLabel}
-              <input value={sourceRepository} maxLength={165} spellCheck={false} onChange={(event) => { setSourceRepository(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+              <input value={sourceRepository} maxLength={165} spellCheck={false} onChange={(event) => { setSourceRepository(event.target.value); invalidateSourceScope(); }}
                 disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
             </label>
             {sourceKind === "repository_file" ? (
               <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
                 {messages.sourceCommitLabel}
-                <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); invalidateSourceScope(); }}
                   disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
               </label>
             ) : (
               <>
                 <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
                   {messages.sourcePrNumberLabel}
-                  <input value={sourcePrNumber} maxLength={20} inputMode="numeric" onChange={(event) => { setSourcePrNumber(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                  <input value={sourcePrNumber} maxLength={20} inputMode="numeric" onChange={(event) => { setSourcePrNumber(event.target.value); invalidateSourceScope(); }}
                     disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
                 </label>
                 <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
                   {messages.sourceBaseShaLabel}
-                  <input value={sourceBaseSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceBaseSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                  <input value={sourceBaseSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceBaseSha(event.target.value); invalidateSourceScope(); }}
                     disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
                 </label>
                 <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
                   {messages.sourceHeadShaLabel}
-                  <input value={sourceHeadSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceHeadSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+                  <input value={sourceHeadSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceHeadSha(event.target.value); invalidateSourceScope(); }}
                     disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
                 </label>
                 <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
                   {messages.sourceSideLabel}
-                  <select value={sourceSide} onChange={(event) => { setSourceSide(event.target.value as "base" | "head"); setSourceScopeResult({ kind: "idle" }); }}
+                  <select value={sourceSide} onChange={(event) => { setSourceSide(event.target.value as "base" | "head"); invalidateSourceScope(); }}
                     disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900">
                     <option value="head">{messages.sourceHeadSide}</option>
                     <option value="base">{messages.sourceBaseSide}</option>
@@ -677,7 +695,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             )}
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourcePathLabel}
-              <input value={sourcePath} maxLength={256} spellCheck={false} onChange={(event) => { setSourcePath(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
+              <input value={sourcePath} maxLength={256} spellCheck={false} onChange={(event) => { setSourcePath(event.target.value); invalidateSourceScope(); }}
                 disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
             </label>
           </div>
@@ -694,7 +712,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
               <AmuxSourceScopeApprovalPanel
                 key={`${submission.ideaId}:${sourceScopeResult.scopeDigest}`}
                 ideaId={submission.ideaId} operatorId={operatorId}
-                checked={sourceScopeResult} available={sourceScopeApprovalAvailable} />
+                checked={sourceScopeResult} available={sourceScopeApprovalAvailable}
+                onApproved={setApprovedCollectionScope} />
+              {approvedCollectionScope?.ideaId === submission.ideaId &&
+               approvedCollectionScope.scopeDigest === sourceScopeResult.scopeDigest &&
+               checkedCollectionModel ? <AmuxCollectionRequestPanel
+                 key={`${submission.ideaId}:${approvedCollectionScope.approvalId}:${approvedCollectionScope.scopeDigest}:${checkedCollectionModel.approvalId}:${checkedCollectionModel.approvalVersion}:${checkedCollectionModel.reasoningEffort}`}
+                 ideaId={submission.ideaId} operatorId={operatorId}
+                 canonicalScopeJson={sourceScopeResult.canonicalScopeJson}
+                 approvedScope={approvedCollectionScope} model={checkedCollectionModel}
+                 available={collectionRequestAvailable}
+                 previewReadAvailable={collectionPreviewReadAvailable} /> : null}
             </div>
           ) : null}
           {sourceScopeResult.kind === "error" ? <p role="alert" className="text-sm text-red-700 dark:text-red-300">{messages.sourceScopeError(sourceScopeResult.code)}</p> : null}

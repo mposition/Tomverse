@@ -21,6 +21,13 @@ type CheckedScope = {
   scopeDigestKeyId: string;
 };
 
+export type ApprovedCollectionScope = {
+  ideaId: string;
+  scopeDigest: string;
+  approvalId: string;
+  expiresAt: string;
+};
+
 type State =
   | { kind: "idle" }
   | { kind: "pending" | "outcome_unknown"; binding: ScopeApprovalBinding; reauthRequired?: boolean }
@@ -33,8 +40,10 @@ const receiptStore = (): Storage | null => {
 };
 
 /** A collection-scope decision only. It never fetches a GitHub file or calls a model. */
-export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, available }: {
+export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, available,
+  onApproved }: {
   ideaId: string; operatorId: string; checked: CheckedScope; available: boolean;
+  onApproved?: (scope: ApprovedCollectionScope | null) => void;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [state, setState] = useState<State>({ kind: "idle" });
@@ -66,8 +75,11 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         body: await response.json() }, binding, "read");
       if (!isCurrent(version)) return;
       if (decision.kind === "approved") {
+        onApproved?.({ ideaId, scopeDigest: checked.scopeDigest,
+          approvalId: binding.approvalId, expiresAt: decision.expiresAt });
         setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "expired") {
+        onApproved?.(null);
         if (!clearSourceScopeApprovalAttempt(receiptStore(), operatorId, binding)) {
           setActiveState({ kind: "storage_unavailable" });
         } else {
@@ -81,13 +93,14 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
     } catch {
       if (isCurrent(version)) setActiveState({ kind: "outcome_unknown", binding });
     }
-  }, [isCurrent, operatorId, setActiveState]);
+  }, [checked.scopeDigest, ideaId, isCurrent, onApproved, operatorId, setActiveState]);
 
   useEffect(() => {
     let active = true;
     // A prop/availability change can reuse this component without unmounting.
     // Invalidate reads and writes started under the previous binding too.
     lifecycleVersion.current += 1;
+    onApproved?.(null);
     const prior = readSourceScopeApprovalAttempt(receiptStore(), operatorId, expected);
     queueMicrotask(() => {
       if (!active) return;
@@ -101,7 +114,7 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
       }
     });
     return () => { active = false; lifecycleVersion.current += 1; };
-  }, [available, operatorId, expected, readBack]);
+  }, [available, onApproved, operatorId, expected, readBack]);
 
   const approve = async () => {
     if (!available || state.kind !== "idle") return;
@@ -136,9 +149,12 @@ export function AmuxSourceScopeApprovalPanel({ ideaId, operatorId, checked, avai
         body: await response.json() }, binding, "write");
       if (!isCurrent(version)) return;
       if (decision.kind === "approved") {
+        onApproved?.({ ideaId, scopeDigest: checked.scopeDigest,
+          approvalId: binding.approvalId, expiresAt: decision.expiresAt });
         setActiveState({ kind: "approved", binding, expiresAt: decision.expiresAt });
       } else if (decision.kind === "refused") {
         if (clearSourceScopeApprovalAttempt(receiptStore(), operatorId, binding)) {
+          onApproved?.(null);
           setActiveState({ kind: "refused", code: decision.code });
         } else {
           setActiveState({ kind: "storage_unavailable" });
