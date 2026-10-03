@@ -150,9 +150,14 @@ production도 같은 순서입니다(`railway:agents:use-production`).
 - **apply가 대시보드 설정을 되돌리지도 않습니다.** 관리되지 않는 필드이기
   때문입니다. 그래서 고친 뒤 다시 apply해도 안전합니다.
 
-**새 project에 처음 apply할 때 Railway 기본값은 `sfo`입니다.** 그래서 region을
-적지 않은 첫 apply는 APP 8이 말하지 않는 곳에 서비스를 만듭니다. 실제로
-2026-10-03 staging 첫 apply가 그랬습니다.
+**생성 시점에는 선언이 반영되고, 그 뒤로는 반영되지 않습니다.** 2026-10-03에
+양쪽을 다 봤습니다 — region을 선언하기 전에 만들어진 staging 두 서비스는
+Railway 기본값 `sfo`로 생겼고 apply로 고칠 수 없었으며, 선언을 넣은 뒤 만들어진
+production 서비스는 처음부터 `asia-southeast1-eqsg3a`였습니다.
+
+그래서 순서가 전부입니다. **region은 그 project에 처음 apply하기 전에
+`AGENT_RAILWAY_REGION`에 적혀 있어야 합니다.** 늦으면 손으로 고치는 수밖에
+없고, 그 수정은 서비스마다 환경마다 따로 해야 합니다.
 
 apply 뒤에는 **반드시 region을 확인하십시오.** 대시보드의 각 서비스 →
 Settings → Regions, 또는 아래 읽기 전용 조회로 봅니다.
