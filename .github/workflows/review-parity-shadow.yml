@@ -47,9 +47,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Same documentation-only escape hatch the fast gate uses, so a docs PR
-      # does not pay for a build it cannot affect.
-      - name: Determine whether this PR touches anything but documentation
+      # Same decision the fast gate's browser jobs use (scripts/pr-ui-scope.mjs),
+      # so a PR that cannot change what the app renders does not pay for a
+      # build it cannot affect.
+      - name: Determine whether this PR can change what the app renders
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -65,24 +66,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          code=false
-          while IFS= read -r path; do
-            case "$path" in
-              .github/audits/*) ;;
-              docs/*.md) ;;
-              */*) code=true ;;
-              *.md) ;;
-              *) code=true ;;
-            esac
-            if [ "$code" = "true" ]; then
-              echo "Non-documentation path found: $path"
-              break
-            fi
-          done <<< "$changed"
-          if [ "$code" = "false" ]; then
-            echo "Documentation-only PR: skipping the parity baseline."
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
 
       - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'

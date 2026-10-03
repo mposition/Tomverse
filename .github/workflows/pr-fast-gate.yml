@@ -1,6 +1,6 @@
 name: PR Fast Gate
 #
-# Five jobs, one required status check.
+# Four jobs, one required status check.
 #
 # ############################################################################
 # # `fast-gate` below MUST keep the name                                     #
@@ -18,9 +18,9 @@ name: PR Fast Gate
 # Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
 # what runs where.
 #
-# secret-scan, static-and-unit, unit-tests, build-and-e2e and ui-risk run
-# concurrently; fast-gate waits for all five and fails unless every one of them
-# succeeded.
+# static-and-unit (which also runs the PR-commit secret scan), unit-tests,
+# build-and-e2e and ui-risk run concurrently; fast-gate waits for all four and
+# fails unless every one of them succeeded.
 # A matrix job's result is the roll-up of its shards, so all four of ui-risk's
 # must pass for it to count as one success. Nothing merges on a green
 # fast-gate that did not pass all four, and no upstream job can go green by
@@ -71,36 +71,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # This duplicates the scan Secret History Scan performs on the same PR
-  # (gitleaks-action scans base..head on pull_request in both), but it is
-  # deliberately kept: fast-gate is the only required status check on develop
-  # and main, so removing this would take secret scanning off the
-  # merge-blocking path entirely. Remove it only after
-  # "Scan repository history for secrets" is itself made a required check.
-  # `fetch-depth: 0` here is for gitleaks, which scans base..head and needs
-  # both ends. Every job in this workflow now checks out full history, each
-  # for its own reason stated at its own checkout, so no comment here claims
-  # anything about the others: the line this replaces said the depth existed
-  # "for this job, and only for this job", and three other jobs had it.
-  secret-scan:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
-    name: Secret scan (PR commits)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Scan pull-request commits for secrets
-        timeout-minutes: 5
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-
   # Everything that needs node_modules but neither a build nor a browser.
   # Runs unconditionally, including on documentation-only PRs: the encoding
   # check is exactly the check a Markdown-only change needs, and the rest is
@@ -127,6 +97,22 @@ jobs:
           # would have passed as a signing commit. The check now fails when the
           # commit is absent, which needs the history to be here.
           fetch-depth: 0
+
+      # The PR-commit secret scan, first, before anything is installed. It was
+      # its own job until 2026-10-03; a ~15-second scan held a whole runner
+      # and its checkout per pull request against the account's concurrent-job
+      # ceiling, and this job already checks out the full history gitleaks
+      # needs to scan base..head. It duplicates Secret History Scan's PR run on
+      # purpose: fast-gate is the only required check, so this keeps secret
+      # scanning on the merge-blocking path. The token is the job's own
+      # read-only GITHUB_TOKEN.
+      - name: Scan pull-request commits for secrets
+        timeout-minutes: 5
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -782,17 +768,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Documentation-only PRs skip this job's expensive half. The rule is a
-      # deliberately narrow allowlist: top-level Markdown and audit reports
-      # only. A Markdown file anywhere else -- under app/, tests/, scripts/,
-      # public/ -- does NOT qualify, because those trees can hold fixtures
-      # and generated content. Shared code, configuration, the lockfile,
-      # workflows and tests all put the full gate back, as does detection
-      # failing for any reason at all: `code=true` is the fallback on every
-      # error path, so the failure mode is "ran too much", never "skipped a
-      # check". `--no-renames` lists both sides of a rename so a file moved
-      # out of documentation is still seen.
-      - name: Determine whether this PR touches anything but documentation
+      # A PR that cannot change what the app renders skips this job's
+      # expensive half; the same decision gates ui-risk below and Review
+      # Parity. scripts/pr-ui-scope.mjs makes it: only paths provably outside
+      # the built app pass (documentation, unit and integration tests, Rust,
+      # other workflows, scripts/ files nothing in the app or its build
+      # reaches) -- until 2026-10-03 it was top-level Markdown and audit
+      # reports only, which almost no agent PR is. Everything else, and
+      # detection failing for any reason, runs the full gate: `code=true` is
+      # the fallback on every error path, so the failure mode is "ran too
+      # much", never "skipped a check". `--no-renames` lists both sides of a
+      # rename so a file moved out of the app is still seen.
+      - name: Determine whether this PR can change what the app renders
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -810,24 +797,7 @@ jobs:
           fi
           echo "Changed paths:"
           echo "$changed"
-          code=false
-          while IFS= read -r path; do
-            case "$path" in
-              .github/audits/*) ;;
-              docs/*.md) ;;
-              */*) code=true ;;
-              *.md) ;;
-              *) code=true ;;
-            esac
-            if [ "$code" = "true" ]; then
-              echo "Non-documentation path found: $path"
-              break
-            fi
-          done <<< "$changed"
-          if [ "$code" = "false" ]; then
-            echo "Documentation-only PR: skipping build, Chromium and smoke tests."
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
 
       - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'
@@ -1009,7 +979,7 @@ jobs:
       # failure mode is "ran too much", never "skipped a check". Inlined rather
       # than shared because this repository has no composite action to share it
       # through; if a third job needs it, extract it then.
-      - name: Determine whether this PR touches anything but documentation
+      - name: Determine whether this PR can change what the app renders
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -1025,24 +995,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          code=false
-          while IFS= read -r path; do
-            case "$path" in
-              .github/audits/*) ;;
-              docs/*.md) ;;
-              */*) code=true ;;
-              *.md) ;;
-              *) code=true ;;
-            esac
-            if [ "$code" = "true" ]; then
-              echo "Non-documentation path found: $path"
-              break
-            fi
-          done <<< "$changed"
-          if [ "$code" = "false" ]; then
-            echo "Documentation-only PR: skipping the UI regression shards."
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
 
       - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'
@@ -1123,7 +1076,7 @@ jobs:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [secret-scan, static-and-unit, unit-tests, build-and-e2e, ui-risk]
+    needs: [static-and-unit, unit-tests, build-and-e2e, ui-risk]
     # `always()` so this reports a red check instead of going pending when an
     # upstream job fails, is cancelled, or is skipped. The step below decides
     # the verdict; reaching it is not itself a pass.
@@ -1137,7 +1090,6 @@ jobs:
       # still concludes `success` and this stays a simple all-must-pass.
       - name: Enforce upstream job results
         env:
-          SECRET_SCAN: ${{ needs.secret-scan.result }}
           STATIC_AND_UNIT: ${{ needs.static-and-unit.result }}
           UNIT_TESTS: ${{ needs.unit-tests.result }}
           BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
@@ -1148,7 +1100,6 @@ jobs:
           set -uo pipefail
           failed=0
           for entry in \
-            "secret-scan=$SECRET_SCAN" \
             "static-and-unit=$STATIC_AND_UNIT" \
             "unit-tests=$UNIT_TESTS" \
             "build-and-e2e=$BUILD_AND_E2E" \
