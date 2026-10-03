@@ -50,7 +50,7 @@ test("a refused environment name stops the run before any child exists", async (
   });
   assert.equal(code, 1);
   assert.equal(spawned, false);
-  assert.match(logs.join("\n"), /reason=env_not_allowed names=DATABASE_URL/);
+  assert.match(logs.join("\n"), /reason=env_not_allowed names=\["DATABASE_URL"\]/);
   assert.ok(!logs.join("\n").includes("value-not-printed"));
 });
 
@@ -101,6 +101,46 @@ test("a child that ignores SIGTERM is still killed", async () => {
     env: PAGE_ENV,
     spawnChild: nodeChild("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"),
     deadlineMs: 300,
+    log: quiet,
+  });
+  assert.equal(code, 1);
+});
+
+test("a hostile environment name cannot add a log line", async () => {
+  const logs = [];
+  await supervise({
+    service: "page",
+    env: { ...PAGE_ENV, "X\nops_observer_supervisor=ok": "1" },
+    spawnChild: () => assert.fail("no child"),
+    log: (line) => logs.push(line),
+  });
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].split("\n").length, 1);
+});
+
+test("the digest service needs its webhook and passes its child only its variables", () => {
+  const env = {
+    OPS_OBSERVER_ENABLED: "true",
+    OPS_OBSERVER_DIGEST_SECRET: "d".repeat(40),
+    OPS_OBSERVER_DIGEST_HEARTBEAT_URL: "https://dead-man.example/ping/def",
+    OPS_OBSERVER_APP_URL: "https://tomverse.app",
+  };
+  assert.deepEqual(planStart("digest", env).names, ["OPS_OBSERVER_DIGEST_WEBHOOK_URL"]);
+  const plan = planStart("digest", { ...env, OPS_OBSERVER_DIGEST_WEBHOOK_URL: "https://hooks.example/d" });
+  assert.deepEqual(Object.keys(plan.childEnv).sort(), [
+    "OPS_OBSERVER_APP_URL",
+    "OPS_OBSERVER_DIGEST_HEARTBEAT_URL",
+    "OPS_OBSERVER_DIGEST_SECRET",
+    "OPS_OBSERVER_DIGEST_WEBHOOK_URL",
+  ]);
+  assert.equal(planStart("digest", { ...env, OPS_OBSERVER_SECRET: "x".repeat(40) }).reason, "env_not_allowed");
+});
+
+test("a child that cannot be spawned fails the run", async () => {
+  const code = await supervise({
+    service: "page",
+    env: PAGE_ENV,
+    spawnChild: (childEnv) => spawn("/nonexistent/ops-observer-child", [], { env: childEnv }),
     log: quiet,
   });
   assert.equal(code, 1);

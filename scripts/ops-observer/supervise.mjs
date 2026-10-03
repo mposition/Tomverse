@@ -72,7 +72,7 @@ export function supervise({ service, env, spawnChild, deadlineMs = SUPERVISOR_DE
     return Promise.resolve(0);
   }
   if (plan.action === "config_error") {
-    log(`ops_observer_supervisor=config_error service=${service} reason=${plan.reason} names=${plan.names.join(",")}`);
+    log(`ops_observer_supervisor=config_error service=${service} reason=${plan.reason} names=${JSON.stringify(plan.names)}`);
     return Promise.resolve(1);
   }
 
