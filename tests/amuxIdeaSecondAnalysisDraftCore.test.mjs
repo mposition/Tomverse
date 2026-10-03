@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { prepareSecondIdeaOnlyAnalysisDraft } from
+import { prepareIdeaOnlyOutputAnalysisDraft, prepareSecondIdeaOnlyAnalysisDraft } from
   "../lib/amux/ideaSecondAnalysisDraftCore.ts";
 import { openAmuxContent } from "../lib/amux/ideaCrypto.ts";
 
@@ -52,6 +52,33 @@ test("a second partial page keeps an explicit third-page output cursor", () => {
   if (result.decision !== "partial") return;
   assert.deepEqual([result.outputPartIndex, result.remainingStartOrdinal,
     result.remainingEndOrdinal], [1, 0, 0]);
+});
+
+test("a third page seals a task against the verified first two output pages", () => {
+  const secondPage = { ...priorPage, chunkIndex: 1, outputPartIndex: 1 };
+  const priorStory = { ref: "c1:card-0", kind: "card", cardType: "story",
+    storyKind: "general", featureRef: feature.ref };
+  const thirdCard = { ...card, localId: "c2:card-0", cardType: "task",
+    storyKind: null, title: "Verify the workflow",
+    parentStoryRef: priorStory.ref, taskRole: "verify",
+    executionGrade: "routine", executionBrief: "Run the bounded verification." };
+  const input = { ideaId: "idea-01", previewId: "preview-03", keys,
+    chunkIndex: 2, history: [priorPage, secondPage],
+    permittedTargetRefs: [feature, priorStory],
+    raw: JSON.stringify(chunk({ previewId: "preview-03", chunkIndex: 2,
+      units: [thirdCard] })) };
+  const result = prepareIdeaOnlyOutputAnalysisDraft(input);
+  assert.equal(result.decision, "ready");
+  if (result.decision !== "ready") return;
+  assert.equal(result.outputPartIndex, 2);
+  const unit = result.draft.units[0];
+  const plain = openAmuxContent(unit.body, "analysis_draft", unit.id, keys);
+  assert.equal(JSON.parse(plain.toString("utf8")).parentStoryRef, priorStory.ref);
+  plain.fill(0);
+  assert.deepEqual(prepareIdeaOnlyOutputAnalysisDraft({ ...input,
+    history: [priorPage] }), { decision: "hold", reason: "invalid_result" });
+  assert.deepEqual(prepareIdeaOnlyOutputAnalysisDraft({ ...input,
+    permittedTargetRefs: [feature] }), { decision: "hold", reason: "invalid_result" });
 });
 
 test("closed history, forged targets and a cardless rejection fail closed", () => {

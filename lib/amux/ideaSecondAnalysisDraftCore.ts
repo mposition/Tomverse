@@ -14,7 +14,7 @@ type SecondDraftInput = {
 };
 type SecondDraftResult =
   | { decision: "ready" | "partial"; draft: SealedAmuxAnalysisDraft;
-      coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 1;
+      coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: number;
       remainingStartOrdinal: 0 | null; remainingEndOrdinal: 0 | null }
   | { decision: "hold"; reason: "invalid_result" | "owner_input" |
       "continuation_required" };
@@ -26,12 +26,32 @@ type SecondDraftResult =
 export function prepareSecondIdeaOnlyAnalysisDraft(
   input: SecondDraftInput,
 ): SecondDraftResult {
-  try { return prepareCheckedSecondDraft(input); }
+  try {
+    const { ideaId, previewId, raw, keys, priorPage, permittedTargetRefs } = input;
+    return prepareIdeaOnlyOutputAnalysisDraft({ ideaId, previewId, raw, keys,
+      permittedTargetRefs, chunkIndex: 1, history: [priorPage] });
+  } catch { return { decision: "hold", reason: "invalid_result" }; }
+}
+
+/** Validate and seal any later output page of the same idea-only source.
+ * The caller supplies every prior page from the verified DB chain and must
+ * bind all target refs to those pages before using this pure result. */
+export function prepareIdeaOnlyOutputAnalysisDraft(input: {
+  ideaId: string; previewId: string; raw: string; keys: AmuxContentKeys;
+  chunkIndex: number; history: readonly AmuxAnalysisOutputPage[];
+  permittedTargetRefs: readonly AmuxPermittedTargetRef[];
+}): SecondDraftResult {
+  try { return prepareCheckedDraft(input); }
   catch { return { decision: "hold", reason: "invalid_result" }; }
 }
 
-function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
-  const { ideaId, previewId, raw, keys, priorPage, permittedTargetRefs } = input;
+function prepareCheckedDraft(input: Parameters<typeof prepareIdeaOnlyOutputAnalysisDraft>[0]): SecondDraftResult {
+  const { ideaId, previewId, raw, keys, chunkIndex, history, permittedTargetRefs } = input;
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 1 ||
+      !Array.isArray(history) ||
+      Object.getOwnPropertyDescriptor(history, "length")?.value !== chunkIndex) {
+    return { decision: "hold", reason: "invalid_result" };
+  }
   if (!Array.isArray(permittedTargetRefs)) {
     return { decision: "hold", reason: "invalid_result" };
   }
@@ -53,11 +73,11 @@ function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
   const targets = targetSnapshots as AmuxPermittedTargetRef[];
   const inspected = inspectAmuxAnalysisContinuation({
     raw, expectedPreviewId: previewId,
-    expectedChunkIndex: 1, expectedRevisionChunkIndex: 1,
+    expectedChunkIndex: chunkIndex, expectedRevisionChunkIndex: chunkIndex,
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: targets,
     sourceUnitCount: 1, coveredStartOrdinal: 0, coveredEndOrdinal: 0,
-    history: [priorPage],
+    history,
   });
   if (!inspected.ok) return { decision: "hold",
     reason: inspected.stage === "owner_input" ? "owner_input" : "invalid_result" };
@@ -65,7 +85,7 @@ function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
     inspected.parsed.chunk.coverageStatus === "complete" &&
     inspected.parsed.chunk.continuationKind === null;
   const partial = inspected.cursor.nextCursor?.sourceOrdinal === 0 &&
-    inspected.cursor.nextCursor.outputPartIndex === 2 &&
+    inspected.cursor.nextCursor.outputPartIndex === chunkIndex + 1 &&
     inspected.parsed.chunk.coverageStatus === "more" &&
     inspected.parsed.chunk.continuationKind === "output";
   if (!complete && !partial) {
@@ -74,7 +94,7 @@ function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
   const sealed = sealAmuxAnalysisDraft({ ideaId, keys,
     raw: amuxCanonicalJson(inspected.parsed.chunk),
     expectedPreviewId: previewId,
-    expectedChunkIndex: 1, expectedRevisionChunkIndex: 1,
+    expectedChunkIndex: chunkIndex, expectedRevisionChunkIndex: chunkIndex,
     previousContinuationKind: "output",
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: targets,
@@ -85,7 +105,7 @@ function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
     return { decision: "hold", reason: "invalid_result" };
   }
   return { decision: complete ? "ready" : "partial", draft: sealed.draft,
-    coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: 1,
+    coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: chunkIndex,
     remainingStartOrdinal: partial ? 0 : null,
     remainingEndOrdinal: partial ? 0 : null };
 }
