@@ -95,16 +95,57 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
 
 test("transactional read locks the stage before reading reservations", async () => {
   const { tx, calls } = txFor(stage, slots());
+  let locks = 0;
   tx.$queryRaw = async (strings, id) => {
     assert.match(strings.join("?"), /FOR NO KEY UPDATE NOWAIT/);
     assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
-    assert.deepEqual(calls, { stages: 0, slots: 0 });
-    return [{ id }];
+    locks++;
+    if (locks === 1) {
+      assert.deepEqual(calls, { stages: 0, slots: 0 });
+      return [{ id }];
+    }
+    assert.equal(calls.stages, Math.floor(locks / 2));
+    assert.equal(calls.slots, Math.floor(locks / 2));
+    return [{ id, status: stage.status,
+      runtimeDeploymentId: stage.runtimeDeploymentId,
+      runtimeCommitSha: stage.runtimeCommitSha }];
   };
-  const result = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+  const deploymentOptions = {
+    environment: {
+      RAILWAY_ENVIRONMENT_NAME: "staging",
+      RAILWAY_DEPLOYMENT_ID: stage.runtimeDeploymentId,
+      RAILWAY_GIT_COMMIT_SHA: stage.runtimeCommitSha,
+      RAILWAY_PROJECT_ID: "22345678-1234-1234-1234-123456789abc",
+      RAILWAY_SERVICE_ID: "32345678-1234-1234-1234-123456789abc",
+      RAILWAY_ENVIRONMENT_ID: "42345678-1234-1234-1234-123456789abc",
+      RAILWAY_API_TOKEN: "synthetic-token",
+    },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: {
+      deployment: { id: stage.runtimeDeploymentId, status: "SUCCESS",
+        meta: { commitHash: stage.runtimeCommitSha } },
+      deployments: { edges: [{ node: { id: stage.runtimeDeploymentId,
+        status: "SUCCESS" } }] },
+    } }) }),
+  };
+  const result = await lockAndReadPromptRefinerVnextOneShotStage(tx, deploymentOptions);
   assert.equal(result.reservationShapeValid, true);
   assert.equal(result.dispatchAuthorized, false);
   assert.deepEqual(calls, { stages: 1, slots: 1 });
+  assert.equal(locks, 2);
+  await assert.rejects(
+    lockAndReadPromptRefinerVnextOneShotStage(tx, {
+      ...deploymentOptions,
+      environment: { ...deploymentOptions.environment,
+        RAILWAY_GIT_COMMIT_SHA: "b".repeat(40) },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: {
+        deployment: { id: stage.runtimeDeploymentId, status: "SUCCESS",
+          meta: { commitHash: "b".repeat(40) } },
+        deployments: { edges: [{ node: { id: stage.runtimeDeploymentId,
+          status: "SUCCESS" } }] },
+      } }) }),
+    }),
+    /vnext_one_shot_approved_deployment_mismatch/
+  );
 });
 
 test("absent or unavailable lock never reads an unlocked stage", async () => {
