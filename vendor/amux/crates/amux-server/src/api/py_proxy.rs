@@ -108,6 +108,7 @@ pub const NATIVE_FAMILIES: &[(&str, &str)] = &[
     ("/api/memory", "global memory document"),
     ("/api/review", "weekly trends engine + digest markdown"),
     ("/api/workers", "modern worker API (+dead-letters)"),
+    ("/api/routing", "read-only worker routing catalog (api/routing.rs)"),
     (
         "/api/models",
         "typed OpenAI, Claude, and Gemini model catalog shared by provider adapters and every worker picker (api/workers.rs)",
