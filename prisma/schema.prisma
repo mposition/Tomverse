@@ -1976,6 +1976,7 @@ model Feedback {
   lifecycleEvents          FeedbackLifecycleEvent[]
   autoFixCase              FeedbackAutoFixCase?
   supportTriageSuggestions SupportTriageSuggestion[]
+  supportTriageMemberships SupportTriageGroupMember[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -8598,4 +8599,68 @@ model SupportTriageSuggestion {
   @@unique([feedbackId, inputDigest])
   @@index([state, ownerQueueState, createdAt])
   @@index([leaseExpiresAt])
+}
+
+/// Support-triage group (docs/policy/support-triage.md §5, §6): one
+/// equivalence class of one kind over server facts, for display only. Its
+/// members carry its primary digest through a composite key, so a terminal
+/// group (digest NULL) can hold none. Migration
+/// 20261003160000_support_triage_group holds the state machine and the
+/// tombstone rules.
+model SupportTriageGroup {
+  id                            String    @id
+  state                         String    @default("candidate")
+  primaryKind                   String
+  primarySnapshotDigest         String?
+  groupCandidateKey             String?   @unique
+  groupInputDigest              String?
+  keyRetiredAt                  DateTime?
+  retiredMemberIds              String[]  @default([])
+  decision                      String?
+  decidedAt                     DateTime?
+  ownerQueueState               String    @default("not_queued")
+  displayedAt                   DateTime?
+  keyRecheckDeferredCount       Int       @default(0)
+  keyRecheckDeferredRunId       String?
+  keyRecheckLastEvaluatedRunSeq BigInt?
+  keyRecheckDeferredRunSeq      BigInt?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @default(now())
+
+  members SupportTriageGroupMember[]
+  signals SupportTriageGroupSignal[]
+
+  @@unique([id, primarySnapshotDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([keyRetiredAt])
+  @@index([retiredMemberIds], type: Gin)
+}
+
+/// A report in an open support-triage group. Inserted and deleted, never updated.
+model SupportTriageGroupMember {
+  groupId               String
+  feedbackId            String   @unique
+  primarySnapshotDigest String
+  createdAt             DateTime @default(now())
+
+  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
+  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, feedbackId])
+}
+
+/// One signal per (group, kind): the SHA-256 of a server value its members
+/// share, never the value. Inserted and deleted, never updated.
+model SupportTriageGroupSignal {
+  groupId           String
+  kind              String
+  snapshotDigest    String
+  provenanceClass   String
+  snapshotExpiresAt DateTime
+  observedAt        DateTime @default(now())
+
+  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, kind])
+  @@index([snapshotExpiresAt])
 }

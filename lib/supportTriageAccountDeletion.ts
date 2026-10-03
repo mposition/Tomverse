@@ -20,10 +20,14 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 
 export type SupportTriageDeletionCounts = {
   readonly suggestions: number;
+  readonly groups: number;
 };
 
 /** Models this module deletes, by manifest name. */
-export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze(["SupportTriageSuggestion"] as const);
+export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze([
+  "SupportTriageSuggestion",
+  "SupportTriageGroup",
+] as const);
 
 /**
  * Called right after the anonymising UPDATE, with the ids it returned.
@@ -43,11 +47,26 @@ export const deleteSupportTriageDataForAccount = async (
   tx: Prisma.TransactionClient,
   anonymisedReportIds: readonly string[]
 ): Promise<SupportTriageDeletionCounts> => {
-  if (anonymisedReportIds.length === 0) return { suggestions: 0 };
+  if (anonymisedReportIds.length === 0) return { suggestions: 0, groups: 0 };
+  const ids = [...anonymisedReportIds];
   const suggestions = await tx.supportTriageSuggestion.deleteMany({
-    where: { feedbackId: { in: [...anonymisedReportIds] } },
+    where: { feedbackId: { in: ids } },
   });
-  return { suggestions: suggestions.count };
+  // Every group the reports are in, or were in before it ended, whatever its
+  // state and cooldown: no deleted report's id survives in a key, a list, a
+  // membership or a signal (docs/policy/support-triage.md §5). Locked in id
+  // order after the reports, the global order; members and signals cascade.
+  const groups = await tx.$queryRaw<{ id: string }[]>`
+    SELECT g."id" FROM "SupportTriageGroup" g
+     WHERE EXISTS (SELECT 1 FROM "SupportTriageGroupMember" m
+                    WHERE m."groupId" = g."id" AND m."feedbackId" = ANY(${ids}::text[]))
+        OR g."retiredMemberIds" && ${ids}::text[]
+     ORDER BY g."id" FOR UPDATE`;
+  const deletedGroups =
+    groups.length === 0
+      ? { count: 0 }
+      : await tx.supportTriageGroup.deleteMany({ where: { id: { in: groups.map((group) => group.id) } } });
+  return { suggestions: suggestions.count, groups: deletedGroups.count };
 };
 
 /** The transaction's last statement: one content-free entry, or none. */
@@ -55,14 +74,15 @@ export const flushSupportTriageDeletionAudit = async (
   tx: Prisma.TransactionClient,
   counts: SupportTriageDeletionCounts
 ): Promise<void> => {
-  if (counts.suggestions === 0) return;
+  if (counts.suggestions === 0 && counts.groups === 0) return;
   await writeSystemAuditLog({
     tx,
     systemActor: "support-triage-account-deletion",
     action: "support_triage.account_data_deleted",
-    targetType: "SupportTriageSuggestion",
+    // One entry for everything this module removed, of every model.
+    targetType: "SupportTriageAccountData",
     targetId: null,
     summary: "Support-triage data deleted with an account",
-    metadata: { suggestions: counts.suggestions },
+    metadata: { suggestions: counts.suggestions, groups: counts.groups },
   });
 };

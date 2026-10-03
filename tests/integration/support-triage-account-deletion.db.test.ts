@@ -18,6 +18,7 @@ import { deleteSupportTriageDataForAccount } from "@/lib/supportTriageAccountDel
 
 const reset = async () => {
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
+  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-del-" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: "@support-triage-deletion.test" } } });
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
@@ -72,11 +73,11 @@ test("deleting an account deletes the triage rows derived from its reports, and 
   assert.equal(report.userId, null);
   assert.equal(report.message, "[deleted account]");
 
-  const audits = await prisma.adminAuditLog.findMany({ where: { targetType: "SupportTriageSuggestion" } });
+  const audits = await prisma.adminAuditLog.findMany({ where: { targetType: "SupportTriageAccountData" } });
   assert.equal(audits.length, 1);
   assert.equal(audits[0].action, "support_triage.account_data_deleted");
   assert.equal(audits[0].actorUserId, null);
-  assert.deepEqual(audits[0].metadata, { suggestions: 2, systemActor: "support-triage-account-deletion" });
+  assert.deepEqual(audits[0].metadata, { suggestions: 2, groups: 0, systemActor: "support-triage-account-deletion" });
   assert.equal(audits[0].targetId, null);
 });
 
@@ -95,7 +96,7 @@ test("an account with nothing derived writes no triage audit entry", async () =>
   });
   await prisma.feedback.create({ data: { id: "fb-del-plain", type: "bug", message: "plain", userId: user.id } });
   await deleteTomverseAccount(user.id, { cancelSubscription: false });
-  assert.equal(await prisma.adminAuditLog.count({ where: { targetType: "SupportTriageSuggestion" } }), 0);
+  assert.equal(await prisma.adminAuditLog.count({ where: { targetType: "SupportTriageAccountData" } }), 0);
 });
 
 // Two connections. The set deleted must be the set anonymised: a suggestion
@@ -201,10 +202,83 @@ test("a suggestion inserted after the anonymisation waits for it and is refused"
     // The insert is waiting on the anonymised report, not already decided.
     await untilBlocked(otherPid);
     release();
-    assert.deepEqual(await deletion, { suggestions: 2 });
+    assert.deepEqual(await deletion, { suggestions: 2, groups: 0 });
     assert.match(await outcome, /deleted account/);
   } finally {
     await other.end();
   }
   assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: { startsWith: "fb-del-mine" } } }), 0);
+});
+
+// Groups (docs/policy/support-triage.md §5): every group the account's reports
+// are in, or were in before it ended, goes whatever its state, members and
+// signals with it, other accounts' members included.
+
+const GROUP_DIGEST = "e".repeat(64);
+
+const groupWith = async (id: string, key: string, feedbackIds: string[]) => {
+  await prisma.supportTriageGroup.create({
+    data: { id, primaryKind: "server_evidence_match", primarySnapshotDigest: GROUP_DIGEST, groupCandidateKey: key },
+  });
+  for (const feedbackId of feedbackIds) {
+    await prisma.supportTriageGroupMember.create({ data: { groupId: id, feedbackId, primarySnapshotDigest: GROUP_DIGEST } });
+  }
+  await prisma.supportTriageGroupSignal.create({
+    data: {
+      groupId: id,
+      kind: "server_evidence_match",
+      provenanceClass: "server_evidence",
+      snapshotDigest: GROUP_DIGEST,
+      snapshotExpiresAt: new Date(Date.now() + 86_400_000),
+    },
+  });
+};
+
+test("deleting an account deletes every group its reports are or were in, and only those", async () => {
+  const { user } = await seed();
+  await prisma.feedback.create({ data: { id: "fb-del-other-2", type: "bug", message: "not mine", userId: null } });
+  await prisma.feedback.create({ data: { id: "fb-del-other-3", type: "bug", message: "not mine", userId: null } });
+  // Open, with one of mine and one of someone else's.
+  await groupWith("g-open", "1".repeat(64), ["fb-del-mine-1", "fb-del-other"]);
+  // Ended earlier: mine survives only in the departed list.
+  await groupWith("g-ended", "2".repeat(64), ["fb-del-mine-2", "fb-del-other-2"]);
+  await prisma.supportTriageGroupMember.deleteMany({ where: { groupId: "g-ended" } });
+  await prisma.supportTriageGroupSignal.deleteMany({ where: { groupId: "g-ended" } });
+  await prisma.supportTriageGroup.update({
+    where: { id: "g-ended" },
+    data: { state: "expired", primarySnapshotDigest: null, retiredMemberIds: ["fb-del-mine-2", "fb-del-other-2"] },
+  });
+  // Nothing of mine.
+  await prisma.supportTriageGroup.create({
+    data: { id: "g-unrelated", primaryKind: "same_account", primarySnapshotDigest: GROUP_DIGEST, groupCandidateKey: "3".repeat(64) },
+  });
+  await prisma.supportTriageGroupMember.create({
+    data: { groupId: "g-unrelated", feedbackId: "fb-del-other-3", primarySnapshotDigest: GROUP_DIGEST },
+  });
+
+  await deleteTomverseAccount(user.id, { cancelSubscription: false });
+
+  assert.deepEqual((await prisma.supportTriageGroup.findMany({ select: { id: true } })).map((row) => row.id), ["g-unrelated"]);
+  assert.deepEqual(
+    (await prisma.supportTriageGroupMember.findMany({ select: { feedbackId: true } })).map((row) => row.feedbackId),
+    ["fb-del-other-3"]
+  );
+  assert.equal(await prisma.supportTriageGroupSignal.count(), 0);
+  const [audit] = await prisma.adminAuditLog.findMany({ where: { targetType: "SupportTriageAccountData" } });
+  assert.deepEqual(audit.metadata, { suggestions: 2, groups: 2, systemActor: "support-triage-account-deletion" });
+  await prisma.feedback.deleteMany({ where: { id: { in: ["fb-del-other-2", "fb-del-other-3"] } } });
+});
+
+test("after the deletion no membership is created for those reports", async () => {
+  const { user } = await seed();
+  await deleteTomverseAccount(user.id, { cancelSubscription: false });
+  await prisma.supportTriageGroup.create({
+    data: { id: "g-late", primaryKind: "same_account", primarySnapshotDigest: GROUP_DIGEST, groupCandidateKey: "4".repeat(64) },
+  });
+  await assert.rejects(
+    prisma.supportTriageGroupMember.create({
+      data: { groupId: "g-late", feedbackId: "fb-del-mine-1", primarySnapshotDigest: GROUP_DIGEST },
+    }),
+    /deleted account/
+  );
 });

@@ -393,3 +393,64 @@ export const OWNER_QUEUE_STATES = Object.freeze(["not_queued", "displayed"] as c
 
 /** A claim's lease, set by the database when a suggestion is claimed. */
 export const SUGGESTION_LEASE_SECONDS = 5 * 60;
+
+/**
+ * `SupportTriageGroup` (policy section 6, design section 5.4). The lists and
+ * the transition table below are the CHECK lists and the `-- transitions:`
+ * block of migration 20261003160000_support_triage_group; tests compare them.
+ * A group is one equivalence class of one kind (`GROUP_KIND_PRIORITY`).
+ */
+export const GROUP_STATES = Object.freeze([
+  "candidate",
+  "confirmed",
+  "dismissed",
+  "expired",
+  "invalidated",
+] as const);
+export type GroupState = (typeof GROUP_STATES)[number];
+
+/** Open groups hold members, signals and a primary snapshot digest; terminal ones hold none. */
+export const GROUP_OPEN_STATES: readonly GroupState[] = Object.freeze(["candidate", "confirmed"]);
+export const GROUP_TERMINAL_STATES: readonly GroupState[] = Object.freeze([
+  "dismissed",
+  "expired",
+  "invalidated",
+]);
+
+export const GROUP_TRANSITIONS: readonly (readonly [GroupState, GroupState])[] = Object.freeze([
+  // A person's decision.
+  ["candidate", "confirmed"],
+  ["candidate", "dismissed"],
+  // Seven days not_queued, or the primary signal's snapshot expired.
+  ["candidate", "expired"],
+  // Fewer than two members, a key collision lost, or three deferred evaluations in a row.
+  ["candidate", "invalidated"],
+  ["confirmed", "invalidated"],
+]);
+
+export const isGroupTransitionAllowed = (from: GroupState, to: GroupState) =>
+  GROUP_TRANSITIONS.some(([a, b]) => a === from && b === to);
+
+/** A person's decision, kept apart from the state so an invalidated group keeps it. */
+export const GROUP_DECISIONS = Object.freeze(["confirmed", "dismissed"] as const);
+
+/** Where a signal's server value comes from; determined by its kind. */
+export const SIGNAL_PROVENANCE: Readonly<Record<GroupKind, string>> = Object.freeze({
+  server_evidence_match: "server_evidence",
+  same_account: "account_derived",
+  autofix_fingerprint: "autofix_derived",
+});
+
+/** Member ids a terminal group keeps as its key tombstone, at most one group's worth. */
+export const GROUP_RETIRED_MEMBER_IDS_MAX = GROUP_MEMBER_CAP;
+
+/** Consecutive deferred key evaluations that invalidate a group (policy section 6). */
+export const GROUP_KEY_RECHECK_DEFERRAL_LIMIT = 3;
+export const GROUP_KEY_TOMBSTONE_DAYS = 7;
+
+/** The provenance classes a signal can carry; `SIGNAL_PROVENANCE` maps each kind to one. */
+export const SIGNAL_PROVENANCE_CLASSES = Object.freeze([
+  "server_evidence",
+  "account_derived",
+  "autofix_derived",
+] as const);

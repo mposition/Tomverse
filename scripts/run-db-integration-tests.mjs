@@ -309,6 +309,9 @@ run(
     // Support-triage suggestions: the state machine, the lease and the
     // display stamp are the guard trigger's, and a report's deletion takes them.
     "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
