@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -46,11 +47,32 @@ test("the workflows that hold these jobs run them", () => {
     assert.equal(runs(".github/workflows/review-parity-shadow.yml"), true);
 });
 
-test("a scripts/ file the app or its build reaches runs them", () => {
-    // Imported by lib/ (relative and @/ alias), run by the build, or by the e2e npm scripts.
+test("every scripts/ file the app imports is reached", () => {
+    // Found here independently of the script: any app-tree import specifier
+    // naming a scripts/ file. Which files these are differs between develop
+    // and main, so the test reads the tree rather than naming them.
+    const root = new URL("..", import.meta.url);
+    const listed = execFileSync("git", ["ls-files", "app", "components", "lib", "locales"], {
+        cwd: root,
+        encoding: "utf8",
+    })
+        .split("\n")
+        .filter((file) => /\.(m?[jt]sx?)$/.test(file));
+    const imported = new Set();
+    for (const file of listed) {
+        const text = readFileSync(new URL(file, root), "utf8");
+        for (const [, spec] of text.matchAll(/(?:from|import)\s*\(?\s*["']([^"']*scripts\/[^"']+)["']/g)) {
+            imported.add(spec.replace(/^@\//, "").replace(/^(\.\.\/)+/, ""));
+        }
+    }
+    for (const path of imported) {
+        assert.ok(reached.has(path), `${path} is imported by the app but not reached`);
+        assert.equal(runs(path), true, path);
+    }
+});
+
+test("a scripts/ file the build or the e2e npm scripts run is reached", () => {
     for (const path of [
-        "scripts/report-issue-backlog-core.mjs",
-        "scripts/mobile-auth-keyring-state.mjs",
         "scripts/run-next-build.mjs",
         "scripts/run-next-build-core.mjs",
         "scripts/run-ui-risk-shard.mjs",
