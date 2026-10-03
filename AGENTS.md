@@ -235,6 +235,27 @@ staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 `gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
 **사람이 켭니다.**
 
+## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
+
+**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
+PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
+바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
+train은 draft를 건너뜁니다).
+
+```
+gh pr ready <번호>        작업 완료 — CI 시작
+gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
+```
+
+- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
+  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
+  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
+- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
+  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
+  돌립니다.
+- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
+  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는

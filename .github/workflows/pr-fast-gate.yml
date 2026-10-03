@@ -26,8 +26,9 @@ name: PR Fast Gate
 # fast-gate that did not pass all four, and no upstream job can go green by
 # being skipped -- see the aggregation step.
 #
-# Two kinds of draft pull request run nothing: a draft release (develop ->
-# main), and a draft whose base is neither develop nor main (a stacked PR).
+# A draft pull request runs nothing (since 2026-10-03; before that only two
+# kinds did -- a draft release, develop -> main, and a draft stacked on a
+# branch other than develop or main).
 #
 # A release PR's head is develop's head, so every merge into develop also synchronizes
 # it, and its whole pull-request tier ran a second time on each develop
@@ -47,6 +48,14 @@ name: PR Fast Gate
 # A stacked draft gets CI when it is marked ready or once it is a draft on
 # develop or main (GitHub retargets a stack when its base merges; that fires
 # no event, so the next push or `ready_for_review` starts the run).
+#
+# Then every draft. With the concurrent-job limit raised to 40, a snapshot on
+# 2026-10-03 still showed 40 jobs running and 68 queued: several agent
+# sessions each kept a series of open, non-draft pull requests into develop and
+# every push ran the full ~20-job tier, while develop's and main's own push
+# checks -- the ones Railway's deployments wait on -- queued behind them. A
+# branch is now opened as a draft (Auto PR to Develop passes --draft) and
+# marked ready when its work is complete; marking it ready runs the tier once.
 #
 # Every job here, and in the other pull-request workflows, carries the same
 # condition; tests/draftPrCiSkip.test.mjs keeps them in step. A draft cannot
@@ -80,7 +89,7 @@ jobs:
   # took ~14 of this job's ~19.5 minutes and this job was the slowest in the
   # gate, so it moved to `unit-tests` below and the two now run side by side.
   static-and-unit:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Security, lint, and encoding checks
     runs-on: ubuntu-latest
     # Without the unit suite the job measured ~5.5 minutes of checks plus
@@ -735,7 +744,7 @@ jobs:
   # per core here (Windows stays serial) and runs the few files that write into
   # the checkout alone afterwards -- see scripts/unit-test-serial-files.mjs.
   unit-tests:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Unit and API policy tests
     runs-on: ubuntu-latest
     # Serial, the step took ~14 minutes; concurrent, a fraction of that. 20
@@ -765,7 +774,7 @@ jobs:
         run: npm run test:unit
 
   build-and-e2e:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Production build and Chromium smoke tests
     runs-on: ubuntu-latest
     # Measured 143s of work with a warm cache (run #130 step timings, minus
@@ -967,7 +976,7 @@ jobs:
   # The full 63-golden visual matrix stays out of the PR tier -- it runs
   # unfiltered on pull requests into main and nightly.
   ui-risk:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
     # Each job: install, build, then a quarter of the tier. 25 minutes is well
@@ -1100,7 +1109,7 @@ jobs:
     # `always()` so this reports a red check instead of going pending when an
     # upstream job fails, is cancelled, or is skipped. The step below decides
     # the verdict; reaching it is not itself a pass.
-    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       # Every upstream job must have concluded `success`. `skipped` and
       # `cancelled` are failures here on purpose: a job that never ran has
