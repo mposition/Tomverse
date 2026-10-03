@@ -69,8 +69,12 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
   돌려주므로 같은 명령을 다시 부릅니다.
 - 종료 코드(submit·wait): 0 accept · 1 reject · 2 unknown · 3 pending · 64 요청 오류 · 65 서버 오류.
   `report`와 jobId 없는 `status`는 성공하면 0입니다(accept라는 뜻이 아닙니다).
-- 검토 대상은 **commit된 것**뿐입니다. base 기본값은 `origin/develop`과의
-  merge-base이며, base commit은 원격에 있어야 합니다(head는 push하지 않아도 됩니다).
+- 검토 대상은 **commit된 것**뿐입니다. base는 `origin/develop`·`origin/main`(그리고 `--base`를
+  줬다면 그것)과 HEAD의 분기점 중 **가장 가까운 것**이고, 원격에 있어야 합니다(head는 push하지
+  않아도 됩니다). 먼 분기점은 이미 병합된 남의 변경을 diff에 끌고 와서 계약 경로 판정으로
+  reviewer를 둘로 늘립니다.
+- `--focus`가 **이 서버에서 검토를 마친 job의 head**이면 계약 경로 판정도 `focus..HEAD`로 합니다.
+  검토받은 적 없는 focus는 base..HEAD 전체로 셉니다(focus 앞에 계약 변경을 숨길 수 없게).
 - 원문은 `npm run -s review -- report <jobId> --slot 0`으로 봅니다.
 - `--focus <rev>`: reviewer에게 `<rev>..HEAD`만 보여 줍니다. 같은 브랜치를 여러 round에 걸쳐
   검토할 때 지난 round 이후의 변경만 판정받는 용도입니다. base는 그대로 신뢰 이력의
@@ -126,8 +130,68 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
   `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
   붙여 넣기 없이 로그인합니다.
-- Devin CLI: 헤드리스 모드, 읽기 전용 보장, **실제로 쓰는 모델의 공급사**. 확인되면
-  `config.json`에서 `vendor`를 적고 `enabled: true`로 바꿉니다. 그 전에는 배정되지 않습니다.
+- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file {promptFile}
+  --respect-workspace-trust false --sandbox --permission-mode auto --model swe-2-high`.
+  공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의 SWE-2를 고정해
+  `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다. 설치 직후
+  `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
+  - **`/dev/stdin`을 쓰지 않습니다.** daemon이 띄운 프로세스의 stdin은 Linux에서 pipe가 아니라
+    socket이라, 경로로 다시 열면 `ENXIO`로 실패합니다(셸 pipe로 한 시험은 통과했고 운영에서는
+    모든 검토가 `reviewer_exit_1`이었습니다). `{promptFile}`을 쓰면 서버가 프롬프트를 상태 폴더의
+    owner-only 파일로 넘기고 끝나면 지웁니다.
+  - `auto`는 읽기 전용 도구만 승인하고, `-p`에서 거절된 도구 호출은 **그 자리에서 실행을 끝냅니다**
+    (`no_verdict_block`). 그래서 Devin 쪽 사용자 설정(`~/.config/devin/config.json`)에 읽기용 셸
+    명령만 `permissions.allow`로 열고(`Exec(grep)`, `Exec(rg)`, `Exec(git log)` 등 — `git diff`는
+    `--output`으로 쓸 수 있어 제외), `sandbox.allowed_domains`를 존재하지 않는 도메인 하나로 두어
+    네트워크를 막고, `promptNote`로 그 목록만 쓰라고 알립니다.
+  - **경로별 읽기 deny(`Read(~/.config/**)`)는 지켜지지 않았습니다**(canary 파일이 읽혔음). 막히는 것은
+    허용 목록 밖의 명령과 sandbox의 네트워크뿐이고, 읽기 범위의 경계는 reviewer 전용 계정입니다.
+  - 브랜치의 `.devin/` 설정은 사용자 설정보다 우선하지만, 지시 파일로 취급되어 base 버전으로
+    되돌려집니다.
+  - **결과: 예시 설정에서 꺼 두었습니다.** 2026-10-02~03 서버에서 devin 검토 27건이 모두 판정 없이
+    끝났습니다 — 11건은 `/dev/stdin`(ENXIO), 11건은 거절된 도구 호출, `--sandbox`와 허용 명령
+    지시문을 넣은 뒤의 5건도 `no_verdict_block`. 다시 켜려면 서버의 실제 job 하나가 판정까지
+    나오는 것을 먼저 확인합니다(셸 pipe로 한 시험은 운영과 달랐습니다).
+- GitHub Copilot CLI(예시 설정에 **꺼진 채** 있음, 실측 전): 문서상 프롬프트는 `-p "<프롬프트>"`
+  인자로만 받습니다. 인자 하나는 Linux에서 약 128KB가 한계라 검토 프롬프트가 들어가지 않으므로,
+  `{promptFile}`에 프롬프트를 쓰고 `-p`에는 그 파일을 읽으라는 짧은 지시만, `--add-dir {promptDir}`로
+  그 job의 프롬프트 폴더 하나만 읽게 합니다. 공급사는 고른 모델로 정해지므로 **Gemini 계열**을
+  고정해 `vendor: "google"`로 둡니다(Copilot의 GPT·Claude·Grok은 기존 공급사와 겹칩니다).
+  켜기 전에 확인할 것:
+  1. 인증은 **권한이 "Copilot Requests" 하나뿐인 fine-grained PAT**을 `COPILOT_GITHUB_TOKEN`으로
+     줍니다(systemd `EnvironmentFile` + provider `passEnv`). 저장소 권한이 있는 토큰이면 내장
+     GitHub MCP 서버를 통해 reviewer가 GitHub에 쓸 수 있습니다. 내장 MCP를 끄는 플래그가 있으면
+     함께 씁니다(`copilot --help`로 확인).
+  2. `-p`에서 허용되지 않은 도구 호출이 실행을 끝내는지 계속하는지(Devin은 끝냈습니다), 쓰기와
+     네트워크(`--deny-tool`)가 막히는지.
+  3. Copilot이 읽는 `.github/instructions/`·`prompts/`·`agents/`·`chatmodes/`와
+     `.github/copilot-instructions.md`는 지시 파일로 취급되어 base 버전으로 되돌려집니다.
+  4. **서버의 실제 job 하나**가 이 provider로 배정되어 판정까지 나오는지.
+
+## 서버 업데이트 (drain)
+
+재시작하면 실행 중이던 검토는 `unknown`(`orchestrator_restarted`)으로 닫히고, 쓰는 사람이
+많으면 서버가 비는 순간이 오지 않습니다. 그래서 **drain으로 새 배정을 멈추고, 실행 중인
+검토가 끝난 뒤** 재시작합니다. drain 중에도 요청은 받아서 대기열에 쌓이고, 잃지 않습니다.
+drain 표시는 상태 폴더의 파일이라 재시작해도 남으므로, 마지막에 직접 풉니다.
+
+**서버의 관리 계정 bash.** 첫 줄은 이 창에서만 쓰는 변수입니다.
+
+```bash
+RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
+$RO drain on
+$RO drain wait --timeout 3600        # 실행 중인 검토가 0이 되면 0으로 끝납니다. 시간 초과는 3
+sudo -u review git -C /home/review/review-orchestrator pull --ff-only
+sudo systemctl restart review-orchestrator
+$RO drain off
+```
+
+다음 round가 이미 들어와 쓸모가 없어진 대기 작업은 `$RO cancel <jobId>...`로 닫습니다. 대기 중인
+slot만 `unknown`(`cancelled_by_operator`)이 되고, 실행 중인 검토는 끝까지 갑니다. cancel된
+검토는 검토로 치지 않으므로 이후 `--focus`의 계약 경로 판정을 좁히지 않습니다.
+
+`drain`은 서버에서만 쓸 수 있고 SSH로 들어오는 요청에는 열려 있지 않습니다. 상태는
+`$RO status`의 `draining`, `runningReviews`, `queuedReviews`로 봅니다.
 
 ## 작성자가 reviewer에게 지시하지 못하게
 

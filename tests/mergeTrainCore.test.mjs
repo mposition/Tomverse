@@ -10,6 +10,7 @@ import {
   pickNextPullRequest,
   refusalReason,
   replacementCommits,
+  SKIPPED_RUN_FAILURE,
   servicesDeployingBranch,
   withLane,
 } from "../scripts/merge-train-core.mjs";
@@ -159,7 +160,7 @@ test("deploymentOutcome needs every service that currently deploys the branch", 
     deploymentOutcome([...before, deployment("SUCCESS", commit, "cron"), deployment("SLEEPING", commit, "web")], commit, "develop").state,
     "succeeded",
   );
-  for (const status of ["FAILED", "SKIPPED", "CRASHED"]) {
+  for (const status of ["FAILED", "CRASHED"]) {
     assert.equal(
       deploymentOutcome([...before, deployment("WAITING", commit, "cron"), deployment(status, commit, "web")], commit, "develop").state,
       "failed",
@@ -224,6 +225,43 @@ test("a REMOVING deployment is treated as replaced, not unknown", () => {
   const deployments = [deployment("REMOVING", commit, "web"), deployment("DEPLOYING", newer, "web")];
   assert.deepEqual(replacementCommits(deployments, commit), [newer]);
   assert.equal(deploymentOutcome(deployments, commit, "develop", new Set([newer])).state, "in_progress");
+});
+
+test("one SKIPPED deployment is a wait, not a failure", () => {
+  // Railway skips a Wait-for-CI deployment when a later push cancelled the
+  // commit's CI run; nothing has failed yet.
+  assert.equal(deploymentOutcome([deployment("SKIPPED", commit, "web")], commit, "develop").state, "in_progress");
+});
+
+test("#1939 on 2026-10-02: SKIPPED, then a later commit containing it deployed", () => {
+  // 0ef8c98e2 SKIPPED (its CI cancelled by #1931's push), 020c93a6a REMOVED,
+  // cc97e1f22 SUCCESS -- the merge was serving.
+  const [first, second] = ["2".repeat(40), "3".repeat(40)];
+  const deployments = [
+    deployment("SKIPPED", commit, "web"),
+    deployment("REMOVED", first, "web"),
+    deployment("SUCCESS", second, "web"),
+  ];
+  assert.deepEqual(replacementCommits(deployments, commit).sort(), [first, second].sort());
+  assert.equal(deploymentOutcome(deployments, commit, "develop", new Set([first, second])).state, "succeeded");
+});
+
+test(`SKIPPED is a failure only ${SKIPPED_RUN_FAILURE} times in a row`, () => {
+  const later = ["4", "5", "6"].map((digit) => digit.repeat(40));
+  const run = (...statuses) =>
+    statuses.map((status, index) => deployment(status, index === 0 ? commit : later[index - 1], "web"));
+  const outcome = (deployments) => deploymentOutcome(deployments, commit, "develop", new Set(later)).state;
+  assert.equal(outcome(run("SKIPPED", "SKIPPED")), "in_progress");
+  assert.equal(outcome(run("SKIPPED", "SKIPPED", "SKIPPED")), "failed");
+  // REMOVED neither extends nor breaks the run.
+  assert.equal(outcome(run("SKIPPED", "REMOVED", "SKIPPED")), "in_progress");
+  assert.equal(outcome(run("SKIPPED", "REMOVED", "SKIPPED", "SKIPPED")), "failed");
+  // A later deployment in flight is a wait; a later build failure is a failure.
+  assert.equal(outcome(run("SKIPPED", "SKIPPED", "WAITING")), "in_progress");
+  assert.equal(outcome(run("SKIPPED", "FAILED")), "failed");
+  // Later SKIPPED deployments that do not contain the merge do not count.
+  const unrelated = run("SKIPPED", "SKIPPED", "SKIPPED");
+  assert.equal(deploymentOutcome(unrelated, commit, "develop", new Set()).state, "in_progress");
 });
 
 test("deploymentOutcome compares commit hashes case-insensitively", () => {
