@@ -10,7 +10,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: main은 사람이 병합하고 레인은 표시만, develop 제외 목록 보강, latch 전용 알림 |
 | 1 | 2026-10-02 mposition | 최초 승인(세 번째 초안). 세 번째 초안 — 독립 검토 반영: App의 main 병합을 ruleset으로 막음(bypass는 저장소 관리자 역할만), 게이트 범위를 `package.json`과 `scripts/**`로, 제외는 후보 선정에서 건너뜀, 승인 판정 단계를 본문에, 모든 secret·키 회전 기록, staging migration 복구, 스위치 off, 단일 점유 |
 | 2 | 2026-10-02 mposition | 버전 1의 독립 검토 반영 — 저장소 루트 파일 전체와 이 Agent의 테이블을 바꾸는 migration을 게이트로, develop 직접 push를 GitHub 설정으로 막고 그 관측을 S-M1 진입 조건으로, main ruleset은 시험 브랜치 관측 뒤에, 지시는 현재 revision·스위치·latch에 결속해 GitHub 호출 직전에 본 앱이 소비, 세 서비스 모두 revision 번호, kill switch는 "값이 있으면 정지", staging 복구 runbook을 S-M2 진입 조건으로, timeout의 문장 수와 Prisma 값, 승인 판정 0·4번 보강, glob 의미 |
-| 3 | (미승인) | 버전 2의 독립 검토 반영 — 승인 판정 0번에서 genesis PR을 순환 밖으로, 4번을 기록으로 판정 가능한 조건으로, 지시 소비가 PR 번호·head SHA·base를 다시 확인하고 병합 호출은 head SHA로 고정, 본 앱은 자기가 읽을 수 있는 스위치만 판정하고 서비스 변수는 서비스가 스스로 판정, 시험 브랜치는 실제 보호 설정을 그대로 복제, 모든 경로의 `package.json`·lockfile·`.npmrc`를 게이트로, 어느 문장이 규범인지 헤더에 명시, staging 복구 runbook의 내용 정정, kill switch 판정을 문장으로 고정, 시험용 App 자격증명과 실제 키 설정의 순서, timeout 식의 유휴 칸. S0 구현에서 확정된 값(경로, 문장 수, Monitor cron) 반영 |
+| 3 | (미승인) | 버전 2의 독립 검토 반영 — 승인 판정 0번에서 genesis PR을 순환 밖으로, 4번을 기록으로 판정 가능한 조건으로, 지시 소비가 PR 번호·head SHA·base를 다시 확인하고 병합 호출은 head SHA로 고정, 본 앱은 자기가 읽을 수 있는 스위치만 판정하고 서비스 변수는 서비스가 스스로 판정, 시험 브랜치는 실제 보호 설정을 그대로 복제, App 갱신 제한을 develop 밖 모든 브랜치로 넓혀 base 변경 경쟁을 막고 병합 뒤 base를 확인, 모든 경로의 `package.json`·lockfile·`.npmrc`를 게이트로, 어느 문장이 규범인지 헤더에 명시, staging 복구 runbook의 내용 정정, kill switch 판정을 문장으로 고정, 시험용 App 자격증명과 실제 키 설정의 순서, timeout 식의 유휴 칸. S0 구현에서 확정된 값(경로, 문장 수, Monitor cron) 반영 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950)의
 git 기록에 있으며, 효력이 없습니다. 이 초안이 승인되어 병합되기 전까지는 버전 2가 효력이고, 병합되는 순간 이 파일 전체가
@@ -97,11 +97,14 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
      같음, develop 레인 스위치(운영자 제어 기록)가 켜짐, latch 없음, 만료 전. 소비는 조건부 갱신으로 **한 번만** 성공합니다.
   3. 소비에 성공한 지시만 병합하며, 병합 호출은 GitHub 병합 API의 `sha` 인자에 **지시의 head SHA**를 넣어 head를
      compare-and-swap으로 고정합니다(기존 merge train의 `--match-head-commit`과 같은 역할). head가 그 사이 바뀌었으면 GitHub가
-     병합을 거절하고, 레인은 그 시도를 실패로 보고합니다.
-  4. 결과는 그 attempt id로 보고합니다.
+     병합을 거절하고, 레인은 그 시도를 실패로 보고합니다. head 고정은 base 변경을 막지 못하므로(소비 뒤 PR의 base가 다른
+     브랜치로 바뀌어도 head SHA는 그대로입니다), **base는 GitHub 설정이 막습니다**: 8절 7항의 갱신 제한 ruleset을 main만이 아니라
+     **develop을 뺀 모든 브랜치**에 걸어, App은 develop 밖의 어떤 브랜치도 병합·갱신하지 못합니다.
+  4. 결과는 그 attempt id로 보고합니다. 병합에 성공하면 서비스는 그 PR을 다시 읽어 **병합된 base가 `develop`이고 merge commit이
+     develop의 이력에 있는지** 확인하고, 아니면(위 ruleset이 동작하지 않은 경우) 레인을 latch하고 결과 불명으로 보고합니다.
   서비스 코드는 base가 `develop`이 아닌 병합 호출, `sha` 인자가 없는 병합 호출, 병합 API 밖의 쓰기(직접 push, ref 갱신)를
   하지 않으며, 정적 test가 이를 고정합니다.
-- **App 키의 쓰기 권한은 저장소 전체입니다.** 그래서 코드가 하지 않는 쓰기를 GitHub 설정으로도 막습니다 — main은 8절 7항,
+- **App 키의 쓰기 권한은 저장소 전체입니다.** 그래서 코드가 하지 않는 쓰기를 GitHub 설정으로도 막습니다 — develop 밖의 모든 브랜치는 8절 7항,
   develop의 직접 push는 8절 9항.
 - 서비스는 hard timeout에 강제 종료됩니다. 본 앱 route의 트랜잭션은 DB가 강제하는 문장·유휴 timeout과 마지막 문장의
   DB 시계 마감 검사로 묶이고, 늦은 실행은 성공으로 기록되지 않습니다. 마감은 DB 시계로 잡습니다(그 회차에서 DB가 읽은 시각에,
@@ -195,12 +198,17 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
    지시 소비에서 합니다. 본 앱은 서비스 변수의 값을 받아 판정하지 않습니다(자기 보고가 되기 때문입니다). **운영자가 본 앱
    쪽에서 레인을 멈추는 수단은 develop 레인 스위치를 끄는 revision 기록이며**, 이것은 다음 소비부터 모든 병합을 거절합니다.
    kill switch 변수는 서비스를 그 자리에서 멈추는 별개의 수단입니다.
-7. **App은 main을 갱신하지 못하게 둡니다.** 필수 리뷰는 App도 지켜야 할 규칙일 뿐이라, 사람이 리뷰를 남긴 main PR은 App도 병합
-   API로 병합할 수 있습니다. 그래서 main에 **갱신 제한 ruleset**(`update`)을 두고 **bypass는 저장소 관리자 역할만**, App은 넣지
-   않습니다. **순서는 시험 먼저입니다.** S-M0에서 시험 브랜치로 먼저 관측합니다(아래 10항). 관측 항목: 리뷰가 없는 PR의 App 병합
-   거절, **리뷰가 끝난 PR의 App 병합 거절**, App의 직접 push 거절, **운영자의 병합 성공**. 넷이 모두 기대대로일 때만 실제 main에
-   같은 ruleset을 겁니다. 하나라도 다르면(예: 개인 계정 저장소에서 관리자 역할 bypass가 동작하지 않으면) main에 ruleset을 걸지
-   않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
+7. **App은 develop 밖의 어떤 브랜치도 갱신하지 못하게 둡니다.** 필수 리뷰는 App도 지켜야 할 규칙일 뿐이라, 사람이 리뷰를 남긴
+   main PR은 App도 병합 API로 병합할 수 있습니다. 그리고 지시를 소비한 뒤 PR의 base가 다른 브랜치로 바뀌면 head 고정만으로는 그
+   병합을 막지 못합니다(3절). 그래서 **develop을 뺀 모든 브랜치**(main 포함)에 **갱신 제한 ruleset**(`update`)을 두고 **bypass는
+   저장소 관리자 역할만**, App은 넣지 않습니다. App이 브랜치를 만들 일은 없으므로 생성 제한(`creation`)도 함께 둡니다. **순서는
+   시험 먼저입니다.** S-M0에서 시험 브랜치로 먼저 관측합니다(아래 10항). 관측 항목: 리뷰가 없는 PR의 App 병합 거절, **리뷰가 끝난
+   PR의 App 병합 거절**, App의 직접 push 거절, **base가 develop도 main도 아닌 PR의 App 병합 거절**, **운영자의 병합 성공**. 다섯이
+   모두 기대대로일 때만 실제 저장소에 같은 ruleset을 겁니다. 하나라도 다르면(예: 개인 계정 저장소에서 관리자 역할 bypass가 동작하지
+   않으면) ruleset을 걸지 않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
+   ruleset은 bypass 목록 밖의 **모든** actor에게 걸리므로, 브랜치를 갱신해야 하는 기존 자동화(Dependabot, 저장소 workflow의
+   GitHub Actions 등)는 bypass에 넣고 **이 App만 넣지 않습니다**. 관측에는 그 자동화의 브랜치 갱신 성공도 포함하며, 거는 날과
+   bypass 목록은 운영자가 관측 결과를 보고 정합니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
@@ -226,7 +234,7 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | S0 | digest·Monitor·운영자 제어 기록 구현, 전부 dark | 이 정책 승인, 승인자 목록 절차 통과 |
 | S1 | staging에서 digest 활성 | S0 test 통과, 운영자 제어 revision 1 기록, IaC apply·secret 설정(운영자) |
 | S2 | production 활성 | S1 30일, 침묵 오탐 0 |
-| S-M0 | 병합 레인 구현(dark), 시험 브랜치 관측(8절 7항·9항·10항, 관측용 App 키는 로컬만 — 11항) 뒤 main·develop ruleset 설정 | 이 정책 버전 3 승인, 공통 기반의 병합 레인 예외 반영 |
+| S-M0 | 병합 레인 구현(dark), 시험 브랜치 관측(8절 7항·9항·10항, 관측용 App 키는 로컬만 — 11항) 뒤 develop 밖 모든 브랜치·develop ruleset 설정 | 이 정책 버전 3 승인, 공통 기반의 병합 레인 예외 반영 |
 | S-M1 | develop shadow(판정만, 병합 안 함) | S-M0 test 통과, **8절 7항·9항의 관측이 모두 기대대로이고 ruleset이 걸림**, 그 뒤에 실제 App 키·Railway 토큰 설정(8절 11항) |
 | S-M2 | develop 무인 병합 | S-M1 7일 이상 판정과 실제가 어긋난 건 0, 8절 8항의 변경 병합, 8절 3항의 staging 복구 runbook |
 | S-M3 | main 후보·production 상태 표시 | S-M2 운영 중. 병합 호출 없음 |
