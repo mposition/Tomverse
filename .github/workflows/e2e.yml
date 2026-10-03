@@ -219,7 +219,29 @@ jobs:
       - name: Install Chromium
         run: scripts/ci/install-playwright.sh chromium
 
+      # Shard weights, one per shard, in shard order.
+      #
+      # `--shard` balances by test count, and a test that skips itself at run
+      # time (`test.skip(testInfo.project.name !== ...)`, ~100 call sites) still
+      # counts. The desktop-chromium tests sort first and almost never skip, so
+      # equal counts gave shard 1 the most real work: on 2026-10-03 the five
+      # shards ran 1205/1031/881/900/850 tests (26/216/333/337/359 skipped),
+      # and over the last 16 green runs the p50 shard times were
+      # 35.0/28.3/26.8/25.6/23.5 minutes -- the run is as slow as shard 1.
+      #
+      # The weights below give each shard the share of the count axis that
+      # takes the same time at those p50 densities (~26 minutes of tests each).
+      # Every test still lands in exactly one shard -- weights move the
+      # boundaries, nothing else -- and a count that no longer matches
+      # `shards` fails the run loudly (tests/mainChromiumShardWeights.test.mjs
+      # pins the pairing first). PWTEST_SHARD_WEIGHTS is Playwright's own,
+      # undocumented knob (lib/cli/testActions.js); if a release drops it, the
+      # split falls back to equal counts, which is today's behaviour.
+      # Recalibrate from fresh shard timings when one shard drifts well past
+      # the others.
       - name: Run Chromium desktop and mobile E2E tests
+        env:
+          PWTEST_SHARD_WEIGHTS: "97:116:125:133:143"
         run: npm run test:e2e:chromium -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
