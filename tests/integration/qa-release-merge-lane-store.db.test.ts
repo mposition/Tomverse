@@ -141,6 +141,7 @@ test("a latched lane is refused", async () => {
 });
 
 test("a round past its deadline records nothing", async () => {
+  const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_issued" } });
   await assert.rejects(
     issueQaReleaseMergeInstruction({
       callerRevision: revision,
@@ -150,7 +151,8 @@ test("a round past its deadline records nothing", async () => {
     QaReleaseMergeLaneLate,
   );
   assert.equal((await attempts()).length, 0);
-  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_issued", targetId: { not: null } } }) >= 0, true);
+  // The audit row was written inside the rolled-back transaction.
+  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_issued" } }), auditsBefore);
 });
 
 const consume = (attemptId: string, overrides: Partial<{ callerRevision: number; number: number; headSha: string; base: string; budgetMs: number }> = {}) =>
@@ -215,6 +217,8 @@ test("an expired instruction is refused on the database clock", async () => {
 
 test("a late consume records nothing", async () => {
   const attemptId = await issued();
+  const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_consumed" } });
   await assert.rejects(consume(attemptId, { budgetMs: 1 }), QaReleaseMergeLaneLate);
+  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_consumed" } }), auditsBefore);
   assert.equal((await prisma.qaReleaseMergeAttempt.findUniqueOrThrow({ where: { id: attemptId } })).state, "issued");
 });
