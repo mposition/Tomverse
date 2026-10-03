@@ -69,13 +69,15 @@ export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]
 };
 
 /**
- * The current state of each amended document that is not a sitemap page.
+ * The current state of each amended document whose date the sitemap may not
+ * publish.
  *
  * `SITEMAP_CONTENT_EVIDENCE` only holds pages whose shown date the sitemap may
- * publish, and `/terms` is not one: its "Last updated" line did not move with
- * every edit (lib/sitemapContentDates.ts). So its state is recorded here, beside
- * a verifier that recomputes it. Checked first; a sitemap entry answers for
- * `/privacy`.
+ * publish. `/terms` is not one: its "Last updated" line did not move with every
+ * edit (lib/sitemapContentDates.ts). `/privacy` is not one while its shown date
+ * is a future effective date. So their state is recorded here, beside a
+ * verifier that recomputes it. This table is read first; a sitemap entry would
+ * answer only for a document not listed here.
  *
  * Both documents today: the S10 amendment as approved on 2026-10-03, effective
  * 2026-11-16. `/privacy` is here too, not in the sitemap table, while that

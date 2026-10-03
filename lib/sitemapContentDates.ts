@@ -31,6 +31,13 @@
  * fails that test until someone decides whether the change moves the
  * effective date, and then updates the date shown on the page, `date` here
  * and the digest together.
+ *
+ * While /privacy is not in the table below, that test is skipped and the same
+ * digest is held by the publication gate instead: AMENDED_DOCUMENT_EVIDENCE in
+ * lib/emailPolicyPublication.ts, recomputed by
+ * tests/support/amendedDocumentVerifiers.mjs through
+ * tests/emailPolicyPublication.test.mjs. That is the check that fails on an
+ * edit until the entry comes back here.
  */
 export type SitemapContentEvidence = {
     /** UTC calendar day, YYYY-MM-DD. */

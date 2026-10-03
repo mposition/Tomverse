@@ -1734,8 +1734,11 @@ EEA·영국을 여는 선행 게이트입니다.
   함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
 - **게시 여부는 "개정을 담은 승인된 버전인가"입니다.** 문서마다 개정을 담았다고
   승인된 버전의 digest 목록(`APPROVED_AMENDED_DIGESTS`)을 두고, 현재 렌더되는
-  digest(`/privacy`는 `lib/sitemapContentDates.ts`, `tests/sitemapLastModified.test.mjs`가
-  실제 페이지와 대조)가 그 목록에 있어야 인정합니다. 처음에는 "개정 전 digest에서
+  digest가 그 목록에 있어야 인정합니다. 현재 digest와 표시 날짜는 `AMENDED_DOCUMENT_EVIDENCE`
+  (`lib/emailPolicyPublication.ts`)에 두고, `tests/support/amendedDocumentVerifiers.mjs`의
+  검증기가 실제 페이지에서 다시 계산해 대조합니다. `/privacy`는 2026-09-28 판까지
+  `lib/sitemapContentDates.ts`에 있었지만, S10 개정을 시행일(2026-11-16)보다 먼저 게시하면서
+  옮겼습니다 — 미래의 시행일은 sitemap `lastmod`가 될 수 없습니다. 처음에는 "개정 전 digest에서
   바뀌었는가"로 판정했는데, 2026-09-28에 `/privacy`가 release notes와 **무관한 이유로**
   바뀌었고 그 설계는 그것을 개정 게시로 셌을 것입니다. 개정 뒤의 모든 편집은 그
   버전이 여전히 개정을 담는다고 승인해 목록에 넣기 전까지 게이트를 닫습니다.
