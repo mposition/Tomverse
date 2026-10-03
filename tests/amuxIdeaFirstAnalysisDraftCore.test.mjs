@@ -46,13 +46,24 @@ test("a complete first idea response becomes separately sealed units, not a card
   assert.equal(JSON.parse(plain.toString("utf8")).title, card.title);
   assert.equal(JSON.stringify(result).includes(card.title), false);
   assert.deepEqual([result.coveredStartOrdinal, result.coveredEndOrdinal,
-    result.outputPartIndex], [0, 0, 0]);
+    result.outputPartIndex, result.remainingStartOrdinal,
+    result.remainingEndOrdinal], [0, 0, 0, null, null]);
 });
 
-test("an unfinished first response or owner question cannot masquerade as complete", () => {
-  assert.deepEqual(prepare(chunk({ coverageStatus: "more", continuationKind: "output",
-    remainingScope: "More cards remain." })),
-  { decision: "hold", reason: "continuation_required" });
+test("a first output page is retained with an exact continuation cursor", () => {
+  const result = prepare(chunk({ coverageStatus: "more", continuationKind: "output",
+    remainingScope: "More cards remain." }));
+  assert.equal(result.decision, "partial");
+  if (result.decision !== "partial") return;
+  assert.equal(result.draft.units.length, 4);
+  assert.equal(result.draft.coverageStatus, "more");
+  assert.equal(result.draft.continuationKind, "output");
+  assert.deepEqual([result.coveredStartOrdinal, result.coveredEndOrdinal,
+    result.outputPartIndex, result.remainingStartOrdinal,
+    result.remainingEndOrdinal], [0, 0, 0, 0, 0]);
+});
+
+test("an owner question cannot masquerade as a complete or output-continuable page", () => {
   assert.deepEqual(prepare(chunk({ outcome: "needs_information",
     coverageStatus: "needs_owner_input",
     ownerQuestion: "Which area is in scope?",

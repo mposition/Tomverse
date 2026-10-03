@@ -53,15 +53,17 @@ export async function readAmuxFirstIdeaAnalysisResult(
     });
     if (!idea) throw new AmuxIdeaAnalysisResultReadError("not_found");
     if (idea.state === "cancelled") return { state: "cancelled" };
-    if (idea.state === "submitted" || idea.state === "analyzing") {
-      return { state: "pending" };
-    }
-    if (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt) {
+    if (idea.state === "submitted") return { state: "pending" };
+    const partial = idea.state === "analyzing" && idea.analysisCompletedAt === null;
+    if (!partial && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     });
+    if (partial && (!chunk || chunk.state !== "draft_ready")) {
+      return { state: "pending" };
+    }
     const units = await tx.amuxIdeaDraftUnit.findMany({
       where: { ideaId, actorUserId, chunkIndex: 0 },
       orderBy: { unitIndex: "asc" },
@@ -78,14 +80,26 @@ export async function readAmuxFirstIdeaAnalysisResult(
         chunk.state !== "draft_ready" || chunk.draftVersion !== 2 ||
         chunk.draftCiphertext !== null || !chunk.currentPreviewId ||
         !chunk.analysisCompletedAt ||
-        chunk.analysisCompletedAt.getTime() !== idea.analysisCompletedAt.getTime() ||
+        (partial ? chunk.coverageStatus !== "more" ||
+          chunk.continuationKind !== "output" || chunk.outputPending !== true ||
+          chunk.outputPartIndex !== 0 || chunk.revisionChunkIndex !== 0 ||
+          chunk.coveredStartOrdinal !== 0 || chunk.coveredEndOrdinal !== 0 ||
+          chunk.remainingStartOrdinal !== 0 || chunk.remainingEndOrdinal !== 0 :
+          chunk.analysisCompletedAt.getTime() !== idea.analysisCompletedAt!.getTime() ||
+          chunk.coverageStatus !== "complete" ||
+          chunk.continuationKind !== null || chunk.outputPending !== false) ||
         !audit?.entryHash || auditRowActorKind(audit) !== "system" ||
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||
         meta.unitCount !== units.length ||
+        meta.coverageStatus !== chunk.coverageStatus ||
+        meta.continuationKind !== chunk.continuationKind ||
+        meta.remainingStartOrdinal !== chunk.remainingStartOrdinal ||
+        meta.remainingEndOrdinal !== chunk.remainingEndOrdinal ||
         !matchesAmuxIdeaAnalysisUnitCommitments(meta.unitCommitments, units) ||
         meta.cardRegistrationStarted !== false ||
         !["propose", "reject"].includes(String(meta.outcome)) ||
+        (partial && meta.outcome !== "propose") ||
         units.length > 40) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
@@ -118,6 +132,10 @@ export async function readAmuxFirstIdeaAnalysisResult(
         freeformValue = parsed as Record<string, unknown>;
         if (freeformValue.previewId !== previewId || freeformValue.chunkIndex !== 0 ||
             freeformValue.outcome !== meta!.outcome ||
+            freeformValue.coverageStatus !== chunk.coverageStatus ||
+            freeformValue.continuationKind !== chunk.continuationKind ||
+            (partial && (typeof freeformValue.remainingScope !== "string" ||
+              !amuxAnalysisTextSafe(freeformValue.remainingScope))) ||
             typeof freeformValue.coveredScope !== "string" ||
             !amuxAnalysisTextSafe(freeformValue.coveredScope)) {
           throw new Error("freeform identity mismatch");
@@ -173,17 +191,21 @@ export async function readAmuxFirstIdeaAnalysisResult(
           expectedRevisionChunkIndex: 0, previousContinuationKind: null,
           permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
         });
-        if (!inspected.ok || inspected.chunk.coverageStatus !== "complete" ||
-            inspected.chunk.continuationKind !== null ||
+        if (!inspected.ok ||
+            inspected.chunk.coverageStatus !== chunk.coverageStatus ||
+            inspected.chunk.continuationKind !== chunk.continuationKind ||
             inspected.chunk.outcome !== meta!.outcome) {
-          throw new Error("complete proposal mismatch");
+          throw new Error("proposal mismatch");
         }
       }
-      return { state: "ready", ideaId, previewId,
+      const shared = { ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
-        outcome: meta!.outcome as "propose" | "reject",
         coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
         units: visibleUnits };
+      if (partial) return { state: "partial", ...shared, outcome: "propose",
+        remainingScope: freeformValue?.remainingScope as string | undefined ?? null };
+      return { state: "ready", ...shared,
+        outcome: meta!.outcome as "propose" | "reject" };
     } catch {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     } finally {

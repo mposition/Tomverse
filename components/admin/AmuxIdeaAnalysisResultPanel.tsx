@@ -63,11 +63,14 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
     {unavailable ? <p role="alert">{m.analysisResultUnavailable}</p> : null}
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
-    {view?.state === "ready" ? <div className="space-y-3">
+    {view?.state === "ready" || view?.state === "partial" ? <div className="space-y-3">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
         {view.completedAt} · {view.previewId}
       </p>
       <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
+      {view.state === "partial" ? <p role="status" className="rounded-lg border border-amber-300 p-3 dark:border-amber-700">
+        {m.analysisResultPartial} {view.remainingScope ?? m.analysisResultScopeExpired}
+      </p> : null}
       {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
       <ol className="space-y-2">
         {view.units.map((unit) => <li key={unit.id}

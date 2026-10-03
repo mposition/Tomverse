@@ -737,6 +737,74 @@ test("unknown CLI outcome holds the full budget and refuses admission and settle
   } }), 0);
 });
 
+test("an output-continuable first result retains its first page without completing the idea", async () => {
+  const workItemsBefore = await prisma.amuxWorkItem.count({
+    where: { sourceSystem: "admin-idea-v4" },
+  });
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { ideaId: true },
+  });
+  const ideaId = preview.ideaId;
+  await prisma.amuxIdeaSubmission.update({
+    where: { id: ideaId }, data: { state: "analyzing" },
+  });
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { state: "in_flight", leaseGeneration: 1 },
+  });
+  await prisma.$transaction((tx) => commitAmuxKnownIdeaAnalysisSettlement(tx,
+    { holdId, outcome: "verified_success", inputTokens: 100, outputTokens: 50 }));
+  const units = [
+    { kind: "node", localId: "c0:node-0", level: "initiative", parentRef: null,
+      title: "Improve intake", description: "An operator idea.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "node", localId: "c0:node-1", level: "epic", parentRef: "c0:node-0",
+      title: "Analyze ideas", description: "A bounded proposal.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "node", localId: "c0:node-2", level: "feature", parentRef: "c0:node-1",
+      title: "Review proposals", description: "A bounded proposal.",
+      sourceRefIds: ["operator_idea"] },
+    { kind: "card", localId: "c0:card-0", cardType: "story", storyKind: "general",
+      title: "Review a first card", problem: "The owner needs a proposal.",
+      scopeIn: ["Show the first page"], scopeOut: ["Do not register cards"],
+      completionCriteria: ["The first page is visible"], featureRef: "c0:node-2",
+      parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
+      taskRole: null, executionGrade: null, executionBrief: null,
+      sourceRefIds: ["operator_idea"] },
+  ];
+  const saved = await prisma.$transaction((tx) => commitAmuxFirstIdeaAnalysisDraft(tx, {
+    ideaId, previewId, holdId, leaseGeneration: 1, keys,
+    rawModelOutput: JSON.stringify({ schemaVersion: 2, previewId, chunkIndex: 0,
+      outcome: "propose", coverageStatus: "more", continuationKind: "output",
+      ownerQuestion: null, coveredScope: "First page", remainingScope: "More cards remain",
+      units }),
+  }));
+  assert.equal(saved.coverageStatus, "more");
+  assert.equal(saved.analysisCompletedAt, null);
+  assert.equal(saved.nextChunkIndex, 1);
+  const [idea, chunk, visible] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    }),
+    readAmuxFirstIdeaAnalysisResult(session, ideaId, keys),
+  ]);
+  assert.equal(idea.state, "analyzing");
+  assert.equal(idea.analysisCompletedAt, null);
+  assert.equal(chunk.state, "draft_ready");
+  assert.equal(chunk.outputPending, true);
+  assert.deepEqual([chunk.remainingStartOrdinal, chunk.remainingEndOrdinal], [0, 0]);
+  assert.equal(visible.state, "partial");
+  if (visible.state !== "partial") throw new Error("first page unavailable");
+  assert.equal(visible.remainingScope, "More cards remain");
+  assert.equal(visible.units.length, 4);
+  assert.equal(visible.units[3]?.proposal?.kind, "card");
+  assert.equal(await prisma.amuxWorkItem.count({
+    where: { sourceSystem: "admin-idea-v4" },
+  }), workItemsBefore);
+});
+
 test("a complete first result saves independent encrypted units and closes only its preview", async () => {
   const { holdId, previewId } = await syntheticDispatchedHold();
   const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({

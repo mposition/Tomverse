@@ -24,7 +24,7 @@ export class AmuxFirstAnalysisDraftError extends Error {
   }
 }
 
-/** Dark app-DB writer for one complete idea-only first response. It does not
+/** Dark app-DB writer for one bounded idea-only first response. It does not
  * run a model, grant a card, or authenticate the local Agent's receipt. The
  * future internal route must authenticate the fenced caller and verify that
  * rawModelOutput belongs to this exact invocation before calling this body.
@@ -34,7 +34,8 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   input: { ideaId: string; previewId: string; holdId: string;
     leaseGeneration: number; rawModelOutput: string; keys: AmuxContentKeys },
 ): Promise<{ ideaId: string; previewId: string; unitCount: number;
-  analysisCompletedAt: string; auditId: string }> {
+  chunkCompletedAt: string; coverageStatus: "complete" | "more";
+  analysisCompletedAt: string | null; nextChunkIndex: number | null; auditId: string }> {
   if (!input || !ID.test(input.ideaId) || !ID.test(input.previewId) ||
       !ID.test(input.holdId) || !Number.isSafeInteger(input.leaseGeneration) ||
       input.leaseGeneration < 1 || typeof input.rawModelOutput !== "string" ||
@@ -163,7 +164,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     ideaId: idea.id, previewId: preview.id, raw: input.rawModelOutput,
     keys: input.keys,
   });
-  if (prepared.decision !== "ready") {
+  if (prepared.decision === "hold") {
     throw new AmuxFirstAnalysisDraftError("invalid_result");
   }
   const nextDay = new Date(now.getTime() + DAY_MS);
@@ -175,10 +176,14 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
     targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
     targetId: `${idea.id}:0`,
-    summary: "Stored one complete AMUX v4 idea analysis as independently purgeable proposal units.",
+    summary: "Stored one bounded AMUX v4 idea analysis page as independently purgeable proposal units.",
     metadata: { ideaId: idea.id, previewId: preview.id, sourcePlanRevisionId: plan.id,
       leaseGeneration: chunk.leaseGeneration, unitCount: prepared.draft.units.length,
       outcome: prepared.draft.outcome,
+      coverageStatus: prepared.draft.coverageStatus,
+      continuationKind: prepared.draft.continuationKind,
+      remainingStartOrdinal: prepared.remainingStartOrdinal,
+      remainingEndOrdinal: prepared.remainingEndOrdinal,
       freeformDigest: prepared.draft.freeform.digest,
       freeformDigestKeyId: prepared.draft.freeform.digestKeyId,
       unitCommitments: prepared.draft.units.map((unit) => ({
@@ -192,15 +197,18 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       currentPreviewId: preview.id, leaseGeneration: input.leaseGeneration,
       analysisCompletedAt: null },
     data: { state: "draft_ready", analysisCompletedAt: now,
-      coverageStatus: "complete", continuationKind: null,
-      outputPartIndex: 0, outputPending: false, draftVersion: 2,
+      coverageStatus: prepared.draft.coverageStatus,
+      continuationKind: prepared.draft.continuationKind,
+      outputPartIndex: prepared.outputPartIndex,
+      outputPending: prepared.decision === "partial", draftVersion: 2,
       freeformCiphertext: Uint8Array.from(prepared.draft.freeform.ciphertext),
       freeformKeyId: prepared.draft.freeform.keyId,
       freeformKeyVersion: prepared.draft.freeform.keyVersion,
       freeformPurgeAfter: nextDay,
       coveredStartOrdinal: prepared.coveredStartOrdinal,
       coveredEndOrdinal: prepared.coveredEndOrdinal,
-      remainingStartOrdinal: null, remainingEndOrdinal: null },
+      remainingStartOrdinal: prepared.remainingStartOrdinal,
+      remainingEndOrdinal: prepared.remainingEndOrdinal },
   });
   if (completedChunk.count !== 1) {
     throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
@@ -226,16 +234,20 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       outcomeUnknownAt: null },
     data: { state: "completed", payloadPurgeAfter },
   });
-  const completedIdea = await tx.amuxIdeaSubmission.updateMany({
-    where: { id: idea.id, state: "analyzing", analysisCompletedAt: null,
-      cancelledAt: null, analysisDeadlineAt: { gt: now } },
-    data: { state: "awaiting_owner", analysisCompletedAt: now,
-      rawPurgeAfter: now },
-  });
+  const completedIdea = prepared.decision === "ready"
+    ? await tx.amuxIdeaSubmission.updateMany({
+      where: { id: idea.id, state: "analyzing", analysisCompletedAt: null,
+        cancelledAt: null, analysisDeadlineAt: { gt: now } },
+      data: { state: "awaiting_owner", analysisCompletedAt: now,
+        rawPurgeAfter: now },
+    }) : { count: 1 };
   if (closedPreview.count !== 1 || completedIdea.count !== 1) {
     throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
   }
   return { ideaId: idea.id, previewId: preview.id,
     unitCount: prepared.draft.units.length,
-    analysisCompletedAt: now.toISOString(), auditId };
+    chunkCompletedAt: now.toISOString(),
+    analysisCompletedAt: prepared.decision === "ready" ? now.toISOString() : null,
+    coverageStatus: prepared.decision === "ready" ? "complete" : "more",
+    nextChunkIndex: prepared.decision === "partial" ? 1 : null, auditId };
 }

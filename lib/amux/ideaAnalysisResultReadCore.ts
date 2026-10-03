@@ -20,7 +20,11 @@ export type AmuxIdeaAnalysisResultView =
   | { state: "pending" | "cancelled" }
   | { state: "ready"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose" | "reject";
-      coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] };
+      coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] }
+  | { state: "partial"; ideaId: string; previewId: string;
+      completedAt: string; outcome: "propose";
+      coveredScope: string | null; remainingScope: string | null;
+      units: AmuxVisibleAnalysisUnit[] };
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -69,13 +73,19 @@ export function parseAmuxIdeaAnalysisResultView(
   if (body.state === "pending" || body.state === "cancelled") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }
-  if (body.state !== "ready" || !keys(body, ["state", "ideaId", "previewId",
-    "completedAt", "outcome", "coveredScope", "units"]) ||
+  const partial = body.state === "partial";
+  if ((body.state !== "ready" && !partial) ||
+      !keys(body, partial ? ["state", "ideaId", "previewId", "completedAt",
+        "outcome", "coveredScope", "remainingScope", "units"] :
+        ["state", "ideaId", "previewId", "completedAt", "outcome",
+          "coveredScope", "units"]) ||
       body.ideaId !== expectedIdeaId || typeof body.previewId !== "string" ||
       !ID.test(body.previewId) || typeof body.completedAt !== "string" ||
       !Number.isFinite(Date.parse(body.completedAt)) ||
-      (body.outcome !== "propose" && body.outcome !== "reject") ||
+      (partial ? body.outcome !== "propose" :
+        body.outcome !== "propose" && body.outcome !== "reject") ||
       (body.coveredScope !== null && !text(body.coveredScope)) ||
+      (partial && body.remainingScope !== null && !text(body.remainingScope)) ||
       !Array.isArray(body.units) || body.units.length > 40 ||
       (body.outcome === "reject" ? body.units.length !== 0 : body.units.length === 0)) {
     return null;

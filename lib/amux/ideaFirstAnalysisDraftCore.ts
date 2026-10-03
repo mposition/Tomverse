@@ -2,10 +2,10 @@ import { inspectAmuxAnalysisContinuation } from "./ideaAnalysisContinuationCore.
 import { sealAmuxAnalysisDraft, type SealedAmuxAnalysisDraft } from "./ideaAnalysisDraftSealCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
-/** A first, idea-only analysis can finish without a continuation worker.
+/** A first, idea-only analysis may finish or retain an output continuation.
  * This prepares encrypted DB values but never writes or authorizes a call.
- * "ready" means a complete analysis record, not necessarily proposed cards:
- * a complete rejection legitimately has zero draft units.
+ * "ready" means a complete analysis record, not necessarily proposed cards;
+ * "partial" retains proposed units and an explicit remaining-output cursor.
  * Its caller must still prove that the confirmed preview belongs to ideaId,
  * that this exact response came from its fenced invocation, and that the
  * source-plan/lease/budget/audit guards all hold under the app DB writer. */
@@ -15,8 +15,9 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
   raw: string;
   keys: AmuxContentKeys;
 }):
-  | { decision: "ready"; draft: SealedAmuxAnalysisDraft;
-      coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 0 }
+  | { decision: "ready" | "partial"; draft: SealedAmuxAnalysisDraft;
+      coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 0;
+      remainingStartOrdinal: 0 | null; remainingEndOrdinal: 0 | null }
   | { decision: "hold"; reason: "invalid_result" | "owner_input" | "continuation_required" } {
   const inspected = inspectAmuxAnalysisContinuation({
     raw: input.raw,
@@ -32,9 +33,14 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
   });
   if (!inspected.ok) return { decision: "hold",
     reason: inspected.stage === "owner_input" ? "owner_input" : "invalid_result" };
-  if (inspected.cursor.nextCursor !== null ||
-      inspected.parsed.chunk.coverageStatus !== "complete" ||
-      inspected.parsed.chunk.continuationKind !== null) {
+  const complete = inspected.cursor.nextCursor === null &&
+    inspected.parsed.chunk.coverageStatus === "complete" &&
+    inspected.parsed.chunk.continuationKind === null;
+  const partial = inspected.cursor.nextCursor?.sourceOrdinal === 0 &&
+    inspected.cursor.nextCursor.outputPartIndex === 1 &&
+    inspected.parsed.chunk.coverageStatus === "more" &&
+    inspected.parsed.chunk.continuationKind === "output";
+  if (!complete && !partial) {
     return { decision: "hold", reason: "continuation_required" };
   }
   const sealed = sealAmuxAnalysisDraft({ ...input,
@@ -46,6 +52,8 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
     permittedTargetRefs: [],
   });
   if (!sealed.ok) return { decision: "hold", reason: "invalid_result" };
-  return { decision: "ready", draft: sealed.draft,
-    coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: 0 };
+  return { decision: complete ? "ready" : "partial", draft: sealed.draft,
+    coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: 0,
+    remainingStartOrdinal: partial ? 0 : null,
+    remainingEndOrdinal: partial ? 0 : null };
 }
