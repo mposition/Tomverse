@@ -127,3 +127,9 @@ test("the version reads in both forms the policies use", () => {
   assert.equal(parseAgentPolicyHeader("approvedBy: a · approvedAt: 2026-10-03 · 정책 버전: v1").version, 1);
   assert.equal(parseAgentPolicyHeader("approvedBy: a · approvedAt: 2026-10-03 · 정책 버전: 2").version, 2);
 });
+
+test("the previous version is a number, a new file, or unknown -- never a guessed first", () => {
+  assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: "unknown" })))["0a"], "unknown");
+  assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: "new" })))["0a"], "pass");
+  assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: 3 })))["0a"], "fail");
+});

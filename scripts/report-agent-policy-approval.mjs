@@ -104,8 +104,18 @@ if (policyText === null) {
 }
 const header = parseAgentPolicyHeader(policyText);
 const lastChangeCommit = gitOrNull("log", "-1", "--format=%H", ref, "--", policyPath) || null;
-const previousText = lastChangeCommit ? gitOrNull("show", `${lastChangeCommit}^:${policyPath}`) : null;
-const previousVersion = previousText === null ? null : parseAgentPolicyHeader(previousText).version;
+// "new" only when git says the path is absent at the parent; any other
+// failure is "unknown", never a first version.
+const previousVersion = (() => {
+  if (!lastChangeCommit) return "unknown";
+  const listed = gitOrNull("ls-tree", "--name-only", `${lastChangeCommit}^`, "--", policyPath);
+  if (listed === null) return "unknown";
+  if (listed === "") return "new";
+  const text = gitOrNull("show", `${lastChangeCommit}^:${policyPath}`);
+  if (text === null) return "unknown";
+  // A draft that carried no version number had no approved version before.
+  return parseAgentPolicyHeader(text).version ?? "new";
+})();
 const pullRequests = lastChangeCommit ? await pullRequestsFor(lastChangeCommit) : null;
 
 const developPr = pullRequests?.filter((pr) => pr.baseRef === "develop" && pr.mergedAt) ?? [];

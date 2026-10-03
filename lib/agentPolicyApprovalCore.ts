@@ -47,8 +47,12 @@ export type AllowlistChange = {
 export type AgentPolicyApprovalFacts = {
   policyPath: string;
   header: AgentPolicyHeader;
-  /** The policy version at the parent of the last change, or null when the file was new there. */
-  previousVersion: number | null;
+  /**
+   * The policy version at the parent of the last change: a number, "new" when
+   * the file did not exist there or carried no version (an unapproved draft),
+   * or "unknown" when it could not be read.
+   */
+  previousVersion: number | "new" | "unknown";
   /** The last commit that changed the policy file. */
   lastChangeCommit: string | null;
   /** The PRs merged into develop that contain that commit, or null if unread. */
@@ -174,10 +178,12 @@ export function judgeAgentPolicyApproval(facts: AgentPolicyApprovalFacts): Agent
   // 0a: the header is filled and the version moved up.
   if (header.approvedBy === null || header.approvedAt === null || header.version === null) {
     steps.push(fail("0a", "approvedBy, approvedAt or the policy version is missing"));
-  } else if (facts.previousVersion !== null && header.version <= facts.previousVersion) {
+  } else if (facts.previousVersion === "unknown") {
+    steps.push(unknown("0a", "the previous version could not be read"));
+  } else if (facts.previousVersion !== "new" && header.version <= facts.previousVersion) {
     steps.push(fail("0a", `version ${header.version} is not above the previous ${facts.previousVersion}`));
   } else {
-    steps.push(pass("0a", `version ${header.version}${facts.previousVersion === null ? " (first)" : ` above ${facts.previousVersion}`}`));
+    steps.push(pass("0a", `version ${header.version}${facts.previousVersion === "new" ? " (first)" : ` above ${facts.previousVersion}`}`));
   }
 
   // 1: the last change.
