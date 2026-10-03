@@ -6,7 +6,9 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+  AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
@@ -56,17 +58,20 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
     select: { ideaId: true, chunkIndex: true },
   });
-  if (!identity || identity.chunkIndex !== 0) refuse("not_ready");
+  if (!identity || ![0, 1].includes(identity.chunkIndex)) refuse("not_ready");
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${identity.ideaId} FOR UPDATE
   `;
   if (ideaLock.length !== 1) refuse("not_ready");
-  const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
+  const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${identity.ideaId} AND "chunkIndex" = 0 FOR UPDATE
+    WHERE "ideaId" = ${identity.ideaId} AND "chunkIndex" <= ${identity.chunkIndex}
+    ORDER BY "chunkIndex" FOR UPDATE
   `;
-  if (chunkLock.length !== 1) refuse("not_ready");
+  if (chunkLocks.length !== identity.chunkIndex + 1 ||
+      chunkLocks.map((row) => row.chunkIndex).sort((a, b) => a - b)
+        .some((index, position) => index !== position)) refuse("not_ready");
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaTransferPreview"
     WHERE "id" = ${input.previewId} AND "ideaId" = ${identity.ideaId}
@@ -85,19 +90,22 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: identity.ideaId } });
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId: identity.ideaId, chunkIndex: 0 } },
+    where: { ideaId_chunkIndex: { ideaId: identity.ideaId,
+      chunkIndex: identity.chunkIndex } },
   });
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: input.previewId },
   });
-  if (!idea || !chunk || !preview || idea.state !== "submitted" ||
+  if (!idea || !chunk || !preview ||
+      idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
+      idea.analysisCompletedAt !== null || idea.cancelledAt !== null ||
       now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId ||
       chunk.state !== "awaiting_preview" ||
       chunk.currentPreviewId !== preview.id ||
       chunk.attempt !== preview.attempt ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
-      preview.ideaId !== idea.id || preview.chunkIndex !== 0 ||
+      preview.ideaId !== idea.id || preview.chunkIndex !== identity.chunkIndex ||
       preview.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       preview.sourceScopeApprovalId !== null ||
       preview.sourceUnitOrdinal !== 0 ||
@@ -146,7 +154,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       !preparedMetadata || typeof preparedMetadata !== "object" ||
       Array.isArray(preparedMetadata) ||
       (preparedMetadata as Record<string, unknown>).ideaId !== idea.id ||
-      (preparedMetadata as Record<string, unknown>).chunkIndex !== 0 ||
+      (preparedMetadata as Record<string, unknown>).chunkIndex !== identity.chunkIndex ||
       (preparedMetadata as Record<string, unknown>).sourcePlanRevisionId !==
         preview.sourcePlanRevisionId ||
       (preparedMetadata as Record<string, unknown>).payloadDigest !== preview.payloadDigest ||
@@ -154,6 +162,26 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
         preview.payloadDigestKeyId ||
       (preparedMetadata as Record<string, unknown>).transferAuthorized !== false) {
     refuse("integrity_unavailable");
+  }
+  if (identity.chunkIndex === 1) {
+    const first = await tx.amuxIdeaAnalysisChunk.findUnique({
+      where: { ideaId_chunkIndex: { ideaId: idea.id, chunkIndex: 0 } },
+    });
+    const priorAudits = await tx.adminAuditLog.findMany({
+      where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+        targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+        targetId: `${idea.id}:0` }, take: 2,
+      select: { entryHash: true },
+    });
+    if (first?.state !== "draft_ready" || first.outputPending !== true ||
+        first.sourcePlanRevisionId !== preview.sourcePlanRevisionId ||
+        first.analysisCompletedAt === null || priorAudits.length !== 1 ||
+        !priorAudits[0]?.entryHash ||
+        (preparedMetadata as Record<string, unknown>).previousChunkAuditHash !==
+          priorAudits[0].entryHash ||
+        (confirmationMetadata as Record<string, unknown>).chunkIndex !== 1) {
+      refuse("integrity_unavailable");
+    }
   }
   let raw: Buffer;
   let confirmedProvider: unknown;
@@ -240,7 +268,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
     targetId: input.holdId,
     summary: "Reserved one AMUX v4 analysis Agent cost ceiling; no model was called.",
-    metadata: { previewId: preview.id, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
+    metadata: { previewId: preview.id, chunkIndex: identity.chunkIndex,
+      namespace: AMUX_V4_ANALYSIS_NAMESPACE,
       monthStart: monthStart.toISOString(), provider: decision.provider,
       modelId: decision.modelId, pricingVersion: decision.pricingVersion,
       priceVersionId: input.priceVersionId,

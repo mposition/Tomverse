@@ -891,6 +891,31 @@ test("an output-continuable first result retains its first page without completi
   assert.equal((await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
     where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
   })).currentPreviewId, replacementId);
+  await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx, {
+    session, request, choice: { previewId: replacementId, ideaId,
+      payloadDigest: replacement.payloadDigest,
+      payloadDigestKeyId: replacement.payloadDigestKeyId },
+    browserNonce, keys,
+  }));
+  const firstHold = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId }, select: { priceVersionId: true },
+  });
+  assert.ok(firstHold.priceVersionId);
+  const nextHoldId = randomUUID();
+  const nextReservation = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx, {
+      holdId: nextHoldId, previewId: replacementId,
+      priceVersionId: firstHold.priceVersionId!, runner, keys,
+    }));
+  assert.equal(nextReservation.previewId, replacementId);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: nextHoldId },
+  })).status, "reserved");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisBudgetReservation(tx, {
+      holdId: randomUUID(), previewId: nextPreviewId,
+      priceVersionId: firstHold.priceVersionId!, runner, keys,
+    })), /not_ready/, "the expired predecessor cannot reserve budget");
   await assert.rejects(prisma.$transaction((tx) =>
     commitFirstOutputContinuationTransferPreview(tx, {
       session, request, choice: { ...choice, previewId: randomUUID() },
