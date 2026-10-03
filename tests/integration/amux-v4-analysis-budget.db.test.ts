@@ -8,6 +8,8 @@ import { Prisma } from "@prisma/client";
 import { takeAuditChainLock, writeAdminAuditLog,
   writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
+  AMUX_V4_ANALYSIS_CLAIM_ACTION,
+  AMUX_V4_ANALYSIS_CLAIM_TARGET,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
@@ -33,6 +35,8 @@ import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 import { commitAmuxIdeaOnlyAnalysisClaim,
+  enforceAmuxV4DailyClaimLimit,
+  readAmuxIdeaAnalysisClaimReceipt,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult,
   readAmuxIdeaAnalysisResultReceipt,
@@ -78,6 +82,8 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
 import { prisma } from "@/lib/prisma";
+import { AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT,
+  amuxV4AnalysisUtcDayKey } from "@/lib/amux/ideaAnalysisInvocationLimitsCore";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const url = testUrl ? new URL(testUrl) : null;
@@ -111,6 +117,38 @@ process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID = keys.digestKeyId;
 process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = keys.digestKey.toString("base64");
 
 after(async () => { await prisma.$disconnect(); });
+
+test("route admission allows claim 12 but holds claim 13 under the DB UTC day", async () => {
+  const rollback = `ROLLBACK_${randomUUID()}`;
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const rows = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    const today = amuxV4AnalysisUtcDayKey(rows[0]?.now);
+    const yesterday = amuxV4AnalysisUtcDayKey(new Date(rows[0]!.now.getTime() - 86_400_000));
+    assert.ok(today && yesterday && today !== yesterday);
+    const record = async (claimDayUtc: string) => writeSystemAuditLog({ tx,
+      systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
+      targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
+      targetId: randomUUID(), summary: "Synthetic daily admission boundary.",
+      metadata: { requestId: randomUUID(), claimDayUtc },
+    });
+    await record(yesterday);
+    for (let count = 1; count < AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT; count += 1) {
+      assert.equal(await enforceAmuxV4DailyClaimLimit(tx), today);
+      await record(today);
+    }
+    assert.equal(await enforceAmuxV4DailyClaimLimit(tx), today,
+      "the twelfth invocation is admitted");
+    await record(today);
+    await assert.rejects(enforceAmuxV4DailyClaimLimit(tx),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
+        error.code === "not_ready");
+    throw new Error(rollback);
+  }, { maxWait: 5_000, timeout: 30_000 }), new RegExp(rollback));
+});
 
 async function confirmedPreviewId(modelId: string,
   frontierApprovalId = randomUUID(),
@@ -632,8 +670,12 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
   const holdId = randomUUID();
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
     { holdId, previewId, priceVersionId, runner, keys }));
+  const claimRequestId = randomUUID();
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimReceipt(tx, { requestId: claimRequestId, previewId })),
+  { status: "absent", requestId: claimRequestId, previewId });
   const claim = await prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys }));
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: claimRequestId, previewId, keys }));
   assert.equal(claim.holdId, holdId);
   assert.equal(claim.modelId, selectedModelId);
   assert.equal(claim.leaseGeneration, 1);
@@ -651,8 +693,18 @@ test("one confirmed first analysis is claimed, locally simulated, saved and read
     preview.state, hold.status], ["analyzing", "in_flight", 1,
     "in_flight", "in_flight"]);
   assert.equal((audit.metadata as Record<string, unknown>).modelCallStarted, false);
+  assert.equal((audit.metadata as Record<string, unknown>).requestId, claimRequestId);
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimReceipt(tx, { requestId: claimRequestId, previewId })),
+  { status: "committed", requestId: claimRequestId,
+    previewId, ideaId: claim.ideaId });
+  const wrongClaimRequestId = randomUUID();
+  assert.deepEqual(await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimReceipt(tx,
+      { requestId: wrongClaimRequestId, previewId })),
+  { status: "partial", requestId: wrongClaimRequestId, previewId });
   await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys })),
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   // Fake local result: no provider CLI or external request occurs in this test.
@@ -720,7 +772,7 @@ async function syntheticFirstClaim(ideaText?: string) {
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
     { holdId, previewId, priceVersionId, runner, keys }));
   const claim = await prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys }));
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys }));
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
 
@@ -887,7 +939,7 @@ async function verifyEighteenChunkIdea(ideaText?: string) {
       priceVersionId: initialPrice.priceVersionId!, runner, keys,
     }), { maxWait: 5_000, timeout: 30_000 });
     const nextClaim = await prisma.$transaction((tx) =>
-      commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys }),
+      commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys }),
     { maxWait: 5_000, timeout: 30_000 });
     assert.equal(nextClaim.holdId, nextHoldId);
     assert.match(nextClaim.prompt, new RegExp(`"chunkIndex":${index}`));
@@ -1119,7 +1171,7 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
     { holdId: randomUUID(), previewId: nextPreviewId,
       priceVersionId: hold.priceVersionId!, runner, keys }));
   await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys })),
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
   const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
@@ -1138,7 +1190,7 @@ test("an unresolved in-flight result blocks a second Agent claim", async () => {
   assert.equal(settled.state, "draft_ready");
   await assert.rejects(prisma.$transaction(async (tx) => {
     const second = await commitAmuxIdeaOnlyAnalysisClaim(tx,
-      { previewId: nextPreviewId, keys });
+      { requestId: randomUUID(), previewId: nextPreviewId, keys });
     assert.equal(second.previewId, nextPreviewId);
     throw new Error("rollback synthetic second claim");
   }), /rollback synthetic second claim/);
@@ -1212,7 +1264,7 @@ test("malformed known output settles cost and requires a fresh owner preview", a
     { holdId: nextHoldId, previewId: nextPreviewId,
       priceVersionId: hold.priceVersionId!, runner, keys }));
   const nextClaim = await prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys }));
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys }));
   assert.equal(nextClaim.leaseGeneration, 1);
   const knownFailure = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
@@ -1253,7 +1305,7 @@ test("unknown usage marks the whole Agent stopped without a blind retry", async 
     assert.equal(hold.status, "outcome_unknown");
     assert.equal(chunk.state, "outcome_unknown");
     await assert.rejects(commitAmuxIdeaOnlyAnalysisClaim(tx,
-      { previewId: nextPreviewId, keys }),
+      { requestId: randomUUID(), previewId: nextPreviewId, keys }),
     (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
       error.code === "not_ready");
     throw new Error("rollback synthetic unknown halt");
@@ -1317,7 +1369,7 @@ test("the Agent-wide third consecutive failed settlement blocks a new claim", as
           outputTokens: 0 },
       });
     }
-    await commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId, keys });
+    await commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys });
   }, { maxWait: 5_000, timeout: 30_000 }),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
@@ -2789,7 +2841,7 @@ test("a committed unknown result blocks a later claim in a new transaction", asy
     readAmuxIdeaAnalysisResultReceipt(tx, { requestId, previewId }))).status,
   "committed");
   await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaOnlyAnalysisClaim(tx, { previewId: nextPreviewId, keys })),
+    commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
 });

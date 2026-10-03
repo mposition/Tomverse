@@ -17,6 +17,10 @@ import { prisma } from "@/lib/prisma";
 // wide failure latch and S0 gates. An environment variable alone cannot open it.
 const RESULT_CODE_LATCH = false;
 const RESULT_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE";
+// Read-back remains available under its own authenticated, default-off gate
+// after result writes are killed. It returns only the content-free receipt.
+const RESULT_RECEIPT_READ_CODE_LATCH = true;
+const RESULT_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ requestId: id, ideaId: id, previewId: id,
   holdId: id, leaseGeneration: z.literal(1),
@@ -33,7 +37,9 @@ function authorized(request: Request): boolean {
 
 export async function POST(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!RESULT_CODE_LATCH || process.env[RESULT_WRITE_ENV] !== "enabled") {
+  if (!RESULT_CODE_LATCH || process.env[RESULT_WRITE_ENV] !== "enabled" ||
+      !RESULT_RECEIPT_READ_CODE_LATCH ||
+      process.env[RESULT_RECEIPT_READ_ENV] !== "enabled") {
     return amuxJsonNoStore({ available: false, reason: "analysis_result_disabled" }, 409);
   }
   if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
@@ -62,16 +68,22 @@ export async function POST(request: Request): Promise<Response> {
 
 export async function GET(request: Request): Promise<Response> {
   if (!authorized(request)) return amuxJsonNoStore({ error: "Unauthorized" }, 401);
-  if (!RESULT_CODE_LATCH || process.env[RESULT_WRITE_ENV] !== "enabled") {
-    return amuxJsonNoStore({ available: false, reason: "analysis_result_disabled" }, 409);
+  if (!RESULT_RECEIPT_READ_CODE_LATCH ||
+      process.env[RESULT_RECEIPT_READ_ENV] !== "enabled") {
+    return amuxJsonNoStore({ available: false,
+      reason: "analysis_result_read_disabled" }, 409);
   }
   const url = new URL(request.url);
+  if (url.searchParams.getAll("requestId").length !== 1 ||
+      url.searchParams.getAll("previewId").length !== 1 ||
+      [...url.searchParams.keys()].length !== 2) {
+    return amuxJsonNoStore({ error: "Invalid request." }, 400);
+  }
   const parsed = z.object({ requestId: id, previewId: id }).strict().safeParse({
     requestId: url.searchParams.get("requestId"),
     previewId: url.searchParams.get("previewId"),
   });
-  if (!parsed.success || [...url.searchParams.keys()].some((key) =>
-    key !== "requestId" && key !== "previewId")) {
+  if (!parsed.success) {
     return amuxJsonNoStore({ error: "Invalid request." }, 400);
   }
   try {
