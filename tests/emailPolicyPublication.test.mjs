@@ -26,7 +26,6 @@ import {
   APPROVED_AMENDED_DIGESTS,
   DIGEST_VERIFIED_BY,
   documentFacts,
-  emailPolicyPublicationProblems,
 } from "../lib/emailPolicyPublication.ts";
 import { SITEMAP_CONTENT_EVIDENCE } from "../lib/sitemapContentDates.ts";
 import {
@@ -230,27 +229,48 @@ test("a consent copy version that makes no promise has changed the promise in ev
   }
 });
 
-test("no version of any document is approved as carrying the amendment yet", () => {
-  assert.deepEqual(APPROVED_AMENDED_DIGESTS, {});
-  // And /privacy has a verified current state, which is what an approval will
-  // be compared against.
-  assert.match(SITEMAP_CONTENT_EVIDENCE["/privacy"].contentSha256, /^[0-9a-f]{64}$/);
+test("the published version of each document is the one approved as carrying the amendment", () => {
+  // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
+  // mposition on 2026-10-03.
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/privacy"], [AMENDED_DOCUMENT_EVIDENCE["/privacy"].contentSha256]);
+  assert.deepEqual(APPROVED_AMENDED_DIGESTS["/terms"], [AMENDED_DOCUMENT_EVIDENCE["/terms"].contentSha256]);
+  assert.equal(AMENDED_DOCUMENT_EVIDENCE["/privacy"].date, "2026-11-16");
+  // A future effective date is not a lastmod (lib/sitemapContentDates.ts).
+  assert.equal(SITEMAP_CONTENT_EVIDENCE["/privacy"], undefined);
+  assert.equal(AMENDED_DOCUMENT_EVIDENCE["/terms"].date, "2026-11-16");
 });
 
-test("today, nothing is published and release notes cannot go live", async () => {
-  // The notice template exists; its wording is not approved yet, so no
-  // delivery of it counts, and the notice is still unidentified.
+test("the documents are published, and only the notice and the date stand between them and release notes", () => {
   assert.equal(CHANGE_NOTICE_TEMPLATE_KEY, "policy_change_notice");
-  assert.deepEqual([...CHANGE_NOTICE_APPROVED_CONTENT_HASHES], []);
+  assert.equal(CHANGE_NOTICE_APPROVED_CONTENT_HASHES.length, 7);
   assert.equal(documentFacts().length, 2);
-  const problems = (await emailPolicyPublicationProblems(NOW)).map(
+  // No notice sent: the documents themselves raise nothing once the date has
+  // passed, and before it each one says so.
+  const unsent = {
+    templateKey: "policy_change_notice",
+    classification: "legal",
+    purpose: null,
+    owed: 10,
+    told: 0,
+    late: 0,
+    unreachable: 0,
+    unreachableAccounts: [],
+    blockingAccounts: [],
+    untold: 10,
+    firstSentAt: null,
+  };
+  const after = publicationProblems({ documents: documentFacts(), notice: unsent, now: NOW }).map(
     (problem) => `${problem.subject}:${problem.refusal}`
   );
-  assert.deepEqual(problems, [
-    "/privacy:document_state_unrecorded",
-    "/terms:document_state_unrecorded",
-    "change notice:change_notice_unidentified",
-  ]);
+  assert.ok(!after.some((entry) => entry.startsWith("/")), after.join(", "));
+  assert.ok(after.includes("policy_change_notice:change_notice_not_sent"), after.join(", "));
+  const before = publicationProblems({
+    documents: documentFacts(),
+    notice: unsent,
+    now: new Date("2026-11-15T23:59:59.000Z"),
+  }).map((problem) => `${problem.subject}:${problem.refusal}`);
+  assert.ok(before.includes("/privacy:effective_date_not_reached"), before.join(", "));
+  assert.ok(before.includes("/terms:effective_date_not_reached"), before.join(", "));
 });
 
 test("the test seam cannot be used outside tests", async () => {
