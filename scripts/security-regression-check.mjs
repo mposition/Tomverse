@@ -3227,7 +3227,10 @@ const checks = [
         // the thing worth pinning here, not just the version.
         // .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
         source.includes("actions/cache/restore@v5") &&
-        !source.includes("uses: actions/cache@v5") &&
+        // Any version, and any pin. Forbidding `actions/cache@v5` alone would
+        // let `@v4`, `@v6` or a SHA save from its post step while a
+        // `restore@v5` step elsewhere kept this assertion true.
+        !source.includes("uses: actions/cache@") &&
         !source.includes("actions/cache/save@") &&
         source.includes("actions/upload-artifact@v7") &&
         source.includes("fetch-depth: 0") &&

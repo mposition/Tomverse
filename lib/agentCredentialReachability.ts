@@ -318,6 +318,25 @@ const VERIFIED_SETUP_CACHES: ReadonlyArray<{ action: RegExp; caches: ReadonlySet
  */
 const AUTOMATIC_PACKAGE_MANAGER_CACHE: readonly RegExp[] = [/^actions\/setup-node@/i];
 
+/**
+ * Setup actions that cache nothing unless `cache` names something.
+ *
+ * `setup-python` caches only for `pip`, `pipenv` or `poetry`, and
+ * `setup-java` only for `maven`, `gradle` or `sbt`; with no `cache` input they
+ * restore nothing. Reporting them as restoring would mark a credentialed job
+ * that holds no cache as one, which is a false positive rather than caution.
+ *
+ * An action on neither this list nor the automatic one still counts as
+ * restoring, because what it would cache is unknown and this governs a
+ * credential gate. `setup-go` is the example: `cache` defaults to true there
+ * and what it caches is GOCACHE, compiled build output.
+ */
+const CACHES_ONLY_WHEN_NAMED: readonly RegExp[] = [
+  /^actions\/setup-python@/i,
+  /^actions\/setup-java@/i,
+  /^actions\/setup-dotnet@/i,
+];
+
 const restoredCacheKinds = (job: Obj): CacheKind[] => {
   // What cannot be read counts as restoring: a `uses` that is not a plain
   // string, is an expression, or names an action kept in this repository
@@ -376,9 +395,11 @@ const restoredCacheKinds = (job: Obj): CacheKind[] => {
         kinds.add("unverified");
         continue;
       }
-      // Every other setup action: its own `cache` input is its switch, and
-      // several default it on (setup-go caches GOCACHE, which is build output).
+      // Every other setup action: its own `cache` input is its switch. Some
+      // cache nothing without it, and some default it on -- setup-go caches
+      // GOCACHE, which is compiled build output.
       if (cacheOff) continue;
+      if (CACHES_ONLY_WHEN_NAMED.some((pattern) => pattern.test(uses))) continue;
       kinds.add("unverified");
     }
   }
