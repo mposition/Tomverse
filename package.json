@@ -37,6 +37,7 @@
     "capture:assistant-knowledge-tutorial": "node --import tsx scripts/capture-assistant-knowledge-tutorial.mjs",
     "capture:amux-staging-evidence": "node --conditions=react-server --import tsx scripts/capture-amux-staging-evidence.mjs",
     "local:amux-intake": "node --import tsx scripts/local-amux-intake.mjs",
+    "local:amux-v4-source-collector-once": "node --import tsx scripts/amux-v4-source-collector-once.ts",
     "build:amux-v4-egress-s0": "esbuild scripts/amux-v4-egress-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-egress-s0.mjs",
     "build:amux-v4-local-analysis-s0": "esbuild scripts/amux-v4-local-analysis-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-local-analysis-s0.mjs",
     "build:amux-v4-cli-binary-s0": "esbuild scripts/amux-v4-cli-binary-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-binary-s0.mjs",
