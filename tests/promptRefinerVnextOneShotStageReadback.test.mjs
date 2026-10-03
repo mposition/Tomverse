@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readPromptRefinerVnextOneShotStage } from
+import { lockAndReadPromptRefinerVnextOneShotStage,
+  readPromptRefinerVnextOneShotStage } from
   "../lib/promptRefinerVnextOneShotStageReadback.ts";
 
 const stage = {
@@ -90,4 +91,45 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
     consumedAt: null };
   assert.equal((await readPromptRefinerVnextOneShotStage(txFor(stage, incomplete).tx))
     .reservationShapeValid, false);
+});
+
+test("transactional read locks the stage before reading reservations", async () => {
+  const { tx, calls } = txFor(stage, slots());
+  tx.$queryRaw = async (strings, id) => {
+    assert.match(strings.join("?"), /FOR NO KEY UPDATE NOWAIT/);
+    assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
+    assert.deepEqual(calls, { stages: 0, slots: 0 });
+    return [{ id }];
+  };
+  const result = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+  assert.equal(result.reservationShapeValid, true);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.deepEqual(calls, { stages: 1, slots: 1 });
+});
+
+test("absent or unavailable lock never reads an unlocked stage", async () => {
+  const absent = txFor(stage, slots());
+  absent.tx.$queryRaw = async () => [];
+  const result = await lockAndReadPromptRefinerVnextOneShotStage(absent.tx);
+  assert.equal(result.stagePresent, false);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.deepEqual(absent.calls, { stages: 0, slots: 0 });
+
+  const unavailable = txFor(stage, slots());
+  unavailable.tx.$queryRaw = async () => { throw new Error("lock_not_available"); };
+  await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(unavailable.tx),
+    /lock_not_available/);
+  assert.deepEqual(unavailable.calls, { stages: 0, slots: 0 });
+
+  const inconsistent = txFor(null, slots());
+  inconsistent.tx.$queryRaw = async () => [{ id: stage.id }];
+  await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(inconsistent.tx),
+    /vnext_one_shot_stage_changed_after_lock/);
+  assert.deepEqual(inconsistent.calls, { stages: 1, slots: 0 });
+
+  const wrongId = txFor(stage, slots());
+  wrongId.tx.$queryRaw = async () => [{ id: "wrong-stage" }];
+  await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(wrongId.tx),
+    /vnext_one_shot_stage_lock_mismatch/);
+  assert.deepEqual(wrongId.calls, { stages: 0, slots: 0 });
 });
