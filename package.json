@@ -47,6 +47,7 @@
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",
     "report:amux-staging-evidence": "node scripts/report-amux-staging-evidence.mjs",
     "review": "node tools/review-orchestrator/client/review.mjs",
+    "verify:amux-wsl-git-transfer": "node scripts/verify-amux-wsl-git-transfer.mjs",
     "lint": "eslint",
     "check": "eslint . --max-warnings=0 && next build",
     "typecheck": "next typegen && tsc --noEmit --incremental false",
