@@ -19,6 +19,16 @@ export const amuxUnitRejectErrorStatus = (code: string): number =>
   code === "not_found" ? 404 :
     ["reconfirm", "already_prepared", "not_ready"].includes(code) ? 409 : 503;
 
+/** A transaction callback that threw never reached Prisma's COMMIT phase. */
+export const amuxUnitRejectNeedsCommitReadback = (callbackReturned: boolean) =>
+  callbackReturned === true;
+
+export const amuxUnitRejectErrorBody = (code: string,
+  recovery?: { decisionId: string; prepareRequestId: string }) =>
+  code === "outcome_unknown"
+    ? { error: code, retryWrite: false, ...recovery }
+    : { error: code };
+
 export function mayExpireAmuxRejectionConfirmation(row: {
   action: string; state: string; expiresAt: Date;
   outcomeUnknownAt: Date | null;

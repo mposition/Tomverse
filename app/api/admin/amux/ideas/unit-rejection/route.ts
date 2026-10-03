@@ -14,6 +14,7 @@ import { AMUX_V4_UNIT_REJECT_READ_ENV,
   AMUX_V4_UNIT_REJECT_BODY_MAX_BYTES,
   amuxV4UnitRejectReadPermitted,
   amuxV4UnitRejectWritePermitted,
+  amuxUnitRejectErrorBody,
   amuxUnitRejectErrorStatus,
   inspectAmuxUnitRejectRequest } from "@/lib/amux/ideaUnitRejectCore";
 import { AmuxUnitRejectError, consumeAmuxUnitReject,
@@ -48,9 +49,8 @@ function failure(error: unknown,
   recovery?: { decisionId: string; prepareRequestId: string }): Response {
   if (error instanceof AmuxUnitRejectError) {
     const status = amuxUnitRejectErrorStatus(error.code);
-    return NextResponse.json(error.code === "outcome_unknown"
-      ? { error: error.code, retryWrite: false, ...recovery }
-      : { error: error.code }, { status, headers: noStore });
+    return NextResponse.json(amuxUnitRejectErrorBody(error.code, recovery),
+      { status, headers: noStore });
   }
   const security = apiSecurityResponse(error);
   if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }

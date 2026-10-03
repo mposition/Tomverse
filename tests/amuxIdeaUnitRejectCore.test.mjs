@@ -6,7 +6,8 @@ import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason } from
   "../lib/amux/ideaUnitDecisionBindingCore.ts";
 import { AMUX_V4_UNIT_REJECT_CODE_LATCH, AMUX_V4_UNIT_REJECT_READ_CODE_LATCH,
   amuxV4UnitRejectWritePermitted, amuxV4UnitRejectReadPermitted,
-  amuxUnitRejectErrorStatus,
+  amuxUnitRejectErrorBody, amuxUnitRejectErrorStatus,
+  amuxUnitRejectNeedsCommitReadback,
   deriveAmuxUnitRejectConfirmation,
   inspectAmuxUnitRejectRequest,
   mayExpireAmuxRejectionConfirmation } from "../lib/amux/ideaUnitRejectCore.ts";
@@ -70,9 +71,19 @@ test("reconfirmation is a conflict, not an administrator sign-in challenge", () 
   assert.equal(amuxUnitRejectErrorStatus("not_found"), 404);
   assert.equal(amuxUnitRejectErrorStatus("outcome_unknown"), 503);
   assert.match(routeSource, /amuxUnitRejectErrorStatus\(error\.code\)/);
-  assert.match(routeSource, /retryWrite: false/);
+  assert.match(routeSource, /amuxUnitRejectErrorBody\(error\.code, recovery\)/);
+  assert.deepEqual(amuxUnitRejectErrorBody("outcome_unknown", {
+    decisionId: "decision-1", prepareRequestId: "prepare-1",
+  }), { error: "outcome_unknown", retryWrite: false,
+    decisionId: "decision-1", prepareRequestId: "prepare-1" });
+  assert.deepEqual(amuxUnitRejectErrorBody("reconfirm"), { error: "reconfirm" });
   assert.match(routeSource,
     /amuxV4UnitRejectReadPermitted\(process\.env\[AMUX_V4_UNIT_REJECT_READ_ENV\]\)/);
+});
+
+test("a callback failure is a known rollback, not an uncertain commit", () => {
+  assert.equal(amuxUnitRejectNeedsCommitReadback(false), false);
+  assert.equal(amuxUnitRejectNeedsCommitReadback(true), true);
 });
 
 test("one request admits exactly one owner decision, never a bulk card write", () => {

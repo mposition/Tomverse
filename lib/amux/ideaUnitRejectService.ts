@@ -26,6 +26,7 @@ import { sameAmuxIdeaUnitConfirmation } from "./ideaUnitConfirmationCore.ts";
 import { AMUX_V4_UNIT_REJECT_READ_ENV, AMUX_V4_UNIT_REJECT_WRITE_ENV,
   amuxV4UnitRejectReadPermitted, amuxV4UnitRejectWritePermitted,
   deriveAmuxUnitRejectConfirmation,
+  amuxUnitRejectNeedsCommitReadback,
   mayExpireAmuxRejectionConfirmation } from "./ideaUnitRejectCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
@@ -505,10 +506,11 @@ export async function prepareAmuxUnitReject(session: Session, request: Request,
       return result;
     }, { maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
-    if (!callbackReturned && error instanceof AmuxUnitRejectError) throw error;
-    if (!callbackReturned) {
+    if (!amuxUnitRejectNeedsCommitReadback(callbackReturned)) {
+      if (error instanceof AmuxUnitRejectError) throw error;
       const known = knownPreCommitRefusal(error, "prepare");
       if (known) throw known;
+      throw new AmuxUnitRejectError("integrity_unavailable");
     }
     try {
       const status = await readAmuxUnitRejectDecision(session,
@@ -545,10 +547,11 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
       return result;
     }, { maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
-    if (!callbackReturned && error instanceof AmuxUnitRejectError) throw error;
-    if (!callbackReturned) {
+    if (!amuxUnitRejectNeedsCommitReadback(callbackReturned)) {
+      if (error instanceof AmuxUnitRejectError) throw error;
       const known = knownPreCommitRefusal(error, "consume");
       if (known) throw known;
+      throw new AmuxUnitRejectError("integrity_unavailable");
     }
     try {
       const status = await readAmuxUnitRejectDecision(session,
@@ -684,6 +687,31 @@ export async function readAmuxUnitRejectDecision(session: Session,
         reasonDigest: prepareMeta.reasonDigest as string,
         reasonDigestKeyId: prepareMeta.reasonDigestKeyId as string,
         expiresAt: row.expiresAt.toISOString() } as const;
+    }
+    if (row.state === "expired" && row.finalAuditLogId) {
+      const expiryAudit = await tx.adminAuditLog.findUnique({
+        where: { id: row.finalAuditLogId },
+      });
+      const expiryMetadata = expiryAudit?.metadata;
+      const expiryMeta = expiryMetadata && typeof expiryMetadata === "object" &&
+        !Array.isArray(expiryMetadata)
+        ? expiryMetadata as Record<string, unknown> : null;
+      if (!expiryAudit?.entryHash ||
+          auditRowActorKind(expiryAudit) !== "system" ||
+          expiryAudit.action !== EXPIRE_ACTION ||
+          expiryAudit.targetType !== TARGET ||
+          expiryAudit.targetId !== row.id ||
+          audits.some((audit) => audit.action === CONSUME_ACTION) ||
+          expiryMeta?.systemActor !== AMUX_SYSTEM_AUDIT_ACTOR ||
+          expiryMeta.ideaId !== row.ideaId ||
+          expiryMeta.draftUnitId !== row.draftUnitId ||
+          expiryMeta.prepareRequestId !== row.prepareRequestId ||
+          expiryMeta.action !== "reject_unit" ||
+          expiryMeta.registered !== false) {
+        return { state: "partial" } as const;
+      }
+      return { state: "expired", decisionId: row.id,
+        draftUnitId: row.draftUnitId } as const;
     }
     if (row.state !== "consumed" || !finalAudit?.entryHash ||
         !row.finalAuditLogId ||
