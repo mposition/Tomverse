@@ -8,6 +8,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안. 비공개 설계서(revision 18, 교차 vendor 독립 검토 `accept`)의 공개 가능한 계약만 옮김 |
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: 트랜잭션 상한 표와 버전별 무장 규칙, 늦은 advance와 재시작, 판정 가능한 단계 전환 조건, readiness 검사 이름, 상한 최대값의 유도, 서비스별 금지 변수 |
+| (미부여) | (미승인) | 세 번째 초안 — 독립 검토 반영: cron이 곧바로 `stuck`이어도 열림, 신규 열림의 날짜당 1회 강제, `abandoned` 뒤 heartbeat 보류, readiness 검사 17개 전부, 마감 판정의 시계, 무력화의 근거와 시험, 전환 조건의 근거 기록, 금지 변수 보강 |
 
 이 문서는 Claude가 설계하고 교차 vendor 독립 검토를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다. 내용 변경은 운영자
 승인과 정책 버전 증가가 필요합니다. 승인은 단계별 착수 조건(8절)을 없애지 않으며, 어떤 Railway 서비스·secret·webhook·
@@ -42,17 +43,19 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    | readiness 채팅 예산 구성 | `providerBudgets` | 연속 3회 false | 없음 |
    | readiness 이메일 유실 | `emailSnapshotKeyring`, `emailSendingIdentity` | 연속 3회 false | 없음 |
    | readiness 판정 불가 | 단일 | `/api/health`는 응답하는데 상태 집계가 연속 3회 실패 | 없음 |
-   | 15분 cron 침묵 | 단일 | `credit_reservation_reconciliation`이 `delayed` | `stuck` |
+   | 15분 cron 침묵 | 단일 | `credit_reservation_reconciliation`이 `delayed` 또는 `stuck`(처음 관측한 구간이 `stuck`이면 그 구간으로 열림) | `delayed` → `stuck` |
    | 이메일 drain 실패 | 단일 | `standard_email_drain`의 연속 실패 구간 3+ | 없음 |
 
    회복은 조건이 연속 2회 해소된 것입니다.
 2. **침묵 감시.** 감시자 자신이 멈추거나 앱·DB가 통째로 응답하지 않으면, 감시자와 독립된 외부 dead-man 서비스가 heartbeat
    공백으로 알립니다(P8). 탐지 지연은 마지막 성공 heartbeat부터 허용치(30분)입니다(결정 D2).
 3. **digest.** 하루 한 번, 항목 20개 상한의 폐쇄 schema 요약을 본 앱에 제출합니다. 소유자는 Admin Console에서 읽습니다.
-   page 키가 아닌 readiness 검사는 모두 digest입니다. 오늘 `/api/ready`의 검사 16개 중 page 키가 아닌 것은
+   `/api/ready`가 계산하는 검사 중 page 키가 아닌 것은 **ready 판정에 들어가는지와 무관하게** 모두 digest입니다. 오늘은 17개 중
    `imageProviderBudget`, `voiceProviderBudget`, `voiceModelPrice`, `searchProviderBudget`, `emailUnsubscribeKeyring`,
    `emailUnsubscribeKeyRetention`, `emailConsentKeyring`, `emailBusinessIdentity`, `emailSubjectLabels`,
-   `emailFooterDisclosures`, `amuxReviewApproval`의 11개이며, 뒤에 더해지는 검사도 같은 규칙을 따릅니다.
+   `emailFooterDisclosures`, `amuxReviewApproval`, `emailBiennialConsentNotice`(ready 판정에 들어가지 않음)의 12개이며, 뒤에
+   더해지는 검사도 같은 규칙을 따릅니다. 상태 집계는 검사 이름 목록을 코드가 아니라 readiness 계산에서 얻고, 모르는 검사가
+   있으면 digest에 그 이름을 적습니다.
 4. **주간 page 채널 점검.** S2부터 주 1회 낮 시간 창에 고정 점검 문장을 page 채널로 보냅니다. 소유자가 휴대폰 푸시로
    받았을 때만 별도 check-in URL을 엽니다(5절).
 
@@ -82,8 +85,10 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    테이블에 쓰는 것은 본 앱의 store 모듈 하나뿐입니다.
 5. **금지 변수가 있으면 시작하지 않습니다.** 서비스 진입점은 아래 이름이 환경에 있으면 자식 프로세스를 띄우기 전에 구성 오류로
    멈춥니다. 두 서비스가 함께 갖는 `OPS_OBSERVER_ENABLED`·`OPS_OBSERVER_APP_URL`·`RAILWAY_DOCKERFILE_PATH`는 금지가 아닙니다.
-   - 두 서비스 공통: `DATABASE_URL`, `DIRECT_URL`, `POSTGRES*`, `PG*`, `PRISMA_*`, `GITHUB_TOKEN`, `GH_*`, 이름에
-     `MAINTENANCE_SECRET`이 든 변수, `AUTO_FIX_SYNC_SECRET`, `ADMIN_AUDIT_INTEGRITY_*`, `NEXTAUTH_SECRET`.
+   - 두 서비스 공통: `DATABASE_URL`, `DIRECT_URL`, `POSTGRES*`, `PG*`, `PRISMA_*`, `GITHUB_TOKEN`, `GH_*`,
+     `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_TOKEN`, `RAILWAY_TOKEN`, `ADMIN_AUDIT_INTEGRITY_*`, `NEXTAUTH_SECRET`, 그리고 이름이
+     `_SECRET`으로 끝나거나 `_API_KEY`를 포함하는 모든 변수 중 자기 서비스의 route secret이 아닌 것(maintenance·provider probe·
+     usage sync·auto-fix 등 내부 route bearer와 LLM·SaaS 키를 이름 하나하나가 아니라 모양으로 막습니다).
    - page 서비스에서만: `OPS_OBSERVER_DIGEST_SECRET`, `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`.
    - digest 서비스에서만: `OPS_OBSERVER_SECRET`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`, `OPS_OBSERVER_HEARTBEAT_URL`.
 6. **빌드 단계에는 runtime 비밀값이 없습니다.** 전용 Dockerfile은 `ARG`를 선언하지 않는 단일 stage이고, 첫 실행 명령이 빌드 환경
@@ -94,7 +99,9 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
 9. **재시작과 겹침이 두 번째 전송을 만들지 않습니다.** 두 서비스는 `restartPolicyType: NEVER`이고, Railway cron은 이전 회차가
    끝나지 않으면 다음 회차를 건너뜁니다. 그래도 수동 실행·재배포로 두 advance가 겹치면, advance는 읽은 generation에 대한 조건부
    갱신이라 같은 generation에서 하나만 commit합니다. 전송 허가는 예약 행을 실제로 넣은 요청의 **응답**으로만 전달되므로,
-   응답을 받지 못하고 끝난 호출자의 예약은 아무도 보내지 않고 다음 실행이 `abandoned`로 닫습니다.
+   응답을 받지 못하고 끝난 호출자의 예약은 아무도 보내지 않고 다음 실행이 `abandoned`로 닫습니다. 그 사건의 종류 슬롯은
+   소진되지만 page가 조용히 빠지지 않습니다 — `abandoned`를 쓴 advance가 같은 트랜잭션에서 DB 시계로 계산한 40분(dead-man 허용치
+   30분 + 주기 10분) 동안 heartbeat를 보류시키므로 P8이 반드시 한 번 울리고, `abandoned` 예약은 digest와 Admin 영역에 남습니다.
 10. **감시 상태 전이는 같은 트랜잭션에서 기존 해시 체인 감사에 시스템 actor로 남습니다.** 감사 테이블에 직접 쓰지 않고
     `lib/adminAudit.ts`의 append 경로를 지납니다.
 11. **Agent는 자기 gate를 고치지 않습니다.** 이 정책, 판정 상수, workflow, 권한 목록의 변경은 사람이 합니다.
@@ -117,11 +124,13 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   - **악화:** 열린 키의 구간이 나빠짐. S2에서는 cron 침묵 키 하나만 악화 구간을 가집니다.
   - **재열림**
   - **회복**
+- 신규 열림은 키당 소유자 날짜당 1회입니다. 같은 날짜의 두 번째 열림은 경과 시간과 무관하게 재열림으로 셉니다(일광절약시간이
+  끝나 25시간인 날에도 성립하도록 시간이 아니라 날짜로 셉니다).
 - 재열림·회복과 재열림으로 시작한 사건의 악화는 소유자 날짜당 6개입니다. **신규 열림과 그 사건의 악화는 이 상한으로 막지
   않습니다.**
 - **하루 최대값의 유도(S2):** 키는 8개입니다.
-  - 신규 열림은 키당 하루 1회입니다. 다시 신규가 되려면 회복 뒤 24시간이 지나야 하기 때문입니다. 그래서 최대 8입니다.
-  - 신규 열림 사건의 악화는 악화 구간을 가진 키가 하나뿐이라 최대 1입니다.
+  - 신규 열림은 키당 소유자 날짜당 1회이므로 최대 8입니다.
+  - 신규 열림 사건의 악화는 악화 구간을 가진 키가 하나뿐이고 그 키의 신규 열림이 날짜당 1회라 최대 1입니다.
   - 나머지 종류는 합쳐서 6입니다.
   - 그러므로 하루 15이고, 채널 점검 요일에는 점검 1이 더해져 16입니다. 점검이 다른 page와 한 메시지로 묶이면 더해지는 것은 0입니다.
 - **genesis한 날의 최대값:** genesis는 키 상태와 genesis별 카운트를 새로 시작하므로 그날은 15가 한 번 더 가능해 최대 31입니다.
@@ -154,7 +163,9 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 모든 줄에서 `Prisma timeout > transaction_timeout 상수 >= C_guarded > statement_timeout > idle`입니다. 문장 수 상한은 DB가
 아니라 애플리케이션이 셉니다(닫힌 allowlist).
 
-**실행 마감.** 모든 요청은 `runDeadline`을 싣습니다. 값은 실행 시작 시각 + supervisor 기한(180초)입니다. 함수는 이렇게 동작합니다.
+**실행 마감.** 모든 요청은 `runDeadline`을 싣습니다. 값은 실행 시작 시각 + supervisor 기한(180초)입니다. 이 절의 "지금"과 모든
+마감 판정은 `clock_timestamp()`입니다. `now()`·`transaction_timestamp()`는 트랜잭션 시작 시각에 멈춰 있어 마감을 넘긴 것을 보지
+못하므로 쓰지 않습니다. 함수는 이렇게 동작합니다.
 
 1. `statement_timeout`과 idle을 위 값으로 겁니다.
 2. 자기 DB 시계로 `remaining = runDeadline − 지금`을 구하고, `remaining < C_guarded + 250 ms`이면 아무것도 쓰지 않고 롤백합니다.
@@ -166,8 +177,11 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
    - `ttArmedMs = min(종류별 상수, runDeadline − 지금 − 250 ms)`를 다시 겁니다(결정 N-7). `ttArmedMs < C_guarded`이면 롤백합니다.
    - 건 직후 시계를 다시 읽어 `지금 + ttArmedMs > runDeadline`이면 롤백합니다.
 
-   그래서 17에서는 점유의 만료 시각이 실행 마감 이하이고, `ttArmedMs >= C_guarded > statement_timeout`이 언제나 참이라
-   statement timer가 조용히 꺼지는 조합이 생기지 않습니다.
+   양수인 timer에 양수를 다시 거는 것은 timer를 바꾸지 않고(설정 값만 바뀜), 0을 거친 뒤 거는 것은 실제로 다시 무장한다는
+   것은 PostgreSQL 17.10에서 실행으로 측정한 사실입니다. S0b의 17 전용 job이 물려받은 값 200 ms와 600 s 두 경우를 매번 다시 실행해
+   이것을 고정합니다(물려받은 값이 너무 작아 무장 전에 세션이 끝나면 쓰기 0으로 끝나는 fail-closed입니다). 그래서 17에서는
+   점유의 만료 시각이 실행 마감 이하이고, `ttArmedMs >= C_guarded > statement_timeout`이 언제나 참이라
+   함수 다음 문장부터는 statement timer가 조용히 꺼지는 조합이 생기지 않습니다.
 5. **어느 버전이든**, 마감을 넘긴 트랜잭션은 commit의 deferred constraint trigger 평가 시점에 DB 시계로 abort됩니다. 성공 응답·
    전송 허가·heartbeat 전에는 별도의 짧은 트랜잭션으로 마감을 다시 확인합니다. 그 확인을 통과하지 못하면 성공을 내보내지 않습니다.
 6. 이 장치들이 덮지 못하는 구간이 있습니다.
@@ -188,7 +202,8 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 
 - 두 서비스 모두 제품 DB 자격증명·GitHub 토큰·admin session·LLM 키·Railway 쓰기 토큰·maintenance secret·감사 무결성 키를
   갖지 않습니다. check-in URL은 어떤 서비스에도 넣지 않습니다.
-- Railway 읽기 토큰(S3)은 읽기 전용 scope가 확인되지 않으면 발급하지 않습니다.
+- Railway 읽기 토큰(S3)은 읽기 전용 scope가 확인되지 않으면 발급하지 않습니다. 그 변수 이름, page 서비스 금지 목록에서의 예외,
+  scope 확인 방법은 S3의 정책 버전에서 정하며 그 전에는 어떤 Railway 토큰도 두 서비스에 없습니다.
 - 소유자가 로컬에서 돌리는 전체 감사 재검증 보고는 서비스 작업이 아니며, 그 실행에 필요한 읽기 자격증명은 소유자만 다룹니다.
 
 ## 8. 단계와 착수·전환 조건
@@ -202,8 +217,8 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 | S0b | 저장소 안 작업만: 순수 core(구간화, 분류, 알림 예산, 내용 검사, 단일 schema 모듈, 신뢰 검사 판정)와 단위 테스트, 감시 store의 DB 통합 테스트(PostgreSQL 16 job과 17 전용 job, 어느 쪽에도 skip 없음) | 이 정책의 승인 판정 통과 | S0b PR 병합 |
 | S1a | 본 앱에 dark 배포: 상태 집계 route, 감시 테이블과 route(genesis 행 없음), Admin genesis 동작과 digest 영역. 배포 뒤 소유자가 최초 genesis(`shadow`)를 승인 | S0b 병합. production이 전용 감사 무결성 키를 쓰고 있음을 확인. 소유자가 production의 `server_version_num`을 한 번 읽어 기록하고, 170000 이상일 때만 `SHOW transaction_timeout`도 읽어 기록(16이면 "해당 없음") | 7일 동안 응답 p95와 DB 부하가 소유자 승인 범위 안(Railway 서비스 지표). 상태 집계·감사 조회 비용 측정을 기록하고 N-3b를 결정 |
 | S1b shadow | 두 Railway 서비스 가동, page webhook 없음, 예약은 `shadowed`로 종결. digest에 would-have-paged 목록과 종류별 예상 메시지 수 | 소유자가 실행 비용 상한과 소유자 시간대를 정하고 정책 버전 증가. 두 서비스의 IaC 선언 병합과 운영자 apply. 첫 빌드 로그에 빌드 환경 검사 통과 줄. 두 heartbeat monitor를 "사건당 1회"로 등록하고 알림 대상 기록 | **14일 연속**(S1b 시작 시각부터): P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), 최초 genesis 뒤 추가 genesis 0건(genesis 행과 그 사람 감사 행), `shadowed`에 이르지 않은 예약 0건(전송 기록 테이블) |
-| S2 page | 1절의 8개 키를 실제로 page | S1b 전환 조건 충족. page 키가 아닌 readiness 검사 **전부**(1절 3항의 이름, 그때 추가된 것 포함)의 영향표에 대한 소유자 결정 기록. page 채널이 소유자 전용이고 휴대폰 푸시로 도달함을 확인. 점검 요일·시간 창 결정과 정책 버전 증가. check-in monitor 생성, monitor 셋의 알림 대상이 page 채널이 아님. Railway의 주 프로세스 종료 인식 관측 통과(결정 D5c). activation genesis(`live`) | **14일**: 오탐 page 주 1회 이하(소유자가 전송 기록의 키·종류·열림 시각을 보고 판정하고, 기록으로 조치 필요 여부를 판정할 수 없는 page는 오탐으로 셈), P8 알림 0회, `confirmed`에 이르지 않은 예약 0건 |
-| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 그리고 Railway 읽기 전용 토큰이 확인된 뒤에만 HTTP 5xx 급증과 기존 운영 알림 전달 실패 | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 알림 예산 초과 0, `confirmed`에 이르지 않은 예약 0건 |
+| S2 page | 1절의 8개 키를 실제로 page | S1b 전환 조건 충족. page 키가 아닌 readiness 검사 **전부**(1절 3항의 이름, 그때 추가된 것 포함)의 영향표에 대한 소유자 결정 기록. page 채널이 소유자 전용이고 휴대폰 푸시로 도달함을 확인. 점검 요일·시간 창 결정과 정책 버전 증가. check-in monitor 생성, monitor 셋의 알림 대상이 page 채널이 아님. Railway의 주 프로세스 종료 인식 관측 통과(결정 D5c). activation genesis(`live`) | **14일**: 오탐 page 주 1회 이하(전송 기록 테이블의 키·종류·열림 시각을 소유자가 보고 판정하고, 기록으로 조치 필요 여부를 판정할 수 없는 page는 오탐으로 셈), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블) |
+| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 그리고 Railway 읽기 전용 토큰이 확인된 뒤에만 HTTP 5xx 급증과 기존 운영 알림 전달 실패 | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 알림 예산 초과 0(전송 기록 테이블의 소유자 날짜별 예약 수 대 재계산한 최대값, 초과 시도는 거절된 advance로 남음), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블) |
 
 되돌림: 어느 단계든 실행 서비스의 `OPS_OBSERVER_ENABLED`를 지우면 다음 회차부터 멈추고, route secret을 지우면 본 앱 route가
 404를 돌려줍니다. 해제(정지)는 아무 조건도 요구하지 않습니다. 다시 켜는 것은 소유자만 합니다.
