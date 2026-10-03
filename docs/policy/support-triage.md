@@ -1,12 +1,13 @@
 # 고객지원 1차 분류 Agent 정책
 
-상태: **승인됨(버전 1).** 최초 작성 2026-10-03, 버전 1 승인 2026-10-03.
-owner: mposition · approvedBy: mposition · approvedAt: 2026-10-03 · 정책 버전: 1
+상태: **승인됨(버전 2).** 최초 작성 2026-10-03, 버전 1 승인 2026-10-03, 버전 2 승인 2026-10-03.
+owner: mposition · approvedBy: mposition · approvedAt: 2026-10-03 · 정책 버전: 2
 allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-10-03 mposition | 최초 승인 |
+| 2 | 2026-10-03 mposition | 1절의 갈래를 lane 여섯 개로 확정: 계정·개인정보 신고는 별도 갈래가 아니라 `trust_safety_human`(안전·보안과 같은 사람 전용 lane) |
 
 운영자 `mposition`이 2026-10-03 대화 세션에서 이 문서를 승인했다. 이 문서는 이 Agent(`agentKey = support-triage`)
 구현의 규범 근거다. 다만 **아래 승인 판정이 통과하기 전에는(이 승인 기록이 `develop`에 병합되기 전을 포함해)
@@ -50,11 +51,16 @@ commit하므로, 이 판정은 실수와 우회를 잡지만 자격증명 도용
 - `SupportTriageDecisionRecord`는 결정 뒤 12개월 보존하고, link된 신고가 계정 삭제되면 즉시 지운다(X2, 5절).
 - 7팀 합산 owner-bound 상한(Q15)과 침묵 감시의 감시자 감시(Q16)는 **P1 착수 조건으로 미결**이다(9절).
 - PostgreSQL 버전(Q18)은 요구하지 않는다. production 버전 기록이 점유 상한 한 층의 유무만 정한다(4절).
+- (버전 2) 계정·개인정보 신고는 별도 lane이 아니라 `trust_safety_human`으로 간다. 설계서 5.6절의 결정이며, 1절의 갈래
+  일곱이 lane 여섯이 된다.
 
 ## 1. 무엇을 하는가
 
-1. 들어온 신고마다 **사람이 먼저 봐야 할 순서와 담당 갈래**(bug-검증됨 / bug-미검증 / 과금·환불 / 계정·개인정보 /
-   안전·보안 / 기능 요청 / 기타)를 결정적 규칙으로 제안한다.
+1. 들어온 신고마다 **사람이 먼저 봐야 할 순서와 담당 lane**을 결정적 규칙으로 제안한다. lane은 여섯이다 —
+   `bug_verified`(bug-검증됨) / `bug_unverified`(bug-미검증) / `billing_human`(과금·환불) /
+   `trust_safety_human`(계정·개인정보와 안전·보안·법적·자해 위협) / `feature_request`(기능 요청) / `other`(기타).
+   `money` flag나 `type = billing`이면 `billing_human`, `account_privacy`·`security`·`legal`·
+   `self_harm_threat` flag면 `trust_safety_human`이고, 둘이 함께 걸리면 `trust_safety_human`이 우선한다.
 2. 서버가 이미 판정한 trace 사실을 **다시 판정하지 않고** 신고 옆에 요약한다.
 3. 같은 문제의 신고를 묶는 **그룹 후보**를 서버 사실(`server_evidence_match` > `same_account` >
    `autofix_fingerprint`)로 제안한다. `traceId`는 쓰지 않는다.
