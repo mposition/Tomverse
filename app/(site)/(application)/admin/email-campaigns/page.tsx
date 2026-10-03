@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { AdminCampaignSchedulePanel } from "@/components/admin/AdminCampaignSchedulePanel";
 import { AdminCampaignComposer } from "@/components/admin/AdminCampaignComposer";
 import { AdminEmailCampaignsPanel } from "@/components/admin/AdminEmailCampaignsPanel";
+import { AdminPolicyNoticeComposer } from "@/components/admin/AdminPolicyNoticeComposer";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import {
@@ -17,6 +18,13 @@ import {
   isEmailCampaignsEnabled,
 } from "@/lib/appSettings";
 import { assistantKnowledgeCampaignContent } from "@/lib/productAnnouncementEmail";
+import { appUrl } from "@/lib/accountEmails";
+import {
+  POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { SUPPORTED_LANGUAGES } from "@/lib/language";
+import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
 
 const TABS = adminNavItemTabs("email-campaigns");
 
@@ -64,6 +72,16 @@ export default async function AdminEmailCampaignsPage({
         />
       ) : (
         <>
+          <AdminPolicyNoticeComposer
+            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+            campaignsEnabled={campaignsEnabled}
+            templateKey={POLICY_CHANGE_NOTICE_TEMPLATE}
+            locales={SUPPORTED_LANGUAGES}
+            effectiveDate={POLICY_CHANGE_NOTICE_EFFECTIVE_DATE}
+            wordingApproved={SUPPORTED_LANGUAGES.every((language) =>
+              isPolicyChangeNoticeWordingApproved(language, appUrl())
+            )}
+          />
           <AdminCampaignComposer
             mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
             campaignsEnabled={campaignsEnabled}
