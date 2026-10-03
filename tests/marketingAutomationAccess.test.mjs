@@ -653,6 +653,8 @@ test("the pipeline file list is the receiver route's whole import closure", () =
 test("the fingerprint watches the receiver's schema models, not the whole schema", () => {
   const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
   const slice = marketingWebhookSchemaSlice(schema);
+  assert.ok(/^datasource \w+ \{/m.test(slice), "datasource block");
+  assert.ok(/^generator \w+ \{/m.test(slice), "generator block");
   for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
     assert.ok(slice.includes(`model ${model} {`), model);
   }

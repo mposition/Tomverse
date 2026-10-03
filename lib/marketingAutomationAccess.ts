@@ -219,18 +219,25 @@ export const MARKETING_WEBHOOK_SCHEMA_MODELS = [
 
 const MARKETING_WEBHOOK_SCHEMA_PATH = "prisma/schema.prisma";
 
-/** The declared models' blocks and the enums their fields use, in schema order. */
+/**
+ * The declared models' blocks, the enums their fields use, and the datasource
+ * and generator blocks (a provider or relationMode change alters what the
+ * receiver can store), in schema order. Blocks end at a `}` in column 0, which
+ * `prisma format` guarantees; a watched model that cannot be found throws.
+ */
 export const marketingWebhookSchemaSlice = (schemaText: string): string => {
   const blocks = new Map<string, string>();
   const order: string[] = [];
   for (const match of canonicalMarketingWebhookFileText(schemaText).matchAll(
-    /^(model|enum)\s+(\w+)\s*\{[\s\S]*?^\}/gm,
+    /^(model|enum|datasource|generator)\s+(\w+)\s*\{[\s\S]*?^\}/gm,
   )) {
     const key = `${match[1]} ${match[2]}`;
     blocks.set(key, match[0]);
     order.push(key);
   }
-  const wanted = new Set<string>();
+  const wanted = new Set<string>(
+    order.filter((key) => key.startsWith("datasource ") || key.startsWith("generator ")),
+  );
   for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
     const block = blocks.get(`model ${model}`);
     if (block === undefined) {
@@ -511,7 +518,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "e9f71e247fb9437ccc1e2624eb64a06df65284d15df87e0feedc9c73e959acf0";
+  "5c4673d30eb5f6c1cf3dae6eeef51677403663048db291589ba569e41a201a16";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
