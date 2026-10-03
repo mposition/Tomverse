@@ -232,6 +232,13 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The shared AgentDigestItem table: closed agent and kind lists, the
+    // idempotency prefix, rows born with their body, and the expiry and purge
+    // that are the only update and delete.
+    "tests/integration/agent-digest-item.db.test.ts",
+    // Its single writer: one row and one system audit entry in one transaction,
+    // a replay or a conflict writes neither, and a refusal never opens one.
+    "tests/integration/agent-digest-store.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",

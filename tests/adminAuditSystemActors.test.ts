@@ -48,6 +48,8 @@ test("the system actor list is closed and changes only by review", () => {
     "engineering-agent-retention",
     "engineering-agent-observer",
     "engineering-agent-registrar",
+    // docs/policy/qa-release-agent.md section 5: the digest intake route.
+    "qa-release-intake",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
