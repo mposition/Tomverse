@@ -284,6 +284,7 @@ run(
     // vNext one-shot storage remains dark but must commit exactly 80 fixed-
     // price slots and refuse consumption before run approval or any reuse.
     "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
