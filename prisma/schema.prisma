@@ -2267,6 +2267,8 @@ model AdminAuditLog {
   amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
+  amuxV4CollectionCreations AmuxIdeaCollectionRequest[] @relation("AmuxIdeaCollectionCreationAudit")
+  amuxV4CollectionTransitions AmuxIdeaCollectionRequest[] @relation("AmuxIdeaCollectionTransitionAudit")
   amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
 
@@ -8483,8 +8485,10 @@ model AmuxIdeaFrontierModelApproval {
 
   approvalAudit   AdminAuditLog  @relation("AmuxV4FrontierApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   revocationAudit AdminAuditLog? @relation("AmuxV4FrontierRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  collectionRequests AmuxIdeaCollectionRequest[]
 
   @@unique([provider, modelId, version])
+  @@unique([id, provider, modelId, version], map: "AmuxIdeaFrontierModelApproval_binding_key")
   @@index([provider, modelId, status])
 }
 
@@ -8513,6 +8517,7 @@ model AmuxIdeaSubmission {
   updatedAt           DateTime  @updatedAt
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
+  collectionRequests AmuxIdeaCollectionRequest[]
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
   confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
   chunks            AmuxIdeaAnalysisChunk[]
@@ -8592,10 +8597,61 @@ model AmuxIdeaSourceScopeApproval {
 
   idea     AmuxIdeaSubmission       @relation("AmuxIdeaScopeOwner", fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   previews AmuxIdeaTransferPreview[]
+  collectionRequests AmuxIdeaCollectionRequest[]
 
   @@unique([id, ideaId])
   @@index([ideaId, status, expiresAt])
   @@index([scopePurgeAfter, scopePurgedAt])
+}
+
+/// Dark, one-source local Ubuntu collection request. It is not a live queue:
+/// no route or worker writes this table until owner confirmation, scope/model
+/// freshness, source selection and result retention have a single writer.
+/// Result bytes are encrypted; retained digests are server-keyed HMAC-SHA256.
+model AmuxIdeaCollectionRequest {
+  id                    String    @id
+  requestId             String    @unique @db.Uuid
+  ideaId                String
+  actorUserId           String
+  sourceScopeApprovalId String
+  frontierApprovalId    String
+  frontierVersion       Int
+  provider              String
+  modelId               String
+  reasoningEffort       String
+  sourceIndex           Int
+  sourceKind            String
+  sourceByteLimit       Int
+  previewId             String    @unique
+  attempt               Int
+  requestDigest         String
+  requestDigestKeyId    String
+  state                 String
+  leaseGeneration       Int       @default(0)
+  leaseId               String?
+  leaseExpiresAt        DateTime?
+  expiresAt             DateTime
+  resultCiphertext      Bytes?
+  resultKeyId           String?
+  resultKeyVersion      Int?
+  resultDigest          String?
+  resultDigestKeyId     String?
+  resultPurgeAfter      DateTime?
+  resultPurgedAt        DateTime?
+  creationAuditLogId    String    @unique
+  transitionAuditLogId  String?   @unique
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  idea              AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  sourceScopeApproval AmuxIdeaSourceScopeApproval @relation(fields: [sourceScopeApprovalId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  frontierApproval  AmuxIdeaFrontierModelApproval @relation(fields: [frontierApprovalId, provider, modelId, frontierVersion], references: [id, provider, modelId, version], onDelete: Restrict, onUpdate: Restrict)
+  creationAudit     AdminAuditLog @relation("AmuxIdeaCollectionCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transitionAudit   AdminAuditLog? @relation("AmuxIdeaCollectionTransitionAudit", fields: [transitionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([ideaId, sourceScopeApprovalId, sourceIndex, attempt], map: "AmuxIdeaCollectionRequest_attempt_key")
+  @@index([state, expiresAt])
+  @@index([resultPurgeAfter, resultPurgedAt])
 }
 
 /// Exact app-controlled model input confirmed by the owner for one attempt.

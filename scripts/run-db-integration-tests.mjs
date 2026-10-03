@@ -281,6 +281,9 @@ run(
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // Dark local collection request binds one approved source, Frontier
+    // identity, immutable request digest and bounded encrypted result.
+    "tests/integration/amux-v4-idea-collection-request.db.test.mjs",
     // Dark v22/v23 CLI receipts: server timestamp, immutable row, strict
     // content-free model detail and unknown/partial token semantics.
     "tests/integration/amux-cli-usage-schema.db.test.ts",

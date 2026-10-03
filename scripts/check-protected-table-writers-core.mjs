@@ -886,6 +886,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The analysis price-version migration adds two restrictive foreign keys to existing approval and revocation audit rows. Its write verbs create and constrain AmuxIdeaAnalysisPriceVersion and add a provenance column to AmuxIdeaAnalysisBudgetHold; it neither writes nor seeds AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261003180000_amux_v4_idea_collection_request/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 18,
+    reason:
+      "The dark collection-request migration adds two restrictive foreign keys to existing creation and transition audit rows. Its guard also reads the new purge audit row FOR SHARE to bind it to the request and chain hash. Its DDL and guard write verbs affect only AmuxIdeaCollectionRequest and a Frontier composite index; it never writes or seeds AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
