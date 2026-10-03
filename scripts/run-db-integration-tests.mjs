@@ -266,6 +266,10 @@ run(
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
