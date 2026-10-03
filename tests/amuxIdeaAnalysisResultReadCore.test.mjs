@@ -75,7 +75,8 @@ test("the Admin result renders proposal relationships only while its verified bo
     import.meta.url), "utf8");
   assert.match(panel, /unit\.proposal \? <AmuxIdeaProposalRelations proposal=\{unit\.proposal\} messages=\{m\} \/>/);
   assert.match(panel, /unit\.proposal\?\.kind === "card"/);
-  assert.match(panel, /view\.state === "partial"/);
+  assert.match(panel, /view\?\.state === "partial"/);
+  assert.match(panel, /view\?\.state === "continued_partial"/);
   assert.doesNotMatch(panel, /dangerouslySetInnerHTML/);
 });
 
@@ -96,6 +97,34 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, result, ideaId), result);
   const partial = { ...result, state: "partial", remainingScope: "More tasks remain." };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, partial, ideaId), partial);
+  const firstPage = { chunkIndex: 0, previewId: result.previewId,
+    completedAt: result.completedAt, outcome: "propose",
+    coveredScope: "First page", remainingScope: "More tasks remain.",
+    units: result.units };
+  const secondPage = { ...firstPage, chunkIndex: 1, previewId: "preview-02",
+    coveredScope: "Second page", remainingScope: null,
+    units: [{ ...result.units[0], id: "unit-02", localRef: "c1:card-0",
+      proposal: { ...result.units[0].proposal, localId: "c1:card-0" } }] };
+  const continued = { state: "continued_ready", ideaId,
+    pages: [firstPage, secondPage] };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, continued, ideaId), continued);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...continued,
+    pages: [firstPage, { ...secondPage, chunkIndex: 0 }],
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...continued,
+    pages: [firstPage, { ...secondPage, remainingScope: "hidden" }],
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...continued,
+    pages: [firstPage, { ...secondPage, units: firstPage.units }],
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...continued,
+    pages: [firstPage, { ...secondPage,
+      completedAt: "2026-10-02T00:00:00.000Z" }],
+  }, ideaId), null);
+  const continuedPartial = { ...continued, state: "continued_partial",
+    pages: [firstPage, { ...secondPage, remainingScope: "One more page" }] };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, continuedPartial, ideaId),
+    continuedPartial);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
     ...partial, outcome: "reject",
   }, ideaId), null);

@@ -12,8 +12,10 @@ import {
   AMUX_V4_ANALYSIS_RESULT_READ_ENV,
   amuxV4AnalysisResultReadEnabled,
 } from "@/lib/amux/ideaAnalysisResultReadCore";
-import { AmuxIdeaAnalysisResultReadError,
-  readAmuxFirstIdeaAnalysisResult } from "@/lib/amux/ideaAnalysisResultReadService";
+import { AmuxIdeaAnalysisResultReadError } from
+  "@/lib/amux/ideaAnalysisResultReadService";
+import { readAmuxIdeaAnalysisResult } from
+  "@/lib/amux/ideaContinuedAnalysisResultReadService";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 
@@ -55,7 +57,7 @@ export async function GET(request: Request): Promise<Response> {
       return NextResponse.json({ error: "schema_rejected" },
         { status: 400, headers: noStore });
     }
-    const result = await readAmuxFirstIdeaAnalysisResult(session, ideaId,
+    const result = await readAmuxIdeaAnalysisResult(session, ideaId,
       loadCurrentAmuxContentKeys(process.env));
     return NextResponse.json(result, { headers: noStore });
   } catch (error) {

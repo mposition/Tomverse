@@ -8,6 +8,7 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { parseAmuxIdeaAnalysisResultView,
+  type AmuxIdeaAnalysisResultPage,
   type AmuxIdeaAnalysisResultView } from "@/lib/amux/ideaAnalysisResultReadCore";
 
 const list = (values: string[]) => <ul className="list-disc pl-5">
@@ -45,6 +46,15 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
     finally { setLoading(false); }
   };
 
+  const pages: AmuxIdeaAnalysisResultPage[] = view?.state === "continued_ready" ||
+    view?.state === "continued_partial" ? view.pages :
+    view?.state === "ready" || view?.state === "partial" ? [{
+      chunkIndex: 0, previewId: view.previewId, completedAt: view.completedAt,
+      outcome: view.outcome, coveredScope: view.coveredScope,
+      remainingScope: view.state === "partial" ? view.remainingScope : null,
+      units: view.units,
+    }] : [];
+
   return <section className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
     aria-labelledby="amux-v4-analysis-result-heading">
     <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">
@@ -63,17 +73,20 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
     {unavailable ? <p role="alert">{m.analysisResultUnavailable}</p> : null}
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
-    {view?.state === "ready" || view?.state === "partial" ? <div className="space-y-3">
+    {pages.length > 0 ? <div className="space-y-3">
+      {pages.map((page, pageIndex) => <div key={page.previewId} className="space-y-3">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
-        {view.completedAt} · {view.previewId}
+        #{page.chunkIndex + 1} · {page.completedAt} · {page.previewId}
       </p>
-      <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
-      {view.state === "partial" ? <p role="status" className="rounded-lg border border-amber-300 p-3 dark:border-amber-700">
-        {m.analysisResultPartial} {view.remainingScope ?? m.analysisResultScopeExpired}
+      <p>{page.coveredScope ?? m.analysisResultScopeExpired}</p>
+      {(view?.state === "partial" ||
+        (view?.state === "continued_partial" && pageIndex === pages.length - 1)) ?
+        <p role="status" className="rounded-lg border border-amber-300 p-3 dark:border-amber-700">
+        {m.analysisResultPartial} {page.remainingScope ?? m.analysisResultScopeExpired}
       </p> : null}
-      {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
+      {page.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
       <ol className="space-y-2">
-        {view.units.map((unit) => <li key={unit.id}
+        {page.units.map((unit) => <li key={unit.id}
           className="rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
           <p className="text-xs text-zinc-600 dark:text-zinc-400">
             {unit.localRef} · {unit.decisionState}
@@ -108,6 +121,7 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
           {unit.proposal ? <AmuxIdeaProposalRelations proposal={unit.proposal} messages={m} /> : null}
         </li>)}
       </ol>
+      </div>)}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;

@@ -65,16 +65,17 @@ export async function readVerifiedAmuxFirstIdeaAnalysisResultInTransaction(
     if (!idea) throw new AmuxIdeaAnalysisResultReadError("not_found");
     if (idea.state === "cancelled") return { state: "cancelled" };
     if (idea.state === "submitted") return { state: "pending" };
-    const partial = idea.state === "analyzing" && idea.analysisCompletedAt === null;
-    if (!partial && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
+    const analyzing = idea.state === "analyzing" && idea.analysisCompletedAt === null;
+    if (!analyzing && (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     });
-    if (partial && (!chunk || chunk.state !== "draft_ready")) {
+    if (analyzing && (!chunk || chunk.state !== "draft_ready")) {
       return { state: "pending" };
     }
+    const partial = analyzing || chunk?.coverageStatus === "more";
     const nextChunk = partial ? await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
     }) : null;

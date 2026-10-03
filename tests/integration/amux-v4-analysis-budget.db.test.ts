@@ -44,6 +44,9 @@ import { commitAmuxSecondIdeaAnalysisDraft,
   AmuxSecondAnalysisDraftError } from "@/lib/amux/ideaSecondAnalysisDraftService";
 import { readAmuxFirstIdeaAnalysisResult,
   AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
+import { readAmuxIdeaAnalysisResult,
+  readAmuxIdeaAnalysisResultInTransaction } from
+  "@/lib/amux/ideaContinuedAnalysisResultReadService";
 import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
   commitAmuxUnitRejectUnknown,
   readAmuxUnitRejectDecision, AmuxUnitRejectError } from
@@ -1470,6 +1473,28 @@ test("a verified second page closes the idea without admitting a card or restart
   { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }),
   (error: unknown) => error instanceof AmuxSecondAnalysisDraftError &&
     error.code === "not_ready");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const partialOutput = JSON.stringify({ ...JSON.parse(secondOutput),
+      coverageStatus: "more", continuationKind: "output",
+      remainingScope: "A third page remains" });
+    const partialSaved = await commitAmuxSecondIdeaAnalysisDraft(tx, {
+      ...input, rawModelOutput: partialOutput,
+    });
+    assert.equal(partialSaved.coverageStatus, "more");
+    assert.equal(partialSaved.nextChunkIndex, 2);
+    const third = await tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 2 } },
+    });
+    assert.equal(third.state, "pending");
+    const partialVisible = await readAmuxIdeaAnalysisResultInTransaction(
+      tx, session, ideaId, keys);
+    assert.equal(partialVisible.state, "continued_partial");
+    if (partialVisible.state !== "continued_partial") {
+      throw new Error("second partial page unavailable");
+    }
+    assert.deepEqual(partialVisible.pages.map((page) => page.units.length), [4, 1]);
+    throw new Error("rollback synthetic second partial page");
+  }), /rollback synthetic second partial page/);
   const saved = await prisma.$transaction((tx) =>
     commitAmuxSecondIdeaAnalysisDraft(tx, input));
   assert.equal(saved.coverageStatus, "complete");
@@ -1499,6 +1524,13 @@ test("a verified second page closes the idea without admitting a card or restart
   assert.equal(audit.action, AMUX_V4_SECOND_DRAFT_SAVED_ACTION);
   assert.equal((audit.metadata as Record<string, unknown>).actorScope,
     AMUX_V4_SECOND_DRAFT_SAVED_SCOPE);
+  const visible = await readAmuxIdeaAnalysisResult(session, ideaId, keys);
+  assert.equal(visible.state, "continued_ready");
+  if (visible.state !== "continued_ready") throw new Error("two pages unavailable");
+  assert.deepEqual(visible.pages.map((page) => page.chunkIndex), [0, 1]);
+  assert.deepEqual(visible.pages.map((page) => page.units.length), [4, 1]);
+  assert.equal(visible.pages[0].units[3]?.proposal?.kind, "card");
+  assert.equal(visible.pages[1].units[0]?.proposal?.kind, "card");
   assert.equal(await prisma.amuxWorkItem.count({
     where: { sourceSystem: "admin-idea-v4" },
   }), workItemsBefore);

@@ -16,6 +16,16 @@ export type AmuxVisibleAnalysisUnit = {
   proposal: AmuxAnalysisChunk["units"][number] | null;
 };
 
+export type AmuxIdeaAnalysisResultPage = {
+  chunkIndex: number;
+  previewId: string;
+  completedAt: string;
+  outcome: "propose" | "reject";
+  coveredScope: string | null;
+  remainingScope: string | null;
+  units: AmuxVisibleAnalysisUnit[];
+};
+
 export type AmuxIdeaAnalysisResultView =
   | { state: "pending" | "cancelled" }
   | { state: "ready"; ideaId: string; previewId: string;
@@ -24,7 +34,9 @@ export type AmuxIdeaAnalysisResultView =
   | { state: "partial"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose";
       coveredScope: string | null; remainingScope: string | null;
-      units: AmuxVisibleAnalysisUnit[] };
+      units: AmuxVisibleAnalysisUnit[] }
+  | { state: "continued_ready" | "continued_partial"; ideaId: string;
+      pages: [AmuxIdeaAnalysisResultPage, AmuxIdeaAnalysisResultPage] };
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
@@ -90,6 +102,43 @@ export function parseAmuxIdeaAnalysisResultView(
   status: number, body: unknown, expectedIdeaId: string,
 ): AmuxIdeaAnalysisResultView | null {
   if (status !== 200 || !ID.test(expectedIdeaId) || !record(body)) return null;
+  if (body.state === "continued_ready" || body.state === "continued_partial") {
+    if (!keys(body, ["state", "ideaId", "pages"]) ||
+        body.ideaId !== expectedIdeaId || !Array.isArray(body.pages) ||
+        body.pages.length !== 2) return null;
+    const ids = new Set<string>();
+    const refs = new Set<string>();
+    let previousCompletedAt = 0;
+    for (const [index, page] of body.pages.entries()) {
+      if (!record(page) || !keys(page, ["chunkIndex", "previewId", "completedAt",
+        "outcome", "coveredScope", "remainingScope", "units"]) ||
+          page.chunkIndex !== index) return null;
+      const completedAt = Date.parse(String(page.completedAt));
+      if (!Number.isFinite(completedAt) || completedAt < previousCompletedAt) return null;
+      previousCompletedAt = completedAt;
+      const partial = index === 0 || body.state === "continued_partial";
+      const nested = parseAmuxIdeaAnalysisResultView(200, partial ? {
+        state: "partial", ideaId: expectedIdeaId,
+        previewId: page.previewId, completedAt: page.completedAt,
+        outcome: page.outcome, coveredScope: page.coveredScope,
+        remainingScope: page.remainingScope, units: page.units,
+      } : {
+        state: "ready", ideaId: expectedIdeaId,
+        previewId: page.previewId, completedAt: page.completedAt,
+        outcome: page.outcome, coveredScope: page.coveredScope,
+        units: page.units,
+      }, expectedIdeaId);
+      if (!nested || (nested.state !== "partial" && nested.state !== "ready") ||
+          nested.state !== (partial ? "partial" : "ready") ||
+          (index === 1 && !partial && page.remainingScope !== null)) return null;
+      for (const unit of nested.units) {
+        if (ids.has(unit.id) || refs.has(unit.localRef)) return null;
+        ids.add(unit.id);
+        refs.add(unit.localRef);
+      }
+    }
+    return body as AmuxIdeaAnalysisResultView;
+  }
   if (body.state === "pending" || body.state === "cancelled") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }

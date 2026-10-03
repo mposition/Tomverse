@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
+import * as ts from "typescript";
 
 import {
   AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
@@ -273,19 +274,10 @@ const walk = (directory: string): string[] =>
   });
 
 test("no administrator audit call site names the reserved key", () => {
-  // The administrator writer began refusing `metadata.systemActor` in the same
-  // change that introduced the system writer. That refusal throws, so a caller
-  // already passing the key would have started failing its action. None did
-  // when this was written (a repository search found the word only in the two
-  // audit modules); this keeps every file that calls the administrator writer
-  // free of it, so a future caller that needs both has to come through review.
-  // It reads source text only: metadata built at runtime (a parsed body, a
-  // result object) is covered by the writer's own refusal, not by this scan.
-  // This reviewed AMUX service contains both audit writers. Its system
-  // entries name the marker as a writer argument, not administrator metadata;
-  // writeAdminAuditLog still rejects the reserved metadata key at runtime.
-  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts",
-    "lib/amux/ideaUnitRejectService.ts"]);
+  // Inspect each administrator writer call, not its whole source file: a
+  // service may also call the system writer, where `systemActor` is required.
+  // Dynamically assembled metadata is still rejected by writeAdminAuditLog.
+  const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))
     .map((path) => relative(ROOT, path).split("\\").join("/"))
@@ -293,10 +285,25 @@ test("no administrator audit call site names the reserved key", () => {
     .map((path) => ({ path, source: readFileSync(resolve(ROOT, path), "utf8") }))
     .filter(({ source }) => source.includes("writeAdminAuditLog("));
   assert.ok(callSites.length > 50, "the scan must actually reach the call sites");
-  assert.deepEqual(
-    callSites
-      .filter(({ source }) => source.includes(SYSTEM_AUDIT_ACTOR_METADATA_KEY))
-      .map(({ path }) => path),
-    []
-  );
+  const findings: string[] = [];
+  for (const { path, source } of callSites) {
+    const parsed = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+    const inspectArgument = (node: ts.Node) => {
+      if (ts.isPropertyAssignment(node) &&
+          ((ts.isIdentifier(node.name) && node.name.text === SYSTEM_AUDIT_ACTOR_METADATA_KEY) ||
+           (ts.isStringLiteral(node.name) && node.name.text === SYSTEM_AUDIT_ACTOR_METADATA_KEY))) {
+        findings.push(path);
+      }
+      ts.forEachChild(node, inspectArgument);
+    };
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+          node.expression.text === "writeAdminAuditLog") {
+        node.arguments.forEach(inspectArgument);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+  }
+  assert.deepEqual(findings, []);
 });
