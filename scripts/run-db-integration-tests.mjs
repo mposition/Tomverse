@@ -239,6 +239,18 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
+    // The digest intake: secret, control revision and switch, closed schema,
+    // then the single writer; one digest per UTC day.
+    "tests/integration/qa-release-digest-intake.db.test.ts",
+    // The Monitor silence check: its own secret, the control revision, then
+    // the freshness verdict over the database clock.
+    "tests/integration/qa-release-monitor.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
