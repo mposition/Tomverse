@@ -5,6 +5,7 @@ import {
   AMUX_ANALYSIS_CHUNK_NODE_CAP,
   AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
   type AmuxAnalysisChunk,
+  inspectAmuxAnalysisChunk,
   amuxAnalysisRefSafe,
   amuxAnalysisInputTextSafe,
   amuxExactDataKeys,
@@ -81,6 +82,51 @@ export function continuationFromAmuxAnalysisChunk(
       validContinuation(continuation, index + 1, 1) ? continuation : null;
   } catch {
     return null;
+  }
+}
+
+/** Compose the second page of an idea-only output continuation. The caller
+ * must first bind previousRaw to the stored chunk and its audit hash; this
+ * pure helper revalidates the model shape and grants no transfer authority. */
+export function buildFirstOutputContinuationPrompt(input: {
+  previewId: string;
+  previousPreviewId: string;
+  previousRaw: string;
+  previousAuditHash: string;
+  ideaText: string;
+}): AmuxIdeaAnalysisPromptResult {
+  try {
+    const previous = inspectAmuxAnalysisChunk({
+      raw: input.previousRaw, expectedPreviewId: input.previousPreviewId,
+      expectedChunkIndex: 0, expectedRevisionChunkIndex: 0,
+      previousContinuationKind: null,
+      permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
+    });
+    if (!previous.ok || previous.chunk.outcome !== "propose" ||
+        previous.chunk.coverageStatus !== "more" ||
+        previous.chunk.continuationKind !== "output") {
+      return { status: "hold", reason: "prompt_data_unverified" };
+    }
+    const continuation = continuationFromAmuxAnalysisChunk(
+      previous.chunk, input.previousAuditHash);
+    if (!continuation) return { status: "hold", reason: "prompt_data_unverified" };
+    const permittedTargetRefs = previous.chunk.units.flatMap<AmuxPermittedTargetRef>((unit) => {
+      if (unit.kind === "node") return [{ ref: unit.localId, kind: "node" as const,
+        level: unit.level }];
+      if (unit.kind === "card") return [{ ref: unit.localId, kind: "card" as const,
+        cardType: unit.cardType, storyKind: unit.storyKind,
+        featureRef: unit.featureRef }];
+      return [];
+    });
+    return buildAmuxIdeaAnalysisPrompt({
+      previewId: input.previewId, chunkIndex: 1, revisionChunkIndex: 1,
+      continuation,
+      sourceTexts: [{ refId: "operator_idea", kind: "operator_idea",
+        text: input.ideaText }],
+      permittedTargetRefs,
+    });
+  } catch {
+    return { status: "hold", reason: "prompt_data_unverified" };
   }
 }
 

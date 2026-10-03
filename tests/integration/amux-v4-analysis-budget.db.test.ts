@@ -18,7 +18,9 @@ import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
-import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewService";
+import { commitFirstOutputContinuationTransferPreview,
+  commitIdeaOnlyTransferPreview, readIdeaOnlyTransferPreview } from
+  "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
@@ -743,7 +745,7 @@ test("an output-continuable first result retains its first page without completi
   });
   const { holdId, previewId } = await syntheticDispatchedHold();
   const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
-    where: { id: previewId }, select: { ideaId: true },
+    where: { id: previewId }, select: { ideaId: true, modelId: true },
   });
   const ideaId = preview.ideaId;
   await prisma.amuxIdeaSubmission.update({
@@ -817,6 +819,38 @@ test("an output-continuable first result retains its first page without completi
   assert.equal(await prisma.amuxWorkItem.count({
     where: { sourceSystem: "admin-idea-v4" },
   }), workItemsBefore);
+  const nextPreviewId = randomUUID();
+  const choice = { previewId: nextPreviewId, ideaId, provider: "openai" as const,
+    modelId: preview.modelId, reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  const continued = await prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice, keys, browserNonce,
+    }));
+  assert.equal(continued.previewId, nextPreviewId);
+  assert.match(continued.payload.prompt, /"chunkIndex":1/);
+  assert.match(continued.payload.prompt, /"previousChunkDigest":"[a-f0-9]{64}"/);
+  assert.match(continued.payload.prompt, /"ref":"c0:node-2"/);
+  const nextPreview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: nextPreviewId },
+  });
+  assert.deepEqual([nextPreview.chunkIndex, nextPreview.attempt,
+    nextPreview.state, nextPreview.sourceUnitOrdinal], [1, 1, "prepared", 0]);
+  const continuedChunk = await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
+  });
+  assert.equal(continuedChunk.state, "awaiting_preview");
+  assert.equal(continuedChunk.currentPreviewId, nextPreviewId);
+  const readback = await readIdeaOnlyTransferPreview(session, nextPreviewId);
+  assert.equal(readback.state, "prepared");
+  if (readback.state !== "prepared") throw new Error("continuation preview unavailable");
+  assert.equal(readback.transferAuthorized, false);
+  assert.equal(readback.payloadDigest, continued.payloadDigest);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice: { ...choice, previewId: randomUUID() },
+      keys, browserNonce,
+    })), /not_ready/);
   await prisma.amuxIdeaAnalysisChunk.update({
     where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     data: { freeformPurgeAfter: new Date(Date.now() - 60_000) },

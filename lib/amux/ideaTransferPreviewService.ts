@@ -1,10 +1,12 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
+import { AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET } from "@/lib/adminAuditSystemActors";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
@@ -14,12 +16,16 @@ import {
   type AmuxContentKeys,
 } from "./ideaCrypto.ts";
 import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.ts";
+import { readAmuxFirstIdeaAnalysisResultInTransaction } from
+  "./ideaAnalysisResultReadService.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
   buildAmuxIdeaAnalysisPrompt,
+  buildFirstOutputContinuationPrompt,
 } from "./ideaAnalysisPromptCore.ts";
+import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import { buildAmuxSourcePlanManifest } from "./ideaSourcePlanManifestCore.ts";
 import {
@@ -256,6 +262,183 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
   }
 }
 
+/** Prepare the first output continuation without sending it. The previous
+ * page is re-read and authenticated under the same locked DB transaction;
+ * a stale or purged page cannot silently become a new transfer preview. */
+export async function commitFirstOutputContinuationTransferPreview(
+  tx: Prisma.TransactionClient, input: {
+    session: Session; request: Request; choice: IdeaOnlyTransferPreviewRequest;
+    keys: AmuxContentKeys; browserNonce: string;
+  },
+): Promise<{ previewId: string; expiresAt: Date; payload: PreviewPayload;
+  payloadDigest: string; payloadDigestKeyId: string }> {
+  const actorUserId = ownerId(input.session);
+  const { choice } = input;
+  if (choice.replacesPreviewId) throw new IdeaTransferPreviewError("not_ready");
+  await takeAuditChainLock(tx);
+  const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaSubmission"
+    WHERE "id" = ${choice.ideaId} AND "actorUserId" = ${actorUserId} FOR UPDATE
+  `;
+  if (ideaLock.length !== 1) throw new IdeaTransferPreviewError("not_found");
+  const chunkLocks = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
+    SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
+    WHERE "ideaId" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
+      AND "chunkIndex" IN (0, 1) ORDER BY "chunkIndex" FOR UPDATE
+  `;
+  if (chunkLocks.length !== 2 || chunkLocks[0]?.chunkIndex !== 0 ||
+      chunkLocks[1]?.chunkIndex !== 1) throw new IdeaTransferPreviewError("not_ready");
+  const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = nowRows[0]?.now;
+  const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: choice.ideaId } });
+  const nextChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
+    where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 1 } },
+  });
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !idea ||
+      !nextChunk || idea.state !== "analyzing" || now >= idea.analysisDeadlineAt ||
+      idea.analysisCompletedAt !== null || idea.cancelledAt !== null ||
+      !idea.currentSourcePlanRevisionId || idea.rawPurgedAt !== null ||
+      !idea.rawCiphertext || !idea.rawKeyId || !idea.rawKeyVersion ||
+      !idea.rawDigest || !idea.rawDigestKeyId ||
+      nextChunk.actorUserId !== actorUserId || nextChunk.state !== "pending" ||
+      nextChunk.attempt !== 0 || nextChunk.currentPreviewId !== null ||
+      nextChunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
+      nextChunk.planStartChunkIndex !== 0 || nextChunk.revisionChunkIndex !== 1) {
+    throw new IdeaTransferPreviewError("not_ready");
+  }
+  const plan = await tx.amuxIdeaSourcePlanRevision.findUnique({
+    where: { id: idea.currentSourcePlanRevisionId },
+  });
+  if (!plan || plan.ideaId !== idea.id || plan.actorUserId !== actorUserId ||
+      plan.state !== "active" || plan.revisionNumber !== 1 ||
+      plan.startChunkIndex !== 0 || plan.sourceUnitCount !== 1 ||
+      plan.unitDigests.length !== 1) throw new IdeaTransferPreviewError("not_ready");
+  const planAudit = await tx.adminAuditLog.findUnique({
+    where: { id: plan.creationAuditLogId },
+    select: { targetId: true, targetType: true, action: true, entryHash: true, metadata: true },
+  });
+  if (!planAudit?.entryHash || planAudit.targetId !== plan.id ||
+      planAudit.targetType !== "AmuxIdeaSourcePlanRevision" ||
+      planAudit.action !== "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" ||
+      !matchesInitialPlanSystemAudit(planAudit.metadata, plan.manifestDigest)) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  const first = await readAmuxFirstIdeaAnalysisResultInTransaction(
+    tx, input.session, choice.ideaId, input.keys);
+  if (first.state !== "partial" || !first.coveredScope || !first.remainingScope ||
+      first.units.some((unit) => !unit.proposal || unit.decisionState !== "proposed")) {
+    throw new IdeaTransferPreviewError("not_ready");
+  }
+  const priorUnits = first.units.map((unit) => unit.proposal) as
+    AmuxAnalysisChunk["units"];
+  const priorAudits = await tx.adminAuditLog.findMany({
+    where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET, targetId: `${idea.id}:0` },
+    take: 2, select: { entryHash: true },
+  });
+  const previousAuditHash = priorAudits[0]?.entryHash;
+  if (priorAudits.length !== 1 || !previousAuditHash ||
+      !/^[a-f0-9]{64}$/.test(previousAuditHash)) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  let raw: Buffer;
+  try {
+    raw = openAmuxContent({ ciphertext: Buffer.from(idea.rawCiphertext),
+      keyId: idea.rawKeyId, keyVersion: idea.rawKeyVersion },
+    "idea_raw", idea.id, input.keys);
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
+  let payloadBytes: Buffer | undefined;
+  try {
+    if (!verifyAmuxContentDigest(raw, "idea_raw", idea.id,
+      idea.rawDigest, idea.rawDigestKeyId, input.keys)) {
+      throw new IdeaTransferPreviewError("integrity_unavailable");
+    }
+    const parsed = inspectAmuxIdeaInput(raw.toString("utf8"));
+    if (!parsed.ok || parsed.input.repositories.length !== 0 ||
+        parsed.input.pullRequests.length !== 0) {
+      throw new IdeaTransferPreviewError("not_ready");
+    }
+    const ideaBytes = Buffer.from(parsed.input.idea, "utf8");
+    try {
+      const built = buildAmuxSourcePlanManifest({
+        ideaId: idea.id, actorUserId, revisionId: plan.id,
+        revisionNumber: 1, startChunkIndex: 0, predecessorId: null,
+        orderedUnits: [{ sourceKind: "operator_idea",
+          sourceReceiptDigest: idea.rawDigest, bytes: ideaBytes }],
+      }, input.keys);
+      if (built.decision !== "ready" ||
+          built.manifest.manifestDigest !== plan.manifestDigest ||
+          built.manifest.manifestDigestKeyId !== plan.manifestDigestKeyId ||
+          built.manifest.unitDigests[0] !== plan.unitDigests[0]) {
+        throw new IdeaTransferPreviewError("integrity_unavailable");
+      }
+    } finally { ideaBytes.fill(0); }
+    const prompt = buildFirstOutputContinuationPrompt({
+      previewId: choice.previewId, previousPreviewId: first.previewId,
+      previousRaw: JSON.stringify({ schemaVersion: 2,
+        previewId: first.previewId, chunkIndex: 0, outcome: "propose",
+        coverageStatus: "more", continuationKind: "output", ownerQuestion: null,
+        coveredScope: first.coveredScope, remainingScope: first.remainingScope,
+        units: priorUnits }),
+      previousAuditHash, ideaText: parsed.input.idea,
+    });
+    if (prompt.status !== "prompt_candidate") {
+      throw new IdeaTransferPreviewError("not_ready");
+    }
+    const payload: PreviewPayload = {
+      version: 1, previewId: choice.previewId, ideaId: choice.ideaId,
+      selection: { provider: choice.provider, modelId: choice.modelId,
+        reasoningEffort: choice.reasoningEffort, approvalId: choice.approvalId,
+        approvalVersion: choice.approvalVersion },
+      templateVersion: prompt.version, prompt: prompt.prompt,
+    };
+    payloadBytes = Buffer.from(amuxCanonicalJson(payload), "utf8");
+    const sealed = sealAmuxContent(payloadBytes, "transfer_payload", choice.previewId, input.keys);
+    const browserBindingDigest = ideaTransferBrowserDigest({
+      previewId: choice.previewId, nonce: input.browserNonce,
+      authenticatedAt: input.session.user?.authenticatedAt, key: input.keys,
+    });
+    const expiresAt = new Date(Math.min(now.getTime() + 15 * 60_000,
+      idea.analysisDeadlineAt.getTime()));
+    if (expiresAt <= now) throw new IdeaTransferPreviewError("not_ready");
+    await tx.amuxIdeaTransferPreview.create({ data: {
+      id: choice.previewId, ideaId: idea.id,
+      sourcePlanRevisionId: plan.id, sourceUnitOrdinal: 0,
+      chunkIndex: 1, attempt: 1, state: "prepared",
+      modelId: choice.modelId, templateVersion: prompt.version,
+      payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
+      payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
+      payloadDigestKeyId: sealed.digestKeyId, expiresAt,
+      payloadPurgeAfter: new Date(expiresAt.getTime() + 24 * 60 * 60_000),
+    } });
+    const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
+      where: { ideaId: idea.id, chunkIndex: 1, actorUserId,
+        state: "pending", attempt: 0, currentPreviewId: null,
+        sourcePlanRevisionId: plan.id },
+      data: { state: "awaiting_preview", attempt: 1,
+        currentPreviewId: choice.previewId },
+    });
+    if (updated.count !== 1) throw new IdeaTransferPreviewError("not_ready");
+    await writeAdminAuditLog({ tx, session: input.session, request: input.request,
+      action: "amux.v4.transfer_preview.prepared",
+      targetType: "AmuxIdeaTransferPreview", targetId: choice.previewId,
+      summary: "Owner prepared one output-continuation transfer preview; no model was called.",
+      metadata: { ideaId: idea.id, chunkIndex: 1, sourcePlanRevisionId: plan.id,
+        previousChunkAuditHash: previousAuditHash,
+        modelApprovalId: choice.approvalId, modelApprovalVersion: choice.approvalVersion,
+        payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId,
+        browserBindingDigest, transferAuthorized: false },
+    });
+    return { previewId: choice.previewId, expiresAt, payload,
+      payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId };
+  } finally {
+    payloadBytes?.fill(0);
+    raw.fill(0);
+  }
+}
+
 /** Read-back does not reauthorize a stale model or permit a transfer. */
 export async function readIdeaOnlyTransferPreview(session: Session, previewId: string): Promise<
   | { state: "not_visible" | "unavailable" | "expired"; transferAuthorized: false }
@@ -365,6 +548,47 @@ export async function prepareIdeaOnlyTransferPreview(
       callbackReturned = true;
       return result;
     }, { maxWait: 5_000, timeout: 15_000 });
+  } catch (error) {
+    if (!callbackReturned && error instanceof IdeaTransferPreviewError) throw error;
+    throw new IdeaTransferPreviewError("outcome_unknown");
+  }
+}
+
+export async function prepareFirstOutputContinuationTransferPreview(
+  session: Session, request: Request, choice: IdeaOnlyTransferPreviewRequest,
+  browserNonce: string,
+) {
+  ownerId(session);
+  if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV])) {
+    throw new IdeaTransferPreviewError("preview_disabled");
+  }
+  if (adminAuditIntegrityKeys(process.env).length === 0) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  const selected = await readCurrentAmuxIdeaFrontierSelection(choice);
+  if (selected.decision === "hold") {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
+  if (selected.decision !== "selection_current" ||
+      selected.approvalId !== choice.approvalId ||
+      selected.approvalVersion !== choice.approvalVersion) {
+    throw new IdeaTransferPreviewError("model_changed");
+  }
+  const keys = loadCurrentAmuxContentKeys(process.env);
+  let callbackReturned = false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+               set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+      `;
+      const result = await commitFirstOutputContinuationTransferPreview(tx, {
+        session, request, choice, keys, browserNonce,
+      });
+      callbackReturned = true;
+      return result;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof IdeaTransferPreviewError) throw error;
     throw new IdeaTransferPreviewError("outcome_unknown");

@@ -27,16 +27,16 @@ export class AmuxIdeaAnalysisResultReadError extends Error {
 
 /** Owner-only, exact-idea read. No writes, external calls or card admission.
  * Expired unit bodies are explicit metadata-only rows, never silently omitted;
- * the 24-hour freeform expiry does not hide 30-day unit proposals. */
-export async function readAmuxFirstIdeaAnalysisResult(
-  session: Session, ideaId: string, keys: AmuxContentKeys,
+ * freeform expiry does not hide 30-day unit proposals. */
+export async function readAmuxFirstIdeaAnalysisResultInTransaction(
+  tx: Prisma.TransactionClient, session: Session, ideaId: string,
+  keys: AmuxContentKeys,
 ): Promise<AmuxIdeaAnalysisResultView> {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
       !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
     throw new AmuxIdeaAnalysisResultReadError("not_found");
   }
-  return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,
              set_config('idle_in_transaction_session_timeout', '5000', true) AS idle_limit
@@ -219,6 +219,13 @@ export async function readAmuxFirstIdeaAnalysisResult(
       freeform?.fill(0);
       for (const plain of plaintextUnits) plain.fill(0);
     }
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+}
+
+export async function readAmuxFirstIdeaAnalysisResult(
+  session: Session, ideaId: string, keys: AmuxContentKeys,
+): Promise<AmuxIdeaAnalysisResultView> {
+  return prisma.$transaction((tx) => readAmuxFirstIdeaAnalysisResultInTransaction(
+    tx, session, ideaId, keys),
+  { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 8_000 });
 }

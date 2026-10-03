@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AMUX_V4_ANALYSIS_DATA_MAX_BYTES,
   AMUX_V4_ANALYSIS_SOURCE_MAX_BYTES,
+  buildFirstOutputContinuationPrompt,
   buildAmuxIdeaAnalysisPrompt,
   continuationFromAmuxAnalysisChunk,
 } from "../lib/amux/ideaAnalysisPromptCore.ts";
@@ -28,6 +29,59 @@ const valid = () => ({
     { ref: "epic_1", kind: "node", level: "epic" },
     { ref: "feature_1", kind: "node", level: "feature" },
   ],
+});
+
+test("a first output page yields a bounded second prompt with prior proposal refs", () => {
+  const previous = {
+    schemaVersion: 2, previewId: "preview_first", chunkIndex: 0,
+    outcome: "propose", coverageStatus: "more", continuationKind: "output",
+    ownerQuestion: null, coveredScope: "First verified Story.",
+    remainingScope: "Design and test tasks remain.",
+    units: [
+      { kind: "node", localId: "c0:node-0", level: "initiative", parentRef: null,
+        title: "Improve intake", description: "One operator goal.",
+        sourceRefIds: ["operator_idea"] },
+      { kind: "node", localId: "c0:node-1", level: "epic", parentRef: "c0:node-0",
+        title: "Analyze ideas", description: "One product direction.",
+        sourceRefIds: ["operator_idea"] },
+      { kind: "node", localId: "c0:node-2", level: "feature", parentRef: "c0:node-1",
+        title: "Review proposals", description: "One bounded feature.",
+        sourceRefIds: ["operator_idea"] },
+      { kind: "card", localId: "c0:card-0", cardType: "story", storyKind: "general",
+        title: "Review first card", problem: "The owner needs a proposal.",
+        scopeIn: ["Show the card"], scopeOut: [],
+        completionCriteria: ["Owner can review it"], featureRef: "c0:node-2",
+        parentStoryRef: null, dependencyRefs: [], duplicateCandidateRefs: [],
+        taskRole: null, executionGrade: null, executionBrief: null,
+        sourceRefIds: ["operator_idea"] },
+    ],
+  };
+  const input = { previewId: "preview_second", previousPreviewId: "preview_first",
+    previousRaw: JSON.stringify(previous), previousAuditHash: "a".repeat(64),
+    ideaText: "Create a reviewable workflow in several tasks." };
+  const built = buildFirstOutputContinuationPrompt(input);
+  assert.equal(built.status, "prompt_candidate");
+  if (built.status !== "prompt_candidate") return;
+  const data = JSON.parse(built.prompt.split("BEGIN_CONFIRMED_DATA_JSON\n")[1]
+    .split("\nEND_CONFIRMED_DATA_JSON")[0]);
+  assert.equal(data.chunkIndex, 1);
+  assert.equal(data.revisionChunkIndex, 1);
+  assert.equal(data.continuation.previousChunkDigest, input.previousAuditHash);
+  assert.equal(data.continuation.remainingScope, previous.remainingScope);
+  assert.deepEqual(data.permittedTargetRefs.map((target) => target.ref),
+    ["c0:node-0", "c0:node-1", "c0:node-2", "c0:card-0"]);
+  assert.deepEqual(buildFirstOutputContinuationPrompt({ ...input,
+    previousRaw: JSON.stringify({ ...previous, coverageStatus: "complete",
+      continuationKind: null, remainingScope: null }) }),
+  { status: "hold", reason: "prompt_data_unverified" });
+  assert.deepEqual(buildFirstOutputContinuationPrompt({ ...input,
+    previousRaw: JSON.stringify({ ...previous, units: previous.units.map((unit) => ({
+      ...unit, sourceRefIds: ["unapproved_source"],
+    })) }) }),
+  { status: "hold", reason: "prompt_data_unverified" });
+  assert.deepEqual(buildFirstOutputContinuationPrompt({ ...input,
+    previousAuditHash: "not_a_digest" }),
+  { status: "hold", reason: "prompt_data_unverified" });
 });
 
 test("prompt candidate states the bounded proposal schema and no write authority", () => {
