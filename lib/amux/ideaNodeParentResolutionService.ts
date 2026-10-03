@@ -12,7 +12,8 @@ const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const ROOT_REF = /^c(0|[1-9][0-9]*):node-(0|[1-9][0-9]{0,3})$/;
 
 export class AmuxNodeParentResolutionError extends Error {
-  constructor(readonly code: "not_found" | "not_ready" | "integrity_unavailable") {
+  constructor(readonly code: "not_found" | "not_ready" | "reconfirm" |
+    "integrity_unavailable") {
     super(code);
     this.name = "AmuxNodeParentResolutionError";
   }
@@ -29,12 +30,19 @@ export async function resolveApprovedAmuxRootParent(
   try { actorUserId = amuxUnitOwnerId(session); }
   catch (error) {
     if (error instanceof AmuxUnitRejectError) {
-      throw new AmuxNodeParentResolutionError("not_found");
+      throw new AmuxNodeParentResolutionError(error.code === "reconfirm"
+        ? "reconfirm" : "not_found");
     }
     throw error;
   }
   if (!ID.test(input.ideaId) || !ROOT_REF.test(input.parentRef)) {
     throw new AmuxNodeParentResolutionError("not_ready");
+  }
+  const isolation = await tx.$queryRaw<Array<{ level: string }>>`
+    SELECT current_setting('transaction_isolation') AS "level"
+  `;
+  if (isolation[0]?.level !== "serializable") {
+    throw new AmuxNodeParentResolutionError("integrity_unavailable");
   }
   const unit = await tx.amuxIdeaDraftUnit.findUnique({
     where: { ideaId_localRef: { ideaId: input.ideaId,
@@ -51,8 +59,7 @@ export async function resolveApprovedAmuxRootParent(
       action: "create_node", state: "consumed" }, take: 2,
   });
   if (decisions.length !== 1) {
-    throw new AmuxNodeParentResolutionError(decisions.length === 0
-      ? "not_ready" : "integrity_unavailable");
+    throw new AmuxNodeParentResolutionError("integrity_unavailable");
   }
   const decision = decisions[0]!;
   const readBack = await readAmuxRootNodeDecisionInTransaction(tx, session,

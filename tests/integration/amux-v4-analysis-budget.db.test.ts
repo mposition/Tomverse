@@ -1165,7 +1165,17 @@ test("a complete first result saves independent encrypted units and closes only 
   const rootChoice = { ideaId, draftUnitId: units[0]!.id,
     decisionId: randomUUID(), prepareRequestId: randomUUID(),
     nodeId: randomUUID(), reason: "" };
+  await assert.rejects(prisma.$transaction((tx) =>
+    resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: units[0]!.localRef! })),
+  (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+    error.code === "integrity_unavailable",
+  "a weaker transaction must not resolve an approval parent");
   await assert.rejects(prisma.$transaction(async (tx) => {
+    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: "not-a-node-ref" }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready");
     await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
       { ideaId, parentRef: units[0]!.localRef! }),
     (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
@@ -1234,6 +1244,11 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal(parent.level, "initiative");
     assert.equal(parent.approvedDecisionId, rootChoice.decisionId);
     assert.equal(parent.content.digest, node.contentDigest);
+    await assert.rejects(resolveApprovedAmuxRootParent(tx,
+      { ...session, user: { ...session.user, id: randomUUID() } } as Session,
+      { ideaId, parentRef: unit.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_found");
     await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
       { ideaId, parentRef: units[1]!.localRef! }),
     (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
