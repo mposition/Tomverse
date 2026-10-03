@@ -15,11 +15,11 @@
 // each send more statements than the call that started it, and a list of the
 // ways it can happen is a list that will be incomplete.
 //
-// Code that must use a reviewed fixed-cost helper which needs the real client
-// (the audit chain append, for instance) calls `charge(n, fn)`: n statements
-// are taken from the allowance first, and only then does `fn` receive the
-// client. The cost n is the caller's claim and is pinned by that helper's own
-// test.
+// There is deliberately no way to hand the callback the real client. A helper
+// that needs it (the audit chain append, when a later slice adds one) will be
+// registered here by name with a fixed cost pinned by its own test, and called
+// by name; a caller-claimed cost with an arbitrary function would let one
+// "statement" run any number, and could leak the client past the ceiling.
 //
 // Exceeding the allowance throws before anything is sent, and the throw rolls
 // the whole transaction back. The arming function is statement 1 and is
@@ -68,17 +68,15 @@ function refusingProxy(target) {
 
 /**
  * Wrap `tx` so that at most `allowed` statements can be sent through it.
- * Returns `{ client, charge, used }`: `client` is what the callback may use,
- * `charge(n, fn)` runs a reviewed fixed-cost helper against the real client
- * after taking n statements, and `used()` reports how many were taken.
+ * Returns `{ client, used }`: `client` is what the callback may use, and
+ * `used()` reports how many statements were taken.
  */
 export function countingClient(tx, allowed) {
   if (!Number.isInteger(allowed) || allowed < 0) throw new Error("ops_observer_statement_allowance_invalid");
   let used = 0;
-  const take = (n) => {
-    if (!Number.isInteger(n) || n < 1) throw new Error("ops_observer_statement_charge_invalid");
-    if (used + n > allowed) refuse("statement_ceiling_exceeded");
-    used += n;
+  const take = () => {
+    if (used >= allowed) refuse("statement_ceiling_exceeded");
+    used += 1;
   };
 
   const client = new Proxy(tx, {
@@ -87,7 +85,7 @@ export function countingClient(tx, allowed) {
       if (ONE_STATEMENT_RAW_METHODS.includes(property) && typeof value === "function") {
         return (...args) => {
           if (!rawCallIsSingleStatement(args)) refuse("statement_ceiling_not_single_statement");
-          take(1);
+          take();
           return value.apply(object, args);
         };
       }
@@ -97,10 +95,5 @@ export function countingClient(tx, allowed) {
     },
   });
 
-  const charge = (n, fn) => {
-    take(n);
-    return fn(tx);
-  };
-
-  return { client, charge, used: () => used };
+  return { client, used: () => used };
 }

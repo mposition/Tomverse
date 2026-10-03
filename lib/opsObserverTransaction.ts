@@ -12,8 +12,7 @@
  *   - logs the transaction_timeout the session inherited, so an operator can
  *     see when this agent replaced one (operator decision N-7);
  *   - gives the callback a client that sends only tagged single-statement
- *     raw queries, refuses its (A)th statement, and a `charge(n, fn)` for a
- *     reviewed fixed-cost helper that needs the real client.
+ *     raw queries and refuses its (A)th statement.
  *
  * `assertNotLate(runDeadline)` is the separate short transaction that must pass
  * before a caller reports success, sends, or pings a heartbeat (§6 item 5): the
@@ -93,11 +92,7 @@ function logArmed(kind: OpsObserverTransactionKind, armed: OpsObserverArmed) {
 export async function withOpsObserverTransaction<T>(
   kind: OpsObserverTransactionKind,
   runDeadline: Date,
-  fn: (
-    tx: Prisma.TransactionClient,
-    armed: OpsObserverArmed,
-    charge: <R>(statements: number, helper: (raw: Prisma.TransactionClient) => R) => R,
-  ) => Promise<T>,
+  fn: (tx: Prisma.TransactionClient, armed: OpsObserverArmed) => Promise<T>,
   client: PrismaClient = prisma,
 ): Promise<{ result: T; armed: OpsObserverArmed }> {
   const bound = TRANSACTION_BOUNDS[kind];
@@ -108,7 +103,7 @@ export async function withOpsObserverTransaction<T>(
       armed = await arm(tx, kind, runDeadline);
       logArmed(kind, armed);
       const counted = countingClient(tx, bound.statementCeiling - 1);
-      return fn(counted.client as Prisma.TransactionClient, armed, counted.charge);
+      return fn(counted.client as Prisma.TransactionClient, armed);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,

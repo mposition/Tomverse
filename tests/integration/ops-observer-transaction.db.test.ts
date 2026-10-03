@@ -70,28 +70,12 @@ test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
       assert.equal(rows[0].n, 0);
     });
 
-    await t.test("a model delegate is refused before it sends anything, and charge() runs a helper only after its cost is taken", async () => {
+    await t.test("a model delegate is refused before it sends anything", async () => {
       const error = await withOpsObserverTransaction("assert", inSeconds(60), async (tx) => {
         // `user` exists in every generated client; the point is that no delegate is reachable.
         await (tx as unknown as { user: { findMany: () => Promise<unknown> } }).user.findMany();
       }).then(() => null, (e: Error & { code?: string }) => e);
       assert.equal(error?.code, "statement_ceiling_unknown_method");
-
-      // assert allows 2 after arming; a charge of 2 runs, a third charge is refused before it runs.
-      let helperRuns = 0;
-      const over = await withOpsObserverTransaction("assert", inSeconds(60), async (_tx, _armed, charge) => {
-        await charge(2, async (raw) => {
-          helperRuns += 1;
-          await raw.$executeRaw`INSERT INTO "OpsObserverWrapperProbe" VALUES (${7})`;
-        });
-        await charge(1, async () => {
-          helperRuns += 1;
-        });
-      }).then(() => null, (e: Error & { code?: string }) => e);
-      assert.equal(over?.code, "statement_ceiling_exceeded");
-      assert.equal(helperRuns, 1);
-      const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "OpsObserverWrapperProbe"`);
-      assert.equal(rows[0].n, 0, "the refused transaction rolled the helper's write back");
     });
 
     await t.test("budget refusal is recognised by SQLSTATE, not by message text", async () => {

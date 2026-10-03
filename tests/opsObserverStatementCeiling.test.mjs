@@ -1,8 +1,7 @@
 // The statement ceiling (docs/policy/sre-ops.md §6): only tagged single-statement
 // raw calls pass and are counted before they run; the (A)+1th throws without
 // reaching the client; every model delegate, *Unsafe method, internal entry
-// point and nested function is refused; and a reviewed fixed-cost helper runs
-// only after its whole cost is taken.
+// point and nested function is refused; and nothing hands out the real client.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -87,21 +86,10 @@ test("model delegates, unsafe and internal entry points, and nested functions al
   assert.deepEqual(sent, []);
 });
 
-test("a fixed-cost helper runs against the real client only after its whole cost is taken", () => {
-  const { tx, sent } = fakeTx();
-  const { client, charge, used } = countingClient(tx, 5);
-  client.$queryRaw(...tag`SELECT 1`);
-  const result = charge(4, (raw) => {
-    raw.opsObserverState.update({});
-    return "appended";
-  });
-  assert.equal(result, "appended");
-  assert.equal(used(), 5);
-  let ran = false;
-  assert.throws(() => charge(1, () => (ran = true)), refusedWith("statement_ceiling_exceeded"));
-  assert.equal(ran, false);
-  assert.deepEqual(sent, ["$queryRaw", "model.update"]);
-  assert.throws(() => charge(0, () => {}), /charge_invalid/);
+test("nothing on the result hands out the real client", () => {
+  const { tx } = fakeTx();
+  const result = countingClient(tx, 5);
+  assert.deepEqual(Object.keys(result).sort(), ["client", "used"]);
 });
 
 test("an invalid allowance is a programming error", () => {
