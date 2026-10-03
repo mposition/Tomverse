@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+import { parse } from "yaml";
+
+import { vendorScope } from "../scripts/rust-vendor-scope.mjs";
+
+// The vendored AMUX server runs only when a change can affect it, and the
+// Rust lane's caches are written only by develop pushes. See the header of
+// .github/workflows/orchestrator-rust.yml.
+
+test("a change under vendor/amux runs the vendored server", () => {
+    assert.equal(vendorScope(["lib/foo.ts", "vendor/amux/crates/amux-server/src/lib.rs"]).vendor, true);
+    assert.equal(vendorScope(["vendor/amux/Cargo.lock"]).vendor, true);
+});
+
+test("a change to the lane, its scope script or the toolchain runs it", () => {
+    for (const path of [
+        ".github/workflows/orchestrator-rust.yml",
+        "scripts/rust-vendor-scope.mjs",
+        "rust-toolchain.toml",
+        "rust-toolchain",
+    ]) {
+        assert.equal(vendorScope([path]).vendor, true, path);
+    }
+});
+
+test("an unrelated change skips it", () => {
+    assert.equal(
+        vendorScope(["lib/chat.ts", "apps/tomverse-orchestrator/src/main.rs", "Cargo.lock", "docs/x.md"]).vendor,
+        false
+    );
+    // A path that merely mentions the vendor directory elsewhere is not in it.
+    assert.equal(vendorScope(["docs/vendor/amux-notes.md"]).vendor, false);
+});
+
+test("no input runs everything", () => {
+    assert.equal(vendorScope([]).vendor, true);
+    assert.equal(vendorScope(["", "  "]).vendor, true);
+});
+
+test("the CLI prints the output line for both answers", () => {
+    const run = (input, ...args) =>
+        spawnSync(process.execPath, ["scripts/rust-vendor-scope.mjs", ...args], {
+            input,
+            encoding: "utf8",
+            env: { ...process.env, GITHUB_OUTPUT: "" },
+        });
+    assert.equal(run("lib/a.ts\n").stdout.trim(), "vendor=false");
+    assert.equal(run("vendor/amux/x.rs\n").stdout.trim(), "vendor=true");
+    assert.equal(run("", "--all").stdout.trim(), "vendor=true");
+});
+
+const workflow = parse(
+    readFileSync(new URL("../.github/workflows/orchestrator-rust.yml", import.meta.url), "utf8")
+);
+const steps = workflow.jobs.workspace.steps;
+const step = (name) => {
+    const found = steps.find((candidate) => candidate.name === name);
+    assert.ok(found, `step "${name}" exists`);
+    return found;
+};
+
+test("every vendored step is gated on the scope decision", () => {
+    const vendored = steps.filter((candidate) => candidate["working-directory"] === "vendor/amux");
+    assert.equal(vendored.length, 3);
+    for (const candidate of vendored) {
+        assert.equal(candidate.if, "steps.scope.outputs.vendor == 'true'", candidate.name);
+    }
+});
+
+test("the workspace build and test are never gated", () => {
+    assert.equal(step("Build").if, undefined);
+    assert.equal(step("Test").if, undefined);
+});
+
+test("caches are restored by everyone and saved only by develop pushes", () => {
+    for (const candidate of steps.filter((s) => String(s.uses ?? "").startsWith("actions/cache"))) {
+        const uses = String(candidate.uses);
+        assert.ok(
+            uses.startsWith("actions/cache/restore@") || uses.startsWith("actions/cache/save@"),
+            `${candidate.name} uses ${uses}; the combined action saves from pull requests too`
+        );
+        if (uses.startsWith("actions/cache/save@")) {
+            assert.match(
+                String(candidate.if),
+                /^github\.event_name == 'push' && github\.ref == 'refs\/heads\/develop' && /,
+                candidate.name
+            );
+        }
+    }
+});
