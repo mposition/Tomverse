@@ -27,6 +27,7 @@ import { AMUX_V4_UNIT_REJECT_READ_ENV, AMUX_V4_UNIT_REJECT_WRITE_ENV,
   amuxV4UnitRejectReadPermitted, amuxV4UnitRejectWritePermitted,
   deriveAmuxUnitRejectConfirmation,
   amuxUnitRejectNeedsCommitReadback,
+  amuxUnitRejectReadbackProvesExpiry,
   mayExpireAmuxRejectionConfirmation } from "./ideaUnitRejectCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
@@ -553,6 +554,7 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
       if (known) throw known;
       throw new AmuxUnitRejectError("integrity_unavailable");
     }
+    let definitelyExpired = false;
     try {
       const status = await readAmuxUnitRejectDecision(session,
         choice.decisionId, choice.prepareRequestId);
@@ -571,6 +573,9 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
           draftUnitId: status.draftUnitId,
           state: "rejected" as const, auditId: status.auditId };
       }
+      if (amuxUnitRejectReadbackProvesExpiry(status, choice)) {
+        definitelyExpired = true;
+      }
       if (status.state === "prepared" &&
           status.ideaId === choice.ideaId &&
           status.draftUnitId === choice.draftUnitId &&
@@ -585,6 +590,7 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
         }), { maxWait: 5_000, timeout: 15_000 });
       }
     } catch { /* Remain unknown; the owner must use exact-ID read-back. */ }
+    if (definitelyExpired) throw new AmuxUnitRejectError("reconfirm");
     throw new AmuxUnitRejectError("outcome_unknown");
   }
 }
@@ -701,6 +707,11 @@ export async function readAmuxUnitRejectDecision(session: Session,
           expiryAudit.action !== EXPIRE_ACTION ||
           expiryAudit.targetType !== TARGET ||
           expiryAudit.targetId !== row.id ||
+          row.consumeRequestId !== null ||
+          row.consumedAt !== null ||
+          row.outcomeUnknownAt !== null ||
+          row.outcomeUnknownConsumeRequestId !== null ||
+          row.outcomeUnknownAuditLogId !== null ||
           audits.some((audit) => audit.action === CONSUME_ACTION) ||
           expiryMeta?.systemActor !== AMUX_SYSTEM_AUDIT_ACTOR ||
           expiryMeta.ideaId !== row.ideaId ||

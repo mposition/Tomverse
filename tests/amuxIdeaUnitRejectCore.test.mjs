@@ -8,6 +8,7 @@ import { AMUX_V4_UNIT_REJECT_CODE_LATCH, AMUX_V4_UNIT_REJECT_READ_CODE_LATCH,
   amuxV4UnitRejectWritePermitted, amuxV4UnitRejectReadPermitted,
   amuxUnitRejectErrorBody, amuxUnitRejectErrorStatus,
   amuxUnitRejectNeedsCommitReadback,
+  amuxUnitRejectReadbackProvesExpiry,
   deriveAmuxUnitRejectConfirmation,
   inspectAmuxUnitRejectRequest,
   mayExpireAmuxRejectionConfirmation } from "../lib/amux/ideaUnitRejectCore.ts";
@@ -84,6 +85,19 @@ test("reconfirmation is a conflict, not an administrator sign-in challenge", () 
 test("a callback failure is a known rollback, not an uncertain commit", () => {
   assert.equal(amuxUnitRejectNeedsCommitReadback(false), false);
   assert.equal(amuxUnitRejectNeedsCommitReadback(true), true);
+});
+
+test("only an exact decision's expired read-back rules out a consume commit", () => {
+  const choice = { decisionId: "decision-1", draftUnitId: "unit-1" };
+  assert.equal(amuxUnitRejectReadbackProvesExpiry({ state: "expired",
+    decisionId: "decision-1", draftUnitId: "unit-1" }, choice), true);
+  for (const status of [
+    { state: "expired", decisionId: "other", draftUnitId: "unit-1" },
+    { state: "expired", decisionId: "decision-1", draftUnitId: "other" },
+    { state: "partial", decisionId: "decision-1", draftUnitId: "unit-1" },
+  ]) {
+    assert.equal(amuxUnitRejectReadbackProvesExpiry(status, choice), false);
+  }
 });
 
 test("one request admits exactly one owner decision, never a bulk card write", () => {

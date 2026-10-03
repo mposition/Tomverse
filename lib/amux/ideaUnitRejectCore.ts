@@ -23,6 +23,12 @@ export const amuxUnitRejectErrorStatus = (code: string): number =>
 export const amuxUnitRejectNeedsCommitReadback = (callbackReturned: boolean) =>
   callbackReturned === true;
 
+export const amuxUnitRejectReadbackProvesExpiry = (status: {
+  state: string; decisionId?: string; draftUnitId?: string;
+}, choice: { decisionId: string; draftUnitId: string }) =>
+  status.state === "expired" && status.decisionId === choice.decisionId &&
+    status.draftUnitId === choice.draftUnitId;
+
 export const amuxUnitRejectErrorBody = (code: string,
   recovery?: { decisionId: string; prepareRequestId: string }) =>
   code === "outcome_unknown"
