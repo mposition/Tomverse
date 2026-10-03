@@ -36,3 +36,25 @@ test("issue locks after the limits, judges before writing, audits before the ins
   // The deadline is anchored on the database clock read in the lane read.
   assert.ok(fn.includes("new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt))"));
 });
+
+test("instruction consume uses the policy's nine statements and audits before its conditional update, deadline last", () => {
+  const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_CONSUME_LIMITS = Object.freeze({"));
+  assert.match(block, /statements: 9,/);
+  assert.match(block, /transactionMs: \(3 \* 9 \+ 5\) \* 1_000,/);
+  assert.match(block, /prismaMs: \(3 \* 9 \+ 5\) \* 1_000 \+ 5_000,/);
+  const fn = SOURCE.slice(SOURCE.indexOf("export async function consumeQaReleaseMergeInstruction"));
+  const order = [
+    "set_config('statement_timeout'",
+    "await takeAuditChainLock(tx);",
+    "FOR UPDATE",
+    "judgeQaReleaseInstructionConsume(",
+    "if (!judgement.consume) return",
+    "await writeSystemAuditLog({",
+    `SET "state" = 'consumed'`,
+    "SELECT clock_timestamp() >= ",
+    "return { consumed: true as const }",
+  ].map((marker) => fn.indexOf(marker));
+  assert.ok(order.every((at) => at > 0), JSON.stringify(order));
+  assert.deepEqual(order, [...order].sort((x, y) => x - y));
+  assert.match(fn, /WHERE "id" = \$\{input\.request\.attemptId\} AND "state" = 'issued'/);
+});

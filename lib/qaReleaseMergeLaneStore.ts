@@ -5,7 +5,9 @@ import { randomUUID } from "node:crypto";
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import {
+  type QaReleaseConsumeRefusal,
   type QaReleaseIssueRefusal,
+  judgeQaReleaseInstructionConsume,
   judgeQaReleaseInstructionIssue,
 } from "@/lib/qaReleaseMergeLaneInstructionCore";
 
@@ -134,5 +136,126 @@ export async function issueQaReleaseMergeInstruction(input: {
       return { issued: true as const, attemptId, controlRevision: judgement.revision, expiresAt: inserted.expiresAt };
     },
     { maxWait: 5_000, timeout: ISSUE.prismaMs },
+  );
+}
+
+export const QA_RELEASE_MERGE_ATTEMPT_CONSUMED_ACTION = "qa_release.merge_attempt_consumed";
+
+/**
+ * Instruction consume (policy section 10): nine statements -- the limits,
+ * the audit chain lock, one read of the attempt (locked) with the newest
+ * operator control revision, switch and latch event, the four of the audit
+ * append, the conditional update and the deadline check -- so 3A + 5 = 32 s.
+ */
+export const QA_RELEASE_CONSUME_LIMITS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 9,
+  transactionMs: (3 * 9 + 5) * 1_000,
+  prismaMs: (3 * 9 + 5) * 1_000 + 5_000,
+});
+const CONSUME = QA_RELEASE_CONSUME_LIMITS;
+
+export type QaReleaseConsumeResult = { consumed: true } | { consumed: false; reason: QaReleaseConsumeRefusal };
+
+type ConsumeRead = {
+  dbNowMs: bigint;
+  revision: number | null;
+  developLaneOn: boolean | null;
+  latched: boolean | null;
+  attemptId: string | null;
+  pullRequestNumber: number | null;
+  headSha: string | null;
+  base: string | null;
+  attemptRevision: number | null;
+  expiresAtMs: bigint | null;
+  state: string | null;
+};
+
+/**
+ * Lets the service merge exactly what was issued, once (policy section 3,
+ * step 2). The service sends what it re-read from GitHub; the app judges
+ * only what it can read itself, and the conditional update succeeds for an
+ * attempt still issued. The database refuses a consume past the expiry on
+ * its own clock as well. A refusal writes nothing.
+ */
+export async function consumeQaReleaseMergeInstruction(input: {
+  callerRevision: number | null;
+  request: { attemptId: string; pullRequestNumber: number; headSha: string; base: string };
+  budget: QaReleaseRoundBudget;
+}): Promise<QaReleaseConsumeResult> {
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(CONSUME.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(CONSUME.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(CONSUME.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      // One statement: the attempt, locked, and the lane facts beside it.
+      const [read] = await tx.$queryRaw<ConsumeRead[]>`SELECT
+          floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
+          c."revision",
+          c."developLaneOn",
+          (SELECT l."latched" FROM "QaReleaseMergeLaneLatch" l ORDER BY l."sequence" DESC LIMIT 1) AS "latched",
+          a."id" AS "attemptId",
+          a."pullRequestNumber",
+          a."headSha",
+          a."base",
+          a."controlRevision" AS "attemptRevision",
+          floor(extract(epoch FROM a."expiresAt") * 1000)::bigint AS "expiresAtMs",
+          a."state"
+        FROM (SELECT 1) one
+        LEFT JOIN LATERAL (
+          SELECT "revision", "developLaneOn" FROM "QaReleaseOperatorControl" ORDER BY "revision" DESC LIMIT 1
+        ) c ON true
+        LEFT JOIN LATERAL (
+          SELECT * FROM "QaReleaseMergeAttempt" WHERE "id" = ${input.request.attemptId} FOR UPDATE
+        ) a ON true`;
+      const deadline = new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt));
+
+      const judgement = judgeQaReleaseInstructionConsume({
+        instruction:
+          read.attemptId === null
+            ? null
+            : {
+                attemptId: read.attemptId,
+                pullRequestNumber: read.pullRequestNumber ?? 0,
+                headSha: read.headSha ?? "",
+                base: read.base ?? "",
+                revision: read.attemptRevision ?? -1,
+                expiresAtMs: Number(read.expiresAtMs),
+                // Anything past issued has been consumed (or moved on).
+                consumed: read.state !== "issued",
+              },
+        request: input.request,
+        control: read.revision === null || read.developLaneOn === null ? null : { revision: read.revision, developLaneOn: read.developLaneOn },
+        callerRevision: input.callerRevision,
+        latched: read.latched === null ? false : read.latched,
+        dbNowMs: Number(read.dbNowMs),
+      });
+      if (!judgement.consume) return { consumed: false as const, reason: judgement.reason };
+
+      const auditLogId = await writeSystemAuditLog({
+        tx,
+        systemActor: "qa-release-merge-lane",
+        action: QA_RELEASE_MERGE_ATTEMPT_CONSUMED_ACTION,
+        targetType: "QaReleaseMergeAttempt",
+        targetId: input.request.attemptId,
+        summary: `Let the merge lane merge pull request #${input.request.pullRequestNumber}.`,
+        metadata: { pullRequestNumber: input.request.pullRequestNumber, headSha: input.request.headSha },
+      });
+      const changed = await tx.$executeRaw`UPDATE "QaReleaseMergeAttempt"
+          SET "state" = 'consumed', "lastAuditLogId" = ${auditLogId}
+        WHERE "id" = ${input.request.attemptId} AND "state" = 'issued'`;
+      // Under the lock the row read issued, so anything else is not this
+      // module's to explain: fail rather than report a consume that did not happen.
+      if (changed !== 1) throw new Error("qa_release_merge_attempt_consume_lost");
+      const [clock] = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${deadline}::timestamptz AS late`;
+      if (clock?.late !== false) throw new QaReleaseMergeLaneLate();
+      return { consumed: true as const };
+    },
+    { maxWait: 5_000, timeout: CONSUME.prismaMs },
   );
 }

@@ -4,7 +4,11 @@ import { after, beforeEach, test } from "node:test";
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { recordQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
-import { QaReleaseMergeLaneLate, issueQaReleaseMergeInstruction } from "@/lib/qaReleaseMergeLaneStore";
+import {
+  QaReleaseMergeLaneLate,
+  consumeQaReleaseMergeInstruction,
+  issueQaReleaseMergeInstruction,
+} from "@/lib/qaReleaseMergeLaneStore";
 
 // The merge lane's single writer against PostgreSQL: instruction issue.
 
@@ -147,4 +151,70 @@ test("a round past its deadline records nothing", async () => {
   );
   assert.equal((await attempts()).length, 0);
   assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_issued", targetId: { not: null } } }) >= 0, true);
+});
+
+const consume = (attemptId: string, overrides: Partial<{ callerRevision: number; number: number; headSha: string; base: string; budgetMs: number }> = {}) =>
+  consumeQaReleaseMergeInstruction({
+    callerRevision: overrides.callerRevision ?? revision,
+    request: {
+      attemptId,
+      pullRequestNumber: overrides.number ?? 21,
+      headSha: overrides.headSha ?? HEAD,
+      base: overrides.base ?? "develop",
+    },
+    budget: budget(overrides.budgetMs === undefined ? {} : { budgetMs: overrides.budgetMs }),
+  });
+
+const issued = async () => {
+  const result = await issue();
+  if (!result.issued) throw new Error(`not issued: ${result.reason}`);
+  return result.attemptId;
+};
+
+test("a consume succeeds once, for exactly what was issued, audited by the merge lane", async () => {
+  const attemptId = await issued();
+  assert.deepEqual(await consume(attemptId), { consumed: true });
+  const row = await prisma.qaReleaseMergeAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+  assert.equal(row.state, "consumed");
+  assert.ok(row.consumedAt);
+  assert.equal(
+    (await prisma.adminAuditLog.findFirst({ where: { id: row.lastAuditLogId } }))?.action,
+    "qa_release.merge_attempt_consumed",
+  );
+  assert.deepEqual(await consume(attemptId), { consumed: false, reason: "already_consumed" });
+});
+
+test("a changed pull request, an unknown attempt and a stale caller are refused and write nothing", async () => {
+  const attemptId = await issued();
+  assert.deepEqual(await consume(attemptId, { headSha: "f".repeat(40) }), { consumed: false, reason: "binding_mismatch" });
+  assert.deepEqual(await consume(attemptId, { base: "main" }), { consumed: false, reason: "binding_mismatch" });
+  assert.deepEqual(await consume(attemptId, { number: 99 }), { consumed: false, reason: "binding_mismatch" });
+  assert.deepEqual(await consume("no-such-attempt"), { consumed: false, reason: "instruction_unknown" });
+  assert.deepEqual(await consume(attemptId, { callerRevision: revision - 1 }), { consumed: false, reason: "revision_mismatch" });
+  assert.equal((await prisma.qaReleaseMergeAttempt.findUniqueOrThrow({ where: { id: attemptId } })).state, "issued");
+});
+
+test("a revision recorded after issue, even with the switch still on, refuses the consume", async () => {
+  const attemptId = await issued();
+  await recordControl(true);
+  assert.deepEqual(await consume(attemptId), { consumed: false, reason: "revision_moved" });
+  await recordControl(false);
+  assert.deepEqual(await consume(attemptId), { consumed: false, reason: "revision_moved" });
+});
+
+test("an expired instruction is refused on the database clock", async () => {
+  const attemptId = await issued();
+  await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseMergeAttempt" DISABLE TRIGGER "QaReleaseMergeAttempt_before_update"`);
+  try {
+    await prisma.$executeRaw`UPDATE "QaReleaseMergeAttempt" SET "expiresAt" = clock_timestamp() - interval '1 second' WHERE "id" = ${attemptId}`;
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseMergeAttempt" ENABLE TRIGGER "QaReleaseMergeAttempt_before_update"`);
+  }
+  assert.deepEqual(await consume(attemptId), { consumed: false, reason: "expired" });
+});
+
+test("a late consume records nothing", async () => {
+  const attemptId = await issued();
+  await assert.rejects(consume(attemptId, { budgetMs: 1 }), QaReleaseMergeLaneLate);
+  assert.equal((await prisma.qaReleaseMergeAttempt.findUniqueOrThrow({ where: { id: attemptId } })).state, "issued");
 });
