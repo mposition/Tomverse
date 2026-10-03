@@ -59,6 +59,9 @@ import { commitAmuxRootNodePrepare, commitAmuxRootNodeConsume,
 import { readAmuxRootNodeDecision,
   readAmuxRootNodeDecisionInTransaction } from
   "@/lib/amux/ideaNodeDecisionReadService";
+import { resolveApprovedAmuxRootParent,
+  AmuxNodeParentResolutionError } from
+  "@/lib/amux/ideaNodeParentResolutionService";
 import { sealAmuxNodeText } from "@/lib/amux/ideaNodeContentCore";
 import { openAmuxContent } from "@/lib/amux/ideaCrypto";
 import { commitAmuxIdeaAnalysisPriceApproval,
@@ -1163,6 +1166,10 @@ test("a complete first result saves independent encrypted units and closes only 
     decisionId: randomUUID(), prepareRequestId: randomUUID(),
     nodeId: randomUUID(), reason: "" };
   await assert.rejects(prisma.$transaction(async (tx) => {
+    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: units[0]!.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready");
     const prepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: rootChoice, keys });
     assert.equal(prepared.decisionId, rootChoice.decisionId);
@@ -1221,6 +1228,16 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal(revision.contentDigest, node.contentDigest);
     assert.equal(decision.state, "consumed");
     assert.equal(unit.state, "approved");
+    const parent = await resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: unit.localRef! });
+    assert.equal(parent.id, rootChoice.nodeId);
+    assert.equal(parent.level, "initiative");
+    assert.equal(parent.approvedDecisionId, rootChoice.decisionId);
+    assert.equal(parent.content.digest, node.contentDigest);
+    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: units[1]!.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready");
     assert.equal(await tx.amuxWorkItem.count({
       where: { sourceSystem: "admin-idea-v4" } }), 0);
     throw new Error("rollback synthetic root node decision");
