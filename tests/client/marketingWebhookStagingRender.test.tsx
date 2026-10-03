@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { ReactNode } from "react";
 
-import { MarketingWebhookStaging } from "@/components/admin/AdminMarketingPanel";
+import {
+  MarketingWebhookStaging,
+  MarketingWebhookVerificationSign,
+} from "@/components/admin/AdminMarketingPanel";
 import type { MarketingAction } from "@/components/admin/MarketingActions";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 
@@ -226,4 +229,20 @@ test("the shared rail asks before a form is sent, not only before a plain button
   const confirmAt = submit.indexOf("window.confirm(opened.confirm)");
   const sendAt = submit.indexOf("send(opened");
   assert.ok(confirmAt > 0 && sendAt > confirmAt, "the form asks before it sends");
+});
+
+test("signing names the record and the digest exactly, behind a confirm", () => {
+  const sign = actionsOf(
+    MarketingWebhookVerificationSign({ section: "reports", onDone: () => undefined, m }),
+  ).find((action) => action.id === "webhook-verification-sign");
+  assert.equal(sign?.path, "/api/admin/marketing/webhook/verification-sign");
+  assert.ok(sign?.confirm);
+  assert.deepEqual(
+    sign?.body({ recordId: " 2026-10-03__zernio-youtube-platform-published ", recordDigest: " " + "AB".repeat(32) + " " }),
+    { recordId: "2026-10-03__zernio-youtube-platform-published", recordDigest: "ab".repeat(32) },
+  );
+  assert.equal(
+    sign?.describe?.({ signatureAuditLogId: "audit_1" }),
+    m.webhookSignDone.replace("{auditLogId}", "audit_1"),
+  );
 });
