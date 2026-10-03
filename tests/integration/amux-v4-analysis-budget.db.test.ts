@@ -1133,6 +1133,27 @@ test("a complete first result saves independent encrypted units and closes only 
     error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 4);
 
+  async function addSyntheticRival(tx: Prisma.TransactionClient) {
+    const rivalId = randomUUID();
+    const rivalAuditId = await writeAdminAuditLog({ tx, session, request,
+      action: "amux.v4.synthetic.rival", targetType: "AmuxPortfolioNode",
+      targetId: rivalId, summary: "Synthetic duplicate candidate" });
+    const sealedRival = sealAmuxNodeText(rivalId,
+      { title: nodes[0]!.title, description: "Synthetic rival" }, keys);
+    await tx.amuxPortfolioNode.create({ data: {
+      id: rivalId, level: "initiative", parentId: null,
+      state: "active", revision: 0,
+      titleCiphertext: Uint8Array.from(sealedRival.titleCiphertext),
+      descriptionCiphertext: Uint8Array.from(sealedRival.descriptionCiphertext),
+      contentKeyId: sealedRival.contentKeyId,
+      contentKeyVersion: sealedRival.contentKeyVersion,
+      contentDigest: sealedRival.contentDigest,
+      contentDigestKeyId: sealedRival.contentDigestKeyId,
+      approvedByUserId: actorUserId,
+      authorizationAuditLogId: rivalAuditId,
+    } });
+  }
+
   const rootChoice = { ideaId, draftUnitId: units[0]!.id,
     decisionId: randomUUID(), prepareRequestId: randomUUID(),
     nodeId: randomUUID(), reason: "" };
@@ -1140,6 +1161,17 @@ test("a complete first result saves independent encrypted units and closes only 
     const prepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: rootChoice, keys });
     assert.equal(prepared.decisionId, rootChoice.decisionId);
+    await assert.rejects(commitAmuxRootNodePrepare(tx, { session, request,
+      choice: { ...rootChoice, decisionId: randomUUID(),
+        prepareRequestId: randomUUID(), nodeId: randomUUID() }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "already_prepared");
+    await assert.rejects(commitAmuxUnitRejectPrepare(tx, { session, request,
+      choice: { ideaId, draftUnitId: rootChoice.draftUnitId,
+        decisionId: randomUUID(), prepareRequestId: randomUUID(),
+        reason: "The proposed node is not in scope." }, keys }),
+    (error: unknown) => error instanceof AmuxUnitRejectError &&
+      error.code === "already_prepared");
     await assert.rejects(commitAmuxRootNodeConsume(tx, { session, request,
       choice: { ...rootChoice, consumeRequestId: randomUUID(),
         confirmationDigest: randomBytes(32).toString("hex") }, keys }),
@@ -1181,24 +1213,7 @@ test("a complete first result saves independent encrypted units and closes only 
       prepareRequestId: randomUUID(), nodeId: randomUUID() };
     const prepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: changedChoice, keys });
-    const rivalId = randomUUID();
-    const rivalAuditId = await writeAdminAuditLog({ tx, session, request,
-      action: "amux.v4.synthetic.rival", targetType: "AmuxPortfolioNode",
-      targetId: rivalId, summary: "Synthetic duplicate candidate" });
-    const sealedRival = sealAmuxNodeText(rivalId,
-      { title: nodes[0]!.title, description: "Synthetic rival" }, keys);
-    await tx.amuxPortfolioNode.create({ data: {
-      id: rivalId, level: "initiative", parentId: null,
-      state: "active", revision: 0,
-      titleCiphertext: Uint8Array.from(sealedRival.titleCiphertext),
-      descriptionCiphertext: Uint8Array.from(sealedRival.descriptionCiphertext),
-      contentKeyId: sealedRival.contentKeyId,
-      contentKeyVersion: sealedRival.contentKeyVersion,
-      contentDigest: sealedRival.contentDigest,
-      contentDigestKeyId: sealedRival.contentDigestKeyId,
-      approvedByUserId: actorUserId,
-      authorizationAuditLogId: rivalAuditId,
-    } });
+    await addSyntheticRival(tx);
     await assert.rejects(commitAmuxRootNodeConsume(tx, { session, request,
       choice: { ...changedChoice, consumeRequestId: randomUUID(),
         confirmationDigest: prepared.confirmationDigest }, keys }),
@@ -1211,6 +1226,32 @@ test("a complete first result saves independent encrypted units and closes only 
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     maxWait: 5_000, timeout: 30_000 }),
   /rollback synthetic changed duplicate scan/);
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+             set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+    `;
+    await takeAuditChainLock(tx);
+    await addSyntheticRival(tx);
+    const duplicateChoice = { ...rootChoice, decisionId: randomUUID(),
+      prepareRequestId: randomUUID(), nodeId: randomUUID() };
+    await assert.rejects(commitAmuxRootNodePrepare(tx,
+      { session, request, choice: duplicateChoice, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "not_ready");
+    const explained = { ...duplicateChoice,
+      reason: "This node covers a separate approved operator scope." };
+    const prepared = await commitAmuxRootNodePrepare(tx,
+      { session, request, choice: explained, keys });
+    const consumed = await commitAmuxRootNodeConsume(tx,
+      { session, request, choice: { ...explained,
+        consumeRequestId: randomUUID(),
+        confirmationDigest: prepared.confirmationDigest }, keys });
+    assert.equal(consumed.state, "created");
+    throw new Error("rollback synthetic duplicate reason decision");
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000, timeout: 30_000 }),
+  /rollback synthetic duplicate reason decision/);
 
   const decisionId = randomUUID();
   const prepareRequestId = randomUUID();

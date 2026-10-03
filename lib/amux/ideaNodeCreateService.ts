@@ -8,7 +8,10 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { sealAmuxNodeText } from "./ideaNodeContentCore.ts";
-import { scanAmuxNodeDuplicates } from "./ideaNodeDuplicateScanService.ts";
+import { AmuxNodeDuplicateScanError, scanAmuxNodeDuplicates } from
+  "./ideaNodeDuplicateScanService.ts";
+import { AmuxUnitExpiryError, expireStaleAmuxUnitDecision } from
+  "./ideaUnitExpiryService.ts";
 import { AMUX_V4_INPUT_SCANNER_VERSION } from "./localIntakeCore.ts";
 import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason } from
   "./ideaUnitDecisionBindingCore.ts";
@@ -17,7 +20,8 @@ import { deriveAmuxIdeaUnitConfirmation,
   type AmuxIdeaDuplicateScan,
   type AmuxIdeaUnitConfirmationSnapshot } from "./ideaUnitConfirmationCore.ts";
 import { checkAmuxIdeaUnitConsume } from "./ideaUnitConsumeGuard.ts";
-import { loadAmuxUnitDecisionSource, amuxUnitOwnerId } from
+import { loadAmuxUnitDecisionSource, amuxUnitOwnerId,
+  AmuxUnitRejectError } from
   "./ideaUnitRejectService.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
@@ -27,7 +31,7 @@ const CONSUME_ACTION = "amux.v4.unit.consume";
 const TARGET = "AmuxIdeaUnitDecision";
 
 export class AmuxNodeCreateError extends Error {
-  constructor(readonly code: "not_ready" | "already_prepared" | "reconfirm" |
+  constructor(readonly code: "not_found" | "not_ready" | "already_prepared" | "reconfirm" |
     "integrity_unavailable") {
     super(code);
     this.name = "AmuxNodeCreateError";
@@ -46,9 +50,48 @@ const validChoice = (choice: AmuxNodeCreatePrepare) => Boolean(choice &&
   UUID.test(choice.ideaId) && UUID.test(choice.draftUnitId) &&
   UUID.test(choice.decisionId) && UUID.test(choice.prepareRequestId) &&
   UUID.test(choice.nodeId) && choice.decisionId !== choice.prepareRequestId &&
-  choice.nodeId !== choice.decisionId && typeof choice.reason === "string");
+  choice.nodeId !== choice.decisionId &&
+  choice.nodeId !== choice.prepareRequestId && typeof choice.reason === "string");
 
 type Source = Awaited<ReturnType<typeof loadAmuxUnitDecisionSource>>;
+
+function ownerId(session: Session) {
+  try { return amuxUnitOwnerId(session); }
+  catch (error) {
+    if (error instanceof AmuxUnitRejectError) {
+      throw new AmuxNodeCreateError(error.code === "not_found" ? "not_found" :
+        error.code === "reconfirm" ? "reconfirm" : "integrity_unavailable");
+    }
+    throw error;
+  }
+}
+
+async function loadSource(tx: Prisma.TransactionClient, session: Session,
+  ideaId: string, draftUnitId: string, keys: AmuxContentKeys) {
+  try { return await loadAmuxUnitDecisionSource(tx, session, ideaId,
+    draftUnitId, keys); }
+  catch (error) {
+    if (error instanceof AmuxUnitRejectError) {
+      throw new AmuxNodeCreateError(error.code === "not_found" ? "not_found" :
+        error.code === "not_ready" ? "not_ready" :
+        error.code === "reconfirm" ? "reconfirm" : "integrity_unavailable");
+    }
+    throw error;
+  }
+}
+
+async function currentNodeScan(tx: Prisma.TransactionClient,
+  title: string, keys: AmuxContentKeys) {
+  try { return await scanAmuxNodeDuplicates(tx,
+    { level: "initiative", parentId: null, title }, keys); }
+  catch (error) {
+    if (error instanceof AmuxNodeDuplicateScanError) {
+      throw new AmuxNodeCreateError(error.code === "invalid_query" ? "not_ready" :
+        error.code === "incomplete" ? "reconfirm" : "integrity_unavailable");
+    }
+    throw error;
+  }
+}
 
 function rootProposal(source: Source) {
   const proposal = source.proposal;
@@ -75,7 +118,7 @@ function decisionReason(choice: AmuxNodeCreatePrepare,
 function snapshot(input: { session: Session; choice: AmuxNodeCreatePrepare;
   source: Source; reviewedScan: AmuxIdeaDuplicateScan;
   keys: AmuxContentKeys }): AmuxIdeaUnitConfirmationSnapshot {
-  const actorUserId = amuxUnitOwnerId(input.session);
+  const actorUserId = ownerId(input.session);
   const proposal = rootProposal(input.source);
   const ownerSession = bindAmuxOwnerSession({ actorUserId,
     authenticatedAt: input.session.user?.authenticatedAt ?? "" }, input.keys);
@@ -111,7 +154,7 @@ function snapshot(input: { session: Session; choice: AmuxNodeCreatePrepare;
 export async function commitAmuxRootNodePrepare(tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreatePrepare;
     keys: AmuxContentKeys }) {
-  const actorUserId = amuxUnitOwnerId(input.session);
+  const actorUserId = ownerId(input.session);
   const choice = input.choice;
   if (!validChoice(choice)) throw new AmuxNodeCreateError("not_ready");
   await tx.$queryRaw`
@@ -119,18 +162,19 @@ export async function commitAmuxRootNodePrepare(tx: Prisma.TransactionClient,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
-  const source = await loadAmuxUnitDecisionSource(tx, input.session,
+  const source = await loadSource(tx, input.session,
     choice.ideaId, choice.draftUnitId, input.keys);
   const proposal = rootProposal(source);
-  const existing = await tx.amuxIdeaUnitDecision.findFirst({
-    where: { draftUnitId: choice.draftUnitId,
-      state: { in: ["prepared", "consumed"] } }, select: { id: true },
-  });
-  if (existing) throw new AmuxNodeCreateError("already_prepared");
+  try { await expireStaleAmuxUnitDecision(tx, choice.draftUnitId); }
+  catch (error) {
+    if (error instanceof AmuxUnitExpiryError) {
+      throw new AmuxNodeCreateError(error.code);
+    }
+    throw error;
+  }
   if (await tx.amuxPortfolioNode.findUnique({ where: { id: choice.nodeId },
     select: { id: true } })) throw new AmuxNodeCreateError("not_ready");
-  const scan = await scanAmuxNodeDuplicates(tx,
-    { level: "initiative", parentId: null, title: proposal.title }, input.keys);
+  const scan = await currentNodeScan(tx, proposal.title, input.keys);
   const reviewed = snapshot({ session: input.session, choice, source,
     reviewedScan: scan, keys: input.keys });
   const confirmation = deriveAmuxIdeaUnitConfirmation(reviewed, input.keys,
@@ -173,7 +217,7 @@ export async function commitAmuxRootNodePrepare(tx: Prisma.TransactionClient,
 export async function commitAmuxRootNodeConsume(tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreateConsume;
     keys: AmuxContentKeys }) {
-  const actorUserId = amuxUnitOwnerId(input.session);
+  const actorUserId = ownerId(input.session);
   const choice = input.choice;
   if (!validChoice(choice) || !UUID.test(choice.consumeRequestId) ||
       choice.consumeRequestId === choice.prepareRequestId ||
@@ -185,7 +229,7 @@ export async function commitAmuxRootNodeConsume(tx: Prisma.TransactionClient,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
-  const source = await loadAmuxUnitDecisionSource(tx, input.session,
+  const source = await loadSource(tx, input.session,
     choice.ideaId, choice.draftUnitId, input.keys);
   const proposal = rootProposal(source);
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
@@ -217,11 +261,11 @@ export async function commitAmuxRootNodeConsume(tx: Prisma.TransactionClient,
       meta.draftUnitId !== choice.draftUnitId ||
       meta.prepareRequestId !== choice.prepareRequestId ||
       meta.confirmationDigest !== decision.confirmationDigest ||
+      meta.confirmationDigestKeyId !== decision.confirmationDigestKeyId ||
       !stored || !stored.duplicates || stored.nodeProposal?.id !== choice.nodeId) {
     throw new AmuxNodeCreateError("integrity_unavailable");
   }
-  const currentScan = await scanAmuxNodeDuplicates(tx,
-    { level: "initiative", parentId: null, title: proposal.title }, input.keys);
+  const currentScan = await currentNodeScan(tx, proposal.title, input.keys);
   const currentSnapshot = snapshot({ session: input.session, choice, source,
     reviewedScan: stored.duplicates, keys: input.keys });
   if (amuxCanonicalJson(stored) !== amuxCanonicalJson(currentSnapshot)) {
@@ -273,7 +317,8 @@ export async function commitAmuxRootNodeConsume(tx: Prisma.TransactionClient,
   } });
   const consumed = await tx.amuxIdeaUnitDecision.updateMany({
     where: { id: decision.id, actorUserId, state: "prepared",
-      outcomeUnknownAt: null, expiresAt: { gt: source.now } },
+      outcomeUnknownAt: null, consumeRequestId: null,
+      finalAuditLogId: null, expiresAt: { gt: source.now } },
     data: { state: "consumed", consumeRequestId: choice.consumeRequestId,
       finalAuditLogId: auditId, resolvedNodeId: choice.nodeId },
   });

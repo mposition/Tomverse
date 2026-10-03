@@ -10,8 +10,7 @@ import { AMUX_V4_UNIT_REJECT_CODE_LATCH, AMUX_V4_UNIT_REJECT_READ_CODE_LATCH,
   amuxUnitRejectNeedsCommitReadback,
   amuxUnitRejectReadbackProvesExpiry,
   deriveAmuxUnitRejectConfirmation,
-  inspectAmuxUnitRejectRequest,
-  mayExpireAmuxRejectionConfirmation } from "../lib/amux/ideaUnitRejectCore.ts";
+  inspectAmuxUnitRejectRequest } from "../lib/amux/ideaUnitRejectCore.ts";
 
 const key = { digestKeyId: "digest_v1", digestKey: Buffer.alloc(32, 11) };
 const routeSource = readFileSync(new URL(
@@ -129,25 +128,4 @@ test("one request admits exactly one owner decision, never a bulk card write", (
       null);
   }
   assert.equal(inspectAmuxUnitRejectRequest("not JSON"), null);
-});
-
-test("only an expired prepared rejection with no uncertain outcome can be replaced", () => {
-  const expiry = new Date("2026-10-03T00:15:00.000Z");
-  const now = new Date("2026-10-03T00:15:00.000Z");
-  const row = { action: "reject_unit", state: "prepared", expiresAt: expiry,
-    outcomeUnknownAt: null, outcomeUnknownResolvedAt: null,
-    outcomeUnknownResolution: null };
-  assert.equal(mayExpireAmuxRejectionConfirmation(row, now), true);
-  assert.equal(mayExpireAmuxRejectionConfirmation(row,
-    new Date("2026-10-03T00:14:59.999Z")), false);
-  assert.equal(mayExpireAmuxRejectionConfirmation({ ...row,
-    outcomeUnknownAt: new Date("2026-10-03T00:10:00.000Z") }, now), false);
-  assert.equal(mayExpireAmuxRejectionConfirmation({ ...row,
-    outcomeUnknownAt: new Date("2026-10-03T00:10:00.000Z"),
-    outcomeUnknownResolvedAt: new Date("2026-10-03T00:12:00.000Z"),
-    outcomeUnknownResolution: "no_commit" }, now), false);
-  assert.equal(mayExpireAmuxRejectionConfirmation({ ...row,
-    action: "register_card" }, now), false);
-  assert.equal(mayExpireAmuxRejectionConfirmation({ ...row,
-    state: "consumed" }, now), false);
 });

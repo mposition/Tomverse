@@ -22,6 +22,8 @@ import { readAmuxIdeaAnalysisResultInTransaction } from
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { AmuxUnitExpiryError, expireStaleAmuxUnitDecision } from
+  "./ideaUnitExpiryService.ts";
 import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason,
   sameAmuxUnitDecisionBinding } from "./ideaUnitDecisionBindingCore.ts";
 import { checkAmuxIdeaUnitConsume } from "./ideaUnitConsumeGuard.ts";
@@ -30,8 +32,7 @@ import { AMUX_V4_UNIT_REJECT_READ_ENV, AMUX_V4_UNIT_REJECT_WRITE_ENV,
   amuxV4UnitRejectReadPermitted, amuxV4UnitRejectWritePermitted,
   deriveAmuxUnitRejectConfirmation,
   amuxUnitRejectNeedsCommitReadback,
-  amuxUnitRejectReadbackProvesExpiry,
-  mayExpireAmuxRejectionConfirmation } from "./ideaUnitRejectCore.ts";
+  amuxUnitRejectReadbackProvesExpiry } from "./ideaUnitRejectCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -259,50 +260,12 @@ export async function commitAmuxUnitRejectPrepare(tx: Prisma.TransactionClient,
   await takeAuditChainLock(tx);
   const source = await loadSource(tx, input.session,
     input.choice.ideaId, input.choice.draftUnitId, input.keys);
-  const existing = await tx.amuxIdeaUnitDecision.findMany({
-    where: { draftUnitId: source.unit.id,
-      state: { in: ["prepared", "consumed"] } },
-    take: 2,
-  });
-  if (existing.some((row) => row.state === "consumed") || existing.length > 1) {
-    throw new AmuxUnitRejectError("already_prepared");
-  }
-  const stale = existing[0];
-  if (stale) {
-    const locked = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT "id" FROM "AmuxIdeaUnitDecision"
-      WHERE "id" = ${stale.id} AND "state" = 'prepared' FOR UPDATE
-    `;
-    const refreshed = await tx.amuxIdeaUnitDecision.findUnique({
-      where: { id: stale.id },
-    });
-    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
-      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
-    `;
-    const now = clock[0]?.now;
-    if (locked.length !== 1 || !refreshed ||
-        !(now instanceof Date) || !Number.isFinite(now.getTime())) {
-      throw new AmuxUnitRejectError("integrity_unavailable");
+  try { await expireStaleAmuxUnitDecision(tx, source.unit.id); }
+  catch (error) {
+    if (error instanceof AmuxUnitExpiryError) {
+      throw new AmuxUnitRejectError(error.code);
     }
-    if (!mayExpireAmuxRejectionConfirmation(refreshed, now)) {
-      throw new AmuxUnitRejectError("already_prepared");
-    }
-    const expiryAuditId = await writeSystemAuditLog({
-      tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR, action: EXPIRE_ACTION,
-      targetType: TARGET, targetId: refreshed.id,
-      summary: "Expired an unconsumed AMUX v4 rejection confirmation before a new owner decision.",
-      metadata: { ideaId: refreshed.ideaId, draftUnitId: refreshed.draftUnitId,
-        prepareRequestId: refreshed.prepareRequestId,
-        expiredAt: now.toISOString(), action: "reject_unit",
-        registered: false },
-    });
-    const expired = await tx.amuxIdeaUnitDecision.updateMany({
-      where: { id: refreshed.id, draftUnitId: source.unit.id,
-        state: "prepared", expiresAt: { lte: now },
-        outcomeUnknownAt: null },
-      data: { state: "expired", finalAuditLogId: expiryAuditId },
-    });
-    if (expired.count !== 1) throw new AmuxUnitRejectError("integrity_unavailable");
+    throw error;
   }
   const bound = confirmation({ ...input.choice, actorUserId,
     authenticatedAt: input.session.user?.authenticatedAt ?? "" }, source, input.keys);

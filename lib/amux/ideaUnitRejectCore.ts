@@ -35,16 +35,6 @@ export const amuxUnitRejectErrorBody = (code: string,
     ? { error: code, retryWrite: false, ...recovery }
     : { error: code };
 
-export function mayExpireAmuxRejectionConfirmation(row: {
-  action: string; state: string; expiresAt: Date;
-  outcomeUnknownAt: Date | null;
-}, now: Date): boolean {
-  return row.action === "reject_unit" && row.state === "prepared" &&
-    row.expiresAt instanceof Date && Number.isFinite(row.expiresAt.getTime()) &&
-    now instanceof Date && Number.isFinite(now.getTime()) &&
-    now >= row.expiresAt && row.outcomeUnknownAt === null;
-}
-
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const REF = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
