@@ -57,9 +57,11 @@ export async function verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(
   verifiedFileCount: number;
   dispatchAuthorized: false;
 }>> {
+  // The candidate commit is fixed at preregistration. A later app deployment
+  // may have another commit, but its candidate manifest and every file must
+  // still have the exact pinned bytes. Deployment identity is checked apart.
   if (!FULL_COMMIT.test(pin.sourceCommitSha) ||
-      !FULL_COMMIT.test(runtimeCommitSha ?? "") ||
-      runtimeCommitSha !== pin.sourceCommitSha) {
+      !FULL_COMMIT.test(runtimeCommitSha ?? "")) {
     return refuse("vnext_one_shot_candidate_commit_mismatch");
   }
   if (!SHA256.test(pin.sourceManifestDigest) ||

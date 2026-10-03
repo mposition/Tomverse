@@ -16,6 +16,7 @@ import type { PromptRefinerVnextOneShotAuditBinding } from
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
 const SHA256 = /^[0-9a-f]{64}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
 
 export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
   sourceCommitSha: string;
@@ -36,7 +37,10 @@ export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
  */
 export async function preparePromptRefinerVnextOneShotStageBinding(
   expected: PromptRefinerVnextOneShotStageRequestPins,
-): Promise<PromptRefinerVnextOneShotAuditBinding> {
+): Promise<PromptRefinerVnextOneShotAuditBinding & Readonly<{
+  sourceCommitPreregistrationVerified: false;
+  dispatchAuthorized: false;
+}>> {
   // The separate owner-runner supplies these content-free custody pins through
   // server configuration. A request cannot introduce a new root or runner.
   const pinnedRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
@@ -51,7 +55,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
       !deployment.activeDeploymentConfirmed ||
       !deployment.deploymentId || !deployment.commitSha ||
       source.sourceCommitSha !== deployment.commitSha ||
-      expected.sourceCommitSha !== source.sourceCommitSha ||
+      !COMMIT.test(expected.sourceCommitSha) ||
       expected.sourceManifestDigest !== source.sourceManifestDigest ||
       expected.runtimeDeploymentId !== deployment.deploymentId ||
       expected.runtimeCommitSha !== deployment.commitSha ||
@@ -60,7 +64,9 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
   }
   return Object.freeze({
     id: STAGE_ID,
-    sourceCommitSha: source.sourceCommitSha,
+    // The transaction-level signed preregistration must confirm this source
+    // commit; current checkout bytes are independently rehashed above.
+    sourceCommitSha: expected.sourceCommitSha,
     sourceManifestDigest: source.sourceManifestDigest,
     runnerDigest: expected.runnerDigest,
     manifestRoot: expected.manifestRoot,
@@ -70,5 +76,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     perRequestCostMicroUsd: BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD),
     slotCount: PROMPT_REFINER_VNEXT_SLOT_COUNT,
     costCeilingMicroUsd: BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD),
+    sourceCommitPreregistrationVerified: false,
+    dispatchAuthorized: false,
   });
 }

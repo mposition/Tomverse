@@ -28,10 +28,15 @@ import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { createPromptRefinerVnextOneShotStageWithSlots } from
   "@/lib/promptRefinerVnextOneShotStageWriter";
+import { recordPromptRefinerVnextOneShotPreregistration } from
+  "@/lib/promptRefinerVnextOneShotPreregistration";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const fixtureKey = "synthetic-chat01-a06-audit-integrity-key";
 const stageId = "prompt-refiner-vnext-one-shot-v1";
+const countOperationalAudits = () => prisma.adminAuditLog.count({
+  where: { action: { not: "prompt_refiner.vnext_one_shot.preregistered" } },
+});
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const binding = {
   id: stageId,
@@ -138,7 +143,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           tx, session, request,
           binding: { ...binding, perRequestCostMicroUsd: BigInt(29_919) },
         })), /stage_audit_binding_invalid/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
 
       const oldFallback = process.env.NEXTAUTH_SECRET;
       delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
@@ -150,7 +155,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         if (oldFallback === undefined) delete process.env.NEXTAUTH_SECRET;
         else process.env.NEXTAUTH_SECRET = oldFallback;
       }
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
 
       // A real failure in the shared audit writer rolls back an earlier write.
       await setup.query(`CREATE FUNCTION reject_stage_audit() RETURNS trigger AS $$
@@ -169,7 +174,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       }), /synthetic audit failure/);
       assert.equal((await setup.query(`SELECT count(*)::int AS count FROM "StageAuditProbe"`))
         .rows[0].count, 0);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       await setup.query(`DROP TRIGGER reject_stage_audit_trigger ON "AdminAuditLog"`);
       await setup.query(`DROP FUNCTION reject_stage_audit()`);
 
@@ -179,7 +184,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         await insertStage(tx, auditLogId, approvedBy, 80);
         throw new Error("synthetic post-stage failure");
       }), /synthetic post-stage failure/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
 
@@ -188,35 +193,67 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         const { auditLogId, approvedBy } = await append(tx);
         await insertStage(tx, auditLogId, approvedBy, 79);
       }), /exactly 80 reserved slots/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
 
       await assert.rejects(prisma.$transaction(async (tx) => {
         const { auditLogId, approvedBy } = await append(tx);
         await insertStage(tx, auditLogId, approvedBy, 81);
       }), /slot|index|constraint/i);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
 
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request,
         binding: { ...binding, costCeilingMicroUsd: BigInt(2_393_441) },
       }), /stage_audit_binding_invalid/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request,
         binding: { ...binding, pricePinDigest: "f".repeat(64) },
       }), /stage_price_mismatch/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
         data: { inputUsdPerMillionTokens: 0.01 } });
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request, binding,
       }), /stage_price_mismatch/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
       await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
         data: { inputUsdPerMillionTokens: null } });
+
+      // The real writer must not create any stage, slot, or audit without B01.
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }), /preregistration_unavailable/);
+      assert.equal(await countOperationalAudits(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
+
+      // B01 is committed first, without a root or any holdout material.
+      const priorPreregCommit = process.env.RAILWAY_GIT_COMMIT_SHA;
+      const priorPreregRunner = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+      process.env.RAILWAY_GIT_COMMIT_SHA = binding.sourceCommitSha;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = binding.runnerDigest;
+      let preregistration;
+      try {
+        preregistration = await recordPromptRefinerVnextOneShotPreregistration({
+          session, request, pins: binding,
+        });
+      } finally {
+        if (priorPreregCommit === undefined) delete process.env.RAILWAY_GIT_COMMIT_SHA;
+        else process.env.RAILWAY_GIT_COMMIT_SHA = priorPreregCommit;
+        if (priorPreregRunner === undefined) {
+          delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+        } else {
+          process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = priorPreregRunner;
+        }
+      }
+      assert.equal(preregistration.dispatchAuthorized, false);
+      assert.equal(await prisma.adminAuditLog.count({ where: {
+        action: "prompt_refiner.vnext_one_shot.preregistered",
+      } }), 1);
 
       // Exercise the actual A07 writer, not only a hand-built transaction.
       await setup.query(`CREATE FUNCTION reject_slot_forty() RETURNS trigger AS $$
@@ -231,7 +268,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request, binding,
       }), /synthetic slot failure/);
-      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await countOperationalAudits(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
       await setup.query(`DROP TRIGGER reject_slot_forty_trigger
@@ -272,14 +309,14 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(readback.reservedSlots, 80);
       assert.equal(readback.dispatchAuthorized, false);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
-      assert.equal(await prisma.adminAuditLog.count(), 1,
+      assert.equal(await countOperationalAudits(), 1,
         "the refused concurrent approval must not leave an audit row");
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request, binding,
       }));
       assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
       assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
-      assert.equal(await prisma.adminAuditLog.count(), 1);
+      assert.equal(await countOperationalAudits(), 1);
 
       // A09 reobserves the same source/deployment/price under the stage lock;
       // neither a bad pin nor a failed audit may advance the run state.
@@ -323,16 +360,16 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           where: { id: stageId },
           data: { status: "run_approved", runApprovalAuditLogId: "forged-run-audit" },
         }), /one-shot run approval audit is missing/);
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
         await assert.rejects(approvePromptRefinerVnextOneShotRun({
           session: { ...session, user: { id: "other-owner", email: "other@example.test" } },
           request, expected,
         }), /run_binding_mismatch/);
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
         await assert.rejects(approvePromptRefinerVnextOneShotRun({
           session, request, expected: { ...expected, manifestRoot: "f".repeat(64) },
         }), /run_binding_mismatch/);
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
         assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
           where: { id: stageId },
         })).status, "staged");
@@ -342,7 +379,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           session, request, expected,
         }), /active_deployment_unverified/);
         activeDeploymentId = binding.runtimeDeploymentId;
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
 
         await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
           data: { inputUsdPerMillionTokens: 0.01 } });
@@ -351,7 +388,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         }), /price/i);
         await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
           data: { inputUsdPerMillionTokens: null } });
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
 
         await setup.query(`CREATE FUNCTION reject_run_audit() RETURNS trigger AS $$
           BEGIN
@@ -366,7 +403,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         await assert.rejects(approvePromptRefinerVnextOneShotRun({
           session, request, expected,
         }), /synthetic run audit failure/);
-        assert.equal(await prisma.adminAuditLog.count(), 1);
+        assert.equal(await countOperationalAudits(), 1);
         assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
           where: { id: stageId },
         })).status, "staged");
@@ -383,7 +420,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal(advanced.status, "run_approved");
         assert.equal(advanced.runApprovalAuditLogId, run.runApprovalAuditLogId);
         assert.notEqual(advanced.runApprovalAuditLogId, auditLogId);
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
         const runAudit = await prisma.adminAuditLog.findUniqueOrThrow({
           where: { id: run.runApprovalAuditLogId },
         });
@@ -398,7 +435,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         await assert.rejects(approvePromptRefinerVnextOneShotRun({
           session, request, expected,
         }), /run_stage_not_ready/);
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
 
         const requestId = "11111111-1111-4111-8111-111111111111";
         const consume = (slotIndex: number, id = requestId,
@@ -407,17 +444,17 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
             runApprovalAuditLogId: approvalId });
         await assert.rejects(consume(0, requestId, "forged-run-audit"),
           /slot_binding_mismatch/);
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
         activeDeploymentId = "12345678-1234-1234-1234-123456789aca";
         await assert.rejects(consume(0), /active_deployment_unverified/);
         activeDeploymentId = binding.runtimeDeploymentId;
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
         await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
           data: { inputUsdPerMillionTokens: 0.01 } });
         await assert.rejects(consume(0), /price/i);
         await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
           data: { inputUsdPerMillionTokens: null } });
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
 
         await setup.query(`CREATE FUNCTION reject_slot_audit() RETURNS trigger AS $$
           BEGIN
@@ -432,7 +469,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         await assert.rejects(consume(0), /synthetic slot audit failure/);
         await setup.query(`DROP TRIGGER reject_slot_audit_trigger ON "AdminAuditLog"`);
         await setup.query(`DROP FUNCTION reject_slot_audit()`);
-        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal(await countOperationalAudits(), 2);
         assert.equal((await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
           where: { stageId_slotIndex: { stageId, slotIndex: 0 } },
         })).status, "reserved", "audit failure must roll back slot consumption");
@@ -453,11 +490,11 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal(consumptionAudit.metadata &&
           (consumptionAudit.metadata as Record<string, unknown>).systemActor,
         "prompt-refiner-vnext-one-shot-runner");
-        assert.equal(await prisma.adminAuditLog.count(), 3);
+        assert.equal(await countOperationalAudits(), 3);
         await assert.rejects(consume(0), /slot_already_consumed/);
         await assert.rejects(consume(1), /unique|P2002|duplicate/i,
           "one request identity cannot consume two slots");
-        assert.equal(await prisma.adminAuditLog.count(), 3,
+        assert.equal(await countOperationalAudits(), 3,
           "duplicate refusal must roll back its audit entry");
         const afterConsume = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
         assert.equal(afterConsume.reservedSlots, 79);
@@ -473,7 +510,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           1, "one concurrent request may bind slot 1");
         assert.equal(competingConsume.filter((result) => result.status === "rejected").length,
           1, "the other concurrent request must not consume a second slot");
-        assert.equal(await prisma.adminAuditLog.count(), 4);
+        assert.equal(await countOperationalAudits(), 4);
         const afterRace = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
         assert.equal(afterRace.reservedSlots, 78);
         assert.equal(afterRace.consumedSlots, 2);
@@ -489,13 +526,13 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           .reservedSlots, 1);
         const final = await consume(79, lastId);
         assert.equal(final.reservationConsumed, true);
-        assert.equal(await prisma.adminAuditLog.count(), 5);
+        assert.equal(await countOperationalAudits(), 5);
         const atCeiling = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
         assert.equal(atCeiling.reservedSlots, 0);
         assert.equal(atCeiling.consumedSlots, 80);
         await assert.rejects(consume(79, "44444444-4444-4444-8444-444444444444"),
           /slot_reservation_unavailable/);
-        assert.equal(await prisma.adminAuditLog.count(), 5);
+        assert.equal(await countOperationalAudits(), 5);
 
         // A13: the full stage -> run -> consumed slot -> synthetic transport
         // -> uncertain stop -> signed receipt path must not send or retry.
@@ -535,7 +572,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
           where: { id: stageId },
         })).status, "run_approved", "audit failure rolls back stage close");
-        assert.equal(await prisma.adminAuditLog.count(), 5);
+        assert.equal(await countOperationalAudits(), 5);
         await setup.query(`DROP TRIGGER reject_unknown_stop_trigger ON "AdminAuditLog"`);
         await setup.query(`DROP FUNCTION reject_unknown_stop()`);
 
@@ -552,7 +589,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           EXECUTE FUNCTION reject_unknown_close()`);
         await assert.rejects(stopPromptRefinerVnextOneShotUnknown(uncertain),
           /synthetic close failure/);
-        assert.equal(await prisma.adminAuditLog.count(), 5,
+        assert.equal(await countOperationalAudits(), 5,
           "stage close failure must roll back the receipt audit");
         await setup.query(`DROP TRIGGER reject_unknown_close_trigger
           ON "PromptRefinerVnextOneShotStage"`);
@@ -569,7 +606,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal((await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
           where: { stageId_slotIndex: { stageId, slotIndex: 79 } },
         })).status, "consumed");
-        assert.equal(await prisma.adminAuditLog.count(), 6);
+        assert.equal(await countOperationalAudits(), 6);
         const stopAudit = await prisma.adminAuditLog.findUniqueOrThrow({
           where: { id: stopped.stopAuditLogId },
         });

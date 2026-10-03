@@ -52,19 +52,24 @@ test("A02 refuses a single changed candidate byte", async (t) => {
   );
 });
 
-test("A02 refuses a changed manifest and a different or short commit", async (t) => {
+test("A02 accepts a later deployment only when every candidate byte is unchanged", async (t) => {
   const { root, pin } = await fixture(t);
-  await assert.rejects(
-    verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(root, "b".repeat(40), pin),
-    /vnext_one_shot_candidate_commit_mismatch/
-  );
+  const laterDeployment = await verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(
+    root, "b".repeat(40), pin);
+  assert.equal(laterDeployment.sourceCommitSha, pin.sourceCommitSha);
+  assert.equal(laterDeployment.candidateSourceVerified, true);
   await assert.rejects(
     verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(root, "a".repeat(7), pin),
     /vnext_one_shot_candidate_commit_mismatch/
   );
+  await assert.rejects(
+    verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(root, "b".repeat(40), {
+      ...pin, sourceCommitSha: "short",
+    }), /vnext_one_shot_candidate_commit_mismatch/
+  );
   await appendFile(join(root, MANIFEST_PATH), "\n");
   await assert.rejects(
-    verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(root, COMMIT, pin),
+    verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(root, "b".repeat(40), pin),
     /vnext_one_shot_candidate_manifest_drift/
   );
 });

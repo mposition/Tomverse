@@ -52,6 +52,8 @@ test("stage binding comes from fresh app and Railway observations", async () => 
     id: "prompt-refiner-vnext-one-shot-v1", ...expected,
     perRequestCostMicroUsd: 29_918n, slotCount: 80,
     costCeilingMicroUsd: 2_393_440n,
+    sourceCommitPreregistrationVerified: false,
+    dispatchAuthorized: false,
   });
   assert.equal(sourceReads, 1);
   assert.equal(deploymentReads, 1);
@@ -59,7 +61,7 @@ test("stage binding comes from fresh app and Railway observations", async () => 
 
 test("stale or disagreeing source, deployment and price pins fail closed", async () => {
   for (const override of [
-    { sourceCommitSha: "f".repeat(40) },
+    { sourceCommitSha: "short" },
     { sourceManifestDigest: "f".repeat(64) },
     { runtimeDeploymentId: "ffffffff-ffff-ffff-ffff-ffffffffffff" },
     { runtimeCommitSha: "f".repeat(40) },
@@ -80,6 +82,17 @@ test("stale or disagreeing source, deployment and price pins fail closed", async
   source = { ...source, sourceManifestDigest: "f".repeat(64) };
   await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
     /stage_observation_mismatch/);
+  source = { ...source, sourceManifestDigest: expected.sourceManifestDigest };
+  deployment = { ...deployment, commitSha: "b".repeat(40) };
+  source = { ...source, sourceCommitSha: "b".repeat(40) };
+  const laterDeployment = await preparePromptRefinerVnextOneShotStageBinding({
+    ...expected, runtimeCommitSha: "b".repeat(40),
+  });
+  assert.equal(laterDeployment.sourceCommitSha, expected.sourceCommitSha);
+  assert.equal(laterDeployment.runtimeCommitSha, "b".repeat(40));
+  assert.equal(laterDeployment.sourceCommitPreregistrationVerified, false);
+  source = { ...source, sourceCommitSha: expected.sourceCommitSha };
+  deployment = { ...deployment, commitSha: expected.runtimeCommitSha };
 });
 
 test("missing or different server custody pins refuse before external observation", async () => {
