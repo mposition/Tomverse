@@ -25,8 +25,12 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     initiative: randomUUID(),
     epic: randomUUID(),
     feature: randomUUID(),
+    secondFeature: randomUUID(),
+    archivedFeature: randomUUID(),
     archivedInitiative: randomUUID(),
     story: randomUUID(),
+    anotherStory: randomUUID(),
+    task: randomUUID(),
   };
   const digest = "a".repeat(64);
   const titleDigest = "b".repeat(64);
@@ -608,6 +612,12 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await addNode(ids.initiative, "initiative");
     await addNode(ids.epic, "epic", ids.initiative);
     await addNode(ids.feature, "feature", ids.epic);
+    await addNode(ids.secondFeature, "feature", ids.epic);
+    await addNode(ids.archivedFeature, "feature", ids.epic);
+    await client.query(
+      `UPDATE public."AmuxPortfolioNode" SET "state" = 'archived' WHERE "id" = $1`,
+      [ids.archivedFeature],
+    );
     await addNode(ids.archivedInitiative, "initiative");
     const insertNodeWithClock = `INSERT INTO public."AmuxPortfolioNode"
       ("id", "level", "state", "revision", "titleCiphertext", "contentKeyId",
@@ -759,6 +769,62 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       approvalId: "synthetic_approval_01",
     });
     await client.query(insertStory, storyParams);
+    const newSourceKey = () => randomUUID().replaceAll("-", "").toUpperCase();
+    for (const invalidFeature of [ids.epic, ids.archivedFeature]) {
+      const error = await expectRejected(insertStory,
+        [randomUUID(), newSourceKey(), digest, storyParams[3], invalidFeature,
+          title, titleDigest, digest]);
+      assert.match(error.message, /requires an active Feature parent/);
+    }
+    const moveStory = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "parentFeatureNodeId" = $2 WHERE "id" = $1`,
+      [ids.story, ids.secondFeature],
+    );
+    assert.match(moveStory.message, /hierarchy and source approval are immutable/);
+    const changeApproval = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "v4SourceApprovalId" = 'other-approval' WHERE "id" = $1`,
+      [ids.story],
+    );
+    assert.match(changeApproval.message, /hierarchy and source approval are immutable/);
+    const changeSource = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "sourceSystem" = 'legacy' WHERE "id" = $1`,
+      [ids.story],
+    );
+    assert.match(changeSource.message, /source identity is immutable|hierarchy and source approval are immutable/);
+    await client.query(insertStory, [ids.anotherStory, newSourceKey(), digest,
+      storyParams[3], ids.secondFeature, title, titleDigest, digest]);
+
+    const insertTask = `INSERT INTO public."AmuxWorkItem"
+      ("id", "title", "status", "sourceSystem", "sourceKey", "sourceVersion",
+       "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+       "parentStoryCardId", "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion",
+       "v4TitleDigest", "v4TitleDigestKeyId", "v4BodyCiphertext", "v4BodyKeyId",
+       "v4BodyKeyVersion", "v4BodyDigest", "v4BodyDigestKeyId", "v4BriefCiphertext",
+       "v4BriefKeyId", "v4BriefKeyVersion", "v4BriefDigest", "v4BriefDigestKeyId",
+       "v4SourceApprovalId", "taskRole", "executionGrade", "updatedAt")
+      VALUES ($1, 'AMUX Task', 'backlog', 'admin-idea-v4', $2, 'v1', $3, $4::jsonb,
+              'task', $5, $6, $7, 'synthetic', 1, $8, 'synthetic', $7, 'synthetic',
+              1, $3, 'synthetic', $7, 'synthetic', 1, $3, 'synthetic',
+              'synthetic-approval', 'implement', 'medium', CURRENT_TIMESTAMP)`;
+    const taskParams = [ids.task, newSourceKey(), digest, storyParams[3],
+      ids.feature, ids.story, title, titleDigest];
+    const crossFeature = await expectRejected(insertTask,
+      [randomUUID(), newSourceKey(), digest, storyParams[3], ids.feature,
+        ids.anotherStory, title, titleDigest]);
+    assert.match(crossFeature.message, /Story in the same Feature/);
+    await client.query(insertTask, taskParams);
+    const taskAsParent = await expectRejected(insertTask,
+      [randomUUID(), newSourceKey(), digest, storyParams[3], ids.feature,
+        ids.task, title, titleDigest]);
+    assert.match(taskAsParent.message, /Story in the same Feature/);
+    // A Task can also attach directly to a Feature when there is no Story.
+    await client.query(insertTask, [randomUUID(), newSourceKey(), digest,
+      storyParams[3], ids.feature, null, title, titleDigest]);
+    const archiveFeatureWithCards = await expectRejected(
+      `UPDATE public."AmuxPortfolioNode" SET "state" = 'archived' WHERE "id" = $1`,
+      [ids.feature],
+    );
+    assert.match(archiveFeatureWithCards.message, /active cards prevent feature archive/);
     const nonBacklogInsert = await expectRejected(
       insertStory.replace("'backlog', 'admin-idea-v4'", "'blocked', 'admin-idea-v4'"),
       [randomUUID(), ...storyParams.slice(1)],
@@ -898,5 +964,125 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
   } finally {
     await client.query("ROLLBACK").catch(() => {});
     await client.end();
+  }
+});
+
+test("v4 card insertion and Feature archive serialize on the parent row", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  const writer = new pg.Client({ connectionString: databaseUrl });
+  const archiver = new pg.Client({ connectionString: databaseUrl });
+  const ids = {
+    initiative: randomUUID(), epic: randomUUID(), insertFirstFeature: randomUUID(),
+    archiveFirstFeature: randomUUID(), insertFirstCard: randomUUID(),
+    archiveFirstCard: randomUUID(),
+  };
+  const digest = "a".repeat(64);
+  const title = Buffer.from("synthetic-hierarchy", "utf8");
+  const addNode = async (id, level, parentId = null) => writer.query(
+    `INSERT INTO public."AmuxPortfolioNode"
+     ("id", "level", "parentId", "state", "revision", "titleCiphertext",
+      "contentKeyId", "contentKeyVersion", "contentDigest", "contentDigestKeyId",
+      "approvedByUserId", "authorizationAuditLogId", "updatedAt")
+     VALUES ($1, $2, $3, 'active', 0, $4, 'synthetic', 1, $5, 'synthetic',
+             'synthetic-owner', $6, CURRENT_TIMESTAMP)`,
+    [id, level, parentId, title, digest, randomUUID()],
+  );
+  const insertStory = (client, id, featureId) => client.query(
+    `INSERT INTO public."AmuxWorkItem"
+     ("id", "title", "status", "sourceSystem", "sourceKey", "sourceVersion",
+      "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+      "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion", "v4TitleDigest",
+      "v4TitleDigestKeyId", "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion",
+      "v4BodyDigest", "v4BodyDigestKeyId", "v4SourceApprovalId", "updatedAt")
+     VALUES ($1, 'AMUX Story', 'backlog', 'admin-idea-v4', $2, 'v1', $3,
+             $4::jsonb, 'story', $5, $6, 'synthetic', 1, $3, 'synthetic',
+             $6, 'synthetic', 1, $3, 'synthetic', 'synthetic-approval', CURRENT_TIMESTAMP)`,
+    [id, randomUUID().replaceAll("-", "").toUpperCase(), digest,
+      JSON.stringify({ schemaVersion: "amux-v4", ideaId: "synthetic_idea_01",
+        approvalId: "synthetic_approval_01" }), featureId, title],
+  );
+  const awaitLockWait = async (observer, blockedPid) => {
+    for (let i = 0; i < 100; i += 1) {
+      const result = await observer.query(
+        `SELECT wait_event_type = 'Lock' AS waiting
+         FROM pg_stat_activity WHERE pid = $1`, [blockedPid],
+      );
+      if (result.rows[0]?.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.fail("the concurrent write did not wait on the parent row lock");
+  };
+
+  await Promise.all([writer.connect(), archiver.connect()]);
+  try {
+    await addNode(ids.initiative, "initiative");
+    await addNode(ids.epic, "epic", ids.initiative);
+    await addNode(ids.insertFirstFeature, "feature", ids.epic);
+    await addNode(ids.archiveFirstFeature, "feature", ids.epic);
+    const blockedPid = (await archiver.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+
+    await writer.query("BEGIN");
+    await writer.query("SET LOCAL statement_timeout = '10s'");
+    await insertStory(writer, ids.insertFirstCard, ids.insertFirstFeature);
+    await archiver.query("BEGIN");
+    await archiver.query("SET LOCAL statement_timeout = '10s'");
+    const archive = archiver.query(
+      `UPDATE public."AmuxPortfolioNode" SET "state" = 'archived' WHERE "id" = $1`,
+      [ids.insertFirstFeature],
+    );
+    await awaitLockWait(writer, blockedPid);
+    await writer.query("COMMIT");
+    await assert.rejects(archive, /active cards prevent feature archive/);
+    await archiver.query("ROLLBACK");
+
+    await writer.query("BEGIN");
+    await writer.query("SET LOCAL statement_timeout = '10s'");
+    await writer.query(
+      `UPDATE public."AmuxPortfolioNode" SET "state" = 'archived' WHERE "id" = $1`,
+      [ids.archiveFirstFeature],
+    );
+    await archiver.query("BEGIN");
+    await archiver.query("SET LOCAL statement_timeout = '10s'");
+    const insert = insertStory(archiver, ids.archiveFirstCard, ids.archiveFirstFeature);
+    await awaitLockWait(writer, blockedPid);
+    await writer.query("COMMIT");
+    await assert.rejects(insert, /requires an active Feature parent/);
+    await archiver.query("ROLLBACK");
+  } finally {
+    await writer.query("ROLLBACK").catch(() => {});
+    await archiver.query("ROLLBACK").catch(() => {});
+    // The parent rows must be committed for the two-session race. Remove only
+    // this synthetic fixture before another DB suite inspects the same test DB.
+    await writer.query("BEGIN");
+    try {
+      await writer.query(
+        `DELETE FROM public."AmuxWorkItem" WHERE "id" IN ($1, $2)`,
+        [ids.insertFirstCard, ids.archiveFirstCard],
+      );
+      await writer.query(
+        `ALTER TABLE public."AmuxPortfolioNode"
+         DISABLE TRIGGER "AmuxPortfolioNode_reject_delete"`,
+      );
+      await writer.query(
+        `DELETE FROM public."AmuxPortfolioNode" WHERE "id" IN ($1, $2)`,
+        [ids.insertFirstFeature, ids.archiveFirstFeature],
+      );
+      await writer.query(
+        `DELETE FROM public."AmuxPortfolioNode" WHERE "id" = $1`, [ids.epic],
+      );
+      await writer.query(
+        `DELETE FROM public."AmuxPortfolioNode" WHERE "id" = $1`, [ids.initiative],
+      );
+      await writer.query(
+        `ALTER TABLE public."AmuxPortfolioNode"
+         ENABLE TRIGGER "AmuxPortfolioNode_reject_delete"`,
+      );
+      await writer.query("COMMIT");
+    } catch (error) {
+      await writer.query("ROLLBACK");
+      throw error;
+    }
+    await Promise.all([writer.end(), archiver.end()]);
   }
 });

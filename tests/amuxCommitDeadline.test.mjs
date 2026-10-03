@@ -84,6 +84,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261003150000_amux_v4_draft_origin_expiry",
   // V4 card text retention stays dark; no orchestrator deadline table changes.
   "20261003160000_amux_v4_card_body_retention",
+  // V4 registration remains dark, but the card's approved hierarchy is fenced.
+  "20261003170000_amux_v4_card_hierarchy_guard",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

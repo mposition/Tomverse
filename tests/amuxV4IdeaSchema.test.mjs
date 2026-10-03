@@ -12,6 +12,8 @@ const portfolioMigrationName = "20261001102100_amux_v4_portfolio_schema";
 const portfolioSql = readFileSync(path.join(migrationRoot, portfolioMigrationName, "migration.sql"), "utf8");
 const cardBodySql = readFileSync(path.join(migrationRoot,
   "20261003160000_amux_v4_card_body_retention", "migration.sql"), "utf8");
+const hierarchyGuardSql = readFileSync(path.join(migrationRoot,
+  "20261003170000_amux_v4_card_hierarchy_guard", "migration.sql"), "utf8");
 const schema = readFileSync(path.join(root, "prisma", "schema.prisma"), "utf8");
 
 test("v4 idea schema is inert and does not change existing AMUX rows", () => {
@@ -79,6 +81,20 @@ test("v4 hierarchy nodes are non-runnable and parent level is checked", () => {
   assert.match(portfolioSql, /"AmuxWorkItem_v4_phase_b_inert_check"/);
   assert.match(portfolioSql, /"AmuxWorkItem_v4_source_snapshot_shape_check"/);
   assert.match(portfolioSql, /BEFORE TRUNCATE ON "AmuxPortfolioNodeRevision"/);
+});
+
+test("v4 card registration requires a real Feature and same-Feature Story", () => {
+  assert.match(hierarchyGuardSql, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(hierarchyGuardSql, /feature_level IS DISTINCT FROM 'feature'/);
+  assert.match(hierarchyGuardSql, /feature_state IS DISTINCT FROM 'active'/);
+  assert.match(hierarchyGuardSql, /story_type IS DISTINCT FROM 'story'/);
+  assert.match(hierarchyGuardSql, /story_source IS DISTINCT FROM 'admin-idea-v4'/);
+  assert.match(hierarchyGuardSql, /story_feature IS DISTINCT FROM NEW\."parentFeatureNodeId"/);
+  assert.match(hierarchyGuardSql, /"parentStoryCardId" IS NOT NULL/);
+  assert.match(hierarchyGuardSql, /FOR SHARE/);
+  assert.match(hierarchyGuardSql, /hierarchy and source approval are immutable/);
+  assert.match(hierarchyGuardSql, /NEW\."sourceSystem" IS DISTINCT FROM OLD\."sourceSystem"/);
+  assert.doesNotMatch(hierarchyGuardSql, /^\s*(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE TABLE)\b/im);
 });
 
 test("v4 card body has encrypted retention fields and a DB-clock purge fence", () => {
