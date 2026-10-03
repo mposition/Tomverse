@@ -889,20 +889,48 @@ test("an output-continuable first result retains its first page without completi
   assert.deepEqual(await readIdeaTransferConfirmation(session, nextPreviewId),
     { state: "expired", previewId: nextPreviewId, ideaId,
       confirmationRecorded: true, modelCallStarted: false });
-  assert.equal(await prisma.adminAuditLog.count({ where: {
+  const confirmedReplacementAudit = await prisma.adminAuditLog.findFirstOrThrow({ where: {
     action: "amux.v4.transfer_preview.expired_for_replacement",
     targetId: nextPreviewId,
-  } }), 1);
+  } });
+  assert.deepEqual(confirmedReplacementAudit.metadata, {
+    ideaId, chunkIndex: 1, replacementPreviewId: replacementId,
+    priorState: "confirmed", confirmationRecorded: true,
+  });
   assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: replacementId },
   })).attempt, 2);
   assert.equal((await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
     where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
   })).currentPreviewId, replacementId);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: replacementId },
+    data: { expiresAt: new Date(Date.now() - 60_000) },
+  });
+  const finalPreviewId = randomUUID();
+  const finalPreview = await prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice: { ...choice, previewId: finalPreviewId,
+        replacesPreviewId: replacementId }, keys, browserNonce,
+    }));
+  assert.deepEqual(await readIdeaTransferConfirmation(session, replacementId),
+    { state: "expired", previewId: replacementId, ideaId,
+      confirmationRecorded: false, modelCallStarted: false });
+  const preparedReplacementAudit = await prisma.adminAuditLog.findFirstOrThrow({ where: {
+    action: "amux.v4.transfer_preview.expired_for_replacement",
+    targetId: replacementId,
+  } });
+  assert.deepEqual(preparedReplacementAudit.metadata, {
+    ideaId, chunkIndex: 1, replacementPreviewId: finalPreviewId,
+    priorState: "prepared", confirmationRecorded: false,
+  });
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: finalPreviewId },
+  })).attempt, 3);
   await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx, {
-    session, request, choice: { previewId: replacementId, ideaId,
-      payloadDigest: replacement.payloadDigest,
-      payloadDigestKeyId: replacement.payloadDigestKeyId },
+    session, request, choice: { previewId: finalPreviewId, ideaId,
+      payloadDigest: finalPreview.payloadDigest,
+      payloadDigestKeyId: finalPreview.payloadDigestKeyId },
     browserNonce, keys,
   }));
   const firstHold = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
@@ -912,13 +940,28 @@ test("an output-continuable first result retains its first page without completi
   const nextHoldId = randomUUID();
   const nextReservation = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx, {
-      holdId: nextHoldId, previewId: replacementId,
+      holdId: nextHoldId, previewId: finalPreviewId,
       priceVersionId: firstHold.priceVersionId!, runner, keys,
     }));
-  assert.equal(nextReservation.previewId, replacementId);
+  assert.equal(nextReservation.previewId, finalPreviewId);
   assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: nextHoldId },
   })).status, "reserved");
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: finalPreviewId },
+    data: { confirmedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() - 60_000),
+      confirmExpiresAt: new Date(Date.now() - 60_000) },
+  });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice: { ...choice, previewId: randomUUID(),
+        replacesPreviewId: finalPreviewId }, keys, browserNonce,
+    })), /not_ready/, "a preview with any budget hold cannot be replaced");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.transfer_preview.expired_for_replacement",
+    targetId: finalPreviewId,
+  } }), 0);
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx, {
       holdId: randomUUID(), previewId: nextPreviewId,

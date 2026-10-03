@@ -67,6 +67,7 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       AND "chunkIndex" <= ${identity.chunkIndex}
     ORDER BY "chunkIndex" FOR UPDATE
   `;
+  // Validate the locked set independently of the order returned by FOR UPDATE.
   if (chunkLocks.length !== identity.chunkIndex + 1 ||
       chunkLocks.map((row) => row.chunkIndex).sort((a, b) => a - b)
         .some((index, position) => index !== position)) {
@@ -247,7 +248,8 @@ export async function readIdeaTransferConfirmation(session: Session, previewId: 
   if (!(nowRows[0]?.now instanceof Date)) {
     return { state: "unavailable", modelCallStarted: false } as const;
   }
-  if (row.state === "prepared" && !row.confirmationAuditLogId) {
+  if (["prepared", "expired"].includes(row.state) &&
+      !row.confirmationAuditLogId && row.confirmedAt === null) {
     return nowRows[0].now >= row.expiresAt
       ? { state: "expired", previewId: row.id, ideaId: row.ideaId,
           confirmationRecorded: false, modelCallStarted: false } as const

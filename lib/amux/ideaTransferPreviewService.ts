@@ -450,8 +450,7 @@ export async function commitFirstOutputContinuationTransferPreview(
         metadata: { ideaId: idea.id, chunkIndex: 1,
           replacementPreviewId: choice.previewId,
           priorState: replacedPreview.state,
-          confirmationRecorded: replacedPreview.confirmationAuditLogId !== null,
-          budgetHoldExists: false },
+          confirmationRecorded: replacedPreview.confirmationAuditLogId !== null },
       });
     }
     await tx.amuxIdeaTransferPreview.create({ data: {
