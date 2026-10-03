@@ -8233,7 +8233,26 @@ model QaReleaseMergeAttempt {
   closedAt          DateTime?                @db.Timestamptz(3)
   updatedAt         DateTime                 @default(now()) @db.Timestamptz(3)
 
+  latchEvents QaReleaseMergeLaneLatch[]
+
   @@index([issuedAt])
+}
+
+/// The QA-release merge lane's latch (docs/policy/qa-release-agent.md version
+/// 4, section 8 item 5): append-only events, latched when the newest sets it.
+/// Reasons are lib/qaReleaseMergeLaneLatchCore.ts; migration
+/// 20261004020000_qa_release_merge_lane_latch keeps the numbering consecutive,
+/// binds each event to an audit row of its own transaction (set by the merge
+/// lane, released by a person) and refuses any change.
+model QaReleaseMergeLaneLatch {
+  sequence   Int                    @id
+  latched    Boolean
+  reason     String?
+  attemptId  String?
+  attempt    QaReleaseMergeAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLogId String                 @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime               @default(now()) @db.Timestamptz(3)
 }
 
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,

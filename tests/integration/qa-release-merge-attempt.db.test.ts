@@ -37,7 +37,7 @@ let revision = 0;
 let sequence = 0;
 
 const cleanup = async () => {
-  for (const table of ["QaReleaseMergeAttempt", "QaReleaseOperatorControl"]) {
+  for (const table of ["QaReleaseMergeLaneLatch", "QaReleaseMergeAttempt", "QaReleaseOperatorControl"]) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "${table}" DISABLE TRIGGER "${table}_before_delete"`);
     try {
       await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
@@ -257,7 +257,8 @@ test("a consume after the expiry is refused by the database clock", async () => 
 
 test("attempts are never removed", async () => {
   await refused(prisma.$executeRaw`DELETE FROM "QaReleaseMergeAttempt"`, /never removed/);
-  await refused(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeAttempt"`), /never removed/);
+  // Refused either way: the latch table's foreign key refuses it before the trigger runs.
+  await refused(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeAttempt"`), /never removed|referenced in a foreign key constraint/);
 });
 
 test("the migration's lifecycle lists are the core's", () => {

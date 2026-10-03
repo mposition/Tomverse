@@ -851,6 +851,13 @@ const REGISTRY = {
     reason:
       "The merge lane attempt's lifecycle (docs/policy/qa-release-agent.md version 4, section 8 item 5): issued, consumed, awaiting_deploy, closed. The migration's trigger enforces the core's transition table; tests/integration/qa-release-merge-attempt.db.test.ts checks the two against each other.",
   },
+  QaReleaseMergeLaneLatch_reason_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeLaneLatchCore.ts",
+    list: "QA_RELEASE_MERGE_LANE_LATCH_REASONS",
+    reason:
+      "Why the merge lane latched (docs/policy/qa-release-agent.md version 4, section 8 item 5). A set event carries one; a person's release carries none.",
+  },
   QaReleaseMergeAttempt_outcome_check: {
     owner: "list",
     module: "lib/qaReleaseMergeAttemptCore.ts",

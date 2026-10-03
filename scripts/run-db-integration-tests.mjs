@@ -257,6 +257,9 @@ run(
     // The merge lane's attempts: one open per lane, the core's lifecycle and
     // nothing else, every write audited by the right actor, no removal.
     "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
     // The Admin Agent digest reader: counts and codes, expired and
     // unreadable bodies shown as such.
     "tests/integration/agent-digest-console.db.test.ts",
