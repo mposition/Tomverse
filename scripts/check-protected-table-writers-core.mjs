@@ -898,7 +898,7 @@ export const RUNTIME_SQL_ALLOWLIST = [
     path: "scripts/ops-observer/statement-ceiling-core.mjs",
     count: 2,
     reason:
-      "The two strings name the raw client methods the sre-ops statement ceiling counts as one statement each; the module compares a property name against this list and calls through the method the caller already holds. It holds no client, builds no SQL and imports nothing, so it can reach no table.",
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
   },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
