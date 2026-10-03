@@ -179,9 +179,31 @@ export function reviewerEnv(provider, source = process.env) {
   return env;
 }
 
-export function expandArgs(provider, workdir) {
-  return provider.args.map((arg) => arg.replaceAll("{workdir}", workdir).replaceAll("{model}", provider.model ?? ""));
+export function expandArgs(provider, workdir, promptFile = "", promptDir = "") {
+  return provider.args.map((arg) =>
+    arg
+      .replaceAll("{workdir}", workdir)
+      .replaceAll("{model}", provider.model ?? "")
+      .replaceAll("{promptFile}", promptFile)
+      .replaceAll("{promptDir}", promptDir),
+  );
 }
+
+/**
+ * A provider that names `{promptFile}` or `{promptDir}` in its args is given
+ * the prompt as a file instead of on stdin. On Linux a spawned child's stdin
+ * is a socket, not a pipe, so a CLI that reopens /dev/stdin by path fails with
+ * ENXIO -- which is how Devin failed every review on 2026-10-02 while a
+ * shell-pipe test passed. `{promptDir}` is the file's own directory, for a CLI
+ * that takes its prompt only as an argument (too short for a review) and must
+ * be granted that one directory to read the file from.
+ */
+export const usesPromptFile = (provider) =>
+  provider.args.some((arg) => arg.includes("{promptFile}") || arg.includes("{promptDir}"));
+
+/** The provider's own note, if any, goes before the shared prompt. */
+export const promptForProvider = (provider, prompt) =>
+  provider.promptNote ? `${provider.promptNote}\n\n${prompt}` : prompt;
 
 /**
  * The scheduling loop. One instance per state directory (enforced by the
@@ -375,15 +397,37 @@ export class Orchestrator {
         settled = true;
         clearTimeout(timer);
         this.killers.delete(kill);
+        if (promptDir) rmSync(promptDir, { recursive: true, force: true });
         out.end();
         err.end();
         resolve(outcome);
       };
+      const text = promptForProvider(provider, prompt);
+      // Outside the worktree, in a directory of its own (so `{promptDir}` grants
+      // this job's prompt and nothing else), owner-only, removed at the end.
+      const promptDir = usesPromptFile(provider)
+        ? join(this.config.stateDir, "prompts", `${job.id}-${slot.index}`)
+        : null;
+      const promptFile = promptDir ? join(promptDir, "prompt.md") : null;
+      if (promptFile) {
+        try {
+          mkdirSync(join(this.config.stateDir, "prompts"), { recursive: true, mode: 0o700 });
+          // A directory left by a crashed run is stale: start from empty.
+          rmSync(promptDir, { recursive: true, force: true });
+          mkdirSync(promptDir, { mode: 0o700 });
+          writeFileSync(promptFile, text, { mode: 0o600 });
+        } catch (error) {
+          // A slot must always be closed; a throw here would leave it running.
+          this.log(`prompt file failed: ${error.message}`);
+          done({ verdict: "unknown", reason: "prompt_file_failed", findings: [] });
+          return;
+        }
+      }
       try {
-        child = spawn(provider.command, expandArgs(provider, workdir), {
+        child = spawn(provider.command, expandArgs(provider, workdir, promptFile ?? "", promptDir ?? ""), {
           cwd: workdir,
           env: reviewerEnv(provider),
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: [promptFile ? "ignore" : "pipe", "pipe", "pipe"],
           detached: posix,
         });
       } catch (error) {
@@ -421,8 +465,10 @@ export class Orchestrator {
         if (code !== 0) return done({ verdict: "unknown", reason: `reviewer_exit_${code}`, findings: [] });
         done(parseReviewerOutput(Buffer.concat(chunks).toString("utf8")));
       });
-      child.stdin.on("error", () => {});
-      child.stdin.end(prompt);
+      if (!promptFile) {
+        child.stdin.on("error", () => {});
+        child.stdin.end(text);
+      }
     });
   }
 }

@@ -82,6 +82,9 @@ export function validateConfig(raw) {
     if (typeof provider.command !== "string" || !Array.isArray(provider.args)) {
       errors.push(`${label}: command and args`);
     }
+    if (provider.promptNote !== undefined && !(typeof provider.promptNote === "string" && provider.promptNote.length <= 4000)) {
+      errors.push(`${label}: promptNote must be a string of at most 4000 characters`);
+    }
     if (provider.maxConcurrent !== undefined && !(Number.isInteger(provider.maxConcurrent) && provider.maxConcurrent >= 1)) {
       errors.push(`${label}: maxConcurrent`);
     }
