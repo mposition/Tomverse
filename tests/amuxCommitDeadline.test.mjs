@@ -81,6 +81,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261003110000_amux_v4_analysis_budget_total_check",
   "20261003120000_amux_v4_analysis_price_versions",
   "20261003130000_amux_v4_chunk_completion_deadline",
+  "20261003150000_amux_v4_draft_origin_expiry",
+  // V4 card text retention stays dark; no orchestrator deadline table changes.
+  "20261003160000_amux_v4_card_body_retention",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

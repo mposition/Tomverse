@@ -700,6 +700,16 @@ const REGISTRY = {
     reason:
       "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
   },
+  AmuxIdeaAnalysisPriceVersion_mode_check: {
+    owner: "database",
+    reason:
+      "The approved AMUX analysis price version records whether an estimate uses subscription CLI or API mode. The reservation writer must bind its hold to one exact approved price version.",
+  },
+  AmuxIdeaAnalysisPriceVersion_provider_check: {
+    owner: "database",
+    reason:
+      "Only approved OpenAI and Anthropic analysis price versions are admitted; adding a provider requires a policy and migration change before it can fund a hold.",
+  },
   AmuxIdeaAnalysisChunk_state_check: {
     owner: "database",
     reason:

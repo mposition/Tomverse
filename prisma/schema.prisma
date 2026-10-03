@@ -7064,6 +7064,14 @@ model AmuxWorkItem {
   v4TitleKeyVersion     Int?
   v4TitleDigest         String?
   v4TitleDigestKeyId    String?
+  /// Problem, in/out scope, and completion criteria share the title's
+  /// terminal+90d purge clock; neither text nor key appears in sourceSnapshot.
+  v4BodyCiphertext      Bytes?
+  v4BodyKeyId           String?
+  v4BodyKeyVersion      Int?
+  v4BodyDigest          String?
+  v4BodyDigestKeyId     String?
+  v4DisplayPurgedAt     DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
   v4BriefKeyVersion     Int?

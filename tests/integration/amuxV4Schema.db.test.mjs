@@ -736,14 +736,17 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       ("id", "title", "status", "sourceSystem", "sourceKey", "sourceVersion",
        "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion",
-       "v4TitleDigest", "v4TitleDigestKeyId", "v4SourceApprovalId", "updatedAt")
+       "v4TitleDigest", "v4TitleDigestKeyId",
+       "v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion",
+       "v4BodyDigest", "v4BodyDigestKeyId", "v4SourceApprovalId", "updatedAt")
       VALUES ($1, 'AMUX Story', 'backlog', 'admin-idea-v4', $2, 'v1', $3,
               $4::jsonb, 'story', $5, $6, 'synthetic', 1, $7, 'synthetic',
+              $6, 'synthetic', 1, $8, 'synthetic',
               'synthetic-approval', CURRENT_TIMESTAMP)`;
     const storyParams = [
       ids.story, sourceKey, digest,
       JSON.stringify({ schemaVersion: null, ideaId: null, approvalId: null }),
-      ids.feature, title, titleDigest,
+      ids.feature, title, titleDigest, digest,
     ];
     await expectRejected(
       insertStory,
@@ -756,11 +759,50 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       approvalId: "synthetic_approval_01",
     });
     await client.query(insertStory, storyParams);
+    const nonBacklogInsert = await expectRejected(
+      insertStory.replace("'backlog', 'admin-idea-v4'", "'blocked', 'admin-idea-v4'"),
+      [randomUUID(), ...storyParams.slice(1)],
+    );
+    assert.equal(nonBacklogInsert.code, "P0001");
+    assert.match(nonBacklogInsert.message, /must start in backlog/);
+    const earlyPurge = await expectRejected(
+      `UPDATE public."AmuxWorkItem"
+       SET "status" = 'cancelled', "v4TitleCiphertext" = NULL,
+           "v4TitleKeyId" = NULL, "v4TitleKeyVersion" = NULL,
+           "v4BodyCiphertext" = NULL, "v4BodyKeyId" = NULL,
+           "v4BodyKeyVersion" = NULL,
+           "v4DisplayPurgedAt" = CURRENT_TIMESTAMP
+       WHERE "id" = $1`, [ids.story],
+      "AmuxWorkItem_v4_display_purge_clock_check",
+    );
+    assert.equal(earlyPurge.code, "23514");
     const todoError = await expectRejected(
       `UPDATE public."AmuxWorkItem" SET "status" = 'todo' WHERE "id" = $1`,
       [ids.story],
     );
     assert.equal(todoError.code, "23514");
+    const beforeTerminal = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
+    await client.query(
+      `UPDATE public."AmuxWorkItem" SET "status" = 'cancelled' WHERE "id" = $1`,
+      [ids.story],
+    );
+    const afterTerminal = await client.query(
+      `SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "moment"`,
+    );
+    const terminalClock = await client.query(
+      `SELECT "v4TerminalAt" FROM public."AmuxWorkItem" WHERE "id" = $1`,
+      [ids.story],
+    );
+    assert.ok(terminalClock.rows[0].v4TerminalAt.getTime() >= beforeTerminal.rows[0].moment.getTime() - 1);
+    assert.ok(terminalClock.rows[0].v4TerminalAt.getTime() <= afterTerminal.rows[0].moment.getTime() + 1);
+    const backdateError = await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "v4TerminalAt" = TIMESTAMP '2000-01-01'
+       WHERE "id" = $1`, [ids.story],
+    );
+    assert.equal(backdateError.code, "P0001");
+    assert.match(backdateError.message, /terminal clock is immutable/);
 
     // Empty-table fixture cleanup is the sole allowed TRUNCATE path.
     await client.query("ROLLBACK");

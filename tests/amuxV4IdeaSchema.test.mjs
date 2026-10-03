@@ -10,6 +10,8 @@ const migrationName = "20261001102000_amux_v4_idea_schema";
 const sql = readFileSync(path.join(migrationRoot, migrationName, "migration.sql"), "utf8");
 const portfolioMigrationName = "20261001102100_amux_v4_portfolio_schema";
 const portfolioSql = readFileSync(path.join(migrationRoot, portfolioMigrationName, "migration.sql"), "utf8");
+const cardBodySql = readFileSync(path.join(migrationRoot,
+  "20261003160000_amux_v4_card_body_retention", "migration.sql"), "utf8");
 const schema = readFileSync(path.join(root, "prisma", "schema.prisma"), "utf8");
 
 test("v4 idea schema is inert and does not change existing AMUX rows", () => {
@@ -77,4 +79,17 @@ test("v4 hierarchy nodes are non-runnable and parent level is checked", () => {
   assert.match(portfolioSql, /"AmuxWorkItem_v4_phase_b_inert_check"/);
   assert.match(portfolioSql, /"AmuxWorkItem_v4_source_snapshot_shape_check"/);
   assert.match(portfolioSql, /BEFORE TRUNCATE ON "AmuxPortfolioNodeRevision"/);
+});
+
+test("v4 card body has encrypted retention fields and a DB-clock purge fence", () => {
+  for (const name of ["v4BodyCiphertext", "v4BodyKeyId", "v4BodyKeyVersion",
+    "v4BodyDigest", "v4BodyDigestKeyId", "v4DisplayPurgedAt"]) {
+    assert.match(cardBodySql, new RegExp(`"${name}"`));
+    assert.match(schema, new RegExp(`\\b${name}\\s+`));
+  }
+  assert.match(cardBodySql, /INTERVAL '90 days'/);
+  assert.match(cardBodySql, /clock_timestamp\(\) AT TIME ZONE 'UTC'/);
+  assert.match(cardBodySql, /purged card display cannot be restored/);
+  assert.match(cardBodySql, /"sourceSystem" IS DISTINCT FROM 'admin-idea-v4'/);
+  assert.doesNotMatch(cardBodySql, /\bUPDATE\s+"AmuxWorkItem"\s+SET\b/i);
 });
