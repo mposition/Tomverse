@@ -1095,7 +1095,7 @@ export const estimateCampaignAudience = async (input: {
         { createdAt: { lt: new Date(`${effectiveDate}T00:00:00.000Z`) } },
       ],
     };
-    const audience = policyChangeNoticeAudienceWhere(effectiveDate);
+    const audience = policyChangeNoticeAudienceWhere(effectiveDate, input.now ?? new Date());
     const [owed, pending, withEmail] = await Promise.all([
       prisma.user.count({ where: owedWhere }),
       prisma.user.count({ where: audience }),

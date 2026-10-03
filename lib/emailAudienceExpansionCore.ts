@@ -63,7 +63,14 @@ export type ExpansionRefusalReason =
    * delivery rows directly rather than going through `enqueueStandardEmail`, so
    * a flag guarding only the single-message path would leave this one open.
    */
-  | "release_notes_disabled";
+  | "release_notes_disabled"
+  /**
+   * The amendment notice and its cohort are not paired as the contract says
+   * (`policyChangeNoticePairingProblem`). Checked at draft too; here because an
+   * event stored before that check, or written by another path, must not reach
+   * a different set of people than the gate counts.
+   */
+  | "notice_audience_mismatch";
 
 /**
  * Whether a pass may run at all.
@@ -139,21 +146,20 @@ export type AudienceCohortSpec =
     };
 
 /**
- * Notice deliveries that mean an account is already reached or about to be.
+ * How long a `sent` notice counts as on its way without a delivery report.
  *
- * The publication gate's told states (delivered, complained) plus the two that
- * are still on their way (pending, sent). Everything else -- bounced, suppressed,
- * skipped, failed, abandoned -- is a notice that did not arrive, so a later wave
- * asks again: a soft bounce is retried by nothing else, and a lane that still
- * refuses the address records that refusal on the new row, which is what the
- * gate's unreachable rule reads.
+ * An account holding a notice that arrived -- the gate's told states *with* a
+ * recorded arrival, exactly as `noticeFactsFor` reads them -- or one still on
+ * its way is not written to again. `pending` is on its way for as long as it
+ * is pending. `sent` is on its way only for this long: a delivery report that
+ * never comes leaves the row `sent` for good while the gate counts the account
+ * untold, and an account the gate is waiting on must not be left out of every
+ * later wave. Everything else -- bounced, suppressed, skipped, failed,
+ * abandoned -- did not arrive, so a later wave asks again; a lane that still
+ * refuses the address records that on the new row, which is what the gate's
+ * unreachable rule reads.
  */
-export const NOTICE_REACHED_OR_IN_FLIGHT_STATUSES = [
-  "pending",
-  "sent",
-  "delivered",
-  "complained",
-] as const;
+export const NOTICE_SENT_IN_FLIGHT_DAYS = 3;
 
 /** YYYY-MM-DD naming a real calendar day, or null. */
 export const readIsoDay = (raw: unknown): string | null => {

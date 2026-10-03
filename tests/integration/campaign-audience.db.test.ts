@@ -9,6 +9,8 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { prisma } from "@/lib/prisma";
+import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
+import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
@@ -650,10 +652,21 @@ test("the amendment notice reaches every owed account once, and a later wave onl
     assert.ok(!("refused" in again), JSON.stringify(again));
     assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
 
-    // One notice did not arrive, and an account joined before the effective day.
+    // One notice bounced. One was reported delivered with its arrival time,
+    // which is what the gate counts as told. One was reported as a complaint
+    // with no arrival time, which the gate does not count, so it is sent again.
+    // And an account joined before the effective day.
     await prisma.emailDelivery.updateMany({
       where: { userId: owed },
       data: { status: "bounced" },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: undated },
+      data: { status: "delivered", sentAt: new Date(), deliveredAt: new Date() },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: suspended },
+      data: { status: "complained", sentAt: new Date(), deliveredAt: null },
     });
     const late = await account({});
     await createdAt(late, new Date("2026-10-20T00:00:00Z"));
@@ -664,8 +677,39 @@ test("the amendment notice reaches every owed account once, and a later wave onl
     assert.ok(!("refused" in followUp), JSON.stringify(followUp));
     assert.deepEqual(
       await noticeRecipients(),
-      [owed, owed, suspended, undated, late].sort()
+      [owed, owed, suspended, suspended, undated, late].sort()
     );
+
+    // A notice sent with no delivery report is on its way for a few days, then
+    // asked about again.
+    const quiet = await account({});
+    await createdAt(quiet, new Date("2026-04-01T00:00:00Z"));
+    const sinceSent = await noticeDraft();
+    await approveCampaign({ campaignId: sinceSent.id, approvalId: `appr-${randomUUID()}` });
+    assert.ok(!("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "launch" }))));
+    const quietRows = () =>
+      prisma.emailDelivery.count({
+        where: { userId: quiet, templateVersion: { template: { key: POLICY_CHANGE_NOTICE_TEMPLATE } } },
+      });
+    assert.equal(await quietRows(), 1);
+    await prisma.emailDelivery.updateMany({
+      where: { userId: { not: quiet } },
+      data: { status: "delivered", sentAt: new Date(), deliveredAt: new Date() },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: quiet },
+      data: { status: "sent", sentAt: new Date() },
+    });
+    assert.ok(!("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "reminder" }))));
+    assert.equal(await quietRows(), 1);
+    await prisma.emailDelivery.updateMany({
+      where: { userId: quiet },
+      data: { sentAt: new Date(Date.now() - 4 * 86_400_000) },
+    });
+    assert.ok(
+      !("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "final_reminder" })))
+    );
+    assert.equal(await quietRows(), 2);
   } finally {
     delete process.env.PUBLIC_APP_URL;
   }
@@ -708,6 +752,31 @@ test("the notice cohort carries only the notice, and the notice only its cohort"
       /announces 2026-11-16/
     );
     assert.equal(await prisma.emailCampaign.count(), 0);
+
+    // An event stored before the draft check, or written another way, stops at
+    // expansion before a single row.
+    await account({});
+    const template = await ensureTemplateVersion({
+      templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+      language: "en",
+    });
+    const event = await prisma.emailEvent.create({
+      data: {
+        kind: `email.${POLICY_CHANGE_NOTICE_TEMPLATE}`,
+        templateId: template.templateId,
+        referenceType: "test",
+        referenceId: randomUUID(),
+        payload: {},
+        audienceKind: "user_segment",
+        audienceSpec: { cohort: { kind: "marketing_consent", purpose: "product_updates" } },
+        status: "pending",
+      },
+      select: { id: true },
+    });
+    assert.deepEqual(await expandEmailEvent({ eventId: event.id }), {
+      refused: "notice_audience_mismatch",
+    });
+    assert.equal(await prisma.emailDelivery.count(), 0);
   } finally {
     delete process.env.PUBLIC_APP_URL;
   }

@@ -6,7 +6,7 @@ import {
   expansionRefusal,
   hasAudience,
   nextBatchPlan,
-  NOTICE_REACHED_OR_IN_FLIGHT_STATUSES,
+  NOTICE_SENT_IN_FLIGHT_DAYS,
   policyChangeNoticePairingProblem,
   readExpansionSpec,
   readIsoDay,
@@ -265,12 +265,10 @@ test("a notice cohort is read only with a real calendar day", () => {
   assert.equal(readIsoDay("2027-02-29"), null);
 });
 
-test("the notice statuses that count as reached are the gate's told states plus in flight", () => {
-  // Anything else did not arrive, so the next wave asks again.
-  assert.deepEqual(
-    [...NOTICE_REACHED_OR_IN_FLIGHT_STATUSES].sort(),
-    ["complained", "delivered", "pending", "sent"]
-  );
+test("a sent notice with no delivery report is on its way for a few days, not for ever", () => {
+  // Without a bound, a report that never comes would leave the account out of
+  // every later wave while the gate counts it untold.
+  assert.ok(NOTICE_SENT_IN_FLIGHT_DAYS > 0 && NOTICE_SENT_IN_FLIGHT_DAYS <= 7);
 });
 
 const pairing = (templateKey, audienceSpec, noticeEffectiveDate = "2026-11-16") =>
