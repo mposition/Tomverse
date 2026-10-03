@@ -994,10 +994,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "81081dade66bed12ba79a57cace76956629ac58506c39c92ad8205ae12c824d5",
+    sha256: "68e1c5a0d053c78699fa1c3d3f0eeb071bf17d22489de13f367010d45e7a344e",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL. 2026-10-03: a migration that creates only a function declares the function name instead, and the question is one fixed EXISTS over pg_catalog.pg_proc in public with that name bound; the guard file only switches to presenceQueryFor(probe).",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
