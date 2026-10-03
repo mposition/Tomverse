@@ -130,12 +130,24 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
   `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
   붙여 넣기 없이 로그인합니다.
-- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file /dev/stdin
-  --respect-workspace-trust false --permission-mode auto --model swe-2-high`. `auto`는 읽기 전용
-  도구만 자동 승인하고, `-p`에서는 확인이 필요한 도구 호출을 거절합니다(쓰기 요청에서 파일이
-  생기지 않음을 확인). 공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의
-  SWE-2를 고정해 `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다.
-  설치 직후 `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
+- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file {promptFile}
+  --respect-workspace-trust false --sandbox --permission-mode auto --model swe-2-high`.
+  공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의 SWE-2를 고정해
+  `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다. 설치 직후
+  `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
+  - **`/dev/stdin`을 쓰지 않습니다.** daemon이 띄운 프로세스의 stdin은 Linux에서 pipe가 아니라
+    socket이라, 경로로 다시 열면 `ENXIO`로 실패합니다(셸 pipe로 한 시험은 통과했고 운영에서는
+    모든 검토가 `reviewer_exit_1`이었습니다). `{promptFile}`을 쓰면 서버가 프롬프트를 상태 폴더의
+    owner-only 파일로 넘기고 끝나면 지웁니다.
+  - `auto`는 읽기 전용 도구만 승인하고, `-p`에서 거절된 도구 호출은 **그 자리에서 실행을 끝냅니다**
+    (`no_verdict_block`). 그래서 Devin 쪽 사용자 설정(`~/.config/devin/config.json`)에 읽기용 셸
+    명령만 `permissions.allow`로 열고(`Exec(grep)`, `Exec(rg)`, `Exec(git log)` 등 — `git diff`는
+    `--output`으로 쓸 수 있어 제외), `sandbox.allowed_domains`를 존재하지 않는 도메인 하나로 두어
+    네트워크를 막고, `promptNote`로 그 목록만 쓰라고 알립니다.
+  - **경로별 읽기 deny(`Read(~/.config/**)`)는 지켜지지 않았습니다**(canary 파일이 읽혔음). 막히는 것은
+    허용 목록 밖의 명령과 sandbox의 네트워크뿐이고, 읽기 범위의 경계는 reviewer 전용 계정입니다.
+  - 브랜치의 `.devin/` 설정은 사용자 설정보다 우선하지만, 지시 파일로 취급되어 base 버전으로
+    되돌려집니다.
 
 ## 서버 업데이트 (drain)
 
