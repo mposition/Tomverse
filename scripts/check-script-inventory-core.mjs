@@ -12,11 +12,19 @@
  *
  * ## Why a declared list and not a probe
  *
- * Probing means running all 70, which took about 15 minutes and needs a
- * credential-free environment to mean anything. A declared list answers
- * instantly and can be wrong, so the test does the part a list cannot: it
- * checks every name still exists and that every tool still refuses. The list
- * says what we decided; the test says whether the tree still agrees.
+ * Probing means running all 70, which took about 15 minutes. A declared list
+ * answers instantly and can be wrong, so the test does the part a list cannot:
+ * it spawns every entry's refusal path and reads the exit code, so a tool that
+ * gains a default fails here instead of being silently excused. The list says
+ * what we decided; the test says whether the tree still agrees.
+ *
+ * ## The reading has to be taken with the credentials unset
+ *
+ * The first enumeration of these 70 was taken in a shell that happened to have
+ * `OPENAI_API_KEY` set, so `check:openai-model-access` passed and was filed as
+ * a gate. It is not: with the key absent it exits 1. A count of failing check
+ * scripts is therefore a statement about an environment as much as about a
+ * tree, and this list is the credential-free reading.
  *
  * ## This is a report, not a gate
  *
@@ -72,6 +80,12 @@ export const ARGUMENT_REQUIRED_CHECKS = [
  * environment allowed it. In CI, with the environment present, they are gates.
  */
 export const ENVIRONMENT_REQUIRED_CHECKS = [
+  {
+    script: "check:openai-model-access",
+    requires: "OPENAI_API_KEY",
+    reason:
+      "Asks OpenAI which models the key can see. Without the key it reports `no_api_key` and exits 1, because a missing key is not evidence the models are unavailable. This one is why the inventory is measured with the credentials unset: the first reading of it passed only because the key happened to be present.",
+  },
   {
     script: "check:fal-image-pricing",
     requires: "FAL_KEY",
