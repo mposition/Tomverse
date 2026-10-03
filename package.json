@@ -202,6 +202,7 @@
     "report:memory-eval-failures": "node --conditions=react-server --import tsx scripts/report-memory-eval-failures.mjs",
     "report:memory-eval-failure-diagnosis": "node --import tsx scripts/report-memory-eval-failure-diagnosis.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
+    "report:check-script-inventory": "node scripts/report-check-script-inventory.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
     "check:unconsumed-response-bodies": "node scripts/check-unconsumed-response-bodies.mjs",
     "report:unconsumed-response-bodies": "node scripts/report-unconsumed-response-bodies.mjs",
