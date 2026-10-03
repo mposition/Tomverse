@@ -31,7 +31,8 @@ export function verifyReboot(snapshot, options) {
     check(snapshot.units?.[key]?.enabled === "enabled", key + " is not enabled");
   }
   check(snapshot.units?.bridge?.active === "inactive", "product bridge is active");
-  check(snapshot.units?.bridge?.enabled === "disabled", "product bridge is enabled");
+  check(["disabled", "masked", "not-found", ""].includes(snapshot.units?.bridge?.enabled),
+    "product bridge is enabled");
   check(snapshot.linger === "Linger=yes", "worker user linger is disabled");
   check(snapshot.binarySha256 === options.expectedSha256, "AMUX binary SHA differs");
   check(snapshot.health?.http === 200 && snapshot.health?.status === "ok",
@@ -64,7 +65,7 @@ export function verifyReboot(snapshot, options) {
   return failures;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
@@ -77,7 +78,9 @@ function parseArgs(argv) {
   for (const key of ["host", "identity", "dashboard", "before-boot-time", "expected-sha256"]) {
     if (!options[key]) throw new Error("missing --" + key);
   }
-  if (!/^[\w.-]+@[\w.-]+$/.test(options.host)) throw new Error("invalid SSH host");
+  if (!/^[A-Za-z0-9][\w.-]*@[A-Za-z0-9][\w.-]*$/.test(options.host)) {
+    throw new Error("invalid SSH host");
+  }
   const dashboard = new URL(options.dashboard);
   if (dashboard.protocol !== "https:") throw new Error("Dashboard must use HTTPS");
   if (!/^[a-f0-9]{64}$/.test(options["expected-sha256"])) {
