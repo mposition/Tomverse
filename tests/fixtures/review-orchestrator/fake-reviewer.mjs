@@ -1,13 +1,18 @@
-// A stand-in reviewer CLI: reads the prompt on stdin and answers per mode.
-import { readFileSync, writeFileSync } from "node:fs";
+// A stand-in reviewer CLI: reads the prompt on stdin, or from the file named
+// after the mode ("promptfile <path>"), and answers per mode.
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 
 const mode = process.argv[2];
-const prompt = readFileSync(0, "utf8");
+const promptPath = mode === "promptfile" ? process.argv[3] : null;
+const prompt = promptPath ? readFileSync(promptPath, "utf8") : readFileSync(0, "utf8");
+if (promptPath && process.env.FAKE_REVIEWER_STAT_OUT) {
+  writeFileSync(process.env.FAKE_REVIEWER_STAT_OUT, String(statSync(promptPath).mode & 0o777));
+}
 if (process.env.FAKE_REVIEWER_PROMPT_OUT) writeFileSync(process.env.FAKE_REVIEWER_PROMPT_OUT, prompt);
 
 const block = (value) => `Looked at it.\n\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\`\n`;
 
-if (mode === "accept") {
+if (mode === "accept" || mode === "promptfile") {
   process.stdout.write(block({ verdict: "accept", findings: [] }));
 } else if (mode === "reject") {
   process.stdout.write(

@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { ReactNode } from "react";
 
-import { MarketingWebhookStaging } from "@/components/admin/AdminMarketingPanel";
+import {
+  MarketingWebhookStaging,
+  MarketingWebhookVerificationSign,
+} from "@/components/admin/AdminMarketingPanel";
 import type { MarketingAction } from "@/components/admin/MarketingActions";
 import { adminMarketingMessages } from "@/lib/adminMessages/marketing";
 
@@ -127,6 +130,20 @@ test("each report arms its own event, against the generation shown", () => {
   assert.equal((fresh?.body({ ttlMinutes: "30" }) as { expectedGeneration: number }).expectedGeneration, 0);
 });
 
+test("an event that was never processed is armed by Zernio's event id", () => {
+  const action = actionsOf(render({})).find((a) => a.id === "webhook-fault-arm-event-id");
+  assert.equal(action?.path, "/api/admin/marketing/webhook/fault-arm");
+  assert.ok(action?.confirm);
+  assert.deepEqual(
+    action?.body({ eventId: "  1f0e8a52-4c1b-4f6a-9d2e-5c7e1a4b6d90 ", ttlMinutes: "15" }),
+    { eventId: "1f0e8a52-4c1b-4f6a-9d2e-5c7e1a4b6d90", expectedGeneration: 0, ttlMinutes: 15 },
+  );
+  assert.equal(
+    actionsOf(render({ canWrite: false })).some((a) => a.id === "webhook-fault-arm-event-id"),
+    false,
+  );
+});
+
 test("a reader, a foreign arm value or an unreadable state offers no write", () => {
   for (const [label, props] of [
     ["reader", { canWrite: false }],
@@ -212,4 +229,20 @@ test("the shared rail asks before a form is sent, not only before a plain button
   const confirmAt = submit.indexOf("window.confirm(opened.confirm)");
   const sendAt = submit.indexOf("send(opened");
   assert.ok(confirmAt > 0 && sendAt > confirmAt, "the form asks before it sends");
+});
+
+test("signing names the record and the digest exactly, behind a confirm", () => {
+  const sign = actionsOf(
+    MarketingWebhookVerificationSign({ section: "reports", onDone: () => undefined, m }),
+  ).find((action) => action.id === "webhook-verification-sign");
+  assert.equal(sign?.path, "/api/admin/marketing/webhook/verification-sign");
+  assert.ok(sign?.confirm);
+  assert.deepEqual(
+    sign?.body({ recordId: " 2026-10-03__zernio-youtube-platform-published ", recordDigest: " " + "AB".repeat(32) + " " }),
+    { recordId: "2026-10-03__zernio-youtube-platform-published", recordDigest: "ab".repeat(32) },
+  );
+  assert.equal(
+    sign?.describe?.({ signatureAuditLogId: "audit_1" }),
+    m.webhookSignDone.replace("{auditLogId}", "audit_1"),
+  );
 });

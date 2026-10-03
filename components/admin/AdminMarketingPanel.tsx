@@ -214,6 +214,14 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         />
       ) : null}
 
+      {view.canWrite ? (
+        <MarketingWebhookVerificationSign
+          section={view.section}
+          onDone={() => void refresh()}
+          m={m}
+        />
+      ) : null}
+
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
 
       {unavailable ? (
@@ -421,6 +429,54 @@ function MarketingSwitchStrip({
  * compares against what this screen read: the shadow switch against its
  * current value, the arm against the generation shown.
  */
+/**
+ * Signing a webhook verification record (S2e-verification): the operator's
+ * judgement and signature, in every environment -- production signs the record
+ * the apply decision will read. The route checks the record is in the deployed
+ * tree, hashes to the digest typed here and was made against this build; the
+ * answer names the audit entry the sibling signature file must cite.
+ */
+export function MarketingWebhookVerificationSign({
+  section,
+  onDone,
+  m,
+}: {
+  section: string;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const sign: MarketingAction[] = [
+    {
+      id: "webhook-verification-sign",
+      label: m.webhookSignAction,
+      path: "/api/admin/marketing/webhook/verification-sign",
+      confirm: m.webhookSignConfirm,
+      fields: [
+        { name: "recordId", label: m.fieldRecordId, kind: "text", initial: "", hint: m.hintRecordId },
+        { name: "recordDigest", label: m.fieldRecordDigest, kind: "text", initial: "", hint: m.hintRecordDigest },
+      ],
+      describe: (result) => {
+        const auditLogId = (result as { signatureAuditLogId?: unknown } | null)?.signatureAuditLogId;
+        return typeof auditLogId === "string" ? m.webhookSignDone.replace("{auditLogId}", auditLogId) : null;
+      },
+      body: (values) => ({
+        recordId: String(values.recordId ?? "").trim(),
+        recordDigest: String(values.recordDigest ?? "").trim().toLowerCase(),
+      }),
+    },
+  ];
+  return (
+    <div
+      data-testid="marketing-webhook-verification-sign"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+    >
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.webhookSignTitle}</p>
+      <p className="mt-1 text-xs text-zinc-500">{m.webhookSignNote}</p>
+      <MarketingActionRail actions={sign} section={section} onDone={onDone} m={m} />
+    </div>
+  );
+}
+
 export function MarketingWebhookStaging({
   staging,
   canWrite,
@@ -472,6 +528,47 @@ export function MarketingWebhookStaging({
   // write cannot be compared against, so no arm control is offered for it.
   const canArm = canWrite && staging.readable && !staging.faultArmUnreadable;
   const expectedGeneration = arm?.generation ?? 0;
+  const describeArm = (result: unknown) => {
+    const generation = (result as { generation?: unknown } | null)?.generation;
+    return typeof generation === "number"
+      ? m.webhookArmDone.replace("{generation}", String(generation))
+      : null;
+  };
+  const ttlField = {
+    name: "ttlMinutes",
+    label: m.fieldTtlMinutes,
+    kind: "number" as const,
+    initial: "30",
+    hint: m.hintTtl,
+  };
+  // Condition 4 needs an event delivered while the shadow was off: it has no
+  // report row to arm from, so it is named by Zernio's own event id.
+  const armByEventId: MarketingAction[] = canArm
+    ? [
+        {
+          id: "webhook-fault-arm-event-id",
+          label: m.webhookArmByEventId,
+          path: "/api/admin/marketing/webhook/fault-arm",
+          confirm: m.webhookArmConfirm,
+          fields: [
+            {
+              name: "eventId",
+              label: m.fieldZernioEventId,
+              kind: "text",
+              initial: "",
+              hint: m.hintZernioEventId,
+            },
+            ttlField,
+          ],
+          describe: describeArm,
+          body: (values) => ({
+            eventId: String(values.eventId ?? "").trim(),
+            expectedGeneration,
+            ttlMinutes: Number(values.ttlMinutes),
+          }),
+        },
+      ]
+    : [];
 
   return (
     <div
@@ -486,6 +583,7 @@ export function MarketingWebhookStaging({
       <p data-testid="marketing-webhook-arm-state" className="mt-3 text-xs text-zinc-300">
         {armLine}
       </p>
+      <MarketingActionRail actions={armByEventId} section={section} onDone={onDone} m={m} />
       {!staging.readable ? null : !staging.reportsReadable ? (
         // A list that could not be read is not an empty one.
         <p className="mt-3 text-xs text-amber-300">{m.webhookReportsUnreadable}</p>

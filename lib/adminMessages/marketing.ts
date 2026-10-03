@@ -30,6 +30,21 @@ export const adminMarketingMessages = defineAdminMessages({
     webhookArmDone: "Armed (generation {generation}). Redeliver this event from Zernio's webhook log.",
     fieldTtlMinutes: "Expires after (minutes)",
     hintTtl: "From 1 to 1440.",
+    webhookArmByEventId: "Arm a fault for a Zernio event id",
+    webhookSignTitle: "Webhook verification record",
+    webhookSignNote:
+      "Sign a staging verification record from docs/ops/marketing-webhook-verification-records. Signing records your judgement that conditions 1-5 hold for its scope; the record must be in this build and made against it.",
+    webhookSignAction: "Sign a verification record",
+    webhookSignConfirm:
+      "This signs the record with your account in the audit log. Production webhook application can later rely on it.",
+    webhookSignDone: "Signed. Audit entry {auditLogId}: give this id for the signature file.",
+    fieldRecordId: "Record id",
+    hintRecordId: "The file name without .json, e.g. 2026-10-03__zernio-youtube-platform-published.",
+    fieldRecordDigest: "Record digest",
+    hintRecordDigest: "The SHA-256 the record PR states.",
+    fieldZernioEventId: "Zernio event id",
+    hintZernioEventId:
+      "From Zernio's webhook log: an event delivered while the shadow was off, so it has not been processed yet.",
     loadFailed: "Could not refresh marketing data.",
     writesNote:
       "Every control here writes, and every write compares against the version this screen read. A refusal means the row moved, not that the control is broken.",
@@ -207,6 +222,21 @@ export const adminMarketingMessages = defineAdminMessages({
     webhookArmDone: "arm했습니다(세대 {generation}). Zernio webhook 로그에서 이 이벤트를 redeliver하세요.",
     fieldTtlMinutes: "유효 시간(분)",
     hintTtl: "1에서 1440 사이.",
+    webhookArmByEventId: "Zernio event id로 fault arm",
+    webhookSignTitle: "Webhook 검증 기록",
+    webhookSignNote:
+      "docs/ops/marketing-webhook-verification-records의 staging 검증 기록에 서명합니다. 서명은 그 범위에서 조건 1-5가 성립한다는 판단을 남기는 것이며, 기록은 이 빌드에 들어 있고 이 빌드로 만든 것이어야 합니다.",
+    webhookSignAction: "검증 기록 서명",
+    webhookSignConfirm:
+      "이 기록에 내 계정으로 서명하고 감사 기록에 남깁니다. 이후 production webhook 적용이 이 서명을 근거로 쓸 수 있습니다.",
+    webhookSignDone: "서명했습니다. 감사 기록 {auditLogId} — 서명 파일에 이 id를 전달해 주세요.",
+    fieldRecordId: "기록 id",
+    hintRecordId: "파일 이름에서 .json을 뺀 값. 예: 2026-10-03__zernio-youtube-platform-published.",
+    fieldRecordDigest: "기록 digest",
+    hintRecordDigest: "기록 PR에 적힌 SHA-256.",
+    fieldZernioEventId: "Zernio event id",
+    hintZernioEventId:
+      "Zernio webhook 로그에서 shadow가 꺼져 있을 때 전달된 이벤트(아직 처리되지 않은 이벤트)의 id를 넣습니다.",
     loadFailed: "마케팅 데이터를 새로 가져오지 못했습니다.",
     writesNote:
       "여기의 모든 조작은 쓰기이며, 화면이 읽은 버전과 대조해 저장합니다. 거절은 행이 그 사이에 바뀌었다는 뜻이지 조작이 고장 났다는 뜻이 아닙니다.",

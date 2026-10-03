@@ -223,7 +223,9 @@ const isLocalDevelopmentRequest = (request: Request) => {
   if (!host) return false;
   try {
     const hostname = new URL(`http://${host}`).hostname;
-    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+    // A `Host` header carrying an IPv6 literal is bracketed, and WHATWG
+    // `hostname` keeps the brackets, so both spellings are listed.
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
   } catch {
     return false;
   }
