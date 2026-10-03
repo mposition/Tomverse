@@ -149,11 +149,12 @@ test("the shipped example config validates and names the repository the client d
   const raw = JSON.parse(read("tools/review-orchestrator/config.example.json", "utf8"));
   const config = validateConfig(raw);
   assert.ok(config.repos[repoNameFromRemote(config.repos.tomverse.url)]);
-  // Four enabled providers on four different model vendors, so a two-reviewer
-  // job never has to wait for the one vendor left over.
+  // Every enabled provider is on its own model vendor. Devin ships disabled: on
+  // 2026-10-02/03 it never returned a verdict on the server (see README).
   const enabled = config.providers.filter((p) => p.enabled);
-  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "cognition", "openai", "xai"]);
-  assert.equal(independentVendorCount(config.providers, "anthropic"), 3);
+  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "openai", "xai"]);
+  assert.equal(config.providers.find((p) => p.id === "devin").enabled, false);
+  assert.equal(independentVendorCount(config.providers, "anthropic"), 2);
 });
 
 test("config fails closed on an enabled provider without a measured vendor", () => {
