@@ -118,3 +118,12 @@ test("enabled: no row today is silent, today's row is recorded", async () => {
   assert.equal(after.verdict, due ? "recorded" : "not_due");
   assert.equal(after.incidents.length, 0);
 });
+
+test("a switch turned on after today's slot is not due and raises nothing, whatever the time of day", async () => {
+  await clearDigests();
+  const { today } = await dbToday();
+  await setSwitch(JSON.stringify({ enabled: true, revision: 2, enabledAt: `${today}T01:30:00.000Z` }));
+  const result = await check();
+  assert.equal(result.verdict, "not_due");
+  assert.equal(result.incidents.length, 0);
+});
