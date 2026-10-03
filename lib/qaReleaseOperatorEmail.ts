@@ -25,7 +25,7 @@ const SUBJECTS: Record<QaReleaseOperatorEmailKind, string> = {
 
 const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale:
-    "No QA release digest has been recorded for 28 hours while the agent is recorded as on. Nothing was decided or changed; open the Agent digests page to see the last digest and the operator control revision.",
+    "The QA release digest check found no current digest while the agent is recorded as on: none has been recorded, the newest is 28 hours old or older, or the newest is dated after the database clock. Nothing was decided or changed; open the Agent digests page to see the last digest and the operator control revision.",
 };
 
 export const buildQaReleaseOperatorEmail = (

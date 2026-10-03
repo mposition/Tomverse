@@ -118,15 +118,20 @@ test("a digest just stored is fresh, and the same digest 28 hours later is stale
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
   }
-  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
+  // Today's alert was queued by the earlier stale round; this one writes nothing.
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: false } });
 });
 
 test("a stale verdict queues one silence alert per UTC date, however often the Monitor runs", async () => {
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
-  await call();
-  await call();
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: false } });
   const rows = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_digest_stale" } });
   assert.equal(rows.length, 1);
   assert.match(rows[0].referenceId, /^stale:\d{4}-\d{2}-\d{2}$/);
-  assert.equal(rows[0].referenceId, `stale:${new Date().toISOString().slice(0, 10)}`);
+  // The key is the database clock's UTC date, not this process's.
+  const [{ day }] = await prisma.$queryRaw<{ day: string }[]>`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day`;
+  assert.equal(rows[0].referenceId, `stale:${day}`);
+  const audits = await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_stale_alerted", targetId: rows[0].id } });
+  assert.equal(audits, 1);
 });

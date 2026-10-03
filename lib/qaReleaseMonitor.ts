@@ -1,5 +1,6 @@
 import "server-only";
 
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { NOTIFICATION_KIND, enqueueNotificationDelivery } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
@@ -31,19 +32,67 @@ const MONITOR_ROUND_BUDGET_MS = 110_000;
 /** The read transaction: two statements (A = 2), so 3A + 5 = 11 s; Prisma 5 s more. */
 const READ_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
 
-/** The alert write: the limits and one upsert (A = 2), so 11 s; Prisma 5 s more. */
-const ALERT_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
+/**
+ * The silence-alert write (policy section 10: nine statements, so 3A + 5 =
+ * 32 s, Prisma five seconds more, transaction_timeout on PostgreSQL 17+):
+ * the limits, the audit chain lock, the existing-alert read, the queue row,
+ * the four of the audit append, and the deadline check as the last statement.
+ */
+export const QA_RELEASE_STALE_WRITE_LIMITS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 9,
+  transactionMs: (3 * 9 + 5) * 1_000,
+  prismaMs: (3 * 9 + 5) * 1_000 + 5_000,
+});
+const ALERT_LIMITS = QA_RELEASE_STALE_WRITE_LIMITS;
 
-async function enqueueStaleAlert(dbNowMs: number): Promise<void> {
-  await prisma.$transaction(
+/** Carries the late answer out of the transaction it rolls back. */
+class StaleAlertLate extends Error {}
+
+/**
+ * Queues today's silence alert and its system audit entry in one
+ * transaction (policy sections 5 and 7). Answers whether this round queued
+ * it: a second stale round the same UTC day finds the row and writes nothing.
+ */
+async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<"queued" | "already_queued"> {
+  const referenceId = qaReleaseStaleReferenceId(dbNowMs);
+  return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT
         set_config('statement_timeout', ${String(ALERT_LIMITS.statementMs)}, true),
-        set_config('idle_in_transaction_session_timeout', ${String(ALERT_LIMITS.idleMs)}, true)`;
-      await enqueueNotificationDelivery(tx, {
-        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
-        referenceId: qaReleaseStaleReferenceId(dbNowMs),
+        set_config('idle_in_transaction_session_timeout', ${String(ALERT_LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(ALERT_LIMITS.transactionMs)}, true)
+        END`;
+      // Under the statement limit, and before any row: the same order every
+      // audit writer takes.
+      await takeAuditChainLock(tx);
+      const existing = await tx.notificationDelivery.findUnique({
+        where: { kind_referenceId: { kind: NOTIFICATION_KIND.qaReleaseDigestStale, referenceId } },
+        select: { id: true },
       });
+      if (existing) return "already_queued" as const;
+      const queued = await enqueueNotificationDelivery(tx, {
+        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
+        referenceId,
+      });
+      // The digest intake's listed actor: the policy names two system actors
+      // for this agent, and this is the app side of the digest, not the lane.
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "qa-release-intake",
+        action: "qa_release.digest_stale_alerted",
+        targetType: "NotificationDelivery",
+        targetId: queued.id,
+        summary: "Queued the QA-release digest silence alert.",
+        metadata: { referenceId },
+      });
+      // The last statement: a round past its deadline is not recorded as a
+      // success (policy section 3); the database clock decides.
+      const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
+      if (clock[0]?.late !== false) throw new StaleAlertLate();
+      return "queued" as const;
     },
     { maxWait: 5_000, timeout: ALERT_LIMITS.prismaMs },
   );
@@ -143,12 +192,13 @@ export async function runQaReleaseMonitor(
   if (!qaReleaseTransactionFits("stale_write", clock() - startedAt, MONITOR_ROUND_BUDGET_MS)) {
     return answer(503, { verdict, error: "monitor_budget_exhausted" });
   }
+  let queued: "queued" | "already_queued";
   try {
-    await enqueueStaleAlert(read.dbNowMs);
-  } catch {
-    // The verdict stands; the alert's outcome is unknown and is reported,
-    // not retried here -- the next round tries again under the same key.
-    return answer(503, { verdict, error: "alert_enqueue_failed" });
+    queued = await enqueueStaleAlert(read.dbNowMs, new Date(startedAt + MONITOR_ROUND_BUDGET_MS));
+  } catch (error) {
+    // The verdict stands; the alert was not recorded, and is not retried
+    // here -- the next round tries again under the same key.
+    return answer(503, { verdict, error: error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed" });
   }
-  return answer(200, { verdict, alerted: true });
+  return answer(200, { verdict, alerted: queued === "queued" });
 }

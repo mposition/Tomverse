@@ -510,6 +510,7 @@ test("every customer-facing notification kind goes through the address lock", ()
     "autoFixReviewRequested",
     "autoFixProductionVerified",
     "autoFixPromotionFailed",
+    "qaReleaseDigestStale",
   ]) {
     assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "operator"`));
   }
