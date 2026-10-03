@@ -16,6 +16,7 @@ import type { PromptRefinerVnextOneShotAuditBinding } from
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
 const SHA256 = /^[0-9a-f]{64}$/;
+const COMMIT = /^[0-9a-f]{40}$/;
 
 export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
   sourceCommitSha: string;
@@ -51,7 +52,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
       !deployment.activeDeploymentConfirmed ||
       !deployment.deploymentId || !deployment.commitSha ||
       source.sourceCommitSha !== deployment.commitSha ||
-      expected.sourceCommitSha !== source.sourceCommitSha ||
+      !COMMIT.test(expected.sourceCommitSha) ||
       expected.sourceManifestDigest !== source.sourceManifestDigest ||
       expected.runtimeDeploymentId !== deployment.deploymentId ||
       expected.runtimeCommitSha !== deployment.commitSha ||
@@ -60,7 +61,9 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
   }
   return Object.freeze({
     id: STAGE_ID,
-    sourceCommitSha: source.sourceCommitSha,
+    // The transaction-level signed preregistration must confirm this source
+    // commit; current checkout bytes are independently rehashed above.
+    sourceCommitSha: expected.sourceCommitSha,
     sourceManifestDigest: source.sourceManifestDigest,
     runnerDigest: expected.runnerDigest,
     manifestRoot: expected.manifestRoot,
