@@ -81,7 +81,7 @@ jobs:
           fi
 
       - name: Restore the workspace build cache
-        id: workspace-cache
+        id: workspace_cache
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -91,7 +91,7 @@ jobs:
           key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
 
       - name: Restore the vendored AMUX build cache
-        id: vendor-cache
+        id: vendor_cache
         if: steps.scope.outputs.vendor == 'true'
         uses: actions/cache/restore@v5
         with:
@@ -124,18 +124,18 @@ jobs:
         run: cargo test -p amux-server --test dockerfile_build_inputs --locked
 
       - name: Save the workspace build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.workspace-cache.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.workspace_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ steps.workspace-cache.outputs.cache-primary-key }}
+          key: ${{ runner.os }}-rust-workspace-${{ hashFiles('Cargo.lock') }}
 
       - name: Save the vendored AMUX build cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.scope.outputs.vendor == 'true' && steps.vendor-cache.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.scope.outputs.vendor == 'true' && steps.vendor_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v5
         with:
           path: vendor/amux/target
-          key: ${{ steps.vendor-cache.outputs.cache-primary-key }}
+          key: ${{ runner.os }}-rust-vendor-amux-${{ hashFiles('vendor/amux/Cargo.lock') }}
