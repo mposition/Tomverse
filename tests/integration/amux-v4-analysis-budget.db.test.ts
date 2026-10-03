@@ -799,6 +799,11 @@ test("an output-continuable first result retains its first page without completi
   assert.equal(idea.analysisCompletedAt, null);
   assert.equal(chunk.state, "draft_ready");
   assert.equal(chunk.outputPending, true);
+  const deadline = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId }, select: { analysisDeadlineAt: true },
+  });
+  assert.equal(chunk.freeformPurgeAfter?.getTime(),
+    deadline.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
   assert.deepEqual([chunk.remainingStartOrdinal, chunk.remainingEndOrdinal], [0, 0]);
   assert.equal(nextChunk.state, "pending");
   assert.equal(nextChunk.currentPreviewId, null);

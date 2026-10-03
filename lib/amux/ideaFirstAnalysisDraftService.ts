@@ -169,6 +169,11 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   }
   const nextDay = new Date(now.getTime() + DAY_MS);
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
+  // An unfinished analysis needs this verified scope for its next page. The
+  // finalizer must shorten this clock to completion + 24h; auto-cancellation
+  // has an absolute seven-day deadline and may retain it for only 24h more.
+  const freeformPurgeAfter = prepared.decision === "partial"
+    ? new Date(idea.analysisDeadlineAt.getTime() + DAY_MS) : nextDay;
   const payloadPurgeAfter = new Date(Math.min(nextDay.getTime(),
     preview.payloadPurgeAfter.getTime()));
   const auditId = await writeSystemAuditLog({
@@ -205,7 +210,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       freeformCiphertext: Uint8Array.from(prepared.draft.freeform.ciphertext),
       freeformKeyId: prepared.draft.freeform.keyId,
       freeformKeyVersion: prepared.draft.freeform.keyVersion,
-      freeformPurgeAfter: nextDay,
+      freeformPurgeAfter,
       coveredStartOrdinal: prepared.coveredStartOrdinal,
       coveredEndOrdinal: prepared.coveredEndOrdinal,
       remainingStartOrdinal: prepared.remainingStartOrdinal,
