@@ -641,7 +641,9 @@ export async function prepareFirstOutputContinuationTransferPreview(
       });
       callbackReturned = true;
       return result;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    // The budget writer takes the same audit/idea locks. READ COMMITTED must
+    // observe a hold that committed while this writer waited for those locks.
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof IdeaTransferPreviewError) throw error;
