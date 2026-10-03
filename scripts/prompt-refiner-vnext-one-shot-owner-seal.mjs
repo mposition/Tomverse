@@ -41,6 +41,7 @@ export function sealOwnerManifestFiles(input) {
   const tempPath = join(dirname(outputPath), `.${basename(outputPath)}.${randomUUID()}.tmp`);
   let descriptor;
   let tempCreated = false;
+  let operationError;
   try {
     // Write and verify a fresh sibling before an atomic no-overwrite hardlink.
     // The owner must use a separately access-controlled directory; mode alone
@@ -65,10 +66,23 @@ export function sealOwnerManifestFiles(input) {
       ownerHmacKey, now,
     });
     linkSync(tempPath, outputPath);
+  } catch (error) {
+    operationError = error;
   } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-    if (tempCreated) unlinkSync(tempPath);
+    const cleanupErrors = [];
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor); } catch (error) { cleanupErrors.push(error); }
+    }
+    if (tempCreated) {
+      try { unlinkSync(tempPath); } catch (error) { cleanupErrors.push(error); }
+    }
+    if (cleanupErrors.length) {
+      throw new AggregateError(
+        operationError ? [operationError, ...cleanupErrors] : cleanupErrors,
+        "owner_seal_cleanup_unknown");
+    }
   }
+  if (operationError) throw operationError;
   return Object.freeze({ sealed: true, caseCount: 80, dispatchAuthorized: false });
 }
 

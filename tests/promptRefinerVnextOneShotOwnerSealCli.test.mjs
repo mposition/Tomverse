@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -68,6 +68,8 @@ test("owner-only synthetic CLI seals once and prints no root or case data", (t) 
   assert.equal(duplicate.status, 1);
   assert.equal(duplicate.stdout, "");
   assert.equal(duplicate.stderr, "owner_seal_unavailable\n");
+  assert.deepEqual(readdirSync(dirname(files.outputPath)).filter(
+    (name) => name.endsWith(".tmp")), []);
 });
 
 test("invalid key or changed manifest never creates a seal", (t) => {
@@ -90,4 +92,6 @@ test("invalid key or changed manifest never creates a seal", (t) => {
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "owner_seal_unavailable\n");
   assert.throws(() => readFileSync(files.outputPath), { code: "ENOENT" });
+  assert.deepEqual(readdirSync(dirname(files.outputPath)).filter(
+    (name) => name.endsWith(".tmp")), []);
 });
