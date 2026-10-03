@@ -233,6 +233,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/product-research-agent.md §4",
   },
   {
+    table: "SupportTriageRun",
+    delegate: "supportTriageRun",
+    writers: ["lib/supportTriageRunStore.ts"],
+    contract: "docs/policy/support-triage.md §4",
+  },
+  {
     table: "EngineeringAgentRun",
     delegate: "engineeringAgentRun",
     writers: ["lib/engineeringAgentStore.ts"],
@@ -765,6 +771,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 16,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/supportTriageDeletionManifest.ts",
+    table: "SupportTriageRun",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    table: "SupportTriageRun",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "The migration creates SupportTriageRun, its CHECK constraints and its insert, update and delete triggers (database-owned deadline, daily cap, late-success downgrade, 30-day delete boundary); it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20261002150000_product_research_observation/migration.sql",

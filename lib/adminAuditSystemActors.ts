@@ -61,7 +61,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -118,3 +118,16 @@ export const auditRowActorKind = (
     row.userAgent === null;
   return isSystemAuditActor(actor) && sessionFieldsEmpty ? "system" : "unknown";
 };
+
+/**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];

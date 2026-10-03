@@ -515,10 +515,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-03: product-research and CHAT-01 changed the schema after develop
  * was repinned. The value below covers the merged schema including the
  * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
- * Every note above stands; support-triage SupportTriageRun moves it again.
+ * Every note above stands; support-triage SupportTriageRun and its two audit actors move it.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "bb651eb57cf0653c4bd568cb5b2f19f9c23a9f6ae56b75a1d8d463923c8adece";
+  "dbfe4e6b1e8eaa404ba2f86dd2f6ec1d151b4e0ddbd59898d72c4cb7c2633aa7";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
