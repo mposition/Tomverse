@@ -110,7 +110,8 @@ export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
 /**
  * Every file whose bytes can decide what a received event becomes: the whole
  * local import closure of the receiver route (receiver, signature, dedupe,
- * storage and audit transaction, mapping, status query), plus the schema and
+ * storage and audit transaction, mapping, status query), plus the schema's receiver
+ * models (MARKETING_WEBHOOK_SCHEMA_MODELS, not the whole file) and
  * the dedupe index it cannot see. Not a hand-picked subset -- the test derives
  * the closure and refuses any difference. This module itself is left out: it
  * holds the fingerprint, and its webhook inputs are in the descriptor below.
@@ -203,15 +204,73 @@ const canonicalPipelinePath = (value: string): string => {
   return path;
 };
 
+/**
+ * The schema models the receiver path reads or writes. These blocks, their
+ * enums, datasource and generator enter the fingerprint (operator decision
+ * 2026-10-03): an unrelated model added elsewhere in the schema no longer
+ * stales a signed record, and a change to any of these still does.
+ */
+export const MARKETING_WEBHOOK_SCHEMA_MODELS = [
+  "AdminAuditLog",
+  "AppSetting",
+  "MarketingChannel",
+  "MarketingReport",
+] as const;
+
+const MARKETING_WEBHOOK_SCHEMA_PATH = "prisma/schema.prisma";
+
+/**
+ * The declared models' blocks, the enums their fields use, and the datasource
+ * and generator blocks (a provider or relationMode change alters what the
+ * receiver can store), in schema order. Blocks end at a `}` in column 0, which
+ * `prisma format` guarantees; a watched model that cannot be found throws.
+ */
+export const marketingWebhookSchemaSlice = (schemaText: string): string => {
+  const blocks = new Map<string, string>();
+  const order: string[] = [];
+  for (const match of canonicalMarketingWebhookFileText(schemaText).matchAll(
+    /^(model|enum|datasource|generator)\s+(\w+)\s*\{[\s\S]*?^\}/gm,
+  )) {
+    const key = `${match[1]} ${match[2]}`;
+    blocks.set(key, match[0]);
+    order.push(key);
+  }
+  const wanted = new Set<string>(
+    order.filter((key) => key.startsWith("datasource ") || key.startsWith("generator ")),
+  );
+  for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
+    const block = blocks.get(`model ${model}`);
+    if (block === undefined) {
+      throw new Error(`Marketing webhook schema model is missing: ${model}`);
+    }
+    wanted.add(`model ${model}`);
+    for (const line of block.split("\n").slice(1)) {
+      const field = /^\s*\w+\s+(\w+)/.exec(line);
+      if (field && blocks.has(`enum ${field[1]}`)) wanted.add(`enum ${field[1]}`);
+    }
+  }
+  return `${order
+    .filter((key) => wanted.has(key))
+    .map((key) => blocks.get(key))
+    .join("\n\n")}\n`;
+};
+
 export const computeMarketingWebhookPipelineFingerprint = (
   files: ReadonlyArray<{ path: string; content: string }>,
   descriptor: unknown,
 ): string => {
   const canonicalFiles = files
-    .map((file) => ({
-      path: canonicalPipelinePath(file.path),
-      content: canonicalMarketingWebhookFileText(file.content),
-    }))
+    .map((file) => {
+      const path = canonicalPipelinePath(file.path);
+      const content = canonicalMarketingWebhookFileText(file.content);
+      return {
+        path,
+        content:
+          path === MARKETING_WEBHOOK_SCHEMA_PATH
+            ? marketingWebhookSchemaSlice(content)
+            : content,
+      };
+    })
     .sort((left, right) => codePointCompare(left.path, right.path));
 
   if (
@@ -453,13 +512,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in.
  *
- * 2026-10-03: product-research, CHAT-01 and the sre-ops genesis and state
- * tables changed the schema after develop was repinned. The value below covers
- * the merged schema; older fingerprints are intentionally stale.
+ * 2026-10-03: product-research and CHAT-01 changed the schema after develop
+ * was repinned. The value below covers the merged schema including the
+ * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
  * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6d8635560c391b4de7b10857b923559f5e4cba1daf5bebe5bf8e18d675a4b1d2";
+  "bb651eb57cf0653c4bd568cb5b2f19f9c23a9f6ae56b75a1d8d463923c8adece";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
