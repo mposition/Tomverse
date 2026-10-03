@@ -6563,8 +6563,9 @@ mod tests {
         assert_eq!(before.0["cotenants"], json!([reader]));
         assert_eq!(before.0["observations"], json!([]));
         assert_eq!(before.0["unclaimed"].as_array().unwrap().len(), paths.len());
+        let verdict_id = before.0["verdict_id"].as_i64().expect("guard must record this verdict");
         let verdict_ts: f64 = store.read().unwrap().query_row(
-            "SELECT ts FROM guard_verdicts ORDER BY id DESC LIMIT 1", [], |r| r.get(0),
+            "SELECT ts FROM guard_verdicts WHERE id=?1", [verdict_id], |r| r.get(0),
         ).unwrap();
         assert!((now_epoch() - verdict_ts).abs() < 60.0, "guard verdict must use epoch seconds");
 
