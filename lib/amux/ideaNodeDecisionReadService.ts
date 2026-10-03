@@ -87,7 +87,7 @@ async function validNoCommitAudit(tx: Prisma.TransactionClient,
 export async function readAmuxRootNodeDecisionInTransaction(
   tx: Prisma.TransactionClient, session: Session,
   decisionId: string, prepareRequestId: string,
-  expectedLevel: "initiative" | "epic" = "initiative",
+  expectedLevel: "initiative" | "epic" | "feature" = "initiative",
 ) {
   const actorUserId = ownerId(session);
   if (!UUID.test(decisionId) || !UUID.test(prepareRequestId)) {
@@ -124,6 +124,9 @@ export async function readAmuxRootNodeDecisionInTransaction(
   const hierarchy = Array.isArray(snapshot?.hierarchy) ? snapshot.hierarchy : null;
   const parent = hierarchy?.length === 1 ? meta(hierarchy[0]) : null;
   const parentContent = meta(parent?.content);
+  const featureRoot = hierarchy?.length === 2 ? meta(hierarchy[0]) : null;
+  const featureParent = hierarchy?.length === 2 ? meta(hierarchy[1]) : null;
+  const featureParentContent = meta(featureParent?.content);
   const rootShape = proposal?.level === "initiative" &&
     proposal.parentId === null && hierarchy?.length === 0 &&
     row.baseNodeId === null && row.baseNodeRevision === null &&
@@ -134,6 +137,17 @@ export async function readAmuxRootNodeDecisionInTransaction(
     parent.id === row.baseNodeId && parent.revision === row.baseNodeRevision &&
     parentContent?.digest === row.baseNodeDigest &&
     parentContent.keyId === row.baseNodeDigestKeyId;
+  const featureShape = proposal?.level === "feature" &&
+    featureRoot?.level === "initiative" &&
+    featureRoot.parentId === null && featureRoot.state === "active" &&
+    featureParent?.level === "epic" &&
+    featureParent.parentId === featureRoot.id &&
+    featureParent.state === "active" &&
+    featureParent.id === proposal.parentId &&
+    featureParent.id === row.baseNodeId &&
+    featureParent.revision === row.baseNodeRevision &&
+    featureParentContent?.digest === row.baseNodeDigest &&
+    featureParentContent.keyId === row.baseNodeDigestKeyId;
   if (row.action !== "create_node" || !prepared?.entryHash ||
       auditRowActorKind(prepared) !== "human" ||
       prepared.actorUserId !== actorUserId || prepared.action !== PREPARE ||
@@ -159,7 +173,7 @@ export async function readAmuxRootNodeDecisionInTransaction(
       meta(source.payload)?.digest !== row.sourcePreviewDigest ||
       meta(source.payload)?.keyId !== row.sourcePreviewDigestKeyId ||
       !proposal || !UUID.test(String(proposal.id)) ||
-      !(rootShape || epicShape)) {
+      !(rootShape || epicShape || featureShape)) {
     return { state: "partial" } as const;
   }
   if (proposal.level !== expectedLevel) return { state: "not_visible" } as const;
@@ -263,7 +277,7 @@ export async function readAmuxRootNodeDecisionInTransaction(
 
 export async function readAmuxRootNodeDecision(session: Session,
   decisionId: string, prepareRequestId: string,
-  expectedLevel: "initiative" | "epic" = "initiative") {
+  expectedLevel: "initiative" | "epic" | "feature" = "initiative") {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
       SELECT set_config('statement_timeout', '2000', true) AS statement_limit,

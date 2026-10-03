@@ -16,7 +16,7 @@ import { AmuxUnitExpiryError, expireStaleAmuxUnitDecision } from
   "./ideaUnitExpiryService.ts";
 import { readAmuxRootNodeDecisionInTransaction } from
   "./ideaNodeDecisionReadService.ts";
-import { resolveApprovedAmuxRootParent,
+import { resolveApprovedAmuxRootParent, resolveApprovedAmuxEpicParent,
   AmuxNodeParentResolutionError } from
   "./ideaNodeParentResolutionService.ts";
 import { AMUX_V4_INPUT_SCANNER_VERSION } from "./localIntakeCore.ts";
@@ -62,10 +62,11 @@ const validChoice = (choice: AmuxNodeCreatePrepare) => Boolean(choice &&
   choice.nodeId !== choice.prepareRequestId && typeof choice.reason === "string");
 
 type Source = Awaited<ReturnType<typeof loadAmuxUnitDecisionSource>>;
-type NodeLevel = "initiative" | "epic";
+type NodeLevel = "initiative" | "epic" | "feature";
 type NodeContext = {
   proposal: Extract<Source["proposal"], { kind: "node" }>;
-  parent: Awaited<ReturnType<typeof resolveApprovedAmuxRootParent>> | null;
+  hierarchy: AmuxIdeaUnitConfirmationSnapshot["hierarchy"];
+  parent: AmuxIdeaUnitConfirmationSnapshot["hierarchy"][number] | null;
 };
 
 function ownerId(session: Session) {
@@ -116,11 +117,17 @@ async function nodeContext(tx: Prisma.TransactionClient, session: Session,
         proposal.parentRef === null)) {
     throw new AmuxNodeCreateError("not_ready");
   }
-  if (level === "initiative") return { proposal, parent: null };
+  if (level === "initiative") return { proposal, hierarchy: [], parent: null };
   try {
-    const parent = await resolveApprovedAmuxRootParent(tx, session,
+    if (level === "epic") {
+      const parent = await resolveApprovedAmuxRootParent(tx, session,
+        { ideaId: source.unit.ideaId, parentRef: proposal.parentRef! });
+      return { proposal, hierarchy: [parent], parent };
+    }
+    const resolved = await resolveApprovedAmuxEpicParent(tx, session,
       { ideaId: source.unit.ideaId, parentRef: proposal.parentRef! });
-    return { proposal, parent };
+    return { proposal, hierarchy: [...resolved.hierarchy],
+      parent: resolved.parent };
   } catch (error) {
     if (error instanceof AmuxNodeParentResolutionError) {
       throw new AmuxNodeCreateError(error.code);
@@ -168,16 +175,16 @@ function snapshot(input: { session: Session; choice: AmuxNodeCreatePrepare;
       payload: { digest: input.source.preview.payloadDigest,
         keyId: input.source.preview.payloadDigestKeyId },
       scopeApprovalId: null, scope: null },
-    hierarchy: parent ? [parent] : [], nodeProposal: { id: input.choice.nodeId,
+    hierarchy: input.context.hierarchy, nodeProposal: { id: input.choice.nodeId,
       level: proposal.level, parentId: parent?.id ?? null }, target: null, card: null,
     duplicates: input.reviewedScan,
     decisionReason: decisionReason(input.choice, input.reviewedScan, input.keys),
   };
 }
 
-/** Dark DB writer for Initiative and a directly approved child Epic. The
- * shared writer does not open the Epic route or enable an environment latch.
- * Callers must use SERIALIZABLE; parent resolution and duplicate scan enforce it. */
+/** Dark DB writer for Initiative, Epic, and Feature. Adding a level here
+ * does not open its route or enable an environment latch. Callers must use
+ * SERIALIZABLE; parent resolution and duplicate scan enforce it. */
 async function commitAmuxNodePrepare(tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreatePrepare;
     keys: AmuxContentKeys }, level: NodeLevel) {
@@ -252,6 +259,10 @@ export const commitAmuxRootNodePrepare = (tx: Prisma.TransactionClient,
 export const commitAmuxEpicNodePrepare = (tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreatePrepare;
     keys: AmuxContentKeys }) => commitAmuxNodePrepare(tx, input, "epic");
+
+export const commitAmuxFeatureNodePrepare = (tx: Prisma.TransactionClient,
+  input: { session: Session; request: Request; choice: AmuxNodeCreatePrepare;
+    keys: AmuxContentKeys }) => commitAmuxNodePrepare(tx, input, "feature");
 
 async function commitAmuxNodeConsume(tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreateConsume;
@@ -386,6 +397,10 @@ export const commitAmuxEpicNodeConsume = (tx: Prisma.TransactionClient,
   input: { session: Session; request: Request; choice: AmuxNodeCreateConsume;
     keys: AmuxContentKeys }) => commitAmuxNodeConsume(tx, input, "epic");
 
+export const commitAmuxFeatureNodeConsume = (tx: Prisma.TransactionClient,
+  input: { session: Session; request: Request; choice: AmuxNodeCreateConsume;
+    keys: AmuxContentKeys }) => commitAmuxNodeConsume(tx, input, "feature");
+
 /** Freeze an exact unresolved consume attempt. The row lock waits for any
  * in-flight consume before deciding; a missing row is never retried. */
 export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
@@ -435,6 +450,20 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
     typeof parentContentValue === "object" &&
     !Array.isArray(parentContentValue)
     ? parentContentValue as Record<string, unknown> : null;
+  const featureRootValue = hierarchy?.length === 2 ? hierarchy[0] : null;
+  const featureRoot = featureRootValue && typeof featureRootValue === "object" &&
+    !Array.isArray(featureRootValue)
+    ? featureRootValue as Record<string, unknown> : null;
+  const featureParentValue = hierarchy?.length === 2 ? hierarchy[1] : null;
+  const featureParent = featureParentValue &&
+    typeof featureParentValue === "object" &&
+    !Array.isArray(featureParentValue)
+    ? featureParentValue as Record<string, unknown> : null;
+  const featureContentValue = featureParent?.content;
+  const featureContent = featureContentValue &&
+    typeof featureContentValue === "object" &&
+    !Array.isArray(featureContentValue)
+    ? featureContentValue as Record<string, unknown> : null;
   const rootShape = nodeProposal?.level === "initiative" &&
     nodeProposal.parentId === null && hierarchy?.length === 0 &&
     row.baseNodeId === null && row.baseNodeRevision === null &&
@@ -445,6 +474,17 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
     parent.id === row.baseNodeId && parent.revision === row.baseNodeRevision &&
     parentContent?.digest === row.baseNodeDigest &&
     parentContent.keyId === row.baseNodeDigestKeyId;
+  const featureShape = nodeProposal?.level === "feature" &&
+    featureRoot?.level === "initiative" &&
+    featureRoot.parentId === null && featureRoot.state === "active" &&
+    featureParent?.level === "epic" &&
+    featureParent.parentId === featureRoot.id &&
+    featureParent.state === "active" &&
+    featureParent.id === nodeProposal.parentId &&
+    featureParent.id === row.baseNodeId &&
+    featureParent.revision === row.baseNodeRevision &&
+    featureContent?.digest === row.baseNodeDigest &&
+    featureContent.keyId === row.baseNodeDigestKeyId;
   if (!prepared?.entryHash || auditRowActorKind(prepared) !== "human" ||
       prepared.actorUserId !== input.actorUserId ||
       prepared.action !== PREPARE_ACTION ||
@@ -456,7 +496,7 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
       meta.confirmationDigestKeyId !== row.confirmationDigestKeyId ||
       stored?.decisionId !== row.id || stored.actorUserId !== row.actorUserId ||
       stored.action !== "create_node" ||
-      !(rootShape || epicShape) ||
+      !(rootShape || epicShape || featureShape) ||
       !UUID.test(String(nodeProposal.id))) {
     throw new AmuxNodeCreateError("integrity_unavailable");
   }
