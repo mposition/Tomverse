@@ -16,5 +16,5 @@ test("preregistration mock-module contract runs with its required Node flag", ()
   ], { encoding: "utf8", env });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(result.stdout, /# pass 3\b/);
+  assert.match(result.stdout, /# pass 4\b/);
 });

@@ -15,6 +15,7 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 import {
   preparePromptRefinerVnextOneShotPreregistration,
+  readPromptRefinerVnextOneShotPreregistration,
   recordPromptRefinerVnextOneShotPreregistration,
 } from "@/lib/promptRefinerVnextOneShotPreregistration";
 
@@ -34,6 +35,48 @@ const requestSchema = z.object({
   pricePinDigest: z.string().regex(/^[0-9a-f]{64}$/),
   confirmation: z.literal("PREREGISTER_VNEXT_ONE_SHOT_CANDIDATE"),
 }).strict();
+
+/** Owner-only signed receipt read-back; available even when writes are off. */
+export async function GET(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || !isAdminSession(session)) {
+      return NextResponse.json({ error: "Not found." }, { status: 404, headers });
+    }
+    if (getAdminRole(session) !== "owner") {
+      return NextResponse.json({ error: "Forbidden." }, { status: 403, headers });
+    }
+    try {
+      await assertRecentAdminAuthentication(session);
+    } catch (error) {
+      if (isAdminReauthenticationError(error)) {
+        return NextResponse.json({ code: "ADMIN_REAUTHENTICATION_REQUIRED" },
+          { status: 428, headers });
+      }
+      throw error;
+    }
+    await consumeApiRateLimit(request, session.user.id,
+      "admin-prompt-refiner-vnext-preregistration-readback", { minute: 3, day: 30 });
+    const readback = await readPromptRefinerVnextOneShotPreregistration(session.user.id);
+    return NextResponse.json({ readback }, { headers });
+  } catch (error) {
+    const security = apiSecurityResponse(error);
+    if (security) {
+      security.headers.set("Cache-Control", headers["Cache-Control"]);
+      return security;
+    }
+    if (error instanceof Error && (
+      error.message === "vnext_one_shot_preregistration_pin_mismatch" ||
+      error.message === "vnext_one_shot_preregistration_source_mismatch" ||
+      error.message === "vnext_one_shot_preregistration_policy_mismatch" ||
+      error.message === "vnext_one_shot_preregistration_price_mismatch")) {
+      return NextResponse.json({ code: "PREREGISTRATION_PIN_MISMATCH" },
+        { status: 409, headers });
+    }
+    return NextResponse.json({ code: "PREREGISTRATION_READBACK_UNAVAILABLE" },
+      { status: 503, headers });
+  }
+}
 
 /** Records only source, runner, price, owner access and retention pins. */
 export async function POST(request: Request) {
