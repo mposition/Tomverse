@@ -1553,6 +1553,20 @@ const REGISTRY = {
     list: "SUGGESTION_STATUSES",
     reason: "open until the operator dismisses it or sends it to AMUX.",
   },
+  SupportTriageRun_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_KINDS",
+    reason:
+      "worker and retention. Each kind has its own deadline (5 minutes, 100 seconds) and its own daily cap of 52, both applied by the row-creation trigger from the kind alone.",
+  },
+  SupportTriageRun_outcome_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_OUTCOMES",
+    reason:
+      "running until the run finishes, then one final outcome. The finishing trigger turns a late success or partial into deadline_exceeded, so the list holds a value the database records and the application never asks for.",
+  },
   EngineeringAgentRun_status_check: {
     owner: "list",
     module: "lib/engineeringAgentCore.ts",

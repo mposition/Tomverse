@@ -249,3 +249,19 @@ test("promotion budget refuses malformed input instead of guessing", () => {
     RangeError
   );
 });
+
+test("the run-table migration's literals are the core constants", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const sql = readFileSync(
+    new URL("../prisma/migrations/20261003120000_support_triage_run/migration.sql", import.meta.url),
+    "utf8"
+  );
+  assert.ok(sql.includes(`WHEN 'worker' THEN interval '${core.LANE_TIMEOUTS.worker.deadlineMs / 60_000} minutes'`));
+  assert.ok(sql.includes(`WHEN 'retention' THEN interval '${core.LANE_TIMEOUTS.retention.deadlineMs / 1_000} seconds'`));
+  assert.ok(sql.includes(`daily_cap CONSTANT INTEGER := ${core.DAILY_RUN_CAP.worker};`));
+  assert.equal(core.DAILY_RUN_CAP.worker, core.DAILY_RUN_CAP.retention);
+  assert.ok(sql.includes(`interval '${core.SUPPORT_TRIAGE_RUN_RETENTION_DAYS} days'`));
+  assert.ok(sql.includes(`"batchesCompleted" <= ${core.RETENTION_BATCHES_PER_RUN_MAX})`));
+  assert.ok(sql.includes(`CHECK ("kind" IN (${core.SUPPORT_TRIAGE_RUN_KINDS.map((k) => `'${k}'`).join(", ")}))`));
+});
