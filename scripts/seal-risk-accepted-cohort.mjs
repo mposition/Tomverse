@@ -3,7 +3,7 @@
 //
 //   npm run email:seal-risk-accepted-cohort -- --approved-at <ISO instant> --approved-by <email>
 //   npm run email:seal-risk-accepted-cohort -- --approved-at <ISO instant> --approved-by <email> \
-//       --apply --confirm-count <N>
+//       --apply --confirm-cohort <digest printed by the dry run>
 //
 // Contract: docs/policy/email-product-news-redesign-draft.md section 5.6, and
 // docs/policy/email-policy-amendment-draft.md section 1 (the seal comes before
@@ -11,17 +11,24 @@
 //
 // ## What it does
 //
-// Without `--apply` it writes nothing. It reads the accounts, prints counts --
-// never an address or an id -- and says what `--apply` would seal. With
-// `--apply` it needs `--confirm-count` equal to the candidate count it just
-// computed, so the seal covers the population the operator saw and no other.
+// Without `--apply` it writes nothing. It reads the accounts and prints counts
+// and a cohort digest -- never an address or an id. The digest is a SHA-256 of
+// the exact scope: approvedAt, the purpose, the address normalisation version
+// and every candidate's (userId, address digest) pair, sorted. Section 5.6
+// makes that list, not its size, the approval's scope.
 //
-// The seal itself is `sealRiskAcceptedApproval()` (lib/emailSendApprovalCohort.ts):
-// one transaction writes the approval, its members and the seal, and refuses an
-// account that does not exist, has no signup date or signed up after
-// `approvedAt`. This script only chooses the candidates and refuses to run
-// twice: a sealed, unwithdrawn approval for the same purpose already covers
-// these accounts, and a second one would make "who is covered" two answers.
+// With `--apply` it needs `--confirm-cohort` equal to the digest of the cohort
+// it computes *inside the sealing transaction*. A member swapped, or an
+// address changed, between the dry run and the seal changes the digest, and
+// nothing is written.
+//
+// The transaction is SERIALIZABLE. It rechecks that no sealed, unwithdrawn
+// approval for the same purpose exists, reads the accounts, compares the
+// digest and seals through `sealRiskAcceptedApproval()`
+// (lib/emailSendApprovalCohort.ts), which refuses an account that does not
+// exist, has no signup date or signed up after `approvedAt`. Two concurrent
+// runs both read "none exists" and both insert; PostgreSQL's serializable
+// isolation aborts one of them, so the tool cannot seal twice.
 //
 // ## What it does not decide
 //
@@ -33,8 +40,13 @@
 // DATABASE_URL must point at the database to seal. The approval and its
 // members are permanent; withdrawing is an EmailSendApprovalRevocation, not an
 // edit.
+import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma.ts";
-import { sealRiskAcceptedApproval } from "../lib/emailSendApprovalCohort.ts";
+import {
+  approvalAddressDigest,
+  sealRiskAcceptedApproval,
+} from "../lib/emailSendApprovalCohort.ts";
+import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "../lib/emailSuppressionCore.ts";
 
 const PURPOSE_KEY = "product_updates";
 
@@ -58,11 +70,51 @@ const fail = (message) => {
   process.exitCode = 1;
 };
 
+const ALREADY_SEALED = {
+  approvalType: "risk_accepted",
+  purposeKey: PURPOSE_KEY,
+  sealedAt: { not: null },
+  revocations: { none: {} },
+};
+
+/** The candidates at `approvedAt`, the counts left out, and the scope's digest. */
+const cohortAt = async (db, approvedAt) => {
+  const accounts = await db.user.findMany({ select: { id: true, email: true, createdAt: true } });
+  const covered = (account) =>
+    Boolean(account.email) && Boolean(account.createdAt) && account.createdAt.getTime() <= approvedAt.getTime();
+  const candidates = accounts
+    .filter(covered)
+    .map((account) => ({ userId: account.id, emailAddress: account.email }));
+  const pairs = candidates
+    .map((candidate) => [candidate.userId, approvalAddressDigest(candidate.emailAddress)])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        approvedAt: approvedAt.toISOString(),
+        purposeKey: PURPOSE_KEY,
+        addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+        members: pairs,
+      })
+    )
+    .digest("hex");
+  return {
+    total: accounts.length,
+    noAddress: accounts.filter((account) => !account.email).length,
+    undated: accounts.filter((account) => account.email && !account.createdAt).length,
+    later: accounts.filter(
+      (account) => account.email && account.createdAt && account.createdAt.getTime() > approvedAt.getTime()
+    ).length,
+    candidates,
+    digest,
+  };
+};
+
 const run = async () => {
   const approvedAtArg = flag("--approved-at");
   const approvedBy = flag("--approved-by")?.trim().toLowerCase();
   const apply = args.includes("--apply");
-  const confirmCount = flag("--confirm-count");
+  const confirmCohort = flag("--confirm-cohort");
 
   if (!approvedAtArg || !approvedBy) {
     return fail("Both --approved-at <ISO instant> and --approved-by <email> are required.");
@@ -90,68 +142,61 @@ const run = async () => {
     return fail(`Expected exactly one active email policy version, found ${policies.length}.`);
   }
 
-  const existing = await prisma.emailSendApproval.count({
-    where: {
-      approvalType: "risk_accepted",
-      purposeKey: PURPOSE_KEY,
-      sealedAt: { not: null },
-      revocations: { none: {} },
-    },
-  });
+  const existing = await prisma.emailSendApproval.count({ where: ALREADY_SEALED });
   if (existing > 0) {
     return fail(
       `A sealed, unwithdrawn risk_accepted approval for ${PURPOSE_KEY} already exists (${existing}). Nothing to do.`
     );
   }
 
-  const accounts = await prisma.user.findMany({
-    select: { id: true, email: true, createdAt: true },
-  });
-  const noAddress = accounts.filter((account) => !account.email).length;
-  const undated = accounts.filter((account) => account.email && !account.createdAt).length;
-  const later = accounts.filter(
-    (account) => account.email && account.createdAt && account.createdAt.getTime() > approvedAt.getTime()
-  ).length;
-  const candidates = accounts
-    .filter(
-      (account) => account.email && account.createdAt && account.createdAt.getTime() <= approvedAt.getTime()
-    )
-    .map((account) => ({ userId: account.id, emailAddress: account.email }));
-
+  const cohort = await cohortAt(prisma, approvedAt);
   console.log(`approvedAt:              ${approvedAt.toISOString()}`);
   console.log(`purpose:                 ${PURPOSE_KEY}`);
-  console.log(`accounts in database:    ${accounts.length}`);
-  console.log(`  without an address:    ${noAddress} (not covered)`);
-  console.log(`  without a signup date: ${undated} (not covered)`);
-  console.log(`  signed up later:       ${later} (not covered)`);
-  console.log(`candidates to seal:      ${candidates.length}`);
+  console.log(`accounts in database:    ${cohort.total}`);
+  console.log(`  without an address:    ${cohort.noAddress} (not covered)`);
+  console.log(`  without a signup date: ${cohort.undated} (not covered)`);
+  console.log(`  signed up later:       ${cohort.later} (not covered)`);
+  console.log(`candidates to seal:      ${cohort.candidates.length}`);
+  console.log(`cohort digest:           ${cohort.digest}`);
 
-  if (candidates.length === 0) {
+  if (cohort.candidates.length === 0) {
     // An approval covering nobody cannot be told apart from one whose member
     // writes failed (sealRefusal: no_members), so there is nothing to seal.
     return fail("\nNo account existed at --approved-at with an address and a signup date; nothing to seal.");
   }
   if (!apply) {
-    console.log(`\nDry run: nothing written. To seal, rerun with --apply --confirm-count ${candidates.length}.`);
+    console.log(`\nDry run: nothing written. To seal exactly this cohort, rerun with --apply --confirm-cohort ${cohort.digest}.`);
     return;
   }
-  if (confirmCount !== String(candidates.length)) {
-    return fail(
-      `--confirm-count must equal the candidate count (${candidates.length}); the population changed or was not confirmed.`
-    );
-  }
+  if (!confirmCohort) return fail("--apply needs --confirm-cohort <digest printed by the dry run>.");
 
-  const sealed = await sealRiskAcceptedApproval({
-    approvedById: approver.id,
-    approvedByEmail: approver.email,
-    approvedAt,
-    reason: REASON,
-    reviewCondition: REVIEW_CONDITION,
-    policyVersionId: policies[0].id,
-    purposeKey: PURPOSE_KEY,
-    candidates,
-  });
-  console.log(`\nSealed at ${sealed.sealedAt?.toISOString()} covering ${candidates.length} account(s).`);
+  const sealed = await prisma.$transaction(
+    async (tx) => {
+      if ((await tx.emailSendApproval.count({ where: ALREADY_SEALED })) > 0) {
+        throw new Error(`A sealed, unwithdrawn risk_accepted approval for ${PURPOSE_KEY} already exists.`);
+      }
+      const current = await cohortAt(tx, approvedAt);
+      if (current.digest !== confirmCohort) {
+        throw new Error(
+          "The cohort is not the one confirmed: an account or an address changed since the dry run. Run the dry run again."
+        );
+      }
+      const approval = await sealRiskAcceptedApproval({
+        approvedById: approver.id,
+        approvedByEmail: approver.email,
+        approvedAt,
+        reason: REASON,
+        reviewCondition: REVIEW_CONDITION,
+        policyVersionId: policies[0].id,
+        purposeKey: PURPOSE_KEY,
+        candidates: current.candidates,
+        client: tx,
+      });
+      return { approval, members: current.candidates.length };
+    },
+    { isolationLevel: "Serializable", timeout: 60_000 }
+  );
+  console.log(`\nSealed at ${sealed.approval.sealedAt?.toISOString()} covering ${sealed.members} account(s).`);
 };
 
 run()
