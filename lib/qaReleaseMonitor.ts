@@ -84,8 +84,8 @@ const DAILY_ALERTS = {
     action: "qa_release.attention_alerted",
     summary: "Queued the QA-release needs-a-check alert.",
   },
-  // Keyed by the digest's own UTC day, not the round's: a digest stored at
-  // 23:50 and first seen fresh after midnight is still that day's digest.
+  // Keyed by the digest's UTC day, which the round only acts on when it is
+  // also the round's own UTC day (see runQaReleaseMonitor).
   recorded: {
     kind: NOTIFICATION_KIND.qaReleaseDigestRecorded,
     referenceId: (alert: DailyAlert) =>
@@ -367,8 +367,16 @@ export async function runQaReleaseMonitor(
   if (verdict === "stale") return alertRound({ which: "stale" }, read, startedAt, clock, 200, { verdict });
   // The day's digest is recorded (policy section 7): one notice per digest
   // day, written only when the read found it not yet queued, so a quiet
-  // fresh round takes no lock and writes nothing.
-  if (verdict === "fresh" && read.latestDigestCreatedAtMs !== null && !read.recordedAlertQueued) {
+  // fresh round takes no lock and writes nothing. Only a digest of the
+  // round's own UTC day is announced: a digest stored just before midnight
+  // and first seen after it goes without a notice rather than giving the
+  // next day two, which the policy's one-per-kind-per-day cap forbids.
+  if (
+    verdict === "fresh" &&
+    read.latestDigestCreatedAtMs !== null &&
+    !read.recordedAlertQueued &&
+    qaReleaseUtcDateKey(read.latestDigestCreatedAtMs) === qaReleaseUtcDateKey(read.dbNowMs)
+  ) {
     const digestCreatedAtMs = read.latestDigestCreatedAtMs;
     return alertRound({ which: "recorded", digestCreatedAtMs }, read, startedAt, clock, 200, { verdict });
   }

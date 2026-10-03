@@ -166,6 +166,40 @@ test("a digest just stored is fresh, and the same digest 28 hours later is stale
   assert.equal(stale.body.verdict, "stale");
 });
 
+test("a fresh digest of an earlier UTC day gets no recorded notice", async () => {
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_recorded" } });
+  const stored = await recordAgentDigestItem({
+    agentKey: "qa-release",
+    kind: "daily_digest",
+    schemaVersion: 1,
+    idempotencyKey: "qa-release:monitor-test:yesterday",
+    payload: { a: 2 },
+  });
+  assert.equal(stored.status, "created");
+  // Moved to one second before the current UTC day began: under 28 hours old,
+  // so fresh, but of the previous day, so never announced.
+  await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" DISABLE TRIGGER "AgentDigestItem_before_update"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AgentDigestItem"
+          SET "createdAt" = date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' - INTERVAL '1 second'
+        WHERE "idempotencyKey" = 'qa-release:monitor-test:yesterday'`,
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
+  }
+  const answered = await call();
+  assert.deepEqual(answered, { status: 200, body: { verdict: "fresh" } });
+  assert.equal(await prisma.notificationDelivery.count({ where: { kind: "qa_release_digest_recorded" } }), 0);
+  // Remove it so the newest digest is the earlier test's again.
+  await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" DISABLE TRIGGER "AgentDigestItem_before_delete"`);
+  try {
+    await prisma.$executeRawUnsafe(`DELETE FROM "AgentDigestItem" WHERE "idempotencyKey" = 'qa-release:monitor-test:yesterday'`);
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_delete"`);
+  }
+});
+
 test("a stale verdict queues one silence alert per UTC date, however often the Monitor runs", async () => {
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
   assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
