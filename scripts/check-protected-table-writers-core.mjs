@@ -235,7 +235,7 @@ export const PROTECTED_TABLES = [
   {
     table: "SupportTriageRun",
     delegate: "supportTriageRun",
-    writers: ["lib/supportTriageRunStore.ts"],
+    writers: ["lib/supportTriageRunStore.ts", "lib/supportTriageRetention.ts"],
     contract: "docs/policy/support-triage.md §4",
   },
   {

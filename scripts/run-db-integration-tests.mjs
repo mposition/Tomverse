@@ -283,6 +283,10 @@ run(
     // Support-triage run writer: a run row and its system audit entry commit
     // or roll back together, and a late finish is recorded as such.
     "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
