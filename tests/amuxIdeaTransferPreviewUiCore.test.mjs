@@ -133,6 +133,12 @@ test("Admin UI gates preparation on an observed idea-only plan and provides exac
   assert.match(panel, /if \(previous\?\.kind === "present"\) \{[\s\S]*?await readBack\(previous\.previewId, previous\.model, previous\.effort\);/);
   assert.match(panel, /new URLSearchParams\(\{ previewId: pendingId \}\)/);
   assert.match(panel, /readPreparedIdeaTransferPreview\(response\.status, body/);
+  assert.match(panel, /m\.transferPreviewIncludedIdeaOnly/);
+  assert.match(panel, /m\.transferPreviewExcludedGitHub/);
+  const messages = readFileSync(new URL("../lib/adminMessages/amuxIdeaInput.ts", import.meta.url), "utf8");
+  assert.match(messages, /Included in this preview: your saved idea text only/);
+  assert.match(messages, /이번 미리보기 포함: 저장된 운영자 아이디어 원문만/);
+  assert.match(messages, /source-scope approval does not add their bytes/);
   assert.match(plan, /onCommitted\?\.\(ideaId\)/);
   assert.match(input, /planReady=\{submission\.kind === "submitted" && planReadyIdeaId === submission\.ideaId\}/);
   assert.match(page, /transferPreviewWritePermitted\(process\.env\[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV\]\)/);

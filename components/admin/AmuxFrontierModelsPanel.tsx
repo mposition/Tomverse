@@ -433,6 +433,12 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {preview.kind === "prepared" ? (
         <div className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
           <p role="status">{m.transferPreviewPrepared}</p>
+          <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+            {m.transferPreviewIncludedIdeaOnly}
+          </p>
+          <p className="text-xs text-zinc-700 dark:text-zinc-300">
+            {m.transferPreviewExcludedGitHub}
+          </p>
           <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
             {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
           <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
