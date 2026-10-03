@@ -9,6 +9,13 @@ import { consumePromptRefinerVnextOneShotSlot } from
   "@/lib/promptRefinerVnextOneShotSlotConsumption";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
+const DEFINITE_REFUSALS = new Set([
+  "vnext_one_shot_slot_request_invalid",
+  "vnext_one_shot_slot_reservation_unavailable",
+  "vnext_one_shot_slot_binding_mismatch",
+  "vnext_one_shot_slot_already_consumed",
+  "vnext_one_shot_slot_transition_conflict",
+]);
 const bodySchema = z.object({
   requestId: z.string().regex(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
   slotIndex: z.number().int().min(0).max(79),
@@ -47,8 +54,14 @@ export async function POST(request: Request) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    // An unknown outcome must be inspected, not sent again with a new request ID.
-    return NextResponse.json({ code: "SLOT_CONSUMPTION_UNAVAILABLE" },
+    if (error instanceof Error && DEFINITE_REFUSALS.has(error.message)) {
+      return NextResponse.json({ code: "SLOT_CONSUMPTION_REFUSED",
+        retryAuthorized: false }, { status: 409, headers });
+    }
+    // A commit or transport failure may be ambiguous. Inspect the content-free
+    // stage/slot/audit readback and hand off; never send again automatically.
+    return NextResponse.json({ code: "SLOT_CONSUMPTION_OUTCOME_UNKNOWN",
+      retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }
 }

@@ -9,7 +9,7 @@ const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
 const token = "synthetic-runner-token-with-at-least-32-characters";
 const requestId = "11111111-1111-4111-8111-111111111111";
 let writes = 0;
-let writeError = false;
+let writeError: "none" | "definite" | "unknown" = "none";
 let routePromise: Promise<{ POST: (request: Request) => Promise<Response> }> | null = null;
 
 function loadRoute() {
@@ -34,7 +34,10 @@ function loadRoute() {
           writes++;
           assert.deepEqual(input, { requestId, slotIndex: 0,
             runApprovalAuditLogId: "synthetic-run-audit" });
-          if (writeError) throw new Error("private database detail");
+          if (writeError === "definite") {
+            throw new Error("vnext_one_shot_slot_already_consumed");
+          }
+          if (writeError === "unknown") throw new Error("private database detail");
           return { requestId, slotIndex: 0,
             slotConsumptionAuditLogId: "synthetic-slot-audit",
             reservationConsumed: true, dispatchAuthorized: false };
@@ -101,14 +104,22 @@ test("strict input and failure response never claim dispatch or expose private e
     assert.deepEqual(await success.json(), { requestId, slotIndex: 0,
       slotConsumptionAuditLogId: "synthetic-slot-audit",
       reservationConsumed: true, dispatchAuthorized: false });
-    writeError = true;
+    writeError = "definite";
+    const refused = await route.POST(request());
+    assert.equal(refused.status, 409);
+    noStore(refused);
+    assert.deepEqual(await refused.json(), { code: "SLOT_CONSUMPTION_REFUSED",
+      retryAuthorized: false });
+    writeError = "unknown";
     const unavailable = await route.POST(request());
     assert.equal(unavailable.status, 503);
     noStore(unavailable);
-    assert.deepEqual(await unavailable.json(), { code: "SLOT_CONSUMPTION_UNAVAILABLE" });
-    assert.equal(writes, 2);
+    assert.deepEqual(await unavailable.json(), {
+      code: "SLOT_CONSUMPTION_OUTCOME_UNKNOWN", retryAuthorized: false,
+      humanReviewRequired: true });
+    assert.equal(writes, 3);
   } finally {
-    writeError = false;
+    writeError = "none";
     if (oldToken === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
     else process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = oldToken;
     if (oldFlag === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED;
