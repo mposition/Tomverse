@@ -33,6 +33,7 @@ const render = (overrides: Record<string, unknown> = {}) =>
       onRequest: () => {},
       onUseSuggestion: () => {},
       onKeepOriginal: () => {},
+      onDismiss: () => {},
       ...overrides,
     } as Parameters<typeof PromptRefinerSuggestionPanel>[0])
   );
@@ -85,6 +86,8 @@ test("accepted fixture is a read-only preview bound to the authored source", () 
   assert.ok(rendered.includes(promptRefinerCopy.ko.previewOnly));
   assert.equal(hasTestId(rendered, "prompt-refiner-use"), false);
   assert.equal(hasTestId(rendered, "prompt-refiner-request"), false);
+  assert.equal(hasTestId(rendered, "prompt-refiner-dismiss-preview"), true);
+  assert.equal((rendered.match(/min-h-11/g) ?? []).length, 1);
   const edited = render({ state, currentPrompt: "새로 작성한 문장" });
   assert.equal(hasTestId(edited, "prompt-refiner-accepted-preview"), false);
   assert.equal(hasTestId(edited, "prompt-refiner-request"), true);
@@ -105,7 +108,8 @@ test("requesting and failure copy promise that the original remains unchanged", 
   assert.equal(hasTestId(failed, "prompt-refiner-failed"), true);
   assert.match(failed, /원문은 바뀌지 않았/);
   assert.equal(failed.includes("internal"), false);
-  assert.equal((failed.match(/min-h-11/g) ?? []).length, 1);
+  assert.equal(hasTestId(failed, "prompt-refiner-dismiss-failed"), true);
+  assert.equal((failed.match(/min-h-11/g) ?? []).length, 2);
 });
 
 test("all seven locales offer explicit accept and keep-original decisions", () => {

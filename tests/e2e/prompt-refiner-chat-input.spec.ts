@@ -474,6 +474,39 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     await expect(page.getByTestId("prompt-refiner-ready")).toBeFocused();
   });
 
+  test("dismissing failure and accepted preview keeps the authored draft", async ({ page }) => {
+    const durable = await mockDurableDrafts(page);
+    await enterChat(page, { offered: true, durableChat: true });
+    await page.route("**/e2e/prompt-refiner-adapter", async (route) => {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        body: JSON.stringify({ refinedPrompt: "invalid response" }) });
+    }, { times: 1 });
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill(SOURCE_PROMPT);
+    await expect.poll(() => durable.writes.includes(SOURCE_PROMPT)).toBe(true);
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-failed")).toBeVisible();
+    await page.getByTestId("prompt-refiner-dismiss-failed").click();
+    await expect(page.getByTestId("prompt-refiner-idle")).toBeVisible();
+    await expect(textarea).toBeFocused();
+    await expect(textarea).toHaveValue(SOURCE_PROMPT);
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible({ timeout: 30_000 });
+    const synthetic = (await page.getByTestId("prompt-refiner-proposal").textContent()) ?? "";
+    expect(synthetic).not.toBe(SOURCE_PROMPT);
+    await page.getByTestId("prompt-refiner-use").click();
+    await expect(page.getByTestId("prompt-refiner-accepted-preview")).toBeVisible();
+    await page.getByTestId("prompt-refiner-dismiss-preview").click();
+    await expect(page.getByTestId("prompt-refiner-idle")).toBeVisible();
+    await expect(textarea).toBeFocused();
+    await expect(textarea).toHaveValue(SOURCE_PROMPT);
+    await page.waitForTimeout(1000);
+    expect(durable.writes).not.toContain(synthetic);
+    expect([...durable.drafts.values()].every((draft) => draft.text !== synthetic)).toBe(true);
+  });
+
   test("a maximum-length legal draft receives a bounded proposal", async ({ page }) => {
     await enterChat(page, { offered: true });
     await page.getByTestId("chat-textarea").fill("a".repeat(16_000));

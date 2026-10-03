@@ -25,6 +25,7 @@ export function PromptRefinerSuggestionPanel({
   onRequest,
   onUseSuggestion,
   onKeepOriginal,
+  onDismiss,
 }: {
   /** One server-owned eligibility decision. False leaves no disabled teaser. */
   offered: boolean;
@@ -36,6 +37,8 @@ export function PromptRefinerSuggestionPanel({
   onUseSuggestion: (suggestion: BoundPromptRefinerSuggestion) => void;
   /** The state owner must leave `ready` after either decision. */
   onKeepOriginal: (suggestion: BoundPromptRefinerSuggestion) => void;
+  /** Leave a failed request or read-only preview without changing the draft. */
+  onDismiss: (requestId: string) => void;
 }) {
   const copy = promptRefinerCopy[language] ?? promptRefinerCopy.en;
   const visible = visiblePromptRefinerState(state, currentPrompt);
@@ -186,6 +189,20 @@ export function PromptRefinerSuggestionPanel({
       >
         <span className="min-w-0 flex-1">{copy.failed}</span>
         <button
+          type="button"
+          data-testid="prompt-refiner-dismiss-failed"
+          disabled={interactionBlocked}
+          aria-label={
+            interactionProblemCopy
+              ? `${copy.keepOriginal}. ${interactionProblemCopy}`
+              : copy.keepOriginal
+          }
+          onClick={() => onDismiss(visible.request.requestId)}
+          className="min-h-11 shrink-0 rounded-full border border-amber-300 bg-white px-3 font-bold transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-zinc-950 dark:hover:bg-amber-950/50"
+        >
+          {copy.keepOriginal}
+        </button>
+        <button
           ref={failedRetryRef}
           type="button"
           data-testid="prompt-refiner-retry"
@@ -234,6 +251,22 @@ export function PromptRefinerSuggestionPanel({
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
           {copy.previewOnly}
         </p>
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            data-testid="prompt-refiner-dismiss-preview"
+            disabled={interactionBlocked}
+            aria-label={
+              interactionProblemCopy
+                ? `${copy.keepOriginal}. ${interactionProblemCopy}`
+                : copy.keepOriginal
+            }
+            onClick={() => onDismiss(visible.suggestion.requestId)}
+            className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {copy.keepOriginal}
+          </button>
+        </div>
       </section>
     );
   }

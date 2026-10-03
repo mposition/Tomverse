@@ -169,6 +169,7 @@ type MobileChatShellProps = {
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  onPromptRefinerDismiss?: (requestId: string) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -451,6 +452,7 @@ export function MobileChatShell({
   promptRefinerState,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1814,6 +1816,7 @@ export function MobileChatShell({
             promptRefinerState={promptRefinerState}
             onPromptRefinerRequest={onPromptRefinerRequest}
             onPromptRefinerDecision={onPromptRefinerDecision}
+            onPromptRefinerDismiss={onPromptRefinerDismiss}
             identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
