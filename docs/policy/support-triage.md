@@ -25,7 +25,7 @@ IaC 항목·feature flag 변경도 그 자체로 허가하지 않는다.
 
 | # | 판정 |
 |---|---|
-| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같고, 그 commit부터 base까지 그 목록 파일의 모든 변경이 그 파일 3절의 규칙을 따랐다 |
+| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같고, 그 commit부터 base까지 그 목록 파일의 모든 변경이 그 파일 3절의 규칙(version 증가, 그 파일만 바꾼 PR, 이전 목록에 있는 계정의 승인, `to-develop` 브랜치 아님)을 따랐다 |
 | 0a | 이 정책 파일의 `approvedBy`·`approvedAt`·정책 버전이 채워져 있고, 정책 버전이 직전 승인 버전보다 크다 |
 | 1 | 이 정책 파일을 마지막으로 바꾼 commit을 찾는다 |
 | 2 | 그 commit을 `develop`에 넣은 PR이 **정확히 하나**다 |
@@ -156,13 +156,13 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 | 그룹 신호 행 | 그룹이 비종결인 동안. `snapshotExpiresAt`이 지나면 삭제하고, `primaryKind` 행이면 그룹을 종결 |
 | 종결 그룹(`dismissed`·`expired`·`invalidated`) | 종결 뒤 30일 |
 | `not_queued` suggestion·그룹 | `createdAt` + 7일이면 승격 대상에서 빠지고 `expired`. WIP가 7일 동안 비지 않으면 사람이 한 번도 보지 못한 채 소멸할 수 있다는 것을 수용한다 |
-| 종결 그룹 key tombstone | 7일(cooldown). 이 기간에는 진짜 새 사건도 같은 key로 억제된다는 trade-off를 수용한다. 계정 삭제는 즉시 null |
+| 종결 그룹 key tombstone | 7일(cooldown). 이 기간에는 진짜 새 사건도 같은 key로 억제된다는 trade-off를 수용한다. key는 멤버 신고 집합에서 만들어지므로, 종결 전이는 멤버십을 지우면서 멤버 신고 id 목록 `retiredMemberIds`(최대 50, 분류 `identifier`)를 그룹 행에 남기고, cooldown이 끝나면 key와 함께 null로 지운다. **계정 삭제는 cooldown과 무관하게, 삭제된 신고가 멤버이거나 `retiredMemberIds`에 있는 그룹 행을 상태와 무관하게 지운다**(멤버십·신호는 cascade). 그래서 삭제된 신고의 id는 어떤 key·목록·멤버십·신호 행에도 남지 않는다 |
 | `SupportTriageRun` | 30일(content-free) |
 | `SupportTriageDecisionRecord`·`SupportTriageDecisionRecordLink` | **결정 뒤 12개월**(X2). link된 신고 중 하나라도 계정 삭제 대상이면 record와 모든 link를 즉시 삭제. 링크만 끊고 행을 남기는 상태는 없다. 목적은 결정의 결과 digest를 본문 삭제 뒤에도 남기는 것이다 |
 | 공통 `AgentDigestItem`(이 Agent 몫) | 본문 `payloadRetentionDays = 90`, 메타 행 `metaRetentionDays = 365`(팀 3 공통값) |
 
-- **보존 회차의 처리 능력.** 하루 48회 × 회차당 8배치 = 384배치. 유도 상한이 요구하는 것은 정상 크기(500행)에서
-  63배치, 바닥 크기(125행)에서 250배치다(8절). 그래서 이 정책은 **삭제 기한을 맞춘다**고 주장한다.
+- **보존 회차의 처리 능력.** 한 배치 transaction은 manifest의 모든 부류를 **부류마다 문장 하나**로, 문장마다 그 부류에서 최대 500행(바닥 125행)을 지운다. 그래서 하루 필요한 배치 수는 부류의 합계가 아니라 **가장 큰 부류**가 정하고, 그 부류는 그룹 신호 행(하루 31,200, 8절)이다 — 정상 크기 63배치, 바닥 크기 250배치. suggestion·멤버십·그룹·tombstone·run·결정 record와 link는 같은 배치 안의 자기 문장이 지우며, 각자 하루 생성량이 신호보다 작다.
+  하루 능력 48회 × 8배치 = 384배치는 **성공 배치 수가 아니라 시작할 수 있는 배치 수**이고, abort된 배치도 이 수를 쓴다. 바닥 요구 250을 빼고 남는 134배치가 abort 여유다. 이 산수는 배치 500행이 400ms 안에 끝난다는 측정되지 않은 전제 위에 있으므로, **P0c의 7일 관측이 (a) 완료 배치 0인 retention 회차 0회, (b) 관측 기간 마지막 회차의 `overdueRemaining = 0`, (c) `oldestOverdueAgeSeconds` 최대 86,400초 미만, (d) retention 요청 p95 ≤ 120초를 보이기 전에는 "삭제 기한을 맞춘다"를 확인된 것으로 취급하지 않고 P1을 시작하지 않는다.** 실패하면 원인이 처리량인지 독성 행인지 먼저 가르고, 처리량이면 배치 크기와 `C_guarded`를 다시 측정해 이 정책의 새 버전으로 고친다.
 - 한 배치가 `statement_timeout`으로 abort되면 다음 배치 크기를 500 → 250 → 125로 줄인다. 바닥에서 같은 회차에
   두 번 abort되면 커서를 그 창 너머로 전진시키고 `blocked`를 센다. 건너뛴 행은 다음 회차가 다시 시도한다.
 - **지워지지 않는 행은 수용 대상이 아니라 경보다.** 어떤 행이 자기 삭제 기한을 24시간 넘기면
@@ -175,7 +175,7 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 - **owner-bound 상한**: P1 동안 표본 판정 7일당 최대 10건, P1d 동안 표시된 결정 대기(WIP) 최대 10건, 각 7일 만료.
   상한에 닿으면 사람에게 보이는 자리로의 승격을 멈추고(P1 표본은 추출 자체를 멈춤) 만료된 항목은 `expired`로
   기록한다. 상한 계수와 승격·추출은 같은 Serializable transaction에서만 한다. 상한은 어떤 경우에도 넘지 않는다.
-- **배치 크기**: worker claim 10건, pass 50건. lease 5분, 갱신 없음.
+- **배치 크기**: worker claim 배치 10건, pass 50건(배치 5개). lease 5분, 갱신 없음. 실행은 single-flight가 아니다 — 예정 회차와 수동 재실행이 겹칠 수 있고, lease가 만료되면 다른 회차가 그 행을 다시 claim한다. 정확성은 단일 실행이 아니라 **fencing**이 진다: 쓰기는 `(id, state = claimed, claimToken)` 조건부 갱신이므로 새 claim 뒤에 도착한 옛 회차의 쓰기는 0행이 되고, 옛 회차가 자기 `deadlineAt`을 넘긴 transaction은 마지막 라운드트립의 마감 검사로 전체 rollback된다(4절). 겹친 두 pass에서도 owner-bound 상한과 그룹 key unique는 유지된다(통합 테스트가 두 연결로 고정).
 - **그룹 모델(Q20).** 그룹은 `primaryKind` 하나의 동치류이고, 그룹 행과 멤버 행이 같은 `primarySnapshotDigest`를
   들며 복합 FK가 이를 강제한다. 신호는 `(groupId, kind)` 한 행이다. 멤버 상한 50. 부차 kind의 신호 행은 그 값을
   멤버 전원이 공유할 때만 쓴다.
@@ -214,11 +214,11 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 |---|---|---|
 | `SupportTriageRun` UTC 날짜당 회차 | worker 52 · retention 52(예정 48 + 수동 여유 4) | **DB**: BEFORE INSERT trigger가 `(kind, UTC 날짜)` advisory 잠금 뒤 센다. 날짜와 `createdAt`은 한 timestamp에서 유도 |
 | suggestion 생성 | 하루 2,600 | 회차 DB × pass당 50 앱 |
-| 그룹 멤버십 | 하루 5,200 | 회차 DB × pass당 100(claim 50 + 이동 예산 50) 앱 |
+| 그룹 멤버십 | 하루 5,200 | 회차 DB × pass당 100(pass 몫 50 + 이동 예산 50) 앱 |
 | 그룹 | 하루 2,600 | 멤버 2 이상 |
 | 그룹 신호 행 | 하루 **31,200** | pass당 건드리는 그룹 ≤ 200 × 그룹당 ≤ 3(`(groupId, kind)` unique DB) × 52 |
 | 회차당 retention 배치 | 8 | 앱 계수기, 종료 행 CHECK는 증인 |
-| 감사(시스템) | **유도 상한 연 455,520행**(worker 246,740 + retention 208,780), **기대값 연 286,160행**(worker 227,760 + retention 58,400) | 회차 수 DB × 회차당 감사 수 앱 |
+| 감사(시스템) | **유도 상한 연 455,520행** = worker `13 × 52 × 365`(246,740) + retention `11 × 52 × 365`(208,780). 회차당 감사는 worker 13, retention 최대 11(시작 1 + digest 1 + 배치 8 + 종료 1). **기대값 연 286,160행** = worker `13 × 48 × 365`(227,760) + retention `(48 × 2 + 1 + 63) × 365`(58,400). retention 기대값은 회차 수 × 11이 아니라, 예정 48회의 시작·종료 감사 96 + digest 1(같은 날 두 번째부터는 `replayed`라 감사 없음) + 그날 실제로 필요한 배치 수(정상 크기 63)다 | 회차 수 DB × 회차당 감사 수 앱 |
 | 감사(사람 결정·계정 삭제) | 상한 없음, 합산하지 않음 | 운영 추정 사람 결정 20/일 |
 
 일부가 애플리케이션 값이므로 위 수치는 "강제 상한"이 아니라 "유도 상한"이다. `AdminAuditLog`는 지울 수
@@ -231,7 +231,7 @@ LLM 도입은 새 설계 revision, 새 독립 검토, 이 정책의 새 버전 �
 | P0a | 이 정책의 승인·병합 | — |
 | P0b | 구조 경계: adapter·정적 검사·삭제 manifest와 파생 테스트·감사 content-negative 테스트·timeout wrapper와 그 16/17 테스트·회차 상한 trigger·보존 회차·heartbeat 판정. flag는 모두 꺼진 상태 | 0절 판정 통과. 이 단계의 migration·삭제 계약은 `contract` 역할로 한다 |
 | P0c | 두 Railway 서비스 IaC apply(운영자), heartbeat·run·retention route 배포, 독립 감시 drill | P0b. P0b가 측정한 값이 수용 기준 이하임을 기록하고 운영자가 수용 |
-| P1 | `SUPPORT_TRIAGE_ENABLED`: 저장만, 인박스에 숨김. 표본 판정 목록만 표시 | P0c, **Q15(7팀 합산 owner-bound 상한과 계수 방식)와 Q16(팀 3이 감시자 감시·heartbeat page 키·caller actor 계약을 제공)의 운영자 결정** — 지금은 미결이며 결정 전에는 P1을 시작하지 않는다 |
+| P1 | `SUPPORT_TRIAGE_ENABLED`: 저장만, 인박스에 숨김. 표본 판정 목록만 표시 | P0c와 그 retention 7일 관측 통과(5절), 팀 3 공통 digest store·제출 경로·공통 Agent digest 영역의 배포, **Q15(7팀 합산 owner-bound 상한과 계수 방식)와 Q16(팀 3이 감시자 감시·heartbeat page 키·caller actor 계약을 제공)의 운영자 결정** — 지금은 미결이며 결정 전에는 P1을 시작하지 않는다 |
 | P1.5 | synthetic suggestion만으로 "보기 → 적용 → confirm" E2E | P0b, 템플릿 문구 승인 |
 | P1d | `SUPPORT_TRIAGE_DISPLAY_ENABLED`: 제안 표시 | P1의 30일·표본 30건 이상·lane 일치율 80% 이상·사람 lane 누락 0, P1.5 |
 
