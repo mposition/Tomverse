@@ -62,7 +62,7 @@ const cleanup = async () => {
   try {
     await prisma.$executeRawUnsafe(`DELETE FROM "QaReleaseOperatorControl"`);
     await prisma.$executeRawUnsafe(`DELETE FROM "AgentDigestItem" WHERE "agentKey" = 'qa-release'`);
-    await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed"] } } });
+    await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention"] } } });
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseOperatorControl" ENABLE TRIGGER "QaReleaseOperatorControl_before_delete"`);
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_delete"`);
@@ -90,16 +90,40 @@ test("recorded off is quiet; recorded on with no digest is stale; a stale revisi
   assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
   assert.deepEqual(await call({ headers: { "x-qa-release-control-revision": String(revision - 1) } }), {
     status: 409,
-    body: { error: "control_revision_mismatch" },
+    body: { error: "control_revision_mismatch", alerted: true },
   });
+  // One needs-a-check alert a day, whichever mismatch found it first.
   assert.deepEqual(await call({ env: { QA_RELEASE_MONITOR_SECRET: MONITOR } }), {
     status: 200,
-    body: { verdict: "control_mismatch" },
+    body: { verdict: "control_mismatch", alerted: false },
   });
   assert.deepEqual(await call({ env: { QA_RELEASE_MONITOR_SECRET: MONITOR, QA_RELEASE_DIGEST_SECRET: "short" } }), {
     status: 200,
-    body: { verdict: "control_mismatch" },
+    body: { verdict: "control_mismatch", alerted: false },
   });
+  const rows = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_attention" } });
+  assert.equal(rows.length, 1);
+  const [{ day }] = await prisma.$queryRaw<{ day: string }[]>`SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day`;
+  assert.equal(rows[0].referenceId, `attention:${day}`);
+  const audits = await prisma.adminAuditLog.findMany({
+    where: { action: "qa_release.attention_alerted", targetId: rows[0].id },
+    select: { metadata: true },
+  });
+  assert.equal(audits.length, 1);
+  assert.equal((audits[0].metadata as Record<string, unknown>).reason, "control_revision_mismatch");
+
+  // With no alert yet today, a control mismatch queues it under its own reason.
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_attention" } });
+  assert.deepEqual(await call({ env: { QA_RELEASE_MONITOR_SECRET: MONITOR } }), {
+    status: 200,
+    body: { verdict: "control_mismatch", alerted: true },
+  });
+  const [again] = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_attention" } });
+  const [audit] = await prisma.adminAuditLog.findMany({
+    where: { action: "qa_release.attention_alerted", targetId: again.id },
+    select: { metadata: true },
+  });
+  assert.equal((audit.metadata as Record<string, unknown>).reason, "control_mismatch");
 });
 
 test("a digest just stored is fresh, and the same digest 28 hours later is stale", async () => {
@@ -184,7 +208,7 @@ test("a round that fails with room left records the day's monitor-failure alert 
     let calls = 0;
     return () => (++calls === 4 ? 200_000 : 0);
   };
-  await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed"] } } });
+  await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention"] } } });
   const before = await prisma.adminAuditLog.count({ where: { action: "qa_release.monitor_failed" } });
   for (let round = 0; round < 2; round += 1) {
     assert.deepEqual(await call({ clock: lateThenBack() }), {

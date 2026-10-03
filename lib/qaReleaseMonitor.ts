@@ -7,6 +7,7 @@ import {
   type QaReleaseFreshnessVerdict,
   judgeQaReleaseFreshness,
   qaReleaseStaleReferenceId,
+  qaReleaseUtcDateKey,
   qaReleaseTransactionFits,
 } from "@/lib/qaReleaseDigestFreshnessCore";
 import {
@@ -23,7 +24,11 @@ import {
  * A `stale` verdict enqueues the silence alert on the operator notification
  * queue under `stale:<UTC date of the database clock>`; the queue's (kind,
  * referenceId) unique key makes it at most one per day, however often the
- * Monitor runs. The queue's own drain sends it.
+ * Monitor runs. The queue's own drain sends it. A control mismatch -- the
+ * digest secret gone while recorded as on, or a caller on another revision
+ * than the newest -- queues the needs-a-check alert the same way under
+ * `attention:<date>`, and a round that cannot finish queues the
+ * monitor-failure alert under `monitor-failure:<date>`.
  */
 
 /** The Monitor caller's own timeout (policy section 10, proposed 120 s) less a margin. */
@@ -52,13 +57,46 @@ const ALERT_LIMITS = QA_RELEASE_STALE_WRITE_LIMITS;
 /** Carries the late answer out of the transaction it rolls back (both writes). */
 class StaleAlertLate extends Error {}
 
+/** What a round found that needs an operator: closed names only. */
+export type QaReleaseAttentionReason = "control_mismatch" | "control_revision_mismatch";
+
 /**
- * Queues today's silence alert and its system audit entry in one
- * transaction (policy sections 5 and 7). Answers whether this round queued
- * it: a second stale round the same UTC day finds the row and writes nothing.
+ * The two daily alerts a round may queue. A round reaches at most one of
+ * them -- a stale verdict and a control mismatch exclude each other, and a
+ * revision mismatch ends the round before any verdict -- so both use the one
+ * alert-write slot of the round's budget (policy section 10).
  */
-async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<"queued" | "already_queued"> {
-  const referenceId = qaReleaseStaleReferenceId(dbNowMs);
+type DailyAlert =
+  | { which: "stale" }
+  | { which: "attention"; reason: QaReleaseAttentionReason };
+
+const DAILY_ALERTS = {
+  stale: {
+    kind: NOTIFICATION_KIND.qaReleaseDigestStale,
+    referenceId: (dbNowMs: number) => qaReleaseStaleReferenceId(dbNowMs),
+    action: "qa_release.digest_stale_alerted",
+    summary: "Queued the QA-release digest silence alert.",
+  },
+  attention: {
+    kind: NOTIFICATION_KIND.qaReleaseAttention,
+    referenceId: (dbNowMs: number) => `attention:${qaReleaseUtcDateKey(dbNowMs)}`,
+    action: "qa_release.attention_alerted",
+    summary: "Queued the QA-release needs-a-check alert.",
+  },
+} as const;
+
+/**
+ * Queues today's alert of one kind and its system audit entry in one
+ * transaction (policy sections 5 and 7). Answers whether this round queued
+ * it: a second round the same UTC day finds the row and writes nothing.
+ */
+async function enqueueDailyAlert(
+  alert: DailyAlert,
+  dbNowMs: number,
+  roundDeadline: Date,
+): Promise<"queued" | "already_queued"> {
+  const spec = DAILY_ALERTS[alert.which];
+  const referenceId = spec.referenceId(dbNowMs);
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT
@@ -70,13 +108,10 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
       // Under the statement limit, and before any row: the same order every
       // audit writer takes.
       await takeAuditChainLock(tx);
-      const queued = await enqueueNotificationDeliveryOnce(tx, {
-        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
-        referenceId,
-      });
+      const queued = await enqueueNotificationDeliveryOnce(tx, { kind: spec.kind, referenceId });
       // A row committed by a concurrent round after this statement began:
       // not known from here, so not reported as either answer.
-      if (queued === null) throw new Error("silence alert row not visible");
+      if (queued === null) throw new Error("alert row not visible");
       // Every path ends with the deadline check, the one that writes nothing too.
       const late = async () => {
         const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${roundDeadline}::timestamptz AS late`;
@@ -91,11 +126,11 @@ async function enqueueStaleAlert(dbNowMs: number, roundDeadline: Date): Promise<
       await writeSystemAuditLog({
         tx,
         systemActor: "qa-release-intake",
-        action: "qa_release.digest_stale_alerted",
+        action: spec.action,
         targetType: "NotificationDelivery",
         targetId: queued.id,
-        summary: "Queued the QA-release digest silence alert.",
-        metadata: { referenceId },
+        summary: spec.summary,
+        metadata: alert.which === "attention" ? { referenceId, reason: alert.reason } : { referenceId },
       });
       // The last statement: a round past its deadline is not recorded as a
       // success (policy section 3); the database clock decides.
@@ -284,7 +319,12 @@ export async function runQaReleaseMonitor(
   });
   if (!admission.ok) {
     if (admission.reason === "unauthorized") return answer(401, { error: "unauthorized" });
-    return answer(admission.reason === "control_revision_unavailable" ? 503 : 409, { error: admission.reason });
+    if (admission.reason === "control_revision_unavailable") return answer(503, { error: admission.reason });
+    // A service running another revision than the newest recorded one is
+    // refused and reported (policy section 6).
+    return alertRound({ which: "attention", reason: "control_revision_mismatch" }, read, startedAt, clock, 409, {
+      error: admission.reason,
+    });
   }
 
   let verdict: QaReleaseFreshnessVerdict;
@@ -300,10 +340,25 @@ export async function runQaReleaseMonitor(
   } catch {
     return failRound("monitor_clock_invalid", startedAt, clock);
   }
-  if (verdict !== "stale") return answer(200, { verdict });
+  if (verdict === "stale") return alertRound({ which: "stale" }, read, startedAt, clock, 200, { verdict });
+  // The digest secret gone while the agent is recorded as on (policy section 6).
+  if (verdict === "control_mismatch") {
+    return alertRound({ which: "attention", reason: "control_mismatch" }, read, startedAt, clock, 200, { verdict });
+  }
+  return answer(200, { verdict });
+}
 
+/** Queues the round's one daily alert and answers with `alerted` beside `body`. */
+async function alertRound(
+  alert: DailyAlert,
+  read: RoundRead,
+  startedAt: number,
+  clock: () => number,
+  status: number,
+  body: Record<string, unknown>,
+): Promise<QaReleaseMonitorAnswer> {
   if (!qaReleaseTransactionFits("stale_write", clock() - startedAt, MONITOR_ROUND_BUDGET_MS)) {
-    return answer(503, { verdict, error: "monitor_budget_exhausted" });
+    return answer(503, { ...body, error: "monitor_budget_exhausted" });
   }
   let queued: "queued" | "already_queued";
   try {
@@ -315,12 +370,19 @@ export async function runQaReleaseMonitor(
     // clocks never meet, so skew between them cannot move it.
     const elapsedAfterReadMs = clock() - startedAt;
     const roundDeadline = new Date(read.dbNowMs + MONITOR_ROUND_BUDGET_MS - elapsedAfterReadMs);
-    queued = await enqueueStaleAlert(read.dbNowMs, roundDeadline);
+    queued = await enqueueDailyAlert(alert, read.dbNowMs, roundDeadline);
   } catch (error) {
-    // The verdict stands; this round recorded nothing (a late round rolls
+    // The finding stands; this round recorded nothing (a late round rolls
     // back, and an earlier round's alert stays as it was), and nothing is
-    // retried here -- the next round tries again under the same key.
-    return failRound(error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed", startedAt, clock, { verdict });
+    // retried here -- the next round tries again under the same key. A
+    // refusal keeps its own name beside the failure.
+    const { error: refused, ...rest } = body;
+    return failRound(
+      error instanceof StaleAlertLate ? "monitor_deadline_passed" : "alert_enqueue_failed",
+      startedAt,
+      clock,
+      refused === undefined ? rest : { ...rest, refused },
+    );
   }
-  return answer(200, { verdict, alerted: queued === "queued" });
+  return answer(status, { ...body, alerted: queued === "queued" });
 }

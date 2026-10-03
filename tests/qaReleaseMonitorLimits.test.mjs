@@ -19,7 +19,7 @@ test("the silence-alert write uses the policy's nine statements: 32 s, Prisma 37
 });
 
 test("the write locks after the limits, audits in the same transaction, and checks the deadline last on every path", () => {
-  const fn = SOURCE.slice(SOURCE.indexOf("async function enqueueStaleAlert"), SOURCE.indexOf("export type QaReleaseMonitorAnswer"));
+  const fn = SOURCE.slice(SOURCE.indexOf("async function enqueueDailyAlert"), SOURCE.indexOf("export const QA_RELEASE_FAILURE_WRITE_LIMITS"));
   const order = [
     "set_config('statement_timeout'",
     "await takeAuditChainLock(tx);",

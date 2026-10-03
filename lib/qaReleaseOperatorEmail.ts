@@ -11,7 +11,7 @@ import { escapeHtml } from "@/lib/supportNotificationEmail";
  * re-renders and the provider's idempotency key needs the same payload.
  */
 
-export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed";
+export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed" | "attention";
 
 /** `stale:YYYY-MM-DD`, the reference id the Monitor enqueues under. */
 const STALE_REFERENCE = /^stale:(\d{4}-\d{2}-\d{2})$/;
@@ -25,9 +25,16 @@ const MONITOR_FAILURE_REFERENCE = /^monitor-failure:(\d{4}-\d{2}-\d{2})$/;
 export const qaReleaseMonitorFailureDateFromReference = (referenceId: string): string | null =>
   MONITOR_FAILURE_REFERENCE.exec(referenceId)?.[1] ?? null;
 
+/** `attention:YYYY-MM-DD`, the reference id an operator control mismatch enqueues under. */
+const ATTENTION_REFERENCE = /^attention:(\d{4}-\d{2}-\d{2})$/;
+
+export const qaReleaseAttentionDateFromReference = (referenceId: string): string | null =>
+  ATTENTION_REFERENCE.exec(referenceId)?.[1] ?? null;
+
 const SUBJECTS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale: "Tomverse QA release digest has gone quiet",
   monitor_failed: "Tomverse QA release digest check could not finish",
+  attention: "Tomverse QA release agent needs a check",
 };
 
 const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
@@ -35,6 +42,8 @@ const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
     "The QA release digest check found no current digest while the agent is recorded as on: none has been recorded, the newest is 28 hours old or older, or the newest is dated after the database clock. Nothing was decided or changed; open the Agent digests page to see the last digest and the operator control revision.",
   monitor_failed:
     "The QA release digest check could not finish a round, so whether the digest is current is not known. Nothing was decided or changed; open the Agent digests page to see the last digest, and the audit log for the reason recorded.",
+  attention:
+    "The QA release digest check found the recorded operator control and the running configuration disagree: a service presented an operator control revision other than the newest, or the digest secret is missing while the agent is recorded as on. Nothing was decided or changed; open the Agent digests page to compare the newest operator control revision with the services' settings.",
 };
 
 export const buildQaReleaseOperatorEmail = (

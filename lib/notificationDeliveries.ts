@@ -15,6 +15,7 @@ import {
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import {
   buildQaReleaseOperatorEmail,
+  qaReleaseAttentionDateFromReference,
   qaReleaseMonitorFailureDateFromReference,
   qaReleaseStaleDateFromReference,
 } from "@/lib/qaReleaseOperatorEmail";
@@ -96,6 +97,9 @@ export const NOTIFICATION_KIND = {
   // A Monitor round that could not reach a verdict or record its alert
   // (policy section 7). `monitor-failure:<UTC date>`, at most one per day.
   qaReleaseMonitorFailed: "qa_release_monitor_failed",
+  // An operator control mismatch the Monitor found (policy sections 6 and 7).
+  // `attention:<UTC date>`, at most one per day.
+  qaReleaseAttention: "qa_release_attention",
 } as const;
 
 export type NotificationKind =
@@ -132,6 +136,7 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operations",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
 };
 
 /**
@@ -162,6 +167,7 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "opera
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operator",
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operator",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
 };
 
 /** A kind this queue does not know is not a customer's: it is refused earlier. */
@@ -422,20 +428,25 @@ async function renderNotification(
     };
   }
 
-  if (kind === NOTIFICATION_KIND.qaReleaseDigestStale || kind === NOTIFICATION_KIND.qaReleaseMonitorFailed) {
+  const qaReleaseEmail =
+    kind === NOTIFICATION_KIND.qaReleaseDigestStale
+      ? ({ email: "digest_stale", date: qaReleaseStaleDateFromReference(referenceId) } as const)
+      : kind === NOTIFICATION_KIND.qaReleaseMonitorFailed
+        ? ({ email: "monitor_failed", date: qaReleaseMonitorFailureDateFromReference(referenceId) } as const)
+        : kind === NOTIFICATION_KIND.qaReleaseAttention
+          ? ({ email: "attention", date: qaReleaseAttentionDateFromReference(referenceId) } as const)
+          : null;
+  if (qaReleaseEmail) {
     // Rendered from the reference id alone: the alert carries a date and a
     // link, nothing the agent read.
-    const stale = kind === NOTIFICATION_KIND.qaReleaseDigestStale;
-    const date = stale
-      ? qaReleaseStaleDateFromReference(referenceId)
-      : qaReleaseMonitorFailureDateFromReference(referenceId);
+    const { date } = qaReleaseEmail;
     const recipient = supportNotificationRecipient();
     if (!date || !recipient) return null;
     const consoleBase =
       process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://tomverse.app";
     return {
       to: recipient,
-      ...buildQaReleaseOperatorEmail(stale ? "digest_stale" : "monitor_failed", {
+      ...buildQaReleaseOperatorEmail(qaReleaseEmail.email, {
         date,
         consoleUrl: `${consoleBase}/admin/agent-digests?tab=qa-release`,
       }),
