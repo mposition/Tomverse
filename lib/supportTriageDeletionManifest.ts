@@ -128,7 +128,50 @@ type ParsedSchema = {
 
 const FIELD_LINE = /^(\w+)\s+(\w+)(\[\]|\?)?(?:\s+(.*))?$/;
 const BLOCK_OPEN = /^(model|enum|generator|datasource|view|type)\s+(\w+)\s*\{(.*)$/;
-const RELATION_FIELDS = /@relation\([^)]*\bfields:\s*\[([^\]]*)\]/;
+/**
+ * The local columns named by a field's `@relation(..., fields: [...])`, read
+ * as Prisma reads arguments: strings are opaque (a relation name may contain
+ * `fields:` or a parenthesis), and only a top-level `fields:` argument counts.
+ * `null` when the attributes cannot be read that way.
+ */
+export const relationFieldsOf = (attributes: string): readonly string[] | null => {
+  const start = attributes.indexOf("@relation(");
+  if (start < 0) return [];
+  const args: string[] = [];
+  let depth = 0;
+  let current = "";
+  let i = start + "@relation(".length;
+  for (; i < attributes.length; i += 1) {
+    const char = attributes[i];
+    if (char === '"') {
+      let j = i + 1;
+      while (j < attributes.length && attributes[j] !== '"') j += attributes[j] === "\\" ? 2 : 1;
+      if (j >= attributes.length) return null;
+      current += attributes.slice(i, j + 1);
+      i = j;
+    } else if (char === "[" || char === "(") {
+      depth += 1;
+      current += char;
+    } else if (char === "]" || (char === ")" && depth > 0)) {
+      depth -= 1;
+      current += char;
+    } else if (char === ")") {
+      args.push(current.trim());
+      break;
+    } else if (char === "," && depth === 0) {
+      args.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (i >= attributes.length) return null;
+  const named = args.find((arg) => /^fields\s*:/.test(arg));
+  if (!named) return [];
+  const list = /^fields\s*:\s*\[([^\]"]*)\]$/.exec(named);
+  if (!list) return null;
+  return list[1].split(",").map((column) => column.trim()).filter(Boolean);
+};
 
 /**
  * Removes `//` and `/* *\/` comments the way Prisma reads them: a comment
@@ -218,10 +261,11 @@ export const parsePrismaSchema = (schema: string): ParsedSchema => {
       }
       const [, fieldName, type, , attributes = ""] = match;
       if (modelNames.has(type)) {
-        const named = RELATION_FIELDS.exec(attributes);
-        const relationFields = named
-          ? named[1].split(",").map((column) => column.trim()).filter(Boolean)
-          : [];
+        const relationFields = relationFieldsOf(attributes);
+        if (relationFields === null) {
+          modelUnreadable.push(line);
+          continue;
+        }
         fields.push({ name: fieldName, type, relation: true, relationFields });
       } else if (SCALAR_TYPES.has(type) || enums.has(type)) {
         fields.push({ name: fieldName, type, relation: false, relationFields: [] });

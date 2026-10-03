@@ -216,3 +216,25 @@ test("negative control: an untyped link backed by a relation, or not named feedb
   ];
   assert.ok(auditDeletionManifest(edited, manifest).some((f) => /backed by a relation; declare it typed/.test(f)));
 });
+
+test("relation arguments are read as Prisma reads them", async () => {
+  const { relationFieldsOf } = await import("../lib/supportTriageDeletionManifest.ts");
+  assert.deepEqual(relationFieldsOf('@relation(fields: [feedbackId], references: [id])'), ["feedbackId"]);
+  assert.deepEqual(relationFieldsOf('@relation("fields: [id]")'), []);
+  assert.deepEqual(relationFieldsOf('@relation("a)b", fields: [x, y], references: [id, k])'), ["x", "y"]);
+  assert.deepEqual(relationFieldsOf("@default(now())"), []);
+  assert.equal(relationFieldsOf('@relation("unterminated'), null);
+  assert.equal(relationFieldsOf("@relation(fields: [a]"), null);
+});
+
+test("negative control: a relation name that spells fields: is not a foreign key", () => {
+  const edited = schema
+    .replace(/^(model SupportTriageRun \{\n)/m, '$1  feedback Feedback[] @relation("fields: [id]")\n')
+    .replace(/^(model Feedback \{\n)/m, '$1  triageRun SupportTriageRun? @relation("fields: [id]", fields: [triageRunId], references: [id])\n  triageRunId String?\n');
+  const manifest = [
+    { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0], link: { kind: "feedback_id", column: "id" }, onAccountDeletion: "delete" },
+  ];
+  assert.ok(
+    auditDeletionManifest(edited, manifest).some((f) => /link column id is not the foreign key of a relation to Feedback/.test(f))
+  );
+});
