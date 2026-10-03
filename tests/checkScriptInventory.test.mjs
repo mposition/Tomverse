@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,14 +26,6 @@ const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const checkScripts = Object.keys(manifest.scripts ?? {}).filter((name) =>
   name.startsWith("check:")
 );
-
-/** The .mjs file a `check:*` command runs, read as text. */
-const sourceOf = (script) => {
-  const command = manifest.scripts[script];
-  const file = command.match(/(scripts\/[\w.-]+\.mjs)/)?.[1];
-  assert.ok(file, `${script} runs a scripts/*.mjs file`);
-  return readFileSync(join(root, file), "utf8");
-};
 
 test("every classified script is still a declared check script", () => {
   for (const script of classifiedScripts()) {
@@ -58,29 +51,58 @@ test("every entry states a reason", () => {
   }
 });
 
+/**
+ * Runs a `check:*` command with nothing supplied, and returns how it refused.
+ *
+ * Grepping the source for "is required" was the first version of this and it
+ * proved nothing: the usage *comment* at the top of each file matched, so a
+ * script that gained a default or lost its refusal branch would still have
+ * passed. The exit code is the only thing a comment cannot fake.
+ *
+ * `without` names environment variables to remove, because a machine that
+ * happens to hold the credential would otherwise watch the check run for real
+ * -- which is exactly the mistake that produced the first, wrong inventory.
+ */
+const refusalOf = (script, without = []) => {
+  const env = { ...process.env };
+  for (const key of without) delete env[key];
+  const result = spawnSync(process.execPath, ["--run", script], {
+    cwd: root,
+    encoding: "utf8",
+    env,
+  });
+  return {
+    status: result.status,
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+  };
+};
+
+/** Escapes a literal for use inside a RegExp. */
+const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 for (const entry of ARGUMENT_REQUIRED_CHECKS) {
-  test(`${entry.script} still refuses without its argument`, () => {
-    const source = sourceOf(entry.script);
-    // The refusal, not the exit code: all five print what they need, and a
-    // tool that stopped printing it would be a worse tool even if it still
-    // exited non-zero.
-    assert.match(
-      source,
-      /is required|Usage:/,
-      "a tool that no longer says what it needs has become something else -- " +
-        "if it gained a default it is a gate now, so take it out of the inventory."
+  test(`${entry.script} refuses with no argument`, () => {
+    const { status, output } = refusalOf(entry.script);
+    assert.notEqual(
+      status,
+      0,
+      "a tool that now succeeds with no argument has become a gate -- take it " +
+        "out of the inventory rather than leaving it excused here."
     );
+    // The flag's own name too: a non-zero exit that no longer says what it
+    // wants is not a usable tool, whatever the inventory claims about it.
+    assert.match(output, new RegExp(literal(entry.flag.replace(/[=<].*$/, ""))));
   });
 }
 
 for (const entry of ENVIRONMENT_REQUIRED_CHECKS) {
-  test(`${entry.script} still names what it needs from the environment`, () => {
-    const variable = entry.requires.split("=")[0];
-    assert.match(
-      sourceOf(entry.script),
-      new RegExp(variable),
-      `${entry.script} should still read ${variable}`
-    );
+  const variable = entry.requires.split("=")[0];
+  test(`${entry.script} refuses without ${variable}`, () => {
+    // Each of these refuses before it calls out or writes anything, which is
+    // what makes spawning them here safe: no request, no mail, no spend.
+    const { status, output } = refusalOf(entry.script, [variable]);
+    assert.notEqual(status, 0, `${entry.script} should fail closed without ${variable}`);
+    assert.match(output, new RegExp(literal(variable)));
   });
 }
 
