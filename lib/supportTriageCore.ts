@@ -281,3 +281,23 @@ export const allocatePromotionBudget = (
   }
   return { admitted, deferred, movesUsed: used, remainingAfter: remainingBudget - used };
 };
+
+/**
+ * `SupportTriageRun` (policy sections 4 and 8): one row per run. The kinds and
+ * outcomes below are the CHECK lists of migration
+ * 20261003120000_support_triage_run; `npm run check:enum-constraints`
+ * compares them.
+ */
+export const SUPPORT_TRIAGE_RUN_KINDS = Object.freeze(["worker", "retention"] as const);
+export const SUPPORT_TRIAGE_RUN_OUTCOMES = Object.freeze([
+  "running",
+  "success",
+  "partial",
+  "failed",
+  "deadline_exceeded",
+] as const);
+export type SupportTriageRunKind = (typeof SUPPORT_TRIAGE_RUN_KINDS)[number];
+export type SupportTriageRunOutcome = (typeof SUPPORT_TRIAGE_RUN_OUTCOMES)[number];
+
+/** A run row may be deleted only once it is this old; younger rows are immutable evidence. */
+export const SUPPORT_TRIAGE_RUN_RETENTION_DAYS = 30;

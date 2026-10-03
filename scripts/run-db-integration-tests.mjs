@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -109,18 +111,22 @@ if (group) {
  * A step whose arguments name no suite at all -- the Prisma schema build -- is
  * never filtered. Each lane gets its own database and has to build it.
  */
-const run = (args, label) => {
+const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
   console.log(`\n[db-integration] ${label}`);
   const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
-    env: testEnvironment,
+    env: { ...testEnvironment, ...environmentOverrides },
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -239,6 +245,18 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
+    // The digest intake: secret, control revision and switch, closed schema,
+    // then the single writer; one digest per UTC day.
+    "tests/integration/qa-release-digest-intake.db.test.ts",
+    // The Monitor silence check: its own secret, the control revision, then
+    // the freshness verdict over the database clock.
+    "tests/integration/qa-release-monitor.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
@@ -266,6 +284,21 @@ run(
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
+    // Support-triage run writer: a run row and its system audit entry commit
+    // or roll back together, and a late finish is recorded as such.
+    "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
@@ -619,6 +652,24 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// This suite creates and drops only its own synthetic schema. Give its Prisma
+// client that exact schema rather than letting it see the lane's public tables.
+const oneShotAuditSuite =
+  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
+  fail("the isolated one-shot audit suite requires a dedicated test database name");
+}
+const oneShotTestUrl = new URL(rawTestDatabaseUrl);
+oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    oneShotAuditSuite],
+  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
+    DATABASE_URL: oneShotTestUrl.toString(),
+    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

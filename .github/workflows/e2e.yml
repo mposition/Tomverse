@@ -1,4 +1,11 @@
 name: Main Chromium Regression
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # This workflow owns the desktop-chromium coverage that PR Fast Gate no
 # longer runs. PR Fast Gate runs only the 25 `@smoke` contracts (see
@@ -163,6 +170,12 @@ jobs:
     # it -- and at three green runs with ten minutes in hand, the case for
     # more shards is not there yet. The next time a shard nears the ceiling
     # is when it is.
+    #
+    # Six since 2026-10-03, when this run became a required check on every
+    # pull request into main and its wall clock (p50 35 minutes, set by shard
+    # 1) became merge latency. The sixth shard costs one more duplicated build
+    # (~1.5 runner-minutes); the weights on the run step below are what make
+    # the split even, since equal counts were never even work.
     timeout-minutes: 40
     strategy:
       # A failing shard must not cancel its siblings. Their results are the
@@ -170,8 +183,8 @@ jobs:
       # into an unreadable run.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
-        shards: [5]
+        shard: [1, 2, 3, 4, 5, 6]
+        shards: [6]
     # Keep the production client bundle on the same deterministic Turnstile
     # configuration used by the isolated Playwright server.
     env:
@@ -190,13 +203,13 @@ jobs:
 
       - name: Restore Next.js build cache
         continue-on-error: true
-        # Restore always, save only on a pull-request run. This workflow can also
-        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
-        # release branch -- and an entry written in the default-branch or develop
-        # scope is restorable by every run that can see it, the required gate
-        # included. A pull-request run writes to its own merge ref, which only that
-        # pull request can restore, so it keeps the cache warm without widening
-        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        # Restore only. Nothing can write this entry any more: this workflow can
+        # run on develop or main, so its cache-mode is read and GitHub refuses the
+        # write at the token (measured -- "cache write denied: token has no
+        # writable scopes"). The save step that used to sit after this one spent
+        # the compression time and then warned, every run, so it is gone. The
+        # reader half stays because every way of warming this again needs it:
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
         uses: actions/cache/restore@v5
         with:
           path: .next/cache
@@ -214,30 +227,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Each shard builds for itself. The shards share a cache key, so the
-      # first to arrive populates .next/cache and the others restore it; the
-      # duplicated work is bounded and buys the wall-clock the split exists for.
+      # Each shard builds for itself. The shards share a cache key, which used
+      # to mean the first to arrive populated .next/cache and the others
+      # restored it. Nothing populates it now -- `cache-mode: read` at the top
+      # of this file leaves the token no write -- so every shard pays the full
+      # build. The duplicated work is bounded and still buys the wall-clock the
+      # split exists for.
       - name: Build once for the Chromium test server
         run: npm run build
 
-      - name: Save the Next.js build cache
-        # Only the pull-request scope. See the restore step above.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: .next/cache
-          key: ${{ runner.os }}-next-v2-main-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
-
       - name: Restore Playwright Chromium cache
         continue-on-error: true
-        # Restore always, save only on a pull-request run. This workflow can also
-        # run outside a pull request -- a dispatch on a chosen ref, or a push to a
-        # release branch -- and an entry written in the default-branch or develop
-        # scope is restorable by every run that can see it, the required gate
-        # included. A pull-request run writes to its own merge ref, which only that
-        # pull request can restore, so it keeps the cache warm without widening
-        # anything. .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        # Restore only. Nothing can write this entry any more: this workflow can
+        # run on develop or main, so its cache-mode is read and GitHub refuses the
+        # write at the token (measured -- "cache write denied: token has no
+        # writable scopes"). The save step that used to sit after this one spent
+        # the compression time and then warned, every run, so it is gone. The
+        # reader half stays because every way of warming this again needs it:
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
         uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
@@ -254,16 +261,30 @@ jobs:
       - name: Install Chromium
         run: scripts/ci/install-playwright.sh chromium
 
-      - name: Save the Playwright Chromium cache
-        # Only the pull-request scope. See the restore step above.
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/cache/save@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-v2-main-${{ hashFiles('package-lock.json') }}-chromium
-
+      # Shard weights, one per shard, in shard order.
+      #
+      # `--shard` balances by test count, and a test that skips itself at run
+      # time (`test.skip(testInfo.project.name !== ...)`, ~100 call sites) still
+      # counts. The desktop-chromium tests sort first and almost never skip, so
+      # equal counts gave shard 1 the most real work: on 2026-10-03 the five
+      # shards ran 1205/1031/881/900/850 tests (26/216/333/337/359 skipped),
+      # and over the last 16 green runs the p50 shard times were
+      # 35.0/28.3/26.8/25.6/23.5 minutes -- the run is as slow as shard 1.
+      #
+      # The weights below give each of the six shards the share of the count
+      # axis that takes the same time at those p50 densities (~22 minutes of
+      # tests each, estimated; 131.7 test-minutes in total).
+      # Every test still lands in exactly one shard -- weights move the
+      # boundaries, nothing else -- and a count that no longer matches
+      # `shards` fails the run loudly (tests/mainChromiumShardWeights.test.mjs
+      # pins the pairing first). PWTEST_SHARD_WEIGHTS is Playwright's own,
+      # undocumented knob (lib/cli/testActions.js); if a release drops it, the
+      # split falls back to equal counts, which is today's behaviour.
+      # Recalibrate from fresh shard timings when one shard drifts well past
+      # the others.
       - name: Run Chromium desktop and mobile E2E tests
+        env:
+          PWTEST_SHARD_WEIGHTS: "81:91:103:106:113:121"
         run: npm run test:e2e:chromium -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence

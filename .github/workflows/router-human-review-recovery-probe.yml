@@ -1,4 +1,11 @@
 name: Router eval — human review recovery probe
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # Stage one of two. It draws nothing, reads no bundle and names no reviewer.
 #

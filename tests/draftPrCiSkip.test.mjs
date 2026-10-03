@@ -4,26 +4,25 @@ import test from "node:test";
 
 import { parse } from "yaml";
 
-// A draft release PR (develop -> main) and a draft stacked on another branch
-// run nothing; a ready one, or a draft into develop, runs everything. See the header of .github/workflows/pr-fast-gate.yml for why.
-// The condition is copied into every job, so this keeps the copies honest.
+// A draft pull request runs nothing; marking it ready runs everything. See the
+// header of .github/workflows/pr-fast-gate.yml for why. The condition is
+// copied into every job, so this keeps the copies honest.
 
-const RUN_UNLESS_SKIPPED_DRAFT =
-    "github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')";
+const RUN_UNLESS_DRAFT = "github.event_name != 'pull_request' || !github.event.pull_request.draft";
 
-// The workflows that run on pull requests into develop or main and occupy a
-// runner. A new one either joins this list or says here why it does not.
+// The workflows that run on pull requests and occupy a runner. A new one
+// either joins this list or says here why it does not.
 const GUARDED = [
     "admin-console-e2e.yml",
     "codeql.yml",
     "credit-finance-db-integration.yml",
+    "e2e.yml",
     "orchestrator-rust.yml",
     "pr-fast-gate.yml",
     "review-parity-shadow.yml",
     "secret-history-scan.yml",
 ];
 const EXEMPT = new Map([
-    ["e2e.yml", "skips every draft into main, a superset of this condition"],
     ["feedback-autofix-promotion-pr.yml", "runs only on a closed pull request"],
 ]);
 
@@ -46,7 +45,7 @@ test("every pull-request workflow is guarded or exempt with a reason", () => {
 });
 
 for (const name of GUARDED) {
-    test(`${name}: every job skips a draft release or stacked PR`, () => {
+    test(`${name}: every job skips a draft pull request`, () => {
         const workflow = load(name);
         for (const [id, job] of Object.entries(workflow.jobs)) {
             const condition = String(job.if ?? "");
@@ -54,8 +53,7 @@ for (const name of GUARDED) {
                 continue; // never runs for a pull request at all
             }
             assert.ok(
-                condition === RUN_UNLESS_SKIPPED_DRAFT ||
-                    condition === `always() && (${RUN_UNLESS_SKIPPED_DRAFT})`,
+                condition === RUN_UNLESS_DRAFT || condition === `always() && (${RUN_UNLESS_DRAFT})`,
                 `${name} job ${id} has if: ${condition || "(none)"}`
             );
         }
@@ -63,7 +61,7 @@ for (const name of GUARDED) {
 
     test(`${name}: marking a draft ready starts a run`, () => {
         // Without it the skipped check from the last draft push would stand
-        // as the required check's verdict when the release PR is merged.
+        // as the required check's verdict when the pull request is merged.
         const types = load(name).on.pull_request?.types ?? [];
         for (const type of ["opened", "synchronize", "reopened", "ready_for_review"]) {
             assert.ok(types.includes(type), `${name} pull_request.types lacks ${type}`);
@@ -71,22 +69,21 @@ for (const name of GUARDED) {
     });
 }
 
-test("the condition runs and skips exactly the intended pull requests", () => {
-    // Evaluate the expression's logic directly: draft x base x head.
-    const runs = ({ draft, base, head }) =>
-        !draft || base === "develop" || (base === "main" && head !== "develop");
-    const cases = [
-        [{ draft: true, base: "main", head: "develop" }, false], // draft release
-        [{ draft: true, base: "codex/to-main/amux-v4-x", head: "codex/to-main/amux-v4-y" }, false], // stacked
-        [{ draft: true, base: "develop", head: "claude/to-develop/x" }, true],
-        [{ draft: true, base: "main", head: "hotfix/x" }, true],
-        [{ draft: false, base: "main", head: "develop" }, true], // ready release
-        [{ draft: false, base: "codex/to-main/amux-v4-x", head: "codex/to-main/amux-v4-y" }, true],
-    ];
-    for (const [pr, expected] of cases) assert.equal(runs(pr), expected, JSON.stringify(pr));
-    // And the expression in the workflows is the one these cases describe.
-    assert.equal(
-        RUN_UNLESS_SKIPPED_DRAFT,
-        "github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')"
+test("edited is not a trigger anywhere the condition applies", () => {
+    // It fires on a title change; a skipped run there would replace a failed
+    // verdict and cancel a real run in progress.
+    for (const name of GUARDED) {
+        const types = load(name).on.pull_request?.types ?? [];
+        assert.ok(!types.includes("edited"), `${name} triggers on edited`);
+    }
+});
+
+test("Auto PR to Develop opens a draft", () => {
+    // The skip only saves runners if branches start as drafts; the agent marks
+    // the pull request ready when the branch is complete.
+    const step = load("auto-pr-to-develop.yml").jobs["auto-pr"]?.steps?.find((candidate) =>
+        String(candidate.run ?? "").includes("gh pr create")
     );
+    assert.ok(step, "the PR creation step exists");
+    assert.match(step.run, /gh pr create \\\n\s+--draft \\/);
 });

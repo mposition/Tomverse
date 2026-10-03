@@ -7,7 +7,7 @@
 // able to reach.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
@@ -38,7 +38,7 @@ const recordingDsl = () => {
   };
 };
 
-test("every runner's start command is a real npm script", () => {
+test("every runner's start command resolves: an npm script, or a node entry file that exists", () => {
   const scripts = JSON.parse(
     readFileSync(join(process.cwd(), "package.json"), "utf8")
   ).scripts;
@@ -46,8 +46,15 @@ test("every runner's start command is a real npm script", () => {
     // `npm run <name>` and `npm run <name> -- <flag>` both have to resolve: a
     // start command Railway cannot run is a cron that fails every night, and
     // the deploy log is the only place it would say so.
+    // A runner whose start check refuses unknown variable names starts node
+    // directly: npm run adds npm_*, INIT_CWD and NODE to the environment.
+    const direct = /^node --experimental-strip-types (scripts\/[a-z0-9/-]+\.mjs)$/.exec(runner.startCommand);
+    if (direct) {
+      assert.ok(existsSync(join(process.cwd(), direct[1])), `${runner.service}: ${direct[1]} does not exist`);
+      continue;
+    }
     const match = /^npm run ([a-z0-9:-]+)(?: -- .+)?$/.exec(runner.startCommand);
-    assert.ok(match, `${runner.service}: start command is not an npm run invocation`);
+    assert.ok(match, `${runner.service}: start command is neither npm run nor a node entry`);
     assert.ok(scripts[match[1]], `${runner.service}: package.json has no "${match[1]}" script`);
   }
   assert.equal(
@@ -245,6 +252,27 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   }
 });
 
+test("the QA-release services declare exactly the variables their start check accepts", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  for (const [key, service] of [["qa_release_digest", "digest"], ["qa_release_monitor", "monitor"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...QA_RELEASE_SERVICE_VARIABLES[service]].sort(), `${key} ${environment}`);
+    }
+  }
+  // The Monitor's 30-minute cron, approved by the operator on 2026-10-03.
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, "*/30 * * * *");
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_digest").cronSchedule, "0 21 * * *");
+});
+
+test("the QA-release services start node directly, so npm adds nothing their start check would refuse", () => {
+  for (const key of ["qa_release_digest", "qa_release_monitor"]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.match(runner.startCommand, /^node --experimental-strip-types scripts\/qa-release-[a-z]+-service\.mjs$/, key);
+  }
+});
+
 test("the region is named rather than left to Railway's default", () => {
   // The approved policy's APP 8 record states where this agent processes
   // data. A service placed by default would be in `sfo`, which that record
@@ -261,4 +289,16 @@ test("the region is named rather than left to Railway's default", () => {
       );
     }
   }
+});
+
+test("the billing-finance-ops trigger declares exactly the variables its start check accepts, and starts node directly", async () => {
+  const { BILLING_FINANCE_OPS_SERVICE_VARIABLES } = await import("../lib/billingFinanceOpsServiceCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "billing_finance_ops_deadline");
+  assert.ok(runner);
+  for (const environment of ["production", "staging"]) {
+    assert.deepEqual([...runner.environments[environment]].sort(), [...BILLING_FINANCE_OPS_SERVICE_VARIABLES].sort(), environment);
+  }
+  // docs/policy/billing-finance-ops.md §1.1: once a day at 01:00 UTC.
+  assert.equal(runner.cronSchedule, "0 1 * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
 });

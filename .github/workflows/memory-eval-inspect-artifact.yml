@@ -1,4 +1,11 @@
 name: Memory eval — inspect a preserved artifact
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # Reads a run that already happened. It calls no provider, holds no provider
 # key and carries no live-mode step, so unlike the decision-grade workflow it

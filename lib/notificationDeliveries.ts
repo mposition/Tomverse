@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,6 +13,13 @@ import {
   type RefundEmailStage,
 } from "@/lib/billingEmails";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
+import {
+  buildQaReleaseOperatorEmail,
+  qaReleaseAttentionDateFromReference,
+  qaReleaseDigestRecordedDateFromReference,
+  qaReleaseMonitorFailureDateFromReference,
+  qaReleaseStaleDateFromReference,
+} from "@/lib/qaReleaseOperatorEmail";
 import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import { qualifiesForTraceAutoReview } from "@/lib/feedbackTraceAutoReview";
@@ -82,6 +91,19 @@ export const NOTIFICATION_KIND = {
   autoFixReviewRequested: "autofix_review_requested",
   autoFixProductionVerified: "autofix_production_verified",
   autoFixPromotionFailed: "autofix_promotion_failed",
+  // The QA-release Monitor's silence alert (docs/policy/qa-release-agent.md
+  // section 7). The referenceId is `stale:<UTC date>`, so the (kind,
+  // referenceId) unique constraint makes it at most one per day.
+  qaReleaseDigestStale: "qa_release_digest_stale",
+  // A Monitor round that could not reach a verdict or record its alert
+  // (policy section 7). `monitor-failure:<UTC date>`, at most one per day.
+  qaReleaseMonitorFailed: "qa_release_monitor_failed",
+  // An operator control mismatch the Monitor found (policy sections 6 and 7).
+  // `attention:<UTC date>`, at most one per day.
+  qaReleaseAttention: "qa_release_attention",
+  // The day's QA-release digest was recorded (policy section 7).
+  // `recorded:<UTC date of the digest>`, at most one per day.
+  qaReleaseDigestRecorded: "qa_release_digest_recorded",
 } as const;
 
 export type NotificationKind =
@@ -116,6 +138,10 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.autoFixReviewRequested]: "operations",
   [NOTIFICATION_KIND.autoFixProductionVerified]: "operations",
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
+  [NOTIFICATION_KIND.qaReleaseDigestStale]: "operations",
+  [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operations",
 };
 
 /**
@@ -144,6 +170,10 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "opera
   [NOTIFICATION_KIND.autoFixReviewRequested]: "operator",
   [NOTIFICATION_KIND.autoFixProductionVerified]: "operator",
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operator",
+  [NOTIFICATION_KIND.qaReleaseDigestStale]: "operator",
+  [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operator",
 };
 
 /** A kind this queue does not know is not a customer's: it is refused earlier. */
@@ -176,6 +206,41 @@ const DEFAULT_TIME_BUDGET_MS = 120_000;
  * before anyone notices missing mail, rather than only when rows abandon.
  */
 export const NOTIFICATION_QUEUE_DEPTH_ALERT = 100;
+
+/**
+ * Enqueues a notification inside an existing transaction in exactly one SQL
+ * statement, and says whether this call created the row.
+ *
+ * For a caller whose transaction is counted statement by statement (the
+ * QA-release Monitor, docs/policy/qa-release-agent.md section 10): Prisma's
+ * `upsert` with an empty update is not a native upsert and runs as three
+ * statements (read, insert, read back). An existing row is left exactly as
+ * it is, like `enqueueNotificationDelivery`. The timestamps are the database
+ * clock in UTC, the zone Prisma writes these naive columns in.
+ *
+ * Null when the row was inserted by a transaction that committed after this
+ * statement began: the conflict skips the insert and this statement's
+ * snapshot cannot see the row. The caller treats that as an unknown outcome.
+ */
+export async function enqueueNotificationDeliveryOnce(
+  tx: Prisma.TransactionClient,
+  input: { kind: NotificationKind; referenceId: string }
+): Promise<{ id: string; inserted: boolean } | null> {
+  const rows = await tx.$queryRaw<{ id: string; inserted: boolean }[]>`
+    WITH inserted AS (
+      INSERT INTO "NotificationDelivery" ("id", "kind", "referenceId", "nextAttemptAt", "createdAt", "updatedAt")
+      SELECT ${randomUUID()}, ${input.kind}, ${input.referenceId}, now_.t, now_.t, now_.t
+        FROM (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS t) now_
+      ON CONFLICT ("kind", "referenceId") DO NOTHING
+      RETURNING "id"
+    )
+    SELECT "id", true AS inserted FROM inserted
+    UNION ALL
+    SELECT d."id", false AS inserted FROM "NotificationDelivery" d
+     WHERE d."kind" = ${input.kind} AND d."referenceId" = ${input.referenceId}
+       AND NOT EXISTS (SELECT 1 FROM inserted)`;
+  return rows.length === 1 ? rows[0] : null;
+}
 
 /**
  * Enqueues a notification inside an existing transaction.
@@ -365,6 +430,33 @@ async function renderNotification(
         productionMergeSha: autoFixCase.productionMergeSha,
         terminalReason: autoFixCase.terminalReason,
         consoleUrl: `${consoleBase}/admin/support?tab=fixes`,
+      }),
+    };
+  }
+
+  const qaReleaseEmail =
+    kind === NOTIFICATION_KIND.qaReleaseDigestStale
+      ? ({ email: "digest_stale", date: qaReleaseStaleDateFromReference(referenceId) } as const)
+      : kind === NOTIFICATION_KIND.qaReleaseMonitorFailed
+        ? ({ email: "monitor_failed", date: qaReleaseMonitorFailureDateFromReference(referenceId) } as const)
+        : kind === NOTIFICATION_KIND.qaReleaseAttention
+          ? ({ email: "attention", date: qaReleaseAttentionDateFromReference(referenceId) } as const)
+          : kind === NOTIFICATION_KIND.qaReleaseDigestRecorded
+            ? ({ email: "digest_recorded", date: qaReleaseDigestRecordedDateFromReference(referenceId) } as const)
+            : null;
+  if (qaReleaseEmail) {
+    // Rendered from the reference id alone: the alert carries a date and a
+    // link, nothing the agent read.
+    const { date } = qaReleaseEmail;
+    const recipient = supportNotificationRecipient();
+    if (!date || !recipient) return null;
+    const consoleBase =
+      process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://tomverse.app";
+    return {
+      to: recipient,
+      ...buildQaReleaseOperatorEmail(qaReleaseEmail.email, {
+        date,
+        consoleUrl: `${consoleBase}/admin/agent-digests?tab=qa-release`,
       }),
     };
   }
