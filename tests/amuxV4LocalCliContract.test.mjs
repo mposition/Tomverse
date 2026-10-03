@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { inspectAmuxV4AnalysisCliResult,
   planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContract.mjs";
+import { amuxV4CodexNoToolsCatalogJson } from
+  "../lib/amux/ideaLocalCodexNoToolsCore.mjs";
 
 const openai = { provider: "openai", modelId: "frontier-openai",
   reasoningEffort: "high" };
@@ -13,7 +15,11 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   const codex = planAmuxV4AnalysisCliInvocation(openai);
   const claude = planAmuxV4AnalysisCliInvocation(anthropic);
   assert.equal(codex.command[0], "/run/amux-cli/codex");
-  assert.deepEqual(codex.command.slice(1, 4), ["--ask-for-approval", "never", "exec"]);
+  assert.deepEqual(codex.command.slice(1, 3), ["--ask-for-approval", "never"]);
+  assert.ok(codex.command.includes("exec"));
+  assert.ok(codex.command.includes("model_catalog_json=\"/run/amux-cli/model-catalog.json\""));
+  assert.ok(codex.command.includes("tools.experimental_request_user_input.enabled=false"));
+  assert.ok(codex.command.includes("shell_tool"));
   assert.ok(codex.command.includes("--ephemeral"));
   assert.ok(codex.command.includes("--ignore-user-config"));
   assert.ok(codex.command.includes("--ignore-rules"));
@@ -37,6 +43,13 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.equal(planAmuxV4AnalysisCliInvocation({ ...openai,
     reasoningEffort: "unverified" }), null);
   assert.throws(() => codex.command.push("bad"), TypeError);
+  const catalog = JSON.parse(amuxV4CodexNoToolsCatalogJson(openai.modelId));
+  assert.equal(catalog.models.length, 1);
+  assert.equal(catalog.models[0].slug, openai.modelId);
+  assert.equal(catalog.models[0].shell_type, "disabled");
+  assert.equal(catalog.models[0].apply_patch_tool_type, null);
+  assert.deepEqual(catalog.models[0].experimental_supported_tools, []);
+  assert.equal(catalog.models[0].tool_mode, "direct");
 });
 
 const claudeEnvelope = (modelId = anthropic.modelId) => ({

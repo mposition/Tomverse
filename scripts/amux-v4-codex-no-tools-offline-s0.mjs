@@ -5,6 +5,9 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { amuxV4CodexNoToolsCatalogJson,
+  amuxV4CodexNoToolsConfigArgs } from
+  "../lib/amux/ideaLocalCodexNoToolsCore.mjs";
 
 const binary = process.argv[2];
 if (process.platform !== "linux" || binary !== "/run/codex" ||
@@ -42,18 +45,8 @@ const server = createServer((request, response) => {
   });
 });
 try {
-  await writeFile(join(temporary, "catalog.json"), JSON.stringify({
-    models: [{
-      slug: "gpt-5.6-sol", display_name: "AMUX Offline Capture", description: null,
-      supported_reasoning_levels: [], shell_type: "disabled", visibility: "list",
-      supported_in_api: true, priority: 1, availability_nux: null,
-      upgrade: null, support_verbosity: false, default_verbosity: null,
-      apply_patch_tool_type: null,
-      truncation_policy: { mode: "tokens", limit: 10000 },
-      experimental_supported_tools: [], supports_search_tool: false,
-      tool_mode: "direct", base_instructions: "Offline synthetic tool capture.",
-    }],
-  }), { mode: 0o600 });
+  await writeFile(join(temporary, "catalog.json"),
+    amuxV4CodexNoToolsCatalogJson("gpt-5.6-sol"), { mode: 0o600 });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -61,7 +54,6 @@ try {
   const port = server.address().port;
   const overrides = [
     `model_provider="local_capture"`,
-    `model_catalog_json=${JSON.stringify(join(temporary, "catalog.json"))}`,
     'model_providers.local_capture.name="local_capture"',
     `model_providers.local_capture.base_url="http://127.0.0.1:${port}/v1"`,
     'model_providers.local_capture.wire_api="responses"',
@@ -70,20 +62,15 @@ try {
     "model_providers.local_capture.supports_standalone_web_search=false",
     "model_providers.local_capture.request_max_retries=0",
     "model_providers.local_capture.stream_max_retries=0",
-    'web_search="disabled"',
-    "tools.experimental_request_user_input.enabled=false",
-    "tools.update_plan.enabled=false", "agents.enabled=false",
+    'model_reasoning_effort="high"',
   ];
-  const disabledFeatures = [
-    "shell_tool", "view_image", "sleep_tool", "multi_agent", "multi_agent_v2",
-    "code_mode", "code_mode_only", "code_mode_host", "deferred_executor",
-    "request_permissions_tool", "token_budget", "current_time_reminder",
-    "tool_suggest", "apps", "plugins", "image_generation",
-    "standalone_web_search",
-  ];
+  const zeroToolArgs = amuxV4CodexNoToolsConfigArgs();
+  const catalogOverride = zeroToolArgs.indexOf("-c");
+  zeroToolArgs[catalogOverride + 1] =
+    `model_catalog_json=${JSON.stringify(join(temporary, "catalog.json"))}`;
   const command = ["--ask-for-approval", "never",
+    ...zeroToolArgs,
     ...overrides.flatMap((value) => ["-c", value]),
-    ...disabledFeatures.flatMap((value) => ["--disable", value]),
     "exec", "--ephemeral", "--ignore-user-config", "--ignore-rules",
     "--strict-config", "--sandbox", "read-only", "--json",
     "--skip-git-repo-check", "-m", "gpt-5.6-sol", "-"];
