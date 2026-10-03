@@ -123,12 +123,13 @@ test("the PostgreSQL 16 compatibility job runs its suites on 16 and stays out of
         "utf8"
     );
     assert.ok(
-        /- group: postgres16\r?\n\s+postgres_image: postgres:16-alpine/.test(workflow),
-        "the matrix must add the postgres16 job on postgres:16-alpine"
+        /credit-finance-db-postgres16:[\s\S]*?image: postgres:16-alpine[\s\S]*?DB_INTEGRATION_GROUP: postgres16/.test(workflow),
+        "a job must run the postgres16 group on postgres:16-alpine"
     );
     assert.ok(
-        workflow.includes("image: ${{ matrix.postgres_image || 'postgres:17-alpine' }}"),
-        "the service image must follow the matrix"
+        /credit-finance-db-result:[\s\S]*?needs: \[[^\]]*\bcredit-finance-db-postgres16\b[^\]]*\]/.test(workflow) &&
+            workflow.includes('test "$POSTGRES16_RESULT" = "success"'),
+        "the required result job must fail when the PostgreSQL 16 job does"
     );
 });
 
