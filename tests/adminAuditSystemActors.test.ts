@@ -50,6 +50,9 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-intake",
     "support-triage-worker",
     "support-triage-retention",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
