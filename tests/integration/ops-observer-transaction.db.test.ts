@@ -11,10 +11,12 @@ const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 
 test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
   const { prisma } = await import("@/lib/prisma");
-  const { withOpsObserverTransaction, assertNotLate, OpsObserverLateError } = await import("@/lib/opsObserverTransaction");
+  const { withOpsObserverTransaction, assertNotLate, OpsObserverLateError, isBudgetInsufficient } = await import("@/lib/opsObserverTransaction");
   const inSeconds = (s: number) => new Date(Date.now() + s * 1000);
-  const probe = `ops_observer_wrapper_probe_${process.pid}`;
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "${probe}" (x int)`);
+  // A fixed name: the callback may only send tagged templates, so the table
+  // name is literal SQL text, not an interpolated fragment.
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "OpsObserverWrapperProbe" (x int)`);
+  await prisma.$executeRawUnsafe(`DELETE FROM "OpsObserverWrapperProbe"`);
 
   try {
     await t.test("statement 1 arms the kind's timers in a READ COMMITTED transaction, and the inherited timer is logged", async () => {
@@ -48,12 +50,23 @@ test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
     await t.test("the statement past the ceiling rolls the whole transaction back", async () => {
       // `assert` allows A = 3, so the callback may send 2 after the arming statement.
       const error = await withOpsObserverTransaction("assert", inSeconds(60), async (tx) => {
-        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (1)`);
-        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (2)`);
-        await tx.$executeRawUnsafe(`INSERT INTO "${probe}" VALUES (3)`);
+        await tx.$executeRaw`INSERT INTO "OpsObserverWrapperProbe" VALUES (${1})`;
+        await tx.$executeRaw`INSERT INTO "OpsObserverWrapperProbe" VALUES (${2})`;
+        await tx.$executeRaw`INSERT INTO "OpsObserverWrapperProbe" VALUES (${3})`;
       }).then(() => null, (e: Error & { code?: string }) => e);
       assert.equal(error?.code, "statement_ceiling_exceeded");
-      const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "${probe}"`);
+      const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "OpsObserverWrapperProbe"`);
+      assert.equal(rows[0].n, 0);
+    });
+
+    await t.test("a raw call that could carry two statements is refused before it is sent", async () => {
+      const error = await withOpsObserverTransaction("confirm", inSeconds(170), async (tx) => {
+        await (tx as unknown as { $executeRawUnsafe: (sql: string) => Promise<number> }).$executeRawUnsafe(
+          `INSERT INTO "OpsObserverWrapperProbe" VALUES (9); INSERT INTO "OpsObserverWrapperProbe" VALUES (9)`,
+        );
+      }).then(() => null, (e: Error & { code?: string }) => e);
+      assert.equal(error?.code, "statement_ceiling_unknown_method");
+      const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "OpsObserverWrapperProbe"`);
       assert.equal(rows[0].n, 0);
     });
 
@@ -70,6 +83,7 @@ test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
         ran = true;
       }).then(() => null, (e: Error) => e);
       assert.match(String(error?.message), /deadline_budget_insufficient/);
+      assert.equal(isBudgetInsufficient(error), true, "the SQLSTATE or message is found in the adapter error");
       assert.equal(ran, false);
     });
 
@@ -81,7 +95,7 @@ test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
       }
     });
   } finally {
-    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "${probe}"`);
+    await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS "OpsObserverWrapperProbe"`);
     await prisma.$disconnect();
   }
 });

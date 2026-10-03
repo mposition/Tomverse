@@ -133,10 +133,32 @@ export async function assertNotLate(runDeadline: Date, client: PrismaClient = pr
     ));
   } catch (error) {
     // Too little budget left to even ask is the same answer: not provably on time.
-    if (error instanceof Error && error.message.includes("deadline_budget_insufficient")) {
-      throw new OpsObserverLateError();
-    }
+    if (isBudgetInsufficient(error)) throw new OpsObserverLateError();
     throw error;
   }
   if (late) throw new OpsObserverLateError();
+}
+
+/** The SQLSTATE the arming function raises for a budget too short to start in. */
+export const BUDGET_INSUFFICIENT_SQLSTATE = "OB001";
+
+/**
+ * Whether an error is the arming function's budget refusal. The SQLSTATE is the
+ * stable signal; where a driver adapter nests it (meta.driverAdapterError,
+ * cause, originalCode) it is looked for there, and the message is only a
+ * fallback.
+ */
+export function isBudgetInsufficient(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  const visit = (value: unknown, depth: number): boolean => {
+    if (value === null || typeof value !== "object" || depth > 6 || seen.has(value)) return false;
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    for (const key of ["code", "originalCode", "sqlState", "sqlstate"]) {
+      if (record[key] === BUDGET_INSUFFICIENT_SQLSTATE) return true;
+    }
+    if (typeof record.message === "string" && record.message.includes("deadline_budget_insufficient")) return true;
+    return Object.values(record).some((child) => visit(child, depth + 1)) || visit(record.cause, depth + 1);
+  };
+  return visit(error, 0);
 }

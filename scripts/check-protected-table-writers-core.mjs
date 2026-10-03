@@ -852,9 +852,9 @@ export const RAW_SQL_ALLOWLIST = [
 export const RUNTIME_SQL_ALLOWLIST = [
   {
     path: "scripts/ops-observer/statement-ceiling-core.mjs",
-    count: 4,
+    count: 2,
     reason:
-      "The four strings name the raw client methods the sre-ops statement ceiling counts as one statement each; the module compares a property name against this list and calls through the method the caller already holds. It holds no client, builds no SQL and imports nothing, so it can reach no table.",
+      "The two strings name the raw client methods the sre-ops statement ceiling counts as one statement each; the module compares a property name against this list and calls through the method the caller already holds. It holds no client, builds no SQL and imports nothing, so it can reach no table.",
   },
   {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
