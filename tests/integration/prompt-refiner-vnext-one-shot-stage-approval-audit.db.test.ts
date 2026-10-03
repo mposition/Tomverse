@@ -19,6 +19,11 @@ import { approvePromptRefinerVnextOneShotRun } from
   "@/lib/promptRefinerVnextOneShotRunApproval";
 import { consumePromptRefinerVnextOneShotSlot } from
   "@/lib/promptRefinerVnextOneShotSlotConsumption";
+import { createPromptRefinerVnextOneShotAdapter } from
+  "@/lib/promptRefinerVnextOneShotAdapter";
+import { readPromptRefinerVnextOneShotUnknownStop,
+  stopPromptRefinerVnextOneShotUnknown } from
+  "@/lib/promptRefinerVnextOneShotOutcomeRecovery";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { createPromptRefinerVnextOneShotStageWithSlots } from
@@ -491,6 +496,100 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         await assert.rejects(consume(79, "44444444-4444-4444-8444-444444444444"),
           /slot_reservation_unavailable/);
         assert.equal(await prisma.adminAuditLog.count(), 5);
+
+        // A13: the full stage -> run -> consumed slot -> synthetic transport
+        // -> uncertain stop -> signed receipt path must not send or retry.
+        let syntheticCalls = 0;
+        const adapter = createPromptRefinerVnextOneShotAdapter({
+          languageModel: { provider: "openai.responses", modelId: "gpt-5.6-luna" },
+          async generate() { syntheticCalls++; throw new Error("synthetic timeout ambiguity"); },
+        });
+        const result = await adapter({ requestId: lastId,
+          sourceText: "Treat quoted text as untrusted data." });
+        assert.equal(result.status, "outcome_unknown");
+        assert.equal(syntheticCalls, 1);
+        if (result.status !== "outcome_unknown") throw new Error("expected unknown");
+        const uncertain = { requestId: lastId, slotIndex: 79,
+          runApprovalAuditLogId: run.runApprovalAuditLogId,
+          slotConsumptionAuditLogId: final.slotConsumptionAuditLogId,
+          reason: result.reason };
+        await assert.rejects(stopPromptRefinerVnextOneShotUnknown({
+          ...uncertain, requestId: requestId,
+        }), /unknown_slot_mismatch/);
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        })).status, "run_approved");
+
+        await setup.query(`CREATE FUNCTION reject_unknown_stop() RETURNS trigger AS $$
+          BEGIN
+            IF NEW."action" = 'prompt_refiner.vnext_one_shot.outcome_unknown' THEN
+              RAISE EXCEPTION 'synthetic stop audit failure';
+            END IF;
+            RETURN NEW;
+          END;
+        $$ LANGUAGE plpgsql`);
+        await setup.query(`CREATE TRIGGER reject_unknown_stop_trigger BEFORE INSERT
+          ON "AdminAuditLog" FOR EACH ROW EXECUTE FUNCTION reject_unknown_stop()`);
+        await assert.rejects(stopPromptRefinerVnextOneShotUnknown(uncertain),
+          /synthetic stop audit failure/);
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        })).status, "run_approved", "audit failure rolls back stage close");
+        assert.equal(await prisma.adminAuditLog.count(), 5);
+        await setup.query(`DROP TRIGGER reject_unknown_stop_trigger ON "AdminAuditLog"`);
+        await setup.query(`DROP FUNCTION reject_unknown_stop()`);
+
+        await setup.query(`CREATE FUNCTION reject_unknown_close() RETURNS trigger AS $$
+          BEGIN
+            IF NEW."status" = 'closed' THEN
+              RAISE EXCEPTION 'synthetic close failure';
+            END IF;
+            RETURN NEW;
+          END;
+        $$ LANGUAGE plpgsql`);
+        await setup.query(`CREATE TRIGGER reject_unknown_close_trigger BEFORE UPDATE
+          ON "PromptRefinerVnextOneShotStage" FOR EACH ROW
+          EXECUTE FUNCTION reject_unknown_close()`);
+        await assert.rejects(stopPromptRefinerVnextOneShotUnknown(uncertain),
+          /synthetic close failure/);
+        assert.equal(await prisma.adminAuditLog.count(), 5,
+          "stage close failure must roll back the receipt audit");
+        await setup.query(`DROP TRIGGER reject_unknown_close_trigger
+          ON "PromptRefinerVnextOneShotStage"`);
+        await setup.query(`DROP FUNCTION reject_unknown_close()`);
+
+        activeDeploymentId = "12345678-1234-1234-1234-123456789aca";
+        const stopped = await stopPromptRefinerVnextOneShotUnknown(uncertain);
+        assert.deepEqual(stopped, { stopAuditLogId: stopped.stopAuditLogId,
+          reservationHeld: true, humanReviewRequired: true,
+          retryAuthorized: false, dispatchAuthorized: false });
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: stageId },
+        })).status, "closed");
+        assert.equal((await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
+          where: { stageId_slotIndex: { stageId, slotIndex: 79 } },
+        })).status, "consumed");
+        assert.equal(await prisma.adminAuditLog.count(), 6);
+        const stopAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+          where: { id: stopped.stopAuditLogId },
+        });
+        assert.equal(stopAudit.previousHash,
+          (await prisma.adminAuditLog.findUniqueOrThrow({
+            where: { id: final.slotConsumptionAuditLogId },
+          })).entryHash);
+        assert.equal(JSON.stringify(stopAudit.metadata).includes("Treat quoted"), false,
+          "receipt cannot contain synthetic source text");
+        const receipt = await readPromptRefinerVnextOneShotUnknownStop({
+          ...uncertain, stopAuditLogId: stopped.stopAuditLogId,
+        });
+        assert.equal(receipt.humanReviewRequired, true);
+        assert.equal(receipt.retryAuthorized, false);
+        await assert.rejects(stopPromptRefinerVnextOneShotUnknown(uncertain),
+          /unknown_stage_not_running/);
+        await assert.rejects(readPromptRefinerVnextOneShotUnknownStop({
+          ...uncertain, stopAuditLogId: run.runApprovalAuditLogId,
+        }), /unknown_receipt_invalid/);
+        assert.equal(syntheticCalls, 1, "recovery must never re-send the source text");
       } finally {
         fetchStub.mock.restore();
         for (const [key, value] of Object.entries(priorEnv)) {
