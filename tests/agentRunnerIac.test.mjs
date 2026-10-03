@@ -238,3 +238,17 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
     assert.match(root.scripts[script], /npm run --prefix \.railway agents:/, script);
   }
 });
+
+test("the QA-release services declare exactly the variables their start check accepts", async () => {
+  const { QA_RELEASE_SERVICE_VARIABLES } = await import("../lib/qaReleaseServiceEnvCore.ts");
+  for (const [key, service] of [["qa_release_digest", "digest"], ["qa_release_monitor", "monitor"]]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.ok(runner, key);
+    for (const environment of ["production", "staging"]) {
+      assert.deepEqual([...runner.environments[environment]].sort(), [...QA_RELEASE_SERVICE_VARIABLES[service]].sort(), `${key} ${environment}`);
+    }
+  }
+  // The Monitor's cron is a proposed value in the policy until approved.
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, null);
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_digest").cronSchedule, "0 21 * * *");
+});

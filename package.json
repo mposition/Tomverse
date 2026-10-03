@@ -111,6 +111,8 @@
     "railway:agents:plan": "npm run --prefix .railway agents:plan",
     "railway:agents:apply": "npm run --prefix .railway agents:apply",
     "agent:product-research-observation": "node scripts/agents/product-research-observation.mjs",
+    "agent:qa-release-digest": "node --experimental-strip-types scripts/qa-release-digest-service.mjs",
+    "agent:qa-release-monitor": "node --experimental-strip-types scripts/qa-release-monitor-service.mjs",
     "marketing:zernio-s0": "node scripts/marketing/zernio-s0-probe.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
