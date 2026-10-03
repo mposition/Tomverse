@@ -53,7 +53,11 @@ import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
   readAmuxUnitRejectDecision, AmuxUnitRejectError } from
   "@/lib/amux/ideaUnitRejectService";
 import { commitAmuxRootNodePrepare, commitAmuxRootNodeConsume,
+  commitAmuxRootNodeUnknown,
   AmuxNodeCreateError } from "@/lib/amux/ideaNodeCreateService";
+import { readAmuxRootNodeDecision,
+  readAmuxRootNodeDecisionInTransaction } from
+  "@/lib/amux/ideaNodeDecisionReadService";
 import { sealAmuxNodeText } from "@/lib/amux/ideaNodeContentCore";
 import { openAmuxContent } from "@/lib/amux/ideaCrypto";
 import { commitAmuxIdeaAnalysisPriceApproval,
@@ -1161,6 +1165,12 @@ test("a complete first result saves independent encrypted units and closes only 
     const prepared = await commitAmuxRootNodePrepare(tx,
       { session, request, choice: rootChoice, keys });
     assert.equal(prepared.decisionId, rootChoice.decisionId);
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
+      rootChoice.decisionId, rootChoice.prepareRequestId)).state, "prepared");
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx,
+      { ...session, user: { ...session.user, id: randomUUID() } } as Session,
+      rootChoice.decisionId, rootChoice.prepareRequestId)).state,
+    "not_visible");
     await assert.rejects(commitAmuxRootNodePrepare(tx, { session, request,
       choice: { ...rootChoice, decisionId: randomUUID(),
         prepareRequestId: randomUUID(), nodeId: randomUUID() }, keys }),
@@ -1182,6 +1192,16 @@ test("a complete first result saves independent encrypted units and closes only 
         confirmationDigest: prepared.confirmationDigest }, keys });
     assert.equal(registered.state, "created");
     assert.equal(registered.nodeId, rootChoice.nodeId);
+    assert.equal(await commitAmuxRootNodeUnknown(tx, { actorUserId,
+      decisionId: rootChoice.decisionId,
+      prepareRequestId: rootChoice.prepareRequestId,
+      consumeRequestId: randomUUID() }), false,
+    "a committed node cannot be marked outcome-unknown");
+    const readBack = await readAmuxRootNodeDecisionInTransaction(tx, session,
+      rootChoice.decisionId, rootChoice.prepareRequestId);
+    assert.equal(readBack.state, "created");
+    if (readBack.state !== "created") throw new Error("node read-back unavailable");
+    assert.equal(readBack.nodeId, rootChoice.nodeId);
     const node = await tx.amuxPortfolioNode.findUniqueOrThrow({
       where: { id: rootChoice.nodeId },
     });
@@ -1208,6 +1228,39 @@ test("a complete first result saves independent encrypted units and closes only 
   /rollback synthetic root node decision/);
   assert.equal(await prisma.amuxPortfolioNode.count({
     where: { id: rootChoice.nodeId } }), 0);
+  assert.equal((await readAmuxRootNodeDecision(session,
+    rootChoice.decisionId, rootChoice.prepareRequestId)).state, "absent");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const unknownChoice = { ...rootChoice, decisionId: randomUUID(),
+      prepareRequestId: randomUUID(), nodeId: randomUUID() };
+    const prepared = await commitAmuxRootNodePrepare(tx,
+      { session, request, choice: unknownChoice, keys });
+    const consumeRequestId = randomUUID();
+    assert.equal(await commitAmuxRootNodeUnknown(tx, { actorUserId,
+      decisionId: unknownChoice.decisionId,
+      prepareRequestId: unknownChoice.prepareRequestId,
+      consumeRequestId }), true);
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
+      unknownChoice.decisionId, unknownChoice.prepareRequestId)).state,
+    "outcome_unknown");
+    assert.equal(await commitAmuxRootNodeUnknown(tx, { actorUserId,
+      decisionId: unknownChoice.decisionId,
+      prepareRequestId: unknownChoice.prepareRequestId,
+      consumeRequestId }), false);
+    await assert.rejects(commitAmuxRootNodeConsume(tx, { session, request,
+      choice: { ...unknownChoice, consumeRequestId,
+        confirmationDigest: prepared.confirmationDigest }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "integrity_unavailable");
+    await assert.rejects(commitAmuxRootNodePrepare(tx, { session, request,
+      choice: { ...unknownChoice, decisionId: randomUUID(),
+        prepareRequestId: randomUUID(), nodeId: randomUUID() }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "already_prepared");
+    throw new Error("rollback synthetic unknown root node decision");
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 5_000, timeout: 30_000 }),
+  /rollback synthetic unknown root node decision/);
   await assert.rejects(prisma.$transaction(async (tx) => {
     const changedChoice = { ...rootChoice, decisionId: randomUUID(),
       prepareRequestId: randomUUID(), nodeId: randomUUID() };

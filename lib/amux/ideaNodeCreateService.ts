@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
+import { takeAuditChainLock, writeAdminAuditLog,
+  writeSystemAuditLog } from "@/lib/adminAudit";
+import { auditRowActorKind, AMUX_SYSTEM_AUDIT_ACTOR } from
+  "@/lib/adminAuditSystemActors";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { sealAmuxNodeText } from "./ideaNodeContentCore.ts";
 import { AmuxNodeDuplicateScanError, scanAmuxNodeDuplicates } from
@@ -29,6 +31,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{1
 const PREPARE_ACTION = "amux.v4.unit.prepare";
 const CONSUME_ACTION = "amux.v4.unit.consume";
 const TARGET = "AmuxIdeaUnitDecision";
+const ACTOR_ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxNodeCreateError extends Error {
   constructor(readonly code: "not_found" | "not_ready" | "already_prepared" | "reconfirm" |
@@ -331,4 +334,87 @@ export async function commitAmuxRootNodeConsume(tx: Prisma.TransactionClient,
   if (approved.count !== 1) throw new AmuxNodeCreateError("reconfirm");
   return { decisionId: decision.id, nodeId: choice.nodeId,
     state: "created" as const, auditId };
+}
+
+/** Freeze an exact unresolved consume attempt. The row lock waits for any
+ * in-flight consume before deciding; a missing row is never retried. */
+export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
+  input: { actorUserId: string; decisionId: string;
+    prepareRequestId: string; consumeRequestId: string }) {
+  if (!ACTOR_ID.test(input.actorUserId) || !UUID.test(input.decisionId) ||
+      !UUID.test(input.prepareRequestId) || !UUID.test(input.consumeRequestId) ||
+      input.consumeRequestId === input.prepareRequestId) {
+    throw new AmuxNodeCreateError("integrity_unavailable");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaUnitDecision"
+    WHERE "id" = ${input.decisionId} AND "actorUserId" = ${input.actorUserId}
+      AND "prepareRequestId" = ${input.prepareRequestId}::uuid FOR UPDATE
+  `;
+  if (locked.length !== 1) return false;
+  const row = await tx.amuxIdeaUnitDecision.findUnique({
+    where: { id: input.decisionId },
+  });
+  if (!row || row.action !== "create_node" || row.state !== "prepared" ||
+      row.prepareRequestId !== input.prepareRequestId ||
+      row.consumeRequestId !== null || row.outcomeUnknownAt !== null ||
+      row.finalAuditLogId !== null || row.resolvedNodeId !== null) return false;
+  const prepared = await tx.adminAuditLog.findUnique({
+    where: { id: row.prepareAuditLogId },
+  });
+  const metadata = prepared?.metadata;
+  const meta = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) ? metadata as Record<string, unknown> : null;
+  const snapshot = meta?.snapshot;
+  const stored = snapshot && typeof snapshot === "object" &&
+    !Array.isArray(snapshot) ? snapshot as Record<string, unknown> : null;
+  const proposal = stored?.nodeProposal;
+  const nodeProposal = proposal && typeof proposal === "object" &&
+    !Array.isArray(proposal) ? proposal as Record<string, unknown> : null;
+  if (!prepared?.entryHash || auditRowActorKind(prepared) !== "human" ||
+      prepared.actorUserId !== input.actorUserId ||
+      prepared.action !== PREPARE_ACTION ||
+      prepared.targetType !== TARGET || prepared.targetId !== row.id ||
+      meta?.action !== "create_node" || meta.ideaId !== row.ideaId ||
+      meta.draftUnitId !== row.draftUnitId ||
+      meta.prepareRequestId !== input.prepareRequestId ||
+      meta.confirmationDigest !== row.confirmationDigest ||
+      meta.confirmationDigestKeyId !== row.confirmationDigestKeyId ||
+      stored?.decisionId !== row.id || stored.actorUserId !== row.actorUserId ||
+      stored.action !== "create_node" ||
+      nodeProposal?.level !== "initiative" ||
+      nodeProposal.parentId !== null ||
+      !UUID.test(String(nodeProposal.id))) {
+    throw new AmuxNodeCreateError("integrity_unavailable");
+  }
+  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxNodeCreateError("integrity_unavailable");
+  }
+  const auditId = await writeSystemAuditLog({
+    tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+    action: "amux.v4.unit.outcome_unknown", targetType: TARGET,
+    targetId: row.id,
+    summary: "Froze an AMUX v4 root node decision after an unverified consume result; no retry occurred.",
+    metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
+      prepareRequestId: row.prepareRequestId,
+      consumeRequestId: input.consumeRequestId, retryAllowed: false },
+  });
+  const updated = await tx.amuxIdeaUnitDecision.updateMany({
+    where: { id: row.id, actorUserId: input.actorUserId, state: "prepared",
+      outcomeUnknownAt: null, consumeRequestId: null, finalAuditLogId: null },
+    data: { outcomeUnknownAt: now,
+      outcomeUnknownConsumeRequestId: input.consumeRequestId,
+      outcomeUnknownAuditLogId: auditId },
+  });
+  if (updated.count !== 1) throw new AmuxNodeCreateError("integrity_unavailable");
+  return true;
 }
