@@ -78,10 +78,8 @@ test("the alert job takes only the lane results and never runs the tree under te
     // Both jobs that run the tree under test: the PostgreSQL 16 job going red
     // on its own must still raise the release-lane alert.
     assert.deepEqual(job.needs, ["credit-finance-db", "credit-finance-db-postgres16"]);
-    assert.match(
-        job.if,
-        /\(needs\.credit-finance-db\.result == 'failure' \|\| needs\.credit-finance-db-postgres16\.result == 'failure'\)/
-    );
+    // Fires when either needed job failed: needs.*.result covers both above.
+    assert.match(job.if, /contains\(join\(needs\.\*\.result, ','\), 'failure'\)/);
     assert.match(job.if, /github\.event_name != 'pull_request'/);
     assert.match(job.if, /^always\(\) && /);
     assert.deepEqual(job.permissions, { contents: "read" });

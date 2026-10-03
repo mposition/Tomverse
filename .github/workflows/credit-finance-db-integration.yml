@@ -324,7 +324,9 @@ jobs:
     # suites the lanes also run, and a release branch must not go quietly red
     # on it.
     needs: [credit-finance-db, credit-finance-db-postgres16]
-    if: always() && (needs.credit-finance-db.result == 'failure' || needs.credit-finance-db-postgres16.result == 'failure') && github.event_name != 'pull_request'
+    # One condition with no `||`: either needed job's failure, joined over
+    # needs.*.result, so this job stays a push-only job by the draft-skip rule.
+    if: always() && contains(join(needs.*.result, ','), 'failure') && github.event_name != 'pull_request'
     permissions:
       contents: read
     timeout-minutes: 5
