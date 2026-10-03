@@ -162,7 +162,10 @@ const oneShotStageAuditWriter = withoutComments(readFileSync(
 const reachesCanonicalOneShotStageAudit = (route) =>
   route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
   route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
-  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
   performs(oneShotStageAuditWriter, "writeAdminAuditLog");
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {

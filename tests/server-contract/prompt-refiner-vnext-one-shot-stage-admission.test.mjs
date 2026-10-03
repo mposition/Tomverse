@@ -35,8 +35,16 @@ const expected = {
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
   runtimeCommitSha: "a".repeat(40), pricePinDigest: "e".repeat(64),
 };
+const priorManifestRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
+const priorRunnerDigest = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
 process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = expected.manifestRoot;
 process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = expected.runnerDigest;
+test.after(() => {
+  if (priorManifestRoot === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
+  else process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = priorManifestRoot;
+  if (priorRunnerDigest === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+  else process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = priorRunnerDigest;
+});
 
 test("stage binding comes from fresh app and Railway observations", async () => {
   const binding = await preparePromptRefinerVnextOneShotStageBinding(expected);
