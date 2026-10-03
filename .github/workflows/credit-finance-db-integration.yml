@@ -89,6 +89,13 @@ concurrency:
   group: credit-finance-db-${{ github.ref }}
   cancel-in-progress: true
 
+# `cache-mode` is the token-level control, and a restore-only action is not: it
+# narrows one declared step while the job keeps a cache key anything running in
+# it can write any entry with. This workflow can run on develop or main, where a
+# written entry is restorable by every run, so its token gets no write at all.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
+cache-mode: read
+
 jobs:
   credit-finance-db:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')

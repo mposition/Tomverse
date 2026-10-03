@@ -8,6 +8,7 @@ import { parse as parseYaml } from "yaml";
 import {
   ALLOWED_SAVE_CONDITIONS,
   CACHE_FAMILIES,
+  cacheModeFailures,
   describeFinding,
   WIDELY_READABLE_BRANCHES,
   judgeCacheKeys,
@@ -124,6 +125,8 @@ test("every rule a finding can carry has its own message", () => {
     ["namespace_shared_across_workflows", "x"],
     ["namespace_reaches_another_workflow", "x"],
     ["unguarded_save_in_widely_readable_scope", "x"],
+    ["cache_mode_write_capable_in_widely_readable_scope", "x"],
+    ["cache_mode_widened_by_job", "x"],
   ];
   for (const [rule, detail] of cases) {
     const message = describeFinding({ rule, workflowPath: "w", jobId: "j", detail });
@@ -555,11 +558,15 @@ test("a `*` inside a branch name is modelled rather than given up on", () => {
   assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['feature/*']")), false);
 });
 
-const scheduled = (step) =>
+// A widely readable workflow that already holds a read-only cache token, so the
+// key and write rules below are read on their own. `cacheMode: null` leaves the
+// declaration out, which is what the cache-mode rule is about.
+const scheduled = (step, { cacheMode = "read" } = {}) =>
   [
     "on:",
     "  schedule:",
     "    - cron: '0 1 * * *'",
+    ...(cacheMode === null ? [] : [`cache-mode: ${cacheMode}`]),
     "jobs:",
     "  j:",
     "    runs-on: ubuntu-latest",
@@ -615,6 +622,8 @@ test("a save's condition must provably hold only on a pull-request run", () => {
         "    - cron: '0 1 * * *'",
         "  pull_request:",
         "    types: [opened, synchronize]",
+        // Read-only token declared, so this test reads only the save guard.
+        "cache-mode: read",
         "jobs:",
         "  j:",
         "    runs-on: ubuntu-latest",
@@ -680,6 +689,7 @@ test("a save guarded on pull_request still needs a narrow pull_request trigger",
       "x",
       [
         ...on,
+        "cache-mode: read",
         "jobs:",
         "  j:",
         "    runs-on: ubuntu-latest",
@@ -782,4 +792,107 @@ test("the workflows that may still write are the pull-request-only ones", () => 
   // Pinned so that making another workflow a cache writer is a visible change
   // rather than a silent one.
   assert.deepEqual([...writers].sort(), ["pr-fast-gate.yml", "review-parity-shadow.yml"]);
+});
+
+// --- cache-mode: the token-level rule ------------------------------------
+//
+// Independent review rejected the first implementation of this audit on
+// exactly this point: choosing actions/cache/restore and guarding a save on
+// `github.event_name` narrows the *declared* steps and leaves the job's cache
+// token write-capable, so a dependency install script running on develop or
+// main can call the cache API directly and plant an entry a required gate
+// restores. Key namespaces are not a permission boundary. `cache-mode` is.
+
+const minimal = (lines) => ["on:", "  schedule:", "    - cron: '0 1 * * *'", ...lines, "jobs:", "  j:", "    runs-on: ubuntu-latest", "    steps: []", ""].join("\n");
+
+test("a widely readable workflow with no cache-mode is refused, even caching nothing", () => {
+  // Caching nothing today is not a reason to leave the token write-capable: it
+  // is where an added step, or a `uses:` action that caches on its own, would
+  // start writing without anyone deciding to.
+  assert.deepEqual(rules([wf("x", minimal([]))]), ["cache_mode_write_capable_in_widely_readable_scope"]);
+});
+
+test("only read and none satisfy the cache-mode rule", () => {
+  for (const mode of ["read", "none"]) {
+    assert.deepEqual(rules([wf("x", minimal([`cache-mode: ${mode}`]))]), [], mode);
+  }
+  for (const mode of ["write", "write-only"]) {
+    assert.deepEqual(
+      rules([wf("x", minimal([`cache-mode: ${mode}`]))]),
+      ["cache_mode_write_capable_in_widely_readable_scope"],
+      mode,
+    );
+  }
+});
+
+test("a value GitHub does not define is refused rather than guessed at", () => {
+  // Including an expression: the documented key takes one of four literals, so
+  // a `${{ }}` value is something this policy cannot evaluate and GitHub may
+  // not accept. Refusing is the only answer that cannot be wrong in the
+  // dangerous direction.
+  for (const mode of ["Read", "readonly", "ro", "true", "${{ github.event_name == 'pull_request' && 'write' || 'read' }}"]) {
+    assert.deepEqual(
+      rules([wf("x", minimal([`cache-mode: ${JSON.stringify(mode)}`]))]),
+      ["cache_mode_write_capable_in_widely_readable_scope"],
+      mode,
+    );
+  }
+  // A bare `cache-mode:` with no value parses as null, which is not one of the
+  // four either.
+  assert.deepEqual(rules([wf("x", minimal(["cache-mode:"]))]), [
+    "cache_mode_write_capable_in_widely_readable_scope",
+  ]);
+});
+
+test("a job may narrow the workflow's cache-mode but not widen it", () => {
+  const withJob = (workflowMode, jobMode) =>
+    wf(
+      "x",
+      [
+        "on:",
+        "  schedule:",
+        "    - cron: '0 1 * * *'",
+        `cache-mode: ${workflowMode}`,
+        "jobs:",
+        "  j:",
+        "    runs-on: ubuntu-latest",
+        `    cache-mode: ${jobMode}`,
+        "    steps: []",
+        "",
+      ].join("\n"),
+    );
+  assert.deepEqual(rules([withJob("read", "none")]), []);
+  assert.deepEqual(rules([withJob("read", "read")]), []);
+  // A job-level value overrides the workflow's, so this one gets its write
+  // capability back however read-only the workflow looks at the top.
+  for (const jobMode of ["write", "write-only"]) {
+    assert.deepEqual(rules([withJob("read", jobMode)]), ["cache_mode_widened_by_job"], jobMode);
+  }
+});
+
+test("a pull-request-only workflow is not asked for a cache-mode", () => {
+  // Its writes land in refs/pull/<n>/merge, which no other ref restores.
+  // Requiring `read` there would stop the entry its own later runs restore --
+  // the warming this audit deliberately kept.
+  const prOnly = (lines) =>
+    wf("x", ["on:", "  pull_request:", "    types: [opened, synchronize]", ...lines, "jobs:", "  j:", "    runs-on: ubuntu-latest", "    steps: []", ""].join("\n"));
+  assert.deepEqual(rules([prOnly([])]), []);
+  assert.deepEqual(rules([prOnly(["cache-mode: write"])]), []);
+});
+
+test("every widely readable workflow in this repository holds a read-only cache token", () => {
+  const dir = ".github/workflows";
+  const missing = [];
+  let checked = 0;
+  for (const name of readdirSync(dir).filter((entry) => /\.ya?ml$/.test(entry))) {
+    const text = readFileSync(join(dir, name), "utf8");
+    const document = parseYaml(text);
+    if (!reachesWidelyReadableScope(document)) continue;
+    checked += 1;
+    if (cacheModeFailures(document).length > 0) missing.push(name);
+  }
+  assert.deepEqual(missing, []);
+  // Pinned so that a new workflow arriving without a declaration is a visible
+  // change here and not only a red gate somebody silences.
+  assert.equal(checked, 24);
 });

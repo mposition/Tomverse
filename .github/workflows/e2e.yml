@@ -90,6 +90,13 @@ concurrency:
   group: main-chromium-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# `cache-mode` is the token-level control, and a restore-only action is not: it
+# narrows one declared step while the job keeps a cache key anything running in
+# it can write any entry with. This workflow can run on develop or main, where a
+# written entry is restorable by every run, so its token gets no write at all.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1.
+cache-mode: read
+
 jobs:
   playwright:
     name: Chromium regression (shard ${{ matrix.shard }}/${{ matrix.shards }})
