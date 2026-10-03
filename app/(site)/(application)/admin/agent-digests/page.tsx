@@ -1,9 +1,12 @@
 export const dynamic = "force-dynamic";
 
+import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { authOptions } from "@/lib/auth";
 
 const TABS = adminNavItemTabs("agent-digests");
 
@@ -11,12 +14,16 @@ const TABS = adminNavItemTabs("agent-digests");
  * The common Agent digest area (docs/policy/qa-release-agent.md section 4):
  * one section per agent that stores digests. Only the open section is
  * loaded. Reading takes ordinary admin authentication, which the console
- * layout has established.
+ * layout has established; recording a control revision takes owner or ops
+ * and a recent sign-in, checked by its route.
  */
 export default async function AdminAgentDigestsPage({ searchParams }: PageProps<"/admin/agent-digests">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
-  const initial = await readAgentDigestConsole();
+  const session = await getServerSession(authOptions);
+  // Whether this viewer may record a revision travels with the payload, so a
+  // reader is not offered a form that can only refuse; the route checks again.
+  const initial = await readAgentDigestConsole(hasAdminPermission(session, "ops:write"));
 
   return (
     <div className="flex min-w-0 flex-col gap-5">

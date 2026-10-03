@@ -94,9 +94,10 @@ read (`docs/policy/qa-release-agent.md` section 4), one section per agent
 that stores them; QA and release is the first. It shows the newest operator
 control revision and the recent digests as counts and codes, says how many
 it lists, and shows an expired or unreadable body as such rather than
-drawing a digest that is not there. It carries no badge and no control in
-this slice: recording a revision and clearing a latch arrive with their own
-routes, each taking owner or ops and a recent sign-in.
+drawing a digest that is not there. It carries no badge. Its one control
+records the next operator control revision, offered to owner and ops only;
+its route checks that role and a recent sign-in again and answers a stale
+sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

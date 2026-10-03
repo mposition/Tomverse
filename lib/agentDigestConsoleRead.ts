@@ -2,13 +2,15 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
+import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 
 /**
  * The read side of the common Agent digest area in the Admin Console
  * (docs/policy/qa-release-agent.md section 4). Reading takes ordinary admin
- * authentication, which the console layout has established; this slice has
- * no control on it.
+ * authentication, which the console layout has established; recording a
+ * control revision is its own route, and `canWrite` only decides whether
+ * this viewer is offered the form.
  *
  * Counts, dates and codes only: the stored digest has no free text, and this
  * reader re-parses it with the closed schema, so a body that no longer parses
@@ -38,6 +40,8 @@ export type AgentDigestConsoleRow = {
 
 export type AgentDigestConsole = {
   limit: number;
+  /** Owner or ops (ops:write): whether this viewer is offered the control form. */
+  canWrite: boolean;
   control: {
     revision: number;
     digestEnabled: boolean;
@@ -45,11 +49,13 @@ export type AgentDigestConsole = {
     developLaneOn: boolean;
     iacCommit: string | null;
     createdAt: string;
+    /** Rotation times only, never a secret's value. */
+    rotatedAt: Record<string, string | null>;
   } | null;
   digests: AgentDigestConsoleRow[];
 };
 
-export async function readAgentDigestConsole(): Promise<AgentDigestConsole> {
+export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDigestConsole> {
   const [control, rows] = await Promise.all([
     readLatestQaReleaseOperatorControl(),
     prisma.agentDigestItem.findMany({
@@ -89,6 +95,7 @@ export async function readAgentDigestConsole(): Promise<AgentDigestConsole> {
 
   return {
     limit: AGENT_DIGEST_CONSOLE_LIMIT,
+    canWrite,
     control: control && {
       revision: control.revision,
       digestEnabled: control.digestEnabled,
@@ -96,6 +103,9 @@ export async function readAgentDigestConsole(): Promise<AgentDigestConsole> {
       developLaneOn: control.developLaneOn,
       iacCommit: control.iacCommit,
       createdAt: control.createdAt.toISOString(),
+      rotatedAt: Object.fromEntries(
+        QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => [field, control[field]?.toISOString() ?? null]),
+      ),
     },
     digests,
   };

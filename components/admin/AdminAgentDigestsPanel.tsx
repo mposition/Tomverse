@@ -1,10 +1,18 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
+
+const PAGE_PATH = "/admin/agent-digests";
+const CONTROL_ROUTE = "/api/admin/agent-digests/qa-release/control";
 
 const fill = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce((text, [key, value]) => text.replace(`{${key}}`, String(value)), template);
@@ -12,9 +20,11 @@ const fill = (template: string, values: Record<string, string | number>) =>
 /**
  * The QA-release section of the common Agent digest area: the newest
  * operator control revision and the recent digests, as counts and codes.
- * Read only (docs/policy/qa-release-agent.md section 4); the controls this
- * agent has -- recording a revision, clearing a latch -- arrive with their
- * own routes.
+ * The one control here records the next operator control revision
+ * (docs/policy/qa-release-agent.md sections 4 and 6), offered only to owner
+ * and ops; its route checks the role and a recent sign-in again, and a stale
+ * sign-in is answered with the way back. Clearing a merge-lane latch arrives
+ * with the lane.
  */
 export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsole }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
@@ -48,6 +58,8 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
           <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.controlNone}</p>
         )}
       </div>
+
+      {initial.canWrite ? <QaReleaseControlForm current={initial.control} /> : null}
 
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestsTitle}</h2>
@@ -95,5 +107,154 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
         )}
       </div>
     </section>
+  );
+}
+
+type Notice = { tone: "ok" | "error"; text: string } | null;
+
+/** An ISO instant as a datetime-local value in the viewer's own zone. */
+const toLocalInput = (iso: string | null) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+function QaReleaseControlForm({ current }: { current: AgentDigestConsole["control"] }) {
+  const m = useAdminMessages(adminAgentDigestsMessages);
+  const router = useRouter();
+  const [digestEnabled, setDigestEnabled] = useState(current?.digestEnabled ?? false);
+  const [mergeLaneEnabled, setMergeLaneEnabled] = useState(current?.mergeLaneEnabled ?? false);
+  const [developLaneOn, setDevelopLaneOn] = useState(current?.developLaneOn ?? false);
+  const [iacCommit, setIacCommit] = useState(current?.iacCommit ?? "");
+  const [rotated, setRotated] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => [field, toLocalInput(current?.rotatedAt[field] ?? null)]),
+    ),
+  );
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
+
+  const submit = async () => {
+    if (!window.confirm(m.confirmSave)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const response = await adminFetch(CONTROL_ROUTE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          digestEnabled,
+          mergeLaneEnabled,
+          developLaneOn,
+          iacCommit: iacCommit.trim() === "" ? null : iacCommit.trim(),
+          ...Object.fromEntries(
+            QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => [
+              field,
+              rotated[field] ? new Date(rotated[field]).toISOString() : null,
+            ]),
+          ),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        code?: unknown;
+        result?: { revision?: unknown };
+      };
+      if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
+        setReauthenticationRequired(true);
+        return;
+      }
+      if (response.status === 409 && typeof payload.code === "string") {
+        setNotice({ tone: "error", text: fill(m.refused, { code: payload.code }) });
+        return;
+      }
+      if (!response.ok || typeof payload.result?.revision !== "number") {
+        setNotice({ tone: "error", text: m.failed });
+        return;
+      }
+      setNotice({ tone: "ok", text: fill(m.saved, { revision: payload.result.revision }) });
+      router.refresh();
+    } catch {
+      setNotice({ tone: "error", text: m.failed });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkbox = (label: string, value: boolean, set: (next: boolean) => void, testId: string) => (
+    <label className="flex min-h-11 items-center gap-2 text-sm">
+      <input type="checkbox" checked={value} onChange={(event) => set(event.target.checked)} data-testid={testId} />
+      {label}
+    </label>
+  );
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+      data-testid="qa-release-control-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.formTitle}</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.formNote}</p>
+      {checkbox(m.digestEnabled, digestEnabled, setDigestEnabled, "qa-release-control-digest")}
+      {checkbox(m.mergeLaneEnabled, mergeLaneEnabled, setMergeLaneEnabled, "qa-release-control-merge-lane")}
+      {checkbox(m.developLaneOn, developLaneOn, setDevelopLaneOn, "qa-release-control-develop-lane")}
+      <label className="flex flex-col gap-1 text-sm">
+        {m.iacCommit}
+        <input
+          className="rounded border border-zinc-300 px-2 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+          value={iacCommit}
+          onChange={(event) => setIacCommit(event.target.value)}
+          placeholder={m.iacCommitHint}
+          pattern="[0-9a-f]{40}"
+          maxLength={40}
+          data-testid="qa-release-control-iac"
+        />
+      </label>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-medium">{m.rotationTitle}</legend>
+        {QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => (
+          <label key={field} className="flex flex-col gap-1 text-sm">
+            {m[field]}
+            <input
+              type="datetime-local"
+              className="rounded border border-zinc-300 px-2 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+              value={rotated[field]}
+              onChange={(event) => setRotated((previous) => ({ ...previous, [field]: event.target.value }))}
+            />
+          </label>
+        ))}
+      </fieldset>
+      {reauthenticationRequired ? (
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-amber-800 dark:text-amber-300">
+          {m.reauthenticationRequired}
+          <a className="font-medium underline" href={adminRecentAuthenticationHref(PAGE_PATH)}>
+            {m.signInAgain}
+          </a>
+        </p>
+      ) : null}
+      {notice ? (
+        <p
+          role="status"
+          className={
+            notice.tone === "ok" ? "text-sm text-zinc-700 dark:text-zinc-300" : "text-sm text-red-700 dark:text-red-300"
+          }
+        >
+          {notice.text}
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        disabled={busy}
+        className="min-h-11 self-start rounded-md bg-zinc-900 px-4 text-sm font-medium text-white disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900"
+        data-testid="qa-release-control-save"
+      >
+        {m.save}
+      </button>
+    </form>
   );
 }

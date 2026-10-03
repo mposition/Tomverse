@@ -5,6 +5,10 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import {
+  QA_RELEASE_SECRET_ROTATION_FIELDS,
+  type QaReleaseSecretRotationField,
+} from "@/lib/qaReleaseOperatorControlFields";
 
 /**
  * The only writer of QaReleaseOperatorControl (docs/policy/qa-release-agent.md
@@ -36,16 +40,8 @@ export const QA_RELEASE_CONTROL_WRITE_LIMITS = Object.freeze({
 });
 const LIMITS = QA_RELEASE_CONTROL_WRITE_LIMITS;
 
-export const QA_RELEASE_SECRET_ROTATION_FIELDS = [
-  "digestSecretRotatedAt",
-  "monitorSecretRotatedAt",
-  "mergeLaneSecretRotatedAt",
-  "githubAppKeyRotatedAt",
-  "railwayTokenRotatedAt",
-  "githubReadTokenRotatedAt",
-] as const;
-
-type RotationField = (typeof QA_RELEASE_SECRET_ROTATION_FIELDS)[number];
+export { QA_RELEASE_SECRET_ROTATION_FIELDS };
+type RotationField = QaReleaseSecretRotationField;
 
 export type QaReleaseOperatorControlInput = {
   digestEnabled: boolean;

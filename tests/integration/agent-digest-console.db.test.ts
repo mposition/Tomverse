@@ -76,7 +76,8 @@ test("present, expired and unreadable bodies are each shown for what they are", 
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
   }
 
-  const console = await readAgentDigestConsole();
+  const console = await readAgentDigestConsole(false);
+  assert.equal(console.canWrite, false);
   const byId = new Map(console.digests.map((row) => [row.id, row]));
   const shown = byId.get(present.status === "created" ? present.id : "");
   assert.equal(shown?.body, "present");
