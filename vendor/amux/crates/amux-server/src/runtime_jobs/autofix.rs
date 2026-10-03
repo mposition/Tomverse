@@ -7177,6 +7177,10 @@ pub(crate) fn should_refresh_with_counts(
     escalating || now - updated_at >= min_secs
 }
 
+const CI_NEXT_ACTION: &str = "Inspect the failed CI assertion and the next green run; record whether \
+                              the same assertion still ran, then repair or quarantine the cause. \
+                              A green run alone is not proof of a fix.";
+
 async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<String>> {
     // PER-TENANT CLOUD: do not drop the server's own health/ops findings onto a
     // customer's board (AMUX-3014). Off by env in the cloud image; on locally
@@ -7192,19 +7196,19 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             // AEAB-59: do not just drop it — if the MEASUREMENT moved, say so on
             // the card that already exists. Read-only here; the write is below.
             let fresh_title = truncate(&f.title, 160);
-            let existing: Option<(String, String, String, i64)> = conn
+            let existing: Option<(String, String, String, i64, Option<String>, String)> = conn
                 .query_row(
-                    "SELECT id, title, COALESCE(desc,''), COALESCE(updated_at, created_at) \
+                    "SELECT id, title, COALESCE(desc,''), COALESCE(updated, created), next_action, status \
                        FROM issues WHERE source_ref = ?1 AND archived = 0 LIMIT 1",
                     rusqlite::params![format!("autofix:{}", f.signature)],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
                 )
                 .ok();
             let now_s = crate::api::reclaim::now_secs();
-            let Some((card_id, old_title, old_desc, updated_at)) = existing else {
+            let Some((card_id, old_title, old_desc, updated_at, old_next_action, status)) = existing else {
                 return Ok(None);
             };
-            if !should_refresh_with_counts(
+            let refresh = should_refresh_with_counts(
                 &old_title,
                 &fresh_title,
                 updated_at,
@@ -7212,10 +7216,29 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
                 refresh_min_secs(),
                 carded_count(&old_desc),
                 f.count,
-            ) {
+            );
+            let backfill_action = f.kind == DetectorKind::CiFailure
+                && matches!(status.as_str(), "todo" | "doing" | "quarantined" | "blocked" | "needsyou" | "review")
+                && old_next_action.as_deref().unwrap_or("").trim().is_empty();
+            if !refresh && !backfill_action {
                 return Ok(None);
             }
             drop(conn);
+            if !refresh {
+                let cid = card_id.clone();
+                state.store.write(move |c| {
+                    c.execute(
+                        "UPDATE issues SET next_action = ?2, updated = ?3 WHERE id = ?1 \
+                         AND status IN ('todo','doing','quarantined','blocked','needsyou','review') \
+                         AND COALESCE(TRIM(next_action),'') = ''",
+                        rusqlite::params![cid, CI_NEXT_ACTION, now_s],
+                    )?;
+                    Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                })?;
+                tracing::info!(card = %card_id, detector = %f.signature,
+                    "autofix backfilled a missing CI disposition");
+                return Ok(None);
+            }
             let body = format!(
                 "{}{}The measurement moved. Re-read {} — previously titled:\n  {}\n\n{}",
                 desc_without_refresh(&old_desc),
@@ -7227,8 +7250,11 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             let (cid, ttl) = (card_id.clone(), fresh_title.clone());
             let _ = state.store.write(move |c| {
                 c.execute(
-                    "UPDATE issues SET title = ?2, desc = ?3, updated_at = ?4 WHERE id = ?1",
-                    rusqlite::params![cid, ttl, body, now_s],
+                    "UPDATE issues SET title = ?2, desc = ?3, updated = ?4, \
+                     next_action = CASE WHEN ?5 = 1 \
+                     AND status IN ('todo','doing','quarantined','blocked','needsyou','review') \
+                     AND COALESCE(TRIM(next_action),'') = '' THEN ?6 ELSE next_action END WHERE id = ?1",
+                    rusqlite::params![cid, ttl, body, now_s, backfill_action, CI_NEXT_ACTION],
                 )?;
                 Ok(crate::db::WriteOutcome {
                     applied: true,
@@ -7259,12 +7285,7 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
     // A CI alert can turn green without its failed assertion being fixed.
     // Give the claimed card a disposition without trusting the workflow's
     // externally supplied name or re-check command as an instruction.
-    let next_action = (f.kind == DetectorKind::CiFailure).then(|| {
-        "Inspect the failed CI assertion and the next green run; record whether \
-         the same assertion still ran, then repair or quarantine the cause. \
-         A green run alone is not proof of a fix."
-            .to_string()
-    });
+    let next_action = (f.kind == DetectorKind::CiFailure).then(|| CI_NEXT_ACTION.to_string());
 
     // The new id has to come back OUT of the writer closure, which runs on the
     // single writer thread — so it cannot ride a thread_local, and widening
@@ -13929,6 +13950,12 @@ mod tests {
             parked_until: None,
         };
         let id = file_finding(&st, &f).await.unwrap().expect("card filed");
+        let next_action: Option<String> = st.store.read().unwrap().query_row(
+            "SELECT next_action FROM issues WHERE id=?1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(next_action.is_none(), "non-CI findings keep their own disposition policy");
 
         let noted = note_quiet_signatures(&st, now, &[]).await.unwrap();
         assert_eq!(noted.len(), 1, "a quiet signature must be noted: {noted:?}");
@@ -14097,6 +14124,18 @@ mod tests {
         let next_action = next_action.expect("a claimed CI alert needs a disposition");
         assert!(next_action.contains("same assertion still ran"));
         assert!(next_action.contains("green run alone is not proof"));
+        let card_for_clear = card.clone();
+        st.store.write(move |conn| {
+            conn.execute("UPDATE issues SET next_action=NULL WHERE id=?1", rusqlite::params![card_for_clear])?;
+            Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+        }).unwrap();
+        assert!(file_finding(&st, &f[0]).await.unwrap().is_none());
+        let restored_action: String = st.store.read().unwrap().query_row(
+            "SELECT next_action FROM issues WHERE id=?1",
+            rusqlite::params![card],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(restored_action, CI_NEXT_ACTION);
         let c = cards(&st);
         assert_eq!(c.len(), 1);
         assert_eq!(
