@@ -9,7 +9,11 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
-import { isEmailReleaseNotesLiveForEnqueue } from "@/lib/emailPolicyPublication";
+import {
+  CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
+  isEmailReleaseNotesLiveForEnqueue,
+} from "@/lib/emailPolicyPublication";
+import { CHANGE_NOTICE_WINDOW_DAYS } from "@/lib/emailPolicyPublicationCore";
 import {
   marketingFlagApplies,
   releaseNotesFlagApplies,
@@ -27,6 +31,7 @@ import {
   EXPANSION_BATCH_SIZE,
   expansionRefusal,
   nextBatchPlan,
+  NOTICE_REACHED_OR_IN_FLIGHT_STATUSES,
   readExpansionSpec,
   type AudienceCohortSpec,
   type ExpansionRefusalReason,
@@ -124,6 +129,43 @@ const waveForEvent = (eventId: string) =>
   });
 
 /**
+ * The accounts an amendment notice wave writes to.
+ *
+ * The publication gate's own owed set and evidence window
+ * (lib/emailPolicyPublication.ts `noticeFactsFor`): an account created before
+ * the effective day, or with no creation time, that holds no approved notice
+ * that arrived or is still on its way. Every wave asks afresh, so a second wave
+ * reaches accounts created since the first and the ones whose notice did not
+ * arrive, and nobody is written to twice. The audience estimate counts the same
+ * condition, so the number an approver reads is the one the wave expands.
+ */
+export const policyChangeNoticeAudienceWhere = (
+  effectiveDate: string
+): Prisma.UserWhereInput => {
+  const effective = new Date(`${effectiveDate}T00:00:00.000Z`);
+  const windowStart = new Date(
+    effective.getTime() - CHANGE_NOTICE_WINDOW_DAYS * 86_400_000
+  );
+  return {
+    AND: [
+      { OR: [{ createdAt: null }, { createdAt: { lt: effective } }] },
+      {
+        emailDeliveries: {
+          none: {
+            status: { in: [...NOTICE_REACHED_OR_IN_FLIGHT_STATUSES] },
+            createdAt: { gte: windowStart },
+            templateVersion: {
+              contentHash: { in: [...CHANGE_NOTICE_APPROVED_CONTENT_HASHES] },
+              template: { key: POLICY_CHANGE_NOTICE_TEMPLATE },
+            },
+          },
+        },
+      },
+    ],
+  };
+};
+
+/**
  * Who a cohort wave looks at next.
  *
  * A first notice asks the audience query. A reminder asks the people the
@@ -133,6 +175,7 @@ const waveForEvent = (eventId: string) =>
  */
 const cohortCandidates = async (input: {
   cohort: AudienceCohortSpec;
+  templateKey: string;
   campaignId: string;
   recomputes: boolean;
   after: string | null;
@@ -178,6 +221,43 @@ const cohortCandidates = async (input: {
         excludedReason: candidate.email ? null : "no_email",
         malformed: false,
       },
+      inAudience: true,
+    }));
+  }
+
+  if (input.cohort.kind === "policy_change_notice") {
+    // Checked at draft too. Here as well because this is the last step before
+    // rows exist, and the cohort reaches people who turned everything off: a
+    // stored campaign pairing it with any other template must stop, loudly.
+    if (input.templateKey !== POLICY_CHANGE_NOTICE_TEMPLATE) {
+      throw new Error(
+        `The amendment notice cohort carries only ${POLICY_CHANGE_NOTICE_TEMPLATE}, not ${input.templateKey}.`
+      );
+    }
+    const rows = await prisma.user.findMany({
+      where: {
+        AND: [
+          policyChangeNoticeAudienceWhere(input.cohort.effectiveDate),
+          ...(input.after ? [{ id: { gt: input.after } }] : []),
+        ],
+      },
+      orderBy: { id: "asc" },
+      take: input.take,
+      select: {
+        id: true,
+        email: true,
+        settings: { select: { language: true } },
+      },
+    });
+    // No ledger. The recipient ledger's cohort names are a closed CHECK, and
+    // this cohort's record is the delivery row itself, which outlives the
+    // account and is what the gate counts. An account with no address gets no
+    // row, and the gate already counts it as unreachable.
+    return rows.map((candidate) => ({
+      id: candidate.id,
+      email: candidate.email,
+      language: candidate.settings?.language ?? null,
+      ledger: null,
       inAudience: true,
     }));
   }
@@ -446,6 +526,7 @@ export async function expandEmailEvent(input: {
       const candidates: ExpansionCandidate[] = spec.cohort
         ? await cohortCandidates({
             cohort: spec.cohort,
+            templateKey: event.template.key,
             campaignId: wave?.campaignId ?? "",
             recomputes: recomputesCohorts,
             after: result.cursor,

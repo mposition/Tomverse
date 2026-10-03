@@ -122,7 +122,81 @@ export type AudienceCohortSpec =
       /** Active accounts that explicitly opted into this marketing purpose. */
       kind: "marketing_consent";
       purpose: "product_updates";
+    }
+  | {
+      /**
+       * Every account the amendment notice is owed to and has not yet reached
+       * or is not already on its way to (S10).
+       *
+       * Owed means what the publication gate counts as owed
+       * (lib/emailPolicyPublication.ts): created before the effective date, or
+       * with no creation time at all. The date is in the spec rather than read
+       * at expansion so a wave keeps meaning the amendment it was approved for;
+       * the draft refuses a date that is not the notice's own.
+       */
+      kind: "policy_change_notice";
+      effectiveDate: string;
     };
+
+/**
+ * Notice deliveries that mean an account is already reached or about to be.
+ *
+ * The publication gate's told states (delivered, complained) plus the two that
+ * are still on their way (pending, sent). Everything else -- bounced, suppressed,
+ * skipped, failed, abandoned -- is a notice that did not arrive, so a later wave
+ * asks again: a soft bounce is retried by nothing else, and a lane that still
+ * refuses the address records that refusal on the new row, which is what the
+ * gate's unreachable rule reads.
+ */
+export const NOTICE_REACHED_OR_IN_FLIGHT_STATUSES = [
+  "pending",
+  "sent",
+  "delivered",
+  "complained",
+] as const;
+
+/** YYYY-MM-DD naming a real calendar day, or null. */
+export const readIsoDay = (raw: unknown): string | null => {
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const day = new Date(`${raw}T00:00:00.000Z`);
+  return Number.isNaN(day.getTime()) || day.toISOString().slice(0, 10) !== raw ? null : raw;
+};
+
+/**
+ * Why a template and a cohort may not go out together, or null.
+ *
+ * The notice cohort reaches people who turned every email off, because the
+ * notice is a `legal` message and that is what it is for. Paired with any other
+ * template it would mail a marketing or product message to that same
+ * population, so the pairing is closed in both directions: the notice cohort
+ * carries only the notice, and the notice goes only to its own cohort -- a
+ * hand-picked list or a consent cohort would leave owed accounts out, and the
+ * gate would then wait on people nobody wrote to.
+ */
+export const policyChangeNoticePairingProblem = (input: {
+  templateKey: string;
+  noticeTemplateKey: string;
+  noticeEffectiveDate: string | null;
+  spec: ExpansionSpec;
+}): string | null => {
+  const isNoticeTemplate = input.templateKey === input.noticeTemplateKey;
+  const cohort = input.spec.cohort;
+  const isNoticeCohort = cohort?.kind === "policy_change_notice";
+  if (isNoticeCohort && !isNoticeTemplate) {
+    return `The amendment notice cohort carries only ${input.noticeTemplateKey}, not ${input.templateKey}.`;
+  }
+  if (!isNoticeTemplate) return null;
+  if (!isNoticeCohort || (input.spec.userIds && input.spec.userIds.length > 0)) {
+    return "The amendment notice goes to its own cohort (every owed account), not to a list or another cohort.";
+  }
+  if (input.noticeEffectiveDate === null) {
+    return "The amendment notice has no effective date yet, so it has no audience.";
+  }
+  if (cohort.effectiveDate !== input.noticeEffectiveDate) {
+    return `The amendment notice announces ${input.noticeEffectiveDate}; this campaign names ${cohort.effectiveDate}.`;
+  }
+  return null;
+};
 
 export type ExpansionSpec = {
   /** Explicit recipients, for a cohort computed somewhere else. */
@@ -161,6 +235,10 @@ const readCohortSpec = (raw: unknown): AudienceCohortSpec | undefined => {
     return value.purpose === "product_updates"
       ? { kind: "marketing_consent", purpose: "product_updates" }
       : undefined;
+  }
+  if (value.kind === "policy_change_notice") {
+    const effectiveDate = readIsoDay(value.effectiveDate);
+    return effectiveDate ? { kind: "policy_change_notice", effectiveDate } : undefined;
   }
   if (value.kind !== "model_retirement") return undefined;
   const target = value.targetModelId;

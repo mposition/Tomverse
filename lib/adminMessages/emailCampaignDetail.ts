@@ -147,6 +147,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
         `${count} of them could be moved automatically.`,
       malformed: (count: number) =>
         `${count} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`,
+      noticeBreakdown: (owed: number, reached: number, noAddress: number) =>
+        `${owed} accounts are owed the notice; ${reached} already hold one that arrived or is on its way, and ${noAddress} of the rest have no address. Each wave asks again, so a later wave reaches accounts created since and notices that did not arrive.`,
       consentBreakdown: (consented: number, active: number, withEmail: number) =>
         `${consented} have a timestamped opt-in; ${active} are active and ${withEmail} currently have an address. Suppression and jurisdiction are checked at send time.`,
       counting: "Counting…",
@@ -349,6 +351,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       autoMigratable: (count: number) => `그중 ${count}명은 자동으로 옮길 수 있습니다.`,
       malformed: (count: number) =>
         `${count}명은 옮길 수 없습니다. parser가 읽을 수 없는 저장값은 다시 쓰지 않고 보존하므로, 그 계정들에 자동 변경을 약속하면 사실이 아니게 됩니다.`,
+      noticeBreakdown: (owed: number, reached: number, noAddress: number) =>
+        `고지 대상 계정은 ${owed}개입니다. ${reached}개는 도착했거나 발송 중인 고지가 이미 있고, 나머지 중 ${noAddress}개는 이메일 주소가 없습니다. wave마다 대상을 다시 계산하므로, 다음 wave는 그 사이 가입한 계정과 고지가 도착하지 않은 계정에 보냅니다.`,
       consentBreakdown: (consented: number, active: number, withEmail: number) =>
         `${consented}명이 시각이 기록된 동의를 했고, 그중 ${active}명이 활성 계정이며 ${withEmail}명은 현재 이메일 주소가 있습니다. 수신 차단과 관할권은 발송 시점에 확인합니다.`,
       counting: "세는 중…",

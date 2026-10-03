@@ -98,7 +98,10 @@ type CampaignView = {
 };
 
 type AudienceSummaryView = {
-  kind?: "marketing_consent";
+  kind?: "marketing_consent" | "policy_change_notice";
+  owed?: number;
+  alreadyReached?: number;
+  noAddress?: number;
   purpose?: "product_updates";
   consented?: number;
   active?: number;
@@ -807,7 +810,15 @@ export function AdminCampaignDetailPanel({
               </p>
             ) : null}
 
-            {campaign.audienceEstimate.kind === "marketing_consent" ? (
+            {campaign.audienceEstimate.kind === "policy_change_notice" ? (
+              <p className="mt-3 text-sm leading-6 text-zinc-300">
+                {m.estimate.noticeBreakdown(
+                  campaign.audienceEstimate.owed ?? 0,
+                  campaign.audienceEstimate.alreadyReached ?? 0,
+                  campaign.audienceEstimate.noAddress ?? 0
+                )}
+              </p>
+            ) : campaign.audienceEstimate.kind === "marketing_consent" ? (
               <p className="mt-3 text-sm leading-6 text-zinc-300">
                 {m.estimate.consentBreakdown(
                   campaign.audienceEstimate.consented ?? 0,

@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import {
   MODEL_LAUNCH_TEMPLATE,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
   PRODUCT_ANNOUNCEMENT_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
@@ -12,6 +13,7 @@ import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
   createCampaignDraft,
+  estimateCampaignAudience,
   runCampaignWave,
 } from "@/lib/emailCampaignService";
 import {
@@ -565,4 +567,148 @@ test("a campaign whose audience names nobody sends to nobody", async () => {
   assert.ok("refused" in run.expansion);
   assert.equal(run.expansion.refused, "no_audience");
   assert.equal(await prisma.emailDelivery.count(), 0);
+});
+
+// The amendment notice cohort (S10): every owed account, once.
+
+const NOTICE_COHORT = {
+  cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-16" },
+};
+
+const noticeDraft = () =>
+  createCampaignDraft({
+    category: "other",
+    templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+    locales: ["ko", "en"],
+    contentByLocale: { ko: {}, en: {} },
+    audienceSpec: NOTICE_COHORT,
+    createdByEmail: "ops@example.test",
+  });
+
+const createdAt = (userId: string, value: Date | null) =>
+  prisma.user.update({ where: { id: userId }, data: { createdAt: value } });
+
+const noticeRecipients = async () =>
+  (
+    await prisma.emailDelivery.findMany({
+      where: { templateVersion: { template: { key: POLICY_CHANGE_NOTICE_TEMPLATE } } },
+      select: { userId: true },
+    })
+  )
+    .map((row) => row.userId)
+    .sort();
+
+test("the amendment notice reaches every owed account once, and a later wave only the rest", async () => {
+  // The approved hashes are for the production origin.
+  process.env.PUBLIC_APP_URL = "https://tomverse.app";
+  try {
+    const owed = await account({});
+    const suspended = await account({ accountStatus: "suspended" });
+    const undated = await account({});
+    const noAddress = await account({ email: null });
+    const joinedAfter = await account({});
+    await createdAt(owed, new Date("2026-01-01T00:00:00Z"));
+    await createdAt(suspended, new Date("2026-03-01T00:00:00Z"));
+    await createdAt(undated, null);
+    await createdAt(noAddress, new Date("2026-02-01T00:00:00Z"));
+    // On the effective day itself: the gate does not count it as owed.
+    await createdAt(joinedAfter, new Date("2026-11-16T00:00:00Z"));
+
+    const first = await noticeDraft();
+    const estimate = await estimateCampaignAudience({
+      campaignId: first.id,
+      byEmail: "ops@example.test",
+    });
+    assert.ok(!("refused" in estimate), JSON.stringify(estimate));
+    assert.equal(estimate.estimatedRecipients, 3);
+    const summary = estimate.summary as {
+      kind?: string;
+      owed?: number;
+      alreadyReached?: number;
+      noAddress?: number;
+    };
+    assert.deepEqual(
+      {
+        kind: summary.kind,
+        owed: summary.owed,
+        alreadyReached: summary.alreadyReached,
+        noAddress: summary.noAddress,
+      },
+      { kind: "policy_change_notice", owed: 4, alreadyReached: 0, noAddress: 1 }
+    );
+
+    await approveCampaign({ campaignId: first.id, approvalId: `appr-${randomUUID()}` });
+    const launch = await runCampaignWave({ campaignId: first.id, kind: "launch" });
+    assert.ok(!("refused" in launch), JSON.stringify(launch));
+    // A legal message: the suspended account is owed it too. No ledger rows,
+    // because the delivery row is this cohort's record.
+    assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
+    assert.equal((await ledger(first.id)).length, 0);
+
+    // Asked again, the cohort holds nobody: each of them has a notice on its way.
+    const again = await runCampaignWave({ campaignId: first.id, kind: "reminder" });
+    assert.ok(!("refused" in again), JSON.stringify(again));
+    assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
+
+    // One notice did not arrive, and an account joined before the effective day.
+    await prisma.emailDelivery.updateMany({
+      where: { userId: owed },
+      data: { status: "bounced" },
+    });
+    const late = await account({});
+    await createdAt(late, new Date("2026-10-20T00:00:00Z"));
+    const followUp = await runCampaignWave({
+      campaignId: first.id,
+      kind: "final_reminder",
+    });
+    assert.ok(!("refused" in followUp), JSON.stringify(followUp));
+    assert.deepEqual(
+      await noticeRecipients(),
+      [owed, owed, suspended, undated, late].sort()
+    );
+  } finally {
+    delete process.env.PUBLIC_APP_URL;
+  }
+});
+
+test("the notice cohort carries only the notice, and the notice only its cohort", async () => {
+  process.env.PUBLIC_APP_URL = "https://tomverse.app";
+  try {
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+        audienceSpec: NOTICE_COHORT,
+        createdByEmail: "ops@example.test",
+      }),
+      /carries only policy_change_notice/
+    );
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: { ko: {}, en: {} },
+        audienceSpec: { cohort: { kind: "marketing_consent", purpose: "product_updates" } },
+        createdByEmail: "ops@example.test",
+      }),
+      /its own cohort/
+    );
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: { ko: {}, en: {} },
+        audienceSpec: { cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-15" } },
+        createdByEmail: "ops@example.test",
+      }),
+      /announces 2026-11-16/
+    );
+    assert.equal(await prisma.emailCampaign.count(), 0);
+  } finally {
+    delete process.env.PUBLIC_APP_URL;
+  }
 });
