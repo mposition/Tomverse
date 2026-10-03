@@ -142,6 +142,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake",
   "qa-release-merge-lane",
   "agent-digest-retention",
+  "billing-finance-ops-intake",
   ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS,
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];

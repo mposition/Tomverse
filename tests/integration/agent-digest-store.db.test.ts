@@ -255,4 +255,68 @@ test("the meta purge deletes only rows whose body is gone and whose 365 days are
     orderBy: { createdAt: "desc" },
   });
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, "agent-digest-retention");
+// docs/policy/billing-finance-ops.md §7 W1a: the registration migration widens
+// the CHECKs and the retention CASE. A billing-finance-ops row is accepted with
+// its own 90-day body retention and its own intake actor; a kind that belongs
+// to another agent is still refused by the database, not only by the store.
+test("billing-finance-ops is registered with its kind, retention and intake actor", async () => {
+  const result = await recordAgentDigestItem({
+    agentKey: "billing-finance-ops",
+    kind: "price_deadline_digest",
+    schemaVersion: 1,
+    idempotencyKey: `billing-finance-ops:test:${randomUUID()}`,
+    payload: { verdict: "quiet", items: [], rejectedFields: [] },
+  });
+  assert.equal(result.status, "created");
+  if (result.status !== "created") return;
+  createdIds.push(result.id);
+
+  const row = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: result.id } });
+  assert.equal(row.retentionUntil.getTime() - row.createdAt.getTime(), 90 * 86_400_000);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditLogId } });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "billing-finance-ops-intake");
+
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
+       VALUES ($1::uuid, 'billing-finance-ops', 'daily_digest', 1, $2, '{}'::jsonb, $3, 2)`,
+      randomUUID(),
+      `billing-finance-ops:test:${randomUUID()}`,
+      "0".repeat(64),
+    ),
+    /AgentDigestItem_kind_check/,
+  );
+});
+
+// The switch row the registration migration seeds is pinned on the migration's
+// SQL in tests/agentDigestContract.test.mjs, not here: other suites in this
+// lane clear AppSetting, so whether the row is still present when this file
+// runs depends on test order, not on the migration.
+
+// The function returns void, so it is called with $executeRawUnsafe (as the
+// support_triage_assert_deadline tests do) rather than selected as a value.
+// The boundary itself -- a run is refused only when the clock is strictly past
+// the deadline -- cannot be hit with a live clock, so it is pinned on the
+// function's text in tests/agentDigestContract.test.mjs; here the two sides of
+// it are shown with a margin.
+test("billing_finance_ops_assert_deadline passes before the deadline and raises after it or on NULL", async () => {
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline(clock_timestamp() + interval '1 minute')`,
+  );
+  // A deadline passed from the application goes as an ISO instant with its Z.
+  // Prisma sends a JS Date as a timestamp without a zone, which `::timestamptz`
+  // then reads in the session's time zone -- on a +10:00 server that moved
+  // this one-minute deadline ten hours into the past.
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline($1::timestamptz)`,
+    new Date(Date.now() + 60_000).toISOString(),
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(clock_timestamp() - interval '1 second')`),
+    /billing_finance_ops_deadline_passed/,
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(NULL)`),
+    /billing_finance_ops_deadline_passed/,
+  );
 });

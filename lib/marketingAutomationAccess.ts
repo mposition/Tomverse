@@ -527,10 +527,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * because the whole Prisma schema is deliberately watched. Descriptor and
  * admission decisions are unchanged. The value below is computed with that
  * model's columns aligned the way `prisma format` aligns them, which is the
- * state the file is committed in.
+ * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "18efce8aa0c113e07187d9b6f0497500374c07f06cdd80adfc0f1d71f9bd4e6f";
+  "efa8d3dfebfc7aa0e4285c2d275fbe0ce24b7fa9dfdfdf66ed964531996f4567";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
