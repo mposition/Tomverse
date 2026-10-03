@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { runAmuxV4SyntheticAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
@@ -21,6 +23,17 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   prompt: `{"previewId":"${previewId}","source":"synthetic"}`,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
+
+test("local one-shot entry point is closed before reading configuration", () => {
+  const script = fileURLToPath(new URL(
+    "../scripts/amux-v4-analysis-agent-once.mjs", import.meta.url));
+  const result = spawnSync(process.execPath, [script], {
+    env: { PATH: process.env.PATH ?? "" }, encoding: "utf8", timeout: 5_000,
+  });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /AMUX_V4_LOCAL_ANALYSIS_REFUSED/);
+});
 
 test("live connector refuses before queue, claim or CLI while code latch is off", async () => {
   let called = 0;
