@@ -55,17 +55,50 @@
     {
       "id": "devin",
       "vendor": "cognition",
-      "enabled": true,
+      "enabled": false,
       "maxConcurrent": 2,
       "model": "swe-2-high",
+      "promptNote": "Tool rule for this run: read files with your file tools; for search use only grep, rg, find, ls, cat, head, tail, wc, git log, git show, git blame, git status or git ls-files. Any other command, any file write and any network access is rejected and ends the review before the verdict. If you cannot check something, say so in a finding.",
       "command": "devin",
       "args": [
         "-p",
-        "--prompt-file", "/dev/stdin",
+        "--prompt-file", "{promptFile}",
         "--respect-workspace-trust", "false",
+        "--sandbox",
         "--permission-mode", "auto",
         "--model", "{model}"
       ]
+    },
+    {
+      "id": "copilot",
+      "vendor": "moonshot",
+      "enabled": true,
+      "priority": 1,
+      "maxConcurrent": 2,
+      "model": "kimi-k3",
+      "command": "copilot",
+      "args": [
+        "-p", "Read the file {promptFile} completely. It is your whole task: follow it exactly and end with the json block it asks for.",
+        "--add-dir", "{promptDir}",
+        "--disable-builtin-mcps",
+        "--no-custom-instructions",
+        "--no-ask-user",
+        "--no-auto-update",
+        "--no-remote",
+        "--no-remote-export",
+        "--disallow-temp-dir",
+        "--secret-env-vars", "COPILOT_GITHUB_TOKEN",
+        "--deny-tool", "write",
+        "--deny-tool", "url",
+        "--allow-tool", "shell(grep)",
+        "--allow-tool", "shell(rg)",
+        "--allow-tool", "shell(git log:*)",
+        "--allow-tool", "shell(git show:*)",
+        "--max-ai-credits", "50",
+        "-s",
+        "--model", "{model}"
+      ],
+      "passEnv": ["COPILOT_GITHUB_TOKEN"]
     }
   ]
 }

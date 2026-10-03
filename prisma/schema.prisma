@@ -5907,6 +5907,48 @@ model PromptRefinerReservation {
   @@index([stageId, status, expiresAt])
 }
 
+// Separate from the v1 shadow reservation tables, whose database constraints
+// pin a different 100-slot contract and price. These rows are dark until the
+// exact one-shot admission and audit path is implemented and reviewed.
+model PromptRefinerVnextOneShotStage {
+  id                         String   @id
+  status                     String   @default("staged")
+  sourceCommitSha            String
+  sourceManifestDigest       String
+  runnerDigest               String
+  manifestRoot               String
+  runtimeDeploymentId        String
+  runtimeCommitSha           String
+  pricePinDigest             String
+  perRequestCostMicroUsd     BigInt
+  slotCount                  Int
+  costCeilingMicroUsd        BigInt
+  approvedBy                 String
+  approvedAt                 DateTime
+  stageApprovalAuditLogId    String   @unique
+  runApprovalAuditLogId      String?  @unique
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  slots PromptRefinerVnextOneShotSlot[]
+}
+
+model PromptRefinerVnextOneShotSlot {
+  id                   String    @id
+  stageId              String
+  slotIndex            Int
+  status               String    @default("reserved")
+  reservedCostMicroUsd BigInt
+  requestId            String?   @unique
+  consumedAt           DateTime?
+  createdAt            DateTime  @default(now())
+
+  stage PromptRefinerVnextOneShotStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([stageId, slotIndex])
+  @@index([stageId, status])
+}
+
 /// Where a provider actually serves a request from.
 ///
 /// Dark. Nothing writes this, nothing routes from it, and no request consults

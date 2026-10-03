@@ -134,6 +134,41 @@ npm run railway:agents:apply
 
 production도 같은 순서입니다(`railway:agents:use-production`).
 
+### 6a. region은 apply가 고치지 못합니다
+
+서비스의 region은 `.railway/agent-runners.ts`의 `AGENT_RAILWAY_REGION`에 적혀
+있고 승인된 정책의 APP 8 기록과 같아야 합니다. 그런데 **Railway CLI는 이미
+존재하는 서비스의 region을 diff하지 않습니다.** 2026-10-03에 확인했습니다 —
+`railway config plan --json`의 `desiredGraph`는
+`{"asia-southeast1-eqsg3a":{"numReplicas":1}}`, `currentGraph`는
+`{"sfo":{"numReplicas":1}}`인데 `changeSet.changes`가 비어 있고 출력은
+`Your Railway configuration is already up to date.`였습니다.
+
+두 가지를 뜻합니다.
+
+- **잘못 만들어진 region은 대시보드에서 고칩니다.** apply로는 안 됩니다.
+- **apply가 대시보드 설정을 되돌리지도 않습니다.** 관리되지 않는 필드이기
+  때문입니다. 그래서 고친 뒤 다시 apply해도 안전합니다.
+
+**생성 시점에는 선언이 반영되고, 그 뒤로는 반영되지 않습니다.** 2026-10-03에
+양쪽을 다 봤습니다 — region을 선언하기 전에 만들어진 staging 두 서비스는
+Railway 기본값 `sfo`로 생겼고 apply로 고칠 수 없었으며, 선언을 넣은 뒤 만들어진
+production 서비스는 처음부터 `asia-southeast1-eqsg3a`였습니다.
+
+그래서 순서가 전부입니다. **region은 그 project에 처음 apply하기 전에
+`AGENT_RAILWAY_REGION`에 적혀 있어야 합니다.** 늦으면 손으로 고치는 수밖에
+없고, 그 수정은 서비스마다 환경마다 따로 해야 합니다.
+
+apply 뒤에는 **반드시 region을 확인하십시오.** 대시보드의 각 서비스 →
+Settings → Regions, 또는 아래 읽기 전용 조회로 봅니다.
+
+```bash
+railway status --json
+```
+
+맞지 않으면 각 서비스의 Settings에서 `asia-southeast1-eqsg3a`로 바꾸고
+재배포합니다.
+
 ### 7. 스위치 켜기
 
 staging의 앱 스위치 → staging의 서비스 스위치 순서로 켭니다. 반대로 하면 서비스가
