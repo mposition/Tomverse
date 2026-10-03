@@ -126,6 +126,11 @@ const run = async () => {
   console.log(`  signed up later:       ${later} (not covered)`);
   console.log(`candidates to seal:      ${candidates.length}`);
 
+  if (candidates.length === 0) {
+    // An approval covering nobody cannot be told apart from one whose member
+    // writes failed (sealRefusal: no_members), so there is nothing to seal.
+    return fail("\nNo account existed at --approved-at with an address and a signup date; nothing to seal.");
+  }
   if (!apply) {
     console.log(`\nDry run: nothing written. To seal, rerun with --apply --confirm-count ${candidates.length}.`);
     return;
