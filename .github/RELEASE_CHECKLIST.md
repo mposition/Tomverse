@@ -25,6 +25,18 @@ Date / timezone:    ____________________
 - [ ] `npm run test:unit`
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
+- [ ] `npm run check:ci-cache-keys` — an Actions cache key decides who may
+      restore the entry, and an entry written while a run is on `main` or
+      `develop` is restorable by every run that can see that scope. Five
+      workflows once shared one exact Playwright key, so one entry held the
+      browser binaries eight jobs launch, and a bare `Linux-next-` restore-key
+      served one workflow's Next 16.3.4 build cache to another and broke its
+      16.3.5 font build. Reads YAML only, no credential.
+- [ ] `npm run check:credential-cache-separation` — a job holding a write
+      permission or an external secret may restore a package manager's cache,
+      which `npm ci` checks against the lockfile, and may not restore build
+      output or browser binaries, which nothing checks and which the job
+      executes. Reads YAML only, no credential.
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:e2e-copy-selectors` — a copy-based locator that steers a
       branch (`isVisible()`, `count()`) resolves instead of retrying, so when
