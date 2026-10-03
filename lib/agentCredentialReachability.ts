@@ -399,7 +399,12 @@ const restoredCacheKinds = (job: Obj): CacheKind[] => {
       // cache nothing without it, and some default it on -- setup-go caches
       // GOCACHE, which is compiled build output.
       if (cacheOff) continue;
-      if (CACHES_ONLY_WHEN_NAMED.some((pattern) => pattern.test(uses))) continue;
+      // `cache: true` turns caching on without naming a manager, which is how
+      // setup-dotnet enables its NuGet cache. Read as "not named" it fell
+      // through the list below and the step was classified as caching nothing
+      // -- a false negative on a credential gate, found by both reviewers.
+      const cacheOn = cache === true || cache === "true";
+      if (!cacheOn && CACHES_ONLY_WHEN_NAMED.some((pattern) => pattern.test(uses))) continue;
       kinds.add("unverified");
     }
   }
