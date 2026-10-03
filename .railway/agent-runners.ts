@@ -116,7 +116,10 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "qa_release_digest",
     service: "QA Release Digest",
-    startCommand: "npm run agent:qa-release-digest",
+    // Node directly, not npm run: npm adds npm_*, INIT_CWD and NODE to the
+    // environment, and the service refuses to start on any name it does not
+    // know (lib/qaReleaseServiceEnvCore.ts).
+    startCommand: "node --experimental-strip-types scripts/qa-release-digest-service.mjs",
     // Policy section 10: 21:00 UTC daily.
     cronSchedule: "0 21 * * *",
     environments: {
@@ -127,7 +130,7 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "qa_release_monitor",
     service: "QA Release Monitor",
-    startCommand: "npm run agent:qa-release-monitor",
+    startCommand: "node --experimental-strip-types scripts/qa-release-monitor-service.mjs",
     // Policy section 10 lists the Monitor's cron (every 30 minutes) as a
     // proposed value to confirm before S0, so it is declared without one and
     // runs only by hand until that value is approved.

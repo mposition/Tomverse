@@ -76,4 +76,9 @@ test("the entry follows no redirect, times out, and imports only its core", () =
   assert.deepEqual([...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]), ["../lib/qaReleaseMonitorServiceCore.ts"]);
   assert.match(source, /redirect: "error"/);
   assert.match(source, /signal: AbortSignal\.timeout\(/);
+  // Never shorter than the route's own round budget, or an in-budget round
+  // would end as an unknown outcome on this side.
+  const number = (text, name) => Number(new RegExp(`const ${name} = ([0-9_]+);`).exec(text)?.[1].replaceAll("_", ""));
+  const route = readFileSync(new URL("../lib/qaReleaseMonitor.ts", import.meta.url), "utf8");
+  assert.ok(number(source, "HTTP_TIMEOUT_MS") > number(route, "MONITOR_ROUND_BUDGET_MS"));
 });
