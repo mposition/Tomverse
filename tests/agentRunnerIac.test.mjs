@@ -290,3 +290,15 @@ test("the region is named rather than left to Railway's default", () => {
     }
   }
 });
+
+test("the billing-finance-ops trigger declares exactly the variables its start check accepts, and starts node directly", async () => {
+  const { BILLING_FINANCE_OPS_SERVICE_VARIABLES } = await import("../lib/billingFinanceOpsServiceCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "billing_finance_ops_deadline");
+  assert.ok(runner);
+  for (const environment of ["production", "staging"]) {
+    assert.deepEqual([...runner.environments[environment]].sort(), [...BILLING_FINANCE_OPS_SERVICE_VARIABLES].sort(), environment);
+  }
+  // docs/policy/billing-finance-ops.md §1.1: once a day at 01:00 UTC.
+  assert.equal(runner.cronSchedule, "0 1 * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
+});
