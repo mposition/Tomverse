@@ -1,7 +1,7 @@
 /**
  * Which develop pull requests the QA-release merge lane must leave to a person.
  *
- * docs/policy/qa-release-agent.md (version 1), section 8 item 3, is the
+ * docs/policy/qa-release-agent.md (version 3), section 8 item 3, is the
  * contract. A pull request listed here is never merged by the lane; it is
  * shown in Admin as human work, and the lane moves on to the next oldest
  * candidate. Every input comes from the caller -- this module reads no
@@ -22,6 +22,25 @@ export const QA_RELEASE_MERGE_LANE_GATE_PATTERNS: readonly string[] = [
   "lib/adminAuditSystemActors.ts",
   "lib/agentAuthorityFiles.ts",
 ];
+
+/**
+ * File names that are gate files wherever they sit (policy version 3): npm
+ * reads every workspace's manifest and runs its install scripts during
+ * `npm ci`, and an `.npmrc` anywhere in the tree can change what is fetched.
+ * Compared without case, because a case-insensitive checkout reads
+ * `Package.json` as the same file.
+ */
+export const QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES: readonly string[] = [
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  ".npmrc",
+];
+
+const GATE_FILE_NAMES = new Set(QA_RELEASE_MERGE_LANE_GATE_FILE_NAMES);
+
+const isGateFileName = (path: string): boolean =>
+  GATE_FILE_NAMES.has(path.slice(path.lastIndexOf("/") + 1).toLowerCase());
 
 /** Head branches whose own contract requires a human merge or a required review. */
 export const QA_RELEASE_MERGE_LANE_EXCLUDED_BRANCH_PREFIXES: readonly string[] = [
@@ -130,7 +149,9 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
         continue;
       }
       // Every file at the repository root sets how checks run or are configured.
-      if (!path.includes("/") || GATE_MATCHERS.some((matcher) => matcher.test(path))) reasons.add("gate_path");
+      if (!path.includes("/") || isGateFileName(path) || GATE_MATCHERS.some((matcher) => matcher.test(path))) {
+        reasons.add("gate_path");
+      }
       if (policyTests.has(path)) reasons.add("policy_test");
       if (ownMatchers.some((matcher) => matcher.test(path))) reasons.add("agent_own_path");
     }

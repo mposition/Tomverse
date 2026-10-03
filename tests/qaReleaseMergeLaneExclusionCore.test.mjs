@@ -184,3 +184,27 @@ test("migration SQL on a non-migration path is ignored", () => {
     { excluded: false },
   );
 });
+
+test("npm's manifest, lockfiles and configuration are gates at any depth (policy version 3)", () => {
+  for (const path of [
+    "packages/shared/package.json",
+    "apps/mobile/package-lock.json",
+    "tools/review-orchestrator/npm-shrinkwrap.json",
+    "packages/shared/.npmrc",
+    "apps/mobile/Package.json",
+    "a/b/c/d/.NPMRC",
+  ]) {
+    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: true, reasons: ["gate_path"] }, path);
+  }
+  // A rename that only moves a manifest away still touched one.
+  assert.deepEqual(
+    judge({ changedFiles: [{ path: "packages/shared/manifest.txt", previousPath: "packages/shared/package.json" }] }),
+    { excluded: true, reasons: ["gate_path"] },
+  );
+});
+
+test("names that only contain a gate file name are not gates", () => {
+  for (const path of ["packages/shared/package.json.md", "lib/my-package.json", "docs/npmrc-notes.md", "lib/package-lock.json.ts"]) {
+    assert.deepEqual(judge({ changedFiles: [{ path }] }), { excluded: false }, path);
+  }
+});
