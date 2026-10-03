@@ -267,6 +267,9 @@ run(
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // vNext one-shot storage remains dark but must commit exactly 80 fixed-
+    // price slots and refuse consumption before run approval or any reuse.
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
@@ -464,6 +467,10 @@ run(
     // direct writes rather than through the store module: what they refuse is
     // exactly the write that did not go through it.
     "tests/integration/marketing-automation-schema.db.test.ts",
+    // The staging webhook shadow: the partial unique index on an event's
+    // digest refusing a second report inside the transaction that would have
+    // audited it, and one winner among deliveries racing for an armed fault.
+    "tests/integration/marketing-webhook-shadow.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them

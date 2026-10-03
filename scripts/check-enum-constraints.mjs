@@ -620,6 +620,16 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_status_check: {
+    owner: "database",
+    reason:
+      "The dark one-shot stage has no active writer. The database permits staged, separately run-approved, then permanently closed; any future admission must match this closed vocabulary.",
+  },
+  PromptRefinerVnextOneShotSlot_status_check: {
+    owner: "database",
+    reason:
+      "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxWorkItem_status_check: {
     owner: "database",
@@ -875,6 +885,20 @@ const REGISTRY = {
     list: "AMUX_INTAKE_APPROVAL_STATUSES",
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
+  ProductResearchObservation_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_OUTCOMES",
+    reason:
+      "ok, failed. A failed slot has nowhere to put a payload: the shape CHECK requires every success column to be null, so a failure cannot display an earlier success content.",
+  },
+  ProductResearchObservation_failureStage_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_FAILURE_STAGES",
+    reason:
+      "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
   EngineeringAgentRun_status_check: {
     owner: "list",

@@ -1734,15 +1734,21 @@ EEA·영국을 여는 선행 게이트입니다.
   함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
 - **게시 여부는 "개정을 담은 승인된 버전인가"입니다.** 문서마다 개정을 담았다고
   승인된 버전의 digest 목록(`APPROVED_AMENDED_DIGESTS`)을 두고, 현재 렌더되는
-  digest(`/privacy`는 `lib/sitemapContentDates.ts`, `tests/sitemapLastModified.test.mjs`가
-  실제 페이지와 대조)가 그 목록에 있어야 인정합니다. 처음에는 "개정 전 digest에서
+  digest가 그 목록에 있어야 인정합니다. 현재 digest와 표시 날짜는 `AMENDED_DOCUMENT_EVIDENCE`
+  (`lib/emailPolicyPublication.ts`)에 두고, `tests/support/amendedDocumentVerifiers.mjs`의
+  검증기가 실제 페이지에서 다시 계산해 대조합니다. `/privacy`는 2026-09-28 판까지
+  `lib/sitemapContentDates.ts`에 있었지만, S10 개정을 시행일(2026-11-16)보다 먼저 게시하면서
+  옮겼습니다 — 미래의 시행일은 sitemap `lastmod`가 될 수 없습니다. 처음에는 "개정 전 digest에서
   바뀌었는가"로 판정했는데, 2026-09-28에 `/privacy`가 release notes와 **무관한 이유로**
   바뀌었고 그 설계는 그것을 개정 게시로 셌을 것입니다. 개정 뒤의 모든 편집은 그
   버전이 여전히 개정을 담는다고 승인해 목록에 넣기 전까지 게이트를 닫습니다.
-- **`/terms`는 지금 판정할 수 없습니다.** 그 페이지의 "Last updated" 줄은 본문이 세
-  번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
-  `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
-  `document_state_unrecorded`로 보고합니다.
+- **`/terms`는 sitemap이 아니라 게이트가 보증합니다.** 개정 전에는 그 페이지의 "Last
+  updated" 줄이 본문이 세 번 바뀌는 동안 움직이지 않았고, 게시 뒤로는 그 줄이 미래의
+  시행일(2026-11-16)이므로, 어느 쪽이든 sitemap `lastmod`가 될 수 없습니다
+  (`lib/sitemapContentDates.ts`). 그래서 현재 digest와 표시 날짜를
+  `AMENDED_DOCUMENT_EVIDENCE`에 두고 검증기가 다시 계산합니다. 개정이 게시되기 전에는
+  승인된 버전이 없어 `document_state_unrecorded`였고, 2026-10-03 게시 뒤로는 시행일
+  전까지 `effective_date_not_reached`입니다.
 - **문서는 `/privacy`와 `/terms` 둘입니다**(`AMENDED_DOCUMENTS`). 동의 문안과
   로그인 화면의 동의 문장은 개정 대상이 아닙니다 — 2026-09-29 결정 B가 동의 장치의
   약속("요청하지 않으면 보내지 않는다")을 유지했으므로, 그 약속을 지우도록 요구하던
@@ -1795,14 +1801,35 @@ EEA·영국을 여는 선행 게이트입니다.
 (`tests/support/amendedDocumentVerifiers.mjs`). 변경 고지 template
 `policy_change_notice`가 등록돼 있습니다.
 
-**남은 것은 전부 소유자 결정입니다** —
-[방침·약관 개정 초안](email-policy-amendment-draft.md)의 (1) `/privacy` 개정안 승인,
-(2) 변경 고지 문안 승인(그 template version의 `contentHash`를
-`CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에), (3) 시행일. 그 뒤 게시한 두 페이지의
-digest를 `APPROVED_AMENDED_DIGESTS`에 적고, 고지를 **사람이** 대상 전원에게 기한 안에
-보내면 게이트가 스스로 열립니다.
-`tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
-있음을 고정하므로, 그때 함께 고칩니다.
+**소유자 승인과 게시 (2026-10-03).**
+[방침·약관 개정](email-policy-amendment-draft.md)의 `/privacy` 개정안(7개 언어),
+`/terms` 조항, 변경 고지 문안(7개 언어), 시행일 **2026-11-16**을 mposition이 승인했습니다.
+
+- 두 페이지에 게시했고, 그 digest를 `APPROVED_AMENDED_DIGESTS`에 적었습니다.
+- 고지의 production `contentHash` 7개를 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적었습니다.
+- `tests/emailPolicyPublication.test.mjs`가 그 승인된 상태를 고정합니다.
+
+**남은 것은 둘이고, 코드가 아닙니다.**
+
+1. 결정 F의 봉인 뒤, **사람이** 고지를 대상 전원에게 보내 **2026-10-18 00:00 UTC 전**에
+   메일함에 도착시킵니다.
+2. 게이트는 **시행일(2026-11-16 00:00 UTC) 이후, 대상 계정 중 late·untold가 하나도 없을 때**
+   열립니다. 대상은 시행일 전에 생긴 계정 전부(생성 시각을 모르는 계정 포함)이고,
+   unreachable은 막지 않습니다.
+   - 고지가 **2026-10-18 00:00 UTC 전**에 메일함에 도착한 계정은 told입니다.
+   - 그 뒤에 도착한 계정은 — 늦게 가입했든 늦게 받았든 — 그 계정에 **처음** 도착한 UTC
+     날짜로부터 30달력일이 지나야 told가 됩니다(나중에 다시 도착한 고지는 그 날을 미루지
+     않습니다). 예를 들어 10-18 도착은 11-17 00:00 UTC, 11-15 도착은 12-15 00:00 UTC에
+     told입니다. 그때까지는 late입니다.
+   - **고지가 아직 도착하지 않은 계정은 — unreachable이 아니라면 — untold이고, 시간으로
+     풀리지 않습니다.** unreachable이 아닌 계정이 소프트 바운스, `failed`·`abandoned`, 또는
+     아직 보내지 않은 상태라면 고지가 도착해야 풀리며, 그런 계정 하나가 게이트 전체를
+     막습니다. 주소가 없거나, 고지가
+     거부·반송된 적이 있고 지금 레인이 그 주소로 법정 고지를 보내지 않는 계정은
+     unreachable이라 막지 않고 보고됩니다(위의 분류). 기한 뒤에 가입한 계정도 대상이므로 그들에게도 고지를
+     보내야 합니다.
+   - 그러므로 게이트는 **unreachable을 뺀 모든 대상 계정에 고지가 도착한 뒤**, 시행일과
+     각 late 계정의 첫 도착 + 30일 중 가장 늦은 때에 열립니다.
 
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.

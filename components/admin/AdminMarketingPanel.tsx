@@ -46,6 +46,35 @@ export type MarketingConsoleView = {
   switches: Record<string, SwitchState>;
   canWrite: boolean;
   configGeneration: number | null;
+  /** Staging only; null everywhere else (lib/marketingConsoleRead.ts). */
+  webhookStaging: WebhookStagingView | null;
+};
+
+type WebhookStagingView = {
+  readable: boolean;
+  shadow: "on" | "off" | "unreadable";
+  reportsReadable: boolean;
+  reportLimit: number;
+  faultArm: {
+    eventIdDigest: string;
+    state: "armed" | "consumed";
+    generation: number;
+    armedAt: string;
+    expiresAt: string;
+  } | null;
+  faultArmUnreadable: boolean;
+  /** Judged when the page was read; the screen does not consult a clock. */
+  faultArmExpired: boolean;
+  shadowReports: Array<{
+    id: string;
+    createdAt: string;
+    eventIdDigest: string;
+    eventType: string;
+    channel: string | null;
+    accountSlug: string | null;
+    derivedStatus: string;
+    statusQueryMatch: boolean;
+  }>;
 };
 
 const stamp = (value: unknown) => {
@@ -174,6 +203,24 @@ export function AdminMarketingPanel({ initial }: { initial: MarketingConsoleView
         onDone={() => void refresh()}
         m={m}
       />
+
+      {view.webhookStaging ? (
+        <MarketingWebhookStaging
+          staging={view.webhookStaging}
+          canWrite={view.canWrite}
+          section={view.section}
+          onDone={() => void refresh()}
+          m={m}
+        />
+      ) : null}
+
+      {view.canWrite ? (
+        <MarketingWebhookVerificationSign
+          section={view.section}
+          onDone={() => void refresh()}
+          m={m}
+        />
+      ) : null}
 
       {error ? <p className="mt-4 text-sm text-red-300">{error}</p> : null}
 
@@ -368,6 +415,248 @@ function MarketingSwitchStrip({
         onDone={onDone}
         m={m}
       />
+    </div>
+  );
+}
+
+/**
+ * The staging webhook exercise (S2e): the shadow switch, the fault latch, and
+ * the newest shadow reports -- whose event digests are what gets armed.
+ *
+ * Drawn only when the loader returned a staging view, which it does only in
+ * staging. Each report carries its own arm control, so the digest that is
+ * armed is the one on the row rather than one copied by hand. Every write
+ * compares against what this screen read: the shadow switch against its
+ * current value, the arm against the generation shown.
+ */
+/**
+ * Signing a webhook verification record (S2e-verification): the operator's
+ * judgement and signature, in every environment -- production signs the record
+ * the apply decision will read. The route checks the record is in the deployed
+ * tree, hashes to the digest typed here and was made against this build; the
+ * answer names the audit entry the sibling signature file must cite.
+ */
+export function MarketingWebhookVerificationSign({
+  section,
+  onDone,
+  m,
+}: {
+  section: string;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  const sign: MarketingAction[] = [
+    {
+      id: "webhook-verification-sign",
+      label: m.webhookSignAction,
+      path: "/api/admin/marketing/webhook/verification-sign",
+      confirm: m.webhookSignConfirm,
+      fields: [
+        { name: "recordId", label: m.fieldRecordId, kind: "text", initial: "", hint: m.hintRecordId },
+        { name: "recordDigest", label: m.fieldRecordDigest, kind: "text", initial: "", hint: m.hintRecordDigest },
+      ],
+      describe: (result) => {
+        const auditLogId = (result as { signatureAuditLogId?: unknown } | null)?.signatureAuditLogId;
+        return typeof auditLogId === "string" ? m.webhookSignDone.replace("{auditLogId}", auditLogId) : null;
+      },
+      body: (values) => ({
+        recordId: String(values.recordId ?? "").trim(),
+        recordDigest: String(values.recordDigest ?? "").trim().toLowerCase(),
+      }),
+    },
+  ];
+  return (
+    <div
+      data-testid="marketing-webhook-verification-sign"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+    >
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">{m.webhookSignTitle}</p>
+      <p className="mt-1 text-xs text-zinc-500">{m.webhookSignNote}</p>
+      <MarketingActionRail actions={sign} section={section} onDone={onDone} m={m} />
+    </div>
+  );
+}
+
+export function MarketingWebhookStaging({
+  staging,
+  canWrite,
+  section,
+  onDone,
+  m,
+}: {
+  staging: WebhookStagingView;
+  canWrite: boolean;
+  section: string;
+  onDone: () => void;
+  m: Record<string, string>;
+}) {
+  // The switch as its writer reads it, not the strip's folded value: a stored
+  // value the writer refuses gets no toggle.
+  const shadow = staging.shadow;
+  const shadowOn = shadow === "on";
+  const shadowToggle: MarketingAction[] =
+    canWrite && staging.readable && (shadow === "on" || shadow === "off")
+      ? [
+          {
+            id: "webhook-shadow-toggle",
+            label: shadowOn ? m.webhookShadowTurnOff : m.webhookShadowTurnOn,
+            path: "/api/admin/marketing/webhook/shadow",
+            method: "PATCH",
+            confirm: shadowOn ? undefined : m.webhookShadowConfirmOn,
+            body: () => ({ enabled: !shadowOn, expectedEnabled: shadowOn }),
+          },
+        ]
+      : [];
+
+  const arm = staging.faultArm;
+  const short = (digest: string) => `${digest.slice(0, 12)}…`;
+  const armLine = !staging.readable
+    ? m.webhookUnreadable
+    : staging.faultArmUnreadable
+      ? m.webhookArmForeign
+      : arm === null
+        ? m.webhookArmNone
+        : arm.state === "consumed"
+          ? m.webhookArmConsumed.replace("{generation}", String(arm.generation))
+          : staging.faultArmExpired
+            ? m.webhookArmExpired.replace("{generation}", String(arm.generation))
+            : m.webhookArmArmed
+                .replace("{digest}", short(arm.eventIdDigest))
+                .replace("{until}", stamp(arm.expiresAt) ?? arm.expiresAt)
+                .replace("{generation}", String(arm.generation));
+  // Arming compares against the generation shown; a value this console did not
+  // write cannot be compared against, so no arm control is offered for it.
+  const canArm = canWrite && staging.readable && !staging.faultArmUnreadable;
+  const expectedGeneration = arm?.generation ?? 0;
+  const describeArm = (result: unknown) => {
+    const generation = (result as { generation?: unknown } | null)?.generation;
+    return typeof generation === "number"
+      ? m.webhookArmDone.replace("{generation}", String(generation))
+      : null;
+  };
+  const ttlField = {
+    name: "ttlMinutes",
+    label: m.fieldTtlMinutes,
+    kind: "number" as const,
+    initial: "30",
+    hint: m.hintTtl,
+  };
+  // Condition 4 needs an event delivered while the shadow was off: it has no
+  // report row to arm from, so it is named by Zernio's own event id.
+  const armByEventId: MarketingAction[] = canArm
+    ? [
+        {
+          id: "webhook-fault-arm-event-id",
+          label: m.webhookArmByEventId,
+          path: "/api/admin/marketing/webhook/fault-arm",
+          confirm: m.webhookArmConfirm,
+          fields: [
+            {
+              name: "eventId",
+              label: m.fieldZernioEventId,
+              kind: "text",
+              initial: "",
+              hint: m.hintZernioEventId,
+            },
+            ttlField,
+          ],
+          describe: describeArm,
+          body: (values) => ({
+            eventId: String(values.eventId ?? "").trim(),
+            expectedGeneration,
+            ttlMinutes: Number(values.ttlMinutes),
+          }),
+        },
+      ]
+    : [];
+
+  return (
+    <div
+      data-testid="marketing-webhook-staging"
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-3"
+    >
+      <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+        {m.webhookStagingTitle}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">{m.webhookStagingNote}</p>
+      <MarketingActionRail actions={shadowToggle} section={section} onDone={onDone} m={m} />
+      <p data-testid="marketing-webhook-arm-state" className="mt-3 text-xs text-zinc-300">
+        {armLine}
+      </p>
+      <MarketingActionRail actions={armByEventId} section={section} onDone={onDone} m={m} />
+      {!staging.readable ? null : !staging.reportsReadable ? (
+        // A list that could not be read is not an empty one.
+        <p className="mt-3 text-xs text-amber-300">{m.webhookReportsUnreadable}</p>
+      ) : (
+        <>
+          <p className="mt-3 text-xs text-zinc-500">
+            {m.webhookReportsTitle.replace("{count}", String(staging.reportLimit))}
+          </p>
+          {staging.shadowReports.length === 0 ? (
+            <p className="mt-2 text-xs text-zinc-400">{m.webhookReportsEmpty}</p>
+          ) : (
+            <div className="mt-2 grid gap-2">
+              {staging.shadowReports.map((report) => (
+                <article
+                  key={report.id}
+                  data-testid="marketing-webhook-report"
+                  className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3"
+                >
+                  <p className="text-xs text-zinc-200">
+                    {stamp(report.createdAt)} · {report.channel ?? "?"}
+                    {report.accountSlug ? ` (${report.accountSlug})` : ""} · {report.eventType} →{" "}
+                    {report.derivedStatus} ·{" "}
+                    <span className={report.statusQueryMatch ? "text-emerald-300" : "text-amber-300"}>
+                      {report.statusQueryMatch ? m.webhookMatchYes : m.webhookMatchNo}
+                    </span>
+                  </p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">
+                    {report.eventIdDigest}
+                  </p>
+                  <MarketingActionRail
+                    actions={
+                      canArm && report.eventIdDigest !== ""
+                        ? [
+                            {
+                              id: `webhook-fault-arm-${report.id}`,
+                              label: m.webhookArmThis,
+                              path: "/api/admin/marketing/webhook/fault-arm",
+                              confirm: m.webhookArmConfirm,
+                              fields: [
+                                {
+                                  name: "ttlMinutes",
+                                  label: m.fieldTtlMinutes,
+                                  kind: "number",
+                                  initial: "30",
+                                  hint: m.hintTtl,
+                                },
+                              ],
+                              describe: (result) => {
+                                const generation = (result as { generation?: unknown } | null)
+                                  ?.generation;
+                                return typeof generation === "number"
+                                  ? m.webhookArmDone.replace("{generation}", String(generation))
+                                  : null;
+                              },
+                              body: (values) => ({
+                                eventIdDigest: report.eventIdDigest,
+                                expectedGeneration,
+                                ttlMinutes: Number(values.ttlMinutes),
+                              }),
+                            },
+                          ]
+                        : []
+                    }
+                    section={section}
+                    onDone={onDone}
+                    m={m}
+                  />
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

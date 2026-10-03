@@ -49,7 +49,7 @@ export type MarketingAutomationAccessReason =
   | "webhook_signature_invalid"
   | "webhook_pipeline_fingerprint_stale"
   | "webhook_config_snapshot_invalid"
-  | "webhook_config_snapshot_stale"
+  | "webhook_production_config_unsigned"
   | "webhook_record_digest_mismatch"
   | "webhook_audit_invalid"
   | "webhook_record_mismatch"
@@ -66,6 +66,8 @@ export const MARKETING_AUTOMATION_KILL_SWITCH_ENV =
 export const TOMVERSE_DEPLOY_ENV = "TOMVERSE_DEPLOY_ENV";
 export const APP_ENV = "APP_ENV";
 export const RAILWAY_ENVIRONMENT_NAME = "RAILWAY_ENVIRONMENT_NAME";
+export const ZERNIO_WEBHOOK_SECRET_ENV = "ZERNIO_WEBHOOK_SECRET";
+export const ZERNIO_API_KEY_ENV = "ZERNIO_API_KEY";
 
 export const MARKETING_DRAFTS_KEY = "marketingAutomation.draftsEnabled";
 export const MARKETING_PUBLISH_KEY = "marketingAutomation.publishEnabled";
@@ -86,24 +88,82 @@ export const marketingAutomationEnabledFromValue = (
 export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
 
 /**
- * S1 has no receiver, dedupe, storage, mapping or status-query comparison.
- * S2 may flip this only after all of those files exist and are included in the
- * static fingerprint below.
+ * The S2e receiver, dedupe, storage, mapping and status-query comparison now
+ * exist and are in the fingerprint below. This stays false until S2f adds the
+ * separately signed production configuration generation (S1 r7 amendment 1):
+ * a staging record alone never applies an event in production.
  */
 export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = false;
 
 export const MARKETING_WEBHOOK_SCHEMA_VERSION = "marketing-webhook-shadow-v1";
-export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [] as const;
+/** Written out, not imported: the receiver's core imports this module. */
+export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
+  "post.published",
+  "post.failed",
+  "post.partial",
+  "post.cancelled",
+  "post.platform.published",
+  "post.platform.failed",
+  "post.platform.deleted",
+] as const;
 
-/** Only pipeline files that exist in S1. S2 must extend this closed list. */
+/**
+ * Every file whose bytes can decide what a received event becomes: the whole
+ * local import closure of the receiver route (receiver, signature, dedupe,
+ * storage and audit transaction, mapping, status query), plus the schema and
+ * the dedupe index it cannot see. Not a hand-picked subset -- the test derives
+ * the closure and refuses any difference. This module itself is left out: it
+ * holds the fingerprint, and its webhook inputs are in the descriptor below.
+ * A change to any listed file makes a signed staging record stale.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FILES = [
+  "app/api/_marketing/zernioAdapter.ts",
+  "app/api/webhooks/zernio/route.ts",
+  "lib/adminAudit.ts",
+  "lib/adminAuditIntegrityCore.ts",
+  "lib/adminAuditSystemActors.ts",
+  "lib/clientIp.ts",
+  "lib/deploymentEnvironment.ts",
+  "lib/marketingAuditEvidence.ts",
   "lib/marketingAutomationSchema.ts",
+  "lib/marketingBannedClaims.ts",
+  "lib/marketingClaimVerbs.ts",
+  "lib/marketingFacts.ts",
+  "lib/marketingGuardCore.ts",
+  "lib/marketingGuardNormalise.ts",
+  "lib/marketingGuardRules.ts",
+  "lib/marketingKoreanClaims.ts",
+  "lib/marketingMemoryClaims.ts",
+  "lib/marketingMinorsClaims.ts",
+  "lib/marketingNegation.ts",
+  "lib/marketingPublishAdapter.ts",
+  "lib/marketingStore.ts",
+  "lib/marketingWebhookCore.ts",
+  "lib/marketingWebhookReceiver.ts",
+  "lib/marketingWebhookSettings.ts",
+  "lib/postgresConnectionConfigCore.mjs",
+  "lib/prisma.ts",
+  "lib/zernioPublishAdapter.ts",
+  "prisma/migrations/20261002120000_marketing_webhook_shadow_event_unique/migration.sql",
   "prisma/schema.prisma",
 ] as const;
 
+/** The route whose import closure the list above must equal. */
+export const MARKETING_WEBHOOK_PIPELINE_ROOT = "app/api/webhooks/zernio/route.ts";
+
+/**
+ * Names only. The staging snapshot hashes these environment values; the
+ * fingerprint carries the names, never a value.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR = {
   appSettingKeys: [MARKETING_WEBHOOK_SHADOW_KEY],
-  envNames: [APP_ENV, RAILWAY_ENVIRONMENT_NAME, TOMVERSE_DEPLOY_ENV],
+  envNames: [
+    APP_ENV,
+    RAILWAY_ENVIRONMENT_NAME,
+    TOMVERSE_DEPLOY_ENV,
+    ZERNIO_API_KEY_ENV,
+    ZERNIO_WEBHOOK_SECRET_ENV,
+  ],
   schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
 } as const;
 
@@ -384,9 +444,22 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-09-30: the sign-in / sign-up split takes develop with the web search
  * override; both notes above stand, and the value below is computed over the
  * merged schema.
+ *
+ * 2026-10-02: the product-research agent's observation table is added
+ * (docs/policy/product-research-agent.md §4) -- one new model with its own
+ * triggers. Not a marketing model and not a webhook input; the digest moves
+ * because the whole Prisma schema is deliberately watched. Descriptor and
+ * admission decisions are unchanged. The value below is computed with that
+ * model's columns aligned the way `prisma format` aligns them, which is the
+ * state the file is committed in.
+ *
+ * 2026-10-03: product-research and CHAT-01 changed the schema after develop
+ * was repinned. The value below covers the merged schema including the
+ * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
+ * Every note above stands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "e51a1cccc316be0fc093d4f7c32744b1288c8ed909bfe5d5e9ef010ea4a2508c";
+  "999ee26f79a9aabcba1a44221f4372864d78f04de067757f4ec1829148e8af80";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -548,7 +621,7 @@ export const marketingWebhookVerificationRecordSchema = z
       .min(1)
       .max(100),
     pipelineFingerprint: sha256Hex,
-    configSnapshotDigest: sha256Hex,
+    stagingConfigSnapshotDigest: sha256Hex,
   })
   .strict();
 
@@ -760,14 +833,12 @@ const webhookApplyDecision = (
     !isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)
   ) {
     add(reasons, "webhook_config_snapshot_invalid");
-  } else if (record) {
-    const currentConfigDigest = computeMarketingWebhookConfigSnapshotDigest(
-      input.webhookConfigSnapshot.value,
-    );
-    if (record.configSnapshotDigest !== currentConfigDigest) {
-      add(reasons, "webhook_config_snapshot_stale");
-    }
   }
+  // S1 r7 amendment 1: the record's staging snapshot is staging evidence and is
+  // never compared with the live one -- environment identity, shadow state and
+  // secrets are meant to differ. Production is bound by its own separately
+  // signed configuration generation, which S2f adds; until then nothing is.
+  add(reasons, "webhook_production_config_unsigned");
 
   if (record && signature) {
     const recordText = input.webhookVerificationRecordText;
