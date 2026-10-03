@@ -9,6 +9,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 최초 초안. 비공개 설계서(revision 18, 교차 vendor 독립 검토 `accept`)의 공개 가능한 계약만 옮김 |
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: 트랜잭션 상한 표와 버전별 무장 규칙, 늦은 advance와 재시작, 판정 가능한 단계 전환 조건, readiness 검사 이름, 상한 최대값의 유도, 서비스별 금지 변수 |
 | (미부여) | (미승인) | 세 번째 초안 — 독립 검토 반영: cron이 곧바로 `stuck`이어도 열림, 신규 열림의 날짜당 1회 강제, `abandoned` 뒤 heartbeat 보류, readiness 검사 17개 전부, 마감 판정의 시계, 무력화의 근거와 시험, 전환 조건의 근거 기록, 금지 변수 보강 |
+| (미부여) | (미승인) | 네 번째 초안 — 독립 검토 반영: 악화도 키당 날짜당 1회만 상한 밖, 환경변수는 allowlist로 판정, statement timer가 문장마다 다시 판정됨과 그 시험, `timestamptz` 비교, S3 조건을 커밋된 기록으로 |
 
 이 문서는 Claude가 설계하고 교차 vendor 독립 검토를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다. 내용 변경은 운영자
 승인과 정책 버전 증가가 필요합니다. 승인은 단계별 착수 조건(8절)을 없애지 않으며, 어떤 Railway 서비스·secret·webhook·
@@ -83,12 +84,15 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    한 번이며 재시도하지 않습니다. 결과를 모르는 예약은 다음 실행이 `abandoned`로 닫고 다시 보내지 않습니다.
 4. **실행 서비스는 제품 DB 자격증명을 갖지 않습니다.** 상태는 본 앱 내부 route로만 읽고 쓰며, 감시 테이블과 이 Agent의 digest
    테이블에 쓰는 것은 본 앱의 store 모듈 하나뿐입니다.
-5. **금지 변수가 있으면 시작하지 않습니다.** 서비스 진입점은 아래 이름이 환경에 있으면 자식 프로세스를 띄우기 전에 구성 오류로
-   멈춥니다. 두 서비스가 함께 갖는 `OPS_OBSERVER_ENABLED`·`OPS_OBSERVER_APP_URL`·`RAILWAY_DOCKERFILE_PATH`는 금지가 아닙니다.
+5. **허용되지 않은 변수가 있으면 시작하지 않습니다.** 판정은 **allowlist**입니다. 서비스 진입점은 환경의 모든 이름을 (a) 7절의
+   자기 서비스 변수, (b) 코드 상수로 고정한 비밀 아닌 런타임 이름(`PATH`·`HOME`·`HOSTNAME`·`NODE_ENV`·`NODE_VERSION`·`PORT` 같은
+   base image·Node 이름과 Railway가 넣는 `RAILWAY_*` 중 비밀이 아닌 것으로 문서에 이름이 있는 것)과 대조하고, 어느 쪽에도 없는
+   이름이 **하나라도** 있으면 자식 프로세스를 띄우기 전에 구성 오류로 멈춥니다. 모르는 이름은 거절이므로 새 자격증명이 이름 모양을
+   바꿔 통과할 수 없습니다. 자식은 자기 서비스 변수 중 필요한 것만 받습니다. 아래 이름은 allowlist에 절대 넣지 않는 것이며, 두
+   번째 검사로 따로 확인합니다.
    - 두 서비스 공통: `DATABASE_URL`, `DIRECT_URL`, `POSTGRES*`, `PG*`, `PRISMA_*`, `GITHUB_TOKEN`, `GH_*`,
-     `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_TOKEN`, `RAILWAY_TOKEN`, `ADMIN_AUDIT_INTEGRITY_*`, `NEXTAUTH_SECRET`, 그리고 이름이
-     `_SECRET`으로 끝나거나 `_API_KEY`를 포함하는 모든 변수 중 자기 서비스의 route secret이 아닌 것(maintenance·provider probe·
-     usage sync·auto-fix 등 내부 route bearer와 LLM·SaaS 키를 이름 하나하나가 아니라 모양으로 막습니다).
+     `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_TOKEN`, `RAILWAY_TOKEN`, `ADMIN_AUDIT_INTEGRITY_*`, `NEXTAUTH_SECRET`, 그리고 본 앱
+     웹 서비스가 가진 모든 자격증명 변수.
    - page 서비스에서만: `OPS_OBSERVER_DIGEST_SECRET`, `OPS_OBSERVER_DIGEST_WEBHOOK_URL`, `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`.
    - digest 서비스에서만: `OPS_OBSERVER_SECRET`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`, `OPS_OBSERVER_HEARTBEAT_URL`.
 6. **빌드 단계에는 runtime 비밀값이 없습니다.** 전용 Dockerfile은 `ARG`를 선언하지 않는 단일 stage이고, 첫 실행 명령이 빌드 환경
@@ -126,11 +130,14 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
   - **회복**
 - 신규 열림은 키당 소유자 날짜당 1회입니다. 같은 날짜의 두 번째 열림은 경과 시간과 무관하게 재열림으로 셉니다(일광절약시간이
   끝나 25시간인 날에도 성립하도록 시간이 아니라 날짜로 셉니다).
-- 재열림·회복과 재열림으로 시작한 사건의 악화는 소유자 날짜당 6개입니다. **신규 열림과 그 사건의 악화는 이 상한으로 막지
-  않습니다.**
+- 악화도 키당 소유자 날짜당 1회만 하루 상한 밖입니다. 같은 키의 같은 날짜 두 번째 악화는, 그 사건이 전날부터 이어진 것이든
+  새로 열린 것이든, 아래 6개 상한에 들어갑니다.
+- 재열림·회복, 재열림으로 시작한 사건의 악화, 그리고 위 규칙으로 넘어온 악화는 소유자 날짜당 6개입니다. **신규 열림과 날짜당 첫
+  악화는 이 상한으로 막지 않습니다.**
 - **하루 최대값의 유도(S2):** 키는 8개입니다.
   - 신규 열림은 키당 소유자 날짜당 1회이므로 최대 8입니다.
-  - 신규 열림 사건의 악화는 악화 구간을 가진 키가 하나뿐이고 그 키의 신규 열림이 날짜당 1회라 최대 1입니다.
+  - 상한 밖 악화는 키당 날짜당 1회이고 악화 구간을 가진 키가 하나뿐이라 최대 1입니다. cron 침묵의 `delayed` → `stuck`은 그 job의
+    침묵 예산과 회복 규칙 때문에 드물게만 일어나지만, 상한은 일어난다고 가정하고 셉니다.
   - 나머지 종류는 합쳐서 6입니다.
   - 그러므로 하루 15이고, 채널 점검 요일에는 점검 1이 더해져 16입니다. 점검이 다른 page와 한 메시지로 묶이면 더해지는 것은 0입니다.
 - **genesis한 날의 최대값:** genesis는 키 상태와 genesis별 카운트를 새로 시작하므로 그날은 15가 한 번 더 가능해 최대 31입니다.
@@ -163,8 +170,8 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 모든 줄에서 `Prisma timeout > transaction_timeout 상수 >= C_guarded > statement_timeout > idle`입니다. 문장 수 상한은 DB가
 아니라 애플리케이션이 셉니다(닫힌 allowlist).
 
-**실행 마감.** 모든 요청은 `runDeadline`을 싣습니다. 값은 실행 시작 시각 + supervisor 기한(180초)입니다. 이 절의 "지금"과 모든
-마감 판정은 `clock_timestamp()`입니다. `now()`·`transaction_timestamp()`는 트랜잭션 시작 시각에 멈춰 있어 마감을 넘긴 것을 보지
+**실행 마감.** 모든 요청은 `runDeadline`을 싣습니다. 값은 실행 시작 시각 + supervisor 기한(180초)입니다. `runDeadline`은 `timestamptz`로 받고 저장하며,
+이 절의 "지금"과 모든 마감 판정은 `timestamptz`인 `clock_timestamp()`와의 비교입니다. 세션 `TimeZone`은 결과를 바꾸지 않습니다. `now()`·`transaction_timestamp()`는 트랜잭션 시작 시각에 멈춰 있어 마감을 넘긴 것을 보지
 못하므로 쓰지 않습니다. 함수는 이렇게 동작합니다.
 
 1. `statement_timeout`과 idle을 위 값으로 겁니다.
@@ -181,11 +188,19 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
    것은 PostgreSQL 17.10에서 실행으로 측정한 사실입니다. S0b의 17 전용 job이 물려받은 값 200 ms와 600 s 두 경우를 매번 다시 실행해
    이것을 고정합니다(물려받은 값이 너무 작아 무장 전에 세션이 끝나면 쓰기 0으로 끝나는 fail-closed입니다). 그래서 17에서는
    점유의 만료 시각이 실행 마감 이하이고, `ttArmedMs >= C_guarded > statement_timeout`이 언제나 참이라
-   함수 다음 문장부터는 statement timer가 조용히 꺼지는 조합이 생기지 않습니다.
+   함수 다음 문장부터는 statement timer가 조용히 꺼지는 조합이 생기지 않습니다. PostgreSQL은 statement timer를 **문장마다 시작할
+   때** 그 시점의 `statement_timeout`과 `transaction_timeout` 값으로 다시 판정하므로, 물려받은 값이 작아 무장 함수 문장 자신의
+   statement timer가 꺼졌더라도 다음 문장은 `ttArmedMs > statement_timeout` 아래에서 다시 무장됩니다. 무장 함수 문장 자신은
+   아래 6항의 "DB 상한이 없는 구간"에 속합니다. 17 전용 job은 물려받은 값 200 ms에서 다음 셋을 **모두** 단언합니다.
+   - 함수 뒤 `pg_sleep(1)`에서 세션이 살아 있습니다(우리 값으로 다시 무장됨).
+   - 그다음 2초를 넘는 문장이 statement timeout으로 취소됩니다(statement timer가 무장돼 있음).
+   - statement 상한 아래의 짧은 문장을 반복하면 `ttArmedMs`에서 세션이 끝납니다(우리 timer가 실제로 돔).
+
+   물려받은 값 600 s에서도 마지막 단언을 합니다. `current_setting`만 보는 단언은 합격 근거가 아닙니다.
 5. **어느 버전이든**, 마감을 넘긴 트랜잭션은 commit의 deferred constraint trigger 평가 시점에 DB 시계로 abort됩니다. 성공 응답·
    전송 허가·heartbeat 전에는 별도의 짧은 트랜잭션으로 마감을 다시 확인합니다. 그 확인을 통과하지 못하면 성공을 내보내지 않습니다.
 6. 이 장치들이 덮지 못하는 구간이 있습니다.
-   - `BEGIN`부터 무장 문장까지
+   - `BEGIN`부터 무장 문장 끝까지
    - trigger 평가 뒤 commit 단계의 잔여
    - durable commit 자체
 
@@ -218,7 +233,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
 | S1a | 본 앱에 dark 배포: 상태 집계 route, 감시 테이블과 route(genesis 행 없음), Admin genesis 동작과 digest 영역. 배포 뒤 소유자가 최초 genesis(`shadow`)를 승인 | S0b 병합. production이 전용 감사 무결성 키를 쓰고 있음을 확인. 소유자가 production의 `server_version_num`을 한 번 읽어 기록하고, 170000 이상일 때만 `SHOW transaction_timeout`도 읽어 기록(16이면 "해당 없음") | 7일 동안 응답 p95와 DB 부하가 소유자 승인 범위 안(Railway 서비스 지표). 상태 집계·감사 조회 비용 측정을 기록하고 N-3b를 결정 |
 | S1b shadow | 두 Railway 서비스 가동, page webhook 없음, 예약은 `shadowed`로 종결. digest에 would-have-paged 목록과 종류별 예상 메시지 수 | 소유자가 실행 비용 상한과 소유자 시간대를 정하고 정책 버전 증가. 두 서비스의 IaC 선언 병합과 운영자 apply. 첫 빌드 로그에 빌드 환경 검사 통과 줄. 두 heartbeat monitor를 "사건당 1회"로 등록하고 알림 대상 기록 | **14일 연속**(S1b 시작 시각부터): P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), 최초 genesis 뒤 추가 genesis 0건(genesis 행과 그 사람 감사 행), `shadowed`에 이르지 않은 예약 0건(전송 기록 테이블) |
 | S2 page | 1절의 8개 키를 실제로 page | S1b 전환 조건 충족. page 키가 아닌 readiness 검사 **전부**(1절 3항의 이름, 그때 추가된 것 포함)의 영향표에 대한 소유자 결정 기록. page 채널이 소유자 전용이고 휴대폰 푸시로 도달함을 확인. 점검 요일·시간 창 결정과 정책 버전 증가. check-in monitor 생성, monitor 셋의 알림 대상이 page 채널이 아님. Railway의 주 프로세스 종료 인식 관측 통과(결정 D5c). activation genesis(`live`) | **14일**: 오탐 page 주 1회 이하(전송 기록 테이블의 키·종류·열림 시각을 소유자가 보고 판정하고, 기록으로 조치 필요 여부를 판정할 수 없는 page는 오탐으로 셈), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블) |
-| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 그리고 Railway 읽기 전용 토큰이 확인된 뒤에만 HTTP 5xx 급증과 기존 운영 알림 전달 실패 | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 알림 예산 초과 0(전송 기록 테이블의 소유자 날짜별 예약 수 대 재계산한 최대값, 초과 시도는 거절된 advance로 남음), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블) |
+| S3 page 확대 | provider 예산 키(provider × 일·월, `>=95`로 열림, `exhausted`로 악화). 그리고 Railway 읽기 전용 토큰이 확인된 뒤에만 HTTP 5xx 급증과 기존 운영 알림 전달 실패 | S2 전환 조건 충족. 키 수와 5절 최대값을 다시 계산해 정책 버전 증가 | **30일**: 커밋된 소유자 날짜별 예약 수가 재계산한 최대값 이하(전송 기록 테이블. 거절된 advance는 롤백되어 행을 남기지 않으므로 이 조건은 거절 횟수를 주장하지 않음), `confirmed`에 이르지 않은 예약 0건(전송 기록 테이블), P8 알림 0회(P8 monitor의 알림 이력 또는 그 알림 대상의 수신 기록) |
 
 되돌림: 어느 단계든 실행 서비스의 `OPS_OBSERVER_ENABLED`를 지우면 다음 회차부터 멈추고, route secret을 지우면 본 앱 route가
 404를 돌려줍니다. 해제(정지)는 아무 조건도 요구하지 않습니다. 다시 켜는 것은 소유자만 합니다.
