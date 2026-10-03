@@ -30,12 +30,18 @@ test("the hash the notice checks is the hash the registry records", () => {
   }
 });
 
-test("today nothing is approved, so nothing can be queued or sent", () => {
-  assert.equal(POLICY_CHANGE_NOTICE_EFFECTIVE_DATE, null);
-  assert.deepEqual([...POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES], []);
+test("the wording approved on 2026-10-03 is what production renders, in every language", () => {
+  // docs/policy/email-policy-amendment-draft.md §4 and §5: approved by
+  // mposition, effective 2026-11-16. One hash per language, computed with
+  // production's site URL.
+  assert.equal(POLICY_CHANGE_NOTICE_EFFECTIVE_DATE, "2026-11-16");
+  assert.equal(POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES.length, LANGUAGES.length);
   for (const language of LANGUAGES) {
-    assert.equal(isPolicyChangeNoticeWordingApproved(language, APP), false);
+    assert.equal(isPolicyChangeNoticeWordingApproved(language, APP), true, language);
   }
+  // Any other site URL renders other bytes, so a staging render is not the
+  // approved notice: the links are part of what was approved.
+  assert.equal(isPolicyChangeNoticeWordingApproved("en", "https://staging.tomverse.app"), false);
 });
 
 test("the notice announces the documents' own effective date", () => {

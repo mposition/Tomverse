@@ -79,7 +79,19 @@ test("the sitemap does not stamp the time it was generated", () => {
     if (!evidenced.includes(today)) assert.equal(first.includes(today), false);
 });
 
-test("the privacy date is exactly the effective date the page shows, in every locale", () => {
+test("no evidenced date is in the future", () => {
+    // A lastmod claims the content changed that day; a day that has not come
+    // is not one. Policy text published ahead of its effective date is held
+    // by the publication gate instead (lib/emailPolicyPublication.ts).
+    const today = new Date().toISOString().slice(0, 10);
+    for (const [path, evidence] of Object.entries(SITEMAP_CONTENT_EVIDENCE)) {
+        assert.ok(evidence.date <= today, `${path}: ${evidence.date} is in the future`);
+    }
+});
+
+const privacyDated = "/privacy" in SITEMAP_CONTENT_EVIDENCE;
+
+test("the privacy date is exactly the effective date the page shows, in every locale", { skip: !privacyDated }, () => {
     const { date } = SITEMAP_CONTENT_EVIDENCE["/privacy"];
     const squash = (text) => text.toLowerCase().replace(/\s+/g, "");
     for (const [locale, copy] of Object.entries(PRIVACY_LOCALES)) {
@@ -99,7 +111,7 @@ test("the privacy date is exactly the effective date the page shows, in every lo
     }
 });
 
-test("the privacy content the date vouches for has not changed", () => {
+test("the privacy content the date vouches for has not changed", { skip: !privacyDated }, () => {
     const digest = createHash("sha256");
     digest.update(readFileSync("components/legal/PrivacyPolicy.tsx", "utf8").replace(/\r\n/g, "\n"));
     digest.update(readFileSync("lib/providerDataDestinations.ts", "utf8").replace(/\r\n/g, "\n"));
