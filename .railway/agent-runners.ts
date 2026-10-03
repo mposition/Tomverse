@@ -94,6 +94,22 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
 
+/**
+ * The QA-release services' variables (docs/policy/qa-release-agent.md
+ * section 3), the same lists lib/qaReleaseServiceEnvCore.ts accepts at start;
+ * tests/agentRunnerIac.test.mjs holds the two equal. Nothing else -- the
+ * service refuses to start with any other name, so a variable added here
+ * alone would stop it rather than reach it.
+ */
+const QA_RELEASE_DIGEST_VARIABLES = [
+  "QA_RELEASE_DIGEST_ENABLED",
+  "QA_RELEASE_DIGEST_SECRET",
+  "QA_RELEASE_GITHUB_READ_TOKEN",
+  "QA_RELEASE_CONTROL_REVISION",
+] as const;
+
+const QA_RELEASE_MONITOR_VARIABLES = ["QA_RELEASE_MONITOR_SECRET", "QA_RELEASE_CONTROL_REVISION"] as const;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -105,6 +121,32 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: PRODUCT_RESEARCH_VARIABLES,
       staging: PRODUCT_RESEARCH_VARIABLES,
+    },
+  },
+  {
+    key: "qa_release_digest",
+    service: "QA Release Digest",
+    // Node directly, not npm run: npm adds npm_*, INIT_CWD and NODE to the
+    // environment, and the service refuses to start on any name it does not
+    // know (lib/qaReleaseServiceEnvCore.ts).
+    startCommand: "node --experimental-strip-types scripts/qa-release-digest-service.mjs",
+    // Policy section 10: 21:00 UTC daily.
+    cronSchedule: "0 21 * * *",
+    environments: {
+      production: QA_RELEASE_DIGEST_VARIABLES,
+      staging: QA_RELEASE_DIGEST_VARIABLES,
+    },
+  },
+  {
+    key: "qa_release_monitor",
+    service: "QA Release Monitor",
+    startCommand: "node --experimental-strip-types scripts/qa-release-monitor-service.mjs",
+    // Every 30 minutes: policy section 10's proposed value, approved by the
+    // operator on 2026-10-03.
+    cronSchedule: "*/30 * * * *",
+    environments: {
+      production: QA_RELEASE_MONITOR_VARIABLES,
+      staging: QA_RELEASE_MONITOR_VARIABLES,
     },
   },
   {

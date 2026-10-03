@@ -185,6 +185,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/qa-release-agent.md §4",
   },
   {
+    table: "QaReleaseOperatorControl",
+    delegate: "qaReleaseOperatorControl",
+    writers: ["lib/qaReleaseOperatorControlStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §6",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -846,10 +852,32 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 11,
+    writeVerbs: 4,
+    reason:
+      "Creates the QA-release operator control table and the triggers that number its revisions, bind each to a same-transaction audit row and refuse every update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    count: 1,
+    reason:
+      "One count in the SupportTriageRun insert trigger, over a name built from TG_TABLE_SCHEMA quoted with %I, with kind and the UTC day bounds bound by USING. It runs after the trigger takes a transaction advisory lock on (kind, UTC day), so two inserts at the cap are serialised. The function pins search_path to pg_catalog, pg_temp. It reads its own table and never writes a protected one.",
+  },
   {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
     count: 5,
@@ -863,6 +891,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
   },
   {
+    path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
+    count: 5,
+    reason:
+      "Five uses in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE and calls the deadline claim function in its own schema; the state guard locks its own genesis FOR SHARE, reads whether that genesis has been superseded, and calls the same claim function. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
+  },
+  {
     path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",
     count: 1,
     reason:
@@ -873,6 +907,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 7,
     reason:
       "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the operator control insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseOperatorControl revision, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",

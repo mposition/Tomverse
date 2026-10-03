@@ -90,7 +90,7 @@ const LANE_RULES = [
   // Prompt Refiner suites keep the lanes they had.
   [
     "agents",
-    /^(amux-|engineering-agent-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle)/,
+    /^(amux-|engineering-agent-|ops-observer-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle|support-triage-)/,
   ],
 ];
 
@@ -100,6 +100,20 @@ const LANE_RULES = [
  * classified runs here.
  */
 export const DB_INTEGRATION_FALLBACK_GROUP = "accounts";
+
+/**
+ * A compatibility job, not a lane. CI's lanes run PostgreSQL 17; production's
+ * version is not known to this repository, and docs/policy/support-triage.md
+ * §4 requires the support-triage timeout suites to run on 16 as well, where
+ * transaction_timeout does not exist. These suites also run in their own lane
+ * on 17, so this list is outside the lane partition: it never removes a suite
+ * from a lane, and `dbIntegrationGroupOf` never returns it.
+ */
+export const POSTGRES16_COMPAT_GROUP = "postgres16";
+export const POSTGRES16_COMPAT_SUITES = Object.freeze([
+  "tests/integration/support-triage-run.db.test.ts",
+  "tests/integration/support-triage-timeouts.db.test.ts",
+]);
 
 export const DB_INTEGRATION_GROUPS = [
   ...LANE_RULES.map(([id]) => id),

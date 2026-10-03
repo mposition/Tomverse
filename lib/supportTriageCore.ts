@@ -1,0 +1,303 @@
+/**
+ * The support-triage agent's deterministic core: the timeout layers and the
+ * guarded budget derived from them, the retention batch gate, the retention
+ * heartbeat conditions, the per-pass promotion budget and the decision about an
+ * inherited `transaction_timeout`.
+ *
+ * Every value here is fixed by docs/policy/support-triage.md (version 1). This
+ * module is pure: no I/O, no clock reads, no environment. Callers pass the
+ * clock and the database facts in, so the same inputs always give the same
+ * decision.
+ */
+
+export const SUPPORT_TRIAGE_POLICY_VERSION = 1;
+
+export type SupportTriageLane = "worker" | "retention" | "admin";
+
+export type LaneTimeouts = {
+  /** Server deadline from run start; `null` means no deadline (admin). */
+  readonly deadlineMs: number | null;
+  readonly statementTimeoutMs: number;
+  readonly idleInTransactionTimeoutMs: number;
+  /** Armed only on PostgreSQL 17; 16 has no such setting. */
+  readonly transactionTimeoutMs: number;
+  readonly prismaTransactionTimeoutMs: number;
+  /** Largest round-trip count any transaction of this lane may send. */
+  readonly maxRoundTrips: number;
+};
+
+/** docs/policy/support-triage.md section 4. */
+export const LANE_TIMEOUTS: Readonly<Record<SupportTriageLane, LaneTimeouts>> =
+  Object.freeze({
+    worker: Object.freeze({
+      deadlineMs: 5 * 60_000,
+      statementTimeoutMs: 5_000,
+      idleInTransactionTimeoutMs: 2_000,
+      transactionTimeoutMs: 150_000,
+      prismaTransactionTimeoutMs: 180_000,
+      maxRoundTrips: 20,
+    }),
+    retention: Object.freeze({
+      deadlineMs: 100_000,
+      statementTimeoutMs: 400,
+      idleInTransactionTimeoutMs: 150,
+      transactionTimeoutMs: 20_000,
+      prismaTransactionTimeoutMs: 30_000,
+      maxRoundTrips: 19,
+    }),
+    admin: Object.freeze({
+      deadlineMs: null,
+      statementTimeoutMs: 5_000,
+      idleInTransactionTimeoutMs: 2_000,
+      transactionTimeoutMs: 120_000,
+      prismaTransactionTimeoutMs: 150_000,
+      maxRoundTrips: 16,
+    }),
+  });
+
+/**
+ * The application-derived guarded budget of one transaction:
+ * `A × statement_timeout + (A − 1) × idle`. It is not a database bound —
+ * PostgreSQL has no statement counter — and must never be called one.
+ */
+export const guardedBudgetMs = (lane: SupportTriageLane, roundTrips: number) => {
+  if (!Number.isSafeInteger(roundTrips) || roundTrips < 1) {
+    throw new RangeError("roundTrips must be a positive integer");
+  }
+  const timeouts = LANE_TIMEOUTS[lane];
+  if (roundTrips > timeouts.maxRoundTrips) {
+    throw new RangeError(`roundTrips exceeds the ${lane} lane maximum`);
+  }
+  return (
+    roundTrips * timeouts.statementTimeoutMs +
+    (roundTrips - 1) * timeouts.idleInTransactionTimeoutMs
+  );
+};
+
+/** The largest `C_guarded` of a lane: 138 s, 10.3 s and 110 s. */
+export const maxGuardedBudgetMs = (lane: SupportTriageLane) =>
+  guardedBudgetMs(lane, LANE_TIMEOUTS[lane].maxRoundTrips);
+
+/**
+ * `Prisma timeout > transaction_timeout > C_guarded max > statement_timeout >
+ * idle`, strictly. If the database timeouts invert, the shorter two are
+ * silently never armed, so the order is a precondition of every budget above.
+ */
+export const laneTimeoutOrderHolds = (lane: SupportTriageLane) => {
+  const t = LANE_TIMEOUTS[lane];
+  const guarded = maxGuardedBudgetMs(lane);
+  return (
+    t.prismaTransactionTimeoutMs > t.transactionTimeoutMs &&
+    t.transactionTimeoutMs > guarded &&
+    guarded > t.statementTimeoutMs &&
+    t.statementTimeoutMs > t.idleInTransactionTimeoutMs
+  );
+};
+
+export type InheritedTimeoutDecision =
+  | { readonly action: "proceed"; readonly armedBy: "policy" }
+  | { readonly action: "proceed"; readonly armedBy: "inherited" }
+  | { readonly action: "refuse"; readonly reason: "inherited_transaction_timeout_too_short" };
+
+/**
+ * Policy section 4 (Q22). A positive inherited `transaction_timeout` is armed
+ * at transaction start and is not re-armed with the policy value. At or below
+ * the lane's largest `C_guarded` the transaction is refused before any write;
+ * above it the run proceeds and accepts that the occupancy bound is the
+ * inherited number, not ours. `null` means the server has no such setting
+ * (PostgreSQL 16).
+ */
+export const decideInheritedTransactionTimeout = (
+  lane: SupportTriageLane,
+  inheritedMs: number | null
+): InheritedTimeoutDecision => {
+  if (inheritedMs === null || inheritedMs === 0) {
+    return { action: "proceed", armedBy: "policy" };
+  }
+  if (!Number.isSafeInteger(inheritedMs) || inheritedMs < 0) {
+    throw new RangeError("inherited transaction_timeout must be a non-negative integer");
+  }
+  if (inheritedMs <= maxGuardedBudgetMs(lane)) {
+    return { action: "refuse", reason: "inherited_transaction_timeout_too_short" };
+  }
+  return { action: "proceed", armedBy: "inherited" };
+};
+
+/** Policy sections 4, 5 and 8. */
+export const RETENTION_BATCHES_PER_RUN_MAX = 8;
+export const RETENTION_BATCH_ROUND_TRIPS = 19;
+export const RETENTION_BATCH_SIZES = Object.freeze([500, 250, 125] as const);
+export const RETENTION_OVERDUE_GRACE_SECONDS = 86_400;
+export const RETENTION_LIVENESS_THRESHOLD_SECONDS = 80 * 60;
+export const DAILY_RUN_CAP = Object.freeze({ worker: 52, retention: 52 } as const);
+
+/**
+ * A retention batch starts only while the remaining budget is strictly larger
+ * than the batch's `C_guarded` and fewer than eight batches have started in
+ * this run. Both must hold; either alone was not a bound.
+ */
+export const mayStartRetentionBatch = (input: {
+  readonly remainingMs: number;
+  readonly batchesStarted: number;
+}) => {
+  if (!Number.isFinite(input.remainingMs)) {
+    throw new RangeError("remainingMs must be a finite number");
+  }
+  if (!Number.isSafeInteger(input.batchesStarted) || input.batchesStarted < 0) {
+    throw new RangeError("batchesStarted must be a non-negative integer");
+  }
+  return (
+    input.remainingMs > guardedBudgetMs("retention", RETENTION_BATCH_ROUND_TRIPS) &&
+    input.batchesStarted < RETENTION_BATCHES_PER_RUN_MAX
+  );
+};
+
+/** The next batch size after a `statement_timeout` abort, or `null` at the floor. */
+export const reducedRetentionBatchSize = (current: number) => {
+  const index = RETENTION_BATCH_SIZES.indexOf(current as 500 | 250 | 125);
+  if (index < 0) throw new RangeError("unknown retention batch size");
+  return index + 1 < RETENTION_BATCH_SIZES.length ? RETENTION_BATCH_SIZES[index + 1] : null;
+};
+
+export type RetentionRunFact = {
+  readonly finishedAt: Date;
+  readonly batchesCompleted: number;
+  readonly overdueRemaining: number;
+  readonly oldestOverdueAgeSeconds: number;
+};
+
+export type RetentionHeartbeat = {
+  readonly stale: boolean;
+  readonly liveness: boolean;
+  readonly progressSingle: boolean;
+  readonly progressDeadline: boolean;
+};
+
+const validTime = (value: Date, name: string) => {
+  const time = value instanceof Date ? value.getTime() : Number.NaN;
+  if (!Number.isFinite(time)) throw new RangeError(`${name} must be a valid Date`);
+  return time;
+};
+
+/**
+ * Policy section 7: three separate conditions, any of which opens the
+ * heartbeat. Liveness reads the newest **successful** retention run
+ * (`latestSuccessAt`, `null` when none exists in the 30-day window); the two
+ * progress conditions read the newest **finished** run whatever its outcome
+ * (`latestFinished`), because a run that ends with no completed batch and rows
+ * still overdue answers non-2xx and is not a success.
+ */
+export const retentionHeartbeat = (input: {
+  readonly now: Date;
+  readonly latestSuccessAt: Date | null;
+  readonly latestFinished: RetentionRunFact | null;
+}): RetentionHeartbeat => {
+  const now = validTime(input.now, "now");
+  const liveness =
+    input.latestSuccessAt === null ||
+    (now - validTime(input.latestSuccessAt, "latestSuccessAt")) / 1_000 >
+      RETENTION_LIVENESS_THRESHOLD_SECONDS;
+  const latest = input.latestFinished;
+  if (latest !== null) {
+    validTime(latest.finishedAt, "latestFinished.finishedAt");
+    for (const key of ["batchesCompleted", "overdueRemaining", "oldestOverdueAgeSeconds"] as const) {
+      if (!Number.isSafeInteger(latest[key]) || latest[key] < 0) {
+        throw new RangeError(`latestFinished.${key} must be a non-negative integer`);
+      }
+    }
+  }
+  const progressSingle =
+    latest !== null && latest.batchesCompleted === 0 && latest.overdueRemaining > 0;
+  const progressDeadline =
+    latest !== null && latest.oldestOverdueAgeSeconds > RETENTION_OVERDUE_GRACE_SECONDS;
+  return {
+    stale: liveness || progressSingle || progressDeadline,
+    liveness,
+    progressSingle,
+    progressDeadline,
+  };
+};
+
+/** Group kinds in priority order, highest first. */
+export const GROUP_KIND_PRIORITY = Object.freeze([
+  "server_evidence_match",
+  "same_account",
+  "autofix_fingerprint",
+] as const);
+export type GroupKind = (typeof GROUP_KIND_PRIORITY)[number];
+
+export const GROUP_MEMBER_CAP = 50;
+export const PROMOTION_MOVES_PER_PASS_MAX = 50;
+
+export type PromotionCandidate = {
+  readonly kind: GroupKind;
+  readonly groupCandidateKey: string;
+  /** Memberships the move would create; at most `GROUP_MEMBER_CAP`. */
+  readonly moves: number;
+};
+
+/**
+ * Policy section 6. Candidates are ordered by kind priority (highest first),
+ * then by `groupCandidateKey` ascending, and only the prefix whose cumulative
+ * move count stays within the remaining pass budget is admitted. Comparing each
+ * candidate alone against the budget let two 30-move candidates through a
+ * 50-move budget together.
+ */
+export const allocatePromotionBudget = (
+  candidates: readonly PromotionCandidate[],
+  remainingBudget: number
+) => {
+  if (!Number.isSafeInteger(remainingBudget) || remainingBudget < 0) {
+    throw new RangeError("remainingBudget must be a non-negative integer");
+  }
+  for (const candidate of candidates) {
+    if (!GROUP_KIND_PRIORITY.includes(candidate.kind)) {
+      throw new RangeError("unknown group kind");
+    }
+    if (!Number.isSafeInteger(candidate.moves) || candidate.moves < 1 || candidate.moves > GROUP_MEMBER_CAP) {
+      throw new RangeError("a candidate moves between 1 and 50 members");
+    }
+  }
+  const ordered = [...candidates].sort((a, b) => {
+    const byKind = GROUP_KIND_PRIORITY.indexOf(a.kind) - GROUP_KIND_PRIORITY.indexOf(b.kind);
+    if (byKind !== 0) return byKind;
+    return a.groupCandidateKey < b.groupCandidateKey
+      ? -1
+      : a.groupCandidateKey > b.groupCandidateKey
+        ? 1
+        : 0;
+  });
+  const admitted: PromotionCandidate[] = [];
+  const deferred: PromotionCandidate[] = [];
+  let used = 0;
+  for (const candidate of ordered) {
+    // A prefix only: once one candidate is deferred, every later one is too.
+    if (deferred.length === 0 && used + candidate.moves <= remainingBudget) {
+      admitted.push(candidate);
+      used += candidate.moves;
+    } else {
+      deferred.push(candidate);
+    }
+  }
+  return { admitted, deferred, movesUsed: used, remainingAfter: remainingBudget - used };
+};
+
+/**
+ * `SupportTriageRun` (policy sections 4 and 8): one row per run. The kinds and
+ * outcomes below are the CHECK lists of migration
+ * 20261003120000_support_triage_run; `npm run check:enum-constraints`
+ * compares them.
+ */
+export const SUPPORT_TRIAGE_RUN_KINDS = Object.freeze(["worker", "retention"] as const);
+export const SUPPORT_TRIAGE_RUN_OUTCOMES = Object.freeze([
+  "running",
+  "success",
+  "partial",
+  "failed",
+  "deadline_exceeded",
+] as const);
+export type SupportTriageRunKind = (typeof SUPPORT_TRIAGE_RUN_KINDS)[number];
+export type SupportTriageRunOutcome = (typeof SUPPORT_TRIAGE_RUN_OUTCOMES)[number];
+
+/** A run row may be deleted only once it is this old; younger rows are immutable evidence. */
+export const SUPPORT_TRIAGE_RUN_RETENTION_DAYS = 30;
