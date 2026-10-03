@@ -59,7 +59,10 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
         )}
       </div>
 
-      {initial.canWrite ? <QaReleaseControlForm current={initial.control} /> : null}
+      {/* Keyed by revision: after a save and refresh the form starts from the new record. */}
+      {initial.canWrite ? (
+        <QaReleaseControlForm key={initial.control?.revision ?? 0} current={initial.control} />
+      ) : null}
 
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestsTitle}</h2>
@@ -132,6 +135,9 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
       QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => [field, toLocalInput(current?.rotatedAt[field] ?? null)]),
     ),
   );
+  // Only the fields a person changed are re-read from the minute-precision
+  // input; an untouched one sends its recorded instant unchanged.
+  const [edited, setEdited] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [reauthenticationRequired, setReauthenticationRequired] = useState(false);
@@ -152,7 +158,11 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
           ...Object.fromEntries(
             QA_RELEASE_SECRET_ROTATION_FIELDS.map((field) => [
               field,
-              rotated[field] ? new Date(rotated[field]).toISOString() : null,
+              edited.has(field)
+                ? rotated[field]
+                  ? new Date(rotated[field]).toISOString()
+                  : null
+                : (current?.rotatedAt[field] ?? null),
             ]),
           ),
         }),
@@ -224,7 +234,11 @@ function QaReleaseControlForm({ current }: { current: AgentDigestConsole["contro
               type="datetime-local"
               className="rounded border border-zinc-300 px-2 py-2 dark:border-zinc-700 dark:bg-zinc-900"
               value={rotated[field]}
-              onChange={(event) => setRotated((previous) => ({ ...previous, [field]: event.target.value }))}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRotated((previous) => ({ ...previous, [field]: value }));
+                setEdited((previous) => new Set(previous).add(field));
+              }}
             />
           </label>
         ))}
