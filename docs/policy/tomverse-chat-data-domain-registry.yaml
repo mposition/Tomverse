@@ -1146,6 +1146,37 @@ domains:
       create-only, globally bounded, and expires after exactly 60 minutes; its
       retention decision is separate from its authority expiry.
 
+  - domain: promptRefinerVnextOneShotStage
+    prismaModel: PromptRefinerVnextOneShotStage
+    userLinkageRole: actor
+    owner: backend-ai
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Immutable, content-free evidence that a named administrator approved
+        one bounded evaluation stage against exact source, deployment, manifest
+        and cost identities. Retention supports security investigation,
+        spending-control audit and defence of related legal claims under GDPR
+        Article 17(3)(b) and (e), subject to legal confirmation of the schedule.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-20"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      approvedBy is the operator id without a User foreign key so account
+      deletion cannot rewrite immutable approval evidence. The stage and its
+      synthetic slots contain no customer id, prompt, answer or provider prose.
+      Operator requests use the manual PrivacyRequest path and linked
+      tamper-evident AdminAuditLog entry. Approval authority and retention are
+      separate decisions; this dark table does not authorize execution.
+
   - domain: promptRefinerShadowRun
     prismaModel: PromptRefinerShadowRun
     userLinkageRole: actor
