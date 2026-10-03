@@ -21,7 +21,8 @@ import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAcc
 import { commitFirstOutputContinuationTransferPreview,
   commitIdeaOnlyTransferPreview, readIdeaOnlyTransferPreview } from
   "@/lib/amux/ideaTransferPreviewService";
-import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
+import { commitIdeaTransferConfirmation, readIdeaTransferConfirmation } from
+  "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
@@ -885,6 +886,13 @@ test("an output-continuable first result retains its first page without completi
   assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: nextPreviewId },
   })).state, "expired");
+  assert.deepEqual(await readIdeaTransferConfirmation(session, nextPreviewId),
+    { state: "expired", previewId: nextPreviewId, ideaId,
+      confirmationRecorded: true, modelCallStarted: false });
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.transfer_preview.expired_for_replacement",
+    targetId: nextPreviewId,
+  } }), 1);
   assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: replacementId },
   })).attempt, 2);

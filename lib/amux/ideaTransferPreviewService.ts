@@ -443,6 +443,16 @@ export async function commitFirstOutputContinuationTransferPreview(
           payloadKeyVersion: null, payloadPurgedAt: now },
       });
       if (expired.count !== 1) throw new IdeaTransferPreviewError("not_ready");
+      await writeAdminAuditLog({ tx, session: input.session, request: input.request,
+        action: "amux.v4.transfer_preview.expired_for_replacement",
+        targetType: "AmuxIdeaTransferPreview", targetId: replacedPreview.id,
+        summary: "Owner replaced one expired analysis transfer preview; no model was called.",
+        metadata: { ideaId: idea.id, chunkIndex: 1,
+          replacementPreviewId: choice.previewId,
+          priorState: replacedPreview.state,
+          confirmationRecorded: replacedPreview.confirmationAuditLogId !== null,
+          budgetHoldExists: false },
+      });
     }
     await tx.amuxIdeaTransferPreview.create({ data: {
       id: choice.previewId, ideaId: idea.id,

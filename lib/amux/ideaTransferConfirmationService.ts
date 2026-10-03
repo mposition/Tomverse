@@ -253,7 +253,8 @@ export async function readIdeaTransferConfirmation(session: Session, previewId: 
           confirmationRecorded: false, modelCallStarted: false } as const
       : { state: "not_confirmed", modelCallStarted: false } as const;
   }
-  if (row.state !== "confirmed" || !row.confirmedAt || !row.confirmExpiresAt ||
+  if (!["confirmed", "expired"].includes(row.state) ||
+      !row.confirmedAt || !row.confirmExpiresAt ||
       row.confirmedByUserId !== actorUserId || !row.confirmationAuditLogId ||
       row.consumedAt !== null) {
     return { state: "unavailable", modelCallStarted: false } as const;
@@ -276,6 +277,9 @@ export async function readIdeaTransferConfirmation(session: Session, previewId: 
   if (nowRows[0].now >= row.confirmExpiresAt) {
     return { state: "expired", previewId: row.id, ideaId: row.ideaId,
       confirmationRecorded: true, modelCallStarted: false } as const;
+  }
+  if (row.state === "expired") {
+    return { state: "unavailable", modelCallStarted: false } as const;
   }
   return { state: "confirmed", previewId: row.id, ideaId: row.ideaId,
     payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
