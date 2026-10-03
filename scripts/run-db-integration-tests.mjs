@@ -94,7 +94,7 @@ const testEnvironment = {
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
 if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
