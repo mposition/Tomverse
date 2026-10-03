@@ -80,6 +80,17 @@ const refusalOf = (script, without = []) => {
 /** Escapes a literal for use inside a RegExp. */
 const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/**
+ * The part of a requirement the refusal has to name.
+ *
+ * A flag keeps its name and drops its placeholder (`--artifact=<path>` ->
+ * `--artifact`). A positional argument *is* its placeholder, so `<origin>`
+ * stays whole -- stripping from the first `<` left an empty needle, and an
+ * empty needle matches everything, so that assertion passed no matter what the
+ * tool printed.
+ */
+const mentionedIn = (flag) => (flag.startsWith("-") ? flag.replace(/[=<].*$/, "") : flag);
+
 for (const entry of ARGUMENT_REQUIRED_CHECKS) {
   test(`${entry.script} refuses with no argument`, () => {
     const { status, output } = refusalOf(entry.script);
@@ -89,9 +100,11 @@ for (const entry of ARGUMENT_REQUIRED_CHECKS) {
       "a tool that now succeeds with no argument has become a gate -- take it " +
         "out of the inventory rather than leaving it excused here."
     );
-    // The flag's own name too: a non-zero exit that no longer says what it
-    // wants is not a usable tool, whatever the inventory claims about it.
-    assert.match(output, new RegExp(literal(entry.flag.replace(/[=<].*$/, ""))));
+    // The requirement's own name too: a non-zero exit that no longer says what
+    // it wants is not a usable tool, whatever the inventory claims about it.
+    const needle = mentionedIn(entry.flag);
+    assert.ok(needle.length > 0, `${entry.script}: empty needle would match anything`);
+    assert.match(output, new RegExp(literal(needle)));
   });
 }
 
