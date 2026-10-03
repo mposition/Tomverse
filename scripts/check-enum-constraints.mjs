@@ -926,7 +926,7 @@ const REGISTRY = {
     module: "scripts/ops-observer/delivery-core.mjs",
     list: "ITEM_ORIGINS",
     reason:
-      "new, reopen. How the incident began, which decides whether its worsening counts against the shared daily cap.",
+      "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
   },
   OpsObserverGenesis_reason_check: {
     owner: "list",
