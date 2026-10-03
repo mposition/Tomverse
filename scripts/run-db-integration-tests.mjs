@@ -270,6 +270,10 @@ run(
     // at 52 per kind per UTC day under concurrency, downgrades a late success
     // and refuses deleting a row younger than 30 days.
     "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
