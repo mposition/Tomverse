@@ -17,6 +17,7 @@ import {
   MARKETING_WEBHOOK_PIPELINE_FILES,
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
   MARKETING_WEBHOOK_PIPELINE_ROOT,
+  MARKETING_WEBHOOK_SCHEMA_MODELS,
   canonicalMarketingWebhookFileText,
   canonicalMarketingWebhookJson,
   computeMarketingWebhookConfigSnapshotDigest,
@@ -24,6 +25,7 @@ import {
   digestMarketingWebhookVerificationRecord,
   marketingAutomationEnabledFromValue,
   marketingWebhookEnvDigests,
+  marketingWebhookSchemaSlice,
   resolveMarketingAutomationAccess,
 } from "../lib/marketingAutomationAccess.ts";
 import {
@@ -646,6 +648,28 @@ test("the pipeline file list is the receiver route's whole import closure", () =
   for (const file of MARKETING_WEBHOOK_PIPELINE_FILES) {
     assert.ok(isFile(path.join(repositoryRoot, file)), file);
   }
+});
+
+test("the fingerprint watches the receiver's schema models, not the whole schema", () => {
+  const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
+  const slice = marketingWebhookSchemaSlice(schema);
+  assert.ok(/^datasource \w+ \{/m.test(slice), "datasource block");
+  assert.ok(/^generator \w+ \{/m.test(slice), "generator block");
+  for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
+    assert.ok(slice.includes(`model ${model} {`), model);
+  }
+  const fingerprint = (text) =>
+    computeMarketingWebhookPipelineFingerprint(
+      [{ path: "prisma/schema.prisma", content: text }],
+      MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR,
+    );
+  // An unrelated model elsewhere changes nothing.
+  assert.equal(fingerprint(`${schema}\nmodel UnrelatedAddition {\n  id String @id\n}\n`), fingerprint(schema));
+  // A change inside a watched model changes it.
+  const changed = schema.replace("model MarketingReport {", "model MarketingReport {\n  addedColumn String?");
+  assert.notEqual(fingerprint(changed), fingerprint(schema));
+  // A watched model that disappears is an error, not a smaller slice.
+  assert.throws(() => marketingWebhookSchemaSlice(schema.replace("model AppSetting {", "model AppSettingRenamed {")));
 });
 
 test("pipeline fingerprint is current and independent of LF versus CRLF", () => {
