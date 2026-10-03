@@ -11,6 +11,8 @@ import { runAmuxV4LocalAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
+import { amuxV4CanClaimAnalysisCli } from
+  "../lib/amux/ideaLocalApprovedCliCatalog.mjs";
 
 const origin = "https://staging.tomverse.example";
 const secret = "v4_analysis_synthetic_012345678901234567890123456";
@@ -42,6 +44,18 @@ test("live connector refuses before queue, claim or CLI while code latch is off"
       throw new Error("live connector must remain closed"); } });
   assert.deepEqual(result, { kind: "refused" });
   assert.equal(called, 0);
+});
+
+test("Codex candidates cannot consume claims without served-model attestation", () => {
+  const base = { modelId: "gpt-5.6-sol", reasoningEffort: "high",
+    egressHosts: ["api.openai.com"] };
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base,
+    provider: "openai" }, base.modelId), false);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
+    modelId: "claude-opus-5-5", egressHosts: ["api.anthropic.com"] },
+  "claude-opus-5-5"), true);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
+    modelId: "claude-opus-5-5", egressHosts: [] }, "claude-opus-5-5"), false);
 });
 
 test("unapproved local CLI catalog stops before claim and model execution", async () => {
