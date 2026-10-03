@@ -310,6 +310,10 @@ run(
     // sre-ops genesis chain and state: chain shape, compare-and-set generation,
     // checkpoint order, trigger stamps, immutability, and no late COMMIT.
     "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
