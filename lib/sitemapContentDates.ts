@@ -9,8 +9,9 @@
  * What does not count as evidence:
  *
  * - The build or request time. The page did not change because it was served.
- * - A date shown on the page that later edits did not move. `/terms` and
- *   `/refund` say "Last updated: July 15, 2026", yet the terms copy was edited
+ * - A date shown on the page that later edits did not move. `/terms` (until
+ *   the 2026-10-03 amendment, which shows its future effective date) and
+ *   `/refund` said "Last updated: July 15, 2026", yet the terms copy was edited
  *   on 2026-07-23, 2026-08-22 and 2026-08-25 and the refund copy on 2026-07-23
  *   without that line changing, so the displayed date is not the last change
  *   and is not repeated here.
