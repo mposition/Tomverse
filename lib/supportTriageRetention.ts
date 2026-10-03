@@ -34,15 +34,22 @@ import { armSupportTriageTransaction } from "@/lib/supportTriageTransaction";
 
 const STATEMENT_CANCELLED = "57014";
 
-const isStatementCancelled = (error: unknown): boolean => {
+/**
+ * Whether an error is PostgreSQL's query_canceled (SQLSTATE 57014). Decided by
+ * the code alone, never by message text: Prisma's adapter carries it as
+ * `meta.driverAdapterError.cause.originalCode`, the pg driver as `code`, and
+ * a wrapper may nest either under `cause`.
+ */
+export const isStatementCancelled = (error: unknown): boolean => {
   const seen = new Set<unknown>();
-  let current: unknown = error;
-  while (current && typeof current === "object" && !seen.has(current)) {
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
     seen.add(current);
-    const record = current as { code?: unknown; message?: unknown; cause?: unknown };
-    if (record.code === STATEMENT_CANCELLED) return true;
-    if (typeof record.message === "string" && record.message.includes("statement timeout")) return true;
-    current = record.cause;
+    const record = current as Record<string, unknown>;
+    if (record.code === STATEMENT_CANCELLED || record.originalCode === STATEMENT_CANCELLED) return true;
+    for (const key of ["cause", "meta", "driverAdapterError"]) queue.push(record[key]);
   }
   return false;
 };
@@ -82,12 +89,11 @@ const runBatch = async (input: {
         const lastRow = window[window.length - 1];
         windowEnd = lastRow ? { createdAt: lastRow.createdAt, id: lastRow.id } : null;
         windowRows = window.length;
-        const deleted =
-          window.length === 0
-            ? 0
-            : await tx.supportTriageRun.deleteMany({ where: { id: { in: window.map((row) => row.id) } } }).then(
-                (result) => result.count
-              );
+        // Nothing past its boundary: nothing written, so nothing to audit.
+        if (window.length === 0) return { kind: "deleted" as const, deleted: 0, last: null };
+        const deleted = await tx.supportTriageRun
+          .deleteMany({ where: { id: { in: window.map((row) => row.id) } } })
+          .then((result) => result.count);
         await writeSystemAuditLog({
           tx,
           systemActor: "support-triage-retention",
@@ -155,6 +161,9 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
         // batch after a skipped window is not progress.
         if (result.deleted > 0) batchesCompleted += 1;
         deleted += result.deleted;
+        // A committed batch clears the strike: two floor cancellations of the
+        // same window, in a row, are what move the cursor.
+        floorCancellations = 0;
         if (result.deleted < size) break; // nothing more past its boundary after the cursor
         continue;
       }
