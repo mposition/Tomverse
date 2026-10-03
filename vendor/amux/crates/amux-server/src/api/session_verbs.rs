@@ -24090,6 +24090,10 @@ mod tests {
             steer_enqueue(&st, "raw", "owner text", "", "").await.is_ok(),
             "the owner's send must still reach an isolated lane — that is the documented boundary"
         );
+        let queued_at: f64 = st.store.read().unwrap().query_row(
+            "SELECT queued_at FROM steering_queue WHERE session='raw'", [], |r| r.get(0),
+        ).unwrap();
+        assert!((now_f64() - queued_at).abs() < 60.0, "steering queue must use epoch seconds");
 
         // CONTROL: an ORDINARY lane still takes automation, or this fix is
         // "turn the fleet off" and every assertion above would still pass.
