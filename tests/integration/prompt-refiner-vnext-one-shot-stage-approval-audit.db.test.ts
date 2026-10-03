@@ -8,6 +8,9 @@ import type { Session } from "next-auth";
 import pg from "pg";
 
 import { prisma } from "@/lib/prisma";
+import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
+  "@/lib/promptRefinerVnextOneShotPriceBinding";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
@@ -26,7 +29,7 @@ const binding = {
   manifestRoot: "d".repeat(64),
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
   runtimeCommitSha: "e".repeat(40),
-  pricePinDigest: "f".repeat(64),
+  pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
   perRequestCostMicroUsd: BigInt(29_918),
   slotCount: 80,
   costCeilingMicroUsd: BigInt(2_393_440),
@@ -69,6 +72,31 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       await setup.query(await readFile(path.join(migrationPath,
         "20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql"), "utf8"));
       await setup.query(`CREATE TABLE "StageAuditProbe" ("id" TEXT PRIMARY KEY)`);
+      await setup.query(`CREATE TABLE "ModelRegistryEntry" (
+        "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "apiModel" TEXT NOT NULL,
+        "provider" TEXT NOT NULL, "apiBaseUrl" TEXT NOT NULL,
+        "apiKeyEnvName" TEXT NOT NULL, "icon" TEXT NOT NULL DEFAULT '',
+        "bestFor" TEXT NOT NULL DEFAULT '', "minimumPlan" TEXT NOT NULL,
+        "usageClass" TEXT NOT NULL, "creditWeight" INTEGER NOT NULL,
+        "publiclyListed" BOOLEAN NOT NULL DEFAULT true,
+        "enabled" BOOLEAN NOT NULL DEFAULT true, "status" TEXT NOT NULL DEFAULT 'enabled',
+        "operationalReason" TEXT, "userVisibleNote" TEXT, "replacementModelId" TEXT,
+        "catalogDeleted" BOOLEAN NOT NULL DEFAULT false, "reasoning" TEXT,
+        "contextWindowTokens" INTEGER, "supportsImage" BOOLEAN NOT NULL DEFAULT false,
+        "supportsNativePdf" BOOLEAN NOT NULL DEFAULT false, "webSearchOverride" TEXT,
+        "maxImages" INTEGER, "maxBase64ImagePayloadBytes" INTEGER,
+        "maxOutputTokens" INTEGER, "reservationOutputTokens" INTEGER,
+        "inputUsdPerMillionTokens" DOUBLE PRECISION,
+        "outputUsdPerMillionTokens" DOUBLE PRECISION,
+        "cachedInputPriceMultiplier" DOUBLE PRECISION,
+        "sortOrder" INTEGER NOT NULL DEFAULT 0, "updatedById" TEXT,
+        "updatedByEmail" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`);
+      const pinnedModel = staticModelRegistrySeedRows().find((row) =>
+        row.id === "gpt-5-6-luna");
+      assert.ok(pinnedModel);
+      await prisma.modelRegistryEntry.create({ data: pinnedModel });
 
       const append = (tx: Prisma.TransactionClient) =>
         writePromptRefinerVnextOneShotStageApprovalAudit({ tx, session, request, binding });
@@ -161,6 +189,20 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         binding: { ...binding, costCeilingMicroUsd: BigInt(2_393_441) },
       }), /stage_audit_binding_invalid/);
       assert.equal(await prisma.adminAuditLog.count(), 0);
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request,
+        binding: { ...binding, pricePinDigest: "f".repeat(64) },
+      }), /stage_price_mismatch/);
+      assert.equal(await prisma.adminAuditLog.count(), 0);
+      await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+        data: { inputUsdPerMillionTokens: 0.01 } });
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }), /stage_price_mismatch/);
+      assert.equal(await prisma.adminAuditLog.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
+      await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+        data: { inputUsdPerMillionTokens: null } });
 
       // Exercise the actual A07 writer, not only a hand-built transaction.
       await setup.query(`CREATE FUNCTION reject_slot_forty() RETURNS trigger AS $$

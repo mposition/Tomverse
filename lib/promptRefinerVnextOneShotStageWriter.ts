@@ -7,6 +7,10 @@ import { type PromptRefinerVnextOneShotAuditBinding } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
+import { readPromptRefinerVnextOneShotPrice } from
+  "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
+  "@/lib/promptRefinerVnextOneShotPriceBinding";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD,
@@ -17,9 +21,9 @@ const SLOT_COST = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 const RUN_CEILING = BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD);
 
 /**
- * A07 storage primitive. A future owner-only route must reobserve the source,
- * runner, deployment and price pins before supplying the binding. This module
- * is not an admission, run approval, dispatch, or provider-call path.
+ * A07 storage primitive. The owner-only route must reobserve source and
+ * deployment before supplying the binding. Price is checked under a registry
+ * SHARE lock in this transaction. This is not run approval or dispatch.
  */
 export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
   session: Session;
@@ -38,6 +42,11 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     // The shared audit-chain lock is acquired before stage or slot row locks.
     const { auditLogId, approvedBy } =
       await writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx });
+    const price = await readPromptRefinerVnextOneShotPrice(tx);
+    if (input.binding.pricePinDigest !== PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST ||
+        !price.pricePinMatchesRegistry || price.problems.length !== 0) {
+      throw new Error("vnext_one_shot_stage_price_mismatch");
+    }
     await tx.promptRefinerVnextOneShotStage.create({
       data: {
         id: input.binding.id,
