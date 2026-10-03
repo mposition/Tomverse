@@ -47,6 +47,35 @@ test("a reviewer on the author's model vendor is never eligible, whatever its CL
   assert.equal(independentVendorCount(PROVIDERS, "anthropic"), 2);
 });
 
+test("a reserve provider (higher priority number) is chosen only when no preferred one is free", () => {
+  const providers = [
+    { id: "codex", vendor: "openai", enabled: true, maxConcurrent: 1 },
+    { id: "cursor", vendor: "xai", enabled: true, maxConcurrent: 1 },
+    { id: "copilot", vendor: "moonshot", enabled: true, maxConcurrent: 2, priority: 1 },
+  ];
+  // Least used by far, still not chosen while codex and cursor are free.
+  const busyOthers = { codex: { running: 0, recent24h: 90, lastAssignedAt: 1 }, cursor: { running: 0, recent24h: 80, lastAssignedAt: 1 } };
+  assert.equal(pickReviewer({ providers, authorVendor: "anthropic", load: busyOthers }).provider.id, "cursor");
+  // Taken once the preferred vendors are at their cap...
+  const atCap = { codex: { running: 1, recent24h: 0, lastAssignedAt: 1 }, cursor: { running: 1, recent24h: 0, lastAssignedAt: 1 } };
+  assert.equal(pickReviewer({ providers, authorVendor: "anthropic", load: atCap }).provider.id, "copilot");
+  // ...or when independence excludes them: the second slot of a two-reviewer
+  // job whose first reviewer was codex, cursor busy.
+  const decisions = planAssignments({
+    jobs: [{ job: { id: "a", authorVendor: "anthropic" }, slots: [{ index: 0, status: "done", vendor: "openai" }, { index: 1, status: "queued" }] }],
+    providers,
+    load: { cursor: { running: 1, recent24h: 0, lastAssignedAt: 1 } },
+    now: 1,
+  });
+  assert.deepEqual(decisions.map((d) => d.provider), ["copilot"]);
+  // A bad priority is a config error.
+  const base = { stateDir: "/x", repos: { demo: { url: "u", mirror: "m" } } };
+  assert.throws(
+    () => validateConfig({ ...base, providers: [{ id: "c", vendor: "moonshot", enabled: true, command: "c", args: [], priority: -1 }] }),
+    /priority/,
+  );
+});
+
 test("ordering: running first, then 24h count, then longest-idle, then id", () => {
   const authorVendor = "openai"; // claude and cursor eligible
   assert.equal(pickReviewer({ providers: PROVIDERS, authorVendor, load: {} }).provider.id, "claude");
@@ -151,10 +180,19 @@ test("the shipped example config validates and names the repository the client d
   assert.ok(config.repos[repoNameFromRemote(config.repos.tomverse.url)]);
   // Every enabled provider is on its own model vendor. Devin ships disabled: on
   // 2026-10-02/03 it never returned a verdict on the server (see README).
+  // Copilot on Kimi K3 (Moonshot) returned a verdict on all of its first eight.
   const enabled = config.providers.filter((p) => p.enabled);
-  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "openai", "xai"]);
+  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "moonshot", "openai", "xai"]);
   assert.equal(config.providers.find((p) => p.id === "devin").enabled, false);
-  assert.equal(independentVendorCount(config.providers, "anthropic"), 2);
+  assert.equal(independentVendorCount(config.providers, "anthropic"), 3);
+  // The Copilot provider never runs with blanket permissions or GitHub's MCP.
+  const copilot = config.providers.find((p) => p.id === "copilot");
+  for (const forbidden of ["--allow-all", "--allow-all-tools", "--allow-all-paths", "--allow-all-urls", "--yolo", "--share-gist"]) {
+    assert.equal(copilot.args.includes(forbidden), false, forbidden);
+  }
+  for (const required of ["--disable-builtin-mcps", "--no-custom-instructions", "--disallow-temp-dir"]) {
+    assert.ok(copilot.args.includes(required), required);
+  }
 });
 
 test("config fails closed on an enabled provider without a measured vendor", () => {
