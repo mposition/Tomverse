@@ -58,6 +58,7 @@ const cleanup = async () => {
   try {
     await prisma.$executeRawUnsafe(`DELETE FROM "QaReleaseOperatorControl"`);
     await prisma.$executeRawUnsafe(`DELETE FROM "AgentDigestItem" WHERE "agentKey" = 'qa-release'`);
+    await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseOperatorControl" ENABLE TRIGGER "QaReleaseOperatorControl_before_delete"`);
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_delete"`);
@@ -82,7 +83,7 @@ test("recorded off is quiet; recorded on with no digest is stale; a stale revisi
   revision = (await recordQaReleaseOperatorControl({ session: session as never, control: control(false) })).revision;
   assert.deepEqual(await call(), { status: 200, body: { verdict: "operator_disabled" } });
   revision = (await recordQaReleaseOperatorControl({ session: session as never, control: control(true) })).revision;
-  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale" } });
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
   assert.deepEqual(await call({ headers: { "x-qa-release-control-revision": String(revision - 1) } }), {
     status: 409,
     body: { error: "control_revision_mismatch" },
@@ -117,5 +118,15 @@ test("a digest just stored is fresh, and the same digest 28 hours later is stale
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
   }
-  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale" } });
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "stale", alerted: true } });
+});
+
+test("a stale verdict queues one silence alert per UTC date, however often the Monitor runs", async () => {
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_digest_stale" } });
+  await call();
+  await call();
+  const rows = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_digest_stale" } });
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].referenceId, /^stale:\d{4}-\d{2}-\d{2}$/);
+  assert.equal(rows[0].referenceId, `stale:${new Date().toISOString().slice(0, 10)}`);
 });

@@ -1,9 +1,11 @@
 import "server-only";
 
+import { NOTIFICATION_KIND, enqueueNotificationDelivery } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
   type QaReleaseFreshnessVerdict,
   judgeQaReleaseFreshness,
+  qaReleaseStaleReferenceId,
   qaReleaseTransactionFits,
 } from "@/lib/qaReleaseDigestFreshnessCore";
 import {
@@ -17,9 +19,10 @@ import {
  * and 7): the Monitor service calls this route on its own cron, and the app
  * judges whether the newest digest is fresh against the database clock.
  *
- * This slice reads and answers only. Recording the silence alert -- once per
- * UTC date through the operator notification queue -- is the next slice, so
- * a `stale` verdict is returned, not yet sent.
+ * A `stale` verdict enqueues the silence alert on the operator notification
+ * queue under `stale:<UTC date of the database clock>`; the queue's (kind,
+ * referenceId) unique key makes it at most one per day, however often the
+ * Monitor runs. The queue's own drain sends it.
  */
 
 /** The Monitor caller's own timeout (policy section 10, proposed 120 s) less a margin. */
@@ -27,6 +30,24 @@ const MONITOR_ROUND_BUDGET_MS = 110_000;
 
 /** The read transaction: two statements (A = 2), so 3A + 5 = 11 s; Prisma 5 s more. */
 const READ_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
+
+/** The alert write: the limits and one upsert (A = 2), so 11 s; Prisma 5 s more. */
+const ALERT_LIMITS = Object.freeze({ statementMs: 2_000, idleMs: 1_000, prismaMs: 16_000 });
+
+async function enqueueStaleAlert(dbNowMs: number): Promise<void> {
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(ALERT_LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(ALERT_LIMITS.idleMs)}, true)`;
+      await enqueueNotificationDelivery(tx, {
+        kind: NOTIFICATION_KIND.qaReleaseDigestStale,
+        referenceId: qaReleaseStaleReferenceId(dbNowMs),
+      });
+    },
+    { maxWait: 5_000, timeout: ALERT_LIMITS.prismaMs },
+  );
+}
 
 export type QaReleaseMonitorAnswer = { status: number; body: Record<string, unknown> };
 
@@ -117,5 +138,17 @@ export async function runQaReleaseMonitor(
   } catch {
     return answer(503, { error: "monitor_clock_invalid" });
   }
-  return answer(200, { verdict });
+  if (verdict !== "stale") return answer(200, { verdict });
+
+  if (!qaReleaseTransactionFits("stale_write", clock() - startedAt, MONITOR_ROUND_BUDGET_MS)) {
+    return answer(503, { verdict, error: "monitor_budget_exhausted" });
+  }
+  try {
+    await enqueueStaleAlert(read.dbNowMs);
+  } catch {
+    // The verdict stands; the alert's outcome is unknown and is reported,
+    // not retried here -- the next round tries again under the same key.
+    return answer(503, { verdict, error: "alert_enqueue_failed" });
+  }
+  return answer(200, { verdict, alerted: true });
 }
