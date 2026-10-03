@@ -11,21 +11,37 @@ import type { AmuxContentKeys } from "./ideaCrypto.ts";
  * must prove the confirmed preview belongs to ideaId, the response came from
  * its fenced invocation, and source-plan/lease/budget/audit guards all hold.
  * This result cannot grant a model call, DB write or card registration. */
-export function prepareSecondIdeaOnlyAnalysisDraft(input: {
+type SecondDraftInput = {
   ideaId: string; previewId: string; raw: string; keys: AmuxContentKeys;
   priorPage: AmuxAnalysisOutputPage;
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
-}):
+};
+type SecondDraftResult =
   | { decision: "ready" | "partial"; draft: SealedAmuxAnalysisDraft;
       coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 1;
       remainingStartOrdinal: 0 | null; remainingEndOrdinal: 0 | null }
   | { decision: "hold"; reason: "invalid_result" | "owner_input" |
-      "continuation_required" } {
+      "continuation_required" };
+
+export function prepareSecondIdeaOnlyAnalysisDraft(
+  input: SecondDraftInput,
+): SecondDraftResult {
+  try { return prepareCheckedSecondDraft(input); }
+  catch { return { decision: "hold", reason: "invalid_result" }; }
+}
+
+function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
   const { ideaId, previewId, raw, keys, priorPage, permittedTargetRefs } = input;
   if (!Array.isArray(permittedTargetRefs)) {
     return { decision: "hold", reason: "invalid_result" };
   }
-  const targetSnapshots = permittedTargetRefs.map(snapshotAmuxPermittedTarget);
+  const targetSnapshots: (AmuxPermittedTargetRef | null)[] = [];
+  for (let index = 0; index < permittedTargetRefs.length; index += 1) {
+    if (!Object.hasOwn(permittedTargetRefs, index)) {
+      return { decision: "hold", reason: "invalid_result" };
+    }
+    targetSnapshots.push(snapshotAmuxPermittedTarget(permittedTargetRefs[index]));
+  }
   if (targetSnapshots.some((target) => target === null)) {
     return { decision: "hold", reason: "invalid_result" };
   }

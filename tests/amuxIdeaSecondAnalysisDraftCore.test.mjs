@@ -83,3 +83,24 @@ test("a mutable caller cannot change the response between cursor judgement and s
     assert.equal(result.draft.units.length, 1);
   }
 });
+
+test("throwing or sparse target inputs return a hold instead of escaping the boundary", () => {
+  const base = { ideaId: "idea-01", previewId: "preview-02",
+    raw: JSON.stringify(chunk()), keys, priorPage };
+  const throwingArray = new Proxy([feature], {
+    get(target, key, receiver) {
+      if (key === "length") throw new Error("never escape");
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const sparse = Array(1);
+  for (const permittedTargetRefs of [throwingArray, sparse]) {
+    assert.deepEqual(prepareSecondIdeaOnlyAnalysisDraft({
+      ...base, permittedTargetRefs,
+    }), { decision: "hold", reason: "invalid_result" });
+  }
+  const throwingInput = { ...base, permittedTargetRefs: [feature] };
+  Object.defineProperty(throwingInput, "raw", { get() { throw new Error("never escape"); } });
+  assert.deepEqual(prepareSecondIdeaOnlyAnalysisDraft(throwingInput),
+    { decision: "hold", reason: "invalid_result" });
+});
