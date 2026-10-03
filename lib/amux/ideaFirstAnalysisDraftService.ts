@@ -184,6 +184,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       continuationKind: prepared.draft.continuationKind,
       remainingStartOrdinal: prepared.remainingStartOrdinal,
       remainingEndOrdinal: prepared.remainingEndOrdinal,
+      nextChunkIndex: prepared.decision === "partial" ? 1 : null,
       freeformDigest: prepared.draft.freeform.digest,
       freeformDigestKeyId: prepared.draft.freeform.digestKeyId,
       unitCommitments: prepared.draft.units.map((unit) => ({
@@ -228,6 +229,16 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     if (created.count !== prepared.draft.units.length) {
       throw new AmuxFirstAnalysisDraftError("integrity_unavailable");
     }
+  }
+  if (prepared.decision === "partial") {
+    // The next output page is a distinct bounded attempt. It remains pending
+    // until a new exact preview is confirmed; this row authorizes no call.
+    await tx.amuxIdeaAnalysisChunk.create({ data: {
+      ideaId: idea.id, actorUserId: idea.actorUserId,
+      chunkIndex: 1, state: "pending", attempt: 0, leaseGeneration: 0,
+      sourcePlanRevisionId: plan.id, planStartChunkIndex: 0,
+      revisionChunkIndex: 1,
+    } });
   }
   const closedPreview = await tx.amuxIdeaTransferPreview.updateMany({
     where: { id: preview.id, state: "in_flight", consumedAt: { not: null },

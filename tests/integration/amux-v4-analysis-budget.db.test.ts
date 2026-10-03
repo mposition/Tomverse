@@ -785,10 +785,13 @@ test("an output-continuable first result retains its first page without completi
   assert.equal(saved.coverageStatus, "more");
   assert.equal(saved.analysisCompletedAt, null);
   assert.equal(saved.nextChunkIndex, 1);
-  const [idea, chunk, visible] = await Promise.all([
+  const [idea, chunk, nextChunk, visible] = await Promise.all([
     prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } }),
     prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
     }),
     readAmuxFirstIdeaAnalysisResult(session, ideaId, keys),
   ]);
@@ -797,6 +800,10 @@ test("an output-continuable first result retains its first page without completi
   assert.equal(chunk.state, "draft_ready");
   assert.equal(chunk.outputPending, true);
   assert.deepEqual([chunk.remainingStartOrdinal, chunk.remainingEndOrdinal], [0, 0]);
+  assert.equal(nextChunk.state, "pending");
+  assert.equal(nextChunk.currentPreviewId, null);
+  assert.equal(nextChunk.sourcePlanRevisionId, chunk.sourcePlanRevisionId);
+  assert.equal(nextChunk.revisionChunkIndex, 1);
   assert.equal(visible.state, "partial");
   if (visible.state !== "partial") throw new Error("first page unavailable");
   assert.equal(visible.remainingScope, "More cards remain");
