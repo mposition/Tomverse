@@ -7,10 +7,6 @@ import { sealAmuxAnalysisDraft, type SealedAmuxAnalysisDraft } from
   "./ideaAnalysisDraftSealCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
-/** Pure, bounded continuation after one verified first output page. The caller
- * must prove the confirmed preview belongs to ideaId, the response came from
- * its fenced invocation, and source-plan/lease/budget/audit guards all hold.
- * This result cannot grant a model call, DB write or card registration. */
 type SecondDraftInput = {
   ideaId: string; previewId: string; raw: string; keys: AmuxContentKeys;
   priorPage: AmuxAnalysisOutputPage;
@@ -23,6 +19,10 @@ type SecondDraftResult =
   | { decision: "hold"; reason: "invalid_result" | "owner_input" |
       "continuation_required" };
 
+/** Pure, bounded continuation after one verified first output page. The caller
+ * must prove the confirmed preview belongs to ideaId, the response came from
+ * its fenced invocation, and source-plan/lease/budget/audit guards all hold.
+ * This result cannot grant a model call, DB write or card registration. */
 export function prepareSecondIdeaOnlyAnalysisDraft(
   input: SecondDraftInput,
 ): SecondDraftResult {
@@ -35,12 +35,17 @@ function prepareCheckedSecondDraft(input: SecondDraftInput): SecondDraftResult {
   if (!Array.isArray(permittedTargetRefs)) {
     return { decision: "hold", reason: "invalid_result" };
   }
+  const length = Object.getOwnPropertyDescriptor(permittedTargetRefs, "length")?.value;
+  if (!Number.isSafeInteger(length) || length > 512) {
+    return { decision: "hold", reason: "invalid_result" };
+  }
   const targetSnapshots: (AmuxPermittedTargetRef | null)[] = [];
-  for (let index = 0; index < permittedTargetRefs.length; index += 1) {
-    if (!Object.hasOwn(permittedTargetRefs, index)) {
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(permittedTargetRefs, index);
+    if (!descriptor || !("value" in descriptor)) {
       return { decision: "hold", reason: "invalid_result" };
     }
-    targetSnapshots.push(snapshotAmuxPermittedTarget(permittedTargetRefs[index]));
+    targetSnapshots.push(snapshotAmuxPermittedTarget(descriptor.value));
   }
   if (targetSnapshots.some((target) => target === null)) {
     return { decision: "hold", reason: "invalid_result" };

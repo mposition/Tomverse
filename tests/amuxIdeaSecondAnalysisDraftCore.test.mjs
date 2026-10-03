@@ -87,18 +87,24 @@ test("a mutable caller cannot change the response between cursor judgement and s
 test("throwing or sparse target inputs return a hold instead of escaping the boundary", () => {
   const base = { ideaId: "idea-01", previewId: "preview-02",
     raw: JSON.stringify(chunk()), keys, priorPage };
-  const throwingArray = new Proxy([feature], {
+  const sparse = Array(1);
+  const growingLength = new Proxy([feature], {
     get(target, key, receiver) {
-      if (key === "length") throw new Error("never escape");
+      if (key === "length") throw new Error("length must be snapshotted");
       return Reflect.get(target, key, receiver);
     },
   });
-  const sparse = Array(1);
-  for (const permittedTargetRefs of [throwingArray, sparse]) {
+  const throwingIndex = [feature];
+  Object.defineProperty(throwingIndex, 0, { get() { throw new Error("no getters"); } });
+  const excessive = Array.from({ length: 513 }, () => feature);
+  for (const permittedTargetRefs of [sparse, throwingIndex, excessive]) {
     assert.deepEqual(prepareSecondIdeaOnlyAnalysisDraft({
       ...base, permittedTargetRefs,
     }), { decision: "hold", reason: "invalid_result" });
   }
+  assert.equal(prepareSecondIdeaOnlyAnalysisDraft({
+    ...base, permittedTargetRefs: growingLength,
+  }).decision, "ready");
   const throwingInput = { ...base, permittedTargetRefs: [feature] };
   Object.defineProperty(throwingInput, "raw", { get() { throw new Error("never escape"); } });
   assert.deepEqual(prepareSecondIdeaOnlyAnalysisDraft(throwingInput),
