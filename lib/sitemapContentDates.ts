@@ -32,7 +32,8 @@
  * effective date, and then updates the date shown on the page, `date` here
  * and the digest together.
  *
- * While /privacy is not in the table below, that test is skipped and the same
+ * While /privacy is not in the table below, both privacy tests there are
+ * skipped (the shown-date match and the digest), and the same
  * digest is held by the publication gate instead: AMENDED_DOCUMENT_EVIDENCE in
  * lib/emailPolicyPublication.ts, recomputed by
  * tests/support/amendedDocumentVerifiers.mjs through
