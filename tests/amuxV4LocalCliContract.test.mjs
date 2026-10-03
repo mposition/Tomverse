@@ -90,6 +90,22 @@ test("Claude result needs exact served model and complete usage", () => {
     Buffer.from([0xff]), 0), { kind: "outcome_unknown" });
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(claudeEnvelope(), ["Bash"]), 0), { kind: "outcome_unknown" });
+  for (const initOverride of [
+    { mcp_servers: [{ name: "external" }] },
+    { mcp_servers: "not-an-array" },
+    { permissionMode: "bypassPermissions" },
+    { permission_mode: "bypassPermissions" },
+  ]) {
+    const events = [
+      { type: "system", subtype: "init", tools: [], ...initOverride },
+      { type: "assistant", message: { role: "assistant",
+        content: [{ type: "text", text: "answer" }] } },
+      claudeEnvelope(),
+    ];
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+      Buffer.from(events.map((event) => JSON.stringify(event)).join("\n")), 0),
+    { kind: "outcome_unknown" });
+  }
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(claudeEnvelope(), [], [{ type: "tool_use", name: "Read" }]), 0),
   { kind: "outcome_unknown" });
