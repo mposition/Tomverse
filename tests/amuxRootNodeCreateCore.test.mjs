@@ -6,7 +6,8 @@ import { AMUX_V4_NODE_CREATE_WRITE_CODE_LATCH,
   AMUX_V4_NODE_CREATE_READ_CODE_LATCH,
   amuxV4NodeCreateWritePermitted, amuxV4NodeCreateReadPermitted,
   amuxRootNodeErrorBody, amuxRootNodeErrorStatus,
-  amuxRootNodeNeedsCommitReadback, amuxRootNodeReadbackProvesExpiry,
+  amuxRootNodeNeedsCommitReadback, amuxRootNodeKnownRollbackCode,
+  amuxRootNodeReadbackProvesExpiry,
   inspectAmuxRootNodeRequest } from "../lib/amux/ideaNodeCreateCore.ts";
 
 const route = readFileSync(new URL(
@@ -24,6 +25,11 @@ const consume = { ...prepare, stage: "consume",
 test("root Initiative decision accepts only exact bounded prepare/consume shapes", () => {
   assert.deepEqual(inspectAmuxRootNodeRequest(JSON.stringify(prepare)), prepare);
   assert.deepEqual(inspectAmuxRootNodeRequest(JSON.stringify(consume)), consume);
+  assert.deepEqual(inspectAmuxRootNodeRequest(JSON.stringify({
+    stage: "confirm_no_commit", decisionId: prepare.decisionId,
+    prepareRequestId: prepare.prepareRequestId,
+  })), { stage: "confirm_no_commit", decisionId: prepare.decisionId,
+    prepareRequestId: prepare.prepareRequestId });
   for (const changed of [
     { ...prepare, hidden: true }, { ...prepare, nodeId: prepare.decisionId },
     { ...prepare, reason: " trailing " }, { ...prepare, reason: "x".repeat(1_001) },
@@ -41,6 +47,8 @@ test("root node route stays dark and uncertain writes are never retry grants", (
   assert.equal(amuxV4NodeCreateReadPermitted("enabled"), false);
   assert.equal(amuxRootNodeNeedsCommitReadback(false), false);
   assert.equal(amuxRootNodeNeedsCommitReadback(true), true);
+  assert.equal(amuxRootNodeKnownRollbackCode("P2034"), true);
+  assert.equal(amuxRootNodeKnownRollbackCode("P2028"), false);
   assert.equal(amuxRootNodeErrorStatus("outcome_unknown"), 503);
   assert.deepEqual(amuxRootNodeErrorBody("outcome_unknown", {
     decisionId: prepare.decisionId,

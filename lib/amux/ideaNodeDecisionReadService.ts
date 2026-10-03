@@ -136,17 +136,26 @@ export async function readAmuxRootNodeDecisionInTransaction(
           ? await tx.adminAuditLog.findUnique({
             where: { id: row.outcomeUnknownResolvedAuditLogId },
           }) : null;
+        const resolvedMeta = meta(resolvedAudit?.metadata);
         if (row.outcomeUnknownResolution !== "no_commit" ||
             !resolvedAudit?.entryHash ||
             auditRowActorKind(resolvedAudit) !== "human" ||
             resolvedAudit.actorUserId !== actorUserId ||
             resolvedAudit.action !== "amux.v4.unit.no_commit_confirmed" ||
             resolvedAudit.targetType !== TARGET ||
-            resolvedAudit.targetId !== row.id) {
+            resolvedAudit.targetId !== row.id ||
+            resolvedMeta?.ideaId !== row.ideaId ||
+            resolvedMeta.draftUnitId !== row.draftUnitId ||
+            resolvedMeta.prepareRequestId !== row.prepareRequestId ||
+            resolvedMeta.consumeRequestId !== row.outcomeUnknownConsumeRequestId ||
+            resolvedMeta.confirmationDigest !== row.confirmationDigest ||
+            resolvedMeta.action !== "create_node" ||
+            resolvedMeta.observedNoEffect !== true) {
           return { state: "partial" } as const;
         }
         return { state: "no_commit_confirmed", decisionId: row.id,
-          draftUnitId: row.draftUnitId } as const;
+          draftUnitId: row.draftUnitId,
+          auditId: row.outcomeUnknownResolvedAuditLogId! } as const;
       }
       return { state: "outcome_unknown", decisionId: row.id } as const;
     }

@@ -16,7 +16,8 @@ import { AMUX_V4_NODE_CREATE_READ_ENV, AMUX_V4_NODE_CREATE_WRITE_ENV,
   amuxRootNodeErrorBody, amuxRootNodeErrorStatus,
   inspectAmuxRootNodeRequest } from "@/lib/amux/ideaNodeCreateCore";
 import { AmuxNodeCreateError } from "@/lib/amux/ideaNodeCreateService";
-import { prepareAmuxRootNode, consumeAmuxRootNode } from
+import { prepareAmuxRootNode, consumeAmuxRootNode,
+  confirmAmuxRootNodeNoCommit } from
   "@/lib/amux/ideaNodeDecisionService";
 import { readAmuxRootNodeDecision,
   AmuxNodeDecisionReadError } from "@/lib/amux/ideaNodeDecisionReadService";
@@ -90,7 +91,10 @@ export async function POST(request: Request): Promise<Response> {
       prepareRequestId: choice.prepareRequestId };
     const result = choice.stage === "prepare"
       ? await prepareAmuxRootNode(auth.session, request, choice)
-      : await consumeAmuxRootNode(auth.session, request, choice);
+      : choice.stage === "consume"
+        ? await consumeAmuxRootNode(auth.session, request, choice)
+        : await confirmAmuxRootNodeNoCommit(auth.session, request,
+          choice.decisionId, choice.prepareRequestId);
     return NextResponse.json(result,
       { status: choice.stage === "prepare" ? 201 : 200, headers: noStore });
   } catch (error) { return failure(error, recovery); }

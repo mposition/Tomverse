@@ -14,6 +14,8 @@ import { AmuxNodeDuplicateScanError, scanAmuxNodeDuplicates } from
   "./ideaNodeDuplicateScanService.ts";
 import { AmuxUnitExpiryError, expireStaleAmuxUnitDecision } from
   "./ideaUnitExpiryService.ts";
+import { readAmuxRootNodeDecisionInTransaction } from
+  "./ideaNodeDecisionReadService.ts";
 import { AMUX_V4_INPUT_SCANNER_VERSION } from "./localIntakeCore.ts";
 import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason } from
   "./ideaUnitDecisionBindingCore.ts";
@@ -418,4 +420,80 @@ export async function commitAmuxRootNodeUnknown(tx: Prisma.TransactionClient,
   });
   if (updated.count !== 1) throw new AmuxNodeCreateError("integrity_unavailable");
   return true;
+}
+
+/** Owner-confirmed no-commit after the unknown marker has waited out the
+ * in-flight row lock. This never replays the attempted create. */
+export async function commitAmuxRootNodeNoCommitConfirmed(
+  tx: Prisma.TransactionClient,
+  input: { session: Session; request: Request; decisionId: string;
+    prepareRequestId: string },
+) {
+  const actorUserId = ownerId(input.session);
+  if (!UUID.test(input.decisionId) || !UUID.test(input.prepareRequestId)) {
+    throw new AmuxNodeCreateError("not_ready");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaUnitDecision"
+    WHERE "id" = ${input.decisionId} AND "actorUserId" = ${actorUserId}
+      AND "prepareRequestId" = ${input.prepareRequestId}::uuid FOR UPDATE
+  `;
+  if (locked.length !== 1) throw new AmuxNodeCreateError("not_found");
+  const status = await readAmuxRootNodeDecisionInTransaction(tx,
+    input.session, input.decisionId, input.prepareRequestId);
+  if (status.state !== "outcome_unknown") {
+    throw new AmuxNodeCreateError(status.state === "partial"
+      ? "integrity_unavailable" : "reconfirm");
+  }
+  const row = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+    where: { id: input.decisionId },
+  });
+  const prepareAudit = await tx.adminAuditLog.findUniqueOrThrow({
+    where: { id: row.prepareAuditLogId },
+  });
+  const preparedMeta = prepareAudit.metadata as Record<string, unknown>;
+  const snapshot = preparedMeta.snapshot as Record<string, unknown>;
+  const proposal = snapshot.nodeProposal as Record<string, unknown>;
+  const proposedId = proposal.id;
+  if (typeof proposedId !== "string" ||
+      await tx.amuxPortfolioNode.findUnique({ where: { id: proposedId } }) ||
+      await tx.amuxPortfolioNodeRevision.findFirst({
+        where: { decisionId: row.id }, select: { id: true },
+      }) ||
+      await tx.amuxWorkItem.findFirst({
+        where: { v4SourceApprovalId: row.id }, select: { id: true },
+      })) throw new AmuxNodeCreateError("integrity_unavailable");
+  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxNodeCreateError("integrity_unavailable");
+  }
+  const auditId = await writeAdminAuditLog({ tx, session: input.session,
+    request: input.request, action: "amux.v4.unit.no_commit_confirmed",
+    targetType: TARGET, targetId: row.id,
+    summary: "Owner confirmed an AMUX v4 root node attempt did not commit.",
+    metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
+      prepareRequestId: row.prepareRequestId,
+      consumeRequestId: row.outcomeUnknownConsumeRequestId,
+      confirmationDigest: row.confirmationDigest,
+      action: "create_node", observedNoEffect: true },
+  });
+  const changed = await tx.amuxIdeaUnitDecision.updateMany({
+    where: { id: row.id, actorUserId, action: "create_node",
+      state: "prepared", outcomeUnknownAt: { not: null },
+      outcomeUnknownResolvedAt: null,
+      finalAuditLogId: null, resolvedNodeId: null },
+    data: { outcomeUnknownResolvedAt: now,
+      outcomeUnknownResolution: "no_commit",
+      outcomeUnknownResolvedAuditLogId: auditId },
+  });
+  if (changed.count !== 1) throw new AmuxNodeCreateError("integrity_unavailable");
+  return { decisionId: row.id, state: "no_commit_confirmed" as const, auditId };
 }

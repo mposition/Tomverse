@@ -7,7 +7,8 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { prisma } from "@/lib/prisma";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { commitAmuxRootNodeConsume, commitAmuxRootNodePrepare,
-  commitAmuxRootNodeUnknown, AmuxNodeCreateError,
+  commitAmuxRootNodeUnknown, commitAmuxRootNodeNoCommitConfirmed,
+  AmuxNodeCreateError,
   type AmuxNodeCreatePrepare, type AmuxNodeCreateConsume } from
   "./ideaNodeCreateService.ts";
 import { readAmuxRootNodeDecision } from "./ideaNodeDecisionReadService.ts";
@@ -15,10 +16,11 @@ import { amuxUnitOwnerId, AmuxUnitRejectError } from
   "./ideaUnitRejectService.ts";
 import { AMUX_V4_NODE_CREATE_READ_ENV, AMUX_V4_NODE_CREATE_WRITE_ENV,
   amuxV4NodeCreateReadPermitted, amuxV4NodeCreateWritePermitted,
-  amuxRootNodeNeedsCommitReadback, amuxRootNodeReadbackProvesExpiry } from
+  amuxRootNodeNeedsCommitReadback, amuxRootNodeKnownRollbackCode,
+  amuxRootNodeReadbackProvesExpiry } from
   "./ideaNodeCreateCore.ts";
 
-function beforeWrite(session: Session) {
+function beforeRecovery(session: Session) {
   try { amuxUnitOwnerId(session); }
   catch (error) {
     if (error instanceof AmuxUnitRejectError) {
@@ -34,6 +36,10 @@ function beforeWrite(session: Session) {
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new AmuxNodeCreateError("integrity_unavailable");
   }
+}
+
+function beforeWrite(session: Session) {
+  beforeRecovery(session);
   try { return loadCurrentAmuxContentKeys(process.env); }
   catch { throw new AmuxNodeCreateError("integrity_unavailable"); }
 }
@@ -64,6 +70,10 @@ export async function prepareAmuxRootNode(session: Session, request: Request,
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError &&
+        amuxRootNodeKnownRollbackCode(error.code)) {
+      throw new AmuxNodeCreateError("reconfirm");
+    }
     if (!amuxRootNodeNeedsCommitReadback(callbackReturned)) {
       if (error instanceof AmuxNodeCreateError) throw error;
       const known = knownPreCommitRefusal(error, "prepare");
@@ -98,6 +108,10 @@ export async function consumeAmuxRootNode(session: Session, request: Request,
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError &&
+        amuxRootNodeKnownRollbackCode(error.code)) {
+      throw new AmuxNodeCreateError("reconfirm");
+    }
     if (!amuxRootNodeNeedsCommitReadback(callbackReturned)) {
       if (error instanceof AmuxNodeCreateError) throw error;
       const known = knownPreCommitRefusal(error, "consume");
@@ -133,6 +147,41 @@ export async function consumeAmuxRootNode(session: Session, request: Request,
       }
     } catch { /* Exact-ID read-back remains the only recovery path. */ }
     if (definitelyExpired) throw new AmuxNodeCreateError("reconfirm");
+    throw new AmuxNodeCreateError("outcome_unknown");
+  }
+}
+
+export async function confirmAmuxRootNodeNoCommit(session: Session,
+  request: Request, decisionId: string, prepareRequestId: string) {
+  beforeRecovery(session);
+  let callbackReturned = false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const result = await commitAmuxRootNodeNoCommitConfirmed(tx,
+        { session, request, decisionId, prepareRequestId });
+      callbackReturned = true;
+      return result;
+    }, { maxWait: 5_000, timeout: 15_000 });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError &&
+        amuxRootNodeKnownRollbackCode(error.code)) {
+      throw new AmuxNodeCreateError("reconfirm");
+    }
+    if (!amuxRootNodeNeedsCommitReadback(callbackReturned)) {
+      if (error instanceof AmuxNodeCreateError) throw error;
+      const known = knownPreCommitRefusal(error, "consume");
+      if (known) throw known;
+      throw new AmuxNodeCreateError("integrity_unavailable");
+    }
+    try {
+      const status = await readAmuxRootNodeDecision(session,
+        decisionId, prepareRequestId);
+      if (status.state === "no_commit_confirmed" &&
+          status.decisionId === decisionId) {
+        return { decisionId, state: "no_commit_confirmed" as const,
+          auditId: status.auditId };
+      }
+    } catch { /* No second owner decision after an uncertain COMMIT. */ }
     throw new AmuxNodeCreateError("outcome_unknown");
   }
 }

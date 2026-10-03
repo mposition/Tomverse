@@ -20,7 +20,9 @@ export type AmuxRootNodeRequest =
       reason: string }
   | { stage: "consume"; ideaId: string; draftUnitId: string;
       decisionId: string; prepareRequestId: string; nodeId: string;
-      reason: string; consumeRequestId: string; confirmationDigest: string };
+      reason: string; consumeRequestId: string; confirmationDigest: string }
+  | { stage: "confirm_no_commit"; decisionId: string;
+      prepareRequestId: string };
 
 const exact = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");
@@ -32,6 +34,14 @@ export function inspectAmuxRootNodeRequest(raw: string): AmuxRootNodeRequest | n
   try { value = JSON.parse(raw); } catch { return null; }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const data = value as Record<string, unknown>;
+  if (data.stage === "confirm_no_commit") {
+    if (!exact(data, ["stage", "decisionId", "prepareRequestId"]) ||
+        typeof data.decisionId !== "string" || !UUID.test(data.decisionId) ||
+        typeof data.prepareRequestId !== "string" ||
+        !UUID.test(data.prepareRequestId) ||
+        data.decisionId === data.prepareRequestId) return null;
+    return data as AmuxRootNodeRequest & { stage: "confirm_no_commit" };
+  }
   const isPrepare = data.stage === "prepare";
   if (!isPrepare && data.stage !== "consume") return null;
   const required = ["stage", "ideaId", "draftUnitId", "decisionId",
@@ -72,6 +82,11 @@ export const amuxRootNodeErrorBody = (code: string,
 
 export const amuxRootNodeNeedsCommitReadback = (callbackReturned: boolean) =>
   callbackReturned === true;
+
+/** Prisma's P2034 reports an aborted Serializable transaction, not an
+ * uncertain COMMIT. All other post-callback errors still need read-back. */
+export const amuxRootNodeKnownRollbackCode = (code: string | undefined) =>
+  code === "P2034";
 
 export const amuxRootNodeReadbackProvesExpiry = (status: {
   state: string; decisionId?: string; draftUnitId?: string;

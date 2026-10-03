@@ -14,5 +14,9 @@ test("expired prepared unit can be replaced, while live and unknown units cannot
   assert.equal(mayExpireAmuxPreparedUnit({ ...row,
     outcomeUnknownAt: new Date("2026-10-03T01:14:00.000Z") }, expiry), false);
   assert.equal(mayExpireAmuxPreparedUnit({ ...row,
+    outcomeUnknownAt: new Date("2026-10-03T01:14:00.000Z"),
+    outcomeUnknownResolvedAt: new Date("2026-10-03T01:14:30.000Z"),
+    outcomeUnknownResolution: "no_commit" }, expiry), true);
+  assert.equal(mayExpireAmuxPreparedUnit({ ...row,
     expiresAt: new Date(NaN) }, expiry), false);
 });

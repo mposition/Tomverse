@@ -53,7 +53,7 @@ import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
   readAmuxUnitRejectDecision, AmuxUnitRejectError } from
   "@/lib/amux/ideaUnitRejectService";
 import { commitAmuxRootNodePrepare, commitAmuxRootNodeConsume,
-  commitAmuxRootNodeUnknown,
+  commitAmuxRootNodeUnknown, commitAmuxRootNodeNoCommitConfirmed,
   AmuxNodeCreateError } from "@/lib/amux/ideaNodeCreateService";
 import { readAmuxRootNodeDecision,
   readAmuxRootNodeDecisionInTransaction } from
@@ -1262,19 +1262,18 @@ test("a complete first result saves independent encrypted units and closes only 
         prepareRequestId: randomUUID(), nodeId: randomUUID() }, keys }),
     (error: unknown) => error instanceof AmuxNodeCreateError &&
       error.code === "already_prepared");
-    const resolvedAuditId = await writeAdminAuditLog({ tx, session, request,
-      action: "amux.v4.unit.no_commit_confirmed",
-      targetType: "AmuxIdeaUnitDecision", targetId: unknownChoice.decisionId,
-      summary: "Synthetic no-commit confirmation for root node read-back." });
-    await tx.amuxIdeaUnitDecision.update({
-      where: { id: unknownChoice.decisionId },
-      data: { outcomeUnknownResolvedAt: new Date(),
-        outcomeUnknownResolution: "no_commit",
-        outcomeUnknownResolvedAuditLogId: resolvedAuditId },
-    });
+    const noCommit = await commitAmuxRootNodeNoCommitConfirmed(tx,
+      { session, request, decisionId: unknownChoice.decisionId,
+        prepareRequestId: unknownChoice.prepareRequestId });
+    assert.equal(noCommit.state, "no_commit_confirmed");
     assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
       unknownChoice.decisionId, unknownChoice.prepareRequestId)).state,
     "no_commit_confirmed");
+    await assert.rejects(commitAmuxRootNodeNoCommitConfirmed(tx,
+      { session, request, decisionId: unknownChoice.decisionId,
+        prepareRequestId: unknownChoice.prepareRequestId }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "reconfirm");
     throw new Error("rollback synthetic unknown root node decision");
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     maxWait: 5_000, timeout: 30_000 }),
