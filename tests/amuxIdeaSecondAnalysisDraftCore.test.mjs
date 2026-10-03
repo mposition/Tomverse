@@ -79,6 +79,19 @@ test("a third page seals a task against the verified first two output pages", ()
     history: [priorPage] }), { decision: "hold", reason: "invalid_result" });
   assert.deepEqual(prepareIdeaOnlyOutputAnalysisDraft({ ...input,
     permittedTargetRefs: [feature] }), { decision: "hold", reason: "invalid_result" });
+  assert.deepEqual(prepareIdeaOnlyOutputAnalysisDraft({ ...input,
+    history: [priorPage, { ...secondPage, outputPartIndex: 4 }] }),
+  { decision: "hold", reason: "invalid_result" });
+  for (const chunkIndex of [0, -1, 1.5]) {
+    assert.deepEqual(prepareIdeaOnlyOutputAnalysisDraft({ ...input, chunkIndex }),
+    { decision: "hold", reason: "invalid_result" });
+  }
+  const more = prepareIdeaOnlyOutputAnalysisDraft({ ...input,
+    raw: JSON.stringify(chunk({ previewId: "preview-03", chunkIndex: 2,
+      coverageStatus: "more", continuationKind: "output",
+      remainingScope: "One last task still needs proposal.", units: [thirdCard] })) });
+  assert.equal(more.decision, "partial");
+  if (more.decision === "partial") assert.equal(more.outputPartIndex, 2);
 });
 
 test("closed history, forged targets and a cardless rejection fail closed", () => {

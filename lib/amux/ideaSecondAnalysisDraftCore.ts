@@ -105,7 +105,8 @@ function prepareCheckedDraft(input: Parameters<typeof prepareIdeaOnlyOutputAnaly
     return { decision: "hold", reason: "invalid_result" };
   }
   return { decision: complete ? "ready" : "partial", draft: sealed.draft,
-    coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: chunkIndex,
+    coveredStartOrdinal: 0, coveredEndOrdinal: 0,
+    outputPartIndex: inspected.cursor.candidate.outputPartIndex,
     remainingStartOrdinal: partial ? 0 : null,
     remainingEndOrdinal: partial ? 0 : null };
 }
