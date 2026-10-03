@@ -320,8 +320,11 @@ jobs:
   report-red-lane:
     name: Report the red release lane
     runs-on: ubuntu-latest
-    needs: credit-finance-db
-    if: always() && needs.credit-finance-db.result == 'failure' && github.event_name != 'pull_request'
+    # Either job going red is the lane going red: the PostgreSQL 16 job runs
+    # suites the lanes also run, and a release branch must not go quietly red
+    # on it.
+    needs: [credit-finance-db, credit-finance-db-postgres16]
+    if: always() && (needs.credit-finance-db.result == 'failure' || needs.credit-finance-db-postgres16.result == 'failure') && github.event_name != 'pull_request'
     permissions:
       contents: read
     timeout-minutes: 5
