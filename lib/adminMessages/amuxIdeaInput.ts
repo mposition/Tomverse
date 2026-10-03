@@ -103,7 +103,7 @@ export const adminAmuxIdeaInputMessages = defineAdminMessages({
     analysisResultDuplicateCandidates: "Possible overlap references",
     analysisResultSourceRefs: "Source references",
     analysisResultCardRef: "Card reference",
-    analysisResultNoRelation: "None",
+    analysisResultNoRelation: "Not linked",
     analysisResultNoApproval: "Reading a proposal does not approve or register it.",
     sourceScopeTitle: "Exact source scope",
     sourceScopeHint: "Check one file from a repository or PR named in this idea. This validates only its proposed identity; it does not read GitHub or authorize model transfer.",

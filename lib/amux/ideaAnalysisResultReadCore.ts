@@ -33,11 +33,13 @@ const text = (value: unknown, max = 2_000): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 const textList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.length <= 12 && value.every((item) => text(item, 500));
+const ref = (value: unknown): value is string =>
+  typeof value === "string" && ID.test(value);
 const refList = (value: unknown, max: number, min = 0): value is string[] =>
   Array.isArray(value) && value.length >= min && value.length <= max &&
-  value.every((item) => text(item, 128));
+  value.every(ref) && new Set(value).size === value.length;
 const optionalRef = (value: unknown): value is string | null =>
-  value === null || text(value, 128);
+  value === null || ref(value);
 
 /** The append-only analysis audit binds every stored proposal, including
  * units whose body has since been purged. No proposal text enters the audit. */
@@ -95,15 +97,24 @@ export function parseAmuxIdeaAnalysisResultView(
     if (!record(value.proposal) || value.proposal.localId !== value.localRef) return null;
     const proposal = value.proposal;
     if (proposal.kind === "node") {
-      if (!["initiative", "epic", "feature"].includes(String(proposal.level)) ||
+      if (!keys(proposal, ["kind", "localId", "level", "parentRef", "title",
+        "description", "sourceRefIds"]) ||
+          !["initiative", "epic", "feature"].includes(String(proposal.level)) ||
           !text(proposal.title, 200) || !text(proposal.description) ||
           !optionalRef(proposal.parentRef) ||
+          (proposal.level === "initiative") !== (proposal.parentRef === null) ||
           !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "card") {
+      if (!keys(proposal, ["kind", "localId", "cardType", "storyKind", "title",
+        "problem", "scopeIn", "scopeOut", "completionCriteria", "featureRef",
+        "parentStoryRef", "dependencyRefs", "duplicateCandidateRefs", "taskRole",
+        "executionGrade", "executionBrief", "sourceRefIds"])) return null;
       if (proposal.cardType === "story") {
         if (!["general", "bug"].includes(String(proposal.storyKind)) ||
             proposal.taskRole !== null || proposal.executionGrade !== null ||
-            proposal.executionBrief !== null || proposal.parentStoryRef !== null) return null;
+            proposal.executionBrief !== null || proposal.parentStoryRef !== null ||
+            !Array.isArray(proposal.dependencyRefs) ||
+            proposal.dependencyRefs.length !== 0) return null;
       } else if (proposal.cardType === "task") {
         if (proposal.storyKind !== null ||
             !AMUX_TASK_ROLE_PROPOSALS.some((role) => role === proposal.taskRole) ||
@@ -111,15 +122,21 @@ export function parseAmuxIdeaAnalysisResultView(
             !text(proposal.executionBrief)) return null;
       } else return null;
       if (!text(proposal.title, 200) || !text(proposal.problem) ||
-          !textList(proposal.scopeIn) || !textList(proposal.scopeOut) ||
-          !textList(proposal.completionCriteria) || !text(proposal.featureRef, 128) ||
+          !textList(proposal.scopeIn) || proposal.scopeIn.length === 0 ||
+          !textList(proposal.scopeOut) ||
+          !textList(proposal.completionCriteria) ||
+          proposal.completionCriteria.length === 0 || !ref(proposal.featureRef) ||
           !optionalRef(proposal.parentStoryRef) ||
           !refList(proposal.dependencyRefs, 16) ||
           !refList(proposal.duplicateCandidateRefs, 8) ||
+          proposal.dependencyRefs.includes(value.localRef) ||
+          proposal.duplicateCandidateRefs.includes(value.localRef) ||
           !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else if (proposal.kind === "evidence") {
-      if (!["observed_error", "source_finding"].includes(String(proposal.evidenceType)) ||
-          !text(proposal.summary) || !text(proposal.cardRef, 128) ||
+      if (!keys(proposal, ["kind", "localId", "evidenceType", "summary",
+        "cardRef", "sourceRefIds"]) ||
+          !["observed_error", "source_finding"].includes(String(proposal.evidenceType)) ||
+          !text(proposal.summary) || !ref(proposal.cardRef) ||
           !refList(proposal.sourceRefIds, 16, 1)) return null;
     } else return null;
   }

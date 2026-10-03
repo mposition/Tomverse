@@ -93,6 +93,12 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
     { cardType: "initiative" }, { storyKind: "proposal" },
     { dependencyRefs: undefined }, { sourceRefIds: [] },
     { parentStoryRef: 123 }, { featureRef: null },
+    { featureRef: "contains,comma" }, { sourceRefIds: ["\u202eunsafe"] },
+    { sourceRefIds: ["source-1", "source-1"] },
+    { scopeIn: [] }, { completionCriteria: [] },
+    { dependencyRefs: ["c0:card-0"] },
+    { duplicateCandidateRefs: ["c0:card-0"] },
+    { unexpected: "extra field" },
   ]) {
     assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
       units: [{ ...result.units[0], proposal: { ...result.units[0].proposal,
@@ -107,6 +113,7 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   for (const malformed of [
     { taskRole: "unapproved_role" }, { executionGrade: "unapproved_grade" },
     { executionBrief: null }, { storyKind: "bug" },
+    { dependencyRefs: ["c0:card-0"] },
   ]) {
     assert.equal(parseAmuxIdeaAnalysisResultView(200, { ...result,
       units: [{ ...result.units[0], proposal: { ...task, ...malformed } }],
@@ -121,8 +128,13 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   for (const [localRef, proposal, malformed] of [
     [node.localId, node, { level: "project" }],
     [node.localId, node, { sourceRefIds: [] }],
+    [node.localId, node, { parentRef: "c0:node-1" }],
+    [node.localId, node, { parentRef: "contains,comma" }],
+    [node.localId, { ...node, level: "epic", parentRef: "c0:node-1" },
+      { parentRef: null }],
     [evidence.localId, evidence, { evidenceType: "freeform" }],
     [evidence.localId, evidence, { cardRef: null }],
+    [evidence.localId, evidence, { cardRef: "\u202eunsafe" }],
     [evidence.localId, evidence, { sourceRefIds: [] }],
   ]) {
     const unit = { ...result.units[0], localRef, proposal };

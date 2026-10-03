@@ -38,6 +38,12 @@ test("missing optional links are explicit, and model text cannot become markup",
   });
   assert.match(escaped, /&lt;script&gt;run\(\)&lt;\/script&gt;/);
   assert.doesNotMatch(escaped, /<script>|<a\b|href=/);
+  const validNoneRef = render({ kind: "node", localId: "c0:node-1", level: "epic",
+    title: "Test proposal", description: "Text only",
+    parentRef: "None", sourceRefIds: ["source-1"],
+  });
+  assert.match(validNoneRef, /None/);
+  assert.doesNotMatch(validNoneRef, /Not linked/);
 });
 
 test("evidence proposal names its card reference without implying approval", () => {
