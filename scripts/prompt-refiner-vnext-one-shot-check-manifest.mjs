@@ -70,15 +70,23 @@ function readBinding(path) {
   return { binding, dev: file.dev, ino: file.ino };
 }
 
-export function checkManifestFiles(manifestPath, bindingPath,
-  verify = verifyPromptRefinerVnextOneShotManifestEnvelope) {
+export function checkManifestFiles(manifestPath, bindingPath) {
   const bound = readBinding(bindingPath);
   const manifest = boundedRegularUtf8(manifestPath, MANIFEST_MAX_BYTES);
   if (bound.dev === manifest.dev && bound.ino === manifest.ino) {
     throw new Error("input_alias");
   }
-  verify(manifest.text, bound.binding.expectedRootDigest,
+  const checked = verifyPromptRefinerVnextOneShotManifestEnvelope(
+    manifest.text, bound.binding.expectedRootDigest,
     bound.binding.expectedPreregistrationDigest);
+  if (checked.caseCount !== 80 || checked.manifestShapeClosed !== true ||
+      checked.caseShapeClosed !== true || checked.duplicateSourceTextRejected !== true ||
+      checked.semanticTruthVerified !== false ||
+      checked.independentAuthorshipVerified !== false ||
+      checked.privacyExclusionVerified !== false ||
+      checked.fullManifestValidated !== false || checked.dispatchAuthorized !== false) {
+    throw new Error("manifest_structure_invalid");
+  }
   return Object.freeze({
     structuralValidation: "pass",
     caseCount: 80,
