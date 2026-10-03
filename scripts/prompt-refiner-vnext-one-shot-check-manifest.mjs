@@ -18,19 +18,19 @@ function boundedRegularUtf8(path, maximum) {
   }
   const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    const before = fstatSync(descriptor);
-    if (!before.isFile() || before.size < 1 || before.size > maximum) {
+    const before = fstatSync(descriptor, { bigint: true });
+    if (!before.isFile() || before.size < 1n || before.size > BigInt(maximum)) {
       throw new Error("input_unavailable");
     }
-    const bytes = Buffer.alloc(before.size);
+    const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
     while (offset < bytes.length) {
       const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset);
       if (count === 0) throw new Error("input_unavailable");
       offset += count;
     }
-    const after = fstatSync(descriptor);
-    const namedAfter = lstatSync(path);
+    const after = fstatSync(descriptor, { bigint: true });
+    const namedAfter = lstatSync(path, { bigint: true });
     if (before.dev !== after.dev || before.ino !== after.ino ||
         before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
         before.ctimeMs !== after.ctimeMs || !namedAfter.isFile() ||

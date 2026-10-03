@@ -95,18 +95,30 @@ test("owner CLI rejects aliases, invalid UTF-8 and unbounded input before verifi
       expectedPreregistrationDigest,
     }));
     linkSync(bindingPath, aliasPath);
-    const unexpectedVerify = () => assert.fail("validator must not run");
-    assert.throws(() => checkManifestFiles(aliasPath, bindingPath, unexpectedVerify),
-      /input_alias/);
+    const assertRefusedBeforeVerify = (manifest, binding) => {
+      let verifierCalled = false;
+      assert.throws(() => checkManifestFiles(manifest, binding,
+        () => { verifierCalled = true; }));
+      assert.equal(verifierCalled, false);
+    };
+    assertRefusedBeforeVerify(aliasPath, bindingPath);
+    assertRefusedBeforeVerify(bindingPath, aliasPath);
     writeFileSync(manifestPath, Buffer.from([0xff]));
-    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    assertRefusedBeforeVerify(manifestPath, bindingPath);
     writeFileSync(manifestPath, "");
-    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    assertRefusedBeforeVerify(manifestPath, bindingPath);
     writeFileSync(manifestPath, Buffer.alloc(16 * 1024 * 1024 + 1));
-    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    assertRefusedBeforeVerify(manifestPath, bindingPath);
     writeFileSync(manifestPath, sentinel);
-    writeFileSync(bindingPath, "x".repeat(1025));
-    assert.throws(() => checkManifestFiles(manifestPath, bindingPath, unexpectedVerify));
+    const validBinding = JSON.stringify({
+      version: "prompt-refiner-vnext-one-shot-binding-v1",
+      expectedRootDigest,
+      expectedPreregistrationDigest,
+    });
+    writeFileSync(bindingPath, validBinding.padEnd(1025, " "));
+    assertRefusedBeforeVerify(manifestPath, bindingPath);
+    writeFileSync(bindingPath, Buffer.from([0xff]));
+    assertRefusedBeforeVerify(manifestPath, bindingPath);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
