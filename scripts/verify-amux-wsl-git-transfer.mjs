@@ -1,10 +1,22 @@
+// Private inventory v3 records repository roots, local refs, worktree HEADs,
+// Git status entries, index hashes, and hashes of nonignored dirty files.
+// Build caches and ignored files are outside this verifier's scope.
+// A seeded recovery mirror may contain additional upstream refs.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const git = (...args) => execFileSync("git", args, { maxBuffer: 32 * 1024 * 1024 });
+// Git location overrides must not redirect verification to the old checkout.
+const gitEnv = Object.fromEntries(Object.entries(process.env)
+  .filter(([name]) => !name.startsWith("GIT_")));
+const git = (...args) => execFileSync("git", args, {
+  env: gitEnv,
+  maxBuffer: 32 * 1024 * 1024,
+});
+const gitPath = (worktree, option) => realpathSync(resolve(worktree,
+  git("-C", worktree, "rev-parse", option).toString("utf8").trim()));
 const lines = (value) => value.toString("utf8").split(/\r?\n/).filter(Boolean);
 
 function fail(message) {
@@ -21,7 +33,9 @@ function mapping(value, flag) {
 
 function fileAt(root, relative) {
   const target = resolve(root, relative);
-  if (!target.startsWith(resolve(root) + sep)) {
+  const realRoot = realpathSync(root);
+  const realTarget = realpathSync(target);
+  if (!realTarget.startsWith(realRoot + sep)) {
     fail("inventory path escapes recovered worktree");
   }
   if (!lstatSync(target).isFile()) {
@@ -38,7 +52,19 @@ function checkFile(root, item) {
   }
 }
 
-function checkRecovered(worktree, destination) {
+function checkRecovered(worktree, destination, mirror) {
+  const realDestination = realpathSync(destination);
+  const realMirror = realpathSync(mirror);
+  const top = gitPath(destination, "--show-toplevel");
+  const common = gitPath(destination, "--git-common-dir");
+  const gitdir = gitPath(destination, "--git-dir");
+  if (top !== realDestination || common !== realMirror ||
+      !gitdir.startsWith(realMirror + sep)) {
+    fail("recovered worktree is not isolated in its mapped mirror");
+  }
+  if (existsSync(resolve(gitdir, "objects/info/alternates"))) {
+    fail("recovered worktree depends on an alternate object store");
+  }
   const head = git("-C", destination, "rev-parse", "HEAD").toString("utf8").trim();
   if (head !== worktree.head) {
     fail("recovered worktree HEAD differs: " + worktree.path);
@@ -124,7 +150,7 @@ function main(argv) {
         if (!destination) {
           fail("missing recovered worktree mapping: " + worktree.path);
         }
-        checkRecovered(worktree, destination);
+        checkRecovered(worktree, destination, mirror);
         dirty += 1;
       }
     }
@@ -138,6 +164,7 @@ function main(argv) {
     refs,
     worktreeHeads: heads,
     recoveredDirtyWorktrees: dirty,
+    ignoredFiles: "excluded from inventory and verification",
     result: "ok",
   }) + "\n");
 }
