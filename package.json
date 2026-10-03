@@ -208,6 +208,7 @@
     "report:memory-eval-failure-diagnosis": "node --import tsx scripts/report-memory-eval-failure-diagnosis.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
+    "report:pending-price-deadlines": "node --import tsx scripts/report-pending-price-deadlines.mjs",
     "check:unconsumed-response-bodies": "node scripts/check-unconsumed-response-bodies.mjs",
     "report:unconsumed-response-bodies": "node scripts/report-unconsumed-response-bodies.mjs",
     "report:unread-body-connection-cost": "node scripts/report-unread-body-connection-cost.mjs",
