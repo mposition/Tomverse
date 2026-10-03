@@ -128,20 +128,29 @@ export function addWorktree(mirror, dir, head) {
 const INSTRUCTION_NAMES = new Set([
   "agents.md", "agents.override.md", "claude.md", "claude.local.md", "gemini.md",
   ".cursorrules", ".windsurfrules", "copilot-instructions.md",
+  // Project MCP server configuration: a server it names is a program to run.
+  ".mcp.json",
 ]);
-const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin"]);
+const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin", ".copilot"]);
 
 /**
- * GitHub Copilot also reads instruction, prompt, agent and chat-mode files
- * from these directories under `.github/` (the directory itself included, in
- * case it is a symlink). `.github/` as a whole is not an instruction directory:
+ * GitHub Copilot also reads instruction, prompt, agent and chat-mode files,
+ * and loads skills, hooks and plugins, from these directories under
+ * `.github/` (the directory itself included, in case it is a symlink). A hook
+ * is a shell command: one planted in a branch under review would run on the
+ * review server. `.github/` as a whole is not an instruction directory:
  * workflows there are reviewed as code.
  */
-const COPILOT_INSTRUCTION_DIRS = new Set(["instructions", "prompts", "agents", "chatmodes"]);
+const COPILOT_INSTRUCTION_DIRS = new Set([
+  "instructions", "prompts", "agents", "chatmodes", "skills", "hooks", "plugins", "copilot",
+]);
 
 export function isInstructionPath(path) {
   const segments = path.split("/");
   if (INSTRUCTION_NAMES.has(segments[segments.length - 1].toLowerCase())) return true;
+  if (segments.length === 2 && segments[0].toLowerCase() === ".vscode" && segments[1].toLowerCase() === "mcp.json") {
+    return true;
+  }
   if (segments.length >= 2 && segments[0].toLowerCase() === ".github" && COPILOT_INSTRUCTION_DIRS.has(segments[1].toLowerCase())) {
     return true;
   }
