@@ -21,7 +21,10 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.ok(codex.command.includes(openai.modelId));
   assert.equal(claude.command[0], "/run/amux-cli/claude");
   assert.ok(claude.command.includes("--safe-mode"));
+  assert.ok(claude.command.includes("--restricted"));
   assert.ok(claude.command.includes("--no-session-persistence"));
+  assert.ok(claude.command.includes("stream-json"));
+  assert.ok(claude.command.includes("--verbose"));
   assert.equal(claude.command.includes("--max-turns"), false);
   assert.deepEqual(claude.command.slice(-4), ["--model", anthropic.modelId,
     "--effort", anthropic.reasoningEffort]);
@@ -42,11 +45,17 @@ const claudeEnvelope = (modelId = anthropic.modelId) => ({
   modelUsage: { [modelId]: { inputTokens: 10, outputTokens: 2,
     cacheReadInputTokens: 3, cacheCreationInputTokens: 1 } },
 });
+const claudeStream = (envelope = claudeEnvelope(), tools = [],
+  content = [{ type: "text", text: envelope.result }]) => Buffer.from([
+  { type: "system", subtype: "init", tools },
+  { type: "assistant", message: { content } },
+  envelope,
+].map((event) => JSON.stringify(event)).join("\n"));
 
 test("Claude result needs exact served model and complete usage", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const completed = inspectAmuxV4AnalysisCliResult(plan,
-    Buffer.from(JSON.stringify(claudeEnvelope())), 0);
+    claudeStream(), 0);
   assert.deepEqual(completed, { kind: "verified_success",
     rawModelOutput: claudeEnvelope().result, inputTokens: 14, outputTokens: 2 });
   for (const sample of [
@@ -60,12 +69,17 @@ test("Claude result needs exact served model and complete usage", () => {
     { ...claudeEnvelope(), modelUsage: {} },
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
-      Buffer.from(JSON.stringify(sample)), 0), { kind: "outcome_unknown" });
+      claudeStream(sample), 0), { kind: "outcome_unknown" });
   }
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
-    Buffer.from(JSON.stringify(claudeEnvelope())), 1), { kind: "outcome_unknown" });
+    claudeStream(), 1), { kind: "outcome_unknown" });
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     Buffer.from([0xff]), 0), { kind: "outcome_unknown" });
+  assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+    claudeStream(claudeEnvelope(), ["Bash"]), 0), { kind: "outcome_unknown" });
+  assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+    claudeStream(claudeEnvelope(), [], [{ type: "tool_use", name: "Read" }]), 0),
+  { kind: "outcome_unknown" });
 });
 
 test("Codex usage without served-model attestation cannot certify success", () => {
@@ -85,4 +99,10 @@ test("Codex usage without served-model attestation cannot certify success", () =
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     Buffer.from(events.slice(0, -1).map((value) =>
       JSON.stringify(value)).join("\n")), 0), { kind: "outcome_unknown" });
+  const withTool = [events[0], events[1],
+    { type: "item.completed", item: { type: "command_execution",
+      command: "true", exit_code: 0 } }, events[2], events[3]];
+  assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(withTool.map((value) => JSON.stringify(value)).join("\n")), 0),
+  { kind: "outcome_unknown" });
 });

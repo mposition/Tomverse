@@ -1,13 +1,14 @@
 /** Operator-invoked Ubuntu S0 only. No app claim, private document or idea
  * enters this process; one invocation of this script makes one CLI call. */
-import { AMUX_V4_SYNTHETIC_S0_ENABLED,
+import { AMUX_V4_CODEX_S0_ENABLED, AMUX_V4_CLAUDE_S0_ENABLED,
   runAmuxV4IsolatedSyntheticCliS0 } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 
 const provider = process.argv[2];
-if (!AMUX_V4_SYNTHETIC_S0_ENABLED || process.platform !== "linux" ||
+if (process.platform !== "linux" ||
     process.argv.length !== 3 ||
     !["openai", "anthropic"].includes(provider) ||
+    !(provider === "openai" ? AMUX_V4_CODEX_S0_ENABLED : AMUX_V4_CLAUDE_S0_ENABLED) ||
     process.env.AMUX_V4_SYNTHETIC_S0_APPROVED !== "1") {
   process.stderr.write("AMUX_V4_CLI_MODEL_S0_REFUSED\n");
   process.exitCode = 2;

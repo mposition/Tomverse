@@ -7,8 +7,8 @@ import { planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContrac
 test("AMUX v4 sandbox uses a fixed isolated namespace and no inherited environment", () => {
   const args = amuxV4SandboxArgs("/tmp/amux-v4-probe-AbC123",
     ["/usr/bin/node", "-e", "process.stdout.write('ok')"]);
-  assert.deepEqual(args.slice(0, 6), ["--unshare-all", "--die-with-parent",
-    "--new-session", "--cap-drop", "ALL", "--clearenv"]);
+  assert.deepEqual(args.slice(0, 5), ["--unshare-all", "--die-with-parent",
+    "--cap-drop", "ALL", "--clearenv"]);
   assert.ok(args.includes("--ro-bind"));
   assert.ok(args.includes("/run/amux"));
   assert.ok(args.includes("--tmpfs"));
@@ -63,7 +63,7 @@ test("AMUX v4 CLI requires a digest-pinned private staged executable", () => {
     { get path() { return path; }, sha256: "a".repeat(64) }), TypeError);
 });
 
-test("AMUX v4 analysis mount accepts only exact planned argv and one private auth file", () => {
+test("AMUX v4 analysis mount accepts only exact planned argv and dedicated mutable profile", () => {
   const socket = "/tmp/amux-v4-socket-abc";
   const selection = { provider: "openai", modelId: "gpt-5.6-sol",
     reasoningEffort: "high" };
@@ -71,9 +71,13 @@ test("AMUX v4 analysis mount accepts only exact planned argv and one private aut
   const cliMount = { path: "/tmp/amux-v4-cli-stage-abc/codex",
     sha256: "a".repeat(64) };
   const analysisMount = { ...selection,
-    authPath: "/home/tommy/.codex/auth.json" };
+    authPath: "/home/tommy/.amux-cli-profiles/codex/auth.json" };
   const args = amuxV4SandboxArgs(socket, plan.command, cliMount, analysisMount);
-  assert.ok(args.includes("/tmp/.codex/auth.json"));
+  const bindAt = args.findIndex((value, index) => value === "--bind" &&
+    args[index + 1] === "/home/tommy/.amux-cli-profiles/codex");
+  assert.ok(bindAt > 0);
+  assert.equal(args[bindAt + 2], "/tmp/.codex");
+  assert.equal(args.includes("/home/tommy/.codex/auth.json"), false);
   assert.ok(args.includes("/etc/ssl/certs"));
   assert.ok(args.includes("CODEX_HOME"));
   assert.equal(args.includes("DATABASE_URL"), false);
@@ -85,4 +89,20 @@ test("AMUX v4 analysis mount accepts only exact planned argv and one private aut
     { ...analysisMount, authPath: "/home/tommy/.ssh/id_ed25519" }), TypeError);
   assert.throws(() => amuxV4SandboxArgs(socket, plan.command, cliMount,
     { ...analysisMount, provider: "anthropic" }), TypeError);
+});
+
+test("Claude analysis mounts only its own mutable profile", () => {
+  const selection = { provider: "anthropic", modelId: "claude-opus-5-5",
+    reasoningEffort: "high" };
+  const plan = planAmuxV4AnalysisCliInvocation(selection);
+  const args = amuxV4SandboxArgs("/tmp/amux-v4-socket-abc", plan.command,
+    { path: "/tmp/amux-v4-cli-stage-abc/claude", sha256: "a".repeat(64) },
+    { ...selection,
+      authPath: "/home/tommy/.amux-cli-profiles/claude/.credentials.json" });
+  const bindAt = args.findIndex((value, index) => value === "--bind" &&
+    args[index + 1] === "/home/tommy/.amux-cli-profiles/claude");
+  assert.ok(bindAt > 0);
+  assert.equal(args[bindAt + 2], "/tmp/.claude");
+  assert.ok(args.includes("CLAUDE_CONFIG_DIR"));
+  assert.equal(args.includes("/home/tommy/.claude/.credentials.json"), false);
 });
