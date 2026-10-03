@@ -12,7 +12,7 @@ const MANIFEST_MAX_BYTES = 16 * 1024 * 1024;
 const BINDING_MAX_BYTES = 1024;
 const HEX = /^[0-9a-f]{64}$/;
 
-function boundedRegularUtf8(path, maximum) {
+export function boundedRegularUtf8(path, maximum) {
   if (typeof path !== "string" || !path || lstatSync(path).isSymbolicLink()) {
     throw new Error("input_unavailable");
   }
@@ -53,7 +53,7 @@ function boundedRegularUtf8(path, maximum) {
   }
 }
 
-function readBinding(path) {
+export function readBinding(path) {
   const file = boundedRegularUtf8(path, BINDING_MAX_BYTES);
   const parsed = parseBenchmarkJson(file.text,
     BINDING_MAX_BYTES);
