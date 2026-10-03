@@ -47,23 +47,40 @@ test("a changed draft cannot render a late proposal", () => {
   assert.equal(hasTestId(rendered, "prompt-refiner-idle"), true);
 });
 
-test("the ready state shows proposal and two explicit choices", () => {
+test("the ready state compares the exact original with the proposal before either choice", () => {
   const rendered = render();
   assert.equal(hasTestId(rendered, "prompt-refiner-ready"), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-original"), true);
+  assert.equal(rendered.includes(suggestion.sourcePrompt), true);
   assert.equal(rendered.includes(suggestion.refinedPrompt), true);
   assert.equal(hasTestId(rendered, "prompt-refiner-use"), true);
   assert.equal(hasTestId(rendered, "prompt-refiner-keep-original"), true);
-  assert.equal(rendered.includes(suggestion.sourcePrompt), false);
+  assert.ok(rendered.includes(promptRefinerCopy.ko.originalLabel));
+  assert.ok(rendered.includes(promptRefinerCopy.ko.comparisonLabel));
   assert.match(rendered, /role="status"/);
   assert.match(rendered, /aria-live="polite"/);
   assert.match(rendered, /tabindex="-1"/);
   assert.equal((rendered.match(/min-h-11/g) ?? []).length, 2);
 });
 
+test("comparison renders the authored whitespace and Unicode without changing the draft", () => {
+  const sourcePrompt = "  원문\t질문\n두 번째 줄  ";
+  const bound = { ...suggestion, sourcePrompt };
+  const rendered = render({
+    currentPrompt: sourcePrompt,
+    state: { status: "ready", suggestion: bound },
+  });
+  assert.ok(rendered.includes(`>${sourcePrompt}</p>`));
+  assert.ok(rendered.includes('data-testid="prompt-refiner-original"'));
+  assert.ok(rendered.includes("whitespace-pre-wrap"));
+});
+
 test("accepted fixture is a read-only preview bound to the authored source", () => {
   const state = { status: "accepted_preview" as const, suggestion };
   const rendered = render({ state });
   assert.equal(hasTestId(rendered, "prompt-refiner-accepted-preview"), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-accepted-preview-original"), true);
+  assert.ok(rendered.includes(suggestion.sourcePrompt));
   assert.ok(rendered.includes(suggestion.refinedPrompt));
   assert.ok(rendered.includes(promptRefinerCopy.ko.previewOnly));
   assert.equal(hasTestId(rendered, "prompt-refiner-use"), false);
@@ -96,6 +113,9 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     keyof typeof promptRefinerCopy
   >) {
     const rendered = render({ language });
+    assert.ok(rendered.includes(promptRefinerCopy[language].comparisonLabel), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].originalLabel), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].proposalLabel), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].previewAction), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].keepOriginal), language);
     const acceptedPreview = render({

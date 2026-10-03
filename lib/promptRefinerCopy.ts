@@ -4,6 +4,8 @@ type PromptRefinerCopy = {
   action: string;
   actionDescription: string;
   requesting: string;
+  comparisonLabel: string;
+  originalLabel: string;
   proposalLabel: string;
   previewOnly: string;
   previewAction: string;
@@ -22,6 +24,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "문장 다듬기",
     actionDescription: "전송하지 않고 더 명확한 문장을 제안합니다.",
     requesting: "문장 제안을 준비하고 있습니다. 원문은 그대로 유지됩니다.",
+    comparisonLabel: "원문과 제안된 문장 비교",
+    originalLabel: "원문",
     proposalLabel: "제안된 문장",
     previewOnly: "검증용 미리보기입니다. 원문은 바뀌지 않았고 대화 메시지는 전송되지 않았습니다.",
     previewAction: "제안 미리보기 확인",
@@ -38,6 +42,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "Improve wording",
     actionDescription: "Prepare a clearer version without sending it.",
     requesting: "Preparing a suggestion. Your original stays unchanged.",
+    comparisonLabel: "Compare original and suggested wording",
+    originalLabel: "Original",
     proposalLabel: "Suggested wording",
     previewOnly: "Fixture preview only. Your original is unchanged. No chat message was sent.",
     previewAction: "Confirm preview",
@@ -54,6 +60,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "优化表述",
     actionDescription: "在发送前提供更清晰的表述建议。",
     requesting: "正在准备建议，原文保持不变。",
+    comparisonLabel: "比较原文与建议表述",
+    originalLabel: "原文",
     proposalLabel: "建议表述",
     previewOnly: "仅供测试预览。原文未更改，未发送聊天消息。",
     previewAction: "确认预览",
@@ -70,6 +78,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "Clarifier le texte",
     actionDescription: "Prépare une formulation plus claire sans l’envoyer.",
     requesting: "Préparation d’une suggestion. Le texte original reste inchangé.",
+    comparisonLabel: "Comparer l’original et la proposition",
+    originalLabel: "Texte original",
     proposalLabel: "Formulation proposée",
     previewOnly: "Aperçu de test uniquement. L’original reste inchangé. Aucun message de chat n’a été envoyé.",
     previewAction: "Confirmer l’aperçu",
@@ -86,6 +96,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "Formulierung verbessern",
     actionDescription: "Erstellt vor dem Senden eine klarere Formulierung.",
     requesting: "Vorschlag wird vorbereitet. Das Original bleibt unverändert.",
+    comparisonLabel: "Original und Vorschlag vergleichen",
+    originalLabel: "Original",
     proposalLabel: "Vorgeschlagene Formulierung",
     previewOnly: "Nur Testvorschau. Das Original blieb unverändert. Keine Chat-Nachricht wurde gesendet.",
     previewAction: "Vorschau bestätigen",
@@ -102,6 +114,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "Mejorar redacción",
     actionDescription: "Prepara una versión más clara sin enviarla.",
     requesting: "Preparando una sugerencia. El original no cambia.",
+    comparisonLabel: "Comparar el original y la sugerencia",
+    originalLabel: "Original",
     proposalLabel: "Redacción sugerida",
     previewOnly: "Solo vista previa de prueba. El original no cambió. No se envió ningún mensaje de chat.",
     previewAction: "Confirmar vista previa",
@@ -118,6 +132,8 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     action: "Melhorar redação",
     actionDescription: "Prepara uma versão mais clara sem enviá-la.",
     requesting: "Preparando uma sugestão. O original permanece igual.",
+    comparisonLabel: "Comparar o original e a sugestão",
+    originalLabel: "Original",
     proposalLabel: "Redação sugerida",
     previewOnly: "Prévia de teste apenas. O original não mudou. Nenhuma mensagem de chat foi enviada.",
     previewAction: "Confirmar prévia",

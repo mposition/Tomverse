@@ -210,10 +210,19 @@ export function PromptRefinerSuggestionPanel({
         data-testid="prompt-refiner-accepted-preview"
         role="status"
         aria-live="polite"
-        aria-label={copy.proposalLabel}
+        aria-label={copy.comparisonLabel}
         className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
       >
         <p className="mb-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+          {copy.originalLabel}
+        </p>
+        <p
+          data-testid="prompt-refiner-accepted-preview-original"
+          className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+        >
+          {visible.suggestion.sourcePrompt}
+        </p>
+        <p className="mb-1.5 mt-3 text-xs font-bold text-zinc-700 dark:text-zinc-200">
           {copy.proposalLabel}
         </p>
         <p
@@ -235,11 +244,20 @@ export function PromptRefinerSuggestionPanel({
       data-testid="prompt-refiner-ready"
       role="status"
       aria-live="polite"
-      aria-label={copy.proposalLabel}
+      aria-label={copy.comparisonLabel}
       tabIndex={-1}
       className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
     >
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+      <p className="mb-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+        {copy.originalLabel}
+      </p>
+      <p
+        data-testid="prompt-refiner-original"
+        className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
+      >
+        {visible.suggestion.sourcePrompt}
+      </p>
+      <div className="mb-1.5 mt-3 flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
         <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
         {copy.proposalLabel}
       </div>
