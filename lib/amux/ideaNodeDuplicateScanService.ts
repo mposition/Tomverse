@@ -7,7 +7,7 @@ import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { openAmuxNodeText } from "./ideaNodeContentCore.ts";
 import type { AmuxIdeaDuplicateScan } from "./ideaUnitConfirmationCore.ts";
 
-const SCAN_VERSION = "node_exact_title_v1";
+const SCAN_VERSION = "node_nfc_lower_title_v1";
 const MAX_SCOPED_NODES = 10_000;
 const MAX_CANDIDATES = 64;
 const NODE_ID = /^[A-Za-z0-9_-]{8,80}$/;
@@ -29,10 +29,12 @@ const keyed = (domain: string, value: unknown, keys: AmuxContentKeys) => ({
 
 const comparableTitle = (title: string) => title.normalize("NFC").toLowerCase();
 
-/** Full exact-title candidate scan within one hierarchy slot. The caller must
+/** Full NFC + Unicode lowercase title candidate scan within one hierarchy slot. The caller must
  * use this in both prepare and consume under SERIALIZABLE isolation; a bounded
  * or undecipherable corpus refuses confirmation instead of claiming completeness.
- * Similarity beyond normalized exact title is not implied by `complete`. */
+ * Similarity beyond this equality is not implied by `complete`. A node sealed
+ * with an unavailable historical key also fails closed until rotation support
+ * is implemented before live registration. */
 export async function scanAmuxNodeDuplicates(tx: Prisma.TransactionClient,
   input: { level: "initiative" | "epic" | "feature";
     parentId: string | null; title: string },
@@ -79,6 +81,9 @@ export async function scanAmuxNodeDuplicates(tx: Prisma.TransactionClient,
       throw new AmuxNodeDuplicateScanError("incomplete");
     }
   }
+  // PostgreSQL's collation is not necessarily the JS order required by the
+  // confirmation contract; always canonicalize candidate order here.
+  candidates.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const query = keyed("amux-v4-node-dedupe-query-v1",
     { level: input.level, parentId: input.parentId, title: expected }, keys);
   const result = keyed("amux-v4-node-dedupe-result-v1", candidates, keys);

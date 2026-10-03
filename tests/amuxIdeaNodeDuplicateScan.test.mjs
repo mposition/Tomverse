@@ -25,18 +25,20 @@ test("node text binds both encrypted fields and rejects swaps or changed digest"
     { ...first, descriptionCiphertext: second.descriptionCiphertext }, keys));
   assert.throws(() => openAmuxNodeText(first.id,
     { ...first, contentDigest: "0".repeat(64) }, keys));
+  assert.throws(() => openAmuxNodeText(first.id, first,
+    { ...keys, masterKeyId: "rotated_master" }));
   assert.throws(() => sealAmuxNodeText(first.id,
     { title: " 제목", description: "설명" }, keys));
 });
 
-test("full scoped scan binds exact-title candidates and revision changes", async () => {
+test("full scoped scan binds normalized-title candidates and revision changes", async () => {
   const rows = [row("node_00000001", "검색 품질"),
     row("node_00000002", "다른 제목"),
     row("node_00000003", "검색 품질", 2)];
   const input = { level: "initiative", parentId: null, title: "검색 품질" };
   const first = await scanAmuxNodeDuplicates(tx(rows), input, keys);
   assert.equal(first.complete, true);
-  assert.equal(first.scanVersion, "node_exact_title_v1");
+  assert.equal(first.scanVersion, "node_nfc_lower_title_v1");
   assert.deepEqual(first.candidates.map((candidate) => candidate.id),
     ["node_00000001", "node_00000003"]);
   assert.equal(first.checkedAtIso, "2026-10-03T01:02:03.004Z");
@@ -46,6 +48,11 @@ test("full scoped scan binds exact-title candidates and revision changes", async
   const unrelated = await scanAmuxNodeDuplicates(tx([
     rows[0], { ...rows[1], revision: 3 }, rows[2]]), input, keys);
   assert.equal(unrelated.result.digest, first.result.digest);
+  const collationOrdered = await scanAmuxNodeDuplicates(tx([
+    row("node_aaaaaaaa", "검색 품질"), row("node_AAAAAAAA", "검색 품질"),
+  ]), input, keys);
+  assert.deepEqual(collationOrdered.candidates.map((candidate) => candidate.id),
+    ["node_AAAAAAAA", "node_aaaaaaaa"]);
 });
 
 test("scan refuses unreadable rows and incomplete candidate or corpus bounds", async () => {
