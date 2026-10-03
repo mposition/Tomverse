@@ -403,12 +403,17 @@ const compilerOptions = parsedConfig.options;
 // described the merged tree and the one below is computed over it. The count
 // and the position-free digest are unchanged on both sides, which is what
 // says the merge repositioned accesses rather than adding any.
+//
+// 2026-10-03, webhook schema slice: `lib/marketingAutomationAccess.ts` gains
+// the schema-slice function for the webhook pipeline fingerprint. No computed
+// element access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8b3d03318ad89d398503ce0e05d3c73b",
-  "221bf3cbf61d195e8a3aad80340e0073",
+  "313bcd0d586d405502af35a53975aee9",
+  "1e64c359f25a36c55ee40fc180c24b44",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
