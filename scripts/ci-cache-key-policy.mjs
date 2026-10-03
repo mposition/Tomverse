@@ -74,14 +74,96 @@ const stringList = (value) => {
 };
 
 /**
+ * A branch-filter pattern as a regular expression, or "unknown".
+ *
+ * `*` within a segment, `**` across segments, and a leading `!` handled by the
+ * caller. `?`, `+` and character classes mean things this does not model, and a
+ * pattern using them compiles to "unknown" so every caller can resolve it in
+ * its own conservative direction -- which is a different direction for an
+ * include list than for an ignore list.
+ */
+const compileBranchPattern = (pattern) => {
+  if (typeof pattern !== "string") return "unknown";
+  if (/[?+[\]{}()|]/.test(pattern)) return "unknown";
+  let source = "";
+  for (let i = 0; i < pattern.length; i += 1) {
+    if (pattern.startsWith("**/", i)) {
+      source += "(?:.*/)?";
+      i += 2;
+    } else if (pattern.startsWith("/**", i) && i + 3 === pattern.length) {
+      source += "/.*";
+      i += 2;
+    } else if (pattern.startsWith("**", i)) {
+      source += ".*";
+      i += 1;
+    } else if (pattern[i] === "*") source += "[^/]*";
+    else source += pattern[i].replace(/[.^$\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`);
+};
+
+/** Could this include pattern put a run on that branch? Unknown means yes. */
+const patternCouldMatch = (pattern, branch) => {
+  if (typeof pattern === "string" && pattern.startsWith("!")) return false; // a negation never adds a branch
+  const compiled = compileBranchPattern(pattern);
+  return compiled === "unknown" ? true : compiled.test(branch);
+};
+
+/** Does this ignore pattern certainly keep that branch out? Unknown means no. */
+const patternCertainlyMatches = (pattern, branch) => {
+  if (typeof pattern === "string" && pattern.startsWith("!")) return false; // a negation puts it back
+  const compiled = compileBranchPattern(pattern);
+  return compiled === "unknown" ? false : compiled.test(branch);
+};
+
+/**
+ * Activity types of `pull_request` that are treated as narrow.
+ *
+ * A `pull_request` run's `GITHUB_REF` is the merge ref, which only that pull
+ * request can restore. `closed` is left out deliberately: whether a merged
+ * pull request's run still carries the merge ref is not something this module
+ * can establish, and the whole point of this rule is that an uncertain answer
+ * about a write resolves against writing. Nothing in this repository caches
+ * through `actions/cache` on a `closed` trigger, so the conservatism is free.
+ */
+const NARROW_PULL_REQUEST_TYPES = new Set([
+  "opened",
+  "synchronize",
+  "reopened",
+  "ready_for_review",
+  "edited",
+  "labeled",
+  "unlabeled",
+  "assigned",
+  "unassigned",
+  "review_requested",
+  "review_request_removed",
+  "converted_to_draft",
+  "auto_merge_enabled",
+  "auto_merge_disabled",
+  "milestoned",
+  "demilestoned",
+  "enqueued",
+  "dequeued",
+]);
+
+/**
  * Whether a workflow can run with `GITHUB_REF` on a widely readable branch.
  *
- * `schedule` runs on the default branch. `workflow_dispatch` runs on whatever
- * ref the operator picks, which includes those branches. A `push` reaches them
- * when its branch filter names one, and when it has no branch filter at all.
+ * This is an allowlist, and it has to be. An earlier version asked only about
+ * `push`, `schedule`, `workflow_dispatch` and `workflow_call` and answered "no"
+ * for everything else -- so `workflow_run`, `repository_dispatch`,
+ * `issue_comment` and the rest, all of which run on the default branch, were
+ * read as narrow. Independent review caught it. Only two event shapes are known
+ * narrow here:
  *
- * Unreadable triggers answer "yes": this decides whether a *write* is allowed,
- * so the uncertain answer has to be the restrictive one.
+ * - `pull_request`, whose ref is the merge ref, with its activity types all in
+ *   NARROW_PULL_REQUEST_TYPES.
+ * - `push` whose filters provably keep it off both shared branches.
+ *
+ * Every other event, and anything unreadable, reaches. The question being
+ * decided is whether a *write* into shared state is allowed, so an uncertain
+ * answer has to be the restrictive one.
  */
 export const reachesWidelyReadableScope = (document) => {
   const on = document?.on ?? document?.true; // YAML 1.1 parses a bare `on:` as true
@@ -94,52 +176,76 @@ export const reachesWidelyReadableScope = (document) => {
         ? on
         : null;
   if (events === null) return true;
+  if (Object.keys(events).length === 0) return true;
 
   for (const [event, filter] of Object.entries(events)) {
-    if (event === "schedule" || event === "workflow_dispatch" || event === "workflow_call") return true;
-    if (event !== "push") continue;
+    if (event === "pull_request") {
+      if (filter === null || filter === undefined) continue; // every type, all narrow
+      if (!isObj(filter)) return true;
+      if (filter.types === undefined) continue;
+      const types = stringList(filter.types);
+      if (types === null || types.length === 0) return true;
+      if (!types.every((type) => NARROW_PULL_REQUEST_TYPES.has(type))) return true;
+      continue;
+    }
+
+    if (event !== "push") return true; // every other event, allowlist style
+
+    if (filter === null || filter === undefined) return true;
     if (!isObj(filter)) return true;
     const branches = filter.branches;
     const ignored = filter["branches-ignore"];
+
     if (branches === undefined && ignored === undefined) {
-      // Tags only still never puts GITHUB_REF on a branch.
+      // Tag filters alone never put GITHUB_REF on a branch.
       if (filter.tags !== undefined || filter["tags-ignore"] !== undefined) continue;
       return true;
     }
     if (branches !== undefined) {
       const list = stringList(branches);
       if (list === null) return true;
+      // Narrow only when no pattern could name a shared branch.
       if (list.some((pattern) => WIDELY_READABLE_BRANCHES.some((branch) => patternCouldMatch(pattern, branch)))) {
         return true;
       }
       continue;
     }
-    // `branches-ignore` without `branches`: everything not named is reached.
+    // `branches-ignore` alone: narrow only when BOTH shared branches are
+    // certainly ignored. An unmodelled pattern proves nothing, so it does not
+    // count as an exclusion -- the earlier version had this backwards and let
+    // `branches-ignore: ['feat*ure']` read as excluding main and develop.
     const list = stringList(ignored);
     if (list === null) return true;
-    if (WIDELY_READABLE_BRANCHES.some((branch) => !list.some((pattern) => patternCouldMatch(pattern, branch)))) {
-      return true;
-    }
+    const allExcluded = WIDELY_READABLE_BRANCHES.every((branch) =>
+      list.some((pattern) => patternCertainlyMatches(pattern, branch)),
+    );
+    if (!allExcluded) return true;
   }
   return false;
 };
 
 /**
- * Conservatively, whether a branch-filter pattern could match a branch name.
+ * Whether a save step's condition provably holds only on a pull-request run.
  *
- * Only the shapes this repository uses are modelled; anything else answers
- * "could match", because a pattern this cannot read must not be read as safe.
+ * Checking that the text mentions `github.event_name` or `github.ref` was not
+ * enough: `github.event_name == 'schedule'` mentions it and permits a write on
+ * the default branch, and `github.ref != 'refs/heads/main'` permits one on
+ * develop. Independent review caught both.
+ *
+ * So the condition must assert the pull-request case as a conjunct and must
+ * contain no disjunction or negation, which together make the assertion
+ * necessary rather than merely present. Extra conjuncts only narrow it further,
+ * so `success() && github.event_name == 'pull_request'` is fine.
  */
-const patternCouldMatch = (pattern, branch) => {
-  if (typeof pattern !== "string") return true;
-  if (pattern.startsWith("!")) return false; // a negation never adds a branch
-  if (pattern === branch) return true;
-  if (pattern === "**" || pattern === "*") return true;
-  if (/^[A-Za-z0-9._\/-]+$/.test(pattern)) return false; // a plain name that is not this branch
-  if (pattern.endsWith("/**") || pattern.endsWith("/*")) {
-    return branch.startsWith(pattern.slice(0, pattern.lastIndexOf("/") + 1));
-  }
-  return true;
+export const saveConditionKeepsToPullRequest = (condition) => {
+  if (typeof condition !== "string") return false;
+  const normalised = condition.replace(/\s+/g, " ").trim();
+  if (normalised.length === 0) return false;
+  if (normalised.includes("||") || normalised.includes("!")) return false;
+  return (
+    normalised.includes("github.event_name == 'pull_request'") ||
+    normalised.includes('github.event_name == "pull_request"')
+  );
 };
 
 /**
@@ -263,6 +369,8 @@ export const judgeCacheKeys = (sources) => {
   const findings = [];
   const problems = [];
   const keyOwners = new Map();
+  /** Every restore-key with where it was declared, for the cross-workflow rule below. */
+  const restoreProbes = [];
 
   for (const source of sources) {
     const read = readCacheSteps(source.text);
@@ -280,12 +388,9 @@ export const judgeCacheKeys = (sources) => {
 
       if (read.widelyReadable && step.mode !== "restore") {
         // A combined step cannot be guarded: its post step decides on its own.
-        // A split save can be, and `github.event_name` or `github.ref` is how
-        // the condition names the scope rather than something unrelated.
-        const guarded =
-          step.mode === "save" &&
-          typeof step.condition === "string" &&
-          /github\.(event_name|ref)\b/.test(step.condition);
+        // A split save can be, but only by a condition that provably holds on
+        // nothing but a pull-request run -- see saveConditionKeepsToPullRequest.
+        const guarded = step.mode === "save" && saveConditionKeepsToPullRequest(step.condition);
         if (!guarded) {
           findings.push({
             rule: "unguarded_save_in_widely_readable_scope",
@@ -297,6 +402,7 @@ export const judgeCacheKeys = (sources) => {
       }
 
       for (const restoreKey of step.restoreKeys) {
+        restoreProbes.push({ workflowPath: source.path, jobId: step.jobId, restoreKey });
         if (step.key !== null && !step.key.startsWith(restoreKey)) {
           findings.push({
             rule: "restore_key_not_a_prefix",
@@ -349,6 +455,30 @@ export const judgeCacheKeys = (sources) => {
     });
   }
 
+  // The rule that actually answers "can this workflow restore another's entry".
+  //
+  // Comparing namespaces was not enough, and the local namespace rule is not
+  // enough either. `Linux-next-v2-pr-` is a legitimate restore-key for a key
+  // whose namespace is `pr`, and it is also a prefix of a key whose namespace
+  // is `pr-admin`; and a key of `...-v2-pr-${{ matrix.lane }}-...` has its own
+  // namespace end at `pr-`, which collides the same way. Independent review
+  // raised both. Rather than model namespaces further, this asks the question
+  // directly: a restore-key may not be a prefix of any key another workflow
+  // declares. Within one workflow it may be -- its jobs are one unit of trust.
+  for (const probe of restoreProbes) {
+    for (const [key, owners] of keyOwners) {
+      if (!key.startsWith(probe.restoreKey)) continue;
+      const others = [...owners].filter((owner) => owner !== probe.workflowPath);
+      if (others.length === 0) continue;
+      findings.push({
+        rule: "restore_key_reaches_another_workflow",
+        workflowPath: probe.workflowPath,
+        jobId: probe.jobId,
+        detail: `${probe.restoreKey} also matches a key declared by ${others.sort().join(", ")}`,
+      });
+    }
+  }
+
   findings.sort((a, b) =>
     `${a.rule}${a.workflowPath}${a.jobId ?? ""}${a.detail}`.localeCompare(
       `${b.rule}${b.workflowPath}${b.jobId ?? ""}${b.detail}`,
@@ -367,6 +497,8 @@ export const describeFinding = (finding) => {
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
       return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+    case "restore_key_reaches_another_workflow":
+      return `${where}: ${finding.detail}. Give the two namespaces names where neither is a prefix of the other.`;
     case "key_missing_family_prefix":
       return `${where}: key "${finding.detail}" does not start with its cache family's prefix.`;
     case "key_shared_across_workflows":

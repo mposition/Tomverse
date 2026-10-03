@@ -11,6 +11,7 @@ import {
   judgeCacheKeys,
   namespacePrefix,
   reachesWidelyReadableScope,
+  saveConditionKeepsToPullRequest,
   readCacheSteps,
 } from "../scripts/ci-cache-key-policy.mjs";
 
@@ -281,16 +282,63 @@ test("a run that can land on main or develop is treated as widely readable", () 
   }
 });
 
+test("every event outside the narrow allowlist reaches, not just the four once named", () => {
+  // An earlier version asked about push, schedule, workflow_dispatch and
+  // workflow_call and answered "not widely readable" for everything else, so
+  // these -- all of which run on the default branch -- read as narrow. It is an
+  // allowlist now. Independent review caught this.
+  const wide = [
+    "on:\n  workflow_run:\n    workflows: [ci]",
+    "on:\n  repository_dispatch: {}",
+    "on:\n  issue_comment:\n    types: [created]",
+    "on:\n  issues: {}",
+    "on:\n  pull_request_target: {}",
+    "on:\n  pull_request_review: {}",
+    "on:\n  check_suite: {}",
+    "on:\n  release:\n    types: [published]",
+    "on:\n  merge_group: {}",
+    "on:\n  deployment_status: {}",
+  ];
+  for (const yaml of wide) {
+    assert.equal(reachesWidelyReadableScope(onBlock(yaml)), true, yaml);
+  }
+});
+
+test("a pull_request whose types include closed is not treated as narrow", () => {
+  // Whether a merged pull request's run still carries the merge ref is not
+  // something this module can establish, and this governs a write.
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  pull_request:\n    types: [closed]")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  pull_request:\n    types: [opened, closed]")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  pull_request:\n    types: [unknown_future_type]")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  pull_request:\n    types: []")), true);
+});
+
 test("a pull-request-only or feature-branch-only run is not widely readable", () => {
   const narrow = [
     "on:\n  pull_request:\n    types: [opened]",
+    "on:\n  pull_request: {}",
+    "on: pull_request",
     "on:\n  push:\n    branches: ['to-develop/**', '**/to-develop/**']",
     "on:\n  push:\n    branches: [release-notes]",
     "on:\n  push:\n    tags: ['v*']",
+    "on:\n  push:\n    branches-ignore: ['main', 'develop']",
   ];
   for (const yaml of narrow) {
     assert.equal(reachesWidelyReadableScope(onBlock(yaml)), false, yaml);
   }
+});
+
+test("an ignore filter must certainly exclude both shared branches, not merely maybe", () => {
+  // This was backwards: `patternCouldMatch` answers "could" with true for an
+  // unmodelled glob, and the ignore branch read that as "is excluded", so
+  // `branches-ignore: ['feat*ure']` passed as keeping a run off main and
+  // develop. Independent review caught it. An unmodelled pattern now proves
+  // nothing, which is the conservative direction for an exclusion.
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches-ignore: ['feat*ure']")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches-ignore: ['ma?n', 'develop']")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches-ignore: ['main']")), true, "develop left in");
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches-ignore: ['**']")), false);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches-ignore: ['main', 'develop']")), false);
 });
 
 test("a trigger block that cannot be read is treated as widely readable", () => {
@@ -298,7 +346,20 @@ test("a trigger block that cannot be read is treated as widely readable", () => 
   // the restrictive one.
   assert.equal(reachesWidelyReadableScope({}), true);
   assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: 7")), true);
-  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['feat*ure']")), true);
+  // Character classes, `?` and `+` are not modelled, so an include list using
+  // one could be naming a shared branch.
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['ma?n']")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['mai[nx]']")), true);
+});
+
+test("a `*` inside a branch name is modelled rather than given up on", () => {
+  // `feat*ure` compiles: `*` is one segment's worth of anything, and neither
+  // main nor develop matches it. Treating every pattern with a `*` as unknown
+  // would make ordinary feature-branch filters read as reaching main.
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['feat*ure']")), false);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['mai*']")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['dev*']")), true);
+  assert.equal(reachesWidelyReadableScope(onBlock("on:\n  push:\n    branches: ['feature/*']")), false);
 });
 
 const scheduled = (step) =>
@@ -344,7 +405,11 @@ test("restore-only is accepted in a widely readable workflow", () => {
   assert.deepEqual(found, []);
 });
 
-test("a save needs a condition naming the scope, and an unrelated one does not count", () => {
+test("a save's condition must provably hold only on a pull-request run", () => {
+  // Checking that the text mentioned `github.event_name` or `github.ref` was
+  // not enough: `github.event_name == 'schedule'` mentions it and permits a
+  // write on the default branch, and `github.ref != 'refs/heads/main'` permits
+  // one on develop. Independent review caught both.
   const save = (condition) =>
     wf(
       "nightly",
@@ -356,13 +421,89 @@ test("a save needs a condition naming the scope, and an unrelated one does not c
         `          key: ${OS}-next-v2-x-${LOCK}-a`,
       ]),
     );
-  assert.deepEqual(rules([save("github.event_name == 'pull_request'")]), []);
-  assert.deepEqual(rules([save("github.ref != 'refs/heads/main'")]), []);
-  assert.deepEqual(rules([save(null)]), ["unguarded_save_in_widely_readable_scope"]);
-  assert.deepEqual(rules([save("success()")]), ["unguarded_save_in_widely_readable_scope"]);
-  assert.deepEqual(rules([save("steps.scope.outputs.code == 'true'")]), [
-    "unguarded_save_in_widely_readable_scope",
-  ]);
+  const allowed = [
+    "github.event_name == 'pull_request'",
+    'github.event_name == "pull_request"',
+    "success() && github.event_name == 'pull_request'",
+    "github.event_name == 'pull_request' && steps.scope.outputs.code == 'true'",
+  ];
+  for (const condition of allowed) {
+    assert.deepEqual(rules([save(condition)]), [], condition);
+    assert.equal(saveConditionKeepsToPullRequest(condition), true, condition);
+  }
+  const refused = [
+    null,
+    "",
+    "success()",
+    "steps.scope.outputs.code == 'true'",
+    "github.event_name == 'schedule'",
+    "github.ref != 'refs/heads/main'",
+    "github.ref == 'refs/heads/develop'",
+    "github.event_name == 'pull_request' || github.event_name == 'push'",
+    "!(github.event_name == 'pull_request')",
+    "github.event_name != 'pull_request'",
+  ];
+  for (const condition of refused) {
+    assert.deepEqual(rules([save(condition)]), ["unguarded_save_in_widely_readable_scope"], String(condition));
+    if (condition !== null) assert.equal(saveConditionKeepsToPullRequest(condition), false, condition);
+  }
+});
+
+test("a restore-key may not be a prefix of another workflow's key", () => {
+  // Two shapes the namespace rule alone lets through, both raised in review.
+  const MATRIX = "${{ matrix.lane }}";
+  const step = (key, restoreKeys = []) =>
+    oneStep({ key, restoreKeys, uses: "actions/cache@v5" });
+
+  // A dynamic segment inside the namespace region: A's own namespace ends at
+  // `pr-`, so `...-v2-pr-` is a legal restore-key for it and still matches B.
+  assert.ok(
+    rules([
+      wf("a", step(`${OS}-next-v2-pr-${MATRIX}-${LOCK}-src`, [`${OS}-next-v2-pr-`])),
+      wf("b", step(`${OS}-next-v2-pr-admin-${LOCK}-src`)),
+    ]).includes("restore_key_reaches_another_workflow"),
+  );
+
+  // Static namespaces where one is a prefix of the other.
+  assert.ok(
+    rules([
+      wf("a", step(`${OS}-next-v2-pr-${LOCK}-src`, [`${OS}-next-v2-pr-`])),
+      wf("b", step(`${OS}-next-v2-pr-admin-${LOCK}-src`)),
+    ]).includes("restore_key_reaches_another_workflow"),
+  );
+
+  // Namespaces where neither is a prefix of the other stay accepted.
+  assert.deepEqual(
+    rules([
+      wf("a", step(`${OS}-next-v2-pr-${LOCK}-src`, [`${OS}-next-v2-pr-${LOCK}-`])),
+      wf("b", step(`${OS}-next-v2-daily-${LOCK}-src`, [`${OS}-next-v2-daily-${LOCK}-`])),
+    ]),
+    [],
+  );
+
+  // Inside one workflow a shared prefix is legal: its jobs are one unit of trust.
+  const twoJobs = [
+    "on: pull_request",
+    "jobs:",
+    "  a:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/cache@v5",
+    "        with:",
+    "          path: .next/cache",
+    `          key: ${OS}-next-v2-pr-${LOCK}-x`,
+    "          restore-keys: |",
+    `            ${OS}-next-v2-pr-`,
+    "  b:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/cache@v5",
+    "        with:",
+    "          path: .next/cache",
+    `          key: ${OS}-next-v2-pr-${LOCK}-y`,
+    "",
+  ].join("\n");
+  assert.deepEqual(rules([wf("one", twoJobs)]), []);
 });
 
 test("the write rule covers every cached path, not only the namespaced families", () => {
