@@ -7,6 +7,7 @@ import {
   judgeAgentPolicyApproval,
   parseAgentPolicyHeader,
   parseAllowlist,
+  previousApprovedPolicyVersion,
 } from "../lib/agentPolicyApprovalCore.ts";
 
 const GENESIS = "8e3dbf64452ab75e3c6f080c8f5f531c02ace387";
@@ -132,4 +133,21 @@ test("the previous version is a number, a new file, or unknown -- never a guesse
   assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: "unknown" })))["0a"], "unknown");
   assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: "new" })))["0a"], "pass");
   assert.equal(results(judgeAgentPolicyApproval(facts({ previousVersion: 3 })))["0a"], "fail");
+});
+
+test("the previous approved version is read from develop before the merge, and an unread one is unknown", () => {
+  assert.equal(previousApprovedPolicyVersion({ present: false }), "new");
+  assert.equal(previousApprovedPolicyVersion({ present: true, text: null }), "unknown");
+  assert.equal(previousApprovedPolicyVersion({ present: true, text: "approvedBy: mposition · 정책 버전: 2" }), 2);
+  // A draft merged before any approval names neither an approver nor a version.
+  assert.equal(previousApprovedPolicyVersion({ present: true, text: "approvedBy: (미승인) · 정책 버전: (미부여)" }), "new");
+  // An approver with no readable version is an unread record, not a first approval.
+  assert.equal(previousApprovedPolicyVersion({ present: true, text: "approvedBy: mposition · 정책 버전: three" }), "unknown");
+});
+
+test("the report reads the previous version at the merge commit's first parent, on the ref's history", () => {
+  const script = readFileSync(new URL("../scripts/report-agent-policy-approval.mjs", import.meta.url), "utf8");
+  assert.ok(script.includes('"merge-base", "--is-ancestor", mergeCommit, ref'));
+  assert.ok(script.includes("${mergeCommit}^1:${policyPath}"));
+  assert.equal(script.includes("lastChangeCommit}^:"), false);
 });

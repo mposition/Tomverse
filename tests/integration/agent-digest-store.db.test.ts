@@ -214,11 +214,10 @@ test("billing-finance-ops is registered with its kind, retention and intake acto
   );
 });
 
-test("the billing-finance-ops switch row exists and starts off", async () => {
-  const setting = await prisma.appSetting.findUnique({ where: { key: "billingFinanceOps.control" } });
-  assert.ok(setting, "the registration migration seeds the switch row");
-  assert.deepEqual(JSON.parse(setting.value), { enabled: false, revision: 0, enabledAt: null });
-});
+// The switch row the registration migration seeds is pinned on the migration's
+// SQL in tests/agentDigestContract.test.mjs, not here: other suites in this
+// lane clear AppSetting, so whether the row is still present when this file
+// runs depends on test order, not on the migration.
 
 // The function returns void, so it is called with $executeRawUnsafe (as the
 // support_triage_assert_deadline tests do) rather than selected as a value.

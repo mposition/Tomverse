@@ -12,7 +12,7 @@ const MANIFEST_MAX_BYTES = 16 * 1024 * 1024;
 const BINDING_MAX_BYTES = 1024;
 const HEX = /^[0-9a-f]{64}$/;
 
-function boundedRegularUtf8(path, maximum) {
+export function boundedRegularUtf8(path, maximum) {
   if (typeof path !== "string" || !path || lstatSync(path).isSymbolicLink()) {
     throw new Error("input_unavailable");
   }
@@ -53,7 +53,7 @@ function boundedRegularUtf8(path, maximum) {
   }
 }
 
-function readBinding(path) {
+export function readBinding(path) {
   const file = boundedRegularUtf8(path, BINDING_MAX_BYTES);
   const parsed = parseBenchmarkJson(file.text,
     BINDING_MAX_BYTES);
@@ -70,15 +70,23 @@ function readBinding(path) {
   return { binding, dev: file.dev, ino: file.ino };
 }
 
-export function checkManifestFiles(manifestPath, bindingPath,
-  verify = verifyPromptRefinerVnextOneShotManifestEnvelope) {
+export function checkManifestFiles(manifestPath, bindingPath) {
   const bound = readBinding(bindingPath);
   const manifest = boundedRegularUtf8(manifestPath, MANIFEST_MAX_BYTES);
   if (bound.dev === manifest.dev && bound.ino === manifest.ino) {
     throw new Error("input_alias");
   }
-  verify(manifest.text, bound.binding.expectedRootDigest,
+  const checked = verifyPromptRefinerVnextOneShotManifestEnvelope(
+    manifest.text, bound.binding.expectedRootDigest,
     bound.binding.expectedPreregistrationDigest);
+  if (checked.caseCount !== 80 || checked.manifestShapeClosed !== true ||
+      checked.caseShapeClosed !== true || checked.duplicateSourceTextRejected !== true ||
+      checked.semanticTruthVerified !== false ||
+      checked.independentAuthorshipVerified !== false ||
+      checked.privacyExclusionVerified !== false ||
+      checked.fullManifestValidated !== false || checked.dispatchAuthorized !== false) {
+    throw new Error("manifest_structure_invalid");
+  }
   return Object.freeze({
     structuralValidation: "pass",
     caseCount: 80,

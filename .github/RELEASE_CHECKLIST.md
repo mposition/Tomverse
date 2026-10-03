@@ -37,6 +37,18 @@ Date / timezone:    ____________________
       which `npm ci` checks against the lockfile, and may not restore build
       output or browser binaries, which nothing checks and which the job
       executes. Reads YAML only, no credential.
+- [ ] `npm run check:agent-pr-cache-isolation` — the narrower question the
+      engineering agent's cache isolation record rests on, and a stronger
+      answer: no credentialed job in a workflow an event the agent raises
+      reaches may restore **any** Actions cache, the package manager's own
+      included. GitHub lets re-runs of a pull request restore that pull
+      request's entries, so isolation cannot answer for the agent's own pull
+      request, and `check:credential-cache-separation` does not keep this
+      condition — it permits the verified package-manager cache, and the
+      lockfile comparison agrees with whatever the agent put in
+      `package-lock.json` in the same pull request. While this check fails,
+      `docs/policy/engineering-agent.md` §5 forbids writing that record.
+      Reads YAML only, no credential.
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:e2e-copy-selectors` — a copy-based locator that steers a
       branch (`isVisible()`, `count()`) resolves instead of retrying, so when
