@@ -92,6 +92,7 @@ const pullRequestsFor = async (commit) => {
       changedFiles: files === null ? null : files.map((file) => file.filename),
       commitAuthors: commits === null ? null : commits.map((c) => ({ login: c.author?.login ?? null, type: c.author?.type ?? null })),
       baseSha: detail?.base?.sha ?? null,
+      mergeCommitSha: detail?.merge_commit_sha ?? null,
     });
   }
   return result;
@@ -104,25 +105,30 @@ if (policyText === null) {
 }
 const header = parseAgentPolicyHeader(policyText);
 const lastChangeCommit = gitOrNull("log", "-1", "--format=%H", ref, "--", policyPath) || null;
-// "new" only when git says the path is absent at the parent; any other
-// failure is "unknown", never a first version.
+const pullRequests = lastChangeCommit ? await pullRequestsFor(lastChangeCommit) : null;
+const mergedIntoDevelop = pullRequests?.filter((pr) => pr.baseRef === "develop" && pr.mergedAt) ?? [];
+// The previous approved version is what develop held just before the policy
+// PR merged -- the first parent of its merge commit -- not the parent of the
+// PR's last commit, which in a multi-commit PR is one of its own drafts.
+// "new" only when git says the path is absent there; any other failure is
+// "unknown", never a first version.
 const previousVersion = (() => {
-  if (!lastChangeCommit) return "unknown";
+  const mergeCommit = mergedIntoDevelop.length === 1 ? mergedIntoDevelop[0].mergeCommitSha : null;
+  if (!mergeCommit) return "unknown";
   // A root commit has no parent, so the file was new there.
-  const parents = gitOrNull("rev-list", "--parents", "-n", "1", lastChangeCommit);
+  const parents = gitOrNull("rev-list", "--parents", "-n", "1", mergeCommit);
   if (parents === null) return "unknown";
   if (parents.split(" ").length === 1) return "new";
-  const listed = gitOrNull("ls-tree", "--name-only", `${lastChangeCommit}^`, "--", policyPath);
+  const listed = gitOrNull("ls-tree", "--name-only", `${mergeCommit}^1`, "--", policyPath);
   if (listed === null) return "unknown";
   if (listed === "") return "new";
-  const text = gitOrNull("show", `${lastChangeCommit}^:${policyPath}`);
+  const text = gitOrNull("show", `${mergeCommit}^1:${policyPath}`);
   if (text === null) return "unknown";
   // A draft that carried no version number had no approved version before.
   return parseAgentPolicyHeader(text).version ?? "new";
 })();
-const pullRequests = lastChangeCommit ? await pullRequestsFor(lastChangeCommit) : null;
 
-const developPr = pullRequests?.filter((pr) => pr.baseRef === "develop" && pr.mergedAt) ?? [];
+const developPr = mergedIntoDevelop;
 const baseSha = developPr.length === 1 ? developPr[0].baseSha : null;
 const firstCommit = (gitOrNull("log", "--diff-filter=A", "--format=%H", ref, "--", AGENT_OPERATOR_ALLOWLIST_PATH) ?? "")
   .split("\n")
