@@ -17,6 +17,8 @@ import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { approvePromptRefinerVnextOneShotRun } from
   "@/lib/promptRefinerVnextOneShotRunApproval";
+import { consumePromptRefinerVnextOneShotSlot } from
+  "@/lib/promptRefinerVnextOneShotSlotConsumption";
 import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { createPromptRefinerVnextOneShotStageWithSlots } from
@@ -392,6 +394,103 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
           session, request, expected,
         }), /run_stage_not_ready/);
         assert.equal(await prisma.adminAuditLog.count(), 2);
+
+        const requestId = "11111111-1111-4111-8111-111111111111";
+        const consume = (slotIndex: number, id = requestId,
+          approvalId = run.runApprovalAuditLogId) =>
+          consumePromptRefinerVnextOneShotSlot({ requestId: id, slotIndex,
+            runApprovalAuditLogId: approvalId });
+        await assert.rejects(consume(0, requestId, "forged-run-audit"),
+          /slot_binding_mismatch/);
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+        activeDeploymentId = "12345678-1234-1234-1234-123456789aca";
+        await assert.rejects(consume(0), /active_deployment_unverified/);
+        activeDeploymentId = binding.runtimeDeploymentId;
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+        await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+          data: { inputUsdPerMillionTokens: 0.01 } });
+        await assert.rejects(consume(0), /price/i);
+        await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
+          data: { inputUsdPerMillionTokens: null } });
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+
+        await setup.query(`CREATE FUNCTION reject_slot_audit() RETURNS trigger AS $$
+          BEGIN
+            IF NEW."action" = 'prompt_refiner.vnext_one_shot.slot_consumed' THEN
+              RAISE EXCEPTION 'synthetic slot audit failure';
+            END IF;
+            RETURN NEW;
+          END;
+        $$ LANGUAGE plpgsql`);
+        await setup.query(`CREATE TRIGGER reject_slot_audit_trigger BEFORE INSERT
+          ON "AdminAuditLog" FOR EACH ROW EXECUTE FUNCTION reject_slot_audit()`);
+        await assert.rejects(consume(0), /synthetic slot audit failure/);
+        await setup.query(`DROP TRIGGER reject_slot_audit_trigger ON "AdminAuditLog"`);
+        await setup.query(`DROP FUNCTION reject_slot_audit()`);
+        assert.equal(await prisma.adminAuditLog.count(), 2);
+        assert.equal((await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
+          where: { stageId_slotIndex: { stageId, slotIndex: 0 } },
+        })).status, "reserved", "audit failure must roll back slot consumption");
+
+        const consumed = await consume(0);
+        assert.equal(consumed.reservationConsumed, true);
+        assert.equal(consumed.dispatchAuthorized, false);
+        const slot = await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
+          where: { stageId_slotIndex: { stageId, slotIndex: 0 } },
+        });
+        assert.equal(slot.status, "consumed");
+        assert.equal(slot.requestId, requestId);
+        assert.ok(slot.consumedAt);
+        const consumptionAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+          where: { id: consumed.slotConsumptionAuditLogId },
+        });
+        assert.equal(consumptionAudit.previousHash, runAudit.entryHash);
+        assert.equal(consumptionAudit.metadata &&
+          (consumptionAudit.metadata as Record<string, unknown>).systemActor,
+        "prompt-refiner-vnext-one-shot-runner");
+        assert.equal(await prisma.adminAuditLog.count(), 3);
+        await assert.rejects(consume(0), /slot_already_consumed/);
+        await assert.rejects(consume(1), /unique|P2002|duplicate/i,
+          "one request identity cannot consume two slots");
+        assert.equal(await prisma.adminAuditLog.count(), 3,
+          "duplicate refusal must roll back its audit entry");
+        const afterConsume = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
+        assert.equal(afterConsume.reservedSlots, 79);
+        assert.equal(afterConsume.consumedSlots, 1);
+        assert.equal(afterConsume.reservationShapeValid, true);
+        assert.equal(afterConsume.dispatchAuthorized, false);
+
+        const competingConsume = await Promise.allSettled([
+          consume(1, "33333333-3333-4333-8333-333333333333"),
+          consume(1, "44444444-4444-4444-8444-444444444444"),
+        ]);
+        assert.equal(competingConsume.filter((result) => result.status === "fulfilled").length,
+          1, "one concurrent request may bind slot 1");
+        assert.equal(competingConsume.filter((result) => result.status === "rejected").length,
+          1, "the other concurrent request must not consume a second slot");
+        assert.equal(await prisma.adminAuditLog.count(), 4);
+        const afterRace = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
+        assert.equal(afterRace.reservedSlots, 78);
+        assert.equal(afterRace.consumedSlots, 2);
+
+        const lastId = "22222222-2222-4222-8222-222222222222";
+        // Fill 77 tombstones directly in this disposable fixture only. The
+        // operational writer above must still append its own audit atomically.
+        await setup.query(`UPDATE "PromptRefinerVnextOneShotSlot"
+          SET "status" = 'consumed',
+            "requestId" = 'synthetic-boundary-' || "slotIndex"::text
+          WHERE "stageId" = $1 AND "slotIndex" BETWEEN 2 AND 78`, [stageId]);
+        assert.equal((await prisma.$transaction(readPromptRefinerVnextOneShotStage))
+          .reservedSlots, 1);
+        const final = await consume(79, lastId);
+        assert.equal(final.reservationConsumed, true);
+        assert.equal(await prisma.adminAuditLog.count(), 5);
+        const atCeiling = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
+        assert.equal(atCeiling.reservedSlots, 0);
+        assert.equal(atCeiling.consumedSlots, 80);
+        await assert.rejects(consume(79, "44444444-4444-4444-8444-444444444444"),
+          /slot_reservation_unavailable/);
+        assert.equal(await prisma.adminAuditLog.count(), 5);
       } finally {
         fetchStub.mock.restore();
         for (const [key, value] of Object.entries(priorEnv)) {
