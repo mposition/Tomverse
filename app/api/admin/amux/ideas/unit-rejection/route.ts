@@ -14,6 +14,7 @@ import { AMUX_V4_UNIT_REJECT_READ_ENV,
   AMUX_V4_UNIT_REJECT_BODY_MAX_BYTES,
   amuxV4UnitRejectReadPermitted,
   amuxV4UnitRejectWritePermitted,
+  amuxUnitRejectErrorStatus,
   inspectAmuxUnitRejectRequest } from "@/lib/amux/ideaUnitRejectCore";
 import { AmuxUnitRejectError, consumeAmuxUnitReject,
   prepareAmuxUnitReject, readAmuxUnitRejectDecision } from
@@ -43,12 +44,13 @@ async function owner() {
   return { session } as const;
 }
 
-function failure(error: unknown): Response {
+function failure(error: unknown,
+  recovery?: { decisionId: string; prepareRequestId: string }): Response {
   if (error instanceof AmuxUnitRejectError) {
-    const status = error.code === "not_found" ? 404 : error.code === "reconfirm"
-      ? 428 : error.code === "already_prepared" || error.code === "not_ready"
-        ? 409 : 503;
-    return NextResponse.json({ error: error.code }, { status, headers: noStore });
+    const status = amuxUnitRejectErrorStatus(error.code);
+    return NextResponse.json(error.code === "outcome_unknown"
+      ? { error: error.code, retryWrite: false, ...recovery }
+      : { error: error.code }, { status, headers: noStore });
   }
   const security = apiSecurityResponse(error);
   if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }
@@ -59,11 +61,16 @@ function failure(error: unknown): Response {
 
 /** Dark owner-only two-step rejection. No model call, card, node or promotion. */
 export async function POST(request: Request): Promise<Response> {
+  let recovery: { decisionId: string; prepareRequestId: string } | undefined;
   try {
     const auth = await owner();
     if ("response" in auth) return auth.response!;
     if (!amuxV4UnitRejectWritePermitted(process.env[AMUX_V4_UNIT_REJECT_WRITE_ENV])) {
       return NextResponse.json({ error: "write_disabled" },
+        { status: 503, headers: noStore });
+    }
+    if (!amuxV4UnitRejectReadPermitted(process.env[AMUX_V4_UNIT_REJECT_READ_ENV])) {
+      return NextResponse.json({ error: "read_disabled" },
         { status: 503, headers: noStore });
     }
     if (!boardImportContentTypeAccepted(request.headers.get("content-type"))) {
@@ -77,12 +84,14 @@ export async function POST(request: Request): Promise<Response> {
       AMUX_V4_UNIT_REJECT_BODY_MAX_BYTES));
     if (!choice) return NextResponse.json({ error: "schema_rejected" },
       { status: 400, headers: noStore });
+    recovery = { decisionId: choice.decisionId,
+      prepareRequestId: choice.prepareRequestId };
     const result = choice.stage === "prepare"
       ? await prepareAmuxUnitReject(auth.session, request, choice)
       : await consumeAmuxUnitReject(auth.session, request, choice);
     return NextResponse.json(result, { status: choice.stage === "prepare" ? 201 : 200,
       headers: noStore });
-  } catch (error) { return failure(error); }
+  } catch (error) { return failure(error, recovery); }
 }
 
 /** Read-back remains separately gated so disabling writes need not hide an

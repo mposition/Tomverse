@@ -23,7 +23,8 @@ import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason,
   sameAmuxUnitDecisionBinding } from "./ideaUnitDecisionBindingCore.ts";
 import { checkAmuxIdeaUnitConsume } from "./ideaUnitConsumeGuard.ts";
 import { sameAmuxIdeaUnitConfirmation } from "./ideaUnitConfirmationCore.ts";
-import { AMUX_V4_UNIT_REJECT_WRITE_ENV, amuxV4UnitRejectWritePermitted,
+import { AMUX_V4_UNIT_REJECT_READ_ENV, AMUX_V4_UNIT_REJECT_WRITE_ENV,
+  amuxV4UnitRejectReadPermitted, amuxV4UnitRejectWritePermitted,
   deriveAmuxUnitRejectConfirmation,
   mayExpireAmuxRejectionConfirmation } from "./ideaUnitRejectCore.ts";
 
@@ -33,6 +34,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const PREPARE_ACTION = "amux.v4.unit.prepare";
 const CONSUME_ACTION = "amux.v4.unit.consume";
 const EXPIRE_ACTION = "amux.v4.unit.expire";
+const UNKNOWN_ACTION = "amux.v4.unit.outcome_unknown";
 const TARGET = "AmuxIdeaUnitDecision";
 
 export class AmuxUnitRejectError extends Error {
@@ -396,9 +398,81 @@ export async function commitAmuxUnitRejectConsume(tx: Prisma.TransactionClient,
     state: "rejected" as const, auditId };
 }
 
+/** Freeze only an exact still-prepared consume attempt after one read-back.
+ * The row lock waits for any in-flight consume transaction before deciding;
+ * it never retries the operation or treats an absent row as no-commit. */
+export async function commitAmuxUnitRejectUnknown(tx: Prisma.TransactionClient,
+  input: { actorUserId: string; decisionId: string;
+    prepareRequestId: string; consumeRequestId: string }) {
+  if (!ID.test(input.actorUserId) || !UUID.test(input.decisionId) ||
+      !UUID.test(input.prepareRequestId) || !UUID.test(input.consumeRequestId)) {
+    throw new AmuxUnitRejectError("integrity_unavailable");
+  }
+  await tx.$queryRaw`
+    SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
+           set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
+  `;
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaUnitDecision"
+    WHERE "id" = ${input.decisionId} AND "actorUserId" = ${input.actorUserId}
+      AND "prepareRequestId" = ${input.prepareRequestId}::uuid FOR UPDATE
+  `;
+  if (locked.length !== 1) return false;
+  const row = await tx.amuxIdeaUnitDecision.findUnique({
+    where: { id: input.decisionId },
+  });
+  if (!row || row.action !== "reject_unit" || row.state !== "prepared" ||
+      row.prepareRequestId !== input.prepareRequestId ||
+      row.consumeRequestId !== null || row.outcomeUnknownAt !== null ||
+      row.finalAuditLogId !== null) return false;
+  const prepareAudit = await tx.adminAuditLog.findUnique({
+    where: { id: row.prepareAuditLogId },
+  });
+  const metadata = prepareAudit?.metadata;
+  const meta = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) ? metadata as Record<string, unknown> : null;
+  if (!prepareAudit?.entryHash || auditRowActorKind(prepareAudit) !== "human" ||
+      prepareAudit.actorUserId !== input.actorUserId ||
+      prepareAudit.action !== PREPARE_ACTION ||
+      prepareAudit.targetType !== TARGET || prepareAudit.targetId !== row.id ||
+      !meta || meta.ideaId !== row.ideaId ||
+      meta.draftUnitId !== row.draftUnitId ||
+      meta.prepareRequestId !== input.prepareRequestId ||
+      meta.confirmationDigest !== row.confirmationDigest ||
+      meta.action !== "reject_unit" || meta.registered !== false) {
+    throw new AmuxUnitRejectError("integrity_unavailable");
+  }
+  const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = clock[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxUnitRejectError("integrity_unavailable");
+  }
+  const auditId = await writeSystemAuditLog({
+    tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+    action: UNKNOWN_ACTION, targetType: TARGET, targetId: row.id,
+    summary: "Froze an AMUX v4 unit decision after an unverified consume result; no retry occurred.",
+    metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
+      prepareRequestId: row.prepareRequestId,
+      consumeRequestId: input.consumeRequestId, retryAllowed: false },
+  });
+  const updated = await tx.amuxIdeaUnitDecision.updateMany({
+    where: { id: row.id, actorUserId: input.actorUserId, state: "prepared",
+      outcomeUnknownAt: null, consumeRequestId: null, finalAuditLogId: null },
+    data: { outcomeUnknownAt: now,
+      outcomeUnknownConsumeRequestId: input.consumeRequestId,
+      outcomeUnknownAuditLogId: auditId },
+  });
+  if (updated.count !== 1) throw new AmuxUnitRejectError("integrity_unavailable");
+  return true;
+}
+
 function beforeWrite(session: Session) {
   ownerId(session);
-  if (!amuxV4UnitRejectWritePermitted(process.env[AMUX_V4_UNIT_REJECT_WRITE_ENV])) {
+  if (!amuxV4UnitRejectWritePermitted(process.env[AMUX_V4_UNIT_REJECT_WRITE_ENV]) ||
+      !amuxV4UnitRejectReadPermitted(process.env[AMUX_V4_UNIT_REJECT_READ_ENV])) {
     throw new AmuxUnitRejectError("write_disabled");
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
@@ -436,6 +510,25 @@ export async function prepareAmuxUnitReject(session: Session, request: Request,
       const known = knownPreCommitRefusal(error, "prepare");
       if (known) throw known;
     }
+    try {
+      const status = await readAmuxUnitRejectDecision(session,
+        choice.decisionId, choice.prepareRequestId);
+      const reason = bindAmuxUnitDecisionReason({ ideaId: choice.ideaId,
+        draftUnitId: choice.draftUnitId, decisionId: choice.decisionId,
+        reason: choice.reason }, keys);
+      if (status.state === "prepared" &&
+          status.ideaId === choice.ideaId &&
+          status.draftUnitId === choice.draftUnitId &&
+          sameAmuxUnitDecisionBinding(reason, {
+            digest: status.reasonDigest, keyId: status.reasonDigestKeyId,
+          })) {
+        return { decisionId: status.decisionId, ideaId: status.ideaId,
+          draftUnitId: status.draftUnitId,
+          confirmationDigest: status.confirmationDigest,
+          confirmationDigestKeyId: status.confirmationDigestKeyId,
+          expiresAt: status.expiresAt };
+      }
+    } catch { /* No second write or blind retry on read-back failure. */ }
     throw new AmuxUnitRejectError("outcome_unknown");
   }
 }
@@ -457,6 +550,38 @@ export async function consumeAmuxUnitReject(session: Session, request: Request,
       const known = knownPreCommitRefusal(error, "consume");
       if (known) throw known;
     }
+    try {
+      const status = await readAmuxUnitRejectDecision(session,
+        choice.decisionId, choice.prepareRequestId);
+      const reason = bindAmuxUnitDecisionReason({ ideaId: choice.ideaId,
+        draftUnitId: choice.draftUnitId, decisionId: choice.decisionId,
+        reason: choice.reason }, keys);
+      if (status.state === "rejected" &&
+          status.ideaId === choice.ideaId &&
+          status.draftUnitId === choice.draftUnitId &&
+          status.confirmationDigest === choice.confirmationDigest &&
+          sameAmuxUnitDecisionBinding(reason, {
+            digest: status.reasonDigest, keyId: status.reasonDigestKeyId,
+          }) &&
+          status.consumeRequestId === choice.consumeRequestId) {
+        return { decisionId: status.decisionId,
+          draftUnitId: status.draftUnitId,
+          state: "rejected" as const, auditId: status.auditId };
+      }
+      if (status.state === "prepared" &&
+          status.ideaId === choice.ideaId &&
+          status.draftUnitId === choice.draftUnitId &&
+          status.confirmationDigest === choice.confirmationDigest &&
+          sameAmuxUnitDecisionBinding(reason, {
+            digest: status.reasonDigest, keyId: status.reasonDigestKeyId,
+          })) {
+        await prisma.$transaction((tx) => commitAmuxUnitRejectUnknown(tx, {
+          actorUserId: ownerId(session), decisionId: choice.decisionId,
+          prepareRequestId: choice.prepareRequestId,
+          consumeRequestId: choice.consumeRequestId,
+        }), { maxWait: 5_000, timeout: 15_000 });
+      }
+    } catch { /* Remain unknown; the owner must use exact-ID read-back. */ }
     throw new AmuxUnitRejectError("outcome_unknown");
   }
 }
@@ -520,17 +645,48 @@ export async function readAmuxUnitRejectDecision(session: Session,
         prepareMeta.sourcePreviewDigest !== row.sourcePreviewDigest ||
         prepareMeta.confirmationDigest !== row.confirmationDigest ||
         prepareMeta.confirmationDigestKeyId !== row.confirmationDigestKeyId ||
+        typeof prepareMeta.reasonDigest !== "string" ||
+        !DIGEST.test(prepareMeta.reasonDigest) ||
+        prepareMeta.reasonDigestKeyId !== row.confirmationDigestKeyId ||
         prepareMeta.action !== "reject_unit" ||
         prepareMeta.registered !== false) {
       return { state: "partial" } as const;
     }
     if (row.state === "prepared" && row.finalAuditLogId === null) {
-      if (row.outcomeUnknownAt !== null) return { state: "outcome_unknown" } as const;
+      if (audits.some((audit) => audit.action === CONSUME_ACTION)) {
+        return { state: "partial" } as const;
+      }
+      if (row.outcomeUnknownAt !== null) {
+        const unknownAudit = row.outcomeUnknownAuditLogId
+          ? await tx.adminAuditLog.findUnique({
+            where: { id: row.outcomeUnknownAuditLogId },
+          }) : null;
+        const unknownMetadata = unknownAudit?.metadata;
+        const unknownMeta = unknownMetadata && typeof unknownMetadata === "object" &&
+          !Array.isArray(unknownMetadata)
+          ? unknownMetadata as Record<string, unknown> : null;
+        if (!unknownAudit?.entryHash ||
+            auditRowActorKind(unknownAudit) !== "system" ||
+            unknownAudit.action !== UNKNOWN_ACTION ||
+            unknownAudit.targetType !== TARGET ||
+            unknownAudit.targetId !== row.id ||
+            unknownMeta?.systemActor !== AMUX_SYSTEM_AUDIT_ACTOR ||
+            unknownMeta.consumeRequestId !== row.outcomeUnknownConsumeRequestId ||
+            unknownMeta.retryAllowed !== false) {
+          return { state: "partial" } as const;
+        }
+        return { state: "outcome_unknown" } as const;
+      }
       return { state: "prepared", decisionId: row.id,
+        ideaId: row.ideaId, draftUnitId: row.draftUnitId,
         confirmationDigest: row.confirmationDigest,
+        confirmationDigestKeyId: row.confirmationDigestKeyId,
+        reasonDigest: prepareMeta.reasonDigest as string,
+        reasonDigestKeyId: prepareMeta.reasonDigestKeyId as string,
         expiresAt: row.expiresAt.toISOString() } as const;
     }
     if (row.state !== "consumed" || !finalAudit?.entryHash ||
+        !row.finalAuditLogId ||
         auditRowActorKind(finalAudit) !== "human" ||
         finalAudit.actorUserId !== actorUserId ||
         finalAudit.action !== CONSUME_ACTION ||
@@ -552,7 +708,11 @@ export async function readAmuxUnitRejectDecision(session: Session,
       where: { id: row.draftUnitId }, select: { state: true },
     });
     return unit?.state === "rejected"
-      ? { state: "rejected", decisionId: row.id, draftUnitId: row.draftUnitId } as const
+      ? { state: "rejected", decisionId: row.id, draftUnitId: row.draftUnitId,
+          ideaId: row.ideaId, confirmationDigest: row.confirmationDigest,
+          reasonDigest: prepareMeta.reasonDigest as string,
+          reasonDigestKeyId: prepareMeta.reasonDigestKeyId as string,
+          consumeRequestId: row.consumeRequestId, auditId: row.finalAuditLogId } as const
       : { state: "partial" } as const;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 8_000 });

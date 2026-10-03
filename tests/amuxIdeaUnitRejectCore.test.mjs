@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason } from
   "../lib/amux/ideaUnitDecisionBindingCore.ts";
 import { AMUX_V4_UNIT_REJECT_CODE_LATCH, AMUX_V4_UNIT_REJECT_READ_CODE_LATCH,
   amuxV4UnitRejectWritePermitted, amuxV4UnitRejectReadPermitted,
+  amuxUnitRejectErrorStatus,
   deriveAmuxUnitRejectConfirmation,
   inspectAmuxUnitRejectRequest,
   mayExpireAmuxRejectionConfirmation } from "../lib/amux/ideaUnitRejectCore.ts";
 
 const key = { digestKeyId: "digest_v1", digestKey: Buffer.alloc(32, 11) };
+const routeSource = readFileSync(new URL(
+  "../app/api/admin/amux/ideas/unit-rejection/route.ts", import.meta.url), "utf8");
 const digest = (letter) => ({ digest: letter.repeat(64), keyId: "digest_v1" });
 const input = () => ({
   ideaId: "idea_00000001", decisionId: "decision_00001",
@@ -58,6 +62,17 @@ test("the unit rejection writer stays dark despite an enabled environment", () =
   assert.equal(amuxV4UnitRejectWritePermitted(undefined), false);
   assert.equal(AMUX_V4_UNIT_REJECT_READ_CODE_LATCH, false);
   assert.equal(amuxV4UnitRejectReadPermitted("enabled"), false);
+});
+
+test("reconfirmation is a conflict, not an administrator sign-in challenge", () => {
+  assert.equal(amuxUnitRejectErrorStatus("reconfirm"), 409);
+  assert.equal(amuxUnitRejectErrorStatus("already_prepared"), 409);
+  assert.equal(amuxUnitRejectErrorStatus("not_found"), 404);
+  assert.equal(amuxUnitRejectErrorStatus("outcome_unknown"), 503);
+  assert.match(routeSource, /amuxUnitRejectErrorStatus\(error\.code\)/);
+  assert.match(routeSource, /retryWrite: false/);
+  assert.match(routeSource,
+    /amuxV4UnitRejectReadPermitted\(process\.env\[AMUX_V4_UNIT_REJECT_READ_ENV\]\)/);
 });
 
 test("one request admits exactly one owner decision, never a bulk card write", () => {

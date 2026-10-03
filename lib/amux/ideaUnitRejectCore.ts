@@ -15,6 +15,10 @@ export const AMUX_V4_UNIT_REJECT_READ_CODE_LATCH = false;
 export const amuxV4UnitRejectReadPermitted = (value: string | undefined) =>
   AMUX_V4_UNIT_REJECT_READ_CODE_LATCH && value === "enabled";
 
+export const amuxUnitRejectErrorStatus = (code: string): number =>
+  code === "not_found" ? 404 :
+    ["reconfirm", "already_prepared", "not_ready"].includes(code) ? 409 : 503;
+
 export function mayExpireAmuxRejectionConfirmation(row: {
   action: string; state: string; expiresAt: Date;
   outcomeUnknownAt: Date | null;
