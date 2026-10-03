@@ -88,7 +88,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
           chunk.remainingStartOrdinal !== 0 || chunk.remainingEndOrdinal !== 0 :
           chunk.analysisCompletedAt.getTime() !== idea.analysisCompletedAt!.getTime() ||
           chunk.coverageStatus !== "complete" ||
-          chunk.continuationKind !== null || chunk.outputPending !== false) ||
+          chunk.continuationKind !== null || chunk.outputPending !== false ||
+          chunk.remainingStartOrdinal !== null || chunk.remainingEndOrdinal !== null) ||
         !audit?.entryHash || auditRowActorKind(audit) !== "system" ||
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||

@@ -819,6 +819,15 @@ test("an output-continuable first result retains its first page without completi
   }), workItemsBefore);
   await prisma.amuxIdeaAnalysisChunk.update({
     where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { freeformPurgeAfter: new Date(Date.now() - 60_000) },
+  });
+  const afterDeadline = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
+  assert.equal(afterDeadline.state, "partial");
+  if (afterDeadline.state !== "partial") throw new Error("expired scope unavailable");
+  assert.equal(afterDeadline.remainingScope, null);
+  assert.equal(afterDeadline.units.length, 4);
+  await prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
     data: { freeformCiphertext: null, freeformKeyId: null,
       freeformKeyVersion: null, freeformPurgedAt: new Date() },
   });
