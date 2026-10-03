@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
+import { Prisma, type AmuxIdeaUnitDecision } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { auditRowActorKind, AMUX_SYSTEM_AUDIT_ACTOR } from
@@ -8,6 +8,8 @@ import { auditRowActorKind, AMUX_SYSTEM_AUDIT_ACTOR } from
 import { prisma } from "@/lib/prisma";
 import { amuxUnitOwnerId, AmuxUnitRejectError } from
   "./ideaUnitRejectService.ts";
+import { amuxRootNodeExpiredUnknownShapeValid } from
+  "./ideaNodeCreateCore.ts";
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const TARGET = "AmuxIdeaUnitDecision";
@@ -37,6 +39,47 @@ function ownerId(session: Session) {
 const meta = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
+
+async function validUnknownAudit(tx: Prisma.TransactionClient,
+  row: AmuxIdeaUnitDecision) {
+  const audit = row.outcomeUnknownAuditLogId
+    ? await tx.adminAuditLog.findUnique({
+      where: { id: row.outcomeUnknownAuditLogId },
+    }) : null;
+  const detail = meta(audit?.metadata);
+  return Boolean(audit?.entryHash && auditRowActorKind(audit) === "system" &&
+    audit.action === UNKNOWN && audit.targetType === TARGET &&
+    audit.targetId === row.id &&
+    detail?.systemActor === AMUX_SYSTEM_AUDIT_ACTOR &&
+    detail.ideaId === row.ideaId &&
+    detail.draftUnitId === row.draftUnitId &&
+    detail.prepareRequestId === row.prepareRequestId &&
+    detail.consumeRequestId === row.outcomeUnknownConsumeRequestId &&
+    detail.action === "create_node" &&
+    detail.confirmationDigest === row.confirmationDigest &&
+    detail.retryAllowed === false);
+}
+
+async function validNoCommitAudit(tx: Prisma.TransactionClient,
+  row: AmuxIdeaUnitDecision, actorUserId: string) {
+  if (row.outcomeUnknownResolution !== "no_commit" ||
+      row.outcomeUnknownResolvedAt === null) return false;
+  const audit = row.outcomeUnknownResolvedAuditLogId
+    ? await tx.adminAuditLog.findUnique({
+      where: { id: row.outcomeUnknownResolvedAuditLogId },
+    }) : null;
+  const detail = meta(audit?.metadata);
+  return Boolean(audit?.entryHash && auditRowActorKind(audit) === "human" &&
+    audit.actorUserId === actorUserId &&
+    audit.action === "amux.v4.unit.no_commit_confirmed" &&
+    audit.targetType === TARGET && audit.targetId === row.id &&
+    detail?.ideaId === row.ideaId &&
+    detail.draftUnitId === row.draftUnitId &&
+    detail.prepareRequestId === row.prepareRequestId &&
+    detail.consumeRequestId === row.outcomeUnknownConsumeRequestId &&
+    detail.confirmationDigest === row.confirmationDigest &&
+    detail.action === "create_node" && detail.observedNoEffect === true);
+}
 
 /** Metadata-only exact-ID read-back. A missing row is never a retry grant:
  * an earlier COMMIT can still be in flight. No node title or idea body leaves
@@ -111,53 +154,19 @@ export async function readAmuxRootNodeDecisionInTransaction(
       return { state: "partial" } as const;
     }
     if (row.outcomeUnknownAt) {
-      const unknownAudit = row.outcomeUnknownAuditLogId
-        ? await tx.adminAuditLog.findUnique({
-          where: { id: row.outcomeUnknownAuditLogId },
-        }) : null;
-      const unknownMeta = meta(unknownAudit?.metadata);
-      if (!unknownAudit?.entryHash ||
-          auditRowActorKind(unknownAudit) !== "system" ||
-          unknownAudit.action !== UNKNOWN ||
-          unknownAudit.targetType !== TARGET ||
-          unknownAudit.targetId !== row.id ||
-          unknownMeta?.systemActor !== AMUX_SYSTEM_AUDIT_ACTOR ||
-          unknownMeta.ideaId !== row.ideaId ||
-          unknownMeta.draftUnitId !== row.draftUnitId ||
-          unknownMeta.prepareRequestId !== row.prepareRequestId ||
-          unknownMeta.consumeRequestId !== row.outcomeUnknownConsumeRequestId ||
-          unknownMeta.action !== "create_node" ||
-          unknownMeta.confirmationDigest !== row.confirmationDigest ||
-          unknownMeta.retryAllowed !== false) {
+      if (!(await validUnknownAudit(tx, row))) {
         return { state: "partial" } as const;
       }
       if (row.outcomeUnknownResolvedAt !== null) {
-        const resolvedAudit = row.outcomeUnknownResolvedAuditLogId
-          ? await tx.adminAuditLog.findUnique({
-            where: { id: row.outcomeUnknownResolvedAuditLogId },
-          }) : null;
-        const resolvedMeta = meta(resolvedAudit?.metadata);
-        if (row.outcomeUnknownResolution !== "no_commit" ||
-            !resolvedAudit?.entryHash ||
-            auditRowActorKind(resolvedAudit) !== "human" ||
-            resolvedAudit.actorUserId !== actorUserId ||
-            resolvedAudit.action !== "amux.v4.unit.no_commit_confirmed" ||
-            resolvedAudit.targetType !== TARGET ||
-            resolvedAudit.targetId !== row.id ||
-            resolvedMeta?.ideaId !== row.ideaId ||
-            resolvedMeta.draftUnitId !== row.draftUnitId ||
-            resolvedMeta.prepareRequestId !== row.prepareRequestId ||
-            resolvedMeta.consumeRequestId !== row.outcomeUnknownConsumeRequestId ||
-            resolvedMeta.confirmationDigest !== row.confirmationDigest ||
-            resolvedMeta.action !== "create_node" ||
-            resolvedMeta.observedNoEffect !== true) {
+        if (!(await validNoCommitAudit(tx, row, actorUserId))) {
           return { state: "partial" } as const;
         }
         return { state: "no_commit_confirmed", decisionId: row.id,
           draftUnitId: row.draftUnitId,
           auditId: row.outcomeUnknownResolvedAuditLogId! } as const;
       }
-      return { state: "outcome_unknown", decisionId: row.id } as const;
+      return { state: "outcome_unknown", decisionId: row.id,
+        nodeId: proposal.id as string } as const;
     }
     return { state: "prepared", decisionId: row.id,
       ideaId: row.ideaId, draftUnitId: row.draftUnitId,
@@ -178,11 +187,16 @@ export async function readAmuxRootNodeDecisionInTransaction(
         expiryMeta.ideaId !== row.ideaId ||
         expiryMeta.draftUnitId !== row.draftUnitId ||
         expiryMeta.prepareRequestId !== row.prepareRequestId ||
+        expiryMeta.registered !== false ||
         row.consumeRequestId !== null || row.resolvedNodeId !== null ||
-        row.outcomeUnknownAt !== null ||
-        row.outcomeUnknownAuditLogId !== null ||
-        row.outcomeUnknownConsumeRequestId !== null ||
+        !amuxRootNodeExpiredUnknownShapeValid(row,
+          expiryMeta.noCommitAuditId) ||
         audits.some((audit) => audit.action === CONSUME)) {
+      return { state: "partial" } as const;
+    }
+    if (row.outcomeUnknownAt !== null &&
+        (!(await validUnknownAudit(tx, row)) ||
+         !(await validNoCommitAudit(tx, row, actorUserId)))) {
       return { state: "partial" } as const;
     }
     return { state: "expired", decisionId: row.id,

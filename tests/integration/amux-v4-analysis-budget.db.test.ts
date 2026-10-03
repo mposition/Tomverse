@@ -16,7 +16,8 @@ import { auditRowActorKind,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
   AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
   AMUX_V4_SECOND_DRAFT_SAVED_SCOPE,
-  AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_IDEA_SYSTEM_ACTOR, AMUX_SYSTEM_AUDIT_ACTOR } from
+  "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
@@ -1269,6 +1270,29 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
       unknownChoice.decisionId, unknownChoice.prepareRequestId)).state,
     "no_commit_confirmed");
+    // Simulate only the 15-minute DB-clock edge; the actual approval and
+    // canonical audit rows remain real transaction writes.
+    const expiryAuditId = await writeSystemAuditLog({ tx,
+      systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      action: "amux.v4.unit.expire", targetType: "AmuxIdeaUnitDecision",
+      targetId: unknownChoice.decisionId,
+      summary: "Synthetic expiry read-back after confirmed no-commit.",
+      metadata: { ideaId, draftUnitId: unknownChoice.draftUnitId,
+        prepareRequestId: unknownChoice.prepareRequestId,
+        expiredAt: new Date().toISOString(), action: "create_node",
+        registered: false, noCommitAuditId: noCommit.auditId },
+    });
+    const currentDecision = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: unknownChoice.decisionId },
+    });
+    const expiryView = {
+      amuxIdeaUnitDecision: { findUnique: async () => ({ ...currentDecision,
+        state: "expired", finalAuditLogId: expiryAuditId }) },
+      adminAuditLog: tx.adminAuditLog,
+    } as unknown as Prisma.TransactionClient;
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(expiryView,
+      session, unknownChoice.decisionId,
+      unknownChoice.prepareRequestId)).state, "expired");
     await assert.rejects(commitAmuxRootNodeNoCommitConfirmed(tx,
       { session, request, decisionId: unknownChoice.decisionId,
         prepareRequestId: unknownChoice.prepareRequestId }),

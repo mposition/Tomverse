@@ -8,6 +8,7 @@ import { AMUX_V4_NODE_CREATE_WRITE_CODE_LATCH,
   amuxRootNodeErrorBody, amuxRootNodeErrorStatus,
   amuxRootNodeNeedsCommitReadback, amuxRootNodeKnownRollbackCode,
   amuxRootNodeReadbackProvesExpiry,
+  amuxRootNodeExpiredUnknownShapeValid,
   inspectAmuxRootNodeRequest } from "../lib/amux/ideaNodeCreateCore.ts";
 
 const route = readFileSync(new URL(
@@ -35,6 +36,8 @@ test("root Initiative decision accepts only exact bounded prepare/consume shapes
     { ...prepare, reason: " trailing " }, { ...prepare, reason: "x".repeat(1_001) },
     { ...consume, consumeRequestId: prepare.nodeId },
     { ...consume, confirmationDigest: "not-a-digest" },
+    { stage: "confirm_no_commit", decisionId: prepare.decisionId,
+      prepareRequestId: prepare.prepareRequestId, hidden: true },
   ]) {
     assert.equal(inspectAmuxRootNodeRequest(JSON.stringify(changed)), null);
   }
@@ -64,5 +67,25 @@ test("root node route stays dark and uncertain writes are never retry grants", (
   assert.match(route, /amuxV4NodeCreateWritePermitted/);
   assert.match(route, /amuxV4NodeCreateReadPermitted/);
   assert.match(route, /readAmuxRootNodeDecision/);
+  assert.match(route, /confirmAmuxRootNodeNoCommit/);
   assert.match(route, /assertRecentAdminAuthentication/);
+});
+
+test("expired read-back distinguishes clean expiry from audited no-commit expiry", () => {
+  const clean = { outcomeUnknownAt: null, outcomeUnknownAuditLogId: null,
+    outcomeUnknownConsumeRequestId: null, outcomeUnknownResolvedAt: null,
+    outcomeUnknownResolution: null, outcomeUnknownResolvedAuditLogId: null };
+  assert.equal(amuxRootNodeExpiredUnknownShapeValid(clean, null), true);
+  assert.equal(amuxRootNodeExpiredUnknownShapeValid(clean, "audit-1"), false);
+  const confirmed = { outcomeUnknownAt: new Date(),
+    outcomeUnknownAuditLogId: "unknown-audit",
+    outcomeUnknownConsumeRequestId: consume.consumeRequestId,
+    outcomeUnknownResolvedAt: new Date(),
+    outcomeUnknownResolution: "no_commit",
+    outcomeUnknownResolvedAuditLogId: "resolution-audit" };
+  assert.equal(amuxRootNodeExpiredUnknownShapeValid(confirmed,
+    "resolution-audit"), true);
+  assert.equal(amuxRootNodeExpiredUnknownShapeValid(confirmed, null), false);
+  assert.equal(amuxRootNodeExpiredUnknownShapeValid({ ...confirmed,
+    outcomeUnknownResolvedAt: null }, "resolution-audit"), false);
 });

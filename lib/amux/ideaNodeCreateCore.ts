@@ -93,3 +93,29 @@ export const amuxRootNodeReadbackProvesExpiry = (status: {
 }, choice: { decisionId: string; draftUnitId: string }) =>
   status.state === "expired" && status.decisionId === choice.decisionId &&
     status.draftUnitId === choice.draftUnitId;
+
+/** Expiry may follow a clean prepared decision or an owner-confirmed
+ * no-commit. An unresolved unknown can never look like an ordinary expiry. */
+export function amuxRootNodeExpiredUnknownShapeValid(row: {
+  outcomeUnknownAt: Date | null;
+  outcomeUnknownAuditLogId: string | null;
+  outcomeUnknownConsumeRequestId: string | null;
+  outcomeUnknownResolvedAt: Date | null;
+  outcomeUnknownResolution: string | null;
+  outcomeUnknownResolvedAuditLogId: string | null;
+}, noCommitAuditId: unknown): boolean {
+  if (row.outcomeUnknownAt === null) {
+    return row.outcomeUnknownAuditLogId === null &&
+      row.outcomeUnknownConsumeRequestId === null &&
+      row.outcomeUnknownResolvedAt === null &&
+      row.outcomeUnknownResolution === null &&
+      row.outcomeUnknownResolvedAuditLogId === null &&
+      noCommitAuditId === null;
+  }
+  return row.outcomeUnknownResolvedAt instanceof Date &&
+    row.outcomeUnknownResolution === "no_commit" &&
+    typeof row.outcomeUnknownAuditLogId === "string" &&
+    typeof row.outcomeUnknownConsumeRequestId === "string" &&
+    typeof row.outcomeUnknownResolvedAuditLogId === "string" &&
+    noCommitAuditId === row.outcomeUnknownResolvedAuditLogId;
+}

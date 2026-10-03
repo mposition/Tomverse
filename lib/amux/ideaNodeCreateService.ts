@@ -453,15 +453,9 @@ export async function commitAmuxRootNodeNoCommitConfirmed(
   const row = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
     where: { id: input.decisionId },
   });
-  const prepareAudit = await tx.adminAuditLog.findUniqueOrThrow({
-    where: { id: row.prepareAuditLogId },
-  });
-  const preparedMeta = prepareAudit.metadata as Record<string, unknown>;
-  const snapshot = preparedMeta.snapshot as Record<string, unknown>;
-  const proposal = snapshot.nodeProposal as Record<string, unknown>;
-  const proposedId = proposal.id;
-  if (typeof proposedId !== "string" ||
-      await tx.amuxPortfolioNode.findUnique({ where: { id: proposedId } }) ||
+  if (await tx.amuxPortfolioNode.findUnique({
+    where: { id: status.nodeId }, select: { id: true },
+  }) ||
       await tx.amuxPortfolioNodeRevision.findFirst({
         where: { decisionId: row.id }, select: { id: true },
       }) ||

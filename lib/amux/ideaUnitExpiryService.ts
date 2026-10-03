@@ -81,6 +81,8 @@ export async function expireStaleAmuxUnitDecision(tx: Prisma.TransactionClient,
         meta?.ideaId !== refreshed.ideaId ||
         meta.draftUnitId !== refreshed.draftUnitId ||
         meta.prepareRequestId !== refreshed.prepareRequestId ||
+        meta.consumeRequestId !== refreshed.outcomeUnknownConsumeRequestId ||
+        meta.confirmationDigest !== refreshed.confirmationDigest ||
         meta.action !== refreshed.action ||
         meta.observedNoEffect !== true) {
       throw new AmuxUnitExpiryError("integrity_unavailable");
