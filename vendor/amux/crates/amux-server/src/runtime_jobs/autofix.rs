@@ -14136,6 +14136,27 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(restored_action, CI_NEXT_ACTION);
+        let card_for_refresh = card.clone();
+        st.store.write(move |conn| {
+            conn.execute(
+                "UPDATE issues SET next_action=NULL, updated=?2 WHERE id=?1",
+                rusqlite::params![card_for_refresh, unix_now() as i64 - 7 * 3600],
+            )?;
+            Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+        }).unwrap();
+        let mut escalated = f[0].clone();
+        escalated.title = "rust failed 62x on the same streak".into();
+        escalated.count = 62;
+        assert!(file_finding(&st, &escalated).await.unwrap().is_none());
+        let (refreshed_title, refreshed_desc, refreshed_action): (String, String, String) = st
+            .store.read().unwrap().query_row(
+                "SELECT title, desc, next_action FROM issues WHERE id=?1",
+                rusqlite::params![card],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ).unwrap();
+        assert_eq!(refreshed_title, escalated.title);
+        assert!(refreshed_desc.contains("The measurement moved"));
+        assert_eq!(refreshed_action, CI_NEXT_ACTION);
         let c = cards(&st);
         assert_eq!(c.len(), 1);
         assert_eq!(
@@ -14143,7 +14164,7 @@ mod tests {
             "a red deploy is a blocker, not a code card"
         );
         assert!(
-            c[0].1.contains("31x"),
+            c[0].1.contains("62x"),
             "count belongs in the computed title: {}",
             c[0].1
         );
