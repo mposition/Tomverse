@@ -124,7 +124,7 @@ pub struct SessionPresence {
     pub generation: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct LocalDispatchBody {
     pub text: String,
     pub no_board: bool,
@@ -646,7 +646,7 @@ pub fn plan_local_dispatch(
         path: format!("/api/sessions/{}/send", encode_session_name(name)),
         body: LocalDispatchBody {
             text: prompt.to_owned(),
-            no_board: true,
+            no_board: false,
             record_history: true,
             msg_id: attempt_id.to_owned(),
         },
@@ -1191,12 +1191,7 @@ impl LocalAmux for HttpLocal {
         let response = self
             .client
             .post(format!("{}{path}", self.base))
-            .json(&serde_json::json!({
-                "text": body.text,
-                "no_board": true,
-                "record_history": body.record_history,
-                "msg_id": body.msg_id,
-            }))
+            .json(body)
             .send()
             .await
             .context("local session send failed")?;
@@ -2151,7 +2146,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn running_session_send_stays_pending_and_does_not_open_a_board() {
+    async fn running_session_send_requests_board_receipt_and_stays_pending() {
         let calls = Arc::new(AtomicUsize::new(0));
         let mut prompts = BTreeMap::new();
         prompts.insert(ATTEMPT_ID.into(), brief_prompt());
@@ -2171,7 +2166,11 @@ mod tests {
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(local.sends.len(), 1);
-        assert!(local.sends[0].no_board);
+        assert!(!local.sends[0].no_board);
+        assert_eq!(
+            serde_json::to_value(&local.sends[0]).unwrap()["no_board"],
+            serde_json::json!(false)
+        );
         assert!(local.sends[0].record_history);
         assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
         assert_eq!(local.paths, vec!["/api/sessions/claude-impl/send".to_owned()]);

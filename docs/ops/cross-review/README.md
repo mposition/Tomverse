@@ -228,6 +228,11 @@ the previous findings. Only an exchange on hold or failed can be continued
 `MAX_SUPERSESSIONS` (2), so starting a new task is not a way to reset the
 revision cap. Beyond the cap a person decides.
 
+The one-time owner-approved CHAT-01 durable-slots v3 `on_hold` → v4 continuation
+is recorded in [its authorization](packages/chat01-refiner-vnext-one-shot-durable-slots-v4.authorization.md).
+The general cap remains 2; the exception checks the exact task, exchange path,
+lineage and `on_hold` status. It does not extend v4's revision limit or permit v5.
+
 The person-driven loop is `package` → `review` → (fix) → `package --round=1`
 → `review` …, and `exchange.json` carries `awaiting_review` or
 `awaiting_revision` between steps and the control program's own `passed`,

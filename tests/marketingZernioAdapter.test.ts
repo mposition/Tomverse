@@ -82,6 +82,7 @@ const created = (overrides: Record<string, unknown> = {}) => ({
     platforms: [
       {
         platform: "linkedin",
+        accountId: "acct_9",
         status: "published",
         platformPostId: "urn:li:share:7100",
         platformPostUrl: "https://www.linkedin.com/feed/update/urn:li:share:7100",
@@ -353,6 +354,47 @@ test("TikTok can be published to and cannot be retracted", async () => {
 // lookupStatus — the question Zernio *can* answer
 // ---------------------------------------------------------------------------
 
+test("a status query is about one account's copy, and never guesses removal", async () => {
+  // The target the question names, among several: the post's own status is an
+  // aggregate, and the first version read it and platforms[0].
+  const twoTargets = {
+    post: {
+      _id: "zpost_1",
+      status: "partial",
+      platforms: [
+        { platform: "linkedin", accountId: "acct_A", status: "failed" },
+        {
+          platform: "linkedin",
+          accountId: { _id: "acct_B" },
+          status: "published",
+          platformPostUrl: "https://www.linkedin.com/feed/update/urn:li:share:7200",
+        },
+      ],
+    },
+  };
+  const askedB = adapterWith([{ status: 200, body: twoTargets }]);
+  assert.deepEqual(await askedB.adapter.lookupStatus("zpost_1", "acct_B"), {
+    state: "live",
+    externalUrl: "https://www.linkedin.com/feed/update/urn:li:share:7200",
+  });
+  const askedA = adapterWith([{ status: 200, body: twoTargets }]);
+  assert.deepEqual(await askedA.adapter.lookupStatus("zpost_1", "acct_A"), { state: "not_live" });
+  const askedNobody = adapterWith([{ status: 200, body: twoTargets }]);
+  assert.deepEqual(await askedNobody.adapter.lookupStatus("zpost_1", "acct_C"), { state: "unknown" });
+
+  const one = (status: string) => ({
+    post: { _id: "zpost_1", status, platforms: [{ platform: "linkedin", accountId: "acct_9", status }] },
+  });
+  for (const [status, state] of [
+    ["failed", "not_live"],
+    ["cancelled", "not_live"],
+    ["publishing", "unknown"],
+  ] as const) {
+    const { adapter } = adapterWith([{ status: 200, body: one(status) }]);
+    assert.equal((await adapter.lookupStatus("zpost_1", "acct_9")).state, state, status);
+  }
+});
+
 test("a status query answers live or unknown, and never guesses removal", async () => {
   // The earlier version of this test pinned 404 and `cancelled` as "removed" --
   // the adapter and its test agreeing with each other and not with the provider.
@@ -361,9 +403,8 @@ test("a status query answers live or unknown, and never guesses removal", async 
   // which is what the publisher would have recorded.
   const cases: Array<[{ status: number; body?: unknown }, string]> = [
     [{ status: 200, body: created() }, "live"],
+    // Zernio's row gone is not the platform's copy gone.
     [{ status: 404, body: null }, "unknown"],
-    [{ status: 200, body: created({ status: "cancelled" }) }, "unknown"],
-    [{ status: 200, body: created({ status: "publishing" }) }, "unknown"],
     [{ status: 500, body: null }, "unknown"],
   ];
   for (const [response, state] of cases) {

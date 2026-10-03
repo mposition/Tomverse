@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
@@ -31,6 +31,19 @@ export class UsageError extends Error {
 const mirrorLock = (config) => join(config.stateDir, "mirror.lock");
 
 /**
+ * Drain mode is a flag file in the state directory, so it survives a restart:
+ * an update drains, waits for the running reviews, restarts, then lifts the
+ * drain, and no review is cut off and closed as unknown.
+ */
+const drainFlag = (config) => join(config.stateDir, "drain");
+export const isDraining = (config) => existsSync(drainFlag(config));
+export function setDraining(config, on) {
+  mkdirSync(config.stateDir, { recursive: true });
+  if (on) writeFileSync(drainFlag(config), `${new Date().toISOString()}\n`);
+  else rmSync(drainFlag(config), { force: true });
+}
+
+/**
  * Accept one review request. `bundlePath` is the client's git bundle already
  * written to disk. Everything is checked before the job becomes visible, so a
  * rejected submit leaves no job behind.
@@ -51,6 +64,23 @@ function checkFocus(mirror, base, head, focus) {
     throw new UsageError("focus_not_in_range", "focus must be on the path from base to head");
   }
   return focus;
+}
+
+/**
+ * Has a finished job on this server reviewed exactly up to `head`? Finished
+ * means every slot returned a verdict (accept or reject): an unknown, a
+ * cancellation or a pending slot is not a review.
+ */
+function reviewedHead(store, repoName, head) {
+  return store
+    .listJobs()
+    .some(
+      ({ job, slots }) =>
+        job.repo === repoName &&
+        job.head === head &&
+        slots.length > 0 &&
+        slots.every((slot) => slot.status === "done" && (slot.verdict === "accept" || slot.verdict === "reject")),
+    );
 }
 
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
@@ -99,7 +129,12 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       if (files.length === 0) throw new UsageError("empty_change");
       const focusFiles = focus ? changedFiles(repo.mirror, focus, head) : files;
       if (focusFiles.length === 0) throw new UsageError("empty_focus", "focus..head changes no file");
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, files);
+      // The contract-path floor counts from the focus only when this server has
+      // itself finished reviewing up to it. A focus nobody reviewed could hide a
+      // contract change before it, so then the whole base..head range counts.
+      const focusReviewed = focus !== null && reviewedHead(store, repoName, focus);
+      const contractFiles = focusReviewed ? focusFiles : files;
+      const { reviewers, touchesContract } = requiredReviewers(config, requested, contractFiles);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
         throw new UsageError(
@@ -120,6 +155,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
         focusFileCount: focusFiles.length,
+        focusReviewed,
         submittedAt: now.getTime(),
       };
       store.publish(job);
@@ -143,9 +179,31 @@ export function reviewerEnv(provider, source = process.env) {
   return env;
 }
 
-export function expandArgs(provider, workdir) {
-  return provider.args.map((arg) => arg.replaceAll("{workdir}", workdir).replaceAll("{model}", provider.model ?? ""));
+export function expandArgs(provider, workdir, promptFile = "", promptDir = "") {
+  return provider.args.map((arg) =>
+    arg
+      .replaceAll("{workdir}", workdir)
+      .replaceAll("{model}", provider.model ?? "")
+      .replaceAll("{promptFile}", promptFile)
+      .replaceAll("{promptDir}", promptDir),
+  );
 }
+
+/**
+ * A provider that names `{promptFile}` or `{promptDir}` in its args is given
+ * the prompt as a file instead of on stdin. On Linux a spawned child's stdin
+ * is a socket, not a pipe, so a CLI that reopens /dev/stdin by path fails with
+ * ENXIO -- which is how Devin failed every review on 2026-10-02 while a
+ * shell-pipe test passed. `{promptDir}` is the file's own directory, for a CLI
+ * that takes its prompt only as an argument (too short for a review) and must
+ * be granted that one directory to read the file from.
+ */
+export const usesPromptFile = (provider) =>
+  provider.args.some((arg) => arg.includes("{promptFile}") || arg.includes("{promptDir}"));
+
+/** The provider's own note, if any, goes before the shared prompt. */
+export const promptForProvider = (provider, prompt) =>
+  provider.promptNote ? `${provider.promptNote}\n\n${prompt}` : prompt;
 
 /**
  * The scheduling loop. One instance per state directory (enforced by the
@@ -189,6 +247,25 @@ export class Orchestrator {
     return expired.length;
   }
 
+  /**
+   * Operator cancel: close every queued slot of a job as unknown. A running
+   * slot is left to finish -- killing it would be an unknown outcome of its
+   * own. Returns how many slots were closed.
+   */
+  cancel(jobId) {
+    const entry = this.store.readJob(jobId);
+    if (!entry) throw new UsageError("job_not_found");
+    let closed = 0;
+    for (const listed of entry.slots) {
+      // Re-read right before writing: the daemon may have just started it.
+      const slot = this.store.readSlot(jobId, listed.index);
+      if (slot.status !== "queued") continue;
+      this.store.writeSlot(jobId, { ...slot, status: "done", verdict: "unknown", reason: "cancelled_by_operator", findings: [], endedAt: this.now() });
+      closed += 1;
+    }
+    return closed;
+  }
+
   recoverOrphans() {
     let recovered = 0;
     for (const { job, slots } of this.store.listJobs()) {
@@ -202,6 +279,9 @@ export class Orchestrator {
   }
 
   tick() {
+    // Draining: start nothing new, let running reviews finish. Submits are still
+    // accepted and wait in the queue until the drain is lifted.
+    if (isDraining(this.config)) return [];
     const jobs = this.store.listJobs();
     const now = this.now();
     const decisions = planAssignments({
@@ -317,15 +397,37 @@ export class Orchestrator {
         settled = true;
         clearTimeout(timer);
         this.killers.delete(kill);
+        if (promptDir) rmSync(promptDir, { recursive: true, force: true });
         out.end();
         err.end();
         resolve(outcome);
       };
+      const text = promptForProvider(provider, prompt);
+      // Outside the worktree, in a directory of its own (so `{promptDir}` grants
+      // this job's prompt and nothing else), owner-only, removed at the end.
+      const promptDir = usesPromptFile(provider)
+        ? join(this.config.stateDir, "prompts", `${job.id}-${slot.index}`)
+        : null;
+      const promptFile = promptDir ? join(promptDir, "prompt.md") : null;
+      if (promptFile) {
+        try {
+          mkdirSync(join(this.config.stateDir, "prompts"), { recursive: true, mode: 0o700 });
+          // A directory left by a crashed run is stale: start from empty.
+          rmSync(promptDir, { recursive: true, force: true });
+          mkdirSync(promptDir, { mode: 0o700 });
+          writeFileSync(promptFile, text, { mode: 0o600 });
+        } catch (error) {
+          // A slot must always be closed; a throw here would leave it running.
+          this.log(`prompt file failed: ${error.message}`);
+          done({ verdict: "unknown", reason: "prompt_file_failed", findings: [] });
+          return;
+        }
+      }
       try {
-        child = spawn(provider.command, expandArgs(provider, workdir), {
+        child = spawn(provider.command, expandArgs(provider, workdir, promptFile ?? "", promptDir ?? ""), {
           cwd: workdir,
           env: reviewerEnv(provider),
-          stdio: ["pipe", "pipe", "pipe"],
+          stdio: [promptFile ? "ignore" : "pipe", "pipe", "pipe"],
           detached: posix,
         });
       } catch (error) {
@@ -363,8 +465,10 @@ export class Orchestrator {
         if (code !== 0) return done({ verdict: "unknown", reason: `reviewer_exit_${code}`, findings: [] });
         done(parseReviewerOutput(Buffer.concat(chunks).toString("utf8")));
       });
-      child.stdin.on("error", () => {});
-      child.stdin.end(prompt);
+      if (!promptFile) {
+        child.stdin.on("error", () => {});
+        child.stdin.end(text);
+      }
     });
   }
 }

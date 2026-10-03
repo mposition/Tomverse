@@ -1,6 +1,6 @@
-# 방침·약관 개정 초안 (S10) — 승인 대기
+# 방침·약관 개정 (S10) — 승인됨 2026-10-03
 
-**상태: 초안.** 이 문서의 문안은 소유자 승인 전입니다. 승인되면 페이지에 게시하고,
+**상태: 승인됨 (mposition, 2026-10-03), 시행일 2026-11-16.** §2·§2.1·§3.1·§4·§5·§8을 승인했습니다. 아래는 승인 전의 설명을 그대로 둔 것입니다. 이 문서의 문안은 소유자 승인 전이었습니다. 승인되면 페이지에 게시하고,
 게시된 버전의 digest를 `APPROVED_AMENDED_DIGESTS`에, 변경 고지의 template
 version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적습니다
 (`lib/emailPolicyPublication.ts`, `lib/policyChangeNoticeEmail.ts`). 그 두 목록이
@@ -82,6 +82,24 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 나머지 문장은 그대로 둡니다. 다른 다섯 언어는 게시 때 같은 뜻으로 옮기며, 그
 번역도 이 절의 승인 대상입니다.
 
+### 2.1 7개 언어 전문 — 승인 대상 (2026-10-03 작성)
+
+각 언어의 `privacyPolicy.email`에서 **첫 두 문장을 "대체 문장"으로 바꾸고**, 셋째
+문장("이를 위해…" / "To do this…")부터 끝까지는 현행 그대로 둔 뒤, 맨 끝에 "추가
+문장"을 붙입니다. ko·en은 위 §2와 [동의 문안](email-consent-copy-draft.md) §6의 문장 그대로이고,
+zh·de·es·fr·pt는 같은 뜻으로 옮긴 번역입니다. 승인되면 이 표의 바이트가 게시되는
+문안이며, 게시 후 digest가 `APPROVED_AMENDED_DIGESTS`에 들어갑니다.
+
+| 언어 | 대체 문장 (현행 첫 두 문장 대신) | 추가 문장 (조항 끝에) |
+|---|---|---|
+| ko | Tomverse는 계정에 등록된 주소로 로그인 코드와 보안 알림, 결제 영수증, 서비스 상태 안내를 보냅니다. 이 셋은 서비스 제공에 속해 끌 수 없습니다. 뉴스레터와 프로모션은 신청하신 경우에만 보냅니다. 제품 소식(Tomverse 서비스 소식)도 신청하신 분께 보내며, 이 개정이 안내되기 전에 가입한 계정에는 신청하지 않으셨어도 보낼 수 있습니다. 그 밖에는 신청하신 경우에만 보냅니다. 로그인 코드·영수증·서비스 안내가 아닌 메일은 모두 이메일 설정에서 또는 해당 메일의 수신거부 링크를 눌러 로그인 없이 언제든 끄실 수 있습니다. | 수신동의는 철회하실 때까지 유효하며 만료되지 않습니다. 한국에서 수신 중이신 경우, 2년마다 수신동의 사실을 알려 드립니다. |
+| en | Tomverse sends you email at the address on your account: sign-in codes and security notices, billing receipts and service status notices. These three are part of providing the service and cannot be switched off. Newsletters and promotions are sent only if you ask for them. Product updates (news about the Tomverse service) are sent if you ask for them, and may be sent without your asking to accounts that were registered before this change was announced. Otherwise they are sent only if you ask for them. Everything other than sign-in codes, receipts and service notices can be turned off at any time in your email settings or with the one-click unsubscribe link in any such message, without signing in. | A marketing consent stays in effect until you withdraw it and does not expire. If you receive marketing email in Korea, we tell you about that consent every two years. |
+| zh | Tomverse 会向您账号登记的地址发送邮件：登录验证码与安全通知、账单收据和服务状态通知。这三类属于服务提供的一部分，无法关闭。新闻通讯和促销信息仅在您主动订阅后发送。产品动态（关于 Tomverse 服务的消息）会在您订阅后发送；对于在本次变更公布之前注册的账号，即使您未订阅也可能发送。除此之外，仅在您订阅后发送。除登录验证码、收据和服务通知以外的所有邮件，您都可以随时在邮件设置中关闭，或点击该类邮件中的一键退订链接关闭，无需登录。 | 营销邮件同意在您撤回之前一直有效，不会过期。如果您在韩国接收营销邮件，我们会每两年告知您一次该同意的事实。 |
+| de | Tomverse sendet Ihnen E-Mails an die in Ihrem Konto hinterlegte Adresse: Anmeldecodes und Sicherheitshinweise, Rechnungsbelege und Hinweise zum Servicestatus. Diese drei gehören zur Bereitstellung des Dienstes und lassen sich nicht abschalten. Newsletter und Werbeaktionen werden nur versendet, wenn Sie darum bitten. Produktneuigkeiten (Neuigkeiten zum Tomverse-Dienst) werden versendet, wenn Sie darum bitten, und können ohne Ihre Anfrage an Konten gesendet werden, die vor der Ankündigung dieser Änderung registriert wurden. Ansonsten werden sie nur versendet, wenn Sie darum bitten. Alles außer Anmeldecodes, Belegen und Servicehinweisen können Sie jederzeit in Ihren E-Mail-Einstellungen oder über den Ein-Klick-Abmeldelink in einer solchen Nachricht abschalten, ohne sich anzumelden. | Eine Einwilligung in Werbe-E-Mails gilt, bis Sie sie widerrufen, und läuft nicht ab. Wenn Sie Werbe-E-Mails in Korea erhalten, informieren wir Sie alle zwei Jahre über diese Einwilligung. |
+| es | Tomverse le envía correos a la dirección de su cuenta: códigos de inicio de sesión y avisos de seguridad, recibos de facturación y avisos sobre el estado del servicio. Estos tres forman parte de la prestación del servicio y no pueden desactivarse. Los boletines y las promociones solo se envían si los solicita. Las novedades de producto (noticias sobre el servicio Tomverse) se envían si las solicita y pueden enviarse sin que lo haya pedido a las cuentas registradas antes de que se anunciara este cambio. En los demás casos, solo se envían si las solicita. Todo lo que no sean códigos de inicio de sesión, recibos y avisos del servicio puede desactivarse en cualquier momento en sus ajustes de correo o con el enlace de baja de un clic incluido en ese tipo de mensajes, sin iniciar sesión. | El consentimiento para recibir correos de marketing sigue vigente hasta que lo retire y no caduca. Si recibe correos de marketing en Corea, le recordaremos ese consentimiento cada dos años. |
+| fr | Tomverse vous envoie des e-mails à l'adresse enregistrée sur votre compte : codes de connexion et avis de sécurité, reçus de facturation et avis d'état du service. Ces trois types font partie de la fourniture du service et ne peuvent pas être désactivés. Les infolettres et les promotions ne sont envoyées que si vous les demandez. Les actualités produit (nouvelles concernant le service Tomverse) sont envoyées si vous les demandez et peuvent être envoyées sans demande de votre part aux comptes créés avant l'annonce de cette modification. Dans les autres cas, elles ne sont envoyées que si vous les demandez. Tout ce qui n'est pas un code de connexion, un reçu ou un avis de service peut être désactivé à tout moment dans vos paramètres d'e-mail ou via le lien de désabonnement en un clic présent dans ce type de message, sans vous connecter. | Un consentement aux e-mails marketing reste valable jusqu'à ce que vous le retiriez et n'expire pas. Si vous recevez des e-mails marketing en Corée, nous vous rappelons ce consentement tous les deux ans. |
+| pt | A Tomverse envia e-mails para o endereço registrado na sua conta: códigos de acesso e avisos de segurança, recibos de cobrança e avisos sobre o estado do serviço. Esses três fazem parte da prestação do serviço e não podem ser desativados. Newsletters e promoções são enviadas somente se você solicitar. Novidades do produto (notícias sobre o serviço Tomverse) são enviadas se você solicitar e podem ser enviadas sem solicitação para contas registradas antes do anúncio desta alteração. Nos demais casos, são enviadas somente se você solicitar. Tudo o que não for código de acesso, recibo ou aviso do serviço pode ser desativado a qualquer momento nas configurações de e-mail ou pelo link de cancelamento em um clique presente nessas mensagens, sem precisar entrar na conta. | O consentimento para e-mails de marketing permanece válido até que você o retire e não expira. Se você recebe e-mails de marketing na Coreia, lembraremos você desse consentimento a cada dois anos. |
+
 **쓰지 않은 것**: `risk_accepted`라는 말, 그리고 "법이 허용하는 경우"라는 설명.
 앞의 것은 독자에게 의미 없는 내부 이름이고, 뒤의 것은 사실이 아닙니다 — 기존
 계정에는 어느 법역에서도 근거가 없고(docs/policy/email-product-news-redesign-draft.md §5.5), 그 발송은 기록된 결정입니다.
@@ -91,6 +109,10 @@ version `contentHash`를 `POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적�
 [동의 문안](email-consent-copy-draft.md) §5의 조항을 그대로 씁니다(승인됨,
 2026-09-23). `/terms`는 en·ko·zh 세 언어이고, zh는 게시 때 같은 뜻으로 옮깁니다.
 게시하면 "최종 업데이트" 날짜가 시행일로 바뀝니다.
+
+### 3.1 zh 번역 — 승인 대상 (2026-10-03 작성)
+
+> **营销邮件同意。** 您的同意在您撤回之前一直有效，没有固定的到期时间。您可以随时在邮件设置中，或通过任何营销邮件中的退订链接撤回同意，**无需登录**。撤回同意不会停止登录验证码、账单收据或服务通知的发送。
 
 ## 4. 변경 고지 — `policy_change_notice`
 
@@ -132,7 +154,12 @@ Refiner의 봉인된 closure를 늘리지 않으려고 그 파일에 둡니다),
 
 ## 5. 시행일
 
-**미정 — 소유자 결정.** 게시일로부터 30일보다 늦어야 합니다. 두 문서가 같은 날을
+**2026-11-16 (월) — 소유자 결정 2026-10-03.** 게시일로부터 30일보다 늦어야 합니다.
+
+이 날을 고른 이유: 승인 → 게시 release → 결정 F의 봉인 → 고지 발송까지
+일주일 안팎을 잡고도, 고지가 시행일 30달력일 전(`noticeDeadline`: 2026-10-18 00:00 UTC 이전
+도착)에 닿을 여유가 남는 날입니다. 이보다 이르면 게시·발송 일정이 하루만 밀려도 게이트가
+`notice_period_too_short`로 남습니다. 두 문서가 같은 날을
 보여야 하며, 다르면 게이트가 `effective_dates_differ`로 거절합니다. 고지의
 `POLICY_CHANGE_NOTICE_EFFECTIVE_DATE`도 같은 날이어야 하고, 테스트가 셋을 묶습니다.
 
@@ -149,10 +176,11 @@ Refiner의 봉인된 closure를 늘리지 않으려고 그 파일에 둡니다),
 
 | 절 | 내용 | 승인 |
 |---|---|---|
-| §2 | `/privacy` 이메일 조항 개정안 (7개 언어) | 대기 |
-| §4 | 변경 고지 문안 (7개 언어) | 대기 |
-| §5 | 시행일 | 대기 |
-| §8 | 2년 고지 영어 본문 | 대기 |
+| §2 | `/privacy` 이메일 조항 개정안 (7개 언어, §2.1) | **mposition, 2026-10-03** |
+| §3.1 | `/terms` 조항 zh 번역 | **mposition, 2026-10-03** |
+| §4 | 변경 고지 문안 (7개 언어) | **mposition, 2026-10-03** |
+| §5 | 시행일 **2026-11-16** | **mposition, 2026-10-03** |
+| §8 | 2년 고지 영어 본문 | **mposition, 2026-10-03** |
 
 ## 8. 2년 고지의 영어 본문 — 초안
 

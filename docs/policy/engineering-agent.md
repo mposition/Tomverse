@@ -6,6 +6,7 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 1
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
+| 2 | **승인 대기** | §1 6번의 "auto-merge 1회 규칙"을 "auto-merge를 켜지 않는 규칙"으로 고친다. 2026-10-02부터 `Auto PR to Develop`은 auto-merge를 켜지 않으며(AGENTS.md), 이 문서가 재사용하던 규칙은 더 엄격한 규칙으로 바뀌었다. 에이전트의 행위는 바뀌지 않는다 |
 | 1 | 2026-09-28 mposition | 최초 승인(두 번째 초안). 작업 원천을 승격된 AMUX 카드로 바꾸고 issue 작업 승인을 없앰, 카드 자기 등록, 외부 행위 유형 `engineering.publish_pr`, AMUX 부착 방식과 교차 잠금, tree 목록 검증과 capability, 병합 관측 일곱 조건, 본 앱의 시간 상한 |
 
 운영자 `mposition`이 2026-09-28 대화 세션에서 이 문서를 승인했다(버전 1). 이제 이 문서는
@@ -56,7 +57,7 @@ AMUX 문서가, engineering의 권한에 대해서는 이 문서가 좁은 쪽�
 4. 우리 backlog에서 한 카드로 검증할 수 있는 작업을 찾아 AMUX backlog에 **등록**한다.
    등록은 실행이 아니며, 실행은 사람이 승격한 카드에서만 시작한다.
 5. 소유자에게 가는 산출은 상한과 만료가 있는 대기열 안에서만 생긴다.
-6. 기존 계약(branch 이름 권한, auto-merge 1회 규칙, feedback-autofix 정책, release
+6. 기존 계약(branch 이름 권한, auto-merge를 켜지 않는 규칙, feedback-autofix 정책, release
    checklist)을 재사용하고 약화하지 않는다.
 
 ### 하지 않는 것

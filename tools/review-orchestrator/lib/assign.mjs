@@ -49,7 +49,17 @@ export function independentVendorCount(providers, authorVendor) {
 
 const loadOf = (load, id) => load[id] ?? { running: 0, recent24h: 0, lastAssignedAt: null };
 
+/**
+ * `priority` (default 0) is compared first: a provider with a higher number is
+ * chosen only when no lower-numbered provider of an allowed vendor is free. A
+ * provider billed per request from a credit pool -- Copilot on Kimi K3, about
+ * 34 credits a review -- is a reserve: it takes the slot that would otherwise
+ * wait for a busy vendor, and does not draw work just for being least used.
+ */
+const priorityOf = (provider) => provider.priority ?? 0;
+
 const compareCandidates = (load) => (a, b) => {
+  if (priorityOf(a) !== priorityOf(b)) return priorityOf(a) - priorityOf(b);
   const la = loadOf(load, a.id);
   const lb = loadOf(load, b.id);
   if (la.running !== lb.running) return la.running - lb.running;

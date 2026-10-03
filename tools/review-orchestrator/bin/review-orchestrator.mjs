@@ -6,6 +6,8 @@
  *   review-orchestrator ssh-dispatch           forced command: reads SSH_ORIGINAL_COMMAND
  *   review-orchestrator daemon                 the scheduling loop (systemd)
  *   review-orchestrator status [jobId]         local inspection
+ *   review-orchestrator drain on|off|wait      local only: stop new assignments for an update
+ *   review-orchestrator cancel <jobId>...      local only: close a job's queued slots
  *
  * Exit codes for submit and wait: 0 accept, 1 reject, 2 unknown, 3 pending.
  * report and the queue overview exit 0 on success. 64 usage, 65 error.
@@ -17,7 +19,7 @@ import { randomBytes } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { computeLoad } from "../lib/assign.mjs";
 import { loadConfig } from "../lib/config.mjs";
-import { Orchestrator, UsageError, submitJob } from "../lib/service.mjs";
+import { Orchestrator, UsageError, isDraining, setDraining, submitJob } from "../lib/service.mjs";
 import { Store, isJobId, summarise } from "../lib/store.mjs";
 import { release, tryAcquire } from "../lib/fsutil.mjs";
 import { Transform } from "node:stream";
@@ -79,6 +81,8 @@ function overview(store, config) {
   const load = computeLoad(jobs, Date.now());
   const queued = jobs.reduce((n, { slots }) => n + slots.filter((s) => s.status === "queued").length, 0);
   return {
+    draining: isDraining(config),
+    runningReviews: Object.values(load).reduce((n, entry) => n + entry.running, 0),
     queuedReviews: queued,
     providers: config.providers.map((p) => ({
       id: p.id,
@@ -175,6 +179,37 @@ async function daemon(config) {
   process.exit(0);
 }
 
+/**
+ * Local only -- not reachable over rpc, so no client key can pause the queue.
+ *
+ *   drain on     stop new assignments (running reviews continue)
+ *   drain wait   block until no review is running; exit 0, or 3 on timeout
+ *   drain off    resume assignments
+ */
+async function drain(config, [action, ...rest]) {
+  const store = new Store(config.stateDir);
+  if (action === "on" || action === "off") {
+    setDraining(config, action === "on");
+    print(overview(store, config));
+    return 0;
+  }
+  if (action === "wait") {
+    const at = rest.indexOf("--timeout");
+    const limitSeconds = at === -1 ? 3600 : Number(rest[at + 1]);
+    if (!Number.isFinite(limitSeconds) || limitSeconds <= 0) throw new UsageError("timeout_invalid");
+    if (!isDraining(config)) throw new UsageError("not_draining", "run `drain on` first, or new reviews keep starting");
+    const deadline = Date.now() + limitSeconds * 1000;
+    let view = overview(store, config);
+    while (view.runningReviews > 0 && Date.now() < deadline) {
+      await sleep(config.pollMs);
+      view = overview(store, config);
+    }
+    print(view);
+    return view.runningReviews === 0 ? 0 : EXIT.pending;
+  }
+  throw new UsageError("drain_action", "use drain on, drain off or drain wait [--timeout seconds]");
+}
+
 async function main(argv) {
   const [command, ...rest] = argv;
   const config = loadConfig();
@@ -182,7 +217,19 @@ async function main(argv) {
   if (command === "rpc") return handle(config, decodeRpc(rest[0]));
   if (command === "ssh-dispatch") return handle(config, decodeRpc(tokenFromSshCommand(process.env.SSH_ORIGINAL_COMMAND)));
   if (command === "status") return handle(config, { command: "status", jobId: rest[0] });
-  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon or status");
+  if (command === "drain") return drain(config, rest);
+  if (command === "cancel") {
+    // Local only, like drain. Closes queued slots; a running review finishes.
+    if (rest.length === 0) throw new UsageError("cancel_needs_job_id");
+    const orchestrator = new Orchestrator(config);
+    const result = rest.map((jobId) => {
+      if (!isJobId(jobId)) throw new UsageError("job_id_invalid", jobId);
+      return { jobId, closedSlots: orchestrator.cancel(jobId) };
+    });
+    print(result);
+    return 0;
+  }
+  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon, status, drain or cancel");
 }
 
 // Compare real paths: a symlinked launcher must still run main, not exit 0 silently.

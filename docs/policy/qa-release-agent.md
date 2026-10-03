@@ -1,7 +1,7 @@
 # QA·릴리스 Agent 정책
 
-상태: **승인됨 — 구현 없음.** 최초 작성 2026-10-02, 세 번째 초안 2026-10-02, 승인 2026-10-02.
-approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 1
+상태: **승인됨(버전 2).** 최초 작성 2026-10-02, 버전 1 승인 2026-10-02, 버전 2 승인 2026-10-02.
+approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 2
 allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 | 버전 | 승인 | 변경 |
@@ -9,8 +9,9 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 최초 초안 |
 | (미부여) | (미승인) | 두 번째 초안 — 독립 검토 반영: main은 사람이 병합하고 레인은 표시만, develop 제외 목록 보강, latch 전용 알림 |
 | 1 | 2026-10-02 mposition | 최초 승인(세 번째 초안). 세 번째 초안 — 독립 검토 반영: App의 main 병합을 ruleset으로 막음(bypass는 저장소 관리자 역할만), 게이트 범위를 `package.json`과 `scripts/**`로, 제외는 후보 선정에서 건너뜀, 승인 판정 단계를 본문에, 모든 secret·키 회전 기록, staging migration 복구, 스위치 off, 단일 점유 |
+| 2 | 2026-10-02 mposition | 버전 1의 독립 검토 반영 — 저장소 루트 파일 전체와 이 Agent의 테이블을 바꾸는 migration을 게이트로, develop 직접 push를 GitHub 설정으로 막고 그 관측을 S-M1 진입 조건으로, main ruleset은 시험 브랜치 관측 뒤에, 지시는 현재 revision·스위치·latch에 결속해 GitHub 호출 직전에 본 앱이 소비, 세 서비스 모두 revision 번호, kill switch는 "값이 있으면 정지", staging 복구 runbook을 S-M2 진입 조건으로, timeout의 문장 수와 Prisma 값, 승인 판정 0·4번 보강, glob 의미 |
 
-운영자 `mposition`이 2026-10-02 대화 세션에서 이 문서를 승인했다(버전 1). 이 문서는 이 Agent 구현의 규범 근거다. 다만
+운영자 `mposition`이 2026-10-02 대화 세션에서 이 문서를 승인했다(버전 1, 그리고 같은 날 버전 2). 이 문서는 이 Agent 구현의 규범 근거다. 다만
 **아래 승인 판정이 통과하기 전에는(이 승인 기록이 `develop`에 병합되기 전을 포함해) S0의 어떤 코드도 작성·병합하지 않는다.**
 이 문서는 Claude가 설계하고 독립 검토(교차 vendor)로 `accept` 판정을 받은 비공개 설계서를 공개 계약으로 옮긴 것이다.
 내용 변경은 운영자 승인과 정책 버전 증가가 필요하다. 승인은 단계별 착수 조건을 없애지 않으며, 어떤
@@ -21,11 +22,12 @@ workflow·secret·branch protection·ruleset·GitHub App·Railway 변경도 그 
 
 | # | 판정 |
 |---|---|
-| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같다 |
+| 0 | `approvedBy`의 계정이, 이 정책 파일을 바꾼 PR의 **base에 있던** `docs/policy/agent-operator-allowlist.md` 목록에 있다. 그 목록 파일의 최초 commit이 위 `allowlistGenesisCommit`과 같고, **그 commit부터 base까지 그 목록 파일의 모든 변경이 그 파일 3절의 규칙**(version 증가, 그 파일만 바꾼 PR, 이전 목록에 있는 계정의 승인, `to-develop` 브랜치 아님)을 따랐다 |
+| 0a | 이 정책 파일의 `approvedBy`·`approvedAt`·정책 버전이 채워져 있고, 정책 버전이 직전 승인 버전보다 크다 |
 | 1 | 이 정책 파일을 마지막으로 바꾼 commit을 찾는다 |
 | 2 | 그 commit을 `develop`에 넣은 PR이 **정확히 하나**다 |
 | 3 | 그 PR의 브랜치 이름에 `to-develop` 경로 조각이 없다 |
-| 4 | 그 PR의 병합자가 사람이고 `approvedBy`와 같은 계정이다 |
+| 4 | 그 PR의 병합자가 `approvedBy`와 같은 계정이다. **병합자가 사람인지는 git·GitHub 기록만으로 가릴 수 없으므로**(승인자 목록 5절: Agent 세션도 같은 명의로 commit함), 운영자가 대화에서 승인한 날짜와 정책 버전을 그 PR 본문에 적고 운영자가 직접 병합한다 |
 | 5 | `approvedAt`이 그 병합의 UTC 날짜와 같다 |
 | 6 | 그 PR이 이 정책 파일 하나만 바꾸고, 모든 commit의 작성자가 `approvedBy`이며 bot이 아니다 |
 | 7 | 그 뒤 이 정책 파일이 다시 바뀌면 1번부터 다시 판정한다 |
@@ -68,16 +70,19 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | 서비스 | 하는 일 | 가진 자격증명 | 없는 것 |
 |---|---|---|---|
 | `QA Release Digest` (Railway cron) | digest 생성·제출 | 본 앱 제출 secret, **읽기 전용** GitHub token, 운영자 제어 revision 번호 | 제품 DB, GitHub 쓰기, 알림·LLM 키 |
-| `QA Release Monitor` (Railway cron) | 침묵 감지 호출 | Monitor 전용 secret | 그 밖의 모든 것 |
-| `QA Release Merge Lane` (Railway cron) | 병합 레인의 사실 수집·develop 병합 실행 | GitHub App key(Contents·Pull requests write, Checks·Commit statuses·Metadata read), Railway 조회 토큰, 전용 secret | 제품 DB, Workflows·Administration 권한 |
+| `QA Release Monitor` (Railway cron) | 침묵 감지 호출 | Monitor 전용 secret, 운영자 제어 revision 번호 | 그 밖의 모든 것 |
+| `QA Release Merge Lane` (Railway cron) | 병합 레인의 사실 수집·develop 병합 실행 | GitHub App key(Contents·Pull requests write, Checks·Commit statuses·Metadata read), Railway 조회 토큰, 전용 secret, 운영자 제어 revision 번호, 활성화 변수, kill switch 변수 | 제품 DB, Workflows·Administration 권한 |
 
 - 세 서비스는 변수를 공유하지 않습니다. IaC 선언의 변수 집합은 test가 정확히 고정합니다.
 - 판정은 본 앱 내부 route에서 합니다(LLM 없음, 외부 텍스트 실행 없음). 본 앱에는 GitHub 쓰기 토큰이 없습니다.
-- **병합 레인 서비스는 스스로 고른 PR을 병합하지 않습니다.** 본 앱이 발급한 지시(attempt id, PR 번호, head SHA, base `develop`)를
-  받아, 다시 읽은 상태가 그 지시와 같을 때만 그 PR 하나를 병합하고 결과를 그 attempt id로 보고합니다. 지시는 한 번만
-  유효합니다. 서비스 코드는 base가 `develop`이 아닌 병합 호출과 병합 API 밖의 쓰기(직접 push, ref 갱신)를 하지 않으며,
-  정적 test가 이를 고정합니다.
-- **App 키의 쓰기 권한은 저장소 전체입니다.** 그래서 코드가 하지 않는 쓰기를 GitHub 설정으로도 막습니다(8절 7항).
+- **병합 레인 서비스는 스스로 고른 PR을 병합하지 않습니다.** 본 앱이 발급한 지시(attempt id, PR 번호, head SHA, base `develop`,
+  발급 당시 운영자 제어 revision, 만료 시각 — 발급 뒤 2분)를 받습니다. 서비스는 상태를 다시 읽어 지시와 같은지 본 뒤,
+  **GitHub 병합 호출 바로 전에 본 앱에 그 지시의 소비를 요청**합니다. 본 앱은 그 순간의 스위치 셋, latch, 최신 revision,
+  만료를 다시 확인하고 하나라도 어긋나면 거절합니다. 소비는 조건부 갱신으로 **한 번만** 성공하고, 소비에 성공한 지시만
+  병합합니다. 결과는 그 attempt id로 보고합니다. 서비스 코드는 base가 `develop`이 아닌 병합 호출과 병합 API 밖의 쓰기(직접
+  push, ref 갱신)를 하지 않으며, 정적 test가 이를 고정합니다.
+- **App 키의 쓰기 권한은 저장소 전체입니다.** 그래서 코드가 하지 않는 쓰기를 GitHub 설정으로도 막습니다 — main은 8절 7항,
+  develop의 직접 push는 8절 9항.
 - 서비스는 hard timeout에 강제 종료됩니다. 본 앱 route의 트랜잭션은 DB가 강제하는 문장·유휴 timeout과 마지막 문장의
   DB 시계 마감 검사로 묶이고, 늦은 실행은 성공으로 기록되지 않습니다. 트랜잭션당 최대 시간은 그 둘에서 **유도한
   애플리케이션 값**이고 DB 상한이 아닙니다.
@@ -103,8 +108,9 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
   GitHub App key, Railway 조회 토큰, 읽기 전용 GitHub token — 의 **회전 시각**(값 아님), 적용할 IaC commit, develop 병합 레인
   스위치)를
   append-only 기록으로 둡니다. 기록은 Admin 행위이고 같은 트랜잭션에 감사됩니다.
-- 운영자는 Railway 변경과 같은 변경에서 서비스에 그 revision 번호를 설정합니다. 본 앱은 제출된 번호가 최신 revision과
-  다르면 그 제출을 거절하고 알립니다. 결과를 모르면 진행하지 않고 사람이 확인합니다.
+- 운영자는 Railway 변경과 같은 변경에서 **세 서비스 모두에** 그 revision 번호를 설정합니다. 본 앱은 세 서비스의 모든 호출
+  (digest 제출, Monitor 호출, 병합 레인의 사실 보고·지시 소비)에서 번호가 최신 revision과 다르면 그 호출을 거절하고 알립니다.
+  결과를 모르면 진행하지 않고 사람이 확인합니다.
 - 기록되지 않은 외부 변경(같은 commit의 재배포)과, 알림이 멎는 회복은 감사 행에 남고, 설명할 revision이 없으면
   알립니다. 활성 상태로 기록된 동안 본 앱 secret이 없어지면 조용해지지 않고 알립니다.
 
@@ -133,34 +139,45 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 3. **제외.** 아래 PR은 레인이 **병합하지 않고** Admin에 "사람 처리 대상"으로 표시만 합니다. 사람이 GitHub에서 각자의 계약대로
    처리합니다.
    - 변경 경로에 게이트 파일: `.github/**`, **`scripts/**` 전체**(PR Fast Gate와 다른 workflow가 실행하는 검사 script가 여기에
-     있습니다), **`package.json`·`package-lock.json`**(검사를 실행하는 npm script와 그 의존성), 정책 테스트(PR base의
+     있습니다), **저장소 루트의 모든 파일**(`package.json`·`package-lock.json`, `eslint.config.mjs`, `tsconfig*.json`,
+     `.gitleaks.toml`, `next.config.*`, `playwright*.config.ts` 등 검사의 실행과 설정을 정하는 파일), 정책 테스트(PR base의
      `docs/policy/**`·`AGENTS.md`·`CLAUDE.md`가 경로로 이름 댄 `tests/**` 파일), `AGENTS.md`, `CLAUDE.md`, `docs/policy/**`,
      `docs/ui-contracts/**`, `docs/release-gates/**`, `lib/adminAuth*`, `lib/adminAuditSystemActors.ts`, `lib/agentAuthorityFiles.ts`.
    - 변경 경로에 이 Agent 자신의 파일(부록 A, 판정은 PR base의 목록으로).
+   - 이 Agent의 테이블(`AgentDigestItem`의 이 Agent 행, `QaRelease`로 시작하는 테이블)을 이름 대는 migration. 판정은 변경된
+     `prisma/migrations/**/migration.sql` 본문에 그 테이블 이름이 나오는지로 하고, 본문을 읽지 못하면 제외합니다.
    - head 브랜치 `agent/**`, `marketing-agent/**`, `feedback-autofix/**`, `feedback-autofix-main/**`, `autofix/**`,
      `visual-baseline/**`, `dependabot/**`.
    - 변경 파일 목록(전체 페이지, rename은 이전·이후 경로 둘 다)을 끝까지 읽지 못한 PR.
    **migration을 포함한 PR도 무인 병합 대상입니다**(staging의 preDeploy가 적용합니다). git revert는 적용된 migration과 실패한
-   migration 기록을 되돌리지 않습니다. 그래서 staging 배포가 실패하면 레인은 latch하고, staging DB의 복구는 운영자가
-   `docs/ops/railway-restore-drill.md`의 절차(또는 staging 재생성)로 합니다. 복구가 끝나기 전에는 latch를 풀지 않습니다.
+   migration 기록을 되돌리지 않습니다. 그래서 staging 배포가 실패하면 레인은 latch하고, 운영자가 staging DB를 복구한 뒤에만
+   latch를 풉니다. **복구 절차는 S-M2 진입 전에 runbook으로 있어야 합니다** — staging 재생성(`.github/RELEASE_CHECKLIST.md`의
+   7.6절이 쓰는 방법)과, 실패한 migration 행의 처리(`prisma migrate resolve`), 그리고 대상 환경이 staging임을 확인하는
+   단계를 담습니다. 그 runbook이 없으면 S-M2에 들어가지 않습니다.
 4. **hold와 추적.** staging 환경의 모든 Railway 서비스 중 하나라도 `WAITING`·`NEEDS_APPROVAL`·`QUEUED`·`INITIALIZING`·
    `BUILDING`·`DEPLOYING`이면 병합하지 않습니다. 병합 직전에 다시 읽고 head를 고정해 병합합니다. develop을 배포하는 서비스
    **전부**가 merge commit을 배포해야 완료이고, `FAILED`·`CRASHED`·`SKIPPED`는 실패입니다.
 5. **결과 불명.** 병합 전에 "시도 중"을 기록하고, 결과를 모르거나 배포가 실패하면 레인을 latch합니다. latch는 사람이 Admin에서
    풉니다. **레인당 시도는 하나입니다** — "시도 중" 행은 레인당 하나만 존재할 수 있게 DB가 강제하고(조건부 단일 점유), 두 회차가
    겹쳐 둘 다 유휴를 읽어도 두 번째는 점유에 실패해 병합하지 않습니다.
-6. **스위치.** 병합은 세 입력이 **모두 켜져 있을 때만** 합니다: 서비스 활성화 변수, develop 레인 스위치(운영자 제어 기록),
-   kill switch 변수. 하나라도 꺼져 있거나 읽지 못하면 병합하지 않습니다.
+6. **스위치.** 병합은 다음이 **모두** 성립할 때만 합니다: 서비스 활성화 변수가 켜져 있음, develop 레인 스위치(운영자 제어
+   기록)가 켜져 있음, **kill switch 변수가 비어 있음**. kill switch는 저장소의 다른 정책과 같은 관례로 **값이 하나라도 있으면
+   정지**이고(`lib/chatStarterAccess.ts`의 `chatStarterKillSwitchEngaged`와 같은 판정), 셋 중 하나라도 읽지 못하면 정지입니다.
+   이 판정은 지시 발급과 지시 소비 두 번 모두 합니다.
 7. **App은 main을 갱신하지 못하게 둡니다.** 필수 리뷰는 App도 지켜야 할 규칙일 뿐이라, 사람이 리뷰를 남긴 main PR은 App도 병합
-   API로 병합할 수 있습니다. 그래서 S-M0 전에 main에 **갱신 제한 ruleset**(`update`)을 두고 **bypass는 저장소 관리자 역할만**,
-   App은 넣지 않습니다. 운영자의 release·hotfix·feedback 승격 병합은 그대로 되고, App의 main 병합·push는 GitHub가 거절합니다.
-   S-M0에서 main과 같은 보호를 건 배포되지 않는 시험 브랜치로 **세 가지를 관측**합니다: 리뷰가 없는 PR의 App 병합 거절, **리뷰가
-   끝난 PR의 App 병합 거절**, App의 직접 push 거절. 그리고 운영자의 병합은 성공합니다. 이 관측이 **모두 기대대로일 때만** S-M1에
-   들어가고, 하나라도 다르면(예: 개인 계정 저장소에서 관리자 역할 bypass가 동작하지 않으면) 운영자가 결정합니다. develop에도 같은
-   방식으로 App의 직접 push를 관측합니다(필수 check가 그 push를 거절하는지). 이 보호를 바꾸는 것은 이 정책의 개정입니다.
+   API로 병합할 수 있습니다. 그래서 main에 **갱신 제한 ruleset**(`update`)을 두고 **bypass는 저장소 관리자 역할만**, App은 넣지
+   않습니다. **순서는 시험 먼저입니다.** S-M0에서 main과 같은 보호를 건 배포되지 않는 시험 브랜치로 먼저 관측합니다: 리뷰가 없는
+   PR의 App 병합 거절, **리뷰가 끝난 PR의 App 병합 거절**, App의 직접 push 거절, **운영자의 병합 성공**. 넷이 모두 기대대로일
+   때만 실제 main에 같은 ruleset을 겁니다. 하나라도 다르면(예: 개인 계정 저장소에서 관리자 역할 bypass가 동작하지 않으면) main에
+   ruleset을 걸지 않고, **S-M1에도 들어가지 않으며**, 운영자가 다음을 정합니다. 이 보호를 바꾸는 것은 이 정책의 개정입니다.
 8. **병합 주체의 전환.** develop 레인을 켜는 변경에서 로컬 `scripts/merge-train.mjs`의 develop 레인을 삭제하고, AGENTS.md의
    "workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다" 절이 develop 병합 주체를 이 레인으로 고쳐 적습니다. 둘 다 게이트
    파일이므로 사람이 병합합니다.
+9. **develop의 직접 push도 막습니다.** 필수 check는 이미 check를 통과한 commit의 직접 push를 막지 못합니다. 그래서 develop에
+   **PR 필수 ruleset**(`pull_request` 규칙, 필수 승인 0건)을 두고 bypass는 저장소 관리자 역할만 둡니다. App은 PR 병합만 할 수
+   있고 직접 push는 거절됩니다. S-M0의 시험 브랜치에서 **check를 통과한 commit의 App 직접 push 거절**과 App의 PR 병합 성공,
+   운영자의 직접 push 성공을 관측하고, 기대대로일 때만 실제 develop에 겁니다. 관측이 다르면 S-M1에 들어가지 않습니다.
+   다른 세션의 브랜치가 develop에 직접 push하던 경로가 있다면 이 규칙이 그것도 막으므로, 거는 날을 운영자가 정합니다.
 
 ## 9. 단계
 
@@ -169,12 +186,12 @@ issue·PR 제목·본문, test 제목, 오류 문장을 담을 필드가 없고,
 | S0 | digest·Monitor·운영자 제어 기록 구현, 전부 dark | 이 정책 승인, 승인자 목록 절차 통과 |
 | S1 | staging에서 digest 활성 | S0 test 통과, 운영자 제어 revision 1 기록, IaC apply·secret 설정(운영자) |
 | S2 | production 활성 | S1 30일, 침묵 오탐 0 |
-| S-M0 | 병합 레인 구현(dark), main 갱신 제한 ruleset 설정, 시험 브랜치 관측(8절 7항) | 이 정책 승인, 공통 기반의 병합 레인 예외 반영 |
-| S-M1 | develop shadow(판정만, 병합 안 함) | S-M0 test 통과, **8절 7항의 관측이 모두 기대대로**, App·Railway 토큰 설정 |
-| S-M2 | develop 무인 병합 | S-M1 7일 이상 판정과 실제가 어긋난 건 0, 8절 8항의 변경 병합 |
+| S-M0 | 병합 레인 구현(dark), 시험 브랜치 관측(8절 7항·9항) 뒤 main·develop ruleset 설정 | 이 정책 승인, 공통 기반의 병합 레인 예외 반영 |
+| S-M1 | develop shadow(판정만, 병합 안 함) | S-M0 test 통과, **8절 7항·9항의 관측이 모두 기대대로이고 ruleset이 걸림**, 그 뒤에 App 키·Railway 토큰 설정 |
+| S-M2 | develop 무인 병합 | S-M1 7일 이상 판정과 실제가 어긋난 건 0, 8절 8항의 변경 병합, 8절 3항의 staging 복구 runbook |
 | S-M3 | main 후보·production 상태 표시 | S-M2 운영 중. 병합 호출 없음 |
 
-되돌림: 서비스 활성화 변수, develop 레인 스위치, kill switch를 끕니다. 진행 중인 병합 시도는 GitHub 기록으로 확인될 때까지
+되돌림: 서비스 활성화 변수를 끄거나, develop 레인 스위치를 끄거나, kill switch 변수에 값을 넣습니다. 진행 중인 병합 시도는 GitHub 기록으로 확인될 때까지
 latch로 남습니다. 이미 병합된 commit은 사람이 revert PR로 되돌립니다.
 
 ## 10. 값
@@ -183,8 +200,7 @@ latch로 남습니다. 이미 병합된 commit은 사람이 revert PR로 되돌�
 
 | 값 | 내용 | 상태 |
 |---|---|---|
-| timeout | 문장 2,000 ms, 유휴 1,000 ms(DB가 강제). 그 둘에서 유도한 트랜잭션당 최대(애플리케이션 값): digest 제출 저장 32초, 침묵 판단 읽기 11초, 침묵 알림 기록 32초, 감시 실패
-  기록 26초. 침묵 감지 한 회차의 최악은 읽기·알림·감시 실패의 합 69초(11 + 32 + 26)이고, 제출 저장은 다른 route입니다. 상수 순서 `Prisma > transaction > statement > idle`. PostgreSQL 17에서만 있는 `transaction_timeout`은 그 서버가 지원할 때만 걸고, 16에서는 걸지 않습니다 | 승인 |
+| timeout | 문장 2,000 ms, 유휴 1,000 ms(DB가 강제, 문장마다·유휴 구간마다 다시 걸림). 트랜잭션당 최대는 그 트랜잭션의 **문장 수 A**로 유도한 애플리케이션 값 `3A + 5`초입니다(문장마다 2초, 문장 사이 유휴 1초, 시작·끝 왕복과 여유 5초): digest 제출 저장 A = 9 → 32초, 침묵 판단 읽기 A = 2 → 11초, 침묵 알림 기록 A = 9 → 32초, 감시 실패 기록 A = 7 → 26초. 침묵 감지 한 회차의 최악은 읽기·알림·감시 실패의 합 69초(11 + 32 + 26)이고, 제출 저장은 다른 route입니다. **Prisma interactive transaction의 timeout은 각 트랜잭션의 최대보다 5초 길게 명시하고**(기본 5초를 쓰지 않음), 상수 순서 `Prisma > transaction > statement > idle`을 test가 고정합니다. 문장 수가 바뀌면 이 값도 이 문서의 개정으로 바뀝니다. PostgreSQL 17에서만 있는 `transaction_timeout`은 그 서버가 지원할 때만 걸고, 16에서는 걸지 않습니다 | 승인 |
 | digest | cron `0 21 * * *` UTC, hard timeout 15분, 침묵 기준 28시간, 본문 보존 90일, 재실행 권고 상한 2건·7일, issues 배열 40 / 30 / 30 | 승인 |
 | CI | PostgreSQL 17 전용 job 하나(17 경로의 시험용) | 승인 |
 | Monitor | cron `*/30 * * * *`, 호출자 timeout 120초 | 제안값(S0 전에 확정) |
@@ -198,6 +214,8 @@ latch로 남습니다. 이미 병합된 commit은 사람이 revert PR로 되돌�
 ## 부록 A. 이 Agent의 파일 (병합 레인의 제외 판정에 쓰는 경로 목록)
 
 병합 레인은 아래 경로를 바꾸는 PR을 무인 병합하지 않습니다(8절 3항). 판정은 그 PR의 base에 있던 이 목록으로 합니다.
+패턴에서 `**`는 디렉터리를 넘고, `*`는 한 경로 조각 안에서 맞추되 **패턴 끝의 `*`는 그 이름으로 시작하는 더 깊은 경로까지**
+맞춥니다(`lib/qaRelease*`는 `lib/qaRelease` 디렉터리 아래 파일도 맞춤). 8절 3항의 `lib/adminAuth*`도 같습니다.
 목록을 바꾸는 것은 이 정책 문서를 바꾸는 것이고, 정책 문서는 게이트 파일입니다. 이 Agent의 script(`scripts/**` 아래)는 8절 3항의 `scripts/**` 제외에 이미 들어가므로 여기 다시 적지 않습니다.
 
 ```
