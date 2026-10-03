@@ -40,13 +40,13 @@
 // DATABASE_URL must point at the database to seal. The approval and its
 // members are permanent; withdrawing is an EmailSendApprovalRevocation, not an
 // edit.
-import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma.ts";
 import {
   approvalAddressDigest,
   sealRiskAcceptedApproval,
 } from "../lib/emailSendApprovalCohort.ts";
 import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "../lib/emailSuppressionCore.ts";
+import { cohortDigest, coveredAt } from "./seal-risk-accepted-cohort-core.mjs";
 
 const PURPOSE_KEY = "product_updates";
 
@@ -80,24 +80,18 @@ const ALREADY_SEALED = {
 /** The candidates at `approvedAt`, the counts left out, and the scope's digest. */
 const cohortAt = async (db, approvedAt) => {
   const accounts = await db.user.findMany({ select: { id: true, email: true, createdAt: true } });
-  const covered = (account) =>
-    Boolean(account.email) && Boolean(account.createdAt) && account.createdAt.getTime() <= approvedAt.getTime();
   const candidates = accounts
-    .filter(covered)
+    .filter((account) => coveredAt(account, approvedAt))
     .map((account) => ({ userId: account.id, emailAddress: account.email }));
-  const pairs = candidates
-    .map((candidate) => [candidate.userId, approvalAddressDigest(candidate.emailAddress)])
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const digest = createHash("sha256")
-    .update(
-      JSON.stringify({
-        approvedAt: approvedAt.toISOString(),
-        purposeKey: PURPOSE_KEY,
-        addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
-        members: pairs,
-      })
-    )
-    .digest("hex");
+  const digest = cohortDigest({
+    approvedAt,
+    purposeKey: PURPOSE_KEY,
+    addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+    members: candidates.map((candidate) => ({
+      userId: candidate.userId,
+      addressDigest: approvalAddressDigest(candidate.emailAddress),
+    })),
+  });
   return {
     total: accounts.length,
     noAddress: accounts.filter((account) => !account.email).length,
@@ -165,7 +159,8 @@ const run = async () => {
     return fail("\nNo account existed at --approved-at with an address and a signup date; nothing to seal.");
   }
   if (!apply) {
-    console.log(`\nDry run: nothing written. To seal exactly this cohort, rerun with --apply --confirm-cohort ${cohort.digest}.`);
+    console.log(`\nDry run: nothing written. To seal exactly this cohort, rerun with:
+  --apply --confirm-cohort ${cohort.digest}`);
     return;
   }
   if (!confirmCohort) return fail("--apply needs --confirm-cohort <digest printed by the dry run>.");
