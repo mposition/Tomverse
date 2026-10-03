@@ -15,6 +15,7 @@ import test from "node:test";
 import {
   AGENT_ENVIRONMENT_BRANCHES,
   AGENT_RAILWAY_PROJECT,
+  AGENT_RAILWAY_REGION,
   AGENT_RUNNER_SERVICES,
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
@@ -143,6 +144,11 @@ test("the resource list is exactly the table for that environment, and refuses t
           ? { restartPolicyType: "NEVER" }
           : { cronSchedule: runner.cronSchedule, restartPolicyType: "NEVER" }
       );
+      // One replica, in the region the approved APP 8 record names. Railway's
+      // default for a new project is `sfo`, so an unnamed region is not a
+      // default -- it is a deployment somewhere the record does not say, which
+      // is what the first apply produced.
+      assert.deepEqual(resource.replicas, { [AGENT_RAILWAY_REGION]: 1 });
       assert.deepEqual(
         Object.keys(resource.env).sort(),
         [...runner.environments[environment]].sort()
@@ -236,5 +242,23 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   ]) {
     assert.ok(root.scripts[script], `package.json has no "${script}" script`);
     assert.match(root.scripts[script], /npm run --prefix \.railway agents:/, script);
+  }
+});
+
+test("the region is named rather than left to Railway's default", () => {
+  // The approved policy's APP 8 record states where this agent processes
+  // data. A service placed by default would be in `sfo`, which that record
+  // does not say -- and the first apply did exactly that.
+  assert.equal(AGENT_RAILWAY_REGION, "asia-southeast1-eqsg3a");
+
+  const { dsl } = recordingDsl();
+  for (const environment of Object.keys(AGENT_ENVIRONMENT_BRANCHES)) {
+    for (const resource of buildAgentRunnerResources(environment, dsl)) {
+      assert.deepEqual(
+        resource.replicas,
+        { [AGENT_RAILWAY_REGION]: 1 },
+        `${environment}/${resource.name}`,
+      );
+    }
   }
 });

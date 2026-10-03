@@ -178,6 +178,7 @@
     "report:provider-data-destinations": "node --conditions=react-server --import tsx scripts/report-provider-data-destinations.mjs",
     "email:check-message-id-duplicates": "node --conditions=react-server --import tsx scripts/email-check-message-id-duplicates.mjs",
     "email:recover-permanent-bounces": "node --conditions=react-server --import tsx scripts/email-recover-permanent-bounces.mjs",
+    "email:seal-risk-accepted-cohort": "node --conditions=react-server --import tsx scripts/seal-risk-accepted-cohort.mjs",
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
     "report:existing-account-jurisdiction": "node --conditions=react-server --import tsx scripts/report-existing-account-jurisdiction.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",

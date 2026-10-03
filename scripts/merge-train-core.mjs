@@ -32,7 +32,11 @@ const FAILED_DEPLOYMENT_STATUSES = new Set(["FAILED", "CRASHED"]);
 
 // SKIPPED deployments in a row, among the merge's own and the later ones that
 // contain it, that count as a failure (operator decision 2026-10-03). Fewer
-// is a wait for the next deployment that contains the merge.
+// is a wait for the next deployment that contains the merge. A SKIPPED whose
+// commit has a cancelled check run is not counted at all: a later push
+// cancelled its CI, so it says nothing about whether the code passes. On
+// 2026-10-03 #1965 latched on three SKIPPED in a row, two of them cancelled by
+// merges a minute apart, and deployed with #1969 half an hour later.
 export const SKIPPED_RUN_FAILURE = 3;
 
 export const LANES = [
@@ -218,6 +222,21 @@ export function replacementCommits(deployments, commitSha) {
   return [...commits];
 }
 
+/**
+ * Commits with a SKIPPED deployment among the merge's own and those of later
+ * commits in `containing`. The caller asks GitHub which of them had a check
+ * run cancelled and passes that set back to deploymentOutcome.
+ */
+export function skippedCommits(deployments, commitSha, containing = new Set()) {
+  const sha = commitSha.toLowerCase();
+  const commits = new Set();
+  for (const deployment of deployments) {
+    const commit = commitOf(deployment);
+    if (deployment.status === "SKIPPED" && (commit === sha || containing.has(commit))) commits.add(commit);
+  }
+  return [...commits];
+}
+
 const oldestFirst = (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt);
 
 /**
@@ -227,13 +246,14 @@ const oldestFirst = (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt);
  * A SKIPPED or replaced (REMOVED/REMOVING) deployment is followed through the
  * later deployments of the service whose commit is in `containing`, oldest
  * first: any success means the merge is serving; a build or runtime failure is
- * a failure; SKIPPED_RUN_FAILURE SKIPPED in a row is a failure (REMOVED
- * neither extends nor breaks the run); one in flight, or a SKIPPED run still
+ * a failure; SKIPPED_RUN_FAILURE SKIPPED in a row is a failure (REMOVED, and a
+ * SKIPPED whose commit is in `cancelled`, neither extends nor breaks the
+ * run); one in flight, or a SKIPPED run still
  * short of it, is a wait. A replaced deployment with nothing after it that
  * contains the merge -- a rollback, or a replacement GitHub could not place --
  * is "unknown".
  */
-function serviceState(deployments, newest, containing) {
+function serviceState(deployments, newest, containing, cancelled) {
   if (SUCCEEDED_DEPLOYMENT_STATUSES.has(newest.status)) return "done";
   if (IN_FLIGHT_DEPLOYMENT_STATUSES.has(newest.status)) return "in_progress";
   if (FAILED_DEPLOYMENT_STATUSES.has(newest.status)) return "failed";
@@ -246,7 +266,9 @@ function serviceState(deployments, newest, containing) {
   if (sequence.some((deployment) => FAILED_DEPLOYMENT_STATUSES.has(deployment.status))) return "failed";
   let run = 0;
   for (const deployment of sequence) {
-    if (deployment.status === "SKIPPED") {
+    if (deployment.status === "SKIPPED" && cancelled.has(commitOf(deployment))) {
+      continue;
+    } else if (deployment.status === "SKIPPED") {
       run += 1;
       if (run >= SKIPPED_RUN_FAILURE) return "failed";
     } else if (!REPLACED_DEPLOYMENT_STATUSES.has(deployment.status)) {
@@ -271,7 +293,7 @@ const OUTCOME_ORDER = ["failed", "unknown", "missing", "in_progress", "done"];
  * "failed" and "unknown"; "not_seen" and "partial" are waits whose length the
  * caller decides.
  */
-export function deploymentOutcome(deployments, commitSha, branch, containing = new Set()) {
+export function deploymentOutcome(deployments, commitSha, branch, containing = new Set(), cancelled = new Set()) {
   const sha = commitSha.toLowerCase();
   const forCommit = deployments.filter((deployment) => commitOf(deployment) === sha);
   if (forCommit.length === 0) return { state: "not_seen", deployments: [] };
@@ -283,7 +305,7 @@ export function deploymentOutcome(deployments, commitSha, branch, containing = n
   let worst = "done";
   for (const serviceId of expected) {
     const newest = forCommit.filter((deployment) => deployment.serviceId === serviceId).sort(newestFirst)[0];
-    const state = newest ? serviceState(deployments, newest, containing) : "missing";
+    const state = newest ? serviceState(deployments, newest, containing, cancelled) : "missing";
     if (OUTCOME_ORDER.indexOf(state) < OUTCOME_ORDER.indexOf(worst)) worst = state;
   }
   const outcome = { failed: "failed", unknown: "unknown", missing: "partial", in_progress: "in_progress", done: "succeeded" };
