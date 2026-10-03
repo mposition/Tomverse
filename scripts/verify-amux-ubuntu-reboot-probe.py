@@ -56,9 +56,10 @@ try:
     with urllib.request.urlopen(
         "https://127.0.0.1:8824/api/health", context=context, timeout=8
     ) as response:
+        body = json.load(response)
         health = {
             "http": response.status,
-            "status": json.load(response).get("status"),
+            "status": body.get("status") if isinstance(body, dict) else None,
         }
 except (OSError, ValueError) as error:
     health["error"] = type(error).__name__

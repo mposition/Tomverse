@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { verifyReboot } from "../scripts/verify-amux-ubuntu-reboot.mjs";
+import { parseArgs, verifyReboot } from "../scripts/verify-amux-ubuntu-reboot.mjs";
 
 const expectedSha256 = "a".repeat(64);
 const worktreeRoot = "/home/tommy/worktrees/Tomverse";
@@ -86,4 +86,46 @@ test("rejects unavailable services and dashboard after reboot", () => {
   assert.ok(failures.includes("local AMUX health failed"));
   assert.ok(failures.includes("tailnet Dashboard is unavailable"));
   assert.ok(failures.includes("codex-chore process is not running"));
+});
+
+test("accepts a removed bridge unit as an inactive state", () => {
+  const snapshot = healthySnapshot();
+  snapshot.units.bridge.enabled = "";
+  assert.deepEqual(verifyReboot(snapshot, options), []);
+});
+
+test("rejects stale Tailscale route, disabled linger, and bad health state", () => {
+  const snapshot = healthySnapshot();
+  snapshot.serve = "https://another-host.example.ts.net (tailnet only)";
+  snapshot.linger = "Linger=no";
+  snapshot.health.status = "degraded";
+  const failures = verifyReboot(snapshot, options);
+  assert.ok(failures.includes("Tailscale Serve route differs"));
+  assert.ok(failures.includes("worker user linger is disabled"));
+  assert.ok(failures.includes("local AMUX health failed"));
+});
+
+test("rejects duplicate or unexpected worker sessions", () => {
+  const snapshot = healthySnapshot();
+  snapshot.panes[1] = { ...snapshot.panes[0] };
+  snapshot.panes.push({ ...snapshot.panes[0], session: "amux-unknown" });
+  const failures = verifyReboot(snapshot, options);
+  assert.ok(failures.includes("worker pane count differs"));
+  assert.ok(failures.includes("unexpected or duplicate worker: claude-chore"));
+  assert.ok(failures.includes("unexpected or duplicate worker: unknown"));
+  assert.ok(failures.includes("missing worker: claude-contract"));
+});
+
+test("rejects malformed CLI options before contacting SSH", () => {
+  const common = [
+    "--identity", "id", "--dashboard", "https://tomverseagent.example.ts.net/",
+    "--before-boot-time", options.beforeBootTime, "--expected-sha256", expectedSha256,
+  ];
+  assert.throws(() => parseArgs(["--host", "-F@host", ...common]), /invalid SSH host/);
+  assert.throws(() => parseArgs([
+    "--host", "tommy@host", "--identity", "id", "--dashboard", "http://host/",
+    "--before-boot-time", options.beforeBootTime, "--expected-sha256", expectedSha256,
+  ]),
+    /Dashboard must use HTTPS/);
+  assert.throws(() => parseArgs(["--host", "tommy@host"]), /missing --identity/);
 });
