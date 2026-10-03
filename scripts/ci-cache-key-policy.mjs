@@ -74,8 +74,9 @@ export const WIDELY_READABLE_BRANCHES = ["main", "develop"];
 export const CACHE_MODES = ["read", "write", "write-only", "none"];
 export const NON_WRITE_CACHE_MODES = ["read", "none"];
 
-/** Each capability as a verb, so a finding reads as a sentence. */
+/** Each capability as a verb, so a finding names exactly what it found. */
 const CAPABILITY_WORDS = { restore: "restoring", save: "saving" };
+const capabilityWords = (capabilities) => capabilities.map((name) => CAPABILITY_WORDS[name]).join(" and ");
 
 /**
  * What each mode lets a job do, so "narrower" can be asked as a question.
@@ -136,34 +137,46 @@ export const cacheModeFailures = (document) => {
           : `workflow-level cache-mode is ${JSON.stringify(declared.workflow)}`,
     });
   }
+  // Being non-write is not the same as being narrower. `read` under a workflow
+  // set to `none` turns restoring back on, which is an override rather than a
+  // narrowing -- the only narrowing between two non-write modes is `none` under
+  // `read`. So every valid value goes through the same subset test, and each
+  // finding names the capabilities *this* pair would add and no others: two
+  // rounds of independent review were spent on a detail and a message that
+  // described a different case than the one they were printed for.
   for (const [jobId, value] of declared.jobs) {
-    if (classify(value) !== "non_write") {
+    if (classify(value) === "unknown") {
       failures.push({
-        rule: "cache_mode_widened_by_job",
+        rule: "cache_mode_unreadable_on_job",
         jobId,
-        detail: `cache-mode is ${JSON.stringify(value)}, which grants saving`,
+        detail: `cache-mode is ${JSON.stringify(value)}`,
       });
       continue;
     }
-    // Being non-write is not the same as being narrower. `read` under a
-    // workflow set to `none` turns restoring back on, which is an override and
-    // not a narrowing -- the only narrowing this allows is `none` under `read`.
-    // Independent review found the earlier version accepting it. Skipped when
-    // the workflow value is not one of the four, because the failure above
-    // already names that and a second finding would only obscure it.
-    if (workflowKind === "non_write") {
-      const allowed = CACHE_MODE_CAPABILITIES[declared.workflow];
-      const wanted = CACHE_MODE_CAPABILITIES[value];
-      const widened = wanted.filter((capability) => !allowed.includes(capability));
-      if (widened.length > 0) {
+    if (workflowKind !== "non_write") {
+      // Nothing to subtract from: the workflow-level failure above already
+      // names that, and a job value can only be reported on its own terms.
+      if (classify(value) === "write_capable") {
         failures.push({
           rule: "cache_mode_widened_by_job",
           jobId,
-          detail: `cache-mode is ${JSON.stringify(value)} under a workflow set to ${JSON.stringify(
-            declared.workflow,
-          )}, which grants ${widened.map((capability) => CAPABILITY_WORDS[capability]).join(" and ")}`,
+          detail: `cache-mode is ${JSON.stringify(value)}, which grants ${capabilityWords(
+            CACHE_MODE_CAPABILITIES[value],
+          )}`,
         });
       }
+      continue;
+    }
+    const allowed = CACHE_MODE_CAPABILITIES[declared.workflow];
+    const widened = CACHE_MODE_CAPABILITIES[value].filter((capability) => !allowed.includes(capability));
+    if (widened.length > 0) {
+      failures.push({
+        rule: "cache_mode_widened_by_job",
+        jobId,
+        detail: `cache-mode is ${JSON.stringify(value)} under a workflow set to ${JSON.stringify(
+          declared.workflow,
+        )}, which grants ${capabilityWords(widened)}`,
+      });
     }
   }
   return failures;
@@ -805,7 +818,9 @@ export const describeFinding = (finding) => {
     case "cache_mode_write_capable_in_widely_readable_scope":
       return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")} and ${finding.detail}. Restore-only steps do not take that away: the job's token can still write any key through the cache API, so anything executing in the job can plant an entry a required gate restores. Declare cache-mode: ${NON_WRITE_CACHE_MODES.join(" or ")} at the workflow level.`;
     case "cache_mode_widened_by_job":
-      return `${where}: ${finding.detail}. A job-level value replaces the workflow's rather than combining with it, so it may only take capability away -- what it grants has to be a subset of what the workflow granted. Saving is back under any of these workflows, and restoring is back under one set to none. A job needing no narrower mode is left without one, and inherits.`;
+      return `${where}: ${finding.detail}. A job-level value replaces the workflow's rather than combining with it, so it may only take capability away -- what it grants has to be a subset of what the workflow granted. The detail above names what this one adds and nothing else. A job that needs no narrower mode is left without one, and inherits.`;
+    case "cache_mode_unreadable_on_job":
+      return `${where}: ${finding.detail}, which is not one of GitHub's four values (${CACHE_MODES.join(", ")}). It is refused because nothing can say what it grants, rather than for what it grants; an expression counts here, since the documented key takes a literal.`;
     case "unguarded_save_in_widely_readable_scope":
       return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")}, where a written entry is restorable by every run that can see that scope — ${finding.detail}. Use actions/cache/restore, and if a save is needed give it an if: on github.event_name or github.ref.`;
     default:

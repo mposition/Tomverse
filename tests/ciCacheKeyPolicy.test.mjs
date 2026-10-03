@@ -127,6 +127,7 @@ test("every rule a finding can carry has its own message", () => {
     ["unguarded_save_in_widely_readable_scope", "x"],
     ["cache_mode_write_capable_in_widely_readable_scope", "x"],
     ["cache_mode_widened_by_job", "x"],
+    ["cache_mode_unreadable_on_job", "x"],
   ];
   for (const [rule, detail] of cases) {
     const message = describeFinding({ rule, workflowPath: "w", jobId: "j", detail });
@@ -953,5 +954,49 @@ test("the widening message is true of the failure it is printed for", () => {
 
   for (const jobMode of ["write", "write-only"]) {
     assert.match(messageFor("read", jobMode), /grants saving/, jobMode);
+  }
+});
+
+test("each job-mode finding names the capabilities that pair adds, and no others", () => {
+  // Rounds 14 and 15 were both spent here. The first version said every job
+  // override "gives back a write-capable token"; the second named the added
+  // capability only in the subset branch and left a shared sentence
+  // enumerating both, so the none/read failure still claimed saving was back.
+  // The property is simple enough to state as one, so this computes the
+  // expected words rather than listing sentences.
+  const GRANTS = { none: [], read: ["restoring"], "write-only": ["saving"], write: ["restoring", "saving"] };
+  const workflow = (workflowMode, jobMode) =>
+    parseYaml(
+      ["on:", "  schedule:", "    - cron: '0 1 * * *'", `cache-mode: ${workflowMode}`, "jobs:", "  j:", "    runs-on: ubuntu-latest", `    cache-mode: ${jobMode}`, "    steps: []", ""].join("\n"),
+    );
+
+  for (const workflowMode of ["read", "none"]) {
+    for (const jobMode of ["read", "none", "write", "write-only"]) {
+      const added = GRANTS[jobMode].filter((word) => !GRANTS[workflowMode].includes(word));
+      const found = cacheModeFailures(workflow(workflowMode, jobMode)).filter((entry) => entry.jobId === "j");
+      const where = `${workflowMode}/${jobMode}`;
+      if (added.length === 0) {
+        assert.deepEqual(found, [], `${where} takes capability away, so it is a narrowing`);
+        continue;
+      }
+      assert.equal(found.length, 1, where);
+      const message = describeFinding({ ...found[0], workflowPath: "w.yml" });
+      for (const word of added) assert.match(message, new RegExp(word), `${where} must name ${word}`);
+      // And must not name one it does not add. This is the half that was
+      // missing: a sentence listing both reads as true for every case.
+      for (const word of ["restoring", "saving"]) {
+        if (added.includes(word)) continue;
+        assert.ok(!message.includes(word), `${where} must not name ${word}: ${message}`);
+      }
+    }
+  }
+
+  // A value outside the four is refused for being unreadable, not for what it
+  // grants, so its message claims no capability at all.
+  const unreadable = cacheModeFailures(workflow("read", '"readonly"')).filter((entry) => entry.jobId === "j");
+  assert.deepEqual(unreadable.map((entry) => entry.rule), ["cache_mode_unreadable_on_job"]);
+  const unreadableMessage = describeFinding({ ...unreadable[0], workflowPath: "w.yml" });
+  for (const word of ["restoring", "saving"]) {
+    assert.ok(!unreadableMessage.includes(word), unreadableMessage);
   }
 });
