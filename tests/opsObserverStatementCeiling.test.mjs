@@ -1,17 +1,15 @@
-// The statement ceiling (docs/policy/sre-ops.md §6): calls are counted before
-// they run, the (A)+1th throws without reaching the client, a call that could
-// send more than one statement is refused, and a method not known to be one
-// statement -- directly or through a nested object -- is refused rather than
-// guessed at.
+// The statement ceiling (docs/policy/sre-ops.md §6): only tagged single-statement
+// raw calls pass and are counted before they run; the (A)+1th throws without
+// reaching the client; every model delegate, *Unsafe method, internal entry
+// point and nested function is refused; and a reviewed fixed-cost helper runs
+// only after its whole cost is taken.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  ONE_STATEMENT_DELEGATE_METHODS,
   StatementCeilingError,
   countingClient,
-  delegateArgsFanOut,
   rawCallIsSingleStatement,
 } from "../scripts/ops-observer/statement-ceiling-core.mjs";
 
@@ -20,91 +18,90 @@ const sqlFragment = { strings: ["SELECT 1; DROP TABLE x"], values: [] };
 
 function fakeTx() {
   const sent = [];
-  const delegateMethods = Object.fromEntries(
-    [...ONE_STATEMENT_DELEGATE_METHODS, "upsert", "createManyAndReturn"].map((m) => [m, (...args) => (sent.push(`model.${m}`), args)]),
-  );
-  delegateMethods.nested = { run: () => sent.push("model.nested.run") };
+  const record = (name) => (...args) => (sent.push(name), args);
   return {
     sent,
     tx: {
-      opsObserverState: delegateMethods,
-      $queryRaw: (...args) => (sent.push("$queryRaw"), args),
-      $executeRaw: (...args) => (sent.push("$executeRaw"), args),
-      $executeRawUnsafe: (...args) => (sent.push("$executeRawUnsafe"), args),
-      $transaction: () => sent.push("$transaction"),
+      opsObserverState: {
+        findUnique: record("model.findUnique"),
+        update: record("model.update"),
+        nested: { run: record("model.nested.run") },
+      },
+      $queryRaw: record("$queryRaw"),
+      $executeRaw: record("$executeRaw"),
+      $executeRawUnsafe: record("$executeRawUnsafe"),
+      $queryRawUnsafe: record("$queryRawUnsafe"),
+      $transaction: record("$transaction"),
+      _request: record("_request"),
+      _executeRequest: record("_executeRequest"),
     },
   };
 }
 
 const refusedWith = (code) => (e) => e instanceof StatementCeilingError && e.code === code;
 
-test("calls up to the allowance pass through and are counted", () => {
+test("tagged single-statement raw calls up to the allowance pass and are counted", () => {
   const { tx, sent } = fakeTx();
-  const { client, used } = countingClient(tx, 3);
-  client.opsObserverState.findUnique({ where: { genesisId: "g" } });
+  const { client, used } = countingClient(tx, 2);
   client.$queryRaw(...tag`SELECT ${1}`);
-  client.opsObserverState.update({ where: { genesisId: "g" }, data: { generation: 2, keys: { "P3#x": { status: "open" } } } });
-  assert.equal(used(), 3);
-  assert.deepEqual(sent, ["model.findUnique", "$queryRaw", "model.update"]);
+  client.$executeRaw(...tag`UPDATE x SET y = ${"a;b"}`);
+  assert.equal(used(), 2);
+  assert.deepEqual(sent, ["$queryRaw", "$executeRaw"]);
 });
 
 test("the call past the allowance throws before it reaches the client", () => {
   const { tx, sent } = fakeTx();
   const { client } = countingClient(tx, 1);
   client.$executeRaw(...tag`UPDATE x SET y = ${1}`);
-  assert.throws(() => client.opsObserverState.findMany({}), refusedWith("statement_ceiling_exceeded"));
+  assert.throws(() => client.$queryRaw(...tag`SELECT 1`), refusedWith("statement_ceiling_exceeded"));
   assert.deepEqual(sent, ["$executeRaw"]);
-});
-
-test("a delegate call that could fan out into several queries is refused, uncounted", () => {
-  const { tx, sent } = fakeTx();
-  const { client, used } = countingClient(tx, 10);
-  for (const args of [
-    { where: {}, include: { genesis: true } },
-    { where: {}, select: { genesis: { select: { id: true } } } },
-    { data: { genesis: { connect: { id: "g" } } } },
-    { data: [{ items: { create: [{ kind: "new_open" }] } }] },
-    { where: {}, create: {}, update: {} },
-  ]) {
-    assert.ok(delegateArgsFanOut(args), JSON.stringify(args));
-    assert.throws(() => client.opsObserverState.findMany(args), refusedWith("statement_ceiling_fan_out"));
-  }
-  assert.equal(delegateArgsFanOut({ where: { id: "x" }, select: { id: true, mode: false } }), false);
-  assert.equal(delegateArgsFanOut({ data: { keys: { "P1a#database": { status: "open" } } } }), false);
-  assert.equal(used(), 0);
-  assert.deepEqual(sent, []);
 });
 
 test("a raw call that is not one tagged statement is refused, uncounted", () => {
   const { tx, sent } = fakeTx();
   const { client, used } = countingClient(tx, 10);
-  for (const args of [
-    ["SELECT 1"],
-    tag`SELECT 1; SELECT 2`,
-    tag`SELECT ${sqlFragment}`,
-  ]) {
+  for (const args of [["SELECT 1"], tag`SELECT 1; SELECT 2`, tag`SELECT ${sqlFragment}`]) {
     assert.equal(rawCallIsSingleStatement(args), false);
     assert.throws(() => client.$queryRaw(...args), refusedWith("statement_ceiling_not_single_statement"));
   }
-  assert.equal(rawCallIsSingleStatement(tag`SELECT ${"a;b"}`), true, "a ; inside a bound value is data, not SQL");
   assert.equal(used(), 0);
   assert.deepEqual(sent, []);
 });
 
-test("unknown methods are refused, whether direct, raw-unsafe or nested", () => {
+test("model delegates, unsafe and internal entry points, and nested functions all refuse", () => {
   const { tx, sent } = fakeTx();
   const { client, used } = countingClient(tx, 10);
   for (const call of [
-    () => client.opsObserverState.upsert({}),
-    () => client.opsObserverState.createManyAndReturn({}),
+    () => client.opsObserverState.findUnique({ where: { genesisId: "g" }, select: { genesis: true } }),
+    () => client.opsObserverState.update({ where: {}, data: {} }),
     () => client.opsObserverState.nested.run(),
-    () => client.$transaction(),
     () => client.$executeRawUnsafe("DELETE FROM x"),
+    () => client.$queryRawUnsafe("SELECT 1"),
+    () => client.$transaction(),
+    () => client._request({}),
+    () => client._executeRequest({}),
   ]) {
     assert.throws(call, refusedWith("statement_ceiling_unknown_method"));
   }
   assert.equal(used(), 0);
   assert.deepEqual(sent, []);
+});
+
+test("a fixed-cost helper runs against the real client only after its whole cost is taken", () => {
+  const { tx, sent } = fakeTx();
+  const { client, charge, used } = countingClient(tx, 5);
+  client.$queryRaw(...tag`SELECT 1`);
+  const result = charge(4, (raw) => {
+    raw.opsObserverState.update({});
+    return "appended";
+  });
+  assert.equal(result, "appended");
+  assert.equal(used(), 5);
+  let ran = false;
+  assert.throws(() => charge(1, () => (ran = true)), refusedWith("statement_ceiling_exceeded"));
+  assert.equal(ran, false);
+  assert.deepEqual(sent, ["$queryRaw", "model.update"]);
+  assert.throws(() => charge(0, () => {}), /charge_invalid/);
 });
 
 test("an invalid allowance is a programming error", () => {

@@ -11,8 +11,9 @@
  *     re-arms transaction_timeout from zero at or before the run deadline;
  *   - logs the transaction_timeout the session inherited, so an operator can
  *     see when this agent replaced one (operator decision N-7);
- *   - gives the callback a client that refuses its (A)th statement and any
- *     method not known to be one statement.
+ *   - gives the callback a client that sends only tagged single-statement
+ *     raw queries, refuses its (A)th statement, and a `charge(n, fn)` for a
+ *     reviewed fixed-cost helper that needs the real client.
  *
  * `assertNotLate(runDeadline)` is the separate short transaction that must pass
  * before a caller reports success, sends, or pings a heartbeat (§6 item 5): the
@@ -92,7 +93,11 @@ function logArmed(kind: OpsObserverTransactionKind, armed: OpsObserverArmed) {
 export async function withOpsObserverTransaction<T>(
   kind: OpsObserverTransactionKind,
   runDeadline: Date,
-  fn: (tx: Prisma.TransactionClient, armed: OpsObserverArmed) => Promise<T>,
+  fn: (
+    tx: Prisma.TransactionClient,
+    armed: OpsObserverArmed,
+    charge: <R>(statements: number, helper: (raw: Prisma.TransactionClient) => R) => R,
+  ) => Promise<T>,
   client: PrismaClient = prisma,
 ): Promise<{ result: T; armed: OpsObserverArmed }> {
   const bound = TRANSACTION_BOUNDS[kind];
@@ -103,7 +108,7 @@ export async function withOpsObserverTransaction<T>(
       armed = await arm(tx, kind, runDeadline);
       logArmed(kind, armed);
       const counted = countingClient(tx, bound.statementCeiling - 1);
-      return fn(counted.client as Prisma.TransactionClient, armed);
+      return fn(counted.client as Prisma.TransactionClient, armed, counted.charge);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -143,22 +148,19 @@ export async function assertNotLate(runDeadline: Date, client: PrismaClient = pr
 export const BUDGET_INSUFFICIENT_SQLSTATE = "OB001";
 
 /**
- * Whether an error is the arming function's budget refusal. The SQLSTATE is the
- * stable signal; where a driver adapter nests it (meta.driverAdapterError,
- * cause, originalCode) it is looked for there, and the message is only a
- * fallback.
+ * Whether an error is the arming function's budget refusal, by its SQLSTATE
+ * only. Through Prisma's driver adapter the PostgreSQL error arrives as P2010
+ * with the database's code at meta.driverAdapterError.cause.code (and
+ * originalCode); a pg error carries it as `code`. Message text is not
+ * consulted: a match on prose would hide a change in where the code travels.
  */
 export function isBudgetInsufficient(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  const visit = (value: unknown, depth: number): boolean => {
-    if (value === null || typeof value !== "object" || depth > 6 || seen.has(value)) return false;
-    seen.add(value);
-    const record = value as Record<string, unknown>;
-    for (const key of ["code", "originalCode", "sqlState", "sqlstate"]) {
-      if (record[key] === BUDGET_INSUFFICIENT_SQLSTATE) return true;
-    }
-    if (typeof record.message === "string" && record.message.includes("deadline_budget_insufficient")) return true;
-    return Object.values(record).some((child) => visit(child, depth + 1)) || visit(record.cause, depth + 1);
+  if (error === null || typeof error !== "object") return false;
+  const e = error as {
+    code?: unknown;
+    meta?: { driverAdapterError?: { cause?: { code?: unknown; originalCode?: unknown } } };
   };
-  return visit(error, 0);
+  if (e.code === BUDGET_INSUFFICIENT_SQLSTATE) return true;
+  const cause = e.meta?.driverAdapterError?.cause;
+  return cause?.code === BUDGET_INSUFFICIENT_SQLSTATE || cause?.originalCode === BUDGET_INSUFFICIENT_SQLSTATE;
 }
