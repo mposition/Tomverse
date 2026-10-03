@@ -76,7 +76,18 @@ test("the workspace build and test are never gated", () => {
     assert.equal(step("Test").if, undefined);
 });
 
-test("caches are restored by everyone and saved only by develop pushes", () => {
+test("caches are restored by everyone and saved only from a pull request", () => {
+    // #1990 saved on pushes to develop, because a ~3 GiB `target` per pull
+    // request filled the repository's 10 GB budget and evicted develop's
+    // entries. The cache-poisoning audit's P1 forbids writing from a run that
+    // can land on main or develop at all, since such an entry is restorable by
+    // every run that can see that scope.
+    //
+    // The merge of the two resolved it by removing what the dispute was about:
+    // `target` is no longer cached, only the downloaded crates, and the save is
+    // confined to the pull request's own scope -- restorable by re-runs of that
+    // pull request and nothing else. This test moved with the workflow; it was
+    // still pinning #1990's condition afterwards.
     for (const candidate of steps.filter((s) => String(s.uses ?? "").startsWith("actions/cache"))) {
         const uses = String(candidate.uses);
         assert.ok(
@@ -84,10 +95,24 @@ test("caches are restored by everyone and saved only by develop pushes", () => {
             `${candidate.name} uses ${uses}; the combined action saves from pull requests too`
         );
         if (uses.startsWith("actions/cache/save@")) {
-            assert.match(
-                String(candidate.if),
-                /^github\.event_name == 'push' && github\.ref == 'refs\/heads\/develop' && /,
-                candidate.name
+            assert.equal(String(candidate.if), "github.event_name == 'pull_request'", candidate.name);
+        }
+    }
+});
+
+test("no cache step names the build output directory", () => {
+    // `target` holds build-script binaries that cargo executes, with nothing
+    // verifying them, and it is what made this cache both a poisoning path and
+    // a budget problem. Removing it is the resolution; this keeps it removed.
+    for (const candidate of steps.filter((s) => String(s.uses ?? "").startsWith("actions/cache"))) {
+        const paths = String(candidate.with?.path ?? "")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+        for (const path of paths) {
+            assert.ok(
+                !/(^|\/)target(\/|$)/.test(path),
+                `${candidate.name} caches "${path}"`
             );
         }
     }

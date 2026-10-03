@@ -844,6 +844,13 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  AgentDigestItem_agent_key_check: {
+    owner: "list",
+    module: "lib/agentDigestContract.ts",
+    list: "AGENT_DIGEST_AGENT_KEYS",
+    reason:
+      "The agents that may store digests in the shared AgentDigestItem table. Adding an agent is a reviewed migration that also gives it a kind list and a body retention; an unknown key would be a write no agent owns.",
+  },
   AmuxOrchestratorWrite_call_kind_check: {
     owner: "list",
     module: "lib/amux/orchestratorHaltCore.ts",

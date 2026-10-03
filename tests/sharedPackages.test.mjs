@@ -9,8 +9,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ESLint } from "eslint";
 
@@ -249,6 +250,31 @@ for (const name of packageNames) {
     assert.equal(parsed.compilerOptions.paths, undefined);
   });
 }
+
+test("the checker finds the compiler the way Node finds anything else", () => {
+    // The standalone type-check is only evidence if the compiler was actually
+    // run. The checker used to spawn a literal
+    // `<root>/node_modules/typescript/bin/tsc`, which does not exist in a git
+    // worktree -- the worktree installs nothing and Node resolves up to the
+    // parent checkout. The spawn failed, its loader stack trace landed in the
+    // problem text, and a missing compiler was reported as a package that does
+    // not type-check.
+    const script = join(root, "scripts", "check-shared-packages.mjs");
+    const source = readFileSync(script, "utf8");
+
+    assert.doesNotMatch(
+        source,
+        /node_modules["'\s,)]/,
+        "a hard-coded node_modules path assumes this checkout installed its own " +
+            "dependencies; resolve the compiler by specifier instead."
+    );
+
+    assert.equal(
+        existsSync(createRequire(pathToFileURL(script).href).resolve("typescript/bin/tsc")),
+        true,
+        "typescript/bin/tsc resolves from the checker's own location"
+    );
+});
 
 test("the workspace resolves the package by its published specifier", async () => {
   // Not a formality: the app imports `@tomverse/chat-core`, and that only

@@ -3219,7 +3219,20 @@ const checks = [
         source.includes("gitleaks/gitleaks-action@v3") &&
         source.includes("actions/checkout@v6") &&
         source.includes("actions/setup-node@v6") &&
-        source.includes("actions/cache@v5") &&
+        // Restore, never save. This workflow runs on the default branch, so an
+        // entry it wrote would be restorable by every run in the repository --
+        // the required pull-request gate included -- and it runs third-party
+        // npm install scripts before it builds. The combined `actions/cache`
+        // writes from its post step and cannot be guarded, so its absence is
+        // the thing worth pinning here, not just the version.
+        // .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        source.includes("actions/cache/restore@v5") &&
+        // Any version, any pin, and any spelling of the `uses:` line. Forbidding
+        // the literal `actions/cache@v5` let `@v4`, `@v6` or a SHA save from a
+        // post step; forbidding the literal `uses: actions/cache@` still let
+        // `uses:  actions/cache@v6` and `uses: "actions/cache@v6"` through.
+        !/uses:\s*["']?actions\/cache@/.test(source) &&
+        !/uses:\s*["']?actions\/cache\/save@/.test(source) &&
         source.includes("actions/upload-artifact@v7") &&
         source.includes("fetch-depth: 0") &&
         source.includes("npm audit --omit=dev --json") &&

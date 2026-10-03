@@ -35,6 +35,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -140,7 +141,34 @@ for (const { name, configured } of configuredFor) {
 
 // --- 2. Each package with TypeScript type-checks standalone -----------------
 
-for (const entry of scriptPackages) {
+/**
+ * The compiler, found the way Node finds anything else.
+ *
+ * A hard-coded `<root>/node_modules/typescript/bin/tsc` is only right when the
+ * checkout installed its own dependencies. A git worktree does not: Node
+ * resolves up to the parent checkout's `node_modules`, which is how every other
+ * script here reaches `tsx`, and the literal path pointed at a file that was
+ * never there. The spawn then failed with a loader stack trace that landed in
+ * the problem text below, so a missing compiler was reported as a package that
+ * does not type-check -- the one conclusion the evidence did not support.
+ */
+const tscBin = (() => {
+  try {
+    return createRequire(import.meta.url).resolve("typescript/bin/tsc");
+  } catch {
+    return null;
+  }
+})();
+
+if (tscBin === null && scriptPackages.length > 0) {
+  problems.push(
+    "typescript is not resolvable from this checkout, so nothing type-checked " +
+      `the ${scriptPackages.length} package(s) with TypeScript sources. Run ` +
+      "`npm ci`. This is the check being unable to run, not a boundary failure."
+  );
+}
+
+for (const entry of tscBin === null ? [] : scriptPackages) {
   const tsconfig = join("packages", entry.name, "tsconfig.json");
   if (!existsSync(join(root, tsconfig))) {
     problems.push(
@@ -152,7 +180,7 @@ for (const entry of scriptPackages) {
   }
   const compiled = spawnSync(
     process.execPath,
-    [join(root, "node_modules", "typescript", "bin", "tsc"), "--project", tsconfig],
+    [tscBin, "--project", tsconfig],
     { cwd: root, encoding: "utf8" }
   );
   if (compiled.status !== 0) {
