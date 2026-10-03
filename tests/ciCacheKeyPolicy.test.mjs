@@ -896,3 +896,23 @@ test("every widely readable workflow in this repository holds a read-only cache 
   // change here and not only a red gate somebody silences.
   assert.equal(checked, 24);
 });
+
+test("an explicit write stops being allowed the moment a wider trigger is added", () => {
+  // Why permitting `cache-mode: write` on a pull-request-only workflow is not a
+  // hole. GitHub's own protection is a *default*: a low-trust trigger gets
+  // `read` unless a workflow opts out by declaring a write-capable mode. So an
+  // explicit `write` left behind on a workflow that later gains `issue_comment`
+  // would opt out of exactly that protection. It cannot survive here, because
+  // reachesWidelyReadableScope() is an allowlist: the added trigger makes the
+  // workflow widely readable and the same rule then refuses the declaration.
+  const withTriggers = (...triggerLines) =>
+    wf("x", ["on:", ...triggerLines, "cache-mode: write", "jobs:", "  j:", "    runs-on: ubuntu-latest", "    steps: []", ""].join("\n"));
+  assert.deepEqual(rules([withTriggers("  pull_request:", "    types: [opened, synchronize]")]), []);
+  for (const added of ["  issue_comment:", "  pull_request_target:", "  workflow_run:", "  schedule:\n    - cron: '0 1 * * *'"]) {
+    assert.deepEqual(
+      rules([withTriggers("  pull_request:", "    types: [opened, synchronize]", added)]),
+      ["cache_mode_write_capable_in_widely_readable_scope"],
+      added,
+    );
+  }
+});
