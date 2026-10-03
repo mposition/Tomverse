@@ -875,6 +875,15 @@ test("a complete first result saves independent encrypted units and closes only 
   assert.equal(prepared.decisionId, decisionId);
   assert.equal((await readAmuxUnitRejectDecision(session,
     decisionId, prepareRequestId)).state, "prepared");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxUnitRejectPrepare(tx, { session, request,
+      choice: { ...rejection, decisionId: randomUUID(),
+        prepareRequestId: randomUUID() }, keys })),
+  (error: unknown) => error instanceof AmuxUnitRejectError &&
+    error.code === "already_prepared");
+  assert.equal(await prisma.amuxIdeaUnitDecision.count({
+    where: { draftUnitId: cardUnit.id, state: "prepared" },
+  }), 1, "a live 15-minute confirmation cannot be replaced");
   assert.equal(await prisma.amuxWorkItem.count({
     where: { v4SourceApprovalId: decisionId },
   }), 0, "preparing a rejection cannot register a card");

@@ -3,10 +3,12 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog,
+  writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
-  AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_IDEA_SYSTEM_ACTOR, AMUX_SYSTEM_AUDIT_ACTOR } from
+  "@/lib/adminAuditSystemActors";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
@@ -22,13 +24,15 @@ import { bindAmuxOwnerSession, bindAmuxUnitDecisionReason,
 import { checkAmuxIdeaUnitConsume } from "./ideaUnitConsumeGuard.ts";
 import { sameAmuxIdeaUnitConfirmation } from "./ideaUnitConfirmationCore.ts";
 import { AMUX_V4_UNIT_REJECT_WRITE_ENV, amuxV4UnitRejectWritePermitted,
-  deriveAmuxUnitRejectConfirmation } from "./ideaUnitRejectCore.ts";
+  deriveAmuxUnitRejectConfirmation,
+  mayExpireAmuxRejectionConfirmation } from "./ideaUnitRejectCore.ts";
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
 const PREPARE_ACTION = "amux.v4.unit.prepare";
 const CONSUME_ACTION = "amux.v4.unit.consume";
+const EXPIRE_ACTION = "amux.v4.unit.expire";
 const TARGET = "AmuxIdeaUnitDecision";
 
 export class AmuxUnitRejectError extends Error {
@@ -216,9 +220,50 @@ export async function commitAmuxUnitRejectPrepare(tx: Prisma.TransactionClient,
   await takeAuditChainLock(tx);
   const source = await loadSource(tx, actorUserId,
     input.choice.ideaId, input.choice.draftUnitId, input.keys);
-  if (await tx.amuxIdeaUnitDecision.count({ where: { draftUnitId: source.unit.id,
-    state: { in: ["prepared", "consumed"] } } }) !== 0) {
+  const existing = await tx.amuxIdeaUnitDecision.findMany({
+    where: { draftUnitId: source.unit.id,
+      state: { in: ["prepared", "consumed"] } },
+    take: 2,
+  });
+  if (existing.some((row) => row.state === "consumed") || existing.length > 1) {
     throw new AmuxUnitRejectError("already_prepared");
+  }
+  const stale = existing[0];
+  if (stale) {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "AmuxIdeaUnitDecision"
+      WHERE "id" = ${stale.id} AND "state" = 'prepared' FOR UPDATE
+    `;
+    const refreshed = await tx.amuxIdeaUnitDecision.findUnique({
+      where: { id: stale.id },
+    });
+    const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    const now = clock[0]?.now;
+    if (locked.length !== 1 || !refreshed ||
+        !(now instanceof Date) || !Number.isFinite(now.getTime())) {
+      throw new AmuxUnitRejectError("integrity_unavailable");
+    }
+    if (!mayExpireAmuxRejectionConfirmation(refreshed, now)) {
+      throw new AmuxUnitRejectError("already_prepared");
+    }
+    const expiryAuditId = await writeSystemAuditLog({
+      tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR, action: EXPIRE_ACTION,
+      targetType: TARGET, targetId: refreshed.id,
+      summary: "Expired an unconsumed AMUX v4 rejection confirmation before a new owner decision.",
+      metadata: { ideaId: refreshed.ideaId, draftUnitId: refreshed.draftUnitId,
+        prepareRequestId: refreshed.prepareRequestId,
+        expiredAt: now.toISOString(), action: "reject_unit",
+        registered: false },
+    });
+    const expired = await tx.amuxIdeaUnitDecision.updateMany({
+      where: { id: refreshed.id, draftUnitId: source.unit.id,
+        state: "prepared", expiresAt: { lte: now },
+        outcomeUnknownAt: null },
+      data: { state: "expired", finalAuditLogId: expiryAuditId },
+    });
+    if (expired.count !== 1) throw new AmuxUnitRejectError("integrity_unavailable");
   }
   const bound = confirmation({ ...input.choice, actorUserId,
     authenticatedAt: input.session.user?.authenticatedAt ?? "" }, source, input.keys);
