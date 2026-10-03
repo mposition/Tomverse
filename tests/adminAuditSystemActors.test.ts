@@ -21,6 +21,9 @@ import {
   AMUX_V4_COLLECTION_CLAIM_ACTION,
   AMUX_V4_COLLECTION_CLAIM_SCOPE,
   AMUX_V4_COLLECTION_CLAIM_TARGET,
+  AMUX_V4_COLLECTION_RESULT_PURGE_ACTION,
+  AMUX_V4_COLLECTION_RESULT_PURGE_SCOPE,
+  AMUX_V4_COLLECTION_RESULT_PURGE_TARGET,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
@@ -252,6 +255,22 @@ test("v4 collection claim has one closed system audit action, target and scope",
     targetType: AMUX_V4_COLLECTION_CLAIM_TARGET,
     metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       actorScope: "wrong-claim-scope" } })), "unknown");
+});
+
+test("v4 collection result purge has one closed system audit action and scope", () => {
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_COLLECTION_RESULT_PURGE_ACTION,
+    AMUX_V4_COLLECTION_RESULT_PURGE_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_COLLECTION_RESULT_PURGE_ACTION, "AmuxIdeaSubmission"), false);
+  assert.equal(auditRowActorKind(row({ action: AMUX_V4_COLLECTION_RESULT_PURGE_ACTION,
+    targetType: AMUX_V4_COLLECTION_RESULT_PURGE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_COLLECTION_RESULT_PURGE_SCOPE } })), "system");
+  assert.equal(auditRowActorKind(row({ action: AMUX_V4_COLLECTION_RESULT_PURGE_ACTION,
+    targetType: AMUX_V4_COLLECTION_RESULT_PURGE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: "wrong-purge-scope" } })), "unknown");
 });
 
 test("a stored row is human, system, or unknown -- never guessed", () => {

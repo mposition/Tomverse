@@ -287,6 +287,15 @@ run(
     // The authenticated collector's dark claim rechecks owner source, model,
     // HMAC and expiry before one audited, bounded lease is created.
     "tests/integration/amux-v4-idea-collection-claim.db.test.ts",
+    // The separate dark result writer fences a leased collector result,
+    // encrypts exact display bytes and records the transition in one tx.
+    "tests/integration/amux-v4-idea-collection-result.db.test.ts",
+    // A separate retention tick erases only due ciphertext/key material and
+    // binds the irreversible purge to one canonical audit transition.
+    "tests/integration/amux-v4-idea-collection-result-purge.db.test.ts",
+    // Owner read decrypts only a current audited result and never authorizes
+    // the model transfer represented by the exact displayed prompt.
+    "tests/integration/amux-v4-idea-collection-preview.db.test.ts",
     // The collector hint pages only current, pending request IDs and never
     // returns source scope, excerpt or model text.
     "tests/integration/amux-v4-idea-collection-queue.db.test.ts",

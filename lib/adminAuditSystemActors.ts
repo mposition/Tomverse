@@ -81,6 +81,14 @@ export const AMUX_V4_IDEA_AUTO_CANCEL_SCOPE = "idea-analysis-auto-cancel-v1" as 
 export const AMUX_V4_COLLECTION_CLAIM_ACTION = "amux.v4.collection.claimed" as const;
 export const AMUX_V4_COLLECTION_CLAIM_TARGET = "AmuxIdeaCollectionRequest" as const;
 export const AMUX_V4_COLLECTION_CLAIM_SCOPE = "idea-collection-claim-v1" as const;
+/** One bounded, scanned display candidate, or a content-free collector hold. */
+export const AMUX_V4_COLLECTION_RESULT_ACTION = "amux.v4.collection.result" as const;
+export const AMUX_V4_COLLECTION_RESULT_TARGET = "AmuxIdeaCollectionRequest" as const;
+export const AMUX_V4_COLLECTION_RESULT_SCOPE = "idea-collection-result-v1" as const;
+/** The retention tick erases only an expired collection result envelope. */
+export const AMUX_V4_COLLECTION_RESULT_PURGE_ACTION = "amux.v4.collection.result_purged" as const;
+export const AMUX_V4_COLLECTION_RESULT_PURGE_TARGET = "AmuxIdeaCollectionRequest" as const;
+export const AMUX_V4_COLLECTION_RESULT_PURGE_SCOPE = "idea-collection-result-purge-v1" as const;
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -160,6 +168,14 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_COLLECTION_CLAIM_ACTION &&
       targetType === AMUX_V4_COLLECTION_CLAIM_TARGET) {
     return AMUX_V4_COLLECTION_CLAIM_SCOPE;
+  }
+  if (action === AMUX_V4_COLLECTION_RESULT_ACTION &&
+      targetType === AMUX_V4_COLLECTION_RESULT_TARGET) {
+    return AMUX_V4_COLLECTION_RESULT_SCOPE;
+  }
+  if (action === AMUX_V4_COLLECTION_RESULT_PURGE_ACTION &&
+      targetType === AMUX_V4_COLLECTION_RESULT_PURGE_TARGET) {
+    return AMUX_V4_COLLECTION_RESULT_PURGE_SCOPE;
   }
   return null;
 };
