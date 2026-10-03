@@ -120,6 +120,19 @@ export async function readAmuxRootNodeDecisionInTransaction(
   const unitBody = meta(snapshot?.unitBody);
   const ownerSession = meta(snapshot?.ownerSession);
   const proposal = meta(snapshot?.nodeProposal);
+  const hierarchy = Array.isArray(snapshot?.hierarchy) ? snapshot.hierarchy : null;
+  const parent = hierarchy?.length === 1 ? meta(hierarchy[0]) : null;
+  const parentContent = meta(parent?.content);
+  const rootShape = proposal?.level === "initiative" &&
+    proposal.parentId === null && hierarchy?.length === 0 &&
+    row.baseNodeId === null && row.baseNodeRevision === null &&
+    row.baseNodeDigest === null && row.baseNodeDigestKeyId === null;
+  const epicShape = proposal?.level === "epic" &&
+    parent?.level === "initiative" && parent.parentId === null &&
+    parent.state === "active" && parent.id === proposal.parentId &&
+    parent.id === row.baseNodeId && parent.revision === row.baseNodeRevision &&
+    parentContent?.digest === row.baseNodeDigest &&
+    parentContent.keyId === row.baseNodeDigestKeyId;
   if (row.action !== "create_node" || !prepared?.entryHash ||
       auditRowActorKind(prepared) !== "human" ||
       prepared.actorUserId !== actorUserId || prepared.action !== PREPARE ||
@@ -145,7 +158,7 @@ export async function readAmuxRootNodeDecisionInTransaction(
       meta(source.payload)?.digest !== row.sourcePreviewDigest ||
       meta(source.payload)?.keyId !== row.sourcePreviewDigestKeyId ||
       !proposal || !UUID.test(String(proposal.id)) ||
-      proposal.level !== "initiative" || proposal.parentId !== null) {
+      !(rootShape || epicShape)) {
     return { state: "partial" } as const;
   }
   if (row.state === "prepared" && !row.finalAuditLogId &&
@@ -230,11 +243,12 @@ export async function readAmuxRootNodeDecisionInTransaction(
     where: { id: row.draftUnitId },
   });
   if (!node || !revision || unit?.state !== "approved" ||
-      node.level !== "initiative" || node.parentId !== null ||
+      node.level !== proposal.level || node.parentId !== proposal.parentId ||
       node.approvedByUserId !== actorUserId ||
       node.authorizationAuditLogId !== row.finalAuditLogId ||
       node.contentDigest !== revision.contentDigest ||
       node.contentDigestKeyId !== revision.contentDigestKeyId ||
+      revision.parentIdAtApproval !== proposal.parentId ||
       revision.authorizationAuditLogId !== row.finalAuditLogId) {
     return { state: "partial" } as const;
   }

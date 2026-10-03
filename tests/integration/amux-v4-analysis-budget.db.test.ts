@@ -54,6 +54,7 @@ import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
   readAmuxUnitRejectDecision, AmuxUnitRejectError } from
   "@/lib/amux/ideaUnitRejectService";
 import { commitAmuxRootNodePrepare, commitAmuxRootNodeConsume,
+  commitAmuxEpicNodePrepare, commitAmuxEpicNodeConsume,
   commitAmuxRootNodeUnknown, commitAmuxRootNodeNoCommitConfirmed,
   AmuxNodeCreateError } from "@/lib/amux/ideaNodeCreateService";
 import { readAmuxRootNodeDecision,
@@ -1244,15 +1245,49 @@ test("a complete first result saves independent encrypted units and closes only 
     assert.equal(parent.level, "initiative");
     assert.equal(parent.approvedDecisionId, rootChoice.decisionId);
     assert.equal(parent.content.digest, node.contentDigest);
+    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
+      { ideaId, parentRef: units[1]!.localRef! }),
+    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
+      error.code === "not_ready");
+    const epicChoice = { ideaId, draftUnitId: units[1]!.id,
+      decisionId: randomUUID(), prepareRequestId: randomUUID(),
+      nodeId: randomUUID(), reason: "" };
+    const epicPrepared = await commitAmuxEpicNodePrepare(tx,
+      { session, request, choice: epicChoice, keys });
+    const epicDecision = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: epicChoice.decisionId },
+    });
+    assert.equal(epicDecision.baseNodeId, rootChoice.nodeId);
+    assert.equal(epicDecision.baseNodeRevision, 0);
+    assert.equal(epicDecision.baseNodeDigest, node.contentDigest);
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
+      epicChoice.decisionId, epicChoice.prepareRequestId)).state, "prepared");
+    await assert.rejects(commitAmuxEpicNodeConsume(tx, { session, request,
+      choice: { ...epicChoice, consumeRequestId: randomUUID(),
+        confirmationDigest: randomBytes(32).toString("hex") }, keys }),
+    (error: unknown) => error instanceof AmuxNodeCreateError &&
+      error.code === "reconfirm");
+    const epicCreated = await commitAmuxEpicNodeConsume(tx,
+      { session, request, choice: { ...epicChoice,
+        consumeRequestId: randomUUID(),
+        confirmationDigest: epicPrepared.confirmationDigest }, keys });
+    assert.equal(epicCreated.state, "created");
+    const epicNode = await tx.amuxPortfolioNode.findUniqueOrThrow({
+      where: { id: epicChoice.nodeId },
+    });
+    const epicRevision = await tx.amuxPortfolioNodeRevision.findFirstOrThrow({
+      where: { nodeId: epicChoice.nodeId },
+    });
+    assert.equal(epicNode.level, "epic");
+    assert.equal(epicNode.parentId, rootChoice.nodeId);
+    assert.equal(epicRevision.parentIdAtApproval, rootChoice.nodeId);
+    assert.equal((await readAmuxRootNodeDecisionInTransaction(tx, session,
+      epicChoice.decisionId, epicChoice.prepareRequestId)).state, "created");
     await assert.rejects(resolveApprovedAmuxRootParent(tx,
       { ...session, user: { ...session.user, id: randomUUID() } } as Session,
       { ideaId, parentRef: unit.localRef! }),
     (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
       error.code === "not_found");
-    await assert.rejects(resolveApprovedAmuxRootParent(tx, session,
-      { ideaId, parentRef: units[1]!.localRef! }),
-    (error: unknown) => error instanceof AmuxNodeParentResolutionError &&
-      error.code === "not_ready");
     assert.equal(await tx.amuxWorkItem.count({
       where: { sourceSystem: "admin-idea-v4" } }), 0);
     throw new Error("rollback synthetic root node decision");
