@@ -131,9 +131,20 @@ const INSTRUCTION_NAMES = new Set([
 ]);
 const INSTRUCTION_DIRS = new Set([".claude", ".codex", ".cursor", ".agents", ".devin"]);
 
+/**
+ * GitHub Copilot also reads instruction, prompt, agent and chat-mode files
+ * from these directories under `.github/` (the directory itself included, in
+ * case it is a symlink). `.github/` as a whole is not an instruction directory:
+ * workflows there are reviewed as code.
+ */
+const COPILOT_INSTRUCTION_DIRS = new Set(["instructions", "prompts", "agents", "chatmodes"]);
+
 export function isInstructionPath(path) {
   const segments = path.split("/");
   if (INSTRUCTION_NAMES.has(segments[segments.length - 1].toLowerCase())) return true;
+  if (segments.length >= 2 && segments[0].toLowerCase() === ".github" && COPILOT_INSTRUCTION_DIRS.has(segments[1].toLowerCase())) {
+    return true;
+  }
   // Any segment, the last included: `.claude` itself may be a symlink.
   return segments.some((segment) => INSTRUCTION_DIRS.has(segment.toLowerCase()));
 }

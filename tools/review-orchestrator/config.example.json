@@ -68,6 +68,21 @@
         "--permission-mode", "auto",
         "--model", "{model}"
       ]
+    },
+    {
+      "id": "copilot",
+      "vendor": "google",
+      "enabled": false,
+      "maxConcurrent": 2,
+      "model": "MEASURE: a Gemini model id from /model",
+      "command": "copilot",
+      "args": [
+        "-p", "Read the file {promptFile} completely. It is your whole task: follow it exactly and end with the json block it asks for.",
+        "--add-dir", "{promptDir}",
+        "--model", "{model}",
+        "-s"
+      ],
+      "passEnv": ["COPILOT_GITHUB_TOKEN"]
     }
   ]
 }
