@@ -48,7 +48,7 @@ const claudeEnvelope = (modelId = anthropic.modelId) => ({
 const claudeStream = (envelope = claudeEnvelope(), tools = [],
   content = [{ type: "text", text: envelope.result }]) => Buffer.from([
   { type: "system", subtype: "init", tools },
-  { type: "assistant", message: { content } },
+  { type: "assistant", message: { role: "assistant", content } },
   envelope,
 ].map((event) => JSON.stringify(event)).join("\n"));
 
@@ -80,6 +80,16 @@ test("Claude result needs exact served model and complete usage", () => {
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(claudeEnvelope(), [], [{ type: "tool_use", name: "Read" }]), 0),
   { kind: "outcome_unknown" });
+  const multiAssistant = Buffer.from([
+    { type: "system", subtype: "init", tools: [] },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "redacted_thinking", data: "opaque" }] } },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "answer" }] } },
+    claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, multiAssistant, 0).kind,
+    "verified_success");
 });
 
 test("Codex usage without served-model attestation cannot certify success", () => {
@@ -96,6 +106,12 @@ test("Codex usage without served-model attestation cannot certify success", () =
   const stdout = Buffer.from(events.map((value) => JSON.stringify(value)).join("\n"));
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0),
     { kind: "model_unverified", inputTokens: 10, outputTokens: 2 });
+  const withReasoning = [events[0], events[1],
+    { type: "item.completed", item: { type: "reasoning", text: "private" } },
+    events[2], events[3]];
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(withReasoning.map((value) => JSON.stringify(value)).join("\n")), 0).kind,
+  "model_unverified");
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     Buffer.from(events.slice(0, -1).map((value) =>
       JSON.stringify(value)).join("\n")), 0), { kind: "outcome_unknown" });

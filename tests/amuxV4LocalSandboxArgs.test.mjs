@@ -63,7 +63,7 @@ test("AMUX v4 CLI requires a digest-pinned private staged executable", () => {
     { get path() { return path; }, sha256: "a".repeat(64) }), TypeError);
 });
 
-test("AMUX v4 analysis mount accepts only exact planned argv and dedicated mutable profile", () => {
+test("AMUX v4 analysis mount accepts only exact planned argv and dedicated credential file", () => {
   const socket = "/tmp/amux-v4-socket-abc";
   const selection = { provider: "openai", modelId: "gpt-5.6-sol",
     reasoningEffort: "high" };
@@ -74,9 +74,10 @@ test("AMUX v4 analysis mount accepts only exact planned argv and dedicated mutab
     authPath: "/home/tommy/.amux-cli-profiles/codex/auth.json" };
   const args = amuxV4SandboxArgs(socket, plan.command, cliMount, analysisMount);
   const bindAt = args.findIndex((value, index) => value === "--bind" &&
-    args[index + 1] === "/home/tommy/.amux-cli-profiles/codex");
+    args[index + 1] === "/home/tommy/.amux-cli-profiles/codex/auth.json");
   assert.ok(bindAt > 0);
-  assert.equal(args[bindAt + 2], "/tmp/.codex");
+  assert.equal(args[bindAt + 2], "/tmp/.codex/auth.json");
+  assert.equal(args.includes("/home/tommy/.amux-cli-profiles/codex"), false);
   assert.equal(args.includes("/home/tommy/.codex/auth.json"), false);
   assert.ok(args.includes("/etc/ssl/certs"));
   assert.ok(args.includes("CODEX_HOME"));
@@ -91,7 +92,7 @@ test("AMUX v4 analysis mount accepts only exact planned argv and dedicated mutab
     { ...analysisMount, provider: "anthropic" }), TypeError);
 });
 
-test("Claude analysis mounts only its own mutable profile", () => {
+test("Claude analysis mounts only its own credential file", () => {
   const selection = { provider: "anthropic", modelId: "claude-opus-5-5",
     reasoningEffort: "high" };
   const plan = planAmuxV4AnalysisCliInvocation(selection);
@@ -100,9 +101,10 @@ test("Claude analysis mounts only its own mutable profile", () => {
     { ...selection,
       authPath: "/home/tommy/.amux-cli-profiles/claude/.credentials.json" });
   const bindAt = args.findIndex((value, index) => value === "--bind" &&
-    args[index + 1] === "/home/tommy/.amux-cli-profiles/claude");
+    args[index + 1] === "/home/tommy/.amux-cli-profiles/claude/.credentials.json");
   assert.ok(bindAt > 0);
-  assert.equal(args[bindAt + 2], "/tmp/.claude");
+  assert.equal(args[bindAt + 2], "/tmp/.claude/.credentials.json");
+  assert.equal(args.includes("/home/tommy/.amux-cli-profiles/claude"), false);
   assert.ok(args.includes("CLAUDE_CONFIG_DIR"));
   assert.equal(args.includes("/home/tommy/.claude/.credentials.json"), false);
 });
