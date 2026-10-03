@@ -396,6 +396,7 @@ test("every notification kind names a sender, and the right one", () => {
     qa_release_digest_stale: "operations",
     qa_release_monitor_failed: "operations",
     qa_release_attention: "operations",
+    qa_release_digest_recorded: "operations",
   });
   for (const role of Object.values(NOTIFICATION_SENDER_ROLE)) {
     assert.equal(senderRoleAllowedOnStream("transactional", role), true);

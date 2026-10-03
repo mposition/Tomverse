@@ -62,7 +62,7 @@ const cleanup = async () => {
   try {
     await prisma.$executeRawUnsafe(`DELETE FROM "QaReleaseOperatorControl"`);
     await prisma.$executeRawUnsafe(`DELETE FROM "AgentDigestItem" WHERE "agentKey" = 'qa-release'`);
-    await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention"] } } });
+    await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention", "qa_release_digest_recorded"] } } });
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseOperatorControl" ENABLE TRIGGER "QaReleaseOperatorControl_before_delete"`);
     await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_delete"`);
@@ -135,7 +135,21 @@ test("a digest just stored is fresh, and the same digest 28 hours later is stale
     payload: { a: 1 },
   });
   assert.equal(stored.status, "created");
+  // The first fresh round queues the digest's recorded notice, keyed by the
+  // digest's own UTC day; every later fresh round finds it and writes nothing.
+  const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_recorded_alerted" } });
+  assert.deepEqual(await call(), { status: 200, body: { verdict: "fresh", alerted: true } });
   assert.deepEqual(await call(), { status: 200, body: { verdict: "fresh" } });
+  const recorded = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_digest_recorded" } });
+  assert.equal(recorded.length, 1);
+  const [{ digestDay }] = await prisma.$queryRaw<{ digestDay: string }[]>`
+    SELECT to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "digestDay"
+      FROM "AgentDigestItem" WHERE "idempotencyKey" = 'qa-release:monitor-test:1'`;
+  assert.equal(recorded[0].referenceId, `recorded:${digestDay}`);
+  assert.equal(
+    await prisma.adminAuditLog.count({ where: { action: "qa_release.digest_recorded_alerted" } }),
+    auditsBefore + 1,
+  );
 
   await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" DISABLE TRIGGER "AgentDigestItem_before_update"`);
   try {
@@ -208,7 +222,7 @@ test("a round that fails with room left records the day's monitor-failure alert 
     let calls = 0;
     return () => (++calls === 4 ? 200_000 : 0);
   };
-  await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention"] } } });
+  await prisma.notificationDelivery.deleteMany({ where: { kind: { in: ["qa_release_digest_stale", "qa_release_monitor_failed", "qa_release_attention", "qa_release_digest_recorded"] } } });
   const before = await prisma.adminAuditLog.count({ where: { action: "qa_release.monitor_failed" } });
   for (let round = 0; round < 2; round += 1) {
     assert.deepEqual(await call({ clock: lateThenBack() }), {

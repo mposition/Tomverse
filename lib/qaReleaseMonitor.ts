@@ -61,27 +61,37 @@ class StaleAlertLate extends Error {}
 export type QaReleaseAttentionReason = "control_mismatch" | "control_revision_mismatch";
 
 /**
- * The two daily alerts a round may queue. A round reaches at most one of
- * them -- a stale verdict and a control mismatch exclude each other, and a
- * revision mismatch ends the round before any verdict -- so both use the one
+ * The daily alerts a round may queue. A round reaches at most one of them
+ * -- the stale, fresh and control-mismatch verdicts exclude each other, and a
+ * revision mismatch ends the round before any verdict -- so all use the one
  * alert-write slot of the round's budget (policy section 10).
  */
 type DailyAlert =
   | { which: "stale" }
-  | { which: "attention"; reason: QaReleaseAttentionReason };
+  | { which: "attention"; reason: QaReleaseAttentionReason }
+  | { which: "recorded"; digestCreatedAtMs: number };
 
 const DAILY_ALERTS = {
   stale: {
     kind: NOTIFICATION_KIND.qaReleaseDigestStale,
-    referenceId: (dbNowMs: number) => qaReleaseStaleReferenceId(dbNowMs),
+    referenceId: (_alert: DailyAlert, dbNowMs: number) => qaReleaseStaleReferenceId(dbNowMs),
     action: "qa_release.digest_stale_alerted",
     summary: "Queued the QA-release digest silence alert.",
   },
   attention: {
     kind: NOTIFICATION_KIND.qaReleaseAttention,
-    referenceId: (dbNowMs: number) => `attention:${qaReleaseUtcDateKey(dbNowMs)}`,
+    referenceId: (_alert: DailyAlert, dbNowMs: number) => `attention:${qaReleaseUtcDateKey(dbNowMs)}`,
     action: "qa_release.attention_alerted",
     summary: "Queued the QA-release needs-a-check alert.",
+  },
+  // Keyed by the digest's own UTC day, not the round's: a digest stored at
+  // 23:50 and first seen fresh after midnight is still that day's digest.
+  recorded: {
+    kind: NOTIFICATION_KIND.qaReleaseDigestRecorded,
+    referenceId: (alert: DailyAlert) =>
+      `recorded:${qaReleaseUtcDateKey(alert.which === "recorded" ? alert.digestCreatedAtMs : Number.NaN)}`,
+    action: "qa_release.digest_recorded_alerted",
+    summary: "Queued the QA-release digest recorded notice.",
   },
 } as const;
 
@@ -96,7 +106,7 @@ async function enqueueDailyAlert(
   roundDeadline: Date,
 ): Promise<"queued" | "already_queued"> {
   const spec = DAILY_ALERTS[alert.which];
-  const referenceId = spec.referenceId(dbNowMs);
+  const referenceId = spec.referenceId(alert, dbNowMs);
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT
@@ -255,6 +265,8 @@ type RoundRead = {
   revision: number | null;
   digestEnabled: boolean | null;
   latestDigestCreatedAtMs: number | null;
+  /** Whether the newest digest's UTC day already has its recorded alert queued. */
+  recordedAlertQueued: boolean;
 };
 
 async function readRound(): Promise<RoundRead> {
@@ -263,16 +275,26 @@ async function readRound(): Promise<RoundRead> {
       await tx.$executeRaw`SELECT
         set_config('statement_timeout', ${String(READ_LIMITS.statementMs)}, true),
         set_config('idle_in_transaction_session_timeout', ${String(READ_LIMITS.idleMs)}, true)`;
-      // One statement for all three facts, so they share one snapshot and one clock.
+      // One statement for all the facts, so they share one snapshot and one clock.
       const rows = await tx.$queryRaw<
-        { dbNowMs: bigint; revision: number | null; digestEnabled: boolean | null; latestMs: bigint | null }[]
+        {
+          dbNowMs: bigint;
+          revision: number | null;
+          digestEnabled: boolean | null;
+          latestMs: bigint | null;
+          recordedQueued: boolean;
+        }[]
       >`SELECT
           floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
           c."revision",
           c."digestEnabled",
-          (SELECT floor(extract(epoch FROM max(d."createdAt")) * 1000)::bigint
-             FROM "AgentDigestItem" d WHERE d."agentKey" = 'qa-release') AS "latestMs"
-        FROM (SELECT 1) one
+          floor(extract(epoch FROM latest.at) * 1000)::bigint AS "latestMs",
+          EXISTS (
+            SELECT 1 FROM "NotificationDelivery" n
+             WHERE n."kind" = ${NOTIFICATION_KIND.qaReleaseDigestRecorded}
+               AND n."referenceId" = 'recorded:' || to_char(latest.at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+          ) AS "recordedQueued"
+        FROM (SELECT max(d."createdAt") AS at FROM "AgentDigestItem" d WHERE d."agentKey" = 'qa-release') latest
         LEFT JOIN LATERAL (
           SELECT "revision", "digestEnabled" FROM "QaReleaseOperatorControl"
            ORDER BY "revision" DESC LIMIT 1
@@ -283,6 +305,7 @@ async function readRound(): Promise<RoundRead> {
         revision: row.revision,
         digestEnabled: row.digestEnabled,
         latestDigestCreatedAtMs: row.latestMs === null ? null : Number(row.latestMs),
+        recordedAlertQueued: row.recordedQueued,
       };
     },
     { maxWait: 5_000, timeout: READ_LIMITS.prismaMs },
@@ -341,6 +364,13 @@ export async function runQaReleaseMonitor(
     return failRound("monitor_clock_invalid", startedAt, clock);
   }
   if (verdict === "stale") return alertRound({ which: "stale" }, read, startedAt, clock, 200, { verdict });
+  // The day's digest is recorded (policy section 7): one notice per digest
+  // day, written only when the read found it not yet queued, so a quiet
+  // fresh round takes no lock and writes nothing.
+  if (verdict === "fresh" && read.latestDigestCreatedAtMs !== null && !read.recordedAlertQueued) {
+    const digestCreatedAtMs = read.latestDigestCreatedAtMs;
+    return alertRound({ which: "recorded", digestCreatedAtMs }, read, startedAt, clock, 200, { verdict });
+  }
   // The digest secret gone while the agent is recorded as on (policy section 6).
   if (verdict === "control_mismatch") {
     return alertRound({ which: "attention", reason: "control_mismatch" }, read, startedAt, clock, 200, { verdict });

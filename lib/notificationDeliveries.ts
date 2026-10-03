@@ -16,6 +16,7 @@ import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import {
   buildQaReleaseOperatorEmail,
   qaReleaseAttentionDateFromReference,
+  qaReleaseDigestRecordedDateFromReference,
   qaReleaseMonitorFailureDateFromReference,
   qaReleaseStaleDateFromReference,
 } from "@/lib/qaReleaseOperatorEmail";
@@ -100,6 +101,9 @@ export const NOTIFICATION_KIND = {
   // An operator control mismatch the Monitor found (policy sections 6 and 7).
   // `attention:<UTC date>`, at most one per day.
   qaReleaseAttention: "qa_release_attention",
+  // The day's QA-release digest was recorded (policy section 7).
+  // `recorded:<UTC date of the digest>`, at most one per day.
+  qaReleaseDigestRecorded: "qa_release_digest_recorded",
 } as const;
 
 export type NotificationKind =
@@ -137,6 +141,7 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operations",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operations",
 };
 
 /**
@@ -168,6 +173,7 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "opera
   [NOTIFICATION_KIND.qaReleaseDigestStale]: "operator",
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operator",
 };
 
 /** A kind this queue does not know is not a customer's: it is refused earlier. */
@@ -435,7 +441,9 @@ async function renderNotification(
         ? ({ email: "monitor_failed", date: qaReleaseMonitorFailureDateFromReference(referenceId) } as const)
         : kind === NOTIFICATION_KIND.qaReleaseAttention
           ? ({ email: "attention", date: qaReleaseAttentionDateFromReference(referenceId) } as const)
-          : null;
+          : kind === NOTIFICATION_KIND.qaReleaseDigestRecorded
+            ? ({ email: "digest_recorded", date: qaReleaseDigestRecordedDateFromReference(referenceId) } as const)
+            : null;
   if (qaReleaseEmail) {
     // Rendered from the reference id alone: the alert carries a date and a
     // link, nothing the agent read.

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildQaReleaseOperatorEmail,
   qaReleaseAttentionDateFromReference,
+  qaReleaseDigestRecordedDateFromReference,
   qaReleaseMonitorFailureDateFromReference,
   qaReleaseStaleDateFromReference,
 } from "../lib/qaReleaseOperatorEmail.ts";
@@ -30,6 +31,15 @@ test("the needs-a-check alert names both mismatches and nothing the agent read",
   assert.equal(qaReleaseAttentionDateFromReference("attention:2026-10-03"), "2026-10-03");
   assert.equal(qaReleaseAttentionDateFromReference("stale:2026-10-03"), null);
   assert.equal(qaReleaseAttentionDateFromReference("attention:2026-10-03x"), null);
+});
+
+test("the recorded notice says it is a report, with the digest's date", () => {
+  const email = buildQaReleaseOperatorEmail("digest_recorded", { date: "2026-10-02", consoleUrl: "https://tomverse.app/x" });
+  assert.equal(email.subject, "Tomverse QA release digest recorded");
+  assert.match(email.text, /report, not a judgement/);
+  assert.match(email.text, /Date \(UTC\): 2026-10-02/);
+  assert.equal(qaReleaseDigestRecordedDateFromReference("recorded:2026-10-02"), "2026-10-02");
+  assert.equal(qaReleaseDigestRecordedDateFromReference("attention:2026-10-02"), null);
 });
 
 test("each kind reads only its own reference shape", () => {

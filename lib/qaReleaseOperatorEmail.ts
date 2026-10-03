@@ -11,7 +11,7 @@ import { escapeHtml } from "@/lib/supportNotificationEmail";
  * re-renders and the provider's idempotency key needs the same payload.
  */
 
-export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed" | "attention";
+export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed" | "attention" | "digest_recorded";
 
 /** `stale:YYYY-MM-DD`, the reference id the Monitor enqueues under. */
 const STALE_REFERENCE = /^stale:(\d{4}-\d{2}-\d{2})$/;
@@ -31,10 +31,17 @@ const ATTENTION_REFERENCE = /^attention:(\d{4}-\d{2}-\d{2})$/;
 export const qaReleaseAttentionDateFromReference = (referenceId: string): string | null =>
   ATTENTION_REFERENCE.exec(referenceId)?.[1] ?? null;
 
+/** `recorded:YYYY-MM-DD`, keyed by the UTC day of the recorded digest. */
+const RECORDED_REFERENCE = /^recorded:(\d{4}-\d{2}-\d{2})$/;
+
+export const qaReleaseDigestRecordedDateFromReference = (referenceId: string): string | null =>
+  RECORDED_REFERENCE.exec(referenceId)?.[1] ?? null;
+
 const SUBJECTS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale: "Tomverse QA release digest has gone quiet",
   monitor_failed: "Tomverse QA release digest check could not finish",
   attention: "Tomverse QA release agent needs a check",
+  digest_recorded: "Tomverse QA release digest recorded",
 };
 
 const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
@@ -44,6 +51,8 @@ const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
     "The QA release digest check could not finish a round, so whether the digest is current is not known. Nothing was decided or changed; open the Agent digests page to see the last digest, and the audit log for the reason recorded.",
   attention:
     "The QA release digest check found the recorded operator control and the running configuration disagree: a service presented an operator control revision other than the newest, or the digest secret is missing while the agent is recorded as on. Nothing was decided or changed; open the Agent digests page to compare the newest operator control revision with the services' settings.",
+  digest_recorded:
+    "The QA release digest for this date was recorded. It is a report, not a judgement: nothing was decided or changed. Open the Agent digests page to read it.",
 };
 
 export const buildQaReleaseOperatorEmail = (
