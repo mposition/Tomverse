@@ -86,6 +86,12 @@ export function sealOwnerManifestFiles(input) {
   return Object.freeze({ sealed: true, caseCount: 80, dispatchAuthorized: false });
 }
 
+export function ownerSealFailureCode(error) {
+  return error instanceof AggregateError &&
+    error.message === "owner_seal_cleanup_unknown"
+    ? "owner_seal_cleanup_unknown" : "owner_seal_unavailable";
+}
+
 function main(args) {
   if (args.length !== 8 || args[0] !== "--manifest" ||
       args[2] !== "--binding" || args[4] !== "--seal-output" ||
@@ -101,8 +107,10 @@ function main(args) {
     });
     process.stdout.write(JSON.stringify(result) + "\n");
     return 0;
-  } catch {
-    process.stderr.write("owner_seal_unavailable\n");
+  } catch (error) {
+    // The destination may already exist after a cleanup failure. Stop and have
+    // the owner inspect the restricted directory; never retry the seal blindly.
+    process.stderr.write(`${ownerSealFailureCode(error)}\n`);
     return 1;
   }
 }

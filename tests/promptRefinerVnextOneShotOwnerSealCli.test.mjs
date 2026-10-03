@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { verifyPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
+import { ownerSealFailureCode } from
+  "../scripts/prompt-refiner-vnext-one-shot-owner-seal.mjs";
 import { syntheticManifest } from
   "./support/promptRefinerVnextOneShotSyntheticManifest.mjs";
 
@@ -16,6 +18,13 @@ const cli = fileURLToPath(new URL(
   "../scripts/prompt-refiner-vnext-one-shot-owner-seal.mjs", import.meta.url));
 const confirmation = "I_AM_MPOSITION_AND_VERIFIED_EVERY_LABEL_AND_PRIVACY_EXCLUSION";
 const keyHex = "42".repeat(32);
+
+test("cleanup ambiguity has a distinct content-free stop code", () => {
+  assert.equal(ownerSealFailureCode(new AggregateError(
+    [new Error("write"), new Error("unlink")],
+    "owner_seal_cleanup_unknown")), "owner_seal_cleanup_unknown");
+  assert.equal(ownerSealFailureCode(new Error("write")), "owner_seal_unavailable");
+});
 
 function withSyntheticFiles(t) {
   const folder = mkdtempSync(join(tmpdir(), "prvnext-owner-seal-"));
