@@ -149,11 +149,12 @@ test("the shipped example config validates and names the repository the client d
   const raw = JSON.parse(read("tools/review-orchestrator/config.example.json", "utf8"));
   const config = validateConfig(raw);
   assert.ok(config.repos[repoNameFromRemote(config.repos.tomverse.url)]);
-  // Four enabled providers on four different model vendors, so a two-reviewer
-  // job never has to wait for the one vendor left over.
+  // Every enabled provider is on its own model vendor. Devin ships disabled: on
+  // 2026-10-02/03 it never returned a verdict on the server (see README).
   const enabled = config.providers.filter((p) => p.enabled);
-  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "cognition", "openai", "xai"]);
-  assert.equal(independentVendorCount(config.providers, "anthropic"), 3);
+  assert.deepEqual(enabled.map((p) => p.vendor).sort(), ["anthropic", "openai", "xai"]);
+  assert.equal(config.providers.find((p) => p.id === "devin").enabled, false);
+  assert.equal(independentVendorCount(config.providers, "anthropic"), 2);
 });
 
 test("config fails closed on an enabled provider without a measured vendor", () => {
@@ -196,7 +197,17 @@ test("instruction paths cover the files reviewer CLIs load on their own", () => 
   // The directory itself counts: it may be replaced by a symlink.
   assert.equal(isInstructionPath(".claude"), true);
   assert.equal(isInstructionPath("sub/.Cursor"), true);
-  for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt"]) {
+  // GitHub Copilot's own instruction, prompt, agent and chat-mode files.
+  // ...and the skills, hooks and plugins it loads (a hook is a shell command),
+  // plus project MCP server configuration.
+  for (const p of [
+    ".github/instructions/a.instructions.md", ".github/prompts/x.prompt.md", ".github/agents/r.agent.md",
+    ".github/chatmodes/c.chatmode.md", ".github/instructions", ".github/hooks/pre.json", ".github/skills/s/SKILL.md",
+    ".github/plugins/p/plugin.json", ".copilot/mcp-config.json", ".mcp.json", ".vscode/mcp.json",
+  ]) {
+    assert.equal(isInstructionPath(p), true, p);
+  }
+  for (const p of ["lib/agentAuthorityFiles.ts", ".github/workflows/ci.yml", "docs/agents.txt", "docs/instructions/x.md"]) {
     assert.equal(isInstructionPath(p), false, p);
   }
 });

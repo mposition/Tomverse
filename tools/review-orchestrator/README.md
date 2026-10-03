@@ -130,12 +130,43 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   (provider의 `passEnv`와 systemd `EnvironmentFile`). 1년 뒤 만료되면 Claude reviewer만
   `unknown`을 돌려주므로 같은 방법으로 갱신합니다. Codex는 `codex login --device-auth`로
   붙여 넣기 없이 로그인합니다.
-- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file /dev/stdin
-  --respect-workspace-trust false --permission-mode auto --model swe-2-high`. `auto`는 읽기 전용
-  도구만 자동 승인하고, `-p`에서는 확인이 필요한 도구 호출을 거절합니다(쓰기 요청에서 파일이
-  생기지 않음을 확인). 공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의
-  SWE-2를 고정해 `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다.
-  설치 직후 `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
+- Devin CLI(2026-10-03 실측, v3000.11.3): `devin -p --prompt-file {promptFile}
+  --respect-workspace-trust false --sandbox --permission-mode auto --model swe-2-high`.
+  공급사는 모델로 정해지므로 Anthropic·OpenAI·xAI와 겹치지 않는 Cognition의 SWE-2를 고정해
+  `vendor: "cognition"`으로 둡니다. 모델을 바꾸면 `vendor`도 같이 바꿉니다. 설치 직후
+  `~/.local/share/devin/credentials.toml`이 644로 만들어지므로 `chmod 600`합니다.
+  - **`/dev/stdin`을 쓰지 않습니다.** daemon이 띄운 프로세스의 stdin은 Linux에서 pipe가 아니라
+    socket이라, 경로로 다시 열면 `ENXIO`로 실패합니다(셸 pipe로 한 시험은 통과했고 운영에서는
+    모든 검토가 `reviewer_exit_1`이었습니다). `{promptFile}`을 쓰면 서버가 프롬프트를 상태 폴더의
+    owner-only 파일로 넘기고 끝나면 지웁니다.
+  - `auto`는 읽기 전용 도구만 승인하고, `-p`에서 거절된 도구 호출은 **그 자리에서 실행을 끝냅니다**
+    (`no_verdict_block`). 그래서 Devin 쪽 사용자 설정(`~/.config/devin/config.json`)에 읽기용 셸
+    명령만 `permissions.allow`로 열고(`Exec(grep)`, `Exec(rg)`, `Exec(git log)` 등 — `git diff`는
+    `--output`으로 쓸 수 있어 제외), `sandbox.allowed_domains`를 존재하지 않는 도메인 하나로 두어
+    네트워크를 막고, `promptNote`로 그 목록만 쓰라고 알립니다.
+  - **경로별 읽기 deny(`Read(~/.config/**)`)는 지켜지지 않았습니다**(canary 파일이 읽혔음). 막히는 것은
+    허용 목록 밖의 명령과 sandbox의 네트워크뿐이고, 읽기 범위의 경계는 reviewer 전용 계정입니다.
+  - 브랜치의 `.devin/` 설정은 사용자 설정보다 우선하지만, 지시 파일로 취급되어 base 버전으로
+    되돌려집니다.
+  - **결과: 예시 설정에서 꺼 두었습니다.** 2026-10-02~03 서버에서 devin 검토 27건이 모두 판정 없이
+    끝났습니다 — 11건은 `/dev/stdin`(ENXIO), 11건은 거절된 도구 호출, `--sandbox`와 허용 명령
+    지시문을 넣은 뒤의 5건도 `no_verdict_block`. 다시 켜려면 서버의 실제 job 하나가 판정까지
+    나오는 것을 먼저 확인합니다(셸 pipe로 한 시험은 운영과 달랐습니다).
+- GitHub Copilot CLI(예시 설정에 **꺼진 채** 있음, 실측 전): 문서상 프롬프트는 `-p "<프롬프트>"`
+  인자로만 받습니다. 인자 하나는 Linux에서 약 128KB가 한계라 검토 프롬프트가 들어가지 않으므로,
+  `{promptFile}`에 프롬프트를 쓰고 `-p`에는 그 파일을 읽으라는 짧은 지시만, `--add-dir {promptDir}`로
+  그 job의 프롬프트 폴더 하나만 읽게 합니다. 공급사는 고른 모델로 정해지므로 **Gemini 계열**을
+  고정해 `vendor: "google"`로 둡니다(Copilot의 GPT·Claude·Grok은 기존 공급사와 겹칩니다).
+  켜기 전에 확인할 것:
+  1. 인증은 **권한이 "Copilot Requests" 하나뿐인 fine-grained PAT**을 `COPILOT_GITHUB_TOKEN`으로
+     줍니다(systemd `EnvironmentFile` + provider `passEnv`). 저장소 권한이 있는 토큰이면 내장
+     GitHub MCP 서버를 통해 reviewer가 GitHub에 쓸 수 있습니다. 내장 MCP를 끄는 플래그가 있으면
+     함께 씁니다(`copilot --help`로 확인).
+  2. `-p`에서 허용되지 않은 도구 호출이 실행을 끝내는지 계속하는지(Devin은 끝냈습니다), 쓰기와
+     네트워크(`--deny-tool`)가 막히는지.
+  3. Copilot이 읽는 `.github/instructions/`·`prompts/`·`agents/`·`chatmodes/`와
+     `.github/copilot-instructions.md`는 지시 파일로 취급되어 base 버전으로 되돌려집니다.
+  4. **서버의 실제 job 하나**가 이 provider로 배정되어 판정까지 나오는지.
 
 ## 서버 업데이트 (drain)
 
