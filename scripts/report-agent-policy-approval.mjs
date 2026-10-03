@@ -108,6 +108,10 @@ const lastChangeCommit = gitOrNull("log", "-1", "--format=%H", ref, "--", policy
 // failure is "unknown", never a first version.
 const previousVersion = (() => {
   if (!lastChangeCommit) return "unknown";
+  // A root commit has no parent, so the file was new there.
+  const parents = gitOrNull("rev-list", "--parents", "-n", "1", lastChangeCommit);
+  if (parents === null) return "unknown";
+  if (parents.split(" ").length === 1) return "new";
   const listed = gitOrNull("ls-tree", "--name-only", `${lastChangeCommit}^`, "--", policyPath);
   if (listed === null) return "unknown";
   if (listed === "") return "new";
