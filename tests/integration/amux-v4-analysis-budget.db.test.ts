@@ -37,6 +37,9 @@ import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
 import { readAmuxFirstIdeaAnalysisResult,
   AmuxIdeaAnalysisResultReadError } from "@/lib/amux/ideaAnalysisResultReadService";
+import { commitAmuxUnitRejectPrepare, commitAmuxUnitRejectConsume,
+  readAmuxUnitRejectDecision, AmuxUnitRejectError } from
+  "@/lib/amux/ideaUnitRejectService";
 import { openAmuxContent } from "@/lib/amux/ideaCrypto";
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
@@ -861,6 +864,47 @@ test("a complete first result saves independent encrypted units and closes only 
   (error: unknown) => error instanceof AmuxFirstAnalysisDraftError &&
     error.code === "not_ready");
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 4);
+
+  const decisionId = randomUUID();
+  const prepareRequestId = randomUUID();
+  const reason = "This card is outside the agreed first release.";
+  const rejection = { ideaId, draftUnitId: cardUnit.id, decisionId,
+    prepareRequestId, reason };
+  const prepared = await prisma.$transaction((tx) =>
+    commitAmuxUnitRejectPrepare(tx, { session, request, choice: rejection, keys }));
+  assert.equal(prepared.decisionId, decisionId);
+  assert.equal((await readAmuxUnitRejectDecision(session,
+    decisionId, prepareRequestId)).state, "prepared");
+  assert.equal(await prisma.amuxWorkItem.count({
+    where: { v4SourceApprovalId: decisionId },
+  }), 0, "preparing a rejection cannot register a card");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxUnitRejectConsume(tx, { session, request,
+      choice: { ...rejection, consumeRequestId: randomUUID(),
+        confirmationDigest: randomBytes(32).toString("hex") }, keys })),
+  (error: unknown) => error instanceof AmuxUnitRejectError &&
+    error.code === "reconfirm");
+  assert.equal((await readAmuxUnitRejectDecision(session,
+    decisionId, prepareRequestId)).state, "prepared");
+  const consumed = await prisma.$transaction((tx) =>
+    commitAmuxUnitRejectConsume(tx, { session, request,
+      choice: { ...rejection, consumeRequestId: randomUUID(),
+        confirmationDigest: prepared.confirmationDigest }, keys }));
+  assert.equal(consumed.state, "rejected");
+  assert.equal((await readAmuxUnitRejectDecision(session,
+    decisionId, prepareRequestId)).state, "rejected");
+  const [rejectedUnit, finalDecision] = await Promise.all([
+    prisma.amuxIdeaDraftUnit.findUniqueOrThrow({ where: { id: cardUnit.id } }),
+    prisma.amuxIdeaUnitDecision.findUniqueOrThrow({ where: { id: decisionId } }),
+  ]);
+  assert.equal(rejectedUnit.state, "rejected");
+  assert.equal(finalDecision.state, "consumed");
+  assert.ok(rejectedUnit.finalDecisionAt && rejectedUnit.bodyPurgeAfter &&
+    rejectedUnit.bodyPurgeAfter.getTime() - rejectedUnit.finalDecisionAt.getTime() ===
+      30 * 24 * 60 * 60_000);
+  assert.equal(await prisma.amuxWorkItem.count({
+    where: { v4SourceApprovalId: decisionId },
+  }), 0, "rejecting a proposal cannot register a card");
 
   const duplicateMetadata = Object.fromEntries(Object.entries(
     audit.metadata as Record<string, Prisma.InputJsonValue>,
