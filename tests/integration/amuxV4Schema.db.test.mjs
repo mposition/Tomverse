@@ -400,7 +400,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
                  (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
                  CURRENT_TIMESTAMP),
                 ($1, 'synthetic-owner', 1, 'draft_ready', 0, 0,
-                 (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
+                 (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '1 minute',
                  CURRENT_TIMESTAMP)`,
         [expiryIdeaId],
       );
@@ -533,6 +533,21 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       [firstUnitId],
     );
     assert.equal(expiryClock.rows[0].clockOk, true);
+    const secondClock = await client.query(
+      `SELECT u."expiresAt" = first_chunk."analysisCompletedAt" + INTERVAL '30 days'
+                AS "firstChunkClockOk",
+              u."expiresAt" <> current_chunk."analysisCompletedAt" + INTERVAL '30 days'
+                AS "notCurrentChunkClock"
+       FROM public."AmuxIdeaDraftUnit" u
+       JOIN public."AmuxIdeaAnalysisChunk" first_chunk
+         ON first_chunk."ideaId" = u."ideaId" AND first_chunk."chunkIndex" = 0
+       JOIN public."AmuxIdeaAnalysisChunk" current_chunk
+         ON current_chunk."ideaId" = u."ideaId" AND current_chunk."chunkIndex" = 1
+       WHERE u."id" = $1`,
+      [secondUnitId],
+    );
+    assert.equal(secondClock.rows[0].firstChunkClockOk, true);
+    assert.equal(secondClock.rows[0].notCurrentChunkClock, true);
     assert.deepEqual(second?.bodyCiphertext, title);
     assert.equal(second?.bodyPurgedAt, null);
 

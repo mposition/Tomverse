@@ -41,6 +41,9 @@ export type AmuxIdeaAnalysisResultView =
 
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
+// Bounds one Admin response, not the number of cards or pages an idea may
+// eventually produce. Larger ideas need cursor-paged reads.
+const MAX_VISIBLE_RESULT_PAGES = 16;
 const keys = (value: Record<string, unknown>, expected: readonly string[]) =>
   Object.keys(value).length === expected.length &&
   expected.every((key) => Object.hasOwn(value, key));
@@ -106,7 +109,8 @@ export function parseAmuxIdeaAnalysisResultView(
   if (body.state === "continued_ready" || body.state === "continued_partial") {
     if (!keys(body, ["state", "ideaId", "pages"]) ||
         body.ideaId !== expectedIdeaId || !Array.isArray(body.pages) ||
-        body.pages.length < 2) return null;
+        body.pages.length < 2 ||
+        body.pages.length > MAX_VISIBLE_RESULT_PAGES) return null;
     const ids = new Set<string>();
     const refs = new Set<string>();
     const previews = new Set<string>();
