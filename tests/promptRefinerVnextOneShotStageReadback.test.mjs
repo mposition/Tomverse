@@ -96,7 +96,7 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
 test("transactional read locks the stage before reading reservations", async () => {
   const { tx, calls } = txFor(stage, slots());
   tx.$queryRaw = async (strings, id) => {
-    assert.match(strings.join("?"), /FOR UPDATE NOWAIT/);
+    assert.match(strings.join("?"), /FOR NO KEY UPDATE NOWAIT/);
     assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
     assert.deepEqual(calls, { stages: 0, slots: 0 });
     return [{ id }];
@@ -126,4 +126,10 @@ test("absent or unavailable lock never reads an unlocked stage", async () => {
   await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(inconsistent.tx),
     /vnext_one_shot_stage_changed_after_lock/);
   assert.deepEqual(inconsistent.calls, { stages: 1, slots: 0 });
+
+  const wrongId = txFor(stage, slots());
+  wrongId.tx.$queryRaw = async () => [{ id: "wrong-stage" }];
+  await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(wrongId.tx),
+    /vnext_one_shot_stage_lock_mismatch/);
+  assert.deepEqual(wrongId.calls, { stages: 0, slots: 0 });
 });

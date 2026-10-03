@@ -37,17 +37,18 @@ const ABSENT_STAGE: PromptRefinerVnextOneShotStageReadback = Object.freeze({
 });
 
 /**
- * Admission callers must take this lock before registry-price and slot reads.
- * Slot writes take a SHARE lock on the same stage row in the DB trigger, so a
- * present stage and its reservations remain stable for this transaction.
- * This is still only a readback, never a dispatch authorization.
+ * A future admission caller must take this lock before registry-price and
+ * slot reads. Slot writes take a SHARE lock on the same stage row in the DB
+ * trigger, so a present stage and its reservations remain stable for this
+ * transaction. No admission caller is wired yet; this readback never grants
+ * dispatch authorization.
  */
 export async function lockAndReadPromptRefinerVnextOneShotStage(
   tx: Prisma.TransactionClient
 ): Promise<PromptRefinerVnextOneShotStageReadback> {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "PromptRefinerVnextOneShotStage"
-    WHERE "id" = ${STAGE_ID} FOR UPDATE NOWAIT
+    WHERE "id" = ${STAGE_ID} FOR NO KEY UPDATE NOWAIT
   `;
   if (rows.length === 0) return ABSENT_STAGE;
   if (rows.length !== 1 || rows[0]?.id !== STAGE_ID) {
