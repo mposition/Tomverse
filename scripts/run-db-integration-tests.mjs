@@ -313,6 +313,10 @@ run(
     // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
     // the statement ceiling rolls back, assertNotLate refuses at the deadline.
     "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

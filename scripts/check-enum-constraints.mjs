@@ -893,6 +893,41 @@ const REGISTRY = {
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
+  OpsObserverDelivery_status_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "DELIVERY_STATUSES",
+    reason:
+      "reserved, confirmed, shadowed, abandoned. Created reserved and closed once; the trigger binds confirmed to a live genesis and shadowed to a shadow one, and a CHECK ties each status to its one timestamp.",
+  },
+  OpsObserverDelivery_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the genesis by the trigger, never written by a caller.",
+  },
+  OpsObserverDeliveryItem_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the reservation by the trigger, so a shadow item never occupies a live incident slot.",
+  },
+  OpsObserverDeliveryItem_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "MESSAGE_KINDS",
+    reason:
+      "new_open, worsening, reopen, recovery. Each kind is reserved once per incident within a mode (the unique on mode, signal, scope, kind, openedAt).",
+  },
+  OpsObserverDeliveryItem_origin_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "ITEM_ORIGINS",
+    reason:
+      "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
+  },
   OpsObserverGenesis_reason_check: {
     owner: "list",
     module: "scripts/ops-observer/genesis-core.mjs",
