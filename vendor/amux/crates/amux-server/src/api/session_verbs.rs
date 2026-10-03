@@ -4657,7 +4657,7 @@ fn mint_capture_card(
         conn,
         &crate::db::board_store::NewIssue {
             acceptance_criteria: None,
-            next_action: None,
+            next_action: Some("Read the delivered prompt, carry out its requested work, and record the result on this card".into()),
             title,
             desc: captured_desc,
             // Neither Doing nor triggered Backlog is redispatched (AMUX-2613).
@@ -25414,7 +25414,7 @@ mod tests {
     #[tokio::test]
     async fn a_human_prompt_auto_captures_and_links_a_ledger_card() {
         let (st, _dir) = state();
-        let q = |sql: &'static str, s: &'static str| -> Option<String> {
+        let q = |sql: &str, s: &str| -> Option<String> {
             st.store
                 .read()
                 .unwrap()
@@ -25445,6 +25445,9 @@ mod tests {
             .expect("the minted card must exist");
         assert_eq!(sess, "lane-cap");
         assert_eq!(status, "doing", "capture mints in doing, not todo (AMUX-2613)");
+        let next_action = q("SELECT next_action FROM issues WHERE id=?1", &card_id)
+            .expect("the first capture must keep a disposition until the worker acts");
+        assert!(next_action.contains("delivered prompt"));
 
         // 2. A distinct SECOND prompt is still work even while a card is open.
         //    The model gets both durable commands and decides whether to relate,
@@ -29323,6 +29326,7 @@ mod steer_boundary_tests {
                 assert!(first.is_some(), "a new task must card even with an open manual card");
                 assert_eq!(first.as_ref().unwrap().status, "backlog", "a delivered prompt must preserve the active manual claim");
                 assert!(first.as_ref().unwrap().source_ref.is_some());
+                assert!(first.as_ref().unwrap().next_action.as_deref().unwrap_or_default().contains("claim this card"));
 
                 // In production the recorder atomically attaches the minted id
                 // to this exact cmd_history row; the retry predicate reads that
