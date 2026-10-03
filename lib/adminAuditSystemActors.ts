@@ -260,7 +260,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_SESSION_INTAKE_SYSTEM_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  "qa-release-intake",
+  "qa-release-intake", "support-triage-worker", "support-triage-retention",
   "qa-release-merge-lane",
   "agent-digest-retention",
   ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
@@ -602,3 +602,16 @@ function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetTy
   return actor !== "model-catalog-renewal" ||
     (action === "model_catalog.snapshot_renewed" && targetType === "ModelCatalogSnapshot");
 }
+
+/**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];

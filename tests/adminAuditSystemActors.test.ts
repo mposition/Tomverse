@@ -144,6 +144,8 @@ test("the system actor list is closed and changes only by review", () => {
     "engineering-agent-registrar",
     // docs/policy/qa-release-agent.md section 5: the digest intake route.
     "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
     // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
     "qa-release-merge-lane",
     // The shared AgentDigestItem body expiry and meta purge, for every agent
