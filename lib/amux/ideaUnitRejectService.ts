@@ -419,7 +419,15 @@ export async function readAmuxUnitRejectDecision(session: Session,
         action: { in: [PREPARE_ACTION, CONSUME_ACTION] } }, take: 3,
     });
     if (!row) {
-      if (audits.some((audit) => audit.actorUserId !== actorUserId)) {
+      const matchingPrepare = audits.some((audit) => {
+        const metadata = audit.metadata;
+        return audit.action === PREPARE_ACTION &&
+          metadata && typeof metadata === "object" &&
+          !Array.isArray(metadata) &&
+          (metadata as Record<string, unknown>).prepareRequestId === prepareRequestId;
+      });
+      if (audits.some((audit) => audit.actorUserId !== actorUserId) ||
+          (audits.length > 0 && !matchingPrepare)) {
         return { state: "not_visible" } as const;
       }
       return { state: audits.length ? "partial" : "absent" } as const;

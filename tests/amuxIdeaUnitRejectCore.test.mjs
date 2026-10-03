@@ -72,6 +72,8 @@ test("one request admits exactly one owner decision, never a bulk card write", (
   assert.deepEqual(inspectAmuxUnitRejectRequest(JSON.stringify(consume)), consume);
   for (const changed of [
     { cards: ["card-1"] }, { reason: "" }, { reason: "x".repeat(1_001) },
+    { reason: " untrimmed" }, { reason: "e\u0301" },
+    { reason: "unsafe\u0000text" },
     { decisionId: prepare.prepareRequestId }, { ideaId: "bad,ref" },
   ]) {
     assert.equal(inspectAmuxUnitRejectRequest(JSON.stringify({ ...prepare, ...changed })),

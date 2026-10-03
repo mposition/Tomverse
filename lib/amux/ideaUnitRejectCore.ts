@@ -1,7 +1,8 @@
 import { deriveAmuxIdeaUnitConfirmation,
   type AmuxIdeaUnitConfirmationResult } from "./ideaUnitConfirmationCore.ts";
 import { AMUX_V4_INPUT_SCANNER_VERSION } from "./localIntakeCore.ts";
-import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
+import { amuxAnalysisTextSafe,
+  type AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxDigestKey } from "./ideaCrypto.ts";
 import type { AmuxUnitDecisionBinding } from "./ideaUnitDecisionBindingCore.ts";
 
@@ -49,7 +50,10 @@ export function inspectAmuxUnitRejectRequest(raw: string): AmuxUnitRejectRequest
       !UUID.test(data.prepareRequestId) ||
       data.decisionId === data.prepareRequestId ||
       typeof data.reason !== "string" || data.reason.length === 0 ||
-      Buffer.byteLength(data.reason, "utf8") > 1_000) return null;
+      data.reason !== data.reason.trim() ||
+      data.reason !== data.reason.normalize("NFC") ||
+      Buffer.byteLength(data.reason, "utf8") > 1_000 ||
+      !amuxAnalysisTextSafe(data.reason)) return null;
   if (isPrepare) return data as AmuxUnitRejectRequest & { stage: "prepare" };
   if (typeof data.consumeRequestId !== "string" ||
       !UUID.test(data.consumeRequestId) ||
