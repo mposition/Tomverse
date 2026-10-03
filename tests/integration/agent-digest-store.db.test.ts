@@ -171,3 +171,12 @@ test("a confirmation returning null commits; on a replay or conflict it is not a
   assert.equal((await recordAgentDigestItem({ ...input, payload: { other: 1 } }, prisma, undefined, confirm)).status, "conflict");
   assert.equal(asked, 1);
 });
+
+test("an admission returning null lets the row and its audit entry commit", async () => {
+  const input = submission({ admitPass: true });
+  const result = await recordAgentDigestItem(input, prisma, async () => null);
+  assert.equal(result.status, "created");
+  if (result.status !== "created") return;
+  createdIds.push(result.id);
+  assert.equal(await auditCount(result.id), 1);
+});

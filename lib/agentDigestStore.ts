@@ -96,7 +96,7 @@ export async function recordAgentDigestItem(
           CASE WHEN current_setting('server_version_num')::int >= 170000
             THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
           END`;
-        // The audit chain's lock before any row lock, under the 2 s statement
+        // The audit chain's lock before any row lock, under the statement
         // limit: a transaction that holds the chain and then touches this row
         // must never wait on one that holds the row and waits for the chain.
         await takeAuditChainLock(tx);
