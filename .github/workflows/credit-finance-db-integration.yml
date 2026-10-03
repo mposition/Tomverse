@@ -164,6 +164,9 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
       DB_INTEGRATION_GROUP: ${{ matrix.group }}
+      # The image above is 17; the ops-observer bounds suite fails rather than
+      # skipping its 17 fixtures if the server is ever not.
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "17"
 
     steps:
       - name: Checkout
@@ -195,6 +198,7 @@ jobs:
   # place the 16 branch is observed. It runs one file, which installs the
   # migration into a throwaway schema itself, and holds no secret.
   ops-observer-pg16:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
     name: Ops observer transaction bounds (PostgreSQL 16)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -322,14 +326,17 @@ jobs:
   credit-finance-db-result:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    needs: credit-finance-db
+    needs: [credit-finance-db, ops-observer-pg16]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
     steps:
       - name: Require every lane to have passed
         env:
           RESULT: ${{ needs.credit-finance-db.result }}
+          PG16_RESULT: ${{ needs.ops-observer-pg16.result }}
         run: |
           echo "Matrix result: $RESULT"
+          echo "PostgreSQL 16 bounds result: $PG16_RESULT"
+          test "$PG16_RESULT" = "success"
           # `success` is the only pass. `skipped` included: the matrix is not
           # conditional, so a skip means something stopped it from running and
           # that is not the same as the suite agreeing.

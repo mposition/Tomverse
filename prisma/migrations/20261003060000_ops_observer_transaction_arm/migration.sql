@@ -19,7 +19,9 @@
 --
 -- Every system function and view is qualified with pg_catalog, so a caller's
 -- search_path cannot substitute its own set_config() or pg_settings and make
--- the function report a timer it never armed. Every argument is required: a
+-- the function report a timer it never armed. least() and extract() are SQL
+-- syntax rather than functions looked up by name, so there is nothing to
+-- qualify and nothing a search_path can replace. Every argument is required: a
 -- NULL deadline or budget would make each comparison below unknown, and an
 -- unknown comparison is skipped, so a NULL is refused before anything is set.
 
