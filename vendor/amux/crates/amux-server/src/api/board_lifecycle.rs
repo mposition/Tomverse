@@ -939,9 +939,6 @@ mod tests {
         ).unwrap();
         assert!((before..=after).contains(&called_at), "intake call must use epoch seconds");
         assert_eq!(retry_at - called_at, 300, "retry deadline must remain five minutes later");
-        if std::env::var_os("AMUX_TIMESTAMP_FIXTURE_OBSERVE").is_some() {
-            println!("intake_fixture called_at={called_at} retry_at={retry_at}");
-        }
         let raw:String=c.query_row("SELECT intake_result FROM cmd_history WHERE id=1",[],|r|r.get(0)).unwrap();
         let saved:Value=serde_json::from_str(&raw).unwrap();
         assert_eq!(saved["response"],"not JSON");
