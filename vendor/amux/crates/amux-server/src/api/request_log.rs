@@ -4712,6 +4712,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn health_readiness_latency_excludes_invariant_scan_latency() {
+        let (store, _dir) = store();
+        let now = unix_now();
+        seed(&store, now - 2.0, "GET", "/api/health", 200, 2.0, "lane-a", "native", None).await;
+        seed(&store, now - 1.0, "GET", "/api/health/invariants", 200, 700.0, "lane-a", "native", None).await;
+
+        let api = logs_api(store);
+        let (status, body) = hit(
+            &api,
+            HttpRequest::builder().uri("/api/logs/stats?since_h=1").body(Body::empty()).unwrap(),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        let families = v["families"].as_array().unwrap();
+        let readiness = families.iter().find(|f| f["family"] == "/api/health").unwrap();
+        let invariants = families.iter().find(|f| f["family"] == "/api/health/invariants").unwrap();
+        assert_eq!(readiness["count"], 1);
+        assert_eq!(readiness["p95_ms"], 2.0);
+        assert_eq!(invariants["count"], 1);
+        assert_eq!(invariants["p95_ms"], 700.0);
+    }
+
+    #[tokio::test]
     async fn debug_routes_serves_the_table_with_owner_from_the_boundary_registry() {
         let v = debug_routes().await.0;
         assert_eq!(v["count"], ROUTE_TABLE.len());
