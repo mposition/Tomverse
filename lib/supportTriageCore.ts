@@ -346,6 +346,10 @@ export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, Sugges
     ["claimed", "superseded"],
     ["pending", "invalidated"],
     ["claimed", "invalidated"],
+    // A not_queued suggestion expires seven days after creation whatever its
+    // state (policy section 5); one that never became ready has no lane.
+    ["pending", "expired"],
+    ["claimed", "expired"],
   ]);
 
 export const isSuggestionTransitionAllowed = (from: SuggestionState, to: SuggestionState) =>

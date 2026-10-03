@@ -47,7 +47,7 @@ CREATE INDEX "SupportTriageSuggestion_state_ownerQueueState_createdAt_idx" ON "S
 
 CREATE INDEX "SupportTriageSuggestion_leaseExpiresAt_idx" ON "SupportTriageSuggestion"("leaseExpiresAt");
 
-ALTER TABLE "SupportTriageSuggestion" ADD CONSTRAINT "SupportTriageSuggestion_feedbackId_fkey" FOREIGN KEY ("feedbackId") REFERENCES "Feedback"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "SupportTriageSuggestion" ADD CONSTRAINT "SupportTriageSuggestion_feedbackId_fkey" FOREIGN KEY ("feedbackId") REFERENCES "Feedback"("id") ON DELETE CASCADE ON UPDATE RESTRICT;
 
 ALTER TABLE "SupportTriageSuggestion"
     ADD CONSTRAINT "SupportTriageSuggestion_state_check"
@@ -71,9 +71,10 @@ ALTER TABLE "SupportTriageSuggestion"
                AND ("state" = 'claimed') = ("leaseExpiresAt" IS NOT NULL)),
     ADD CONSTRAINT "SupportTriageSuggestion_failure_check"
         CHECK (("state" = 'failed') = ("failureCode" IS NOT NULL)),
-    -- A proposal that reached ready names its lane, and keeps it.
+    -- A proposal that reached ready names its lane, and keeps it. An expired
+    -- row may never have been ready, so it may have none.
     ADD CONSTRAINT "SupportTriageSuggestion_lane_present_check"
-        CHECK ("state" NOT IN ('ready', 'accepted', 'rejected', 'expired') OR "lane" IS NOT NULL),
+        CHECK ("state" NOT IN ('ready', 'accepted', 'rejected') OR "lane" IS NOT NULL),
     ADD CONSTRAINT "SupportTriageSuggestion_displayed_check"
         CHECK (("ownerQueueState" = 'displayed') = ("displayedAt" IS NOT NULL));
 
@@ -87,12 +88,26 @@ DECLARE
     now_utc TIMESTAMP(3) := clock_timestamp() AT TIME ZONE 'UTC';
     -- limit: SUGGESTION_LEASE_SECONDS
     lease CONSTANT INTERVAL := interval '5 minutes';
+    -- The message lib/accountDeletion.ts leaves on a deleted account's report.
+    deleted_marker CONSTANT TEXT := '[deleted account]';
+    report_message TEXT;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW."state" <> 'pending' OR NEW."claimToken" IS NOT NULL OR NEW."leaseExpiresAt" IS NOT NULL
             OR NEW."attemptCount" <> 0 OR NEW."ownerQueueState" <> 'not_queued'
-            OR NEW."displayedAt" IS NOT NULL OR NEW."failureCode" IS NOT NULL OR NEW."lane" IS NOT NULL THEN
+            OR NEW."displayedAt" IS NOT NULL OR NEW."failureCode" IS NOT NULL OR NEW."lane" IS NOT NULL
+            OR NEW."keywordFlags" IS DISTINCT FROM ARRAY[]::TEXT[] THEN
             RAISE EXCEPTION 'SupportTriageSuggestion must be inserted pending and unclaimed'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        -- Nothing is derived again from a deleted account's report. The row
+        -- is locked so an account deletion cannot slip in between.
+        EXECUTE pg_catalog.format(
+            'SELECT f."message" FROM %I."Feedback" f WHERE f."id" = $1 FOR SHARE',
+            TG_TABLE_SCHEMA
+        ) INTO report_message USING NEW."feedbackId";
+        IF report_message = deleted_marker THEN
+            RAISE EXCEPTION 'SupportTriageSuggestion cannot be created for a deleted account''s report'
                 USING ERRCODE = 'check_violation';
         END IF;
         NEW."createdAt" := now_utc;
@@ -127,7 +142,9 @@ BEGIN
             ('pending', 'superseded'),
             ('claimed', 'superseded'),
             ('pending', 'invalidated'),
-            ('claimed', 'invalidated')
+            ('claimed', 'invalidated'),
+            ('pending', 'expired'),
+            ('claimed', 'expired')
             -- end transitions
         ) THEN
             RAISE EXCEPTION 'SupportTriageSuggestion % cannot go from % to %', OLD."id", OLD."state", NEW."state"
@@ -170,10 +187,19 @@ BEGIN
         RAISE EXCEPTION 'SupportTriageSuggestion % lane and flags are written only on becoming ready', OLD."id"
             USING ERRCODE = 'check_violation';
     END IF;
+    -- A CHECK cannot see inside the array: no NULL element, no repeat.
+    IF pg_catalog.array_position(NEW."keywordFlags", NULL) IS NOT NULL
+        OR pg_catalog.cardinality(NEW."keywordFlags")
+           <> (SELECT pg_catalog.count(DISTINCT flag) FROM pg_catalog.unnest(NEW."keywordFlags") AS flag) THEN
+        RAISE EXCEPTION 'SupportTriageSuggestion keywordFlags must be distinct, non-null codes'
+            USING ERRCODE = 'check_violation';
+    END IF;
 
     IF NEW."ownerQueueState" IS DISTINCT FROM OLD."ownerQueueState" THEN
+        -- Displaying is its own write on an already-ready row, never part of
+        -- the result that makes it ready: promotion is capped separately.
         IF NOT (OLD."ownerQueueState" = 'not_queued' AND NEW."ownerQueueState" = 'displayed'
-                AND NEW."state" = 'ready') THEN
+                AND OLD."state" = 'ready' AND NEW."state" = 'ready') THEN
             RAISE EXCEPTION 'SupportTriageSuggestion % can be displayed only once, while ready', OLD."id"
                 USING ERRCODE = 'check_violation';
         END IF;

@@ -8593,7 +8593,7 @@ model SupportTriageSuggestion {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @default(now())
 
-  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
 
   @@unique([feedbackId, inputDigest])
   @@index([state, ownerQueueState, createdAt])

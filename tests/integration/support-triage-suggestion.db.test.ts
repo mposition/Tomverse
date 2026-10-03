@@ -73,6 +73,7 @@ test("a suggestion is born pending, unclaimed and unqueued", async () => {
     { lane: "other" },
     { attemptCount: 1 },
     { ownerQueueState: "displayed", displayedAt: new Date() },
+    { keywordFlags: ["money"] },
   ]) {
     await assert.rejects(
       prisma.supportTriageSuggestion.create({
@@ -165,7 +166,7 @@ test("only the core table's transitions are allowed, and terminal rows never cha
   const allowed = new Set(SUGGESTION_TRANSITIONS.map(([a, b]) => `${a}->${b}`));
   // pending cannot jump to ready or accepted.
   await create("p");
-  for (const to of ["ready", "accepted", "rejected", "expired", "failed"]) {
+  for (const to of ["ready", "accepted", "rejected", "failed"]) {
     assert.ok(!allowed.has(`pending->${to}`));
     await assert.rejects(update("p", { state: to, lane: "other", failureCode: to === "failed" ? "internal_error" : null }));
   }
@@ -181,6 +182,14 @@ test("only the core table's transitions are allowed, and terminal rows never cha
 test("display is reached once, from not_queued on a ready row, and stamped by the database", async () => {
   await create();
   await assert.rejects(update("s1", { ownerQueueState: "displayed" }), /only once, while ready/);
+  // Not in the same write that makes the row ready.
+  await claim("s1");
+  await assert.rejects(
+    update("s1", { state: "ready", lane: "other", ownerQueueState: "displayed" }),
+    /only once, while ready/
+  );
+  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
+  await create();
   await toReady("s1");
   const shown = await update("s1", { ownerQueueState: "displayed" });
   assert.ok(shown.displayedAt);
@@ -213,4 +222,42 @@ test("the guard function has no EXCEPTION handler and pins its search path", asy
   assert.equal(rows.length, 1);
   assert.equal(rows[0].handler, false);
   assert.deepEqual(rows[0].config, ["search_path=pg_catalog, pg_temp"]);
+});
+
+test("a not-yet-ready suggestion can expire without a lane", async () => {
+  await create("p");
+  assert.equal((await update("p", { state: "expired" })).state, "expired");
+  await create("c", "e".repeat(64));
+  await claim("c");
+  const expired = await update("c", { state: "expired" });
+  assert.equal(expired.lane, null);
+  assert.equal(expired.claimToken, null);
+});
+
+test("flags hold no NULL element and no repeat", async () => {
+  await create();
+  await claim("s1");
+  await assert.rejects(
+    update("s1", { state: "ready", lane: "other", keywordFlags: ["money", "money"] }),
+    /distinct, non-null codes/
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `UPDATE "SupportTriageSuggestion" SET "state" = 'ready', "lane" = 'other', "keywordFlags" = ARRAY['money', NULL]::TEXT[] WHERE id = 's1'`
+    ),
+    /distinct, non-null codes/
+  );
+});
+
+test("no suggestion is created for a deleted account's report", async () => {
+  await prisma.feedback.create({ data: { id: "fb-triage-deleted", type: "bug", message: "[deleted account]" } });
+  await assert.rejects(
+    prisma.supportTriageSuggestion.create({ data: { id: "x", feedbackId: "fb-triage-deleted", inputDigest: DIGEST } }),
+    /deleted account/
+  );
+});
+
+test("a report's id cannot be changed under its suggestions", async () => {
+  await create();
+  await assert.rejects(prisma.feedback.update({ where: { id: FEEDBACK }, data: { id: "fb-triage-renamed" } }));
 });
