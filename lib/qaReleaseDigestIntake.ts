@@ -93,7 +93,7 @@ export async function receiveQaReleaseDigest(
     // run past its own hard deadline is not recorded as a success (policy
     // section 3). The database clock decides, and a late answer rolls both
     // writes back. Admission and this check keep the created path at the
-    // policy's nine statements (AGENT_DIGEST_CREATED_STATEMENTS).
+    // policy's nine statements (AGENT_DIGEST_STORE_TIMEOUTS.statements).
     async (tx) => {
       const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${new Date(digest.runDeadline)}::timestamptz AS late`;
       return clock[0]?.late === false ? null : "run_deadline_passed";
