@@ -7256,6 +7256,15 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
     let kind_slug = f.kind.slug().to_string();
     let now_s = unix_now() as i64;
     let parked_until = f.parked_until;
+    // A CI alert can turn green without its failed assertion being fixed.
+    // Give the claimed card a disposition without trusting the workflow's
+    // externally supplied name or re-check command as an instruction.
+    let next_action = (f.kind == DetectorKind::CiFailure).then(|| {
+        "Inspect the failed CI assertion and the next green run; record whether \
+         the same assertion still ran, then repair or quarantine the cause. \
+         A green run alone is not proof of a fix."
+            .to_string()
+    });
 
     // The new id has to come back OUT of the writer closure, which runs on the
     // single writer thread — so it cannot ride a thread_local, and widening
@@ -7282,7 +7291,7 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             }
             let new = bs::NewIssue {
                 acceptance_criteria: None,
-                next_action: None,
+                next_action: next_action.clone(),
                 title: title.clone(),
                 desc: desc.clone(),
                 // PARKED, NOT QUEUED (AMUX-3645). A dwell-window fault has no
@@ -14075,6 +14084,19 @@ mod tests {
         let (status, _log, sref) = card_row(&st, &card);
         assert_eq!(status, "todo", "a filed fault is queued, not pre-closed");
         assert_eq!(sref, format!("autofix:{}", f[0].signature));
+        let next_action: Option<String> = st
+            .store
+            .read()
+            .unwrap()
+            .query_row(
+                "SELECT next_action FROM issues WHERE id=?1",
+                rusqlite::params![card],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let next_action = next_action.expect("a claimed CI alert needs a disposition");
+        assert!(next_action.contains("same assertion still ran"));
+        assert!(next_action.contains("green run alone is not proof"));
         let c = cards(&st);
         assert_eq!(c.len(), 1);
         assert_eq!(
