@@ -9,7 +9,7 @@ const mod = (path: string) => pathToFileURL(resolve(ROOT, path)).href;
 const token = "synthetic-runner-token-with-at-least-32-characters";
 const requestId = "11111111-1111-4111-8111-111111111111";
 let writes = 0;
-let writeError: "none" | "definite" | "unknown" = "none";
+let writeErrorCode: string | null = null;
 let routePromise: Promise<{ POST: (request: Request) => Promise<Response> }> | null = null;
 
 function loadRoute() {
@@ -34,10 +34,7 @@ function loadRoute() {
           writes++;
           assert.deepEqual(input, { requestId, slotIndex: 0,
             runApprovalAuditLogId: "synthetic-run-audit" });
-          if (writeError === "definite") {
-            throw new Error("vnext_one_shot_slot_already_consumed");
-          }
-          if (writeError === "unknown") throw new Error("private database detail");
+          if (writeErrorCode) throw new Error(writeErrorCode);
           return { requestId, slotIndex: 0,
             slotConsumptionAuditLogId: "synthetic-slot-audit",
             reservationConsumed: true, dispatchAuthorized: false };
@@ -104,22 +101,31 @@ test("strict input and failure response never claim dispatch or expose private e
     assert.deepEqual(await success.json(), { requestId, slotIndex: 0,
       slotConsumptionAuditLogId: "synthetic-slot-audit",
       reservationConsumed: true, dispatchAuthorized: false });
-    writeError = "definite";
-    const refused = await route.POST(request());
-    assert.equal(refused.status, 409);
-    noStore(refused);
-    assert.deepEqual(await refused.json(), { code: "SLOT_CONSUMPTION_REFUSED",
-      retryAuthorized: false });
-    writeError = "unknown";
+    for (const code of [
+      "vnext_one_shot_slot_request_invalid",
+      "vnext_one_shot_slot_custody_pin_unavailable",
+      "vnext_one_shot_slot_reservation_unavailable",
+      "vnext_one_shot_slot_binding_mismatch",
+      "vnext_one_shot_slot_already_consumed",
+      "vnext_one_shot_slot_transition_conflict",
+    ]) {
+      writeErrorCode = code;
+      const refused = await route.POST(request());
+      assert.equal(refused.status, 409, code);
+      noStore(refused);
+      assert.deepEqual(await refused.json(), { code: "SLOT_CONSUMPTION_REFUSED",
+        retryAuthorized: false });
+    }
+    writeErrorCode = "private database detail";
     const unavailable = await route.POST(request());
     assert.equal(unavailable.status, 503);
     noStore(unavailable);
     assert.deepEqual(await unavailable.json(), {
       code: "SLOT_CONSUMPTION_OUTCOME_UNKNOWN", retryAuthorized: false,
       humanReviewRequired: true });
-    assert.equal(writes, 3);
+    assert.equal(writes, 8);
   } finally {
-    writeError = "none";
+    writeErrorCode = null;
     if (oldToken === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
     else process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = oldToken;
     if (oldFlag === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED;

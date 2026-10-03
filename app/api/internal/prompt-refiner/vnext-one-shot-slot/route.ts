@@ -11,6 +11,7 @@ import { consumePromptRefinerVnextOneShotSlot } from
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_slot_request_invalid",
+  "vnext_one_shot_slot_custody_pin_unavailable",
   "vnext_one_shot_slot_reservation_unavailable",
   "vnext_one_shot_slot_binding_mismatch",
   "vnext_one_shot_slot_already_consumed",
