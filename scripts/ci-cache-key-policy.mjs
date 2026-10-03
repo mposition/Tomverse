@@ -74,6 +74,9 @@ export const WIDELY_READABLE_BRANCHES = ["main", "develop"];
 export const CACHE_MODES = ["read", "write", "write-only", "none"];
 export const NON_WRITE_CACHE_MODES = ["read", "none"];
 
+/** Each capability as a verb, so a finding reads as a sentence. */
+const CAPABILITY_WORDS = { restore: "restoring", save: "saving" };
+
 /**
  * What each mode lets a job do, so "narrower" can be asked as a question.
  *
@@ -138,7 +141,7 @@ export const cacheModeFailures = (document) => {
       failures.push({
         rule: "cache_mode_widened_by_job",
         jobId,
-        detail: `cache-mode is ${JSON.stringify(value)}`,
+        detail: `cache-mode is ${JSON.stringify(value)}, which grants saving`,
       });
       continue;
     }
@@ -158,7 +161,7 @@ export const cacheModeFailures = (document) => {
           jobId,
           detail: `cache-mode is ${JSON.stringify(value)} under a workflow set to ${JSON.stringify(
             declared.workflow,
-          )}, which adds ${widened.join(" and ")}`,
+          )}, which grants ${widened.map((capability) => CAPABILITY_WORDS[capability]).join(" and ")}`,
         });
       }
     }
@@ -802,7 +805,7 @@ export const describeFinding = (finding) => {
     case "cache_mode_write_capable_in_widely_readable_scope":
       return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")} and ${finding.detail}. Restore-only steps do not take that away: the job's token can still write any key through the cache API, so anything executing in the job can plant an entry a required gate restores. Declare cache-mode: ${NON_WRITE_CACHE_MODES.join(" or ")} at the workflow level.`;
     case "cache_mode_widened_by_job":
-      return `${where}: ${finding.detail}, which widens the workflow's cache-mode for this job and gives it back a write-capable token. Only ${NON_WRITE_CACHE_MODES.join(" and ")} may be declared on a job here.`;
+      return `${where}: ${finding.detail}. A job-level value replaces the workflow's rather than combining with it, so it may only take capability away -- what it grants has to be a subset of what the workflow granted. Saving is back under any of these workflows, and restoring is back under one set to none. A job needing no narrower mode is left without one, and inherits.`;
     case "unguarded_save_in_widely_readable_scope":
       return `${where}: this workflow can run on ${WIDELY_READABLE_BRANCHES.join(" or ")}, where a written entry is restorable by every run that can see that scope — ${finding.detail}. Use actions/cache/restore, and if a save is needed give it an if: on github.event_name or github.ref.`;
     default:

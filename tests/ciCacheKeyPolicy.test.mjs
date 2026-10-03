@@ -926,3 +926,32 @@ test("an explicit write stops being allowed the moment a wider trigger is added"
     );
   }
 });
+
+test("the widening message is true of the failure it is printed for", () => {
+  // The message-coverage test above only asks that a rule has a message of its
+  // own. Independent review found this one asserting the job "gets back a
+  // write-capable token" and that "only read and none may be declared" -- both
+  // false of the none-under-read failure, where the job declares `read` and
+  // gains only restoring. A sentence a reader acts on has to be true of the
+  // case it was printed for, so this reads the real findings.
+  const workflow = (workflowMode, jobMode) =>
+    parseYaml(
+      ["on:", "  schedule:", "    - cron: '0 1 * * *'", `cache-mode: ${workflowMode}`, "jobs:", "  j:", "    runs-on: ubuntu-latest", `    cache-mode: ${jobMode}`, "    steps: []", ""].join("\n"),
+    );
+  const messageFor = (workflowMode, jobMode) => {
+    const found = cacheModeFailures(workflow(workflowMode, jobMode));
+    assert.equal(found.length, 1, `${workflowMode}/${jobMode} should produce one finding`);
+    return describeFinding({ ...found[0], workflowPath: "w.yml" });
+  };
+
+  const restoreAdded = messageFor("none", "read");
+  assert.match(restoreAdded, /grants restoring/);
+  // It must not tell the reader that `read` is an accepted job value, which is
+  // the value being refused here.
+  assert.ok(!/may be declared on a job/.test(restoreAdded), restoreAdded);
+  assert.ok(!/write-capable/.test(restoreAdded), restoreAdded);
+
+  for (const jobMode of ["write", "write-only"]) {
+    assert.match(messageFor("read", jobMode), /grants saving/, jobMode);
+  }
+});
