@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -14,8 +15,14 @@ let existing = [];
 let auditInput = null;
 let priceReads = 0;
 let auditValid = true;
+let policyDrift = false;
+let stageExists = false;
+const policyBytes = readFileSync(resolve(root,
+  "docs/policy/prompt-refiner-quality-evaluation-vnext-one-shot-v2.md"));
 const tx = {
   adminAuditLog: { findMany: async () => existing },
+  promptRefinerVnextOneShotStage: { findUnique: async () =>
+    stageExists ? { id: "prompt-refiner-vnext-one-shot-v1" } : null },
 };
 
 mock.module(mod("lib/prisma.ts"), { namedExports: {
@@ -30,6 +37,9 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
 } });
 mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
   adminAuditIntegrityKeys: () => ["synthetic-key"],
+} });
+mock.module(mod("lib/promptRefinerStageAdmission.ts"), { namedExports: {
+  readExactCheckoutFile: async () => policyDrift ? Buffer.from("changed policy") : policyBytes,
 } });
 mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), { namedExports: {
   promptRefinerVnextOneShotAuditReceiptIsValid: async () => auditValid,
@@ -60,6 +70,11 @@ process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = expected.runnerDigest;
 
 test("preregistration reobserves source and rejects an unpinned runner or price", async () => {
   assert.deepEqual(await preparePromptRefinerVnextOneShotPreregistration(expected), expected);
+  assert.equal(sourceReads, 1);
+  policyDrift = true;
+  await assert.rejects(preparePromptRefinerVnextOneShotPreregistration(expected),
+    /preregistration_policy_mismatch/);
+  policyDrift = false;
   assert.equal(sourceReads, 1);
   await assert.rejects(preparePromptRefinerVnextOneShotPreregistration({
     ...expected, runnerDigest: "e".repeat(64),
@@ -102,6 +117,13 @@ test("one owner approval records fixed policy, cost, access and retention withou
   await assert.rejects(recordPromptRefinerVnextOneShotPreregistration({
     session, request, pins: expected,
   }), /preregistration_already_recorded/);
+  assert.equal(priceReads, 1);
+  existing = [];
+  stageExists = true;
+  await assert.rejects(recordPromptRefinerVnextOneShotPreregistration({
+    session, request, pins: expected,
+  }), /preregistration_stage_exists/);
+  stageExists = false;
   assert.equal(priceReads, 1);
 });
 

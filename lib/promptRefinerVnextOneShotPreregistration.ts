@@ -1,11 +1,13 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { prisma } from "@/lib/prisma";
+import { readExactCheckoutFile } from "@/lib/promptRefinerStageAdmission";
 import { previewPromptRefinerVnextOneShotCandidateSourcePin } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
 import { promptRefinerVnextOneShotAuditReceiptIsValid } from
@@ -27,6 +29,7 @@ const SUMMARY = "Preregistered the bounded Prompt Refiner vNext one-shot candida
 const HEX_64 = /^[0-9a-f]{64}$/;
 const POLICY_SHA256 =
   "dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b";
+const POLICY_PATH = "docs/policy/prompt-refiner-quality-evaluation-vnext-one-shot-v2.md";
 
 export type PromptRefinerVnextOneShotPreregistrationPins = Readonly<{
   sourceCommitSha: string;
@@ -66,6 +69,16 @@ const metadataFor = (pins: PromptRefinerVnextOneShotPreregistrationPins,
 export async function preparePromptRefinerVnextOneShotPreregistration(
   expected: PromptRefinerVnextOneShotPreregistrationPins,
 ): Promise<PromptRefinerVnextOneShotPreregistrationPins> {
+  let policyBytes: Uint8Array;
+  try {
+    policyBytes = await readExactCheckoutFile(process.cwd(), POLICY_PATH,
+      { maxBytes: 64 * 1024 });
+  } catch {
+    throw new Error("vnext_one_shot_preregistration_policy_unavailable");
+  }
+  if (createHash("sha256").update(policyBytes).digest("hex") !== POLICY_SHA256) {
+    throw new Error("vnext_one_shot_preregistration_policy_mismatch");
+  }
   const runnerDigest = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
   if (!HEX_64.test(runnerDigest ?? "") ||
       runnerDigest !== expected.runnerDigest ||
@@ -104,6 +117,11 @@ export async function recordPromptRefinerVnextOneShotPreregistration(input: {
     });
     if (existing.length !== 0) {
       throw new Error("vnext_one_shot_preregistration_already_recorded");
+    }
+    if (await tx.promptRefinerVnextOneShotStage.findUnique({
+      where: { id: STAGE_ID }, select: { id: true },
+    })) {
+      throw new Error("vnext_one_shot_preregistration_stage_exists");
     }
     const price = await readPromptRefinerVnextOneShotPrice(tx);
     if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {

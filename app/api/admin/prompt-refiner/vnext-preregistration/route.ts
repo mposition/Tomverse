@@ -19,6 +19,14 @@ import {
 } from "@/lib/promptRefinerVnextOneShotPreregistration";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
+const permanentRefusals = new Set([
+  "vnext_one_shot_preregistration_already_recorded",
+  "vnext_one_shot_preregistration_stage_exists",
+  "vnext_one_shot_preregistration_pin_mismatch",
+  "vnext_one_shot_preregistration_source_mismatch",
+  "vnext_one_shot_preregistration_price_mismatch",
+  "vnext_one_shot_preregistration_policy_mismatch",
+]);
 const requestSchema = z.object({
   sourceCommitSha: z.string().regex(/^[0-9a-f]{40}$/),
   sourceManifestDigest: z.string().regex(/^[0-9a-f]{64}$/),
@@ -69,6 +77,10 @@ export async function POST(request: Request) {
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
+    }
+    if (error instanceof Error && permanentRefusals.has(error.message)) {
+      return NextResponse.json({ code: "PREREGISTRATION_REFUSED" },
+        { status: 409, headers });
     }
     return NextResponse.json({ code: "PREREGISTRATION_UNAVAILABLE" },
       { status: 503, headers });

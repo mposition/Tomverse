@@ -17,6 +17,7 @@ let recent = true;
 let validOrigin = true;
 let prepares = 0;
 let writes = 0;
+let recordFailure: string | null = null;
 let mocksInstalled = false;
 const pins = {
   sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
@@ -71,6 +72,7 @@ async function loadRoute() {
     },
     recordPromptRefinerVnextOneShotPreregistration: async () => {
       writes++;
+      if (recordFailure) throw new Error(recordFailure);
       return { auditLogId: "opaque-audit-id", dispatchAuthorized: false };
     },
   } });
@@ -119,5 +121,11 @@ test("strict pins record once through the server and reveal no candidate content
   });
   assert.equal(prepares, 1);
   assert.equal(writes, 1);
+  recordFailure = "vnext_one_shot_preregistration_already_recorded";
+  const refused = await route.POST(request());
+  assert.equal(refused.status, 409);
+  assert.deepEqual(await refused.json(), { code: "PREREGISTRATION_REFUSED" });
+  assert.equal(refused.headers.get("cache-control"), "private, no-store, max-age=0");
+  recordFailure = null;
   delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PREREGISTRATION_WRITE_ENABLED;
 });

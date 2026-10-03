@@ -223,6 +223,14 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       await prisma.modelRegistryEntry.update({ where: { id: "gpt-5-6-luna" },
         data: { inputUsdPerMillionTokens: null } });
 
+      // The real writer must not create any stage, slot, or audit without B01.
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }), /preregistration_unavailable/);
+      assert.equal(await countOperationalAudits(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
+
       // B01 is committed first, without a root or any holdout material.
       const priorPreregCommit = process.env.RAILWAY_GIT_COMMIT_SHA;
       const priorPreregRunner = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
