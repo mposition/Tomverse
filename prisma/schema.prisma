@@ -8416,6 +8416,8 @@ model OpsObserverGenesis {
   /// sha256 of the canonical genesis request the owner approved.
   requestDigest       String
   invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime          @db.Timestamptz(3)
   state               OpsObserverState?
 }
 

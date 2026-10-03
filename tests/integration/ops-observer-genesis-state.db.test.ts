@@ -35,13 +35,14 @@ async function refused(work: Promise<unknown>, pattern: RegExp) {
   assert.match(error!.message, pattern);
 }
 
-async function genesis(reason: string, mode: string, supersedes: string | null) {
+function genesisSql(deadlineSeconds = 60) {
+  return `INSERT INTO "OpsObserverGenesis" (id, reason, mode, "supersedesGenesisId", "requestDigest", "invariantVersion", "createdAt", "runDeadlineAt")
+     VALUES ($1, $2, $3, $4, $5, 99, '2000-01-01T00:00:00Z', clock_timestamp() + interval '${deadlineSeconds} seconds')`;
+}
+
+async function genesis(reason: string, mode: string, supersedes: string | null, on: pg.Client = client) {
   const id = randomUUID();
-  await q(
-    `INSERT INTO "OpsObserverGenesis" (id, reason, mode, "supersedesGenesisId", "requestDigest", "invariantVersion", "createdAt")
-     VALUES ($1, $2, $3, $4, $5, 99, '2000-01-01T00:00:00Z')`,
-    [id, reason, mode, supersedes, DIGEST],
-  );
+  await on.query(genesisSql(), [id, reason, mode, supersedes, DIGEST]);
   return id;
 }
 
@@ -137,8 +138,12 @@ test("genesis chain, state compare-and-set and late-commit refusal", { skip: !ra
       await advance(1);
       await advance(2);
       await refused(advance(3, `, "verifiedThroughGeneration" = 3`), /ops_observer_state_checkpoint_order/);
+      await refused(advance(3, `, "verifiedThroughGeneration" = 2`), /OpsObserverState_checkpoint_check/);
       await advance(3, `, "verifiedThroughGeneration" = 2, "verifiedThroughAuditId" = 'a', "verifiedThroughAuditHash" = 'h'`);
       await refused(advance(4, `, "verifiedThroughGeneration" = 1`), /ops_observer_state_checkpoint_order/);
+      // The audit row a checkpoint names cannot be swapped under the same checkpoint.
+      await refused(advance(4, `, "verifiedThroughAuditId" = 'b'`), /ops_observer_state_checkpoint_order/);
+      await refused(advance(4, `, "verifiedThroughAuditHash" = 'other'`), /ops_observer_state_checkpoint_order/);
       const { rows } = await q(`SELECT generation, "stampGeneration", "stampKeysSha256" = ops_observer_sha256_hex(keys::text) AS ok FROM "OpsObserverState" WHERE "genesisId" = $1`, [id]);
       assert.deepEqual(rows[0], { generation: 3, stampGeneration: 3, ok: true });
       await refused(q(`DELETE FROM "OpsObserverState" WHERE "genesisId" = $1`, [id]), /ops_observer_state_not_deletable/);
@@ -161,6 +166,8 @@ test("genesis chain, state compare-and-set and late-commit refusal", { skip: !ra
            VALUES ($1, 0, '{}'::jsonb, 1, 0, 'x', 'x', ${soon(200)})`, [id]),
         /ops_observer_deadline_too_far/,
       );
+      const current = await head();
+      await refused(q(genesisSql(200), [randomUUID(), "recovery", current.mode, current.id, DIGEST]), /ops_observer_deadline_too_far/);
       await insertState(id);
     });
 
@@ -172,6 +179,73 @@ test("genesis chain, state compare-and-set and late-commit refusal", { skip: !ra
       await refused(q("COMMIT"), /ops_observer_late_commit/);
       const { rows } = await q(`SELECT generation FROM "OpsObserverState" WHERE "genesisId" = $1`, [id]);
       assert.equal(rows[0].generation, 0);
+    });
+
+    await t.test("a genesis evaluated past its deadline does not commit", async () => {
+      const current = await head();
+      await q("BEGIN");
+      await q(genesisSql(1), [randomUUID(), "recovery", current.mode, current.id, DIGEST]);
+      await q(`SELECT pg_sleep(1.5)`);
+      await refused(q("COMMIT"), /ops_observer_late_commit/);
+      assert.equal((await head()).id, current.id);
+    });
+
+    const second = async () => {
+      const other = new pg.Client({ connectionString: rawUrl });
+      other.on("error", () => {});
+      await other.connect();
+      await other.query(`SET search_path TO "${schema}"`);
+      return other;
+    };
+
+    await t.test("a state write in flight holds off the genesis that would replace it", async () => {
+      const current = await head();
+      const { rows } = await q(`SELECT generation FROM "OpsObserverState" WHERE "genesisId" = $1`, [current.id]);
+      const other = await second();
+      try {
+        await q("BEGIN");
+        await q(`UPDATE "OpsObserverState" SET generation = $2, "runDeadlineAt" = ${soon(60)} WHERE "genesisId" = $1`, [current.id, rows[0].generation + 1]);
+        let replaced = false;
+        const replacing = genesis("recovery", current.mode, current.id, other).then((id) => {
+          replaced = true;
+          return id;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        assert.equal(replaced, false, "the replacement waits for the state write");
+        await q("COMMIT");
+        const replacement = await replacing;
+        assert.equal((await head()).id, replacement);
+        // The state committed while its genesis was still the head; now it is not.
+        await refused(
+          q(`UPDATE "OpsObserverState" SET generation = $2, "runDeadlineAt" = ${soon(60)} WHERE "genesisId" = $1`, [current.id, rows[0].generation + 2]),
+          /ops_observer_state_superseded/,
+        );
+      } finally {
+        await other.end();
+      }
+    });
+
+    await t.test("a genesis replacement in flight makes the waiting state write fail as superseded", async () => {
+      const current = await head();
+      await insertState(current.id);
+      const other = await second();
+      try {
+        await other.query("BEGIN");
+        await genesis("recovery", current.mode, current.id, other);
+        const advancing = q(
+          `UPDATE "OpsObserverState" SET generation = 1, "runDeadlineAt" = ${soon(60)} WHERE "genesisId" = $1`,
+          [current.id],
+        ).then(() => null, (e: Error) => e);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await other.query("COMMIT");
+        const error = await advancing;
+        assert.ok(error, "the state write must not advance a superseded genesis");
+        assert.match(error!.message, /ops_observer_state_superseded/);
+        const { rows } = await q(`SELECT generation FROM "OpsObserverState" WHERE "genesisId" = $1`, [current.id]);
+        assert.equal(rows[0].generation, 0);
+      } finally {
+        await other.end();
+      }
     });
 
     await t.test("trigger functions pin search_path", async () => {

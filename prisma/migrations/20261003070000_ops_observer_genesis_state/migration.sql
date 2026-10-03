@@ -23,8 +23,18 @@
 --      leaves stamps that do not match.
 --   5. A late run is not recorded as a success. A claimed deadline must be
 --      present and at most 180 s ahead of the database clock (policy §6), and
---      a deferred constraint trigger aborts the COMMIT of a state write
---      evaluated after that deadline.
+--      a deferred constraint trigger aborts the COMMIT of a genesis or state
+--      write evaluated after that deadline. A session can move a deferrable
+--      check earlier with SET CONSTRAINTS ... IMMEDIATE, and any session that
+--      can run SQL in the transaction could equally disable the trigger, so
+--      the database cannot hold this against the code that writes: no source
+--      file may issue SET CONSTRAINTS (tests/opsObserverNoSetConstraints), and
+--      the store re-checks the deadline in its own short transaction before it
+--      reports success (policy §6 item 5).
+--   6. A state write and a genesis replacing the genesis it belongs to are
+--      serialised: the genesis insert locks the head FOR UPDATE, and the state
+--      guard locks its own genesis FOR SHARE before asking whether it has been
+--      superseded, so whichever commits second sees the first.
 --
 -- Trigger functions pin search_path to pg_catalog, pg_temp and reach tables
 -- only through the schema of the table that fired them, so a session's
@@ -41,6 +51,7 @@ CREATE TABLE "OpsObserverGenesis" (
     "rootMarker" INTEGER,
     "requestDigest" TEXT NOT NULL,
     "invariantVersion" INTEGER NOT NULL,
+    "runDeadlineAt" TIMESTAMPTZ(3) NOT NULL,
 
     CONSTRAINT "OpsObserverGenesis_pkey" PRIMARY KEY ("id")
 );
@@ -83,8 +94,10 @@ ALTER TABLE "OpsObserverState"
     ADD CONSTRAINT "OpsObserverState_generation_check" CHECK ("generation" >= 0),
     ADD CONSTRAINT "OpsObserverState_keys_check" CHECK (jsonb_typeof("keys") = 'object'),
     ADD CONSTRAINT "OpsObserverState_checkpoint_check"
-        CHECK ("verifiedThroughGeneration" >= 0
-               AND ("verifiedThroughAuditId" IS NULL) = ("verifiedThroughAuditHash" IS NULL));
+        CHECK (("verifiedThroughGeneration" = 0
+                AND "verifiedThroughAuditId" IS NULL AND "verifiedThroughAuditHash" IS NULL)
+               OR ("verifiedThroughGeneration" > 0
+                AND "verifiedThroughAuditId" IS NOT NULL AND "verifiedThroughAuditHash" IS NOT NULL));
 
 -- The claim every deadline-carrying row passes on the way in.
 CREATE FUNCTION ops_observer_deadline_claim(claimed timestamptz) RETURNS void
@@ -121,6 +134,7 @@ BEGIN
   NEW."createdAt"        := clock_timestamp();
   NEW."invariantVersion" := 1;
   NEW."rootMarker"       := CASE WHEN NEW."supersedesGenesisId" IS NULL THEN 1 ELSE NULL END;
+  EXECUTE format('SELECT %I.ops_observer_deadline_claim($1)', TG_TABLE_SCHEMA) USING NEW."runDeadlineAt";
 
   -- The head is the genesis nobody has replaced. Locking it serialises two
   -- genesis requests; the unique on supersedesGenesisId refuses the loser.
@@ -152,6 +166,11 @@ CREATE TRIGGER "OpsObserverGenesis_guard"
     BEFORE INSERT OR UPDATE OR DELETE ON "OpsObserverGenesis"
     FOR EACH ROW EXECUTE FUNCTION ops_observer_genesis_guard();
 
+CREATE CONSTRAINT TRIGGER ops_observer_genesis_deadline_check
+    AFTER INSERT ON "OpsObserverGenesis"
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION ops_observer_deadline_check();
+
 CREATE FUNCTION ops_observer_state_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
@@ -161,6 +180,11 @@ BEGIN
     RAISE EXCEPTION 'ops_observer_state_not_deletable' USING ERRCODE = 'OB030';
   END IF;
 
+  -- Lock first, then look: a genesis replacing this one holds its row FOR
+  -- UPDATE until it commits, and the EXISTS below is a new snapshot taken
+  -- after the lock is granted, so it sees that genesis if it committed.
+  EXECUTE format('SELECT 1 FROM %I."OpsObserverGenesis" WHERE id = $1 FOR SHARE', TG_TABLE_SCHEMA)
+    USING NEW."genesisId";
   EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I."OpsObserverGenesis" WHERE "supersedesGenesisId" = $1)',
                  TG_TABLE_SCHEMA)
     INTO superseded USING NEW."genesisId";
@@ -179,6 +203,12 @@ BEGIN
     END IF;
     IF NEW."verifiedThroughGeneration" < OLD."verifiedThroughGeneration"
        OR NEW."verifiedThroughGeneration" > OLD."generation" THEN
+      RAISE EXCEPTION 'ops_observer_state_checkpoint_order' USING ERRCODE = 'OB034';
+    END IF;
+    -- The audit row a checkpoint names moves only with the checkpoint.
+    IF NEW."verifiedThroughGeneration" = OLD."verifiedThroughGeneration"
+       AND (NEW."verifiedThroughAuditId" IS DISTINCT FROM OLD."verifiedThroughAuditId"
+            OR NEW."verifiedThroughAuditHash" IS DISTINCT FROM OLD."verifiedThroughAuditHash") THEN
       RAISE EXCEPTION 'ops_observer_state_checkpoint_order' USING ERRCODE = 'OB034';
     END IF;
   END IF;

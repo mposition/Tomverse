@@ -842,9 +842,9 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
-    count: 3,
+    count: 5,
     reason:
-      "Three reads in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE, the state guard reads whether its genesis has been superseded, and it calls the deadline claim function in its own schema. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+      "Five uses in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE and calls the deadline claim function in its own schema; the state guard locks its own genesis FOR SHARE, reads whether that genesis has been superseded, and calls the same claim function. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
   },
   {
     path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",
