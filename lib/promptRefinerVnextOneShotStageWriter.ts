@@ -9,6 +9,8 @@ import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
+import { assertPromptRefinerVnextOneShotPreregistrationForStage } from
+  "@/lib/promptRefinerVnextOneShotPreregistration";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
 import {
@@ -47,6 +49,9 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
         !price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("vnext_one_shot_stage_price_mismatch");
     }
+    await assertPromptRefinerVnextOneShotPreregistrationForStage(
+      tx, input.binding, input.session.user?.id ?? "",
+    );
     await tx.promptRefinerVnextOneShotStage.create({
       data: {
         id: input.binding.id,
