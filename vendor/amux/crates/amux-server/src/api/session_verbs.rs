@@ -23628,16 +23628,20 @@ mod tests {
         }
         let mut headers = HeaderMap::new();
         headers.insert("x-amux-worker", "peer-steer-caller".parse().unwrap());
-        let before = now_i64() * 1000;
+        let before_s = now_i64();
         let response = steer_mutate(&st, "peer-steer-recipient", &Method::POST, &headers,
             &json!({"text":"Rebuild the shard index for tenant 42 and report the residual count",
                 "record_history":true, "no_board":true})).await;
-        let after = now_i64() * 1000;
+        let after_s = now_i64();
         assert_eq!(response.status(), StatusCode::OK);
         let body: Value = serde_json::from_slice(
             &axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
         assert!(body["no_board_refused"].is_null(), "coordination does not promise a task: {body}");
         let conn = st.store.read().unwrap();
+        let history_rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cmd_history WHERE session='peer-steer-recipient'", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(history_rows, 1, "fixture must identify one queued history row");
         let (kind, origin, pending, card): (String, String, i64, Option<String>) = conn.query_row(
             "SELECT type, origin, capture_pending, card_id FROM cmd_history WHERE session='peer-steer-recipient'",
             [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
@@ -23646,7 +23650,8 @@ mod tests {
         let queued_at: i64 = conn.query_row(
             "SELECT queued_at FROM cmd_history WHERE session='peer-steer-recipient'", [], |r| r.get(0),
         ).unwrap();
-        assert!((before..=after).contains(&queued_at), "queued history must use epoch milliseconds");
+        assert!((before_s * 1000..(after_s + 1) * 1000).contains(&queued_at),
+            "queued history must use epoch milliseconds");
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM issues WHERE session='peer-steer-recipient'",
             [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
