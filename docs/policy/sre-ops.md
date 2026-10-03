@@ -11,6 +11,7 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | (미부여) | (미승인) | 세 번째 초안 — 독립 검토 반영: cron이 곧바로 `stuck`이어도 열림, 신규 열림의 날짜당 1회 강제, `abandoned` 뒤 heartbeat 보류, readiness 검사 17개 전부, 마감 판정의 시계, 무력화의 근거와 시험, 전환 조건의 근거 기록, 금지 변수 보강 |
 | (미부여) | (미승인) | 네 번째 초안 — 독립 검토 반영: 악화도 키당 날짜당 1회만 상한 밖, 환경변수는 allowlist로 판정, statement timer가 문장마다 다시 판정됨과 그 시험, `timestamptz` 비교, S3 조건을 커밋된 기록으로 |
 | (미부여) | (미승인) | 다섯 번째 초안 — 독립 검토 반영: 닫힌 runtime 이름 목록과 실행 서비스가 혼자 판정하는 모양 규칙, 악화 규칙 하나로 정리, idle timer 시험 |
+| (미부여) | (미승인) | 여섯 번째 초안 — 독립 검토 반영: 17 단언 개수 표기, 모양 규칙에 `DIRECT_URL` |
 
 이 문서는 Claude가 설계하고 교차 vendor 독립 검토를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다. 내용 변경은 운영자
 승인과 정책 버전 증가가 필요합니다. 승인은 단계별 착수 조건(8절)을 없애지 않으며, 어떤 Railway 서비스·secret·webhook·
@@ -102,7 +103,7 @@ production이 조용히 망가지고 있는지 감시하고, **급한 것은 소
    - **(b) 모양 규칙.** 자기 서비스 변수(7절)를 **제외한** 모든 이름 중 아래에 걸리는 것이 있으면 거절합니다. (a)에 실수로 들어간
      자격증명도 이 검사가 막습니다.
      - 대소문자를 무시하고 `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`,
-       `ENCRYPTION_KEY`, `SIGNING_KEY`, `CREDENTIAL`, `DATABASE_URL`, `DSN`을 포함하는 이름
+       `ENCRYPTION_KEY`, `SIGNING_KEY`, `CREDENTIAL`, `DATABASE_URL`, `DIRECT_URL`, `DSN`을 포함하는 이름
      - `POSTGRES`·`PG`·`PRISMA_`·`GH_`·`ADMIN_AUDIT_INTEGRITY_`로 시작하는 이름
      - 상대 서비스의 변수 이름. page 서비스에서는 `OPS_OBSERVER_DIGEST_SECRET`, `OPS_OBSERVER_DIGEST_WEBHOOK_URL`,
        `OPS_OBSERVER_DIGEST_HEARTBEAT_URL`이고, digest 서비스에서는 `OPS_OBSERVER_SECRET`, `OPS_OBSERVER_PAGE_WEBHOOK_URL`,
@@ -204,7 +205,7 @@ page와 채널 점검이 같은 실행에서 생기면 page 문장·링크 뒤�
    함수 다음 문장부터는 statement timer가 조용히 꺼지는 조합이 생기지 않습니다. PostgreSQL은 statement timer를 **문장마다 시작할
    때** 그 시점의 `statement_timeout`과 `transaction_timeout` 값으로 다시 판정하므로, 물려받은 값이 작아 무장 함수 문장 자신의
    statement timer가 꺼졌더라도 다음 문장은 `ttArmedMs > statement_timeout` 아래에서 다시 무장됩니다. 무장 함수 문장 자신은
-   아래 6항의 "DB 상한이 없는 구간"에 속합니다. 17 전용 job은 물려받은 값 200 ms에서 다음 셋을 **모두** 단언합니다.
+   아래 6항의 "DB 상한이 없는 구간"에 속합니다. 17 전용 job은 물려받은 값 200 ms에서 다음 넷을 **모두** 단언합니다.
    - 함수 뒤 `pg_sleep(1)`에서 세션이 살아 있습니다(우리 값으로 다시 무장됨).
    - 그다음 2초를 넘는 문장이 statement timeout으로 취소됩니다(statement timer가 무장돼 있음).
    - statement 상한 아래의 짧은 문장을 반복하면 `ttArmedMs`에서 세션이 끝납니다(우리 timer가 실제로 돔).
