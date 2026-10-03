@@ -177,11 +177,7 @@ export async function deleteTomverseAccount(
       where: { userId: user.id },
     });
 
-    // Before the reports are anonymised: once userId is null nothing can find
-    // the triage rows derived from them (docs/policy/support-triage.md §5).
-    const supportTriageDeleted = await deleteSupportTriageDataForAccount(tx, user.id);
-
-    await tx.feedback.updateMany({
+    const anonymisedReports = await tx.feedback.updateManyAndReturn({
       where: { userId: user.id },
       data: {
         userId: null,
@@ -194,7 +190,15 @@ export async function deleteTomverseAccount(
         // becomes unsendable instead of mailing a removed contact.
         emailUpdatesConsent: false,
       },
+      select: { id: true },
     });
+    // Keyed on exactly the reports anonymised above; once userId is null
+    // nothing else can find the triage rows derived from them
+    // (docs/policy/support-triage.md §5).
+    const supportTriageDeleted = await deleteSupportTriageDataForAccount(
+      tx,
+      anonymisedReports.map((report) => report.id)
+    );
 
     await tx.refundRequest.updateMany({
       where: { userId: user.id },

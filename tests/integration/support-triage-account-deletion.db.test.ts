@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
+import pg from "pg";
+
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import { resolvePostgresConnectionConfig } from "@/lib/postgresConnectionConfigCore.mjs";
 import { prisma } from "@/lib/prisma";
+import { deleteSupportTriageDataForAccount } from "@/lib/supportTriageAccountDeletion";
 
 // Support-triage data in a real account deletion (docs/policy/support-triage.md §5).
 //
@@ -92,4 +96,91 @@ test("an account with nothing derived writes no triage audit entry", async () =>
   await prisma.feedback.create({ data: { id: "fb-del-plain", type: "bug", message: "plain", userId: user.id } });
   await deleteTomverseAccount(user.id, { cancelSubscription: false });
   assert.equal(await prisma.adminAuditLog.count({ where: { targetType: "SupportTriageSuggestion" } }), 0);
+});
+
+// Two connections. The set deleted must be the set anonymised: a suggestion
+// that reaches a report while the deletion runs is either deleted with it or
+// refused, never left behind on an anonymised report.
+
+const directClient = async () => {
+  const url = process.env.DATABASE_URL;
+  assert.ok(url, "DATABASE_URL must point at the test database");
+  const config = resolvePostgresConnectionConfig(url, { requireTestMarker: true });
+  const client = new pg.Client({ connectionString: config.connectionString, options: config.poolOptions });
+  await client.connect();
+  return client;
+};
+
+const untilSomeoneWaitsOnALock = async () => {
+  for (let i = 0; i < 100; i += 1) {
+    const [row] = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
+    if (row.n > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail("no session ever waited on a lock");
+};
+
+test("a suggestion inserted before the anonymisation commits is deleted with the account", async () => {
+  const { user } = await seed();
+  const other = await directClient();
+  try {
+    await other.query("BEGIN");
+    // Takes FOR SHARE on the report in the guard trigger and holds it.
+    await other.query(
+      `INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest") VALUES ('s-race-early', 'fb-del-mine-2', $1)`,
+      ["c".repeat(64)]
+    );
+    const deletion = deleteTomverseAccount(user.id, { cancelSubscription: false });
+    await untilSomeoneWaitsOnALock();
+    await other.query("COMMIT");
+    assert.equal((await deletion).deleted, true);
+  } finally {
+    await other.end();
+  }
+  assert.deepEqual(
+    (await prisma.supportTriageSuggestion.findMany({ select: { id: true } })).map((row) => row.id),
+    ["s-other"]
+  );
+});
+
+test("a suggestion inserted after the anonymisation waits for it and is refused", async () => {
+  const { user } = await seed();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let anonymised!: () => void;
+  const reachedGate = new Promise<void>((resolve) => (anonymised = resolve));
+  // The account-deletion order on its own, held open after the delete.
+  const deletion = prisma.$transaction(
+    async (tx) => {
+      const reports = await tx.feedback.updateManyAndReturn({
+        where: { userId: user.id },
+        data: { userId: null, message: "[deleted account]" },
+        select: { id: true },
+      });
+      const counts = await deleteSupportTriageDataForAccount(tx, reports.map((report) => report.id));
+      anonymised();
+      await gate;
+      return counts;
+    },
+    { timeout: 15_000 }
+  );
+  await reachedGate;
+  const other = await directClient();
+  try {
+    const late = other.query(
+      `INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest") VALUES ('s-race-late', 'fb-del-mine-1', $1)`,
+      ["d".repeat(64)]
+    );
+    const outcome = late.then(
+      () => "inserted",
+      (error: Error) => error.message
+    );
+    await untilSomeoneWaitsOnALock();
+    release();
+    assert.deepEqual(await deletion, { suggestions: 2 });
+    assert.match(await outcome, /deleted account/);
+  } finally {
+    await other.end();
+  }
+  assert.equal(await prisma.supportTriageSuggestion.count({ where: { feedbackId: { startsWith: "fb-del-mine" } } }), 0);
 });

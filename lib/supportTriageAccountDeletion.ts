@@ -3,8 +3,8 @@
  *
  * Account deletion keeps the account's reports and anonymises them in place,
  * so no foreign-key cascade reaches the triage rows derived from them. This
- * module deletes those rows inside the account-deletion transaction, before
- * the reports are anonymised, and records how many it removed as the
+ * module deletes those rows inside the account-deletion transaction, keyed on
+ * exactly the reports that transaction anonymised, and records how many it removed as the
  * transaction's last statement. Writing the audit entry last keeps the audit
  * chain's lock off the rest of a transaction this module does not own; an
  * account with nothing derived writes no entry.
@@ -25,18 +25,27 @@ export type SupportTriageDeletionCounts = {
 /** Models this module deletes, by manifest name. */
 export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze(["SupportTriageSuggestion"] as const);
 
+/**
+ * Called right after the anonymising UPDATE, with the ids it returned.
+ *
+ * The set must be the one the anonymisation wrote, not a separate read by
+ * userId: under READ COMMITTED a report committed between two statements is in
+ * one set and not the other, and a report anonymised without its triage rows
+ * deleted can never be found from the account again (docs/policy/support-triage.md §5).
+ *
+ * Why nothing escapes after the UPDATE: it holds a row lock on every report it
+ * anonymised until commit. A suggestion insert takes FOR SHARE on its report in
+ * the guard trigger, so it waits, then reads the deleted-account marker and is
+ * refused. An insert that took FOR SHARE first makes the UPDATE wait for it, and
+ * once it commits this DELETE (a later statement) sees it.
+ */
 export const deleteSupportTriageDataForAccount = async (
   tx: Prisma.TransactionClient,
-  userId: string
+  anonymisedReportIds: readonly string[]
 ): Promise<SupportTriageDeletionCounts> => {
-  // Reports first, in id order: the global lock order puts Feedback before
-  // every triage table, and holding the reports keeps a worker from deriving
-  // a new row from one between this delete and the anonymisation.
-  const reports = await tx.$queryRaw<{ id: string }[]>`
-    SELECT f."id" FROM "Feedback" f WHERE f."userId" = ${userId} ORDER BY f."id" FOR UPDATE`;
-  if (reports.length === 0) return { suggestions: 0 };
+  if (anonymisedReportIds.length === 0) return { suggestions: 0 };
   const suggestions = await tx.supportTriageSuggestion.deleteMany({
-    where: { feedbackId: { in: reports.map((report) => report.id) } },
+    where: { feedbackId: { in: [...anonymisedReportIds] } },
   });
   return { suggestions: suggestions.count };
 };
