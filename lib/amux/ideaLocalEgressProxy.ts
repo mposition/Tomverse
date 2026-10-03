@@ -14,7 +14,9 @@ const MAX_HEAD_BYTES = 4_096;
 const MAX_ACTIVE_TUNNELS = 4;
 const MAX_PROXY_CONNECTIONS = 16;
 const MAX_DIRECTION_BYTES = 16 * 1024 * 1024;
-const TUNNEL_DEADLINE_MS = 120_000;
+// Equal to the v13 process hard deadline; the process supervisor, not a
+// shorter tunnel lifetime, decides whether the one-shot analysis timed out.
+const TUNNEL_DEADLINE_MS = 600_000;
 const CONNECT_DEADLINE_MS = 5_000;
 
 const refuse = (socket: Socket, status: 403 | 429 | 502) => {
