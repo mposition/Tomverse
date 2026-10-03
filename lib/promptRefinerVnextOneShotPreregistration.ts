@@ -14,6 +14,8 @@ import { promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
+import { readPromptRefinerVnextOneShotStage } from
+  "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
 import {
@@ -118,9 +120,7 @@ export async function recordPromptRefinerVnextOneShotPreregistration(input: {
     if (existing.length !== 0) {
       throw new Error("vnext_one_shot_preregistration_already_recorded");
     }
-    if (await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID }, select: { id: true },
-    })) {
+    if ((await readPromptRefinerVnextOneShotStage(tx)).stagePresent) {
       throw new Error("vnext_one_shot_preregistration_stage_exists");
     }
     const price = await readPromptRefinerVnextOneShotPrice(tx);

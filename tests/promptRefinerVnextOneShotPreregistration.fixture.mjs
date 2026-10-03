@@ -22,8 +22,6 @@ const policyBytes = readFileSync(resolve(root,
   "docs/policy/prompt-refiner-quality-evaluation-vnext-one-shot-v2.md"));
 const tx = {
   adminAuditLog: { findMany: async () => existing },
-  promptRefinerVnextOneShotStage: { findUnique: async () =>
-    stageExists ? { id: "prompt-refiner-vnext-one-shot-v1" } : null },
 };
 
 mock.module(mod("lib/prisma.ts"), { namedExports: {
@@ -53,6 +51,9 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
 });
 mock.module(mod("lib/promptRefinerVnextOneShotPriceBinding.ts"), { namedExports: {
   PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST: expected.pricePinDigest,
+} });
+mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
+  readPromptRefinerVnextOneShotStage: async () => ({ stagePresent: stageExists }),
 } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
   namedExports: { readPromptRefinerVnextOneShotPrice: async () => {
