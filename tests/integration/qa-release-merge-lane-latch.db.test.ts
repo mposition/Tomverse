@@ -133,3 +133,41 @@ test("events are never changed or removed, and their time is the database's", as
   await assert.rejects(prisma.$executeRaw`DELETE FROM "QaReleaseMergeLaneLatch"`, /append-only/);
   await assert.rejects(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeLaneLatch"`), /append-only/);
 });
+
+test("the audit row must be this transaction's, for this event, by the merge lane's own actor", async () => {
+  const next = ((await newest())?.sequence ?? 0) + 1;
+  const insert = (tx: Prisma.TransactionClient, auditId: string) =>
+    tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "auditLogId")
+      VALUES (${next}, true, 'deploy_failed', ${auditId})`;
+  const target = { targetType: "QaReleaseMergeLaneLatch", summary: "test" };
+
+  // An audit row committed by an earlier transaction is not this one's.
+  const committed = await prisma.$transaction((tx) =>
+    writeSystemAuditLog({ tx, systemActor: "qa-release-merge-lane", action: "qa_release.merge_lane_latched", targetId: String(next), ...target }),
+  );
+  await assert.rejects(prisma.$transaction((tx) => insert(tx, committed)), /set by the merge lane/);
+
+  // An audit row for another event.
+  await assert.rejects(
+    prisma.$transaction(async (tx) =>
+      insert(tx, await writeSystemAuditLog({ tx, systemActor: "qa-release-merge-lane", action: "qa_release.merge_lane_latched", targetId: String(next + 7), ...target })),
+    ),
+    /set by the merge lane/,
+  );
+
+  // Another system actor.
+  await assert.rejects(
+    prisma.$transaction(async (tx) =>
+      insert(tx, await writeSystemAuditLog({ tx, systemActor: "qa-release-intake", action: "qa_release.merge_lane_latched", targetId: String(next), ...target })),
+    ),
+    /set by the merge lane/,
+  );
+
+  // An action outside the lane's namespace.
+  await assert.rejects(
+    prisma.$transaction(async (tx) =>
+      insert(tx, await writeSystemAuditLog({ tx, systemActor: "qa-release-merge-lane", action: "qa_release.digest_stale_alerted", targetId: String(next), ...target })),
+    ),
+    /set by the merge lane/,
+  );
+});

@@ -257,8 +257,16 @@ test("a consume after the expiry is refused by the database clock", async () => 
 
 test("attempts are never removed", async () => {
   await refused(prisma.$executeRaw`DELETE FROM "QaReleaseMergeAttempt"`, /never removed/);
-  // Refused either way: the latch table's foreign key refuses it before the trigger runs.
+  // A plain TRUNCATE meets the latch table's foreign key first; with the
+  // latch table named too, the attempt table's own trigger must refuse it.
   await refused(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeAttempt"`), /never removed|referenced in a foreign key constraint/);
+  await refused(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeAttempt", "QaReleaseMergeLaneLatch"`), /never removed|append-only/);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseMergeLaneLatch" DISABLE TRIGGER "QaReleaseMergeLaneLatch_before_truncate"`);
+  try {
+    await refused(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseMergeAttempt", "QaReleaseMergeLaneLatch"`), /never removed/);
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "QaReleaseMergeLaneLatch" ENABLE TRIGGER "QaReleaseMergeLaneLatch_before_truncate"`);
+  }
 });
 
 test("the migration's lifecycle lists are the core's", () => {
@@ -270,4 +278,29 @@ test("the migration's lifecycle lists are the core's", () => {
   assert.deepEqual([...states.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...QA_RELEASE_MERGE_ATTEMPT_STATES]);
   const outcomes = /"outcome" IS NULL OR "outcome" IN \(([^)]*)\)/.exec(sql)?.[1] ?? "";
   assert.deepEqual([...outcomes.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...QA_RELEASE_MERGE_ATTEMPT_OUTCOMES]);
+});
+
+test("the audit row must be this transaction's, for this attempt, by the merge lane's own actor", async () => {
+  const id = nextId();
+  const insert = (tx: Prisma.TransactionClient, auditId: string) =>
+    tx.$executeRaw`INSERT INTO "QaReleaseMergeAttempt"
+      ("id", "pullRequestNumber", "headSha", "base", "controlRevision", "state", "lastAuditLogId")
+      VALUES (${id}, 12, ${HEAD}, 'develop', ${revision}, 'issued', ${auditId})`;
+  const audit = (tx: Prisma.TransactionClient, overrides: { systemActor?: "qa-release-merge-lane" | "qa-release-intake"; action?: string; targetId?: string }) =>
+    writeSystemAuditLog({
+      tx,
+      systemActor: overrides.systemActor ?? "qa-release-merge-lane",
+      action: overrides.action ?? "qa_release.merge_attempt_issued",
+      targetType: "QaReleaseMergeAttempt",
+      targetId: overrides.targetId ?? id,
+      summary: "test",
+    });
+
+  const committed = await prisma.$transaction((tx) => audit(tx, {}));
+  await refused(prisma.$transaction((tx) => insert(tx, committed)), /audited by the merge lane/);
+  await refused(prisma.$transaction(async (tx) => insert(tx, await audit(tx, { targetId: `${id}-other` }))), /audited by the merge lane/);
+  await refused(prisma.$transaction(async (tx) => insert(tx, await audit(tx, { systemActor: "qa-release-intake" }))), /audited by the merge lane/);
+  await refused(prisma.$transaction(async (tx) => insert(tx, await audit(tx, { action: "qa_release.digest_stale_alerted" }))), /audited by the merge lane/);
+  await prisma.$transaction(async (tx) => insert(tx, await audit(tx, {})));
+  await move(id, "lane", "closed", "not_merged");
 });
