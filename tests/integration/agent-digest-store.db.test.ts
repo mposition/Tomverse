@@ -180,3 +180,42 @@ test("an admission returning null lets the row and its audit entry commit", asyn
   createdIds.push(result.id);
   assert.equal(await auditCount(result.id), 1);
 });
+
+// docs/policy/billing-finance-ops.md §7 W1a: the registration migration widens
+// the CHECKs and the retention CASE. A billing-finance-ops row is accepted with
+// its own 90-day body retention and its own intake actor; a kind that belongs
+// to another agent is still refused by the database, not only by the store.
+test("billing-finance-ops is registered with its kind, retention and intake actor", async () => {
+  const result = await recordAgentDigestItem({
+    agentKey: "billing-finance-ops",
+    kind: "price_deadline_digest",
+    schemaVersion: 1,
+    idempotencyKey: `billing-finance-ops:test:${randomUUID()}`,
+    payload: { verdict: "quiet", items: [], rejectedFields: [] },
+  });
+  assert.equal(result.status, "created");
+  if (result.status !== "created") return;
+  createdIds.push(result.id);
+
+  const row = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: result.id } });
+  assert.equal(row.retentionUntil.getTime() - row.createdAt.getTime(), 90 * 86_400_000);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditLogId } });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "billing-finance-ops-intake");
+
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
+       VALUES ($1::uuid, 'billing-finance-ops', 'daily_digest', 1, $2, '{}'::jsonb, $3, 2)`,
+      randomUUID(),
+      `billing-finance-ops:test:${randomUUID()}`,
+      "0".repeat(64),
+    ),
+    /AgentDigestItem_kind_check/,
+  );
+});
+
+test("the billing-finance-ops switch row exists and starts off", async () => {
+  const setting = await prisma.appSetting.findUnique({ where: { key: "billingFinanceOps.control" } });
+  assert.ok(setting, "the registration migration seeds the switch row");
+  assert.deepEqual(JSON.parse(setting.value), { enabled: false, revision: 0, enabledAt: null });
+});

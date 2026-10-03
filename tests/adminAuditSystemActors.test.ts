@@ -50,6 +50,8 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-intake",
     "support-triage-worker",
     "support-triage-retention",
+    // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
+    "billing-finance-ops-intake",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
