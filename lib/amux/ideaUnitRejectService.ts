@@ -7,6 +7,7 @@ import { takeAuditChainLock, writeAdminAuditLog,
   writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind, AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_SECOND_DRAFT_SAVED_ACTION, AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
   AMUX_V4_IDEA_SYSTEM_ACTOR, AMUX_SYSTEM_AUDIT_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
@@ -16,6 +17,8 @@ import { prisma } from "@/lib/prisma";
 import { inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import { matchesAmuxIdeaAnalysisUnitCommitments } from
   "./ideaAnalysisResultReadCore.ts";
+import { readAmuxIdeaAnalysisResultInTransaction } from
+  "./ideaContinuedAnalysisResultReadService.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
@@ -71,20 +74,28 @@ const validPrepare = (value: AmuxUnitRejectPrepare): boolean =>
 
 /** Locks follow idea -> chunk -> preview -> unit -> decision. The audit-chain
  * lock is acquired first, matching the existing AMUX v4 owner writers. */
-async function loadSource(tx: Prisma.TransactionClient, actorUserId: string,
+async function loadSource(tx: Prisma.TransactionClient, session: Session,
   ideaId: string, draftUnitId: string, keys: AmuxContentKeys) {
+  const actorUserId = ownerId(session);
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${ideaId} AND "actorUserId" = ${actorUserId} FOR UPDATE
   `;
   if (ideaLock.length !== 1) throw new AmuxUnitRejectError("not_found");
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: ideaId } });
+  const target = await tx.amuxIdeaDraftUnit.findUnique({
+    where: { id: draftUnitId }, select: { chunkIndex: true },
+  });
+  const chunkIndex = target?.chunkIndex;
+  if (chunkIndex !== 0 && chunkIndex !== 1) {
+    throw new AmuxUnitRejectError("not_ready");
+  }
   const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${ideaId} AND "chunkIndex" = 0 FOR UPDATE
+    WHERE "ideaId" = ${ideaId} AND "chunkIndex" = ${chunkIndex} FOR UPDATE
   `;
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex } },
   });
   if (!idea || chunkLock.length !== 1 || !chunk?.currentPreviewId) {
     throw new AmuxUnitRejectError("not_ready");
@@ -99,7 +110,7 @@ async function loadSource(tx: Prisma.TransactionClient, actorUserId: string,
   const unitLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaDraftUnit"
     WHERE "id" = ${draftUnitId} AND "ideaId" = ${ideaId} AND
-      "actorUserId" = ${actorUserId} AND "chunkIndex" = 0 FOR UPDATE
+      "actorUserId" = ${actorUserId} AND "chunkIndex" = ${chunkIndex} FOR UPDATE
   `;
   const unit = await tx.amuxIdeaDraftUnit.findUnique({ where: { id: draftUnitId } });
   const clock = await tx.$queryRaw<Array<{ now: Date }>>`
@@ -115,13 +126,13 @@ async function loadSource(tx: Prisma.TransactionClient, actorUserId: string,
       chunk.draftVersion !== 2 || chunk.actorUserId !== actorUserId ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       chunk.currentPreviewId !== preview.id ||
-      preview.ideaId !== ideaId || preview.chunkIndex !== 0 ||
+      preview.ideaId !== ideaId || preview.chunkIndex !== chunkIndex ||
       preview.state !== "completed" || preview.confirmedByUserId !== actorUserId ||
       !preview.confirmationAuditLogId ||
       preview.sourceScopeApprovalId !== null || preview.sourceUnitOrdinal !== 0 ||
       preview.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       unit.ideaId !== ideaId || unit.actorUserId !== actorUserId ||
-      unit.chunkIndex !== 0 || unit.state !== "proposed" ||
+      unit.chunkIndex !== chunkIndex || unit.state !== "proposed" ||
       !unit.localRef || !unit.bodyCiphertext || !unit.bodyKeyId ||
       !unit.bodyKeyVersion || unit.bodyPurgedAt !== null ||
       now >= unit.expiresAt ||
@@ -129,15 +140,17 @@ async function loadSource(tx: Prisma.TransactionClient, actorUserId: string,
     throw new AmuxUnitRejectError("not_ready");
   }
   const units = await tx.amuxIdeaDraftUnit.findMany({
-    where: { ideaId, actorUserId, chunkIndex: 0 },
+    where: { ideaId, actorUserId, chunkIndex },
     orderBy: { unitIndex: "asc" },
     select: { id: true, localRef: true, unitKind: true,
       bodyDigest: true, bodyDigestKeyId: true },
   });
   const draftAudits = await tx.adminAuditLog.findMany({
-    where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-      targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
-      targetId: `${ideaId}:0` }, take: 2,
+    where: { action: chunkIndex === 0 ? AMUX_V4_FIRST_DRAFT_SAVED_ACTION :
+      AMUX_V4_SECOND_DRAFT_SAVED_ACTION,
+      targetType: chunkIndex === 0 ? AMUX_V4_FIRST_DRAFT_SAVED_TARGET :
+        AMUX_V4_SECOND_DRAFT_SAVED_TARGET,
+      targetId: `${ideaId}:${chunkIndex}` }, take: 2,
   });
   const draftAudit = draftAudits[0];
   const draftMetadata = draftAudit?.metadata;
@@ -164,6 +177,23 @@ async function loadSource(tx: Prisma.TransactionClient, actorUserId: string,
       previewMeta.payloadDigest !== preview.payloadDigest ||
       previewMeta.payloadDigestKeyId !== preview.payloadDigestKeyId) {
     throw new AmuxUnitRejectError("integrity_unavailable");
+  }
+  if (chunkIndex === 1) {
+    const result = await readAmuxIdeaAnalysisResultInTransaction(
+      tx, session, ideaId, keys);
+    if (result.state !== "continued_ready" ||
+        result.pages[1]?.previewId !== preview.id) {
+      throw new AmuxUnitRejectError("not_ready");
+    }
+    const visible = result.pages[1].units.find((entry) => entry.id === unit.id);
+    if (!visible?.proposal || visible.decisionState !== "proposed" ||
+        visible.bodyDigest !== unit.bodyDigest ||
+        visible.bodyDigestKeyId !== unit.bodyDigestKeyId ||
+        visible.localRef !== unit.localRef ||
+        visible.proposal.kind === "evidence") {
+      throw new AmuxUnitRejectError("integrity_unavailable");
+    }
+    return { unit, preview, proposal: visible.proposal, now };
   }
   let plain: Buffer;
   try {
@@ -222,7 +252,7 @@ export async function commitAmuxUnitRejectPrepare(tx: Prisma.TransactionClient,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
-  const source = await loadSource(tx, actorUserId,
+  const source = await loadSource(tx, input.session,
     input.choice.ideaId, input.choice.draftUnitId, input.keys);
   const existing = await tx.amuxIdeaUnitDecision.findMany({
     where: { draftUnitId: source.unit.id,
@@ -287,7 +317,8 @@ export async function commitAmuxUnitRejectPrepare(tx: Prisma.TransactionClient,
   });
   const row = await tx.amuxIdeaUnitDecision.create({ data: {
     id: input.choice.decisionId, ideaId: input.choice.ideaId,
-    draftUnitId: source.unit.id, actorUserId, chunkIndex: 0,
+    draftUnitId: source.unit.id, actorUserId,
+    chunkIndex: source.unit.chunkIndex,
     prepareRequestId: input.choice.prepareRequestId,
     action: "reject_unit", state: "prepared",
     ownerSessionDigest: bound.ownerSession.digest,
@@ -322,7 +353,7 @@ export async function commitAmuxUnitRejectConsume(tx: Prisma.TransactionClient,
            set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
   `;
   await takeAuditChainLock(tx);
-  const source = await loadSource(tx, actorUserId, choice.ideaId,
+  const source = await loadSource(tx, input.session, choice.ideaId,
     choice.draftUnitId, input.keys);
   const locked = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaUnitDecision"

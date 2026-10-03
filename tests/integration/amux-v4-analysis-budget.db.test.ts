@@ -1550,6 +1550,30 @@ test("a verified second page closes the idea without admitting a card or restart
   assert.deepEqual(visible.pages.map((page) => page.units.length), [4, 1]);
   assert.equal(visible.pages[0].units[3]?.proposal?.kind, "card");
   assert.equal(visible.pages[1].units[0]?.proposal?.kind, "card");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const choice = { ideaId, draftUnitId: units[0]!.id,
+      decisionId: randomUUID(), prepareRequestId: randomUUID(),
+      reason: "The second-page proposal is outside this release." };
+    const prepared = await commitAmuxUnitRejectPrepare(tx,
+      { session, request, choice, keys });
+    const decision = await tx.amuxIdeaUnitDecision.findUniqueOrThrow({
+      where: { id: prepared.decisionId },
+    });
+    assert.equal(decision.chunkIndex, 1);
+    const consumed = await commitAmuxUnitRejectConsume(tx, {
+      session, request, choice: { ...choice, consumeRequestId: randomUUID(),
+        confirmationDigest: prepared.confirmationDigest }, keys,
+    });
+    assert.equal(consumed.state, "rejected");
+    assert.equal((await tx.amuxIdeaDraftUnit.findUniqueOrThrow({
+      where: { id: units[0]!.id },
+    })).state, "rejected");
+    assert.equal(await tx.amuxWorkItem.count({
+      where: { sourceSystem: "admin-idea-v4" },
+    }), workItemsBefore, "rejecting a later page cannot register a card");
+    throw new Error("rollback synthetic second-page rejection");
+  }, { maxWait: 5_000, timeout: 30_000 }),
+  /rollback synthetic second-page rejection/);
   assert.equal(await prisma.amuxWorkItem.count({
     where: { sourceSystem: "admin-idea-v4" },
   }), workItemsBefore);

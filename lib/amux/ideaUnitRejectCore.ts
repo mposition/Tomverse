@@ -94,8 +94,9 @@ export function inspectAmuxUnitRejectRequest(raw: string): AmuxUnitRejectRequest
   return data as AmuxUnitRejectRequest & { stage: "consume" };
 }
 
-/** Only the first, operator-idea chunk is handled by this dark writer. Later
- * source-plan revisions and hierarchy/card approvals need separate bindings. */
+/** The first two confirmed idea-only output pages can be rejected by this
+ * dark writer. Other source-plan revisions and hierarchy/card approvals need
+ * separate bindings. */
 export function deriveAmuxUnitRejectConfirmation(input: {
   ideaId: string; decisionId: string; prepareRequestId: string;
   actorUserId: string; ownerSession: AmuxUnitDecisionBinding;
