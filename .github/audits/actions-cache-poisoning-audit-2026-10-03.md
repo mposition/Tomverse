@@ -680,6 +680,12 @@ PR에서 `pull_request`로 돌고, 그 run의 save 단계 로그가 mode 때문�
 >    실패하지 않습니다. 다만 문서가 말한 "informational message"가 아니라
 >    `##[warning]`이며, `cache/save@v5`는 **tar/zstd 압축을 모두 끝낸 뒤** 거부
 >    당합니다. 건너뛰는 것이 아니라 값을 치르고 거절당하는 것입니다.
+>
+> **관측은 하나가 아닙니다.** 같은 PR의 `Admin Console E2E` run
+> (`37106376116`)에서 `.next/cache`와 Playwright 캐시 양쪽이 같은 거부를
+> 받았습니다. 즉 경로·workflow·캐시 종류에 따른 특수 사례가 아니라 토큰의
+> 성질입니다. 같은 run의 restore는 `Cache not found for input keys`였습니다 —
+> v2 키로 쓰인 항목이 아직 없었다는 뜻이고, 이 변경 이전에도 miss였습니다.
 
 **그래서 죽은 save 단계 다섯 개를 제거했습니다**(`admin-console-e2e` 2,
 `e2e` 2, `orchestrator-rust` 1). 그 단계들이 할 수 있는 일은 매 run 압축 비용을
