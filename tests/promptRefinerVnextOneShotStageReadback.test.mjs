@@ -4,6 +4,9 @@ import test from "node:test";
 import { lockAndReadPromptRefinerVnextOneShotStage,
   readPromptRefinerVnextOneShotStage } from
   "../lib/promptRefinerVnextOneShotStageReadback.ts";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
+  "../lib/promptRefinerVnextOneShotPriceBinding.ts";
+import { staticModelRegistrySeedRows } from "../lib/modelRegistryShared.ts";
 
 const stage = {
   id: "prompt-refiner-vnext-one-shot-v1",
@@ -15,7 +18,7 @@ const stage = {
   manifestRoot: "d".repeat(64),
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
   runtimeCommitSha: "e".repeat(40),
-  pricePinDigest: "f".repeat(64),
+  pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
   perRequestCostMicroUsd: 29_918n,
   costCeilingMicroUsd: 2_393_440n,
   approvedBy: "synthetic-owner",
@@ -95,16 +98,76 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
 
 test("transactional read locks the stage before reading reservations", async () => {
   const { tx, calls } = txFor(stage, slots());
+  let locks = 0;
   tx.$queryRaw = async (strings, id) => {
-    assert.match(strings.join("?"), /FOR NO KEY UPDATE NOWAIT/);
+    const sql = strings.join("?");
+    assert.match(sql, /FOR NO KEY UPDATE NOWAIT/);
     assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
-    assert.deepEqual(calls, { stages: 0, slots: 0 });
-    return [{ id }];
+    locks++;
+    if (!sql.includes('"status"')) {
+      if (locks === 1) assert.deepEqual(calls, { stages: 0, slots: 0 });
+      return [{ id }];
+    }
+    if (sql.includes('"pricePinDigest"')) return [stage];
+    return [{ id, status: stage.status,
+      runtimeDeploymentId: stage.runtimeDeploymentId,
+      runtimeCommitSha: stage.runtimeCommitSha }];
   };
-  const result = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+  let priceLocks = 0;
+  tx.$executeRaw = async (sql) => {
+    assert.deepEqual([...sql], ['LOCK TABLE "ModelRegistryEntry" IN SHARE MODE']);
+    priceLocks++;
+    return 0;
+  };
+  tx.modelRegistryEntry = { findUnique: async () =>
+    staticModelRegistrySeedRows().find((row) => row.id === "gpt-5-6-luna") };
+  const deploymentOptions = {
+    environment: {
+      RAILWAY_ENVIRONMENT_NAME: "staging",
+      RAILWAY_DEPLOYMENT_ID: stage.runtimeDeploymentId,
+      RAILWAY_GIT_COMMIT_SHA: stage.runtimeCommitSha,
+      RAILWAY_PROJECT_ID: "22345678-1234-1234-1234-123456789abc",
+      RAILWAY_SERVICE_ID: "32345678-1234-1234-1234-123456789abc",
+      RAILWAY_ENVIRONMENT_ID: "42345678-1234-1234-1234-123456789abc",
+      RAILWAY_API_TOKEN: "synthetic-token",
+    },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ data: {
+      deployment: { id: stage.runtimeDeploymentId, status: "SUCCESS",
+        meta: { commitHash: stage.runtimeCommitSha } },
+      deployments: { edges: [{ node: { id: stage.runtimeDeploymentId,
+        status: "SUCCESS" } }] },
+    } }) }),
+  };
+  const result = await lockAndReadPromptRefinerVnextOneShotStage(tx, deploymentOptions);
   assert.equal(result.reservationShapeValid, true);
   assert.equal(result.dispatchAuthorized, false);
   assert.deepEqual(calls, { stages: 1, slots: 1 });
+  assert.equal(locks, 3);
+  assert.equal(priceLocks, 1);
+  await assert.rejects(
+    lockAndReadPromptRefinerVnextOneShotStage(tx, {
+      ...deploymentOptions,
+      environment: { ...deploymentOptions.environment,
+        RAILWAY_GIT_COMMIT_SHA: "b".repeat(40) },
+      fetchImpl: async () => ({ ok: true, json: async () => ({ data: {
+        deployment: { id: stage.runtimeDeploymentId, status: "SUCCESS",
+          meta: { commitHash: "b".repeat(40) } },
+        deployments: { edges: [{ node: { id: stage.runtimeDeploymentId,
+          status: "SUCCESS" } }] },
+      } }) }),
+    }),
+    /vnext_one_shot_approved_deployment_mismatch/
+  );
+  assert.equal(priceLocks, 1);
+  tx.modelRegistryEntry.findUnique = async () => ({
+    ...staticModelRegistrySeedRows().find((row) => row.id === "gpt-5-6-luna"),
+    inputUsdPerMillionTokens: 0.01,
+  });
+  await assert.rejects(
+    lockAndReadPromptRefinerVnextOneShotStage(tx, deploymentOptions),
+    /vnext_one_shot_registry_price_mismatch/
+  );
+  assert.equal(priceLocks, 2);
 });
 
 test("absent or unavailable lock never reads an unlocked stage", async () => {
