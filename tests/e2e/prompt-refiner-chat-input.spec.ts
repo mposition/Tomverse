@@ -571,6 +571,14 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
   });
 
+  test("a maximum-length legal draft receives a bounded proposal", async ({ page }) => {
+    await enterChat(page, { offered: true });
+    await page.getByTestId("chat-textarea").fill("a".repeat(16_000));
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toBeFocused();
+    await expect(page.getByTestId("prompt-refiner-proposal")).not.toBeEmpty();
+  });
+
   for (const scenario of [
     { name: "320px at 200% text", viewport: { width: 320, height: 640 }, font: 32 },
     { name: "200% zoom equivalent", viewport: { width: 195, height: 340 }, font: 16 },
