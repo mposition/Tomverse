@@ -8442,8 +8442,9 @@ model OpsObserverGenesis {
   requestDigest       String
   invariantVersion    Int
   /// The deadline the approving request claimed; checked again at COMMIT.
-  runDeadlineAt       DateTime          @db.Timestamptz(3)
+  runDeadlineAt       DateTime              @db.Timestamptz(3)
   state               OpsObserverState?
+  deliveries          OpsObserverDelivery[]
 }
 
 /// The key state of one genesis. Every update is exactly the next generation
@@ -8465,4 +8466,62 @@ model OpsObserverState {
   stampCheckpointSha256     String
   /// The deadline the writing run claimed; checked again at COMMIT.
   runDeadlineAt             DateTime           @db.Timestamptz(3)
+}
+
+/// One reservation of the sre-ops agent: what a run may send, at most once
+/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
+/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
+/// open at a time. The migration's triggers enforce all of it.
+model OpsObserverDelivery {
+  id               String                    @id @db.Uuid
+  genesisId        String                    @db.Uuid
+  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The run that reserved it; one reservation per run.
+  runId            String                    @unique
+  /// One of DELIVERY_STATUSES.
+  status           String
+  /// 1 while reserved, null once closed; unique, so one reservation is open.
+  reservedMarker   Int?                      @unique
+  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  confirmedAt      DateTime?                 @db.Timestamptz(3)
+  shadowedAt       DateTime?                 @db.Timestamptz(3)
+  abandonedAt      DateTime?                 @db.Timestamptz(3)
+  /// The owner's calendar date the daily budget counts against.
+  ownerDate        DateTime                  @db.Date
+  /// Set on the reservation that carries the weekly channel check; one per date.
+  channelCheckDate DateTime?                 @unique @db.Date
+  /// The AgentDigestItem the page links to; null for a check-only message.
+  digestItemId     String?                   @db.Uuid
+  invariantVersion Int
+  stampStatus      String
+  /// The deadline of the run that last wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime                  @db.Timestamptz(3)
+  items            OpsObserverDeliveryItem[]
+
+  @@index([genesisId, ownerDate])
+}
+
+/// One message kind for one incident inside a reservation. Written in the
+/// reservation's own transaction and never changed; (mode, signal, scope,
+/// kind, openedAt) is unique, so each kind is reserved once per incident.
+model OpsObserverDeliveryItem {
+  id         String              @id @db.Uuid
+  deliveryId String              @db.Uuid
+  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  /// Copied from the reservation by the trigger.
+  mode       String
+  signal     String
+  scope      String
+  /// One of MESSAGE_KINDS.
+  kind       String
+  /// One of ITEM_ORIGINS.
+  origin     String
+  openedAt   DateTime            @db.Timestamptz(3)
+  /// Whether this item counted against the shared daily cap.
+  capped     Boolean
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
+  @@index([deliveryId])
 }

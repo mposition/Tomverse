@@ -37,6 +37,8 @@ const REVIEWED_MENTIONS = {
   // States the limit of the deferred deadline check twice, and names this
   // test's file (opsObserverNoSetConstraints) once.
   "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql": 3,
+  // Points back to the genesis and state migration's statement of that limit.
+  "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql": 1,
 };
 
 function* walk(dir) {
