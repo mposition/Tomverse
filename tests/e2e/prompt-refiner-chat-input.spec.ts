@@ -634,6 +634,58 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
     expect(requests).toBe(3);
     expect(durable.writes.every((text) => text === SOURCE_PROMPT || text === `${SOURCE_PROMPT} 하나` || text === finalDraft)).toBe(true);
   });
+
+  test("responsive shell remount keeps one bound suggestion and never requests after an edit", async ({ page }) => {
+    const durable = await mockDurableDrafts(page);
+    let requests = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/e2e/prompt-refiner-adapter") {
+        requests += 1;
+      }
+    });
+    await enterChat(page, { offered: true, durableChat: true, viewport: { width: 767, height: 680 } });
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill(SOURCE_PROMPT);
+    await expect.poll(() => durable.writes.includes(SOURCE_PROMPT)).toBe(true);
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    const proposal = await page.getByTestId("prompt-refiner-proposal").textContent();
+    expect(requests).toBe(1);
+    await page.evaluate(() => {
+      (window as Window & { __responsiveComposer?: Element | null }).__responsiveComposer =
+        document.querySelector('[data-testid="chat-textarea"]');
+    });
+
+    await page.setViewportSize({ width: 768, height: 680 });
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    expect(await page.evaluate(() =>
+      (window as Window & { __responsiveComposer?: Element | null }).__responsiveComposer !==
+      document.querySelector('[data-testid="chat-textarea"]')
+    ), "the mobile ChatInput did not remount at the breakpoint").toBe(true);
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    await expect(page.getByTestId("prompt-refiner-original")).toHaveText(SOURCE_PROMPT);
+    await expect(page.getByTestId("prompt-refiner-proposal")).toHaveText(proposal ?? "");
+    await expect(textarea).toHaveValue(SOURCE_PROMPT);
+
+    await page.setViewportSize({ width: 767, height: 680 });
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    await expect(textarea).toHaveValue(SOURCE_PROMPT);
+    expect(requests, "switching shells requested another suggestion").toBe(1);
+
+    const editedDraft = `${SOURCE_PROMPT} 수정`;
+    await textarea.fill(editedDraft);
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+    await page.setViewportSize({ width: 768, height: 680 });
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+    await page.setViewportSize({ width: 767, height: 680 });
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+    await expect(textarea).toHaveValue(editedDraft);
+    await expect(page.getByTestId("prompt-refiner-request")).toBeVisible();
+    await expect.poll(() => [...durable.drafts.values()].some((draft) => draft.text === editedDraft)).toBe(true);
+    expect(requests, "an edited draft caused an automatic request on remount").toBe(1);
+  });
 });
 
 async function blockAndCountChatPosts(page: Page, durable: Awaited<ReturnType<typeof mockDurableDrafts>>) {
