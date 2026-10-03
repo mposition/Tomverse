@@ -195,6 +195,33 @@ async function expectRefinerInsideViewport(page: Page) {
   }
 }
 
+async function expectRefinerCopyReachable(page: Page) {
+  for (const id of ["prompt-refiner-original", "prompt-refiner-proposal"]) {
+    const copy = page.getByTestId(id);
+    await expect(copy).toBeVisible();
+    await copy.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    const bounds = await copy.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const visibleHeight = window.visualViewport?.height ?? window.innerHeight;
+      const maxScrollTop = element.scrollHeight - element.clientHeight;
+      element.scrollTop = maxScrollTop;
+      return {
+        top: rect.top,
+        bottom: rect.bottom,
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        maxScrollTop,
+        reachedBottom: element.scrollTop,
+        visibleHeight,
+      };
+    });
+    expect(bounds.bottom, `${id} is above the visible viewport`).toBeGreaterThan(0);
+    expect(bounds.top, `${id} is below the visible viewport`).toBeLessThan(bounds.visibleHeight);
+    expect(bounds.scrollWidth, `${id} has clipped horizontal text`).toBeLessThanOrEqual(bounds.width + 1);
+    expect(bounds.reachedBottom, `${id} cannot scroll to its last line`).toBe(bounds.maxScrollTop);
+  }
+}
+
 async function holdRefinerResponse(page: Page) {
   let release!: () => void;
   let observed!: () => void;
@@ -546,8 +573,67 @@ test.describe("Prompt Refiner in the actual ChatInput", { tag: "@ui-risk" }, () 
       await page.getByTestId("prompt-refiner-request").click();
       await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
       await expectRefinerInsideViewport(page);
+      await expect(page.getByTestId("prompt-refiner-original")).toHaveText(SOURCE_PROMPT);
+      await expect(page.getByTestId("prompt-refiner-proposal")).not.toBeEmpty();
+      await expectRefinerCopyReachable(page);
     });
   }
+
+  test("keyboard, consecutive input and remount keep one suggestion for the exact authored draft", async ({ page }) => {
+    test.setTimeout(90_000);
+    const durable = await mockDurableDrafts(page);
+    let requests = 0;
+    page.on("request", (request) => {
+      if (request.method() === "POST" && new URL(request.url()).pathname === "/e2e/prompt-refiner-adapter") {
+        requests += 1;
+      }
+    });
+    await enterChat(page, { offered: true, durableChat: true, viewport: { width: 390, height: 844 } });
+    await setRootFontSize(page, 32);
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill(SOURCE_PROMPT);
+    await expect.poll(() => durable.writes.includes(SOURCE_PROMPT)).toBe(true);
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Object.defineProperty(viewport, "height", { configurable: true, get: () => window.innerHeight - 320 });
+      viewport.dispatchEvent(new Event("resize"));
+    });
+    await page.getByTestId("prompt-refiner-request").evaluate((button) => {
+      if (!(button instanceof HTMLButtonElement)) throw new Error("not a button");
+      button.click();
+      button.click();
+    });
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    await expect(page.getByTestId("prompt-refiner-original")).toHaveText(SOURCE_PROMPT);
+    await expectRefinerCopyReachable(page);
+    expect(requests, "one rapid action dispatched duplicate fixture requests").toBe(1);
+    await expect(textarea).toHaveValue(SOURCE_PROMPT);
+
+    await textarea.fill(`${SOURCE_PROMPT} 하나`);
+    await textarea.pressSequentially(" 둘");
+    const finalDraft = `${SOURCE_PROMPT} 하나 둘`;
+    await expect(textarea).toHaveValue(finalDraft);
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+    await expect(page.getByTestId("prompt-refiner-request")).toBeVisible();
+    await expect.poll(() => [...durable.drafts.values()].some((draft) => draft.text === finalDraft)).toBe(true);
+    expect(requests, "typing silently requested another suggestion").toBe(1);
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    await expect(page.getByTestId("prompt-refiner-original")).toHaveText(finalDraft);
+    expect(requests).toBe(2);
+    await page.reload();
+    await expect(textarea).toHaveValue(finalDraft);
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(0);
+    await expect(page.getByTestId("prompt-refiner-request")).toBeVisible();
+    expect(requests, "remount silently requested another suggestion").toBe(2);
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-ready")).toHaveCount(1);
+    await expect(page.getByTestId("prompt-refiner-original")).toHaveText(finalDraft);
+    await expect(textarea).toHaveValue(finalDraft);
+    expect(requests).toBe(3);
+    expect(durable.writes.every((text) => text === SOURCE_PROMPT || text === `${SOURCE_PROMPT} 하나` || text === finalDraft)).toBe(true);
+  });
 });
 
 async function blockAndCountChatPosts(page: Page, durable: Awaited<ReturnType<typeof mockDurableDrafts>>) {

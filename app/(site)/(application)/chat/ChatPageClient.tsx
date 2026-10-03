@@ -1069,7 +1069,8 @@ export function ChatPageClient({
       // A validated acceptance is a read-only preview until the authored
       // draft changes. Do not clear its provenance for a second request.
       if (promptRefinerResolutionRef.current?.decision === "accepted") return;
-      promptRefinerAbortControllerRef.current?.abort();
+      // Two clicks can reach this callback before React commits requesting.
+      if (promptRefinerAbortControllerRef.current) return;
       const requestSequence = ++promptRefinerRequestSequenceRef.current;
       const request: PromptRefinerRequest = {
         requestId: `fixture_${requestSequence}`,
