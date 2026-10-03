@@ -36,10 +36,33 @@ test("every lane keeps Prisma > transaction > C_guarded > statement > idle stric
   }
 });
 
-test("retention run deadline is one value of 100 s and admin has none", () => {
-  assert.equal(LANE_TIMEOUTS.retention.deadlineMs, 100_000);
-  assert.equal(LANE_TIMEOUTS.worker.deadlineMs, 300_000);
-  assert.equal(LANE_TIMEOUTS.admin.deadlineMs, null);
+test("the whole timeout table matches policy section 4, value by value", () => {
+  assert.deepEqual(LANE_TIMEOUTS, {
+    worker: {
+      deadlineMs: 300_000,
+      statementTimeoutMs: 5_000,
+      idleInTransactionTimeoutMs: 2_000,
+      transactionTimeoutMs: 150_000,
+      prismaTransactionTimeoutMs: 180_000,
+      maxRoundTrips: 20,
+    },
+    retention: {
+      deadlineMs: 100_000,
+      statementTimeoutMs: 400,
+      idleInTransactionTimeoutMs: 150,
+      transactionTimeoutMs: 20_000,
+      prismaTransactionTimeoutMs: 30_000,
+      maxRoundTrips: 19,
+    },
+    admin: {
+      deadlineMs: null,
+      statementTimeoutMs: 5_000,
+      idleInTransactionTimeoutMs: 2_000,
+      transactionTimeoutMs: 120_000,
+      prismaTransactionTimeoutMs: 150_000,
+      maxRoundTrips: 16,
+    },
+  });
 });
 
 test("inherited transaction_timeout: 0 or absent arms ours, short refuses, long proceeds", () => {
@@ -66,6 +89,13 @@ test("retention gate needs both budget above 10.3 s and fewer than 8 started bat
   assert.equal(mayStartRetentionBatch({ remainingMs: 10_300, batchesStarted: 0 }), false);
   assert.equal(mayStartRetentionBatch({ remainingMs: 99_000, batchesStarted: 7 }), true);
   assert.equal(mayStartRetentionBatch({ remainingMs: 99_000, batchesStarted: 8 }), false);
+});
+
+test("retention gate refuses a missing, negative or fractional counter instead of starting", () => {
+  assert.throws(() => mayStartRetentionBatch({ remainingMs: 99_000, batchesStarted: null }), RangeError);
+  assert.throws(() => mayStartRetentionBatch({ remainingMs: 99_000, batchesStarted: -1 }), RangeError);
+  assert.throws(() => mayStartRetentionBatch({ remainingMs: 99_000, batchesStarted: 1.5 }), RangeError);
+  assert.throws(() => mayStartRetentionBatch({ remainingMs: Number.NaN, batchesStarted: 0 }), RangeError);
 });
 
 test("worst case still starts eight batches inside the 100 s budget, never nine", () => {
@@ -95,30 +125,47 @@ test("daily capacity covers the floor-size demand of 250 batches", () => {
 
 test("retention heartbeat: each of the three conditions opens it on its own", () => {
   const now = new Date("2026-10-03T12:00:00Z");
-  const healthy = {
-    finishedAt: new Date("2026-10-03T11:40:00Z"),
+  const recent = new Date("2026-10-03T11:40:00Z");
+  const finished = {
+    finishedAt: recent,
     batchesCompleted: 3,
     overdueRemaining: 0,
     oldestOverdueAgeSeconds: 0,
   };
   const cases = [
-    [null, { liveness: true, progressSingle: false, progressDeadline: false }],
-    [healthy, { liveness: false, progressSingle: false, progressDeadline: false }],
-    [{ ...healthy, finishedAt: new Date("2026-10-03T10:39:59Z") }, { liveness: true, progressSingle: false, progressDeadline: false }],
-    [{ ...healthy, finishedAt: new Date("2026-10-03T10:40:00Z") }, { liveness: false, progressSingle: false, progressDeadline: false }],
-    [{ ...healthy, batchesCompleted: 0, overdueRemaining: 4 }, { liveness: false, progressSingle: true, progressDeadline: false }],
-    [{ ...healthy, batchesCompleted: 0, overdueRemaining: 0 }, { liveness: false, progressSingle: false, progressDeadline: false }],
-    [{ ...healthy, oldestOverdueAgeSeconds: 86_401 }, { liveness: false, progressSingle: false, progressDeadline: true }],
-    [{ ...healthy, oldestOverdueAgeSeconds: 86_400 }, { liveness: false, progressSingle: false, progressDeadline: false }],
+    [null, null, { liveness: true, progressSingle: false, progressDeadline: false }],
+    [recent, finished, { liveness: false, progressSingle: false, progressDeadline: false }],
+    [new Date("2026-10-03T10:39:59Z"), finished, { liveness: true, progressSingle: false, progressDeadline: false }],
+    [new Date("2026-10-03T10:40:00Z"), finished, { liveness: false, progressSingle: false, progressDeadline: false }],
+    [recent, { ...finished, batchesCompleted: 0, overdueRemaining: 4 }, { liveness: false, progressSingle: true, progressDeadline: false }],
+    [recent, { ...finished, batchesCompleted: 0, overdueRemaining: 0 }, { liveness: false, progressSingle: false, progressDeadline: false }],
+    [recent, { ...finished, oldestOverdueAgeSeconds: 86_401 }, { liveness: false, progressSingle: false, progressDeadline: true }],
+    [recent, { ...finished, oldestOverdueAgeSeconds: 86_400 }, { liveness: false, progressSingle: false, progressDeadline: false }],
   ];
-  for (const [latestSuccess, expected] of cases) {
-    const result = retentionHeartbeat({ now, latestSuccess });
+  for (const [latestSuccessAt, latestFinished, expected] of cases) {
     assert.deepEqual(
-      result,
+      retentionHeartbeat({ now, latestSuccessAt, latestFinished }),
       { ...expected, stale: expected.liveness || expected.progressSingle || expected.progressDeadline },
-      JSON.stringify(latestSuccess)
+      JSON.stringify({ latestSuccessAt, latestFinished })
     );
   }
+});
+
+test("progress conditions read the latest finished run even when it was not a success", () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+  // The last success is recent, but the newer finished run completed nothing.
+  const result = retentionHeartbeat({
+    now,
+    latestSuccessAt: new Date("2026-10-03T11:20:00Z"),
+    latestFinished: {
+      finishedAt: new Date("2026-10-03T11:50:00Z"),
+      batchesCompleted: 0,
+      overdueRemaining: 12,
+      oldestOverdueAgeSeconds: 600,
+    },
+  });
+  assert.equal(result.progressSingle, true);
+  assert.equal(result.stale, true);
 });
 
 test("a flat positive backlog no longer passes: age, not trend, opens it", () => {
@@ -129,7 +176,17 @@ test("a flat positive backlog no longer passes: age, not trend, opens it", () =>
     overdueRemaining: 1_000,
     oldestOverdueAgeSeconds: 90_000,
   };
-  assert.equal(retentionHeartbeat({ now, latestSuccess: flat }).stale, true);
+  assert.equal(retentionHeartbeat({ now, latestSuccessAt: flat.finishedAt, latestFinished: flat }).stale, true);
+});
+
+test("a corrupt timestamp or counter throws instead of reading as healthy", () => {
+  const now = new Date("2026-10-03T12:00:00Z");
+  const ok = new Date("2026-10-03T11:50:00Z");
+  const finished = { finishedAt: ok, batchesCompleted: 1, overdueRemaining: 0, oldestOverdueAgeSeconds: 0 };
+  assert.throws(() => retentionHeartbeat({ now: new Date("x"), latestSuccessAt: ok, latestFinished: finished }), RangeError);
+  assert.throws(() => retentionHeartbeat({ now, latestSuccessAt: new Date("x"), latestFinished: finished }), RangeError);
+  assert.throws(() => retentionHeartbeat({ now, latestSuccessAt: ok, latestFinished: { ...finished, finishedAt: new Date("x") } }), RangeError);
+  assert.throws(() => retentionHeartbeat({ now, latestSuccessAt: ok, latestFinished: { ...finished, overdueRemaining: -1 } }), RangeError);
 });
 
 test("promotion budget is a cumulative prefix: two 30-move candidates in a 50 budget admit one", () => {
@@ -171,10 +228,20 @@ test("once one candidate is deferred every later one is deferred, even if it wou
   assert.deepEqual(result.deferred.map((c) => c.groupCandidateKey), ["b", "c"]);
 });
 
+test("a full 50-member move exactly uses a fresh pass budget", () => {
+  const result = allocatePromotionBudget([{ kind: "same_account", groupCandidateKey: "a", moves: 50 }], 50);
+  assert.equal(result.admitted.length, 1);
+  assert.equal(result.remainingAfter, 0);
+});
+
 test("promotion budget refuses malformed input instead of guessing", () => {
   assert.throws(() => allocatePromotionBudget([], -1), RangeError);
   assert.throws(
-    () => allocatePromotionBudget([{ kind: "same_account", groupCandidateKey: "a", moves: 50 }], 50),
+    () => allocatePromotionBudget([{ kind: "same_account", groupCandidateKey: "a", moves: 51 }], 50),
+    RangeError
+  );
+  assert.throws(
+    () => allocatePromotionBudget([{ kind: "trace_id", groupCandidateKey: "a", moves: 1 }], 50),
     RangeError
   );
   assert.throws(

@@ -139,9 +139,18 @@ export const DAILY_RUN_CAP = Object.freeze({ worker: 52, retention: 52 } as cons
 export const mayStartRetentionBatch = (input: {
   readonly remainingMs: number;
   readonly batchesStarted: number;
-}) =>
-  input.remainingMs > guardedBudgetMs("retention", RETENTION_BATCH_ROUND_TRIPS) &&
-  input.batchesStarted < RETENTION_BATCHES_PER_RUN_MAX;
+}) => {
+  if (!Number.isFinite(input.remainingMs)) {
+    throw new RangeError("remainingMs must be a finite number");
+  }
+  if (!Number.isSafeInteger(input.batchesStarted) || input.batchesStarted < 0) {
+    throw new RangeError("batchesStarted must be a non-negative integer");
+  }
+  return (
+    input.remainingMs > guardedBudgetMs("retention", RETENTION_BATCH_ROUND_TRIPS) &&
+    input.batchesStarted < RETENTION_BATCHES_PER_RUN_MAX
+  );
+};
 
 /** The next batch size after a `statement_timeout` abort, or `null` at the floor. */
 export const reducedRetentionBatchSize = (current: number) => {
@@ -164,20 +173,39 @@ export type RetentionHeartbeat = {
   readonly progressDeadline: boolean;
 };
 
+const validTime = (value: Date, name: string) => {
+  const time = value instanceof Date ? value.getTime() : Number.NaN;
+  if (!Number.isFinite(time)) throw new RangeError(`${name} must be a valid Date`);
+  return time;
+};
+
 /**
  * Policy section 7: three separate conditions, any of which opens the
- * heartbeat. `latestSuccess` is the newest successful retention run, `null`
- * when none exists in the 30-day window.
+ * heartbeat. Liveness reads the newest **successful** retention run
+ * (`latestSuccessAt`, `null` when none exists in the 30-day window); the two
+ * progress conditions read the newest **finished** run whatever its outcome
+ * (`latestFinished`), because a run that ends with no completed batch and rows
+ * still overdue answers non-2xx and is not a success.
  */
 export const retentionHeartbeat = (input: {
   readonly now: Date;
-  readonly latestSuccess: RetentionRunFact | null;
+  readonly latestSuccessAt: Date | null;
+  readonly latestFinished: RetentionRunFact | null;
 }): RetentionHeartbeat => {
-  const latest = input.latestSuccess;
+  const now = validTime(input.now, "now");
   const liveness =
-    latest === null ||
-    (input.now.getTime() - latest.finishedAt.getTime()) / 1_000 >
+    input.latestSuccessAt === null ||
+    (now - validTime(input.latestSuccessAt, "latestSuccessAt")) / 1_000 >
       RETENTION_LIVENESS_THRESHOLD_SECONDS;
+  const latest = input.latestFinished;
+  if (latest !== null) {
+    validTime(latest.finishedAt, "latestFinished.finishedAt");
+    for (const key of ["batchesCompleted", "overdueRemaining", "oldestOverdueAgeSeconds"] as const) {
+      if (!Number.isSafeInteger(latest[key]) || latest[key] < 0) {
+        throw new RangeError(`latestFinished.${key} must be a non-negative integer`);
+      }
+    }
+  }
   const progressSingle =
     latest !== null && latest.batchesCompleted === 0 && latest.overdueRemaining > 0;
   const progressDeadline =
@@ -204,7 +232,7 @@ export const PROMOTION_MOVES_PER_PASS_MAX = 50;
 export type PromotionCandidate = {
   readonly kind: GroupKind;
   readonly groupCandidateKey: string;
-  /** Memberships the move would create; at most `GROUP_MEMBER_CAP - 1`. */
+  /** Memberships the move would create; at most `GROUP_MEMBER_CAP`. */
   readonly moves: number;
 };
 
@@ -222,6 +250,14 @@ export const allocatePromotionBudget = (
   if (!Number.isSafeInteger(remainingBudget) || remainingBudget < 0) {
     throw new RangeError("remainingBudget must be a non-negative integer");
   }
+  for (const candidate of candidates) {
+    if (!GROUP_KIND_PRIORITY.includes(candidate.kind)) {
+      throw new RangeError("unknown group kind");
+    }
+    if (!Number.isSafeInteger(candidate.moves) || candidate.moves < 1 || candidate.moves > GROUP_MEMBER_CAP) {
+      throw new RangeError("a candidate moves between 1 and 50 members");
+    }
+  }
   const ordered = [...candidates].sort((a, b) => {
     const byKind = GROUP_KIND_PRIORITY.indexOf(a.kind) - GROUP_KIND_PRIORITY.indexOf(b.kind);
     if (byKind !== 0) return byKind;
@@ -235,9 +271,6 @@ export const allocatePromotionBudget = (
   const deferred: PromotionCandidate[] = [];
   let used = 0;
   for (const candidate of ordered) {
-    if (!Number.isSafeInteger(candidate.moves) || candidate.moves < 1 || candidate.moves >= GROUP_MEMBER_CAP) {
-      throw new RangeError("a candidate moves between 1 and 49 members");
-    }
     // A prefix only: once one candidate is deferred, every later one is too.
     if (deferred.length === 0 && used + candidate.moves <= remainingBudget) {
       admitted.push(candidate);
