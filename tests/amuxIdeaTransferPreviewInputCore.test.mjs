@@ -63,7 +63,7 @@ test("expired preview replacement names one different prior receipt", () => {
   }
 });
 
-test("a second output page is explicit and cannot also replace a first preview", () => {
+test("a second output page is explicit and can name one expired predecessor", () => {
   assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
     ...input, chunkIndex: 1,
   })), { ok: true, request: {
@@ -72,8 +72,12 @@ test("a second output page is explicit and cannot also replace a first preview",
     reasoningEffort: input.reasoningEffort,
     approvalId: input.approvalId, approvalVersion: input.approvalVersion,
   } });
+  assert.equal(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
+    ...input, chunkIndex: 1,
+    replacesPreviewId: "123e4567-e89b-42d3-a456-426614174004",
+  })).ok, true);
   for (const changed of [{ chunkIndex: 0 }, { chunkIndex: 2 },
-    { chunkIndex: 1, replacesPreviewId: "123e4567-e89b-42d3-a456-426614174004" }]) {
+    { chunkIndex: 1, replacesPreviewId: input.previewId }]) {
     assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify({
       ...input, ...changed,
     })), { ok: false, code: "schema_rejected" });

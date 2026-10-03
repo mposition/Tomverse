@@ -846,6 +846,13 @@ test("an output-continuable first result retains its first page without completi
   if (readback.state !== "prepared") throw new Error("continuation preview unavailable");
   assert.equal(readback.transferAuthorized, false);
   assert.equal(readback.payloadDigest, continued.payloadDigest);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitIdeaTransferConfirmation(tx, { session, request,
+      choice: { previewId: nextPreviewId, ideaId,
+        payloadDigest: continued.payloadDigest,
+        payloadDigestKeyId: continued.payloadDigestKeyId },
+      browserNonce: randomBytes(32).toString("base64url"), keys,
+    })), /browser_mismatch/);
   const confirmed = await prisma.$transaction((tx) =>
     commitIdeaTransferConfirmation(tx, { session, request,
       choice: { previewId: nextPreviewId, ideaId,
@@ -857,6 +864,33 @@ test("an output-continuable first result retains its first page without completi
   assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
     where: { id: nextPreviewId },
   })).state, "confirmed");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice: { ...choice, previewId: randomUUID(),
+        replacesPreviewId: nextPreviewId }, keys, browserNonce,
+    })), /not_ready/, "a live confirmation cannot be replaced");
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: nextPreviewId },
+    data: { confirmedAt: new Date(Date.now() - 120_000),
+      expiresAt: new Date(Date.now() - 60_000),
+      confirmExpiresAt: new Date(Date.now() - 60_000) },
+  });
+  const replacementId = randomUUID();
+  const replacement = await prisma.$transaction((tx) =>
+    commitFirstOutputContinuationTransferPreview(tx, {
+      session, request, choice: { ...choice, previewId: replacementId,
+        replacesPreviewId: nextPreviewId }, keys, browserNonce,
+    }));
+  assert.equal(replacement.previewId, replacementId);
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: nextPreviewId },
+  })).state, "expired");
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: replacementId },
+  })).attempt, 2);
+  assert.equal((await prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 1 } },
+  })).currentPreviewId, replacementId);
   await assert.rejects(prisma.$transaction((tx) =>
     commitFirstOutputContinuationTransferPreview(tx, {
       session, request, choice: { ...choice, previewId: randomUUID() },

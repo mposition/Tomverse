@@ -53,7 +53,7 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
       (replacing && (typeof value.replacesPreviewId !== "string" ||
         !isAmuxIdeaRequestId(value.replacesPreviewId) ||
         value.replacesPreviewId === value.previewId)) ||
-      (continuing && (value.chunkIndex !== 1 || replacing)) ||
+      (continuing && value.chunkIndex !== 1) ||
       (value.provider !== "openai" && value.provider !== "anthropic") ||
       typeof value.modelId !== "string" || !MODEL_ID.test(value.modelId) ||
       typeof value.reasoningEffort !== "string" || !EFFORTS.has(value.reasoningEffort) ||

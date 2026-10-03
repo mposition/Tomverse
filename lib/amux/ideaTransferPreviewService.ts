@@ -274,7 +274,6 @@ export async function commitFirstOutputContinuationTransferPreview(
   payloadDigest: string; payloadDigestKeyId: string }> {
   const actorUserId = ownerId(input.session);
   const { choice } = input;
-  if (choice.replacesPreviewId) throw new IdeaTransferPreviewError("not_ready");
   await takeAuditChainLock(tx);
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
@@ -288,22 +287,54 @@ export async function commitFirstOutputContinuationTransferPreview(
   `;
   if (chunkLocks.length !== 2 || chunkLocks[0]?.chunkIndex !== 0 ||
       chunkLocks[1]?.chunkIndex !== 1) throw new IdeaTransferPreviewError("not_ready");
+  if (choice.replacesPreviewId) {
+    const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "AmuxIdeaTransferPreview"
+      WHERE "id" = ${choice.replacesPreviewId} AND "ideaId" = ${choice.ideaId}
+      FOR UPDATE
+    `;
+    if (previewLock.length !== 1) throw new IdeaTransferPreviewError("not_ready");
+  }
   const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
     SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
   `;
   const now = nowRows[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new IdeaTransferPreviewError("integrity_unavailable");
+  }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: choice.ideaId } });
   const nextChunk = await tx.amuxIdeaAnalysisChunk.findUnique({
     where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 1 } },
   });
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || !idea ||
-      !nextChunk || idea.state !== "analyzing" || now >= idea.analysisDeadlineAt ||
+  const replacedPreview = choice.replacesPreviewId
+    ? await tx.amuxIdeaTransferPreview.findUnique({ where: { id: choice.replacesPreviewId } })
+    : null;
+  const existingHold = replacedPreview
+    ? await tx.amuxIdeaAnalysisBudgetHold.findUnique({
+      where: { previewId: replacedPreview.id }, select: { id: true },
+    }) : null;
+  const nextAttempt = replacedPreview ? replacedPreview.attempt + 1 : 1;
+  const replaceable = choice.replacesPreviewId
+    ? replacedPreview?.ideaId === choice.ideaId &&
+      replacedPreview.sourcePlanRevisionId === idea?.currentSourcePlanRevisionId &&
+      replacedPreview.sourceScopeApprovalId === null &&
+      replacedPreview.sourceUnitOrdinal === 0 && replacedPreview.chunkIndex === 1 &&
+      ["prepared", "confirmed", "expired"].includes(replacedPreview.state) &&
+      replacedPreview.consumedAt === null && replacedPreview.outcomeUnknownAt === null &&
+      replacedPreview.expiresAt <= now && existingHold === null &&
+      replacedPreview.attempt >= 1 && nextAttempt <= 2_147_483_647 &&
+      nextChunk?.state === "awaiting_preview" &&
+      nextChunk.currentPreviewId === replacedPreview.id &&
+      nextChunk.attempt === replacedPreview.attempt
+    : nextChunk?.state === "pending" && nextChunk.attempt === 0 &&
+      nextChunk.currentPreviewId === null;
+  if (!idea || !nextChunk || idea.state !== "analyzing" ||
+      now >= idea.analysisDeadlineAt ||
       idea.analysisCompletedAt !== null || idea.cancelledAt !== null ||
       !idea.currentSourcePlanRevisionId || idea.rawPurgedAt !== null ||
       !idea.rawCiphertext || !idea.rawKeyId || !idea.rawKeyVersion ||
       !idea.rawDigest || !idea.rawDigestKeyId ||
-      nextChunk.actorUserId !== actorUserId || nextChunk.state !== "pending" ||
-      nextChunk.attempt !== 0 || nextChunk.currentPreviewId !== null ||
+      nextChunk.actorUserId !== actorUserId || !replaceable ||
       nextChunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       nextChunk.planStartChunkIndex !== 0 || nextChunk.revisionChunkIndex !== 1) {
     throw new IdeaTransferPreviewError("not_ready");
@@ -403,10 +434,20 @@ export async function commitFirstOutputContinuationTransferPreview(
     const expiresAt = new Date(Math.min(now.getTime() + 15 * 60_000,
       idea.analysisDeadlineAt.getTime()));
     if (expiresAt <= now) throw new IdeaTransferPreviewError("not_ready");
+    if (replacedPreview) {
+      const expired = await tx.amuxIdeaTransferPreview.updateMany({
+        where: { id: replacedPreview.id, ideaId: idea.id,
+          state: replacedPreview.state, consumedAt: null, outcomeUnknownAt: null,
+          expiresAt: { lte: now } },
+        data: { state: "expired", payloadCiphertext: null, payloadKeyId: null,
+          payloadKeyVersion: null, payloadPurgedAt: now },
+      });
+      if (expired.count !== 1) throw new IdeaTransferPreviewError("not_ready");
+    }
     await tx.amuxIdeaTransferPreview.create({ data: {
       id: choice.previewId, ideaId: idea.id,
       sourcePlanRevisionId: plan.id, sourceUnitOrdinal: 0,
-      chunkIndex: 1, attempt: 1, state: "prepared",
+      chunkIndex: 1, attempt: nextAttempt, state: "prepared",
       modelId: choice.modelId, templateVersion: prompt.version,
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
@@ -415,9 +456,11 @@ export async function commitFirstOutputContinuationTransferPreview(
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
       where: { ideaId: idea.id, chunkIndex: 1, actorUserId,
-        state: "pending", attempt: 0, currentPreviewId: null,
+        state: replacedPreview ? "awaiting_preview" : "pending",
+        attempt: replacedPreview?.attempt ?? 0,
+        currentPreviewId: replacedPreview?.id ?? null,
         sourcePlanRevisionId: plan.id },
-      data: { state: "awaiting_preview", attempt: 1,
+      data: { state: "awaiting_preview", attempt: nextAttempt,
         currentPreviewId: choice.previewId },
     });
     if (updated.count !== 1) throw new IdeaTransferPreviewError("not_ready");
@@ -429,7 +472,9 @@ export async function commitFirstOutputContinuationTransferPreview(
         previousChunkAuditHash: previousAuditHash,
         modelApprovalId: choice.approvalId, modelApprovalVersion: choice.approvalVersion,
         payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId,
-        browserBindingDigest, transferAuthorized: false },
+        browserBindingDigest,
+        ...(replacedPreview ? { replacesPreviewId: replacedPreview.id } : {}),
+        transferAuthorized: false },
     });
     return { previewId: choice.previewId, expiresAt, payload,
       payloadDigest: sealed.digest, payloadDigestKeyId: sealed.digestKeyId };

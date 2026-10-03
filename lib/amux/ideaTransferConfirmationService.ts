@@ -68,7 +68,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     ORDER BY "chunkIndex" FOR UPDATE
   `;
   if (chunkLocks.length !== identity.chunkIndex + 1 ||
-      chunkLocks.some((row, index) => row.chunkIndex !== index)) {
+      chunkLocks.map((row) => row.chunkIndex).sort((a, b) => a - b)
+        .some((index, position) => index !== position)) {
     throw new IdeaTransferConfirmationError("not_ready");
   }
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
@@ -186,7 +187,7 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
   const auditId = await writeAdminAuditLog({ tx, session: input.session,
     request: input.request, action: "amux.v4.transfer_preview.confirmed",
     targetType: "AmuxIdeaTransferPreview", targetId: row.id,
-    summary: "Owner confirmed one exact AMUX v4 idea-only model input; no model was called.",
+    summary: "Owner confirmed one exact AMUX v4 analysis transfer preview; no model was called.",
     metadata: { ideaId: idea.id, chunkIndex: row.chunkIndex,
       sourcePlanRevisionId: row.sourcePlanRevisionId,
       payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
