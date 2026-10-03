@@ -6,6 +6,7 @@ import test from "node:test";
 import { parse as parseYaml } from "yaml";
 
 import {
+  ALLOWED_SAVE_CONDITIONS,
   CACHE_FAMILIES,
   WIDELY_READABLE_BRANCHES,
   judgeCacheKeys,
@@ -410,23 +411,36 @@ test("a save's condition must provably hold only on a pull-request run", () => {
   // not enough: `github.event_name == 'schedule'` mentions it and permits a
   // write on the default branch, and `github.ref != 'refs/heads/main'` permits
   // one on develop. Independent review caught both.
-  const save = (condition) =>
+  // A workflow with both a schedule and a narrow pull_request trigger, which is
+  // the real shape of the three that keep a guarded save: widely readable, and
+  // with a pull-request run the guard can actually be true on.
+  const mixed = (condition) =>
     wf(
-      "nightly",
-      scheduled([
+      "mixed",
+      [
+        "on:",
+        "  schedule:",
+        "    - cron: '0 1 * * *'",
+        "  pull_request:",
+        "    types: [opened, synchronize]",
+        "jobs:",
+        "  j:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
         "      - uses: actions/cache/save@v5",
         ...(condition === null ? [] : [`        if: ${condition}`]),
         "        with:",
         "          path: .next/cache",
         `          key: ${OS}-next-v2-x-${LOCK}-a`,
-      ]),
+        "",
+      ].join("\n"),
     );
-  const allowed = [
-    "github.event_name == 'pull_request'",
-    'github.event_name == "pull_request"',
-    "success() && github.event_name == 'pull_request'",
-    "github.event_name == 'pull_request' && steps.scope.outputs.code == 'true'",
-  ];
+  const save = mixed;
+  // Exactly ALLOWED_SAVE_CONDITIONS, because that is a closed list rather than
+  // a shape this module parses. A workflow needing another form adds it there,
+  // reviewed -- which is the point: an expression nobody read is not accepted
+  // just because it looks like a conjunction.
+  const allowed = [...ALLOWED_SAVE_CONDITIONS];
   for (const condition of allowed) {
     assert.deepEqual(rules([save(condition)]), [], condition);
     assert.equal(saveConditionKeepsToPullRequest(condition), true, condition);
@@ -447,6 +461,57 @@ test("a save's condition must provably hold only on a pull-request run", () => {
     assert.deepEqual(rules([save(condition)]), ["unguarded_save_in_widely_readable_scope"], String(condition));
     if (condition !== null) assert.equal(saveConditionKeepsToPullRequest(condition), false, condition);
   }
+
+  // A condition that merely wraps the comparison in something else is refused:
+  // `(github.event_name == 'pull_request') == false` contains no `!` and no `||`
+  // and is true on a schedule. The accepted forms are a closed list rather than
+  // an expression this module tries to reason about -- two attempts at reasoning
+  // were both wrong, and independent review caught each.
+  for (const sneaky of [
+    "(github.event_name == 'pull_request') == false",
+    "github.event_name == 'pull_request' == false",
+    "contains('pull_request', github.event_name) == false",
+    "github.event_name == 'pull_request' && github.event_name == 'schedule'",
+  ]) {
+    assert.equal(saveConditionKeepsToPullRequest(sneaky), false, sneaky);
+  }
+  // A wrapping `${{ }}` is formatting, not meaning.
+  assert.equal(saveConditionKeepsToPullRequest("${{ github.event_name == 'pull_request' }}"), true);
+});
+
+test("a save guarded on pull_request still needs a narrow pull_request trigger", () => {
+  // `types: [closed]` with an event_name guard satisfies the condition and
+  // writes from a merged pull request all the same. Independent review raised
+  // the combination.
+  const save = (on) =>
+    wf(
+      "x",
+      [
+        ...on,
+        "jobs:",
+        "  j:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/cache/save@v5",
+        "        if: github.event_name == 'pull_request'",
+        "        with:",
+        "          path: .next/cache",
+        `          key: ${OS}-next-v2-x-${LOCK}-a`,
+        "",
+      ].join("\n"),
+    );
+  assert.deepEqual(rules([save(["on:", "  pull_request:", "    types: [closed]"])]), [
+    "unguarded_save_in_widely_readable_scope",
+  ]);
+  assert.deepEqual(rules([save(["on:", "  pull_request:", "    types: [opened, closed]"])]), [
+    "unguarded_save_in_widely_readable_scope",
+  ]);
+  // No pull_request trigger at all: the guard can never be true, so a save
+  // behind it is dead code at best and a hole at worst.
+  assert.deepEqual(rules([save(["on:", "  schedule:", "    - cron: '0 1 * * *'"])]), [
+    "unguarded_save_in_widely_readable_scope",
+  ]);
+  assert.deepEqual(rules([save(["on:", "  schedule:", "    - cron: '0 1 * * *'", "  pull_request:"])]), []);
 });
 
 test("a restore-key may not be a prefix of another workflow's key", () => {

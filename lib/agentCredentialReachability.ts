@@ -274,12 +274,12 @@ const permissionsWrite = (permissions: Json | undefined): "write" | "read" | "un
  * What kind of cache a restoring step reads.
  *
  * The distinction is whether anything verifies the restored bytes before they
- * are used. A package manager's own cache is content-addressed and checked
- * against the lockfile, so a tampered entry fails or is refetched rather than
- * installing different code. Build output and browser binaries have no such
- * check: `npm run build` reads `.next/cache` into the server bundle it then
- * runs, and on a cache hit `playwright install` launches the cached binaries
- * without downloading or hashing anything.
+ * are used. A lockfile-checked package manager cache is content-addressed and
+ * compared against the lockfile, so a tampered entry fails or is refetched
+ * rather than installing different code. Build output and browser binaries
+ * have no such check: `npm run build` reads `.next/cache` into the server
+ * bundle it then runs, and on a cache hit `playwright install` launches the
+ * cached binaries without downloading or hashing anything.
  *
  * `unreadable` is neither, and is treated as the worse of the two everywhere.
  * .github/audits/actions-cache-poisoning-audit-2026-10-03.md 3.1 and 4.4.
@@ -288,6 +288,25 @@ export type CacheKind = "verified_package_manager" | "unverified" | "unreadable"
 
 /** The kinds a job restores, deduplicated and ordered for a stable record. */
 const KIND_ORDER: CacheKind[] = ["unreadable", "unverified", "verified_package_manager"];
+
+/**
+ * The only setup actions whose cache counts as verified, and with which input.
+ *
+ * Treating every `actions/setup-*` cache as verified was wrong: the property
+ * belongs to the package manager, not to the family of actions.
+ * `actions/setup-go` caches `GOCACHE`, which is compiled build output with
+ * nothing checking it, and `setup-java` and `setup-python` cache artefacts of
+ * their own. Independent review caught it. So this is an allowlist of
+ * (action, cache input) pairs that are lockfile-checked, and everything else
+ * that caches is `unverified`.
+ *
+ * Only npm is listed because it is the only one this repository uses and the
+ * only one whose verification has been read here. Adding yarn or pnpm is a
+ * change to this list with that reading done, not an assumption.
+ */
+const VERIFIED_SETUP_CACHES: ReadonlyArray<{ action: RegExp; caches: ReadonlySet<string> }> = [
+  { action: /^actions\/setup-node@/i, caches: new Set(["npm"]) },
+];
 
 const restoredCacheKinds = (job: Obj): CacheKind[] => {
   // What cannot be read counts as restoring: a `uses` that is not a plain
@@ -319,8 +338,24 @@ const restoredCacheKinds = (job: Obj): CacheKind[] => {
       continue;
     }
     if (/^actions\/setup-[a-z-]+@/i.test(uses)) {
-      const cache = isObj(step.with) ? step.with.cache : undefined;
-      if (cache !== false && cache !== "false") kinds.add("verified_package_manager");
+      const withBlock = isObj(step.with) ? step.with : {};
+      const packageManagerCache = withBlock["package-manager-cache"];
+      const cache = withBlock.cache;
+      // setup-node v6 defaults `package-manager-cache` to true and caches when
+      // package.json declares a package manager, so switching that off is the
+      // only way to say "this step caches nothing"
+      // (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+      const switchedOff =
+        packageManagerCache === false ||
+        packageManagerCache === "false" ||
+        ((cache === false || cache === "false") && packageManagerCache !== undefined);
+      if (switchedOff) continue;
+      const verified = VERIFIED_SETUP_CACHES.some(
+        (entry) => entry.action.test(uses) && typeof cache === "string" && entry.caches.has(cache.trim()),
+      );
+      // Caching with no `cache` input, or with one not on the allowlist, is a
+      // cache this cannot vouch for rather than one it may assume is checked.
+      kinds.add(verified ? "verified_package_manager" : "unverified");
     }
   }
   return KIND_ORDER.filter((kind) => kinds.has(kind));

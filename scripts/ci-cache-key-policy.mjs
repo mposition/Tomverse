@@ -225,28 +225,81 @@ export const reachesWidelyReadableScope = (document) => {
 };
 
 /**
- * Whether a save step's condition provably holds only on a pull-request run.
+ * The exact save conditions this policy accepts.
  *
- * Checking that the text mentions `github.event_name` or `github.ref` was not
- * enough: `github.event_name == 'schedule'` mentions it and permits a write on
- * the default branch, and `github.ref != 'refs/heads/main'` permits one on
- * develop. Independent review caught both.
+ * A closed list rather than an analysis, after two attempts at the latter were
+ * both wrong. Looking for `github.event_name` or `github.ref` in the text
+ * accepted `github.event_name == 'schedule'`. Requiring the pull-request
+ * comparison as a substring with no `!` and no `||` accepted
+ * `(github.event_name == 'pull_request') == false`, which is true on a
+ * schedule. Independent review caught each in turn.
  *
- * So the condition must assert the pull-request case as a conjunct and must
- * contain no disjunction or negation, which together make the assertion
- * necessary rather than merely present. Extra conjuncts only narrow it further,
- * so `success() && github.event_name == 'pull_request'` is fine.
+ * Writing a GitHub expression evaluator to settle this would be a third
+ * attempt at the same mistake. These are the forms a cache save needs; a
+ * workflow wanting another one is a change to this list, reviewed, rather
+ * than a string this module tries to reason about.
+ */
+export const ALLOWED_SAVE_CONDITIONS = [
+  "github.event_name == 'pull_request'",
+  'github.event_name == "pull_request"',
+  "success() && github.event_name == 'pull_request'",
+  "github.event_name == 'pull_request' && success()",
+];
+
+/**
+ * Whether a save step's condition is one of the accepted forms.
+ *
+ * Whitespace is normalised and a wrapping `${{ }}` is stripped, because those
+ * are formatting rather than meaning. Nothing else is interpreted.
  */
 export const saveConditionKeepsToPullRequest = (condition) => {
   if (typeof condition !== "string") return false;
-  const normalised = condition.replace(/\s+/g, " ").trim();
-  if (normalised.length === 0) return false;
-  if (normalised.includes("||") || normalised.includes("!")) return false;
-  return (
-    normalised.includes("github.event_name == 'pull_request'") ||
-    normalised.includes('github.event_name == "pull_request"')
-  );
+  let normalised = condition.replace(/\s+/g, " ").trim();
+  const wrapped = /^\$\{\{(.*)\}\}$/.exec(normalised);
+  if (wrapped) normalised = wrapped[1].replace(/\s+/g, " ").trim();
+  return ALLOWED_SAVE_CONDITIONS.includes(normalised);
 };
+
+/**
+ * Whether a `pull_request` trigger exists and every activity type is narrow.
+ *
+ * A save guarded by `github.event_name == 'pull_request'` only keeps to the
+ * merge ref if the workflow's own `pull_request` trigger cannot fire on an
+ * activity whose run carries something else. With `types: [closed]` the guard
+ * is true on a merged pull request, and that run is not one this module will
+ * claim is on the merge ref. Independent review caught the combination.
+ */
+export const hasOnlyNarrowPullRequestTrigger = (document) => {
+  const on = document?.on ?? document?.true;
+  if (typeof on === "string") return on === "pull_request";
+  if (Array.isArray(on)) return on.includes("pull_request") && on.every((event) => event === "pull_request");
+  if (!isObj(on)) return false;
+  if (!Object.prototype.hasOwnProperty.call(on, "pull_request")) return false;
+  const filter = on.pull_request;
+  if (filter === null || filter === undefined) return true;
+  if (!isObj(filter)) return false;
+  if (filter.types === undefined) return true;
+  const types = stringList(filter.types);
+  if (types === null || types.length === 0) return false;
+  return types.every((type) => NARROW_PULL_REQUEST_TYPES.has(type));
+};
+
+/**
+ * Expressions a restore-key may contain.
+ *
+ * The cross-workflow prefix rule compares key text, so an expression whose
+ * value this cannot predict breaks the comparison: a restore-key of
+ * `...-v2-pr-${{ matrix.lane }}-` reaches `...-v2-pr-admin-...` when the lane
+ * is `admin`, and `startsWith` on the raw text sees nothing. Independent review
+ * caught it. `runner.os` and `hashFiles(...)` are allowed because identical
+ * text means an identical value, which is what the comparison needs.
+ */
+const PREDICTABLE_EXPRESSION = /^\s*(?:runner\.os|hashFiles\([^)]*\))\s*$/;
+
+const unpredictableExpressions = (text) =>
+  [...text.matchAll(/\$\{\{([^}]*)\}\}/g)]
+    .map((match) => match[1])
+    .filter((inner) => !PREDICTABLE_EXPRESSION.test(inner));
 
 /**
  * Every cache step in a workflow, as {jobId, path, key, restoreKeys, mode}.
@@ -287,7 +340,11 @@ export const readCacheSteps = (text) => {
       });
     }
   }
-  return { steps, widelyReadable: reachesWidelyReadableScope(document) };
+  return {
+    steps,
+    widelyReadable: reachesWidelyReadableScope(document),
+    narrowPullRequestTrigger: hasOnlyNarrowPullRequestTrigger(document),
+  };
 };
 
 /** The family row a step's paths fall under, or null when none is governed. */
@@ -388,21 +445,38 @@ export const judgeCacheKeys = (sources) => {
 
       if (read.widelyReadable && step.mode !== "restore") {
         // A combined step cannot be guarded: its post step decides on its own.
-        // A split save can be, but only by a condition that provably holds on
-        // nothing but a pull-request run -- see saveConditionKeepsToPullRequest.
-        const guarded = step.mode === "save" && saveConditionKeepsToPullRequest(step.condition);
+        // A split save can be, by one of the accepted conditions -- and only if
+        // this workflow's own `pull_request` trigger cannot fire on an activity
+        // whose run is not on the merge ref. `types: [closed]` with an
+        // event_name guard satisfies the condition and still writes from a
+        // merged pull request, which is why both halves are required.
+        const conditionOk = step.mode === "save" && saveConditionKeepsToPullRequest(step.condition);
+        const guarded = conditionOk && read.narrowPullRequestTrigger;
         if (!guarded) {
           findings.push({
             rule: "unguarded_save_in_widely_readable_scope",
             workflowPath: source.path,
             jobId: step.jobId,
-            detail: step.mode === "save" ? `save if: ${step.condition ?? "(none)"}` : `actions/cache (combined)`,
+            detail:
+              step.mode !== "save"
+                ? "actions/cache (combined)"
+                : conditionOk
+                  ? "save guarded on pull_request, but this workflow's pull_request trigger is not narrow"
+                  : `save if: ${step.condition ?? "(none)"}`,
           });
         }
       }
 
       for (const restoreKey of step.restoreKeys) {
         restoreProbes.push({ workflowPath: source.path, jobId: step.jobId, restoreKey });
+        for (const expression of unpredictableExpressions(restoreKey)) {
+          findings.push({
+            rule: "restore_key_has_unpredictable_expression",
+            workflowPath: source.path,
+            jobId: step.jobId,
+            detail: `\${{${expression}}} in ${restoreKey}`,
+          });
+        }
         if (step.key !== null && !step.key.startsWith(restoreKey)) {
           findings.push({
             rule: "restore_key_not_a_prefix",
@@ -497,6 +571,8 @@ export const describeFinding = (finding) => {
       return `${where}: restore-key "${finding.detail}" is broader than this step's own generation and namespace, so it matches other workflows' entries.`;
     case "key_missing_generation_and_namespace":
       return `${where}: key "${finding.detail}" must read <os>-<family>-v<n>-<namespace>- before its first expression, so a restore-key has a namespace boundary to stop at and a poisoned generation can be abandoned by bumping v<n>.`;
+    case "restore_key_has_unpredictable_expression":
+      return `${where}: restore-key contains ${finding.detail}, whose value this cannot predict, so whether it reaches another workflow's entry cannot be decided. A restore-key may use only runner.os and hashFiles().`;
     case "restore_key_reaches_another_workflow":
       return `${where}: ${finding.detail}. Give the two namespaces names where neither is a prefix of the other.`;
     case "key_missing_family_prefix":

@@ -463,10 +463,23 @@ ${step}`;
 `), true, "setup-go caches by default");
   assert.equal(restores(`      - uses: actions/setup-go@v5
 `), true);
+  // `cache: false` alone no longer counts as switched off. setup-node v6
+  // defaults `package-manager-cache` to true and caches whenever package.json
+  // declares a package manager, so the `cache` input is not the off switch any
+  // more -- that is the latent path the cache audit recorded in its 4.2.
   assert.equal(restores(`      - uses: actions/setup-go@v5
         with:
           cache: false
-`), false, "switched off explicitly");
+`), true, "cache: false is not the off switch under package-manager-cache");
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+`), false, "package-manager-cache: false is");
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          cache: false
+          package-manager-cache: false
+`), false, "both off");
   assert.equal(restores(`      - uses: \${{ vars.ACTION }}
 `), true, "an action named by expression");
   assert.equal(restores(`      - uses: ./.github/actions/cache
@@ -499,8 +512,29 @@ ${step}`;
     );
     return reason === undefined ? null : reason.cacheKinds;
   };
+  // Verified is a property of the package manager, not of the setup-* family.
+  // Only an allowlisted (action, cache input) pair earns it; a setup step that
+  // caches something this cannot name is `unverified`.
   assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: npm
 `), ["verified_package_manager"]);
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+`), ["unverified"], "no cache input: what it would cache is not known here");
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: yarn
+`), ["unverified"], "not on the allowlist");
+  assert.deepEqual(kinds(`      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+`), ["unverified"], "setup-go caches GOCACHE, which is build output");
+  assert.equal(kinds(`      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+`), null, "the only off switch under v6");
   assert.deepEqual(kinds(`      - uses: actions/cache@v5
         with: { path: .next/cache, key: k }
 `), ["unverified"]);
@@ -517,6 +551,8 @@ ${step}`;
   // one, in a fixed order so the digest is stable.
   assert.deepEqual(
     kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: npm
       - uses: actions/cache@v5
         with: { path: .next/cache, key: k }
 `),
@@ -610,15 +646,28 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // rule: no event the agent raises reaches it. Flagged for the owner's review in
 // the pull request that adds it.
 //
-// 2ccf7af5eb0f (2026-10-03): the summary now carries each cache reason's kinds,
-// so this pin can see a credentialed job move from a verified package-manager
-// cache to an unverified one. No workflow's posture changed: all 14 cache
-// reasons read `verified_package_manager`, 17 reasons and 22 credentialed jobs
-// as before. That measurement is the point -- the separation the cache audit
-// found by reading is now a checked fact, and
-// `npm run check:credential-cache-separation` fails if it ends.
-// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3.
-const POSTURE_DIGEST = "2ccf7af5eb0f";
+// 977c24f3e564 (2026-10-03): two changes, and the posture genuinely improved.
+//
+// The summary now carries each cache reason's kinds, so this pin can see a
+// credentialed job move from a verified package-manager cache to an unverified
+// one -- the change it most needed to catch and previously could not, since the
+// reason string is identical either way.
+//
+// And the kinds are judged by an allowlist of (setup action, cache input) pairs
+// rather than by treating every `actions/setup-*` cache as verified. The
+// property belongs to the package manager: `setup-go` caches GOCACHE, which is
+// compiled build output with nothing checking it. Independent review caught
+// that. Consequently `cache: false` is no longer read as an off switch either,
+// because setup-node v6 defaults `package-manager-cache` to true and caches
+// whenever package.json names a package manager.
+//
+// Three credentialed jobs that had no `cache:` input therefore had to say so,
+// and now carry `package-manager-cache: false`. They restore nothing, so cache
+// reasons fall 14 -> 11 and total reasons 17 -> 14; 22 credentialed jobs and 1
+// path rule are unchanged. All 11 remaining read `verified_package_manager`,
+// which `npm run check:credential-cache-separation` now holds.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3 and 4.2.
+const POSTURE_DIGEST = "977c24f3e564";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
