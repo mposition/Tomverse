@@ -111,19 +111,40 @@ const directClient = async () => {
   return client;
 };
 
-const untilSomeoneWaitsOnALock = async () => {
+// Waits on the named backend only, so an unrelated waiter elsewhere in the
+// cluster cannot release the holder before the interleaving under test exists.
+const until = async (probe: () => Promise<boolean>, what: string) => {
   for (let i = 0; i < 100; i += 1) {
-    const [row] = await prisma.$queryRaw<{ n: number }[]>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
-    if (row.n > 0) return;
+    if (await probe()) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.fail("no session ever waited on a lock");
+  assert.fail(what);
 };
+
+/** Some session is blocked by this backend. */
+const untilBlockedBy = (pid: number) =>
+  until(async () => {
+    const [row] = await prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM pg_catalog.pg_stat_activity a WHERE ${pid}::int = ANY(pg_catalog.pg_blocking_pids(a.pid))`;
+    return row.n > 0;
+  }, `no session was ever blocked by backend ${pid}`);
+
+/** This backend is blocked by some session. */
+const untilBlocked = (pid: number) =>
+  until(async () => {
+    const [row] = await prisma.$queryRaw<{ n: number }[]>`
+      SELECT pg_catalog.cardinality(pg_catalog.pg_blocking_pids(${pid}::int))::int AS n`;
+    return row.n > 0;
+  }, `backend ${pid} was never blocked`);
+
+const backendPid = async (client: pg.Client) =>
+  (await client.query("SELECT pg_catalog.pg_backend_pid() AS pid")).rows[0].pid as number;
 
 test("a suggestion inserted before the anonymisation commits is deleted with the account", async () => {
   const { user } = await seed();
   const other = await directClient();
   try {
+    const otherPid = await backendPid(other);
     await other.query("BEGIN");
     // Takes FOR SHARE on the report in the guard trigger and holds it.
     await other.query(
@@ -131,7 +152,8 @@ test("a suggestion inserted before the anonymisation commits is deleted with the
       ["c".repeat(64)]
     );
     const deletion = deleteTomverseAccount(user.id, { cancelSubscription: false });
-    await untilSomeoneWaitsOnALock();
+    // The deletion is blocked by this insert's FOR SHARE, not merely running.
+    await untilBlockedBy(otherPid);
     await other.query("COMMIT");
     assert.equal((await deletion).deleted, true);
   } finally {
@@ -167,6 +189,7 @@ test("a suggestion inserted after the anonymisation waits for it and is refused"
   await reachedGate;
   const other = await directClient();
   try {
+    const otherPid = await backendPid(other);
     const late = other.query(
       `INSERT INTO "SupportTriageSuggestion" ("id", "feedbackId", "inputDigest") VALUES ('s-race-late', 'fb-del-mine-1', $1)`,
       ["d".repeat(64)]
@@ -175,7 +198,8 @@ test("a suggestion inserted after the anonymisation waits for it and is refused"
       () => "inserted",
       (error: Error) => error.message
     );
-    await untilSomeoneWaitsOnALock();
+    // The insert is waiting on the anonymised report, not already decided.
+    await untilBlocked(otherPid);
     release();
     assert.deepEqual(await deletion, { suggestions: 2 });
     assert.match(await outcome, /deleted account/);
