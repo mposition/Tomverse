@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import pg from "pg";
+
+import { resolvePostgresConnectionConfig } from "@/lib/postgresConnectionConfigCore.mjs";
 import { prisma } from "@/lib/prisma";
 import { GROUP_MEMBER_CAP, GROUP_STATES, GROUP_TRANSITIONS } from "@/lib/supportTriageCore";
 
@@ -296,4 +299,48 @@ test("the guard functions have no EXCEPTION handler and pin their search path", 
     assert.equal(row.handler, false, row.name);
     assert.deepEqual(row.config, ["search_path=pg_catalog, pg_temp"], row.name);
   }
+});
+
+const directClient = async () => {
+  const url = process.env.DATABASE_URL;
+  assert.ok(url, "DATABASE_URL must point at the test database");
+  const config = resolvePostgresConnectionConfig(url, { requireTestMarker: true });
+  const client = new pg.Client({ connectionString: config.connectionString, options: config.poolOptions });
+  await client.connect();
+  return client;
+};
+
+test("two connections adding the fiftieth and fifty-first member: one is refused", async () => {
+  await group();
+  const ids = Array.from({ length: GROUP_MEMBER_CAP + 1 }, (_, i) => `race-${String(i).padStart(2, "0")}`);
+  await prisma.feedback.createMany({
+    data: ids.map((id) => ({ id: `fb-group-${id}`, type: "bug", message: "race fixture" })),
+  });
+  for (const id of ids.slice(0, GROUP_MEMBER_CAP - 1)) await member("g1", id);
+  const first = await directClient();
+  const second = await directClient();
+  try {
+    const secondPid = (await second.query("SELECT pg_catalog.pg_backend_pid() AS pid")).rows[0].pid as number;
+    const insert = `INSERT INTO "SupportTriageGroupMember" ("groupId", "feedbackId", "primarySnapshotDigest") VALUES ('g1', $1, $2)`;
+    await first.query("BEGIN");
+    await first.query(insert, [`fb-group-${ids[GROUP_MEMBER_CAP - 1]}`, DIGEST]);
+    const late = second.query(insert, [`fb-group-${ids[GROUP_MEMBER_CAP]}`, DIGEST]).then(
+      () => "inserted",
+      (error: Error) => error.message
+    );
+    // The second insert is waiting on the group lock the first one holds.
+    for (let i = 0; ; i += 1) {
+      const [row] = await prisma.$queryRaw<{ n: number }[]>`
+        SELECT pg_catalog.cardinality(pg_catalog.pg_blocking_pids(${secondPid}::int))::int AS n`;
+      if (row.n > 0) break;
+      assert.ok(i < 100, "the second insert never waited on the first");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await first.query("COMMIT");
+    assert.match(await late, /already has 50 members/);
+  } finally {
+    await first.end();
+    await second.end();
+  }
+  assert.equal(await prisma.supportTriageGroupMember.count({ where: { groupId: "g1" } }), GROUP_MEMBER_CAP);
 });

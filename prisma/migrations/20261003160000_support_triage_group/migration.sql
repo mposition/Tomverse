@@ -338,12 +338,17 @@ BEGIN
         RAISE EXCEPTION 'SupportTriageGroupMember cannot be created for a deleted account''s report'
             USING ERRCODE = 'check_violation';
     END IF;
-    -- The group is held while its members are counted, so two inserts cannot
-    -- both see room for the fiftieth.
+    -- The group is locked by one statement and its members counted by the
+    -- next, so two inserts cannot both see room for the fiftieth. One
+    -- statement would not do: under READ COMMITTED a statement that waited
+    -- for the lock still counts with the snapshot it took before waiting.
     EXECUTE pg_catalog.format(
-        'SELECT (SELECT pg_catalog.count(*) FROM %I."SupportTriageGroupMember" m WHERE m."groupId" = g."id")::INTEGER
-           FROM %I."SupportTriageGroup" g WHERE g."id" = $1 FOR UPDATE OF g',
-        TG_TABLE_SCHEMA, TG_TABLE_SCHEMA
+        'SELECT 1 FROM %I."SupportTriageGroup" g WHERE g."id" = $1 FOR UPDATE',
+        TG_TABLE_SCHEMA
+    ) USING NEW."groupId";
+    EXECUTE pg_catalog.format(
+        'SELECT pg_catalog.count(*)::INTEGER FROM %I."SupportTriageGroupMember" m WHERE m."groupId" = $1',
+        TG_TABLE_SCHEMA
     ) INTO members USING NEW."groupId";
     IF members >= member_cap THEN
         RAISE EXCEPTION 'SupportTriageGroup % already has % members', NEW."groupId", member_cap

@@ -910,9 +910,9 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "prisma/migrations/20261003160000_support_triage_group/migration.sql",
-    count: 4,
+    count: 5,
     reason:
-      "Four reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE with its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
+      "Five reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE and then, as a separate statement with a fresh snapshot, its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
   },
   {
     path: "prisma/migrations/20261004010000_support_triage_suggestion/migration.sql",
