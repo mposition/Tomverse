@@ -18,6 +18,9 @@ import {
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+  AMUX_V4_COLLECTION_CLAIM_ACTION,
+  AMUX_V4_COLLECTION_CLAIM_SCOPE,
+  AMUX_V4_COLLECTION_CLAIM_TARGET,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
@@ -232,6 +235,23 @@ const row = (overrides: Record<string, unknown>) => ({
   userAgent: null,
   metadata: null,
   ...overrides,
+});
+
+test("v4 collection claim has one closed system audit action, target and scope", () => {
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_COLLECTION_CLAIM_ACTION, AMUX_V4_COLLECTION_CLAIM_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_COLLECTION_CLAIM_ACTION, "AmuxIdeaSubmission"), false);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    "amux.v4.collection.preview_ready", AMUX_V4_COLLECTION_CLAIM_TARGET), false);
+  assert.equal(auditRowActorKind(row({ action: AMUX_V4_COLLECTION_CLAIM_ACTION,
+    targetType: AMUX_V4_COLLECTION_CLAIM_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_COLLECTION_CLAIM_SCOPE } })), "system");
+  assert.equal(auditRowActorKind(row({ action: AMUX_V4_COLLECTION_CLAIM_ACTION,
+    targetType: AMUX_V4_COLLECTION_CLAIM_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: "wrong-claim-scope" } })), "unknown");
 });
 
 test("a stored row is human, system, or unknown -- never guessed", () => {

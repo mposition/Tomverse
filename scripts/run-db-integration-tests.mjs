@@ -284,6 +284,9 @@ run(
     // Dark Admin request writer rechecks source, model and idempotency under
     // locks; neither a GitHub read nor a model call is performed.
     "tests/integration/amux-v4-idea-collection-request-service.db.test.ts",
+    // The authenticated collector's dark claim rechecks owner source, model,
+    // HMAC and expiry before one audited, bounded lease is created.
+    "tests/integration/amux-v4-idea-collection-claim.db.test.ts",
     // The collector hint pages only current, pending request IDs and never
     // returns source scope, excerpt or model text.
     "tests/integration/amux-v4-idea-collection-queue.db.test.ts",

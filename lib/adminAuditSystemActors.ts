@@ -77,6 +77,10 @@ export const AMUX_V4_SECOND_DRAFT_SAVED_SCOPE = "second-analysis-draft-save-v1" 
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_SCOPE = "idea-analysis-auto-cancel-v1" as const;
+/** One authenticated source collector claims one already owner-approved file. */
+export const AMUX_V4_COLLECTION_CLAIM_ACTION = "amux.v4.collection.claimed" as const;
+export const AMUX_V4_COLLECTION_CLAIM_TARGET = "AmuxIdeaCollectionRequest" as const;
+export const AMUX_V4_COLLECTION_CLAIM_SCOPE = "idea-collection-claim-v1" as const;
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -152,6 +156,10 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
     return AMUX_V4_IDEA_AUTO_CANCEL_SCOPE;
+  }
+  if (action === AMUX_V4_COLLECTION_CLAIM_ACTION &&
+      targetType === AMUX_V4_COLLECTION_CLAIM_TARGET) {
+    return AMUX_V4_COLLECTION_CLAIM_SCOPE;
   }
   return null;
 };
