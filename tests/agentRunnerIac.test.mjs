@@ -255,8 +255,8 @@ test("the QA-release services declare exactly the variables their start check ac
       assert.deepEqual([...runner.environments[environment]].sort(), [...QA_RELEASE_SERVICE_VARIABLES[service]].sort(), `${key} ${environment}`);
     }
   }
-  // The Monitor's cron is a proposed value in the policy until approved.
-  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, null);
+  // The Monitor's 30-minute cron, approved by the operator on 2026-10-03.
+  assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_monitor").cronSchedule, "*/30 * * * *");
   assert.equal(AGENT_RUNNER_SERVICES.find((entry) => entry.key === "qa_release_digest").cronSchedule, "0 21 * * *");
 });
 

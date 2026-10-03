@@ -131,10 +131,9 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     key: "qa_release_monitor",
     service: "QA Release Monitor",
     startCommand: "node --experimental-strip-types scripts/qa-release-monitor-service.mjs",
-    // Policy section 10 lists the Monitor's cron (every 30 minutes) as a
-    // proposed value to confirm before S0, so it is declared without one and
-    // runs only by hand until that value is approved.
-    cronSchedule: null,
+    // Every 30 minutes: policy section 10's proposed value, approved by the
+    // operator on 2026-10-03.
+    cronSchedule: "*/30 * * * *",
     environments: {
       production: QA_RELEASE_MONITOR_VARIABLES,
       staging: QA_RELEASE_MONITOR_VARIABLES,
