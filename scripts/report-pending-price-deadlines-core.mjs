@@ -68,12 +68,13 @@ const passes = (pattern, value) =>
     typeof value === "string" && pattern.test(value);
 
 /**
- * One register entry -> either its `register_deadline` line, or the list of
- * fields that could not be printed. A rejected value is never printed in any
- * part, so a field that fails its rule cannot smuggle a token or a line into
- * the output.
+ * One register entry -> either the values its `register_deadline` line prints,
+ * or the list of fields that could not be printed. A rejected value is never
+ * kept in any part, so a field that fails its rule cannot smuggle a token or a
+ * line into the output -- or into the stage W digest, which is built from
+ * these same entries (docs/policy/billing-finance-ops.md §1.1).
  */
-const entryLines = (entry, index, now) => {
+const judgeEntry = (entry, index, now) => {
     const rejected = [];
     if (!passes(MODEL_ID_PATTERN, entry.modelId)) rejected.push("modelId");
     if (!passes(DATE_PATTERN, entry.registeredAt)) rejected.push("registeredAt");
@@ -81,51 +82,29 @@ const entryLines = (entry, index, now) => {
     const ticket = encodeTicket(entry.verificationTicket);
     if (ticket === undefined) rejected.push("ticket");
 
-    if (rejected.length > 0) {
-        return {
-            rejected: true,
-            mark: "none",
-            lines: rejected.map(
-                (field) => `register_value_rejected index=${index} field=${field}`
-            ),
-        };
-    }
+    if (rejected.length > 0) return { kind: "rejected", index, fields: rejected };
 
     const remainingDays = daysUntil(entry.expiresAt, now);
-    const mark = markFor(remainingDays);
     return {
-        rejected: false,
-        mark,
-        lines: [
-            [
-                "register_deadline",
-                `modelId=${entry.modelId}`,
-                `registeredAt=${entry.registeredAt}`,
-                `expiresAt=${entry.expiresAt}`,
-                `remainingDays=${remainingDays === null ? "NONE" : remainingDays}`,
-                `mark=${mark}`,
-                `ticket=${ticket}`,
-            ].join(" "),
-        ],
+        kind: "deadline",
+        index,
+        modelId: entry.modelId,
+        registeredAt: entry.registeredAt,
+        expiresAt: entry.expiresAt,
+        remainingDays,
+        mark: markFor(remainingDays),
+        ticket,
     };
 };
 
 /**
- * The whole report. `lines` is complete before anything is printed, so a run
- * that throws prints nothing -- and in particular no `verdict=` line, which is
- * how a reader tells a broken script from a quiet register.
+ * The structured judgement the report and the stage W digest share: one entry
+ * per register item in register order, and the verdict.
  */
-export const buildPendingPriceDeadlineReport = ({ register, models, now }) => {
-    const lines = [];
-    let anyRejected = false;
-    let anyMarked = false;
-
-    register.forEach((entry, index) => {
-        const result = entryLines(entry, index, now);
-        lines.push(...result.lines);
-        anyRejected ||= result.rejected;
-        anyMarked ||= result.mark !== "none";
-    });
+export const judgePendingPriceDeadlines = ({ register, models, now }) => {
+    const entries = register.map((entry, index) => judgeEntry(entry, index, now));
+    const anyRejected = entries.some((entry) => entry.kind === "rejected");
+    const anyMarked = entries.some((entry) => entry.kind === "deadline" && entry.mark !== "none");
 
     // `expired` is the deadline itself, which the marks already report. The
     // other errors mean the register is malformed, and owner/ticket/approval
@@ -142,7 +121,32 @@ export const buildPendingPriceDeadlineReport = ({ register, models, now }) => {
             : anyMarked
               ? "notice"
               : "quiet";
+    return { entries, verdict };
+};
 
+const entryLines = (entry) =>
+    entry.kind === "rejected"
+        ? entry.fields.map((field) => `register_value_rejected index=${entry.index} field=${field}`)
+        : [
+              [
+                  "register_deadline",
+                  `modelId=${entry.modelId}`,
+                  `registeredAt=${entry.registeredAt}`,
+                  `expiresAt=${entry.expiresAt}`,
+                  `remainingDays=${entry.remainingDays === null ? "NONE" : entry.remainingDays}`,
+                  `mark=${entry.mark}`,
+                  `ticket=${entry.ticket}`,
+              ].join(" "),
+          ];
+
+/**
+ * The whole report. `lines` is complete before anything is printed, so a run
+ * that throws prints nothing -- and in particular no `verdict=` line, which is
+ * how a reader tells a broken script from a quiet register.
+ */
+export const buildPendingPriceDeadlineReport = ({ register, models, now }) => {
+    const { entries, verdict } = judgePendingPriceDeadlines({ register, models, now });
+    const lines = entries.flatMap(entryLines);
     lines.push(POLICY_QUOTE, `verdict=${verdict}`);
     return { lines, verdict, exitCode: EXIT_CODES[verdict] };
 };
