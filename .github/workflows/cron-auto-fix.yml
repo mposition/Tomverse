@@ -217,7 +217,14 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          cache: npm
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment package.json
+          # names a package manager. This job holds a credential, and nothing can write
+          # a cache in a scope this job runs in any more, so the entry it used to look
+          # for is a guaranteed miss -- measured on run 37162314395. Declaring it costs
+          # nothing and takes the job out of the analyser's cache-restoring set.
+          # .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and P3.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci

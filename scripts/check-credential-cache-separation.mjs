@@ -87,8 +87,14 @@ if (offenders.length > 0) {
   process.exit(1);
 }
 
+// Zero is its own sentence. The clause about what the restored cache is only
+// describes a case where something is restored, and printing "all of it
+// package-manager cache ()" at zero states a fact about an empty set.
 console.log(
-  `Credential cache separation check passed: ${cacheReasons.length} credentialed job(s) restore a cache, ` +
-    `all of it package-manager cache that npm ci verifies against the lockfile (${distribution}). ` +
-    `${analysis.credentialedJobs.length} credentialed job(s) across ${workflows.length} workflow(s).`,
+  cacheReasons.length === 0
+    ? `Credential cache separation check passed: no credentialed job restores any cache. ` +
+        `${analysis.credentialedJobs.length} credentialed job(s) across ${workflows.length} workflow(s).`
+    : `Credential cache separation check passed: ${cacheReasons.length} credentialed job(s) restore a cache, ` +
+        `all of it package-manager cache that npm ci verifies against the lockfile (${distribution}). ` +
+        `${analysis.credentialedJobs.length} credentialed job(s) across ${workflows.length} workflow(s).`,
 );
