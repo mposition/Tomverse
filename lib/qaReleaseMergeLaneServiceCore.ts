@@ -163,7 +163,10 @@ async function judgeAwaitingDeploy(
 }
 
 /** The ordered re-read of an issued or consumed attempt (section 8 item 5), at its first answering step. */
-async function rereadAttempt(ports: QaReleaseMergeLanePorts, attempt: NonNullable<QaReleaseLaneState["openAttempt"]>): Promise<QaReleaseMergeLaneRoundOutcome> {
+async function rereadAttempt(
+  ports: QaReleaseMergeLanePorts,
+  attempt: { id: string; pullRequestNumber: number },
+): Promise<QaReleaseMergeLaneRoundOutcome> {
   let pull: QaReleasePullRead | null;
   try {
     pull = await ports.github.readPull(attempt.pullRequestNumber);
@@ -210,10 +213,13 @@ export async function runQaReleaseMergeLaneRound(
   const attempt = state.openAttempt;
   if (attempt) {
     if (attempt.state === "awaiting_deploy") return judgeAwaitingDeploy(ports, attempt, state.dbNowMs);
+    // A latched lane issues nothing, so an issued or consumed attempt under a
+    // latch is one whose merge result was unknown or never reported: re-read
+    // it now. Unlatched, it may still be in another round's hands for twelve
+    // minutes; after that, latch once as unreported.
+    if (state.latched) return rereadAttempt(ports, attempt);
     if (state.dbNowMs - attempt.issuedAtMs <= QA_RELEASE_RESULT_SILENCE_MS) return { exitCode: 0, outcome: "attempt_in_flight" };
-    // Past twelve minutes with no result: latch once, then re-read.
-    if (!state.latched) return sendReport(ports, attempt.id, { kind: "unreported" }, "unreported");
-    return rereadAttempt(ports, attempt);
+    return sendReport(ports, attempt.id, { kind: "unreported" }, "unreported");
   }
   if (state.latched) return { exitCode: 0, outcome: "latched" };
 
@@ -252,16 +258,21 @@ export async function runQaReleaseMergeLaneRound(
 
   // Re-read right before the merge (section 3 step 1, section 8 items 4 and 6):
   // the pull request as GitHub has it now, staging free, and this service's
-  // own switches judged again. Any difference closes the attempt as not
-  // merged -- which it is -- rather than leaving it to expire.
+  // own switches judged again. A difference on a pull request known to be
+  // unmerged closes the attempt as not merged -- which it is -- rather than
+  // leaving it to expire.
   const abandon = async () => {
     const recorded = await sendReport(ports, attemptId, { kind: "reread", result: "not_merged" }, "abandoned_before_merge");
     return recorded.exitCode === 0 ? ({ exitCode: 0, outcome: "abandoned" } as const) : recorded;
   };
   const fresh = await ports.github.readPull(pick.number).catch(() => null);
+  // Unreadable: leave the attempt open; it expires unconsumed and a later
+  // round's ordered re-read decides it (section 8 item 5).
+  if (fresh === null) return { exitCode: 0, outcome: "attempt_in_flight" };
+  // Merged by someone else meanwhile: that merge is tracked like any other,
+  // through the ordered re-read -- never closed as not merged.
+  if (fresh.merged) return rereadAttempt(ports, { id: attemptId, pullRequestNumber: pick.number });
   if (
-    fresh === null ||
-    fresh.merged ||
     fresh.headRefOid !== pick.headRefOid ||
     fresh.baseRefName !== "develop" ||
     refusalReason(fresh, "develop") !== null

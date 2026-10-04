@@ -236,3 +236,28 @@ test("a report the app did not record, or an unreadable state, ends the round as
   };
   assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, unread.ports), { exitCode: 1, outcome: "state_unknown" });
 });
+
+test("a pull request merged by someone else before the consume is tracked, and an unreadable one is left open", async () => {
+  const mergedMeanwhile = ports({ readPull: (n) => pull(n, { merged: true, mergeCommitSha: MERGE }) });
+  await runQaReleaseMergeLaneRound(ENV, mergedMeanwhile.ports);
+  assert.deepEqual(reports(mergedMeanwhile.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
+  assert.equal(names(mergedMeanwhile.calls).includes("consume"), false);
+
+  const mergedElsewhere = ports({ readPull: (n) => pull(n, { merged: true, baseRefName: "main", mergeCommitSha: MERGE }) });
+  await runQaReleaseMergeLaneRound(ENV, mergedElsewhere.ports);
+  assert.deepEqual(reports(mergedElsewhere.calls), [{ kind: "reread", result: "merged_off_develop" }]);
+
+  const unread = ports({ readPull: () => null });
+  assert.deepEqual(await runQaReleaseMergeLaneRound(ENV, unread.ports), { exitCode: 0, outcome: "attempt_in_flight" });
+  assert.deepEqual(reports(unread.calls), []);
+  assert.equal(names(unread.calls).includes("consume"), false);
+});
+
+test("a latched lane re-reads its unknown attempt at once, without the twelve-minute wait", async () => {
+  const run = ports({
+    state: { ...awaiting({ state: "consumed", issuedAtMs: NOW - 60 * 1000, mergeCommitSha: null }), latched: true },
+    readPull: (n) => pull(n, { merged: true, mergeCommitSha: MERGE }),
+  });
+  await runQaReleaseMergeLaneRound(ENV, run.ports);
+  assert.deepEqual(reports(run.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
+});
