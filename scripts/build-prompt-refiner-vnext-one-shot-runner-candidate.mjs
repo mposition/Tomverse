@@ -16,14 +16,25 @@ const packagePath = resolve(root, "bin", `${name}.mjs.gz`);
 const recordPath = resolve(root, "bin", `${name}.json`);
 const a15Commit = "256e087d503151ea1ebdf812b1c6e52a5cfb6d77";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const sourceSha256 = (bytes) => sha256(Buffer.from(
-  bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8"));
+const sourceSha256 = (bytes) => {
+  const normalized = Buffer.allocUnsafe(bytes.length);
+  let count = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 13 && bytes[i + 1] === 10) continue;
+    normalized[count++] = bytes[i];
+  }
+  return sha256(normalized.subarray(0, count));
+};
 const git = (...args) => execFileSync("git", args, {
   cwd: root, encoding: "utf8", windowsHide: true,
 }).trim();
 const gitBytes = (path, commit) => execFileSync("git", ["show", `${commit}:${path}`], {
   cwd: root, windowsHide: true,
 });
+const verifyOnly = process.argv.length === 3 && process.argv[2] === "--verify";
+if (!verifyOnly && process.argv.length !== 2) {
+  throw new Error("runner_candidate_mode_invalid");
+}
 
 if (git("status", "--porcelain", "--untracked-files=no") !== "") {
   throw new Error("runner_candidate_source_dirty");
@@ -58,6 +69,9 @@ if (bundle.outputFiles.length !== 1) {
 const runnerBytes = bundle.outputFiles[0].contents;
 const packageBytes = gzipSync(runnerBytes, { level: 9, mtime: 0 });
 const existing = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : null;
+if (verifyOnly && !existing) {
+  throw new Error("runner_candidate_missing");
+}
 const sourceCommit = existing?.sourceCommit ?? git("rev-parse", "HEAD");
 const inputs = Object.keys(bundle.metafile.inputs).map((input) => {
   const absolute = resolve(root, input);
