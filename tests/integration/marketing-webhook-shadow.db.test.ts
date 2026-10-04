@@ -49,6 +49,8 @@ const reset = async () => {
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "EngineeringAgentApproval",
       -- Keep the v4 foreign-key closure explicit; these dark tables are empty here.
       "AmuxIdeaUnitDecision",

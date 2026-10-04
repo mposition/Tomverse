@@ -421,12 +421,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-04, merged main and sre-ops: account, AMUX, audit actor and
 // marketing fingerprint edits coexist in the fixed closure. The count and
 // position-free inventory stay unchanged; repin source positions below.
+//
+// 2026-10-05, AMUX v4 analysis budget: an existing admin-audit helper now
+// selects an action-specific actor scope. The count (228) and position-free
+// inventory are unchanged; only positions in this fixed closure moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "85a2067f7f6273a1a79d405e8815d89f",
-  "aadfd76db7b487ca264dfad74b9ebf60",
+  "c145aeb7588742162b5f8c9276daf9c7",
+  "085d5792233040a176e15b14ecb8306b",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

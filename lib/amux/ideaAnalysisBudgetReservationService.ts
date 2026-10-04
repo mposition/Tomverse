@@ -205,6 +205,15 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { previewId: preview.id }, select: { id: true },
   })) refuse("already_reserved");
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // First reservation in a UTC month creates its own capped ledger row. The
+  // audit-chain lock serializes this with other reservation writers, while
+  // the unique month key remains the database backstop.
+  await tx.amuxIdeaAnalysisBudgetWindow.createMany({
+    data: [{ namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
+      limitMicroUsd: BigInt(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD),
+      spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) }],
+    skipDuplicates: true,
+  });
   const lockedWindow = await tx.$queryRaw<Array<{
     spentMicroUsd: bigint; reservedMicroUsd: bigint; limitMicroUsd: bigint;
   }>>`
