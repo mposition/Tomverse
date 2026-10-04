@@ -43,6 +43,19 @@ export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
 export type EngineeringAgentSystemAuditActor =
   (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
 
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 /** AMUX intake policy v12 (approved by mposition, 2026-10-01): this first
  * active v4 actor has one action/target pair, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
@@ -66,13 +79,15 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
-  "marketing-guard",
+  "marketing-guard", "marketing-webhook",
   "prompt-refiner-shadow-runner",
+  "prompt-refiner-vnext-one-shot-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   // Scoped to the dark initial source-plan writer below.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -148,3 +163,26 @@ export const auditRowActorKind = (
   }
   return "system";
 };
+
+/**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+  "support-triage-account-deletion",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;

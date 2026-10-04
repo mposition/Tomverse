@@ -124,7 +124,7 @@ pub struct SessionPresence {
     pub generation: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct LocalDispatchBody {
     pub text: String,
     pub no_board: bool,
@@ -366,6 +366,26 @@ pub fn plan_worker_heartbeat(
     }
 }
 
+fn plan_bridge_heartbeat(
+    halted: bool,
+    roster_ok: bool,
+    running: bool,
+    at_boundary: bool,
+    has_pending: bool,
+) -> WorkerHeartbeatPlan {
+    if !roster_ok {
+        // An unreadable roster cannot prove the worker stopped.
+        plan_worker_heartbeat(true, false, true)
+    } else if halted {
+        // An ambiguous attempt may have been dropped from local pending while
+        // the server still owns it. Never advertise dispatch readiness until
+        // operator read-back and a fresh process registration.
+        plan_worker_heartbeat(running, false, true)
+    } else {
+        plan_worker_heartbeat(running, at_boundary, has_pending)
+    }
+}
+
 impl WorkerAdapter for ExistingSessionAdapter {
     async fn is_running(&self, worker: &str) -> Result<bool> {
         Ok(self
@@ -482,14 +502,15 @@ pub fn completion_from_card(detail: &serde_json::Value) -> LocalCompletion {
     }
 }
 
-/// A settle whose response was lost may be sent again: the server fences a
-/// replay on the ended attempt and task revision, so a committed first send
-/// answers the second with not-settled. Only an explicit not-settled drops it.
+/// An unknown settle outcome must stop the bridge for human read-back.
+/// A replay is fenced by the server, but it is still a write request and can
+/// hide whether the first request committed. Only a definite busy response
+/// proves no write happened and permits a later attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettleResult {
     Settled,
     DropAndHalt,
-    KeepAndHalt,
+    HaltForReadBack,
     /// Tomverse answered busy: the settle did not happen. Keep, no halt.
     RetryNextTick,
 }
@@ -498,7 +519,7 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
     match settled {
         Some(true) => SettleResult::Settled,
         Some(false) => SettleResult::DropAndHalt,
-        None => SettleResult::KeepAndHalt,
+        None => SettleResult::HaltForReadBack,
     }
 }
 
@@ -511,6 +532,54 @@ pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
         Err(error) if is_database_busy(error) => SettleResult::RetryNextTick,
         Err(_) => plan_settle_result(None),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SettleFollowup {
+    halt: bool,
+    keep_pending: bool,
+}
+
+/// Only an explicit database-busy answer proves that settlement wrote nothing.
+/// An unknown result stops the bridge for human read-back, not another write.
+fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
+    match result {
+        SettleResult::Settled => SettleFollowup {
+            halt: false,
+            keep_pending: false,
+        },
+        SettleResult::DropAndHalt => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+        },
+        SettleResult::HaltForReadBack => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+        },
+        SettleResult::RetryNextTick => SettleFollowup {
+            halt: false,
+            keep_pending: true,
+        },
+    }
+}
+
+/// Discard an ambiguous settlement without replaying it. A halted bridge
+/// still retains other attempts until their heartbeats and settlements finish.
+fn apply_settle_followup<T>(
+    entry: T,
+    result: SettleResult,
+    halted: &mut bool,
+    still_running: &mut Vec<T>,
+) {
+    let followup = plan_settle_followup(result);
+    *halted |= followup.halt;
+    if followup.keep_pending {
+        still_running.push(entry);
+    }
+}
+
+fn should_exit_halted_bridge(halted: bool, pending_count: usize) -> bool {
+    halted && pending_count == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -646,7 +715,7 @@ pub fn plan_local_dispatch(
         path: format!("/api/sessions/{}/send", encode_session_name(name)),
         body: LocalDispatchBody {
             text: prompt.to_owned(),
-            no_board: true,
+            no_board: false,
             record_history: true,
             msg_id: attempt_id.to_owned(),
         },
@@ -1191,12 +1260,7 @@ impl LocalAmux for HttpLocal {
         let response = self
             .client
             .post(format!("{}{path}", self.base))
-            .json(&serde_json::json!({
-                "text": body.text,
-                "no_board": true,
-                "record_history": body.record_history,
-                "msg_id": body.msg_id,
-            }))
+            .json(body)
             .send()
             .await
             .context("local session send failed")?;
@@ -1401,11 +1465,13 @@ pub async fn run_from_env() -> i32 {
                 continue;
             };
             let has_pending = pending_workers.contains(&name);
-            let plan = if roster_ok {
-                plan_worker_heartbeat(session.running, session.at_boundary, has_pending)
-            } else {
-                plan_worker_heartbeat(true, false, true)
-            };
+            let plan = plan_bridge_heartbeat(
+                halted,
+                roster_ok,
+                session.running,
+                session.at_boundary,
+                has_pending,
+            );
             let published = api
                 .worker_heartbeat(
                     &name,
@@ -1601,21 +1667,22 @@ pub async fn run_from_env() -> i32 {
                             )
                             .await
                             .map(|response| response.settled);
-                        match plan_settle_answer(&settled) {
-                            SettleResult::Settled => {}
-                            SettleResult::DropAndHalt => halted = true,
-                            SettleResult::KeepAndHalt => {
-                                halted = true;
-                                still_running.push(entry);
-                            }
-                            SettleResult::RetryNextTick => {
-                                eprintln!(
-                                    "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
-                                    entry.delivery.attempt_id
-                                );
-                                still_running.push(entry);
-                            }
+                        let result = plan_settle_answer(&settled);
+                        if result == SettleResult::HaltForReadBack {
+                            eprintln!(
+                                "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
+                                entry.delivery.attempt_id
+                            );
+                        } else if result == SettleResult::RetryNextTick {
+                            eprintln!(
+                                "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
+                                entry.delivery.attempt_id
+                            );
                         }
+                        // Drop only the ambiguous attempt. Other attempts
+                        // still need heartbeats and settlement before the
+                        // halted bridge exits for operator read-back.
+                        apply_settle_followup(entry, result, &mut halted, &mut still_running);
                     }
                 }
             }
@@ -1625,7 +1692,7 @@ pub async fn run_from_env() -> i32 {
             eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
             halt_reported = true;
         }
-        if halted && pending.is_empty() {
+        if should_exit_halted_bridge(halted, pending.len()) {
             return BRIDGE_HALT_EXIT_CODE;
         }
 
@@ -2011,6 +2078,38 @@ mod tests {
     }
 
     #[test]
+    fn halted_bridge_never_advertises_a_worker_as_dispatch_ready() {
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "stopped",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, false, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(false, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "idle",
+                dispatch_ready: true,
+            }
+        );
+    }
+
+    #[test]
     fn activation_gate_stays_closed_without_the_exact_env() {
         assert!(WSL_BRIDGE_CODE_LATCH);
         assert_eq!(activation_gate(false, Some("1")), ActivationGate::LatchOff);
@@ -2151,7 +2250,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn running_session_send_stays_pending_and_does_not_open_a_board() {
+    async fn running_session_send_requests_board_receipt_and_stays_pending() {
         let calls = Arc::new(AtomicUsize::new(0));
         let mut prompts = BTreeMap::new();
         prompts.insert(ATTEMPT_ID.into(), brief_prompt());
@@ -2171,7 +2270,11 @@ mod tests {
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(local.sends.len(), 1);
-        assert!(local.sends[0].no_board);
+        assert!(!local.sends[0].no_board);
+        assert_eq!(
+            serde_json::to_value(&local.sends[0]).unwrap()["no_board"],
+            serde_json::json!(false)
+        );
         assert!(local.sends[0].record_history);
         assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
         assert_eq!(local.paths, vec!["/api/sessions/claude-impl/send".to_owned()]);
@@ -2458,10 +2561,65 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_settle_response_keeps_the_attempt_and_only_a_refusal_drops_it() {
+    fn a_lost_settle_response_halts_for_read_back_without_replaying_the_write() {
         assert_eq!(plan_settle_result(Some(true)), SettleResult::Settled);
         assert_eq!(plan_settle_result(Some(false)), SettleResult::DropAndHalt);
-        assert_eq!(plan_settle_result(None), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_result(None), SettleResult::HaltForReadBack);
+        assert_eq!(
+            plan_settle_followup(SettleResult::Settled),
+            SettleFollowup { halt: false, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::DropAndHalt),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::HaltForReadBack),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::RetryNextTick),
+            SettleFollowup { halt: false, keep_pending: true }
+        );
+    }
+
+    #[test]
+    fn an_unknown_settle_keeps_other_attempts_alive_until_they_finish() {
+        let mut halted = false;
+        let mut pending = vec![
+            ("unknown", SettleResult::HaltForReadBack),
+            ("busy", SettleResult::RetryNextTick),
+            ("settled", SettleResult::Settled),
+        ];
+        let mut still_running = Vec::new();
+        for (attempt, result) in pending.drain(..) {
+            apply_settle_followup(attempt, result, &mut halted, &mut still_running);
+        }
+        assert_eq!(still_running, vec!["busy"]);
+        assert!(halted);
+        assert!(!should_exit_halted_bridge(halted, still_running.len()));
+        // The next tick heartbeats the retained attempt and settles it; only
+        // then may the halted process exit with the non-restarting status.
+        let mut final_pending = Vec::new();
+        apply_settle_followup(
+            still_running.remove(0),
+            SettleResult::Settled,
+            &mut halted,
+            &mut final_pending,
+        );
+        assert!(final_pending.is_empty());
+        assert!(should_exit_halted_bridge(halted, final_pending.len()));
+    }
+
+    #[test]
+    fn the_run_loop_restores_other_pending_attempts_before_exiting() {
+        let source = include_str!("wsl_bridge.rs");
+        let loop_start = source.find("for mut entry in pending.drain(..)").unwrap();
+        let loop_end = source[loop_start..].find("pending = still_running;").unwrap() + loop_start;
+        let settle_loop = &source[loop_start..loop_end];
+        assert!(settle_loop.contains("apply_settle_followup(entry, result"));
+        assert!(!settle_loop.contains("return BRIDGE_HALT_EXIT_CODE"));
+        assert!(source[loop_end..].contains("should_exit_halted_bridge(halted, pending.len())"));
     }
 
     #[test]
@@ -2706,7 +2864,7 @@ mod tests {
         let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
         assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
         let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
-        assert_eq!(plan_settle_answer(&unknown), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_answer(&unknown), SettleResult::HaltForReadBack);
         assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
         assert_eq!(plan_settle_answer(&Ok(false)), SettleResult::DropAndHalt);
     }

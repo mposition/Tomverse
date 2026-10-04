@@ -1,0 +1,22 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-manifest-allocation-v1",
+  "requirement": "Implement only the operator-approved free one-shot vNext manifest allocation development primitive. Policy commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e and file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b were approved by mposition for no-cost owner-runner/server binding code, synthetic tests and Claude independent review. This module combines the prior root rehash with existing HMAC allocation, language/cell/challenge/direction quotas and bounded source text checks inside a future owner-only environment. It is deliberately not a complete witness/predicate/rubric validator, seal authority or dispatch admission. No real holdout content is authored, requested or inspected. Codex authors; Claude Code Max first-party subscription CLI reviews read-only, with user-approved skip-preflight exception and no Anthropic API. No provider call, cost reservation, stage/run approval, flag, product activation, PR merge or deployment is authorized.",
+  "completionCriteria": [
+    "Read the exact requirement and scoped diff before tests or author account; bind the verdict to the package digest.",
+    "Confirm full-manifest root/preregistration binding is checked before extracting any metadata and raw content/root never leaves the owner-only function return value.",
+    "Confirm the existing strict allocation validator checks the 32-byte seed HMAC permutation, 80 unique ko/en IDs, exact cells/challenges and closed direction/reason contract; each sourceText uses the existing vNext bounds.",
+    "Confirm the primitive machine-readably reports fullManifestValidated false and dispatchAuthorized false because witness, predicate, rubric truth, durable approvals and deployment/cost checks remain absent. Do not treat it as sealing or operational gate evidence.",
+    "Confirm all inputs in tests are labelled synthetic and new source/tests are byte-pinned in a separate development-only closure, including its own closure test.",
+    "Require focused tests, typecheck, lint, policy-reference and whitespace guards. Distinguish controller-recorded checks from commands the read-only reviewer actually ran.",
+    "Return exactly one raw JSON verdict without Markdown fences and with only reproducible actionable findings. Approval with findings is not a controller pass."
+  ],
+  "baseCommit": "f521602e75761022c371ebc0dba23da246ae5970",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-allocation-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-core-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestCore.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestCore.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestCoreClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

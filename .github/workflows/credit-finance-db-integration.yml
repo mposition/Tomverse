@@ -1,7 +1,15 @@
 name: Credit Finance DB Integration
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "prisma/**"
       - "lib/chatSecurity.ts"
@@ -90,10 +98,12 @@ concurrency:
 
 jobs:
   credit-finance-db:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Credit and finance PostgreSQL scenarios (${{ matrix.group }})
     runs-on: ubuntu-latest
 
-    # Seven lanes, because one job stopped fitting.
+    # Nine lanes, because one job stopped fitting -- and then seven stopped
+    # fitting evenly.
     #
     # 20 minutes left no margin, so on 2026-08-15 this became 30 with a note
     # saying what would have to happen next: "past about 25 minutes the suite
@@ -114,6 +124,13 @@ jobs:
     # diff does not touch a single suite here. So the number goes back to
     # bounding a hang, and the work is divided instead.
     #
+    # Seven lanes split by domain left `accounts` (the catch-all) at 53 suites
+    # and `email` at 42 against 9-18 elsewhere. A lane costs ~15s per suite
+    # plus ~2 minutes of setup, so accounts ran ~16 minutes while assistant ran
+    # ~3, and on every develop and main push Railway's Wait for CI held the
+    # deployment for the slowest lane. On 2026-10-02 `consent`, `agents` and
+    # `conversations` took the overflow; the largest lane is now 24 suites.
+    #
     # The lanes are named in scripts/db-integration-groups.mjs and a test
     # asserts this matrix runs all of them -- a lane defined and not listed
     # here would look exactly like a passing check.
@@ -121,12 +138,14 @@ jobs:
       fail-fast: false
       matrix:
         group:
+          - consent
           - email
           - assistant
           - memory
-          - import
+          - conversations
           - routing
           - finance
+          - agents
           - accounts
 
     # Bounds a hang, not the runtime. The largest lane holds under a third of
@@ -152,6 +171,9 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
       DB_INTEGRATION_GROUP: ${{ matrix.group }}
+      # The image above is 17; the ops-observer bounds suite fails rather than
+      # skipping its 17 fixtures if the server is ever not.
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "17"
 
     steps:
       - name: Checkout
@@ -175,6 +197,100 @@ jobs:
       # just pushed -- and restores the shared npm cache, so anything it can
       # read, that code can read. The alert lives in `report-red-lane` below,
       # which never runs this tree.
+
+  # The sre-ops transaction arming function branches on the server version
+  # (docs/policy/sre-ops.md §6 item 3): on PostgreSQL 16 it must neither read
+  # nor set transaction_timeout, and production's version is not known to this
+  # repository. Every other lane runs PostgreSQL 17, so this job is the only
+  # place the 16 branch is observed. It runs one file, which installs the
+  # migration into a throwaway schema itself, and holds no secret.
+  ops-observer-pg16:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Ops observer transaction bounds (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tomverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tomverse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "16"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the transaction bounds suite on PostgreSQL 16
+        run: node --conditions=react-server --import tsx --test tests/integration/ops-observer-transaction-bounds.db.test.ts
+
+  # Not a lane: the support-triage timeout suites again, on PostgreSQL 16,
+  # where transaction_timeout does not exist (docs/policy/support-triage.md
+  # §4). The suites it runs are POSTGRES16_COMPAT_SUITES in
+  # scripts/db-integration-groups.mjs; they also run on 17 in their own lane.
+  # A separate job with a literal image rather than a matrix expression, so
+  # the job's shape is the same as the lanes'.
+  credit-finance-db-postgres16:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Support-triage suites on PostgreSQL 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tomverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tomverse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
+      DB_INTEGRATION_GROUP: postgres16
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the support-triage suites on PostgreSQL 16
+        run: npm run test:db:integration
 
   # Only the release-branch lane is worth an alert, and the notifier enforces
   # that itself rather than trusting this condition -- a run on any other
@@ -211,8 +327,13 @@ jobs:
   report-red-lane:
     name: Report the red release lane
     runs-on: ubuntu-latest
-    needs: credit-finance-db
-    if: always() && needs.credit-finance-db.result == 'failure' && github.event_name != 'pull_request'
+    # Either job going red is the lane going red: the PostgreSQL 16 job runs
+    # suites the lanes also run, and a release branch must not go quietly red
+    # on it.
+    needs: [credit-finance-db, credit-finance-db-postgres16]
+    # One condition with no `||`: either needed job's failure, joined over
+    # needs.*.result, so this job stays a push-only job by the draft-skip rule.
+    if: always() && contains(join(needs.*.result, ','), 'failure') && github.event_name != 'pull_request'
     permissions:
       contents: read
     timeout-minutes: 5
@@ -231,6 +352,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment
+          # package.json declares a package manager, without this file changing.
+          # This job holds a credential, so that would quietly put a cache next
+          # to it (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
 
       - name: Report the red lane
         env:
@@ -252,7 +379,7 @@ jobs:
   # The name branch protection knows.
   #
   # Splitting one job into a matrix renames its check: "Credit and finance
-  # PostgreSQL scenarios" becomes seven checks with the group in brackets. A
+  # PostgreSQL scenarios" becomes one check per lane with the group in brackets. A
   # required check that no longer reports is not a failure an operator can see
   # -- it is a pull request that waits forever for something nobody is going to
   # run, which is worse than a red one.
@@ -264,14 +391,20 @@ jobs:
   credit-finance-db-result:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    needs: credit-finance-db
-    if: always()
+    needs: [credit-finance-db, ops-observer-pg16, credit-finance-db-postgres16]
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       - name: Require every lane to have passed
         env:
           RESULT: ${{ needs.credit-finance-db.result }}
+          PG16_RESULT: ${{ needs.ops-observer-pg16.result }}
+          POSTGRES16_RESULT: ${{ needs.credit-finance-db-postgres16.result }}
         run: |
           echo "Matrix result: $RESULT"
+          echo "PostgreSQL 16 bounds result: $PG16_RESULT"
+          test "$PG16_RESULT" = "success"
+          echo "Support-triage PostgreSQL 16 result: $POSTGRES16_RESULT"
+          test "$POSTGRES16_RESULT" = "success"
           # `success` is the only pass. `skipped` included: the matrix is not
           # conditional, so a skip means something stopped it from running and
           # that is not the same as the suite agreeing.

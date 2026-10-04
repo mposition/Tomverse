@@ -18,7 +18,7 @@
  * ## Why a rule over the filename, not a list
  *
  * `run-db-integration-tests.mjs` names every suite in order, each with a
- * comment saying what it is there to prove. Copying them into seven arrays
+ * comment saying what it is there to prove. Copying them into one array per lane
  * would scatter that reasoning and put every future suite in front of a
  * question -- which array? -- that is easy to answer wrongly and silent when
  * it is. The runner keeps its list; this decides the lane from the name.
@@ -40,11 +40,20 @@
 
 /** Ordered most specific first: the first match wins. */
 const LANE_RULES = [
-  // Both email lanes, the campaign layer above them, and the two report
-  // senders. One domain, and the largest single group of suites in the repo.
+  // Who may be written to and under which rules: consent and its
+  // confirmation, jurisdiction, the campaign layer and the release-note sends
+  // built on it. Split from `email` on 2026-10-02, when the two together were
+  // 42 suites and the second-slowest lane; it must stay above `email`, whose
+  // `email-` prefix would otherwise take these.
+  [
+    "consent",
+    /^(campaign-|marketing-lane|email-(audience-expansion|campaign|consent-confirmation|jurisdiction-|login-signup-hold|marketing-reach|permission-ledger|policy-publication|preferences-consent|send-approval-cohort|statutory-display-readiness|verified-session-consent)|release-notes-|signup-consent)/,
+  ],
+  // Delivery: both email lanes, suppression, webhooks, templates and the two
+  // report senders.
   [
     "email",
-    /^(email-|campaign-|marketing-lane|founding-tester-pass-emails|model-lifecycle-|admin-email-delivery|credential-email-lane|standard-email-lane)/,
+    /^(email-|founding-tester-pass-emails|model-lifecycle-|admin-email-delivery|credential-email-lane|standard-email-lane)/,
   ],
   // Assistant profiles: the version snapshot, the knowledge pipeline, package
   // import and export, and which revision a turn actually reads.
@@ -54,11 +63,13 @@ const LANE_RULES = [
     "memory",
     /^(memory-|retention-sweep|chat-context-bundle|conversation-memory-mode)/,
   ],
-  // External conversation import, the snapshot lock, and the retention and
-  // sharing boundaries around imported content.
+  // Conversations and what they carry: external import, the snapshot lock,
+  // retention and sharing, and -- since 2026-10-02, moved out of `accounts` --
+  // continuation, pin/search/title, durable recovery, attachments and
+  // generated artifacts. This lane was `import` until then.
   [
-    "import",
-    /^(external-import|external-conversation-lock|context-manifest-retention|public-share-route|default-model-reconciliation)/,
+    "conversations",
+    /^(external-import|external-conversation-|context-manifest-retention|public-share-route|default-model-reconciliation|conversation-(lock-migration|pin|search|title)|continuation-source-export|chat-durable-recovery|message-attachment|generated-artifacts)/,
   ],
   // Routing: the run, its attempts, the manifest boundary, and the product and
   // selection-mode attribution the ROUTE gates are written against.
@@ -70,16 +81,39 @@ const LANE_RULES = [
   // decide whether a paid turn starts at all.
   [
     "finance",
-    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
+    /^(credit-finance|chat-concurrency|chat-rate-limit|chat-token-quota|fallback-pricing|chat-attempt-usage|model-registry|prompt-refiner-reservation|prompt-refiner-vnext-one-shot|subscription-sync-ordering|plan-change-|image-generation|refund-decision-route|stripe-webhook-route|webhook-reprocess-route|perplexity-deep-research-route|readiness-route)/,
+  ],
+  // The agents and the review machinery around them: AMUX intake, promotion
+  // and reconciliation, the engineering and marketing agents, Prompt Refiner
+  // shadow runs, and AI Review telemetry and feedback. Moved out of `accounts`
+  // on 2026-10-02. Below `routing` and `finance` on purpose: their AMUX and
+  // Prompt Refiner suites keep the lanes they had.
+  [
+    "agents",
+    /^(amux-|engineering-agent-|ops-observer-|marketing-(automation|fact|templates|webhook)|prompt-refiner-|comparison-review-|feedback-lifecycle|support-triage-)/,
   ],
 ];
 
 /**
  * The catch-all, and deliberately a real domain rather than a bucket named
- * "other": accounts, administrators, providers and the artefacts a
- * conversation carries. A suite nobody classified runs here.
+ * "other": accounts, administrators, sign-in and providers. A suite nobody
+ * classified runs here.
  */
 export const DB_INTEGRATION_FALLBACK_GROUP = "accounts";
+
+/**
+ * A compatibility job, not a lane. CI's lanes run PostgreSQL 17; production's
+ * version is not known to this repository, and docs/policy/support-triage.md
+ * §4 requires the support-triage timeout suites to run on 16 as well, where
+ * transaction_timeout does not exist. These suites also run in their own lane
+ * on 17, so this list is outside the lane partition: it never removes a suite
+ * from a lane, and `dbIntegrationGroupOf` never returns it.
+ */
+export const POSTGRES16_COMPAT_GROUP = "postgres16";
+export const POSTGRES16_COMPAT_SUITES = Object.freeze([
+  "tests/integration/support-triage-run.db.test.ts",
+  "tests/integration/support-triage-timeouts.db.test.ts",
+]);
 
 export const DB_INTEGRATION_GROUPS = [
   ...LANE_RULES.map(([id]) => id),

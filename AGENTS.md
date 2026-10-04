@@ -25,6 +25,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+<!-- development-execution -->
+## Development sessions deliver small working changes
+
+For a feature or bug fix, choose the smallest useful behavior within the approved scope, implement it, and run the relevant test or check. Keep investigation and design focused on what is needed for that next code change. Do not substitute policy revisions, plans, or repeated independent reviews for working functionality.
+
+Follow required approvals, policy gates, and independent review for the changes to which they apply. Once those requirements are clear, continue with code that is already authorized. If a decision blocks one change, name the exact blocker and complete another authorized, testable slice when available.
+
+Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
+<!-- /development-execution -->
+
 # 의미 있는 개발 사이클의 완료 보고
 
 작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
@@ -111,6 +121,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 | Account identity | `accent-account-*` | teal |
 | Account memory 제어 | `accent-account-memory-*` | teal |
 | 성공·검증 상태 | `status-success-*` | emerald |
+| 스위치 켜짐 상태 | `status-switch-on-*` | emerald |
 
 ## 규칙
 
@@ -153,7 +164,7 @@ codex/to-develop/fix-picker          자동 PR
 docs/to-develop/release-policy       자동 PR
 to-develop/ime-submit                자동 PR
 
-claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+claude/to-main/dependabot-hold       없음 — main PR도 열 수 없습니다(아래 절)
 release/**, hotfix/**                없음 — production에 닿습니다
 dependabot/**, autofix/**,
 feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
@@ -177,23 +188,73 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
 
-## auto-merge는 PR을 만든 실행이 한 번만 켭니다
+## main으로 가는 PR은 release와 hotfix뿐입니다
 
-`Auto PR to Develop`은 **자기 실행이 PR을 새로 열었을 때만** auto-merge를
-켭니다. 이미 열려 있는 PR에는 켜지 않습니다 — push마다 다시 켜면 사람이 끈
-auto-merge가 다음 commit까지만 유효해지고, 그 사실을 아무도 말해 주지 않습니다.
+**기능은 develop으로 보내고, main에는 release가 가져갑니다.**
+`.github/RELEASE_CHECKLIST.md` 7.9절의 세 경로 — `develop`(release),
+`release/**`(선택 release), `hotfix/**`(사고·보안 권고) — 만 main에 닿습니다.
+`to-main`이라는 이름은 경로가 아닙니다. 2026-10-02부터 PR Fast Gate가 이를
+검사하며(`scripts/main-pr-source-policy.mjs`,
+`tests/mainPrSourcePolicy.test.mjs`), 그 밖의 head는 필수 check가 실패합니다.
 
-2026-09-05에 그렇게 됐습니다. PR #1256은 02:13:06Z에 auto-merge가 꺼졌고,
-draft인 동안의 push 일곱 번은 draft 검사가 막았지만, ready로 되돌린 뒤
-05:20:16Z push 하나에 workflow가 다시 켰고 13분 뒤 병합됐습니다. 병합을
-보류하라는 지시가 있던 PR입니다.
+```
+develop                              통과 — release
+release/2026-10-02-consent           통과 — 선택 release (체크리스트 7.9.1)
+hotfix/stripe-timeout                통과 — 체크리스트 7.9.2의 여섯 항목이 필요합니다
+claude/hotfix/stripe-timeout         통과 — `hotfix`는 경로 조각
+dependabot/**, autofix/**,
+feedback-autofix-main/**             통과 — 각자의 승인 게이트가 있습니다
+claude/to-main/..., codex/...        거부 — `gh pr edit <번호> --base develop`
+```
 
-**끈 것은 꺼진 채로 있습니다.** 판정은 workflow의 `if:`가 create 단계의
-`created` 출력을 읽는 것이고, `tests/autoPrAutoMergeArming.test.mjs`가 그 단계의
-실제 shell을 stub `gh`로 돌려 양쪽 경로를 고정합니다.
+근거는 수치입니다. 2026-09-20~10-02에 main에 병합된 PR 80건 중 78건이 기능
+브랜치였고, 각각 CI를 두 번 돌았으며(PR과 main push), develop으로 되돌아오는
+back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 손으로 필요했습니다.
 
-그래서 이미 열린 PR에 auto-merge가 필요하면 **사람이 켭니다.** 그것이 이 규칙이
-지키려는 결정입니다.
+규칙 이전에 main으로 열려 있던 PR 4건(#1798, #1858, #1880, #1882)은
+`scripts/main-pr-source-policy.mjs`의 예외 목록으로 통과시킵니다. 이 목록은 줄기만 하고,
+테스트가 새 항목 추가를 막습니다.
+
+## workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다
+
+`Auto PR to Develop`은 PR을 열 뿐 **병합하지도, auto-merge를 켜지도 않습니다**
+(2026-10-02 운영자 결정). auto-merge가 켜진 PR은 check가 통과하는 순간 GitHub가
+병합하므로, Railway가 무엇을 하고 있든 상관없이 몇 분 간격으로 병합된 PR들이
+staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
+
+병합은 운영자가 로컬에서 실행하는 merge train(`npm run merge-train`,
+`scripts/merge-train.mjs`)이 맡습니다. 가장 오래된 non-draft·CI 통과 PR을 하나씩
+병합하고, 그 환경에 진행 중인 Railway 배포가 하나라도 있으면 hold합니다. 자기가
+병합한 배포가 실패하면 멈추고 재시도하지 않습니다.
+
+이전 규칙의 교훈은 그대로입니다. 2026-09-05에 PR #1256은 사람이 auto-merge를
+끈 뒤 push 한 번에 workflow가 다시 켜서, 병합을 보류하라는 지시가 있던 상태로
+병합됐습니다. 자동화가 사람이 끈 스위치를 다시 켜서는 안 됩니다.
+
+`tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
+`gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
+**사람이 켭니다.**
+
+## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
+
+**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
+PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
+바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
+train은 draft를 건너뜁니다).
+
+```
+gh pr ready <번호>        작업 완료 — CI 시작
+gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
+```
+
+- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
+  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
+  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
+- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
+  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
+  돌립니다.
+- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
+  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -1117,6 +1178,31 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`은 route와,
+  운영자가 staging에서 실행하는 검증 기록 생성기의 서명 변조 probe에서만 읽습니다(값은 출력하지
+  않고 HMAC 계산에만 씁니다, 운영자 승인 2026-10-02). 게시물은 바꾸지 않습니다 — 적용은 S2f이고
+  staging 서명 이후입니다.
+- **S2e-verification(검증 기록과 서명)**: `lib/marketingWebhookRecordDraft.ts`,
+  `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
+  `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
+  답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
+  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
+  강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
+  2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
 
 # 엔지니어링 Agent
 
@@ -1627,6 +1713,48 @@ Non-negotiable requirements:
 - A card that promises a feature this build does not have is a release blocker.
   Everything else here is ordinary review.
 <!-- END:chat-starter-catalog-invariant -->
+
+<!-- BEGIN:independent-review-requests -->
+# 독립 검토는 검토 서버에 요청합니다
+
+작업을 마치고 독립 검토가 필요하면 **reviewer를 직접 고르지 않습니다.** 다른
+공급사의 앱이나 CLI를 손으로 부르지 않고 검토 서버에 요청합니다. 서버가 작성자와
+**모델 공급사가 다른** reviewer를 부하에 따라 배정하고, 판정을 결정적 규칙으로
+돌려줍니다. 설치와 동작은 `tools/review-orchestrator/README.md`에 있습니다.
+
+1. **검토할 변경을 commit합니다.** commit되지 않은 변경은 서버로 가지 않습니다.
+2. **요청합니다.** 클라이언트는 운영자 PC의 고정 위치에 있으므로 어느 브랜치에서나
+   같은 명령을 씁니다. 이 도구가 들어 있는 checkout에서는 `npm run -s review --`도 같습니다.
+
+   ```
+   node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<무엇을 왜 바꿨는지 한두 줄>"
+   ```
+
+   - `--author`는 **지금 작업한 앱 자신**입니다. Claude Code는 `claude`, Codex는
+     `codex`, Cursor는 `cursor`이고, Cursor는 실제로 쓴 모델의 공급사를
+     `--author-vendor`(`anthropic`·`openai`·`xai`·`google` 등)로 함께 적습니다.
+     서버가 이 값으로 같은 공급사를 빼므로, 다른 앱의 이름을 쓰지 않습니다.
+   - base는 클라이언트가 고릅니다. `origin/develop`과 `origin/main`의 분기점 중 **더 가까운 것**이
+     base가 되므로 `--base`는 붙이지 않습니다. 먼 기준점은 이미 병합된 남의 변경을 끌고 와서
+     reviewer를 둘로 늘리고 대기열을 막습니다(2026-10-02, 대기 20건 전부가 그랬습니다).
+   - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
+     올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
+   - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.
+     reviewer에게는 그 commit 이후의 diff만 보여 주고, 지시 파일과 계약 경로 판정은 base부터
+     전체를 기준으로 합니다. push하지 않은 commit도 focus가 될 수 있습니다.
+3. **기다립니다.** `node "$HOME/bin/review.mjs" wait <jobId>`를 종료 코드가 3이 아닐 때까지
+   반복합니다. 한 번에 최대 9분 기다리므로 명령 하나의 시간 제한 안에 들어갑니다.
+4. **결과대로 처리합니다.**
+   - `0` accept: 결과를 보고합니다.
+   - `1` reject: 지적을 고치고 commit한 뒤 **새로 submit**합니다. 같은 job을 다시 쓰지 않습니다.
+   - `2` unknown: **다시 보내지 않습니다.** `report <jobId>`의 원문과 함께 사람에게 알립니다.
+     결과를 모르는 것을 다른 reviewer로 몰래 다시 보내면 부하가 한쪽으로 쏠립니다.
+   - `64`·`65`: 요청이나 서버의 오류입니다. 오류 출력을 그대로 사람에게 알립니다.
+     SSH 접속 오류(`Permission denied`, `Could not resolve hostname`)도 여기에 속합니다.
+
+검토 결과는 **신호이지 승인이 아닙니다.** accept가 병합이나 배포 승인을 대신하지
+않고, 정책 문서가 기록을 요구하는 별도 교차 검토 절차가 있으면 그 절차를 따릅니다.
+<!-- END:independent-review-requests -->
 
 <!-- BEGIN:agent-delegation-policy -->
 # 작업을 어느 모델에 보낼지

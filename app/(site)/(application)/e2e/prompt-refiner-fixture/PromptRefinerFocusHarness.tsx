@@ -96,6 +96,10 @@ export function PromptRefinerFocusHarness({
           setState({ status: "idle" });
           requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
         }}
+        onDismiss={() => {
+          setState({ status: "idle" });
+          requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+        }}
       />
       <textarea
         ref={textareaRef}
