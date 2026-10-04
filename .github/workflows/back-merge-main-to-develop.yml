@@ -160,9 +160,54 @@ jobs:
             -m "See .github/workflows/back-merge-main-to-develop.yml."; then
             echo "conflicted=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::The back-merge conflicted. The job will fail without opening a pull request; a person has to resolve it."
+            echo "::warning::The back-merge conflicted."
             git merge --abort || true
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A selective release cherry-picks, so main and develop hold the released
+      # content under different commits and the ancestry merge conflicts on files
+      # develop has moved on from. That happened for all four selective releases
+      # of 2026-10-03; every resolution was the same, "keep develop", and every
+      # merged tree was byte-identical to develop's. #2023 did the fourth by hand.
+      #
+      # This step decides whether that resolution is provably safe for THIS
+      # conflict and records why either way. It is fail-closed, and the criterion
+      # is in scripts/back-merge-ancestry-core.mjs: every line main added must
+      # already be in develop, every line main removed must be gone from develop,
+      # and the resolved tree must be byte-identical to develop's -- so an
+      # admitted merge records ancestry and can never write a file. A hotfix that
+      # reached main alone fails the first test and stays a person's job.
+      - name: Decide whether keeping develop is provably safe
+        id: ancestry
+        if: steps.merge.outputs.conflicted == 'true'
+        run: |
+          set -uo pipefail
+          if node scripts/back-merge-ancestry.mjs --ours origin/develop --theirs origin/main; then
+            echo "admitted=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "admitted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only ever `git commit-tree` with develop's own tree: the commit records
+      # two parents and not one byte of content. There is no resolution to review
+      # because there is no change to review.
+      - name: Record the ancestry when it is safe
+        id: ancestry_merge
+        if: steps.ancestry.outputs.admitted == 'true'
+        run: |
+          set -euo pipefail
+          TREE="$(git rev-parse origin/develop^{tree})"
+          COMMIT="$(git commit-tree "$TREE" -p origin/develop -p origin/main \
+            -m "Merge main into develop to restore the shared ancestry" \
+            -m "Automated ancestry merge. The textual merge conflicted because a selective release cherry-picks, so develop holds the released content under its own commits and has moved on from the same files. scripts/back-merge-ancestry.mjs proved develop already carries every line main added and none it removed, and that the resolved tree is develop's, so this commit takes develop's tree unchanged and records only the ancestry." \
+            -m "See .github/workflows/back-merge-main-to-develop.yml and scripts/back-merge-ancestry-core.mjs.")"
+          git diff --quiet "$COMMIT" origin/develop
+          if git push origin "$COMMIT:refs/heads/develop"; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The ancestry merge was safe but the push was refused."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
           fi
 
       # Reported for the log, and worth reading: a back-merge after a squashed
@@ -207,9 +252,14 @@ jobs:
       #                    guessed is worse than the absence of one. The job
       #                    fails, `verify` fails after it, and a person picks
       #                    it up from `origin/develop`.
+      #   admitted      -- the ancestry step proved keeping develop safe and
+      #                    pushed a merge commit carrying develop's own tree, so
+      #                    there is nothing left for this step to do. Only a
+      #                    REFUSED decision, or a push that failed, reaches here.
       - name: Open a pull request when the push was refused, or fail on a conflict
         if: |
           steps.needed.outputs.needed == 'true' &&
+          steps.ancestry_merge.outputs.pushed != 'true' &&
           (steps.merge.outputs.conflicted == 'true' || steps.push.outputs.pushed == 'false')
         run: |
           set -uo pipefail
