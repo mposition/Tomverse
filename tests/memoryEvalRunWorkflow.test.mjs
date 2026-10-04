@@ -201,7 +201,13 @@ test("the checkout can answer the ancestry the budget gate asks about", () => {
     // artifact, and forty seconds of `npm ci` to learn it.
     const at = workflow.indexOf("uses: actions/checkout@v4");
     assert.ok(at > 0, "the workflow does not check anything out");
-    const step = workflow.slice(at, workflow.indexOf("uses: actions/setup-node@v4"));
+    // The landmark is version-agnostic and checked. It used to name `@v4`, and
+    // when that step moved to v6 `indexOf` returned -1, so `slice(at, -1)` read
+    // almost the whole file and the assertions below still passed -- on a
+    // region they were never meant to cover.
+    const until = workflow.indexOf("uses: actions/setup-node@");
+    assert.ok(until > at, "the workflow does not set up Node after checking out");
+    const step = workflow.slice(at, until);
     assert.match(
         step,
         /fetch-depth: 0/,
