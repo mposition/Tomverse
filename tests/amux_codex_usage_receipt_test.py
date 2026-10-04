@@ -165,6 +165,29 @@ class UsageReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "timezone"):
             module.extract_usage(sample_lines(), ATTEMPT, TASK, TURNS, "codex-impl", "CI-6", "2026-10-04T02:44:12")
 
+    def test_uppercase_attempt_markers_are_compared_case_insensitively(self):
+        lines = sample_lines()
+        lines[3] = user_event(
+            TURNS[0], f"Task: {TASK}\nExecution attempt: {ATTEMPT.upper()}", "t03"
+        )
+        self.assertEqual(self.extract(lines)["attemptId"], ATTEMPT)
+        foreign = "abcdef00-0000-4000-8000-000000000001"
+        lines[3] = user_event(
+            TURNS[0],
+            f"Task: {TASK}\nExecution attempt: {ATTEMPT}\nExecution attempt: {foreign.upper()}",
+            "t03",
+        )
+        with self.assertRaisesRegex(ValueError, "another execution attempt"):
+            self.extract(lines)
+
+    def test_naive_rollout_timestamp_is_refused_with_value_error(self):
+        lines = sample_lines()
+        started = json.loads(lines[1])
+        started["timestamp"] = started["timestamp"].removesuffix("Z")
+        lines[1] = json.dumps(started) + "\n"
+        with self.assertRaisesRegex(ValueError, "timezone"):
+            self.extract(lines)
+
     def test_cumulative_gap_is_refused(self):
         lines = sample_lines()
         row = json.loads(lines[4])
