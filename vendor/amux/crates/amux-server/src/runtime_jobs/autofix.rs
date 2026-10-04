@@ -7134,7 +7134,11 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 /// cooldown in charge.
 pub(crate) fn carded_count(desc: &str) -> Option<u64> {
     desc.lines()
-        .find_map(|l| l.trim().strip_prefix("count:"))
+        .find_map(|l| {
+            let line = l.trim();
+            line.strip_prefix("count:")
+                .or_else(|| line.strip_prefix("consecutive_failures:"))
+        })
         .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
@@ -7199,7 +7203,7 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             let existing: Option<(String, String, String, i64, Option<String>, String)> = conn
                 .query_row(
                     "SELECT id, title, COALESCE(desc,''), COALESCE(updated, created), next_action, status \
-                       FROM issues WHERE source_ref = ?1 AND archived = 0 LIMIT 1",
+                       FROM issues WHERE source_ref = ?1 AND archived = 0 AND deleted IS NULL LIMIT 1",
                     rusqlite::params![format!("autofix:{}", f.signature)],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
                 )
@@ -7226,17 +7230,19 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             drop(conn);
             if !refresh {
                 let cid = card_id.clone();
-                state.store.write(move |c| {
-                    c.execute(
-                        "UPDATE issues SET next_action = ?2, updated = ?3 WHERE id = ?1 \
-                         AND status IN ('todo','doing','quarantined','blocked','needsyou','review') \
-                         AND COALESCE(TRIM(next_action),'') = ''",
-                        rusqlite::params![cid, CI_NEXT_ACTION, now_s],
+                let reply = state.store.write(move |c| {
+                    let changed = c.execute(
+                        "UPDATE issues SET next_action = ?2 WHERE id = ?1 \
+                         AND archived = 0 AND deleted IS NULL AND next_action IS ?3 \
+                         AND status IN ('todo','doing','quarantined','blocked','needsyou','review')",
+                        rusqlite::params![cid, CI_NEXT_ACTION, old_next_action],
                     )?;
-                    Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+                    Ok(crate::db::WriteOutcome { applied: changed > 0, events: vec![] })
                 })?;
-                tracing::info!(card = %card_id, detector = %f.signature,
-                    "autofix backfilled a missing CI disposition");
+                if reply.applied {
+                    tracing::info!(card = %card_id, detector = %f.signature,
+                        "autofix backfilled a missing CI disposition");
+                }
                 return Ok(None);
             }
             let body = format!(
@@ -7248,23 +7254,26 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
                 render_desc(f)
             );
             let (cid, ttl) = (card_id.clone(), fresh_title.clone());
-            let _ = state.store.write(move |c| {
-                c.execute(
+            let reply = state.store.write(move |c| {
+                let changed = c.execute(
                     "UPDATE issues SET title = ?2, desc = ?3, updated = ?4, \
                      next_action = CASE WHEN ?5 = 1 \
                      AND status IN ('todo','doing','quarantined','blocked','needsyou','review') \
-                     AND COALESCE(TRIM(next_action),'') = '' THEN ?6 ELSE next_action END WHERE id = ?1",
+                     AND COALESCE(TRIM(next_action),'') = '' THEN ?6 ELSE next_action END \
+                     WHERE id = ?1 AND archived = 0 AND deleted IS NULL",
                     rusqlite::params![cid, ttl, body, now_s, backfill_action, CI_NEXT_ACTION],
                 )?;
                 Ok(crate::db::WriteOutcome {
-                    applied: true,
+                    applied: changed > 0,
                     events: vec![],
                 })
-            });
-            tracing::info!(
-                card = %card_id, detector = %f.signature,
-                "autofix refreshed a standing card — the measurement moved (AEAB-59)"
-            );
+            })?;
+            if reply.applied {
+                tracing::info!(
+                    card = %card_id, detector = %f.signature,
+                    "autofix refreshed a standing card — the measurement moved (AEAB-59)"
+                );
+            }
             return Ok(None);
         }
     }
@@ -8681,6 +8690,7 @@ mod tests {
     fn carded_count_reads_the_evidence_line_or_says_it_cannot() {
         let desc = "verdict: whatever\ncount: 4\ndistinct_clients: 1 (ip:100.108.219.90)\n";
         assert_eq!(super::carded_count(desc), Some(4));
+        assert_eq!(super::carded_count("consecutive_failures: 31\n"), Some(31));
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
         assert_eq!(super::carded_count("count: not-a-number\n"), None);
@@ -14125,28 +14135,44 @@ mod tests {
         assert!(next_action.contains("same assertion still ran"));
         assert!(next_action.contains("green run alone is not proof"));
         let card_for_clear = card.clone();
-        st.store.write(move |conn| {
-            conn.execute("UPDATE issues SET next_action=NULL WHERE id=?1", rusqlite::params![card_for_clear])?;
-            Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
-        }).unwrap();
-        assert!(file_finding(&st, &f[0]).await.unwrap().is_none());
-        let restored_action: String = st.store.read().unwrap().query_row(
-            "SELECT next_action FROM issues WHERE id=?1",
-            rusqlite::params![card],
-            |r| r.get(0),
-        ).unwrap();
-        assert_eq!(restored_action, CI_NEXT_ACTION);
-        let card_for_refresh = card.clone();
+        let old_measurement_at = unix_now() as i64 - 7 * 3600;
         st.store.write(move |conn| {
             conn.execute(
                 "UPDATE issues SET next_action=NULL, updated=?2 WHERE id=?1",
-                rusqlite::params![card_for_refresh, unix_now() as i64 - 7 * 3600],
+                rusqlite::params![card_for_clear, old_measurement_at],
             )?;
             Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
         }).unwrap();
-        let mut escalated = f[0].clone();
-        escalated.title = "rust failed 62x on the same streak".into();
-        escalated.count = 62;
+        assert!(file_finding(&st, &f[0]).await.unwrap().is_none());
+        let (restored_action, measurement_after_backfill): (String, i64) = st.store.read().unwrap().query_row(
+            "SELECT next_action, updated FROM issues WHERE id=?1",
+            rusqlite::params![card],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(restored_action, CI_NEXT_ACTION);
+        assert_eq!(measurement_after_backfill, old_measurement_at,
+            "filling a missing action must not reset the measurement refresh clock");
+
+        // A small increase refreshes after the old cooldown, even though the
+        // missing action was filled just now.
+        runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_031, "failure", 900.0));
+        let next = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(next.signature, f[0].signature);
+        assert_eq!(next.count, 32);
+        assert!(file_finding(&st, &next).await.unwrap().is_none());
+        let refreshed_at: i64 = st.store.read().unwrap().query_row(
+            "SELECT updated FROM issues WHERE id=?1", rusqlite::params![card], |r| r.get(0),
+        ).unwrap();
+        assert!(refreshed_at > old_measurement_at);
+
+        // The CI evidence uses `consecutive_failures`, not `count`. Doubling
+        // the measured streak must still bypass the new six-hour cooldown.
+        for i in 32..64 {
+            runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_000 + i, "failure", 900.0));
+        }
+        let escalated = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(escalated.signature, f[0].signature);
+        assert_eq!(escalated.count, 64);
         assert!(file_finding(&st, &escalated).await.unwrap().is_none());
         let (refreshed_title, refreshed_desc, refreshed_action): (String, String, String) = st
             .store.read().unwrap().query_row(
@@ -14164,7 +14190,7 @@ mod tests {
             "a red deploy is a blocker, not a code card"
         );
         assert!(
-            c[0].1.contains("62x"),
+            c[0].1.contains("64x"),
             "count belongs in the computed title: {}",
             c[0].1
         );
