@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
@@ -89,7 +89,7 @@ test("standalone candidate runs all 80 synthetic cases without transport", (t) =
     `return new Response(null, { status: 409 }); };\n`);
   const resultPath = join(folder, "result.json");
   const dispatch = spawnSync(process.execPath,
-    ["--conditions=react-server", "--import", preload, tampered,
+    ["--conditions=react-server", "--import", pathToFileURL(preload).href, tampered,
       "--dispatch-slot", "--manifest", manifestPath,
       "--binding", bindingPath, "--seal", sealPath,
       "--slot", "0", "--run-audit", "synthetic-run-audit",
