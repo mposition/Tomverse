@@ -66,9 +66,10 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 }
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
-  initialPlanAvailable, frontierModelsAvailable, operatorId }: {
+  initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
-  initialPlanAvailable: boolean; frontierModelsAvailable: boolean; operatorId: string;
+  initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
+  transferPreviewAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -79,6 +80,10 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [recoveryChecked, setRecoveryChecked] = useState(false);
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
+  const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
+  const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
+    setPlanReadyIdeaId(committedIdeaId);
+  }, []);
   const [sourceRepository, setSourceRepository] = useState("");
   const [sourceCommitSha, setSourceCommitSha] = useState("");
   const [sourcePath, setSourcePath] = useState("");
@@ -406,8 +411,17 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         ideaId={submission.kind === "submitted" ? submission.ideaId : null}
         operatorId={operatorId} available={initialPlanAvailable}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
+        onCommitted={onInitialPlanCommitted}
       />
-      <AmuxFrontierModelsPanel available={frontierModelsAvailable} />
+      <AmuxFrontierModelsPanel
+        key={submission.kind === "submitted" ? submission.ideaId : "none"}
+        available={frontierModelsAvailable}
+        previewAvailable={transferPreviewAvailable}
+        ideaId={submission.kind === "submitted" ? submission.ideaId : null}
+        planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
+        declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
+        operatorId={operatorId}
+      />
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>

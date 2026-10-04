@@ -25,8 +25,10 @@ const receiptStore = (): Storage | null => {
 };
 
 /** Idea-only plan preparation. The opaque idea ID is the recovery key. */
-export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredExternalSources }: {
+export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredExternalSources,
+  onCommitted }: {
   ideaId: string | null; operatorId: string; available: boolean; declaredExternalSources: boolean;
+  onCommitted?: (ideaId: string) => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const { locale } = useAdminLocale();
@@ -50,12 +52,13 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       if (decision.kind === "committed") {
         clearPendingInitialPlan(receiptStore(), operatorId, pendingIdeaId);
         setState({ kind: "committed", ideaId: pendingIdeaId, revisionId: decision.revisionId });
+        onCommitted?.(pendingIdeaId);
       } else {
         setState({ kind: "outcome_unknown", ideaId: pendingIdeaId });
       }
     } catch { setState({ kind: "outcome_unknown", ideaId: pendingIdeaId }); }
     finally { setReadBackPending(false); }
-  }, [operatorId, locale, m.initialPlanUnavailable]);
+  }, [operatorId, locale, m.initialPlanUnavailable, onCommitted]);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +84,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
             if (!active) return;
             if (decision.kind === "committed") {
               setState({ kind: "committed", ideaId, revisionId: decision.revisionId });
+              onCommitted?.(ideaId);
             } else if (decision.kind === "absent") {
               setState({ kind: "idle" });
               setCheckedIdeaId(ideaId);
@@ -98,7 +102,8 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       setRecoveryChecked(true);
     });
     return () => { active = false; };
-  }, [operatorId, readBack, ideaId, available, declaredExternalSources, locale, m.initialPlanUnavailable]);
+  }, [operatorId, readBack, ideaId, available, declaredExternalSources, locale,
+    m.initialPlanUnavailable, onCommitted]);
 
   const prepare = async () => {
     if (!ideaId || !available || declaredExternalSources || !recoveryChecked ||
@@ -123,6 +128,7 @@ export function AmuxInitialPlanPanel({ ideaId, operatorId, available, declaredEx
       if (decision.kind === "committed") {
         clearPendingInitialPlan(receiptStore(), operatorId, ideaId);
         setState({ kind: "committed", ideaId, revisionId: decision.revisionId });
+        onCommitted?.(ideaId);
       } else if (decision.kind === "refused") {
         clearPendingInitialPlan(receiptStore(), operatorId, ideaId);
         setState({ kind: "refused", code: decision.code });
