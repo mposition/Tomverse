@@ -124,6 +124,11 @@ export default async function AdminAmuxBacklogPage({
           transferConfirmAvailable={transferConfirmAvailable}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
             process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])}
+          analysisBudgetAvailable={transferConfirmAvailable &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
