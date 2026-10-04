@@ -35,6 +35,18 @@ const HEX_64 = /^[0-9a-f]{64}$/;
 const POLICY_SHA256 =
   "dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b";
 const POLICY_PATH = "docs/policy/prompt-refiner-quality-evaluation-vnext-one-shot-v2.md";
+const BINDING_VERSION = "prompt-refiner-vnext-one-shot-preregistration-binding-v1";
+
+const bindingDigestFor = (entry: { id: string; entryHash: string | null }): string => {
+  if (!entry.id || entry.id.length > 128 || !HEX_64.test(entry.entryHash ?? "")) {
+    throw new Error("vnext_one_shot_preregistration_record_unverifiable");
+  }
+  return createHash("sha256").update(canonicalBenchmarkJson({
+    version: BINDING_VERSION,
+    auditLogId: entry.id,
+    auditEntryHash: entry.entryHash,
+  }), "utf8").digest("hex");
+};
 
 export type PromptRefinerVnextOneShotPreregistrationPins = Readonly<{
   sourceCommitSha: string;
@@ -153,6 +165,7 @@ export async function readPromptRefinerVnextOneShotPreregistration(
 ): Promise<Readonly<{
   preregistrationRecorded: boolean;
   preregistrationAuditLogId: string | null;
+  preregistrationBindingDigest: string | null;
   currentPinsMatch: boolean;
   dispatchAuthorized: false;
 }>> {
@@ -190,18 +203,21 @@ export async function readPromptRefinerVnextOneShotPreregistration(
     const metadataMatches = canonicalBenchmarkJson(metadata) ===
       canonicalBenchmarkJson(metadataFor(pinned, accessorUserId));
     const price = metadataMatches ? await readPromptRefinerVnextOneShotPrice(tx) : null;
-    return { auditLogId: entry.id, pinned, metadataMatches,
+    return { auditLogId: entry.id, bindingDigest: bindingDigestFor(entry),
+      pinned, metadataMatches,
       priceMatches: price !== null && price.pricePinMatchesRegistry &&
         price.problems.length === 0 };
   }, { maxWait: 5_000, timeout: 15_000 });
   if (receipt === null) {
     return Object.freeze({ preregistrationRecorded: false,
-      preregistrationAuditLogId: null, currentPinsMatch: false,
+      preregistrationAuditLogId: null, preregistrationBindingDigest: null,
+      currentPinsMatch: false,
       dispatchAuthorized: false as const });
   }
   const recorded = (currentPinsMatch: boolean) => Object.freeze({
     preregistrationRecorded: true,
     preregistrationAuditLogId: receipt.auditLogId,
+    preregistrationBindingDigest: currentPinsMatch ? receipt.bindingDigest : null,
     currentPinsMatch,
     dispatchAuthorized: false as const,
   });

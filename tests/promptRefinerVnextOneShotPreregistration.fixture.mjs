@@ -1,9 +1,11 @@
 // Runs only through the small wrapper that enables Node's module-mock flag.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
+import { canonicalBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
@@ -11,6 +13,11 @@ const source = { sourceCommitSha: "a".repeat(40),
   sourceManifestDigest: "b".repeat(64) };
 const expected = { ...source, runnerDigest: "c".repeat(64),
   pricePinDigest: "d".repeat(64) };
+const syntheticEntryHash = "f".repeat(64);
+const bindingDigest = createHash("sha256").update(canonicalBenchmarkJson({
+  version: "prompt-refiner-vnext-one-shot-preregistration-binding-v1",
+  auditLogId: "audit-prereg-1", auditEntryHash: syntheticEntryHash,
+}), "utf8").digest("hex");
 let sourceReads = 0;
 let sourceFailure = null;
 let existing = [];
@@ -160,7 +167,8 @@ test("one owner approval records fixed policy, cost, access and retention withou
 
 test("stage requires exactly one signed matching owner preregistration", async () => {
   const entry = { id: "audit-prereg-1", actorUserId: "synthetic-owner",
-    summary: auditInput.summary, metadata: auditInput.metadata };
+    summary: auditInput.summary, metadata: auditInput.metadata,
+    entryHash: syntheticEntryHash };
   existing = [entry];
   await assert.doesNotReject(assertPromptRefinerVnextOneShotPreregistrationForStage(
     tx, expected, "synthetic-owner"));
@@ -183,21 +191,25 @@ test("lost POST response is recovered only from one signed, current owner receip
   existing = [];
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"), {
     preregistrationRecorded: false, preregistrationAuditLogId: null,
-    currentPinsMatch: false, dispatchAuthorized: false,
+    preregistrationBindingDigest: null, currentPinsMatch: false,
+    dispatchAuthorized: false,
   });
   const entry = { id: "audit-prereg-1", actorUserId: "synthetic-owner",
-    summary: auditInput.summary, metadata: auditInput.metadata };
+    summary: auditInput.summary, metadata: auditInput.metadata,
+    entryHash: syntheticEntryHash };
   existing = [entry];
   auditValid = true;
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"), {
     preregistrationRecorded: true, preregistrationAuditLogId: "audit-prereg-1",
-    currentPinsMatch: true, dispatchAuthorized: false,
+    preregistrationBindingDigest: bindingDigest, currentPinsMatch: true,
+    dispatchAuthorized: false,
   });
   // A later app release can have a different commit if candidate bytes remain pinned.
   process.env.RAILWAY_GIT_COMMIT_SHA = "f".repeat(40);
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"), {
     preregistrationRecorded: true, preregistrationAuditLogId: "audit-prereg-1",
-    currentPinsMatch: true, dispatchAuthorized: false,
+    preregistrationBindingDigest: bindingDigest, currentPinsMatch: true,
+    dispatchAuthorized: false,
   });
   existing = [entry, entry];
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
@@ -207,11 +219,15 @@ test("lost POST response is recovered only from one signed, current owner receip
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
     /preregistration_record_unverifiable/);
   auditValid = true;
+  existing = [{ ...entry, entryHash: "invalid" }];
+  await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
+    /preregistration_record_unverifiable/);
   existing = [{ ...entry, actorUserId: "different-owner" }];
   await assert.rejects(readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
     /preregistration_record_unverifiable/);
   const stale = { preregistrationRecorded: true,
-    preregistrationAuditLogId: "audit-prereg-1", currentPinsMatch: false,
+    preregistrationAuditLogId: "audit-prereg-1", preregistrationBindingDigest: null,
+    currentPinsMatch: false,
     dispatchAuthorized: false };
   existing = [{ ...entry, metadata: { ...entry.metadata, slotCount: 81 } }];
   assert.deepEqual(await readPromptRefinerVnextOneShotPreregistration("synthetic-owner"),
