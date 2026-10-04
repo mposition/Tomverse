@@ -5,9 +5,7 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
-import { auditRowActorKind,
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET } from "@/lib/adminAuditSystemActors";
+import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
