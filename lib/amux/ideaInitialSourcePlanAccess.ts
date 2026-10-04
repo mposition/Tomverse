@@ -14,6 +14,7 @@ import {
 import { matchesInitialPlanSystemAudit } from "./ideaInitialPlanAuditCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { amuxContentKeyRing, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import {
   AMUX_V4_INITIAL_PLAN_WRITE_ENV,
   initialPlanWritePermitted,
@@ -106,14 +107,26 @@ export async function commitInitialIdeaSourcePlan(tx: Prisma.TransactionClient, 
 
 /** One deterministic write. A possibly committed response is never retried. */
 export async function prepareInitialIdeaSourcePlan(session: Session, request: Request, ideaId: string) {
-  ownerId(session);
+  const actorUserId = ownerId(session);
   if (!initialPlanWritePermitted(process.env[AMUX_V4_INITIAL_PLAN_WRITE_ENV])) {
     throw new InitialPlanAccessError("plan_disabled", 503);
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new InitialPlanAccessError("integrity_unavailable", 503);
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const owned = await prisma.amuxIdeaSubmission.findFirst({
+    where: { id: ideaId, actorUserId }, select: { id: true },
+  });
+  if (!owned) throw new InitialPlanAccessError("not_found", 404);
+  let keys: AmuxContentKeys;
+  try {
+    const global = loadCurrentAmuxContentKeys(process.env);
+    const identity = { ideaId, purpose: "idea_raw" as const, subjectId: ideaId };
+    const unit = await loadAmuxContentUnitKeys(identity);
+    keys = amuxContentKeyRing(global, [{ identity, keys: unit }]);
+  } catch {
+    throw new InitialPlanAccessError("integrity_unavailable", 503);
+  }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {

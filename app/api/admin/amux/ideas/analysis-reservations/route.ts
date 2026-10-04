@@ -16,7 +16,7 @@ import { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH,
   AmuxIdeaAnalysisReservationError,
   commitAmuxIdeaAnalysisBudgetReservation } from
   "@/lib/amux/ideaAnalysisBudgetReservationService";
-import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
 const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE";
@@ -98,7 +98,8 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: "price_profile_unapproved" },
         { status: 409, headers: noStore });
     }
-    const keys = loadCurrentAmuxContentKeys(process.env);
+    const keys = await loadAmuxContentKeyRing([{ ideaId: preview.ideaId,
+      purpose: "transfer_payload", subjectId: body.previewId }]);
     const receipt = await prisma.$transaction((tx) =>
       commitAmuxIdeaAnalysisBudgetReservation(tx, {
         ...body, keys,

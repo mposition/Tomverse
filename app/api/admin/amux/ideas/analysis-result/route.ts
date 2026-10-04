@@ -17,7 +17,11 @@ import { AmuxIdeaAnalysisResultReadError } from
 import { readAmuxIdeaAnalysisResult } from
   "@/lib/amux/ideaContinuedAnalysisResultReadService";
 import { isAmuxIdeaRequestId } from "@/lib/amux/ideaSubmissionCore";
-import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { amuxAnalysisFreeformSubjectId } from
+  "@/lib/amux/ideaAnalysisDraftSealCore";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
+import type { AmuxContentKeyIdentity } from "@/lib/amux/ideaKeyStore";
+import { prisma } from "@/lib/prisma";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
@@ -64,8 +68,31 @@ export async function GET(request: Request): Promise<Response> {
       return NextResponse.json({ error: "schema_rejected" },
         { status: 400, headers: noStore });
     }
+    const owned = await prisma.amuxIdeaSubmission.findFirst({
+      where: { id: ideaId, actorUserId: session.user!.id! },
+      select: { id: true },
+    });
+    if (!owned) return NextResponse.json({ error: "not_found" },
+      { status: 404, headers: noStore });
+    const [chunks, units] = await Promise.all([
+      prisma.amuxIdeaAnalysisChunk.findMany({ where: { ideaId,
+        freeformCiphertext: { not: null } },
+        select: { currentPreviewId: true } }),
+      prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId,
+        bodyCiphertext: { not: null } }, select: { id: true } }),
+    ]);
+    const identities: AmuxContentKeyIdentity[] = [];
+    for (const chunk of chunks) {
+      if (chunk.currentPreviewId) identities.push({ ideaId,
+        purpose: "analysis_freeform",
+        subjectId: amuxAnalysisFreeformSubjectId(ideaId,
+          chunk.currentPreviewId) });
+    }
+    for (const unit of units) identities.push({ ideaId,
+      purpose: "analysis_draft", subjectId: unit.id });
+    const keys = await loadAmuxContentKeyRing(identities);
     const result = await readAmuxIdeaAnalysisResult(session, ideaId,
-      loadCurrentAmuxContentKeys(process.env), startChunkIndex);
+      keys, startChunkIndex);
     return NextResponse.json(result, { headers: noStore });
   } catch (error) {
     if (error instanceof AmuxIdeaAnalysisResultReadError) {

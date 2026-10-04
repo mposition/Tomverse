@@ -31,7 +31,8 @@ type Outcome = "verified_success" | "invocation_failed" | "outcome_unknown";
 type Input = { requestId: string; ideaId: string; previewId: string;
   holdId: string; leaseGeneration: number; outcome: Outcome;
   rawModelOutput: string | null; inputTokens: number | null;
-  outputTokens: number | null; keys: AmuxContentKeys };
+  outputTokens: number | null; keys: AmuxContentKeys;
+  unitIds?: readonly string[] };
 type Receipt = { previewId: string; ideaId: string;
   state: "draft_ready" | "provider_failed" | "outcome_unknown" | "owner_input";
   duplicate: boolean; auditId: string };
@@ -284,7 +285,8 @@ export async function commitAmuxIdeaAnalysisResult(
   const prepared = input.outcome !== "verified_success" ? null :
     identity.chunkIndex === 0
       ? prepareFirstIdeaOnlyAnalysisDraft({ ideaId: input.ideaId,
-        previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys })
+        previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys,
+        unitIds: input.unitIds })
       : await (async () => {
         const idea = await tx.amuxIdeaSubmission.findUnique({
           where: { id: input.ideaId }, select: { actorUserId: true },
@@ -371,7 +373,8 @@ export async function commitAmuxIdeaAnalysisResult(
         finally { payload.fill(0); }
         return prepareIdeaOnlyOutputAnalysisDraft({ ideaId: input.ideaId,
           previewId: input.previewId, raw: input.rawModelOutput!,
-          keys: input.keys, chunkIndex: identity.chunkIndex,
+          keys: input.keys, unitIds: input.unitIds,
+          chunkIndex: identity.chunkIndex,
           history: historyRows.map((row) => ({ chunkIndex: row.chunkIndex,
             coveredStartOrdinal: 0, coveredEndOrdinal: 0,
             remainingStartOrdinal: 0, remainingEndOrdinal: 0,
@@ -477,6 +480,7 @@ export async function commitAmuxIdeaAnalysisResult(
           ideaId: input.ideaId, previewId: input.previewId,
           holdId: input.holdId, leaseGeneration: input.leaseGeneration,
           rawModelOutput: input.rawModelOutput!, keys: input.keys,
+          unitIds: input.unitIds,
         });
       } else {
         await commitAmuxContinuedIdeaAnalysisDraft(tx, {
@@ -484,6 +488,7 @@ export async function commitAmuxIdeaAnalysisResult(
           holdId: input.holdId, chunkIndex: identity.chunkIndex,
           leaseGeneration: input.leaseGeneration,
           rawModelOutput: input.rawModelOutput!, keys: input.keys,
+          unitIds: input.unitIds,
         });
       }
     } else {

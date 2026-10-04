@@ -4,7 +4,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
   PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
-import type { AmuxContentKeys, AmuxContentPurpose } from "./ideaCrypto.ts";
+import { amuxContentKeyCoordinate, type AmuxContentKeys,
+  type AmuxContentPurpose, type AmuxMasterKey } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 
 const IDEA_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -54,9 +55,12 @@ function connection(env: NodeJS.ProcessEnv) {
   const endpoint = env.AMUX_V4_KEY_STORE_ENDPOINT;
   const accessKeyId = env.AMUX_V4_KEY_STORE_ACCESS_KEY_ID;
   const secretAccessKey = env.AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY;
+  const secureEndpoint = !!endpoint && /^https:\/\/[^/?#]+\/?$/.test(endpoint);
+  const testLoopback = env.NODE_ENV === "test" && !!endpoint &&
+    /^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/?$/.test(endpoint);
   if (!bucket || !BUCKET.test(bucket) || !region || !REGION.test(region) ||
       !endpoint || !accessKeyId || !secretAccessKey ||
-      !/^https:\/\/[^/?#]+\/?$/.test(endpoint)) {
+      (!secureEndpoint && !testLoopback)) {
     throw new AmuxIdeaKeyStoreError("unavailable");
   }
   return { bucket, client: new S3Client({ region, endpoint,
@@ -101,6 +105,57 @@ function scopedKeys(input: AmuxContentKeyIdentity, key: Buffer,
   if (key.length !== KEY_BYTES) throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   return { masterKeyId: identity(input).keyId, masterKeyVersion: 1,
     masterKey: key, digestKeyId: global.digestKeyId, digestKey: global.digestKey };
+}
+
+/** The synchronous crypto boundary receives only already-loaded unit keys;
+ * no object-store I/O is allowed while a product DB transaction is open. */
+export function amuxContentKeyRing(global: AmuxContentKeys,
+  units: readonly { identity: AmuxContentKeyIdentity; keys: AmuxContentKeys }[]):
+  AmuxContentKeys {
+  const contentMasters = new Map<string, AmuxMasterKey>();
+  for (const unit of units) {
+    identity(unit.identity);
+    if (unit.keys.digestKeyId !== global.digestKeyId ||
+        !unit.keys.digestKey.equals(global.digestKey) ||
+        unit.keys.masterKeyId !== identity(unit.identity).keyId ||
+        unit.keys.masterKeyVersion !== 1) {
+      throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+    }
+    const coordinate = amuxContentKeyCoordinate(unit.identity.purpose,
+      unit.identity.subjectId);
+    if (contentMasters.has(coordinate)) {
+      throw new AmuxIdeaKeyStoreError("conflict");
+    }
+    contentMasters.set(coordinate, unit.keys);
+  }
+  return { ...global, contentMasters };
+}
+
+export async function loadAmuxContentKeyRing(
+  identities: readonly AmuxContentKeyIdentity[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AmuxContentKeys> {
+  const global = loadCurrentAmuxContentKeys(env);
+  const units = await Promise.all(identities.map(async (item) => ({
+    identity: item, keys: await loadAmuxContentUnitKeys(item, env),
+  })));
+  return amuxContentKeyRing(global, units);
+}
+
+export async function createAmuxContentKeyRing(
+  existing: readonly AmuxContentKeyIdentity[],
+  created: readonly AmuxContentKeyIdentity[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AmuxContentKeys> {
+  const global = loadCurrentAmuxContentKeys(env);
+  // Avoid parallel creates: if one fails, no later new key should be written.
+  const units = await Promise.all(existing.map(async (item) => ({
+    identity: item, keys: await loadAmuxContentUnitKeys(item, env),
+  })));
+  for (const item of created) {
+    units.push({ identity: item, keys: await createAmuxContentUnitKeys(item, env) });
+  }
+  return amuxContentKeyRing(global, units);
 }
 
 /** Create before storing the corresponding body. A failed DB transaction may

@@ -9,6 +9,7 @@ import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
 type SecondDraftInput = {
   ideaId: string; previewId: string; raw: string; keys: AmuxContentKeys;
+  unitIds?: readonly string[];
   priorPage: AmuxAnalysisOutputPage;
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
 };
@@ -39,6 +40,7 @@ export function prepareSecondIdeaOnlyAnalysisDraft(
  * bind all target refs to those pages before using this pure result. */
 export function prepareIdeaOnlyOutputAnalysisDraft(input: {
   ideaId: string; previewId: string; raw: string; keys: AmuxContentKeys;
+  unitIds?: readonly string[];
   chunkIndex: number; history: readonly AmuxAnalysisOutputPage[];
   permittedTargetRefs: readonly AmuxPermittedTargetRef[];
 }): SecondDraftResult {
@@ -47,7 +49,8 @@ export function prepareIdeaOnlyOutputAnalysisDraft(input: {
 }
 
 function prepareCheckedDraft(input: Parameters<typeof prepareIdeaOnlyOutputAnalysisDraft>[0]): SecondDraftResult {
-  const { ideaId, previewId, raw, keys, chunkIndex, history, permittedTargetRefs } = input;
+  const { ideaId, previewId, raw, keys, unitIds, chunkIndex, history,
+    permittedTargetRefs } = input;
   if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 1 ||
       !Array.isArray(history) ||
       Object.getOwnPropertyDescriptor(history, "length")?.value !== chunkIndex) {
@@ -95,7 +98,7 @@ function prepareCheckedDraft(input: Parameters<typeof prepareIdeaOnlyOutputAnaly
   if (!complete && !partial) {
     return { decision: "hold", reason: "continuation_required" };
   }
-  const sealed = sealAmuxAnalysisDraft({ ideaId, keys,
+  const sealed = sealAmuxAnalysisDraft({ ideaId, keys, unitIds,
     raw: amuxCanonicalJson(inspected.parsed.chunk),
     expectedPreviewId: previewId,
     expectedChunkIndex: chunkIndex, expectedRevisionChunkIndex: chunkIndex,

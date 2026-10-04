@@ -33,7 +33,8 @@ export class AmuxSecondAnalysisDraftError extends Error {
 export async function commitAmuxSecondIdeaAnalysisDraft(
   tx: Prisma.TransactionClient,
   input: { ideaId: string; previewId: string; holdId: string;
-    leaseGeneration: number; rawModelOutput: string; keys: AmuxContentKeys },
+    leaseGeneration: number; rawModelOutput: string; keys: AmuxContentKeys;
+    unitIds?: readonly string[] },
 ): Promise<{ ideaId: string; previewId: string; unitCount: number;
   coverageStatus: "complete" | "more"; nextChunkIndex: number | null;
   analysisCompletedAt: string | null; auditId: string }> {
@@ -46,7 +47,7 @@ export async function commitAmuxContinuedIdeaAnalysisDraft(
   tx: Prisma.TransactionClient,
   input: { ideaId: string; previewId: string; holdId: string;
     chunkIndex: number; leaseGeneration: number; rawModelOutput: string;
-    keys: AmuxContentKeys },
+    keys: AmuxContentKeys; unitIds?: readonly string[] },
 ): Promise<{ ideaId: string; previewId: string; unitCount: number;
   coverageStatus: "complete" | "more"; nextChunkIndex: number | null;
   analysisCompletedAt: string | null; auditId: string }> {
@@ -292,7 +293,7 @@ export async function commitAmuxContinuedIdeaAnalysisDraft(
   const prepared = prepareIdeaOnlyOutputAnalysisDraft({
     ideaId: idea.id, previewId: preview.id, raw: input.rawModelOutput,
     keys: input.keys, chunkIndex: input.chunkIndex, history,
-    permittedTargetRefs: selectedTargets,
+    permittedTargetRefs: selectedTargets, unitIds: input.unitIds,
   });
   if (prepared.decision === "hold") {
     throw new AmuxSecondAnalysisDraftError("invalid_result");

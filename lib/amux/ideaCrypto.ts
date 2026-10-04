@@ -13,6 +13,9 @@ export type AmuxMasterKey = {
   masterKeyId: string;
   masterKeyVersion: number;
   masterKey: Buffer;
+  /** Preloaded before a DB transaction. When present, there is no fallback
+   * to the global master for a missing purpose/subject coordinate. */
+  contentMasters?: ReadonlyMap<string, AmuxMasterKey>;
 };
 
 export type AmuxDigestKey = {
@@ -64,6 +67,21 @@ const aadFor = (purpose: AmuxContentPurpose, subjectId: string): Buffer => {
   return Buffer.from(`amux-v4\0${purpose}\0${subjectId}`, "utf8");
 };
 
+export const amuxContentKeyCoordinate = (purpose: AmuxContentPurpose,
+  subjectId: string): string => {
+  aadFor(purpose, subjectId);
+  return `${purpose}\0${subjectId}`;
+};
+
+const masterFor = (keys: AmuxMasterKey, purpose: AmuxContentPurpose,
+  subjectId: string): AmuxMasterKey => {
+  const selected = keys.contentMasters?.get(amuxContentKeyCoordinate(purpose, subjectId)) ??
+    (keys.contentMasters ? null : keys);
+  if (!selected) throw new Error("AMUX content unit key is unavailable");
+  assertMaster(selected);
+  return selected;
+};
+
 const envelopeAadFor = (context: Buffer, keys: AmuxMasterKey): Buffer => {
   const version = Buffer.alloc(4);
   version.writeUInt32BE(keys.masterKeyVersion);
@@ -98,17 +116,17 @@ export function sealAmuxContent(
   subjectId: string,
   keys: AmuxContentKeys,
 ): SealedAmuxContent {
-  assertMaster(keys);
   assertDigestKey(keys);
   if (!Buffer.isBuffer(plain) || plain.length > MAX_CONTENT_BYTES) {
     throw new Error("AMUX content size is invalid");
   }
   const context = aadFor(purpose, subjectId);
-  const envelopeAad = envelopeAadFor(context, keys);
+  const master = masterFor(keys, purpose, subjectId);
+  const envelopeAad = envelopeAadFor(context, master);
   const dataKey = randomBytes(KEY_BYTES);
   try {
     const wrapIv = randomBytes(IV_BYTES);
-    const wrap = createCipheriv("aes-256-gcm", keys.masterKey, wrapIv, { authTagLength: TAG_BYTES });
+    const wrap = createCipheriv("aes-256-gcm", master.masterKey, wrapIv, { authTagLength: TAG_BYTES });
     wrap.setAAD(envelopeAad);
     const wrappedKey = Buffer.concat([wrap.update(dataKey), wrap.final()]);
     const wrapTag = wrap.getAuthTag();
@@ -124,8 +142,8 @@ export function sealAmuxContent(
         MAGIC, Buffer.from([FORMAT_VERSION]), wrapIv, wrapTag, wrappedKey,
         dataIv, dataTag, encrypted,
       ]),
-      keyId: keys.masterKeyId,
-      keyVersion: keys.masterKeyVersion,
+      keyId: master.masterKeyId,
+      keyVersion: master.masterKeyVersion,
       ...amuxContentDigest(plain, purpose, subjectId, keys),
     };
   } finally {
@@ -139,8 +157,8 @@ export function openAmuxContent(
   subjectId: string,
   keys: AmuxMasterKey,
 ): Buffer {
-  assertMaster(keys);
-  if (sealed.keyId !== keys.masterKeyId || sealed.keyVersion !== keys.masterKeyVersion ||
+  const master = masterFor(keys, purpose, subjectId);
+  if (sealed.keyId !== master.masterKeyId || sealed.keyVersion !== master.masterKeyVersion ||
       !Buffer.isBuffer(sealed.ciphertext) || sealed.ciphertext.length < HEADER_BYTES ||
       sealed.ciphertext.length > HEADER_BYTES + MAX_CONTENT_BYTES) {
     throw new Error("AMUX content envelope is invalid");
@@ -150,7 +168,7 @@ export function openAmuxContent(
     throw new Error("AMUX content format is unsupported");
   }
   const context = aadFor(purpose, subjectId);
-  const envelopeAad = envelopeAadFor(context, keys);
+  const envelopeAad = envelopeAadFor(context, master);
   let offset = MAGIC.length + 1;
   const wrapIv = bytes.subarray(offset, offset += IV_BYTES);
   const wrapTag = bytes.subarray(offset, offset += TAG_BYTES);
@@ -159,7 +177,7 @@ export function openAmuxContent(
   const dataTag = bytes.subarray(offset, offset += TAG_BYTES);
   const encrypted = bytes.subarray(offset);
 
-  const unwrap = createDecipheriv("aes-256-gcm", keys.masterKey, wrapIv, { authTagLength: TAG_BYTES });
+  const unwrap = createDecipheriv("aes-256-gcm", master.masterKey, wrapIv, { authTagLength: TAG_BYTES });
   unwrap.setAAD(envelopeAad);
   unwrap.setAuthTag(wrapTag);
   const dataKey = Buffer.concat([unwrap.update(wrappedKey), unwrap.final()]);

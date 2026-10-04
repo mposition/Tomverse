@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import test from "node:test";
 
-import { openAmuxContentUnitKey, sealAmuxContentUnitKey } from
+import { amuxContentKeyRing, openAmuxContentUnitKey, sealAmuxContentUnitKey } from
   "../lib/amux/ideaKeyStore.ts";
+import { openAmuxContent, sealAmuxContent } from "../lib/amux/ideaCrypto.ts";
 
 const ideaId = "1e5f6f12-4281-4879-ae75-8ab0d2a57b44";
 const raw = { ideaId, purpose: "idea_raw", subjectId: ideaId };
@@ -32,4 +33,24 @@ test("key envelope refuses invalid coordinates and key sizes", () => {
     { code: "integrity_unavailable" });
   assert.throws(() => openAmuxContentUnitKey(raw, Buffer.alloc(0), randomBytes(32)),
     { code: "integrity_unavailable" });
+});
+
+test("preloaded keyring never falls back to the global master", () => {
+  const global = { masterKeyId: "global", masterKeyVersion: 1,
+    masterKey: randomBytes(32), digestKeyId: "digest", digestKey: randomBytes(32) };
+  const unitKeyId = (input) => `amux2-${createHash("sha256")
+    .update(`amux-v4-content-key\0${input.ideaId}\0${input.purpose}\0${input.subjectId}`)
+    .digest("base64url")}`;
+  const keys = { ...global, masterKeyId: unitKeyId(raw),
+    masterKey: randomBytes(32) };
+  const ring = amuxContentKeyRing(global, [{ identity: raw, keys }]);
+  const sealed = sealAmuxContent(Buffer.from("synthetic idea"), raw.purpose,
+    raw.subjectId, ring);
+  assert.equal(sealed.keyId, keys.masterKeyId);
+  assert.deepEqual(openAmuxContent(sealed, raw.purpose, raw.subjectId, ring),
+    Buffer.from("synthetic idea"));
+  assert.throws(() => sealAmuxContent(Buffer.from("other"), draft1.purpose,
+    draft1.subjectId, ring), /unit key is unavailable/);
+  assert.throws(() => openAmuxContent(sealed, raw.purpose, raw.subjectId, global),
+    /envelope is invalid/);
 });

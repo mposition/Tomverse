@@ -157,7 +157,8 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
 
   const resolveUnknown = async () => {
     if (!available || busy || unknown || hold?.state !== "found" ||
-        hold.hold.status !== "outcome_unknown" || !runnerStopped ||
+        !["outcome_unknown", "in_flight"].includes(hold.hold.status) ||
+        !runnerStopped ||
         !readBackChecked) return;
     setBusy(true); setFailure(false);
     try {
@@ -245,7 +246,8 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     </button> : null}
     {hold?.state === "found" && hold.hold.status === "reserved" ?
       <p role="status">{m.reserved}</p> : null}
-    {hold?.state === "found" && hold.hold.status === "outcome_unknown" ? <>
+    {hold?.state === "found" &&
+      ["outcome_unknown", "in_flight"].includes(hold.hold.status) ? <>
       <p role="alert">{m.unknownHold}</p>
       <label className="flex items-center gap-2"><input type="checkbox"
         checked={runnerStopped} onChange={(event) =>

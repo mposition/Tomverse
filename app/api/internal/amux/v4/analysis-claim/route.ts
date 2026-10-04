@@ -11,7 +11,7 @@ import { commitAmuxIdeaOnlyAnalysisClaim,
   enforceAmuxV4DailyClaimLimit,
   readAmuxIdeaAnalysisClaimReceipt,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
-import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
 const CLAIM_CODE_LATCH = true;
@@ -46,7 +46,12 @@ export async function POST(request: Request): Promise<Response> {
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   let callbackReturned = false;
   try {
-    const keys = loadCurrentAmuxContentKeys(process.env);
+    const preview = await prisma.amuxIdeaTransferPreview.findUnique({
+      where: { id: choice.previewId }, select: { ideaId: true },
+    });
+    if (!preview) return amuxJsonNoStore({ error: "not_ready" }, 409);
+    const keys = await loadAmuxContentKeyRing([{ ideaId: preview.ideaId,
+      purpose: "transfer_payload", subjectId: choice.previewId }]);
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`
         SELECT set_config('statement_timeout', '5000', true) AS statement_limit,

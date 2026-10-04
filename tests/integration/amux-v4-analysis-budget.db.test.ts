@@ -27,7 +27,7 @@ import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { commitFirstOutputContinuationTransferPreview,
-  commitIdeaOnlyTransferPreview, readIdeaOnlyTransferPreview } from
+  commitIdeaOnlyTransferPreview } from
   "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation, readIdeaTransferConfirmation } from
   "@/lib/amux/ideaTransferConfirmationService";
@@ -1651,11 +1651,17 @@ test("an output-continuable first result retains its first page without completi
   });
   assert.equal(continuedChunk.state, "awaiting_preview");
   assert.equal(continuedChunk.currentPreviewId, nextPreviewId);
-  const readback = await readIdeaOnlyTransferPreview(session, nextPreviewId);
-  assert.equal(readback.state, "prepared");
-  if (readback.state !== "prepared") throw new Error("continuation preview unavailable");
-  assert.equal(readback.transferAuthorized, false);
-  assert.equal(readback.payloadDigest, continued.payloadDigest);
+  // This synthetic transaction fixture seals with an in-memory key. The
+  // public read-back now requires the external per-unit store, so verify the
+  // stored envelope here with the fixture key instead of bypassing that gate.
+  assert.equal(nextPreview.payloadDigest, continued.payloadDigest);
+  const readbackPayload = openAmuxContent({
+    ciphertext: Buffer.from(nextPreview.payloadCiphertext!),
+    keyId: nextPreview.payloadKeyId!,
+    keyVersion: nextPreview.payloadKeyVersion!,
+  }, "transfer_payload", nextPreviewId, keys);
+  assert.match(JSON.parse(readbackPayload.toString("utf8")).prompt, /"chunkIndex":1/);
+  readbackPayload.fill(0);
   await assert.rejects(prisma.$transaction((tx) =>
     commitIdeaTransferConfirmation(tx, { session, request,
       choice: { previewId: nextPreviewId, ideaId,
@@ -2881,4 +2887,22 @@ test("unknown result blocks claims until owner consumes full reservation", async
       holdId, previewId, runnerStopped: true, readBackChecked: true })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisUnknownResolutionError &&
     error.code === "not_resolvable", "owner resolution is one-time");
+});
+
+test("a lost result POST can be conservatively closed after its hard deadline", async () => {
+  const { previewId, holdId } = await syntheticFirstClaim();
+  await prisma.amuxIdeaAnalysisBudgetHold.update({ where: { id: holdId },
+    data: { dispatchedAt: new Date(Date.now() - 12 * 60_000) } });
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnknownResolution(tx, { session, request,
+      holdId, previewId, runnerStopped: true, readBackChecked: true }));
+  assert.equal(result.holdId, holdId);
+  const [hold, preview] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+  ]);
+  assert.equal(hold.status, "owner_consumed");
+  assert.equal(hold.settledMicroUsd, hold.reservedMicroUsd);
+  assert.equal(preview.state, "owner_rejected");
+  assert.ok(preview.outcomeUnknownAt);
 });

@@ -87,6 +87,19 @@ test("coverage and owner question are sealed separately from proposal units", ()
     "analysis_freeform", amuxAnalysisFreeformSubjectId("idea-02", "preview-01"), keys));
 });
 
+test("preallocated draft IDs bind separately loaded external keys", () => {
+  const unitIds = ["1e5f6f12-4281-4879-ae75-8ab0d2a57b44",
+    "ed543d85-b0cb-4ffc-ace1-4cc4142f0d86"];
+  const result = seal(chunk(), { unitIds });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.draft.units.map((unit) => unit.id), unitIds);
+  assert.deepEqual(seal(chunk(), { unitIds: unitIds.slice(0, 1) }),
+    { ok: false, code: "metadata_incomplete" });
+  assert.deepEqual(seal(chunk(), { unitIds: [unitIds[0], unitIds[0]] }),
+    { ok: false, code: "metadata_incomplete" });
+});
+
 test("unapproved source and invalid idea identity are refused before sealing", () => {
   assert.deepEqual(seal(chunk([{ ...story, sourceRefIds: ["other-source"] }])),
     { ok: false, code: "source_ref_unapproved" });

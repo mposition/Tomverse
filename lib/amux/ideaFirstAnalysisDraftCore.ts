@@ -14,6 +14,7 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
   previewId: string;
   raw: string;
   keys: AmuxContentKeys;
+  unitIds?: readonly string[];
 }):
   | { decision: "ready" | "partial"; draft: SealedAmuxAnalysisDraft;
       coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 0;

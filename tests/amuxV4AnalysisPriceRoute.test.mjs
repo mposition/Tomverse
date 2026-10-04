@@ -92,7 +92,7 @@ test("unknown analysis recovery is owner-only, separately switched and never ret
   assert.match(service, /status: "owner_consumed"/);
   assert.match(service, /settledMicroUsd: hold\.reservedMicroUsd/);
   assert.match(service, /writeAdminAuditLog\(/);
-  assert.match(panel, /hold\.hold\.status !== "outcome_unknown"/);
+  assert.match(panel, /\["outcome_unknown", "in_flight"\]/);
   assert.match(panel, /readBackChecked: true/);
   assert.doesNotMatch(route, /runAmuxV4IsolatedApprovedAnalysis\(/);
 });

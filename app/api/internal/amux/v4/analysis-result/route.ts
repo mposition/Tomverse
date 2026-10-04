@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
@@ -11,6 +12,10 @@ import { AmuxIdeaAnalysisResultError,
   readAmuxIdeaAnalysisResultReceipt } from
   "@/lib/amux/ideaAnalysisResultService";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { amuxAnalysisFreeformSubjectId } from
+  "@/lib/amux/ideaAnalysisDraftSealCore";
+import { createAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
+import type { AmuxContentKeyIdentity } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
 // Intentionally dark: a live result requires verified isolated runner, agent-
@@ -51,9 +56,57 @@ export async function POST(request: Request): Promise<Response> {
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   let callbackReturned = false;
   try {
-    const keys = loadCurrentAmuxContentKeys(process.env);
+    let keys = loadCurrentAmuxContentKeys(process.env);
+    let unitIds: string[] | undefined;
+    if (body.outcome === "verified_success") {
+      const preview = await prisma.amuxIdeaTransferPreview.findUnique({
+        where: { id: body.previewId },
+        select: { ideaId: true, chunkIndex: true },
+      });
+      if (!preview || preview.ideaId !== body.ideaId) {
+        return amuxJsonNoStore({ error: "not_ready" }, 409);
+      }
+      let count = 0;
+      try {
+        const parsed: unknown = JSON.parse(body.rawModelOutput!);
+        const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>).units : null;
+        if (Array.isArray(units) && units.length <= 40) count = units.length;
+      } catch { /* Invalid model output is settled as a failed invocation. */ }
+      unitIds = Array.from({ length: count }, () => randomUUID());
+      const existing: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
+        purpose: "transfer_payload", subjectId: body.previewId }];
+      if (preview.chunkIndex > 0) {
+        existing.push({ ideaId: body.ideaId, purpose: "idea_raw",
+          subjectId: body.ideaId });
+        const [priorChunks, priorUnits] = await Promise.all([
+          prisma.amuxIdeaAnalysisChunk.findMany({ where: { ideaId: body.ideaId,
+            chunkIndex: { lt: preview.chunkIndex },
+            freeformCiphertext: { not: null } },
+            select: { currentPreviewId: true } }),
+          prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: body.ideaId,
+            chunkIndex: { lt: preview.chunkIndex },
+            bodyCiphertext: { not: null } }, select: { id: true } }),
+        ]);
+        for (const row of priorChunks) {
+          if (row.currentPreviewId) existing.push({ ideaId: body.ideaId,
+            purpose: "analysis_freeform",
+            subjectId: amuxAnalysisFreeformSubjectId(body.ideaId,
+              row.currentPreviewId) });
+        }
+        for (const row of priorUnits) existing.push({ ideaId: body.ideaId,
+          purpose: "analysis_draft", subjectId: row.id });
+      }
+      const created: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
+        purpose: "analysis_freeform",
+        subjectId: amuxAnalysisFreeformSubjectId(body.ideaId, body.previewId) },
+      ...unitIds.map((id) => ({ ideaId: body.ideaId,
+        purpose: "analysis_draft" as const, subjectId: id }))];
+      keys = await createAmuxContentKeyRing(existing, created);
+    }
     const receipt = await prisma.$transaction(async (tx) => {
-      const saved = await commitAmuxIdeaAnalysisResult(tx, { ...body, keys });
+      const saved = await commitAmuxIdeaAnalysisResult(tx, { ...body, keys,
+        unitIds });
       callbackReturned = true;
       return saved;
     }, { maxWait: 5_000, timeout: 15_000 });

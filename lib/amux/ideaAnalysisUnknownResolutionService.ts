@@ -92,14 +92,18 @@ export async function commitAmuxIdeaAnalysisUnknownResolution(
   if (!preview || !hold || preview.ideaId === "" ||
       preview.ideaId !== previewIdentity.ideaId ||
       preview.chunkIndex !== previewIdentity.chunkIndex ||
-      preview.state !== "outcome_unknown" ||
-      preview.outcomeUnknownAt === null || preview.consumedAt === null ||
-      hold.status !== "outcome_unknown" || hold.dispatchedAt === null ||
+      !["outcome_unknown", "in_flight"].includes(preview.state) ||
+      preview.consumedAt === null ||
+      hold.status !== preview.state || hold.dispatchedAt === null ||
       hold.closedAt !== null || hold.settledMicroUsd !== null ||
       hold.inputTokens !== null || hold.outputTokens !== null ||
       hold.previewId !== preview.id || hold.namespace !== identity.namespace ||
       hold.monthStart.getTime() !== identity.monthStart.getTime()) {
     throw new AmuxIdeaAnalysisUnknownResolutionError("not_resolvable");
+  }
+  if ((preview.state === "outcome_unknown") !==
+      (preview.outcomeUnknownAt !== null)) {
+    throw new AmuxIdeaAnalysisUnknownResolutionError("integrity_unavailable");
   }
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
     where: { ideaId_chunkIndex: { ideaId: preview.ideaId,
@@ -113,10 +117,10 @@ export async function commitAmuxIdeaAnalysisUnknownResolution(
   if (!chunk || !idea ||
       !(now instanceof Date) || !Number.isFinite(now.getTime()) ||
       now.getTime() < hold.dispatchedAt.getTime() + RUNNER_DEADLINE_MS ||
-      now < preview.outcomeUnknownAt ||
+      (preview.outcomeUnknownAt !== null && now < preview.outcomeUnknownAt) ||
       preview.confirmedByUserId !== actorUserId ||
       idea.actorUserId !== actorUserId ||
-      chunk.state !== "outcome_unknown" ||
+      chunk.state !== preview.state ||
       chunk.currentPreviewId !== preview.id ||
       chunk.leaseGeneration !== 1 ||
       windowLock[0]!.reservedMicroUsd < hold.reservedMicroUsd ||
@@ -131,6 +135,7 @@ export async function commitAmuxIdeaAnalysisUnknownResolution(
     metadata: { namespace: hold.namespace, previewId: preview.id,
       ideaId: idea.id, chunkIndex: chunk.chunkIndex,
       consumedMicroUsd: hold.reservedMicroUsd.toString(),
+      previousStatus: hold.status,
       runnerStopped: true, readBackChecked: true, retryAutomatically: false },
   });
   const window = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
@@ -141,21 +146,22 @@ export async function commitAmuxIdeaAnalysisUnknownResolution(
       reservedMicroUsd: { decrement: hold.reservedMicroUsd } },
   });
   const closed = await tx.amuxIdeaAnalysisBudgetHold.updateMany({
-    where: { id: hold.id, status: "outcome_unknown", closedAt: null,
+    where: { id: hold.id, status: hold.status, closedAt: null,
       settledMicroUsd: null, inputTokens: null, outputTokens: null },
     data: { status: "owner_consumed", settledMicroUsd: hold.reservedMicroUsd,
       closedAt: now },
   });
   const rejected = await tx.amuxIdeaTransferPreview.updateMany({
-    where: { id: preview.id, state: "outcome_unknown",
-      outcomeUnknownAt: { not: null } },
-    data: { state: "owner_rejected" },
+    where: { id: preview.id, state: preview.state,
+      consumedAt: { not: null } },
+    data: { state: "owner_rejected",
+      outcomeUnknownAt: preview.outcomeUnknownAt ?? now },
   });
   const nextChunkState = idea.cancelledAt !== null || idea.state === "cancelled"
     ? "cancelled" : now >= idea.analysisDeadlineAt ? "expired" : "awaiting_preview";
   const resetChunk = await tx.amuxIdeaAnalysisChunk.updateMany({
     where: { ideaId: idea.id, chunkIndex: chunk.chunkIndex,
-      state: "outcome_unknown", currentPreviewId: preview.id,
+      state: preview.state, currentPreviewId: preview.id,
       leaseGeneration: 1 },
     data: { state: nextChunkState, leaseGeneration: 0 },
   });

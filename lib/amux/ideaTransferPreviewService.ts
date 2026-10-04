@@ -20,7 +20,9 @@ import { readCurrentAmuxIdeaFrontierSelection } from "./ideaFrontierCatalogRead.
 import { AmuxIdeaAnalysisResultReadError } from "./ideaAnalysisResultReadService.ts";
 import { readVerifiedAmuxIdeaAnalysisContinuationContext } from
   "./ideaContinuedAnalysisResultReadService.ts";
-import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { createAmuxContentKeyRing, loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
+import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
+import type { AmuxContentKeyIdentity } from "./ideaKeyStore.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import {
   AMUX_V4_ANALYSIS_PROMPT_VERSION,
@@ -596,7 +598,11 @@ export async function readIdeaOnlyTransferPreview(session: Session, previewId: s
       (auditMetadata as Record<string, unknown>).transferAuthorized !== false) {
     return { state: "unavailable", transferAuthorized: false };
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  let keys: AmuxContentKeys;
+  try {
+    keys = await loadAmuxContentKeyRing([{ ideaId: row.ideaId,
+      purpose: "transfer_payload", subjectId: row.id }]);
+  } catch { return { state: "unavailable", transferAuthorized: false }; }
   let raw: Buffer;
   try {
     raw = openAmuxContent({ ciphertext: Buffer.from(row.payloadCiphertext),
@@ -632,13 +638,17 @@ export async function prepareIdeaOnlyTransferPreview(
   session: Session, request: Request, choice: IdeaOnlyTransferPreviewRequest,
   browserNonce: string,
 ) {
-  ownerId(session);
+  const actorUserId = ownerId(session);
   if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV])) {
     throw new IdeaTransferPreviewError("preview_disabled");
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
+  const owned = await prisma.amuxIdeaSubmission.findFirst({
+    where: { id: choice.ideaId, actorUserId }, select: { id: true },
+  });
+  if (!owned) throw new IdeaTransferPreviewError("not_found");
   const selected = await readCurrentAmuxIdeaFrontierSelection(choice);
   if (selected.decision === "hold") {
     throw new IdeaTransferPreviewError("integrity_unavailable");
@@ -648,7 +658,13 @@ export async function prepareIdeaOnlyTransferPreview(
       selected.approvalVersion !== choice.approvalVersion) {
     throw new IdeaTransferPreviewError("model_changed");
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  let keys: AmuxContentKeys;
+  try {
+    keys = await createAmuxContentKeyRing([
+      { ideaId: choice.ideaId, purpose: "idea_raw", subjectId: choice.ideaId },
+    ], [{ ideaId: choice.ideaId, purpose: "transfer_payload",
+      subjectId: choice.previewId }]);
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
@@ -669,13 +685,17 @@ export async function prepareFirstOutputContinuationTransferPreview(
   session: Session, request: Request, choice: IdeaOnlyTransferPreviewRequest,
   browserNonce: string,
 ) {
-  ownerId(session);
+  const actorUserId = ownerId(session);
   if (!transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV])) {
     throw new IdeaTransferPreviewError("preview_disabled");
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
+  const owned = await prisma.amuxIdeaSubmission.findFirst({
+    where: { id: choice.ideaId, actorUserId }, select: { id: true },
+  });
+  if (!owned) throw new IdeaTransferPreviewError("not_found");
   const selected = await readCurrentAmuxIdeaFrontierSelection(choice);
   if (selected.decision === "hold") {
     throw new IdeaTransferPreviewError("integrity_unavailable");
@@ -685,7 +705,28 @@ export async function prepareFirstOutputContinuationTransferPreview(
       selected.approvalVersion !== choice.approvalVersion) {
     throw new IdeaTransferPreviewError("model_changed");
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const [priorChunks, priorUnits] = await Promise.all([
+    prisma.amuxIdeaAnalysisChunk.findMany({ where: { ideaId: choice.ideaId,
+      freeformCiphertext: { not: null } },
+      select: { currentPreviewId: true } }),
+    prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: choice.ideaId,
+      bodyCiphertext: { not: null } }, select: { id: true } }),
+  ]);
+  const existing: AmuxContentKeyIdentity[] = [{ ideaId: choice.ideaId,
+    purpose: "idea_raw", subjectId: choice.ideaId }];
+  for (const chunk of priorChunks) {
+    if (chunk.currentPreviewId) existing.push({ ideaId: choice.ideaId,
+      purpose: "analysis_freeform",
+      subjectId: amuxAnalysisFreeformSubjectId(choice.ideaId,
+        chunk.currentPreviewId) });
+  }
+  for (const unit of priorUnits) existing.push({ ideaId: choice.ideaId,
+    purpose: "analysis_draft", subjectId: unit.id });
+  let keys: AmuxContentKeys;
+  try {
+    keys = await createAmuxContentKeyRing(existing, [{ ideaId: choice.ideaId,
+      purpose: "transfer_payload", subjectId: choice.previewId }]);
+  } catch { throw new IdeaTransferPreviewError("integrity_unavailable"); }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {

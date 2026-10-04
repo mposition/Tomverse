@@ -45,5 +45,9 @@ export function loadCurrentAmuxContentKeys(env: Record<string, string | undefine
     masterKey,
     digestKeyId,
     digestKey,
+    // Entry routes must preload the exact external unit keys before opening a
+    // transaction. A forgotten route cannot silently fall back to the app
+    // master and put restorable plaintext in a product-DB backup.
+    contentMasters: new Map(),
   };
 }
