@@ -112,3 +112,46 @@ test("an invalid allowance is a programming error", () => {
   assert.throws(() => countingClient({}, -1), /allowance_invalid/);
   assert.throws(() => countingClient({}, 1.5), /allowance_invalid/);
 });
+
+test("a registered helper takes its whole cost before it runs, on the real client", () => {
+  const { tx, sent } = fakeTx();
+  const seen = [];
+  const helpers = { $append: { cost: 4, run: (real, input) => (seen.push([real === tx, input]), "appended") } };
+  const { client, used } = countingClient(tx, 5, helpers);
+  client.$queryRaw(...tag`SELECT 1`);
+  assert.equal(client.$append({ a: 1 }), "appended");
+  assert.deepEqual(seen, [[true, { a: 1 }]]);
+  assert.equal(used(), 5);
+  // Nothing is left, so the next call is refused before it runs.
+  assert.throws(() => client.$append({}), refusedWith("statement_ceiling_exceeded"));
+  assert.throws(() => client.$queryRaw(...tag`SELECT 1`), refusedWith("statement_ceiling_exceeded"));
+  assert.equal(seen.length, 1);
+  assert.deepEqual(sent, ["$queryRaw"]);
+});
+
+test("a helper whose cost does not fit is refused whole, not partly taken", () => {
+  const { tx } = fakeTx();
+  let ran = false;
+  const { client, used } = countingClient(tx, 3, { $append: { cost: 4, run: () => (ran = true) } });
+  assert.throws(() => client.$append({}), refusedWith("statement_ceiling_exceeded"));
+  assert.equal(ran, false);
+  assert.equal(used(), 0);
+});
+
+test("helpers are registered by the wrapper only and are never a way to the client", () => {
+  const { tx } = fakeTx();
+  const { client } = countingClient(tx, 10, { $append: { cost: 1, run: () => "ok" } });
+  assert.equal(Object.getOwnPropertyDescriptor(client, "$append"), undefined);
+  assert.deepEqual(Reflect.ownKeys(client), []);
+  assert.throws(() => client.$other({}), refusedWith("statement_ceiling_unknown_method"));
+  for (const helpers of [
+    { append: { cost: 1, run: () => {} } },
+    { $queryRaw: { cost: 1, run: () => {} } },
+    { $append: { cost: 0, run: () => {} } },
+    { $append: { cost: 1.5, run: () => {} } },
+    { $append: { cost: 1 } },
+    { $append: null },
+  ]) {
+    assert.throws(() => countingClient(tx, 10, helpers), /ops_observer_statement_helper_/);
+  }
+});
