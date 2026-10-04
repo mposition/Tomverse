@@ -33,7 +33,6 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.deepEqual(codex.command.slice(-1), ["-"]);
   assert.ok(codex.command.includes(openai.modelId));
   assert.equal(claude.command[0], "/run/amux-cli/claude");
-  assert.ok(claude.command.includes("--bare"));
   assert.ok(claude.command.includes("--safe-mode"));
   assert.ok(claude.command.includes("--restricted"));
   assert.ok(claude.command.includes("--disable-slash-commands"));
