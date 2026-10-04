@@ -452,7 +452,8 @@ test("the same observation reported again is still recorded, and a repeated latc
   assert.equal(again.latched, "deploy_unreadable");
   const row = await attemptRow(attemptId);
   assert.equal(row.state, "awaiting_deploy");
-  assert.ok(row.deployObservedAt && firstSeen && row.deployObservedAt.getTime() >= firstSeen.getTime());
+  // The same list again still moves the observation time (a release ran in between).
+  assert.ok(row.deployObservedAt && firstSeen && row.deployObservedAt.getTime() > firstSeen.getTime());
   assert.deepEqual((await latchEvents()).map((event) => event.latched), [true, false, true]);
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });

@@ -73,8 +73,8 @@ export type QaReleaseConsoleAttempt = {
   headSha: string;
   mergeCommitSha: string | null;
   issuedAt: string;
-  /** The staging deployments the lane last observed, re-checked against the closed shape. */
   outcome: string | null;
+  /** The staging deployments the lane last observed, re-checked against the closed shape. */
   deployObservation: { service: string; status: string; commitSha: string | null }[] | null;
   deployObservedAt: string | null;
 };

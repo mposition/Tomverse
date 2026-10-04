@@ -62,6 +62,9 @@ test("the migration's trigger states the core's transition table, row for row", 
     MIGRATION,
     new RegExp(`IF NOT allowed AND OLD\\."state" = '${QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE}' AND NEW\\."state" = '${QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE}' THEN`),
   );
+  // The lane may write the same list again, and that write moves the observation time.
+  assert.match(MIGRATION, /allowed := NEW."outcome" IS NULL AND NEW."deployObservation" IS NOT NULLs+AND NEW."mergeCommitSha" IS NOT DISTINCT FROM OLD."mergeCommitSha";/);
+  assert.match(MIGRATION, /WHEN NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation" OR observation_only THEN now_/);
   const openStates = /one_open_per_base_key"\s*ON "QaReleaseMergeAttempt" \("base"\)\s*WHERE "state" IN \(([^)]*)\)/.exec(MIGRATION)?.[1] ?? "";
   assert.deepEqual([...openStates.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...QA_RELEASE_MERGE_ATTEMPT_OPEN_STATES]);
 });
