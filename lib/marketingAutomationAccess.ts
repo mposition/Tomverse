@@ -528,9 +528,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-05: AMUX v4 adds a separately scoped system-audit action for its
  * analysis budget hold. The webhook receiver's imports and decisions do not
  * change; its existing audit-helper closure now has different source bytes.
+ * The AMUX expiry, settlement, unknown-outcome and auto-cancel audit scopes
+ * move those same helper bytes again. Existing signed staging evidence becomes
+ * stale; the receiver's own admission and write path remain unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "d8e4d28e1aeb4ab2a63600c61370f02cbd2aea8aef12566b7ed8787f38419878";
+  "0e7f99576007fdede9b85d21b1a4baf829568a914002012fa170e6f0f49f4585";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
