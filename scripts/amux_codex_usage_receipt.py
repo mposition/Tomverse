@@ -19,6 +19,8 @@ ATTEMPT_MARKER = re.compile(r"Execution attempt: ([0-9a-fA-F-]{36})")
 
 
 def parse_timestamp(value):
+    if not isinstance(value, str):
+        raise ValueError("rollout timestamp needs an ISO string")
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("rollout timestamp needs a timezone")
