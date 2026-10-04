@@ -1052,6 +1052,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 11,
+    writeVerbs: 4,
+    reason:
+      "Creates the QA-release operator control table and the triggers that number its revisions, bind each to a same-transaction audit row and refuse every update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
+  },
+  {
     path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 5,
@@ -1106,22 +1122,6 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "The AMUX retention-hold migration has three restrictive foreign keys to separately written owner approval/release and system notice audit rows. Its DDL and trigger constrain only AmuxIdeaRetentionHold; it does not write AdminAuditLog.",
-  },
-  {
-    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
-    table: "QaReleaseOperatorControl",
-    tableMentions: 11,
-    writeVerbs: 4,
-    reason:
-      "Creates the QA-release operator control table and the triggers that number its revisions, bind each to a same-transaction audit row and refuse every update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
-  },
-  {
-    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
-    table: "AdminAuditLog",
-    tableMentions: 1,
-    writeVerbs: 4,
-    reason:
-      "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
   },
 ];
 

@@ -45,6 +45,8 @@ export type EngineeringAgentSystemAuditActor =
 
 /** AMUX intake policy v12 (approved by mposition, 2026-10-01): the v4 actor
  * has an explicit action/target scope per writer, not general audit authority. */
+/** AMUX intake policy v12 (approved by mposition, 2026-10-01): this first
+ * active v4 actor has one action/target pair, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_TARGET = "AmuxIdeaSourcePlanRevision" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as const;

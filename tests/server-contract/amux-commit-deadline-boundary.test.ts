@@ -614,6 +614,45 @@ test("a COMMIT-phase failure of a mutation stays unknown in a route that wrote n
   });
 });
 
+test("a raw-query statement timeout inside recovery is a known rollback", async () => {
+  const { amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
+  await quietly(async () => {
+    reset({ callbackError: databaseError("57014", "canceling statement due to statement timeout") });
+    const error = await caught(withAmuxRouteBudget(() => run(MUTATION)));
+    assert.equal((error as { code?: unknown }).code, "P2010");
+    assert.equal(
+      await reasonOf(amuxInternalErrorResponse("execution_recover", error)),
+      "amux_database_deadline_exceeded",
+    );
+  });
+});
+
+test("a running transaction timeout remains unknown even with a nested statement timeout", async () => {
+  const { amuxInternalErrorResponse } = await modules();
+  const timeout = Object.assign(new Error("transaction timed out"), {
+    code: "P2028",
+    meta: { driverAdapterError: { kind: "postgres", code: "57014" } },
+  });
+  await quietly(async () => {
+    assert.equal(
+      await reasonOf(amuxInternalErrorResponse("execution_recover", timeout)),
+      "amux_outcome_unknown",
+    );
+  });
+});
+
+test("an unrelated outer code does not hide a nested statement timeout", async () => {
+  const { amuxInternalErrorResponse } = await modules();
+  const timeout = Object.assign(new Error("query canceled"), {
+    code: "ABCDE",
+    meta: { driverAdapterError: { kind: "postgres", code: "57014" } },
+  });
+  assert.equal(
+    await reasonOf(amuxInternalErrorResponse("execution_recover", timeout)),
+    "amux_database_deadline_exceeded",
+  );
+});
+
 test("a statement timeout or a lost connection in a read of a route that wrote nothing is busy", async () => {
   const { AmuxDbBoundaryError, amuxInternalErrorResponse, withAmuxRouteBudget } = await modules();
   const socketError = Object.assign(new Error("read ECONNRESET"), {
