@@ -143,7 +143,7 @@ test("Claude result needs exact served model and complete usage", () => {
 test("Claude ignores only bounded pre-init UI invalidation notices", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const startup = { type: "system", subtype: "ui_invalidate",
-    uuid: "notice-1", session_id: "session-1" };
+    event: "ui.render", uuid: "notice-1", session_id: "session-1" };
   const stream = (prefix) => Buffer.from([...prefix,
     { type: "system", subtype: "init", tools: [] },
     { type: "assistant", message: { role: "assistant",
@@ -155,10 +155,37 @@ test("Claude ignores only bounded pre-init UI invalidation notices", () => {
   for (const prefix of [
     [{ ...startup, tools: ["Bash"] }],
     [{ ...startup, content: "unexpected" }],
+    [{ ...startup, event: "other" }],
+    [{ ...startup, instances: [{ surface: "terminal" }] }],
     Array.from({ length: 9 }, () => startup),
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
       stream(prefix), 0), { kind: "outcome_unknown" });
+  }
+});
+
+test("Claude accepts only a bounded rate-limit observation after assistant", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const init = { type: "system", subtype: "init", tools: [] };
+  const assistant = { type: "assistant", message: { role: "assistant",
+    content: [{ type: "text", text: "S0_OK" }] } };
+  const rate = { type: "rate_limit_event", rate_limit_info: {},
+    uuid: "notice-2", session_id: "session-1" };
+  const stream = (events) => Buffer.from(events.map((event) =>
+    JSON.stringify(event)).join("\n"));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+    stream([init, assistant, rate, claudeEnvelope()]), 0).kind,
+  "verified_success");
+  for (const events of [
+    [rate, init, assistant, claudeEnvelope()],
+    [init, rate, assistant, claudeEnvelope()],
+    [init, assistant, { ...rate, tools: ["Bash"] }, claudeEnvelope()],
+    [init, assistant, { ...rate, rate_limit_info: null }, claudeEnvelope()],
+    [init, assistant, ...Array.from({ length: 9 }, () => rate),
+      claudeEnvelope()],
+  ]) {
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+      stream(events), 0), { kind: "outcome_unknown" });
   }
 });
 
