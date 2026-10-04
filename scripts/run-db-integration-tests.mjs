@@ -364,6 +364,10 @@ run(
     // time, items only in their reservation's transaction and once per
     // incident kind, retention-only deletion, no late COMMIT.
     "tests/integration/ops-observer-delivery.db.test.ts",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
