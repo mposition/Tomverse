@@ -57,6 +57,8 @@ test("the system actor list is closed and changes only by review", () => {
     // The shared AgentDigestItem body expiry and meta purge, for every agent
     // (docs/policy/billing-finance-ops.md §1.4).
     "agent-digest-retention",
+    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
+    "qa-release-merge-lane",
     // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
     "ops-observer",
   ]);

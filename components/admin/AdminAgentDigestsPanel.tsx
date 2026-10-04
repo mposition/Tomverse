@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Lock } from "lucide-react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { QaReleaseMergeLaneSection } from "@/components/admin/QaReleaseMergeLaneSection";
 import type { AgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAgentDigestsMessages } from "@/lib/adminMessages/agentDigests";
@@ -23,8 +24,8 @@ const fill = (template: string, values: Record<string, string | number>) =>
  * The one control here records the next operator control revision
  * (docs/policy/qa-release-agent.md sections 4 and 6), offered only to owner
  * and ops; its route checks the role and a recent sign-in again, and a stale
- * sign-in is answered with the way back. Clearing a merge-lane latch arrives
- * with the lane.
+ * sign-in is answered with the way back. The develop merge lane's latch and
+ * its release are QaReleaseMergeLaneSection.
  */
 export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsole }) {
   const m = useAdminMessages(adminAgentDigestsMessages);
@@ -63,6 +64,8 @@ export function AdminAgentDigestsPanel({ initial }: { initial: AgentDigestConsol
       {initial.canWrite ? (
         <QaReleaseControlForm key={initial.control?.revision ?? 0} current={initial.control} />
       ) : null}
+
+      <QaReleaseMergeLaneSection lane={initial.mergeLane} canWrite={initial.canWrite} />
 
       <div className="flex flex-col gap-3">
         <h2 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{m.digestsTitle}</h2>
