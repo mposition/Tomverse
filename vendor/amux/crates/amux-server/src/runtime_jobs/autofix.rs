@@ -6175,12 +6175,12 @@ pub fn idem_of(signature: &str) -> String {
     format!("autofix:{signature}")
 }
 
-/// The card body. Evidence first, in a fixed order, with the recheck command
-/// last — a lane picking this up should be able to reproduce the finding
-/// before reading a word of prose.
 const AUTOFIX_DESC_HEADER: &str =
     "Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n";
 
+/// The card body. Evidence first, in a fixed order, with the recheck command
+/// last — a lane picking this up should be able to reproduce the finding
+/// before reading a word of prose.
 pub fn render_desc(f: &Finding) -> String {
     let mut s = String::new();
     s.push_str(AUTOFIX_DESC_HEADER);
@@ -8715,7 +8715,11 @@ mod tests {
         };
         let first = super::render_desc(&finding);
         finding.evidence[0].1 = "64".into();
-        let refreshed = format!("{first}{}{}", super::REFRESH_MARK, super::render_desc(&finding));
+        let refreshed = format!(
+            "{first}{}The measurement moved. Re-read now — previously titled:\n  count: 999\n\n{}",
+            super::REFRESH_MARK,
+            super::render_desc(&finding)
+        );
         assert_eq!(super::carded_count(&refreshed), Some(64));
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
