@@ -66,7 +66,7 @@ const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_recorded:
     "The QA release digest for this date was recorded. It is a report, not a judgement: nothing was decided or changed. Open the Agent digests page to read it.",
   merge_lane_latched:
-    "The QA release merge lane stopped merging develop pull requests because an outcome was unknown or a staging deployment did not succeed. It merges nothing until a person releases the latch in Admin. Open the Agent digests page to see the reason, the attempt and the staging deployments.",
+    "The QA release merge lane stopped merging develop pull requests because a merge or staging deployment needs a person: its outcome was unknown, it did not succeed, it landed somewhere other than develop, or the report came from another operator control revision than the newest. It merges nothing until a person releases the latch. The reason and the pull request are in the Admin audit log.",
 };
 
 export const buildQaReleaseOperatorEmail = (

@@ -171,3 +171,25 @@ test("the audit row must be this transaction's, for this event, by the merge lan
     /set by the merge lane/,
   );
 });
+
+test("an audit row naming the attempt authorizes a latch only for a report or a resolution, never an issue or a consume", async () => {
+  const next = ((await newest())?.sequence ?? 0) + 1;
+  const viaAttempt = (action: string) =>
+    prisma.$transaction(async (tx) => {
+      const auditId = await writeSystemAuditLog({
+        tx,
+        systemActor: "qa-release-merge-lane",
+        action,
+        targetType: "QaReleaseMergeAttempt",
+        targetId: ATTEMPT,
+        summary: "test",
+      });
+      await tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "attemptId", "auditLogId")
+        VALUES (${next}, true, 'deploy_failed', ${ATTEMPT}, ${auditId})`;
+    });
+  for (const action of ["qa_release.merge_attempt_issued", "qa_release.merge_attempt_consumed", "qa_release.merge_lane_latched"]) {
+    await assert.rejects(viaAttempt(action), /set by the merge lane/, action);
+  }
+  await viaAttempt("qa_release.merge_attempt_reported");
+  await append(next + 1, false, null, "person");
+});

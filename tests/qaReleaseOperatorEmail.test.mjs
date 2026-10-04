@@ -47,6 +47,7 @@ test("the merge lane latch alert says the lane stopped and a person releases it"
   const email = buildQaReleaseOperatorEmail("merge_lane_latched", { date: "2026-10-04", consoleUrl: "https://tomverse.app/x" });
   assert.equal(email.subject, "Tomverse develop merge lane stopped");
   assert.match(email.text, /until a person releases the latch/);
+  assert.match(email.text, /another operator control revision/);
   assert.equal(qaReleaseMergeLaneLatchDateFromReference("merge-lane-latch:2026-10-04"), "2026-10-04");
   assert.equal(qaReleaseMergeLaneLatchDateFromReference("attention:2026-10-04"), null);
 });
