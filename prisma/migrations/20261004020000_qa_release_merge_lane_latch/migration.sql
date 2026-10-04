@@ -10,6 +10,9 @@
 -- * A set event carries one of the lane's reasons (lib/qaReleaseMergeLaneLatchCore.ts)
 --   and is audited in the same transaction by the qa-release-merge-lane system
 --   actor. Setting is allowed while latched: a second cause is recorded.
+-- * The audit row targets either this event or the attempt the event names:
+--   a result report, or a person's release that also ends an attempt, is one
+--   audit row for both writes (policy section 10's statement counts).
 -- * A release carries no reason, follows a set event, and is audited in the
 --   same transaction by a person (actorUserId set).
 -- * An event may name the attempt it concerns; the attempt must exist.
@@ -77,9 +80,9 @@ BEGIN
     'SELECT EXISTS (
        SELECT 1 FROM %I."AdminAuditLog"
         WHERE "id" = $1
-          AND "targetType" = ''QaReleaseMergeLaneLatch''
-          AND "targetId" = $2
-          AND "action" LIKE ''qa\_release.merge\_lane\_%%''
+          AND (("targetType" = ''QaReleaseMergeLaneLatch'' AND "targetId" = $2)
+               OR ($4 IS NOT NULL AND "targetType" = ''QaReleaseMergeAttempt'' AND "targetId" = $4))
+          AND "action" LIKE ''qa\_release.merge\_%%''
           AND xmin = pg_current_xact_id()::xid
           AND CASE WHEN $3
                 THEN "actorUserId" IS NULL AND "metadata"->>''systemActor'' = ''qa-release-merge-lane''
@@ -87,7 +90,7 @@ BEGIN
               END)',
     TG_TABLE_SCHEMA)
     INTO audit_ok
-    USING NEW."auditLogId", NEW."sequence"::text, NEW."latched";
+    USING NEW."auditLogId", NEW."sequence"::text, NEW."latched", NEW."attemptId";
   IF NOT coalesce(audit_ok, false) THEN
     RAISE EXCEPTION 'QaReleaseMergeLaneLatch events are audited in the same transaction: set by the merge lane, released by a person'
       USING ERRCODE = 'check_violation';

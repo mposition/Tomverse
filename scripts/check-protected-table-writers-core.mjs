@@ -532,23 +532,23 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseOperatorControl",
-    tableMentions: 2,
-    writeVerbs: 8,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue and consume transactions counted statement by statement: in each, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; and consume's one conditional UPDATE of that row from issued to consumed. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+    tableMentions: 3,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeAttempt",
-    tableMentions: 6,
-    writeVerbs: 8,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue and consume transactions counted statement by statement: in each, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; and consume's one conditional UPDATE of that row from issued to consumed. No table name is interpolated; every value is a bound parameter.",
+    tableMentions: 9,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. No table name is interpolated; every value is a bound parameter.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeLaneLatch",
-    tableMentions: 2,
-    writeVerbs: 8,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue and consume transactions counted statement by statement: in each, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; and consume's one conditional UPDATE of that row from issued to consumed. No table name is interpolated; every value is a bound parameter. It reads the newest latch event here and writes none in this slice.",
+    tableMentions: 4,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. No table name is interpolated; every value is a bound parameter. It reads the newest latch event here and writes none in this slice.",
   },
   {
     path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
@@ -561,10 +561,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
     table: "QaReleaseMergeAttempt",
-    tableMentions: 1,
+    tableMentions: 2,
     writeVerbs: 9,
     reason:
-      "The latch table's foreign key names the attempt an event concerns. It writes no attempt row; its write verbs constrain or refuse the latch table.",
+      "The latch table's foreign key names the attempt an event concerns, and its insert trigger accepts an audit row that targets that attempt. It writes no attempt row; its write verbs constrain or refuse the latch table.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",

@@ -58,3 +58,25 @@ test("instruction consume uses the policy's nine statements and audits before it
   assert.deepEqual(order, [...order].sort((x, y) => x - y));
   assert.match(fn, /WHERE "id" = \$\{input\.request\.attemptId\} AND "state" = 'issued'/);
 });
+
+test("result report arms ten statements, audits first, moves in one statement, then latch, alert and the deadline last", () => {
+  const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_REPORT_LIMITS = Object.freeze({"));
+  assert.match(block, /statements: 10,/);
+  assert.match(block, /transactionMs: \(3 \* 10 \+ 5\) \* 1_000,/);
+  assert.match(block, /prismaMs: \(3 \* 10 \+ 5\) \* 1_000 \+ 5_000,/);
+  const fn = SOURCE.slice(SOURCE.indexOf("export async function reportQaReleaseMergeResult"));
+  const order = [
+    "set_config('statement_timeout'",
+    "await takeAuditChainLock(tx);",
+    "await writeSystemAuditLog({",
+    "WITH c AS (",
+    'INSERT INTO "QaReleaseMergeLaneLatch"',
+    "enqueueNotificationDeliveryOnce(tx,",
+    "SELECT clock_timestamp() >= ",
+    "return { recorded: true as const",
+  ].map((marker) => fn.indexOf(marker));
+  assert.ok(order.every((at) => at > 0), JSON.stringify(order));
+  assert.deepEqual(order, [...order].sort((x, y) => x - y));
+  // A revision mismatch never closes a deploy as a success, in SQL as in the core.
+  assert.match(fn, /AND \(\$\{!closesAsSuccess\} OR \(SELECT "revision" FROM c\) IS NOT DISTINCT FROM \$\{input\.callerRevision\}::int\)/);
+});

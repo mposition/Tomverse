@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { NOTIFICATION_KIND, enqueueNotificationDeliveryOnce } from "@/lib/notificationDeliveries";
 import { prisma } from "@/lib/prisma";
 import {
   type QaReleaseConsumeRefusal,
@@ -10,6 +11,12 @@ import {
   judgeQaReleaseInstructionConsume,
   judgeQaReleaseInstructionIssue,
 } from "@/lib/qaReleaseMergeLaneInstructionCore";
+import type { QaReleaseMergeLaneLatchReason } from "@/lib/qaReleaseMergeLaneLatchCore";
+import {
+  type QaReleaseMergeReport,
+  qaReleaseReportEffect,
+  qaReleaseReportEffectUnderRevision,
+} from "@/lib/qaReleaseMergeLaneReportCore";
 
 /**
  * The only writer of QaReleaseMergeAttempt and QaReleaseMergeLaneLatch
@@ -258,4 +265,146 @@ export async function consumeQaReleaseMergeInstruction(input: {
     },
     { maxWait: 5_000, timeout: CONSUME.prismaMs },
   );
+}
+
+export const QA_RELEASE_MERGE_ATTEMPT_REPORTED_ACTION = "qa_release.merge_attempt_reported";
+
+/** No result report within this long of issue makes an attempt "unreported" (policy section 8 item 5). */
+export const QA_RELEASE_UNREPORTED_AFTER_MS = 12 * 60 * 1000;
+
+/**
+ * Result report (policy section 10): at most ten statements -- the limits,
+ * the audit chain lock, the four of the audit append, one statement that
+ * reads the newest revision and the attempt and makes the conditional move,
+ * the latch event, the latch alert's queue row and the deadline check -- so
+ * 3A + 5 = 35 s, and the limits are always armed for ten.
+ */
+export const QA_RELEASE_REPORT_LIMITS = Object.freeze({
+  statementMs: 2_000,
+  idleMs: 1_000,
+  statements: 10,
+  transactionMs: (3 * 10 + 5) * 1_000,
+  prismaMs: (3 * 10 + 5) * 1_000 + 5_000,
+});
+const REPORT = QA_RELEASE_REPORT_LIMITS;
+
+export type QaReleaseReportRefusal = "attempt_unknown" | "state_moved" | "too_early";
+
+export type QaReleaseReportResult =
+  | { recorded: true; moved: boolean; latched: QaReleaseMergeLaneLatchReason | null; revisionMatched: boolean }
+  | { recorded: false; reason: QaReleaseReportRefusal };
+
+/** Carries a refusal out of the transaction it rolls back (the audit row goes with it). */
+class ReportRefused extends Error {
+  constructor(readonly reason: QaReleaseReportRefusal) {
+    super(reason);
+  }
+}
+
+type ReportRead = {
+  dbNowMs: bigint;
+  newestRevision: number | null;
+  state: string | null;
+  issuedAtMs: bigint | null;
+  moved: number;
+};
+
+/**
+ * Records a result report for one attempt (policy section 8 item 5): moves
+ * the attempt only from a state the report is about, latches when the
+ * report or a revision mismatch calls for it, queues the day's latch alert,
+ * and is never refused for a revision mismatch (section 6) -- the report is
+ * kept and latches instead. A report about a state the attempt is no longer
+ * in, about an unknown attempt, or an "unreported" claim before twelve
+ * minutes, records nothing.
+ */
+export async function reportQaReleaseMergeResult(input: {
+  callerRevision: number | null;
+  attemptId: string;
+  report: QaReleaseMergeReport;
+  budget: QaReleaseRoundBudget;
+}): Promise<QaReleaseReportResult> {
+  const own = qaReleaseReportEffect(input.report);
+  // Whether the move is the one a revision mismatch withholds.
+  const closesAsSuccess = own.move?.to === "closed" && own.move.outcome === "deployed";
+  const unreportedInterval = `${QA_RELEASE_UNREPORTED_AFTER_MS} milliseconds`;
+  try {
+    return await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT
+          set_config('statement_timeout', ${String(REPORT.statementMs)}, true),
+          set_config('idle_in_transaction_session_timeout', ${String(REPORT.idleMs)}, true),
+          CASE WHEN current_setting('server_version_num')::int >= 170000
+            THEN set_config('transaction_timeout', ${String(REPORT.transactionMs)}, true)
+          END`;
+        await takeAuditChainLock(tx);
+        // One audit row for the attempt change and the latch event both:
+        // the two tables' triggers accept a row targeting this attempt.
+        const auditLogId = await writeSystemAuditLog({
+          tx,
+          systemActor: "qa-release-merge-lane",
+          action: QA_RELEASE_MERGE_ATTEMPT_REPORTED_ACTION,
+          targetType: "QaReleaseMergeAttempt",
+          targetId: input.attemptId,
+          summary: `Recorded a merge lane ${input.report.kind} report.`,
+          metadata: { report: input.report, callerRevision: input.callerRevision },
+        });
+        // One statement: the newest revision, the attempt (locked) and the
+        // conditional move, decided on what that same statement reads.
+        const [read] = await tx.$queryRaw<ReportRead[]>`WITH c AS (
+            SELECT "revision" FROM "QaReleaseOperatorControl" ORDER BY "revision" DESC LIMIT 1
+          ), cur AS (
+            SELECT "id", "state", "issuedAt" FROM "QaReleaseMergeAttempt" WHERE "id" = ${input.attemptId} FOR UPDATE
+          ), u AS (
+            UPDATE "QaReleaseMergeAttempt" a
+               SET "state" = ${own.move?.to ?? "closed"},
+                   "outcome" = ${own.move?.outcome ?? null},
+                   "mergeCommitSha" = coalesce(${own.move?.mergeCommitSha ?? null}, a."mergeCommitSha"),
+                   "lastAuditLogId" = ${auditLogId}
+              FROM cur
+             WHERE a."id" = cur."id"
+               AND ${own.move !== null}
+               AND cur."state" = ANY(${[...own.from]}::text[])
+               AND (${!closesAsSuccess} OR (SELECT "revision" FROM c) IS NOT DISTINCT FROM ${input.callerRevision}::int)
+               AND (${input.report.kind !== "unreported"} OR cur."issuedAt" <= clock_timestamp() - ${unreportedInterval}::interval)
+            RETURNING a."id"
+          )
+          SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
+                 (SELECT "revision" FROM c) AS "newestRevision",
+                 (SELECT "state" FROM cur) AS "state",
+                 (SELECT floor(extract(epoch FROM "issuedAt") * 1000)::bigint FROM cur) AS "issuedAtMs",
+                 (SELECT count(*)::int FROM u) AS "moved"`;
+        const deadline = new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt));
+
+        if (read.state === null) throw new ReportRefused("attempt_unknown");
+        if (!(own.from as readonly string[]).includes(read.state)) throw new ReportRefused("state_moved");
+        if (input.report.kind === "unreported" && Number(read.dbNowMs) - Number(read.issuedAtMs) < QA_RELEASE_UNREPORTED_AFTER_MS) {
+          throw new ReportRefused("too_early");
+        }
+        const revisionMatched = read.newestRevision !== null && read.newestRevision === input.callerRevision;
+        const effect = qaReleaseReportEffectUnderRevision(own, revisionMatched);
+        const moved = read.moved === 1;
+        // The statement moved exactly when the effect says it should.
+        if (moved !== (effect.move !== null)) throw new Error("qa_release_merge_report_move_mismatch");
+
+        if (effect.latch !== null) {
+          await tx.$executeRaw`INSERT INTO "QaReleaseMergeLaneLatch" ("sequence", "latched", "reason", "attemptId", "auditLogId")
+            SELECT coalesce(max("sequence"), 0) + 1, true, ${effect.latch}, ${input.attemptId}, ${auditLogId}
+              FROM "QaReleaseMergeLaneLatch"`;
+          const queued = await enqueueNotificationDeliveryOnce(tx, {
+            kind: NOTIFICATION_KIND.qaReleaseMergeLaneLatched,
+            referenceId: `merge-lane-latch:${new Date(Number(read.dbNowMs)).toISOString().slice(0, 10)}`,
+          });
+          if (queued === null) throw new Error("qa_release_merge_lane_alert_not_visible");
+        }
+        const [clock] = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${deadline}::timestamptz AS late`;
+        if (clock?.late !== false) throw new QaReleaseMergeLaneLate();
+        return { recorded: true as const, moved, latched: effect.latch, revisionMatched };
+      },
+      { maxWait: 5_000, timeout: REPORT.prismaMs },
+    );
+  } catch (error) {
+    if (error instanceof ReportRefused) return { recorded: false, reason: error.reason };
+    throw error;
+  }
 }

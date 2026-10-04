@@ -11,7 +11,12 @@ import { escapeHtml } from "@/lib/supportNotificationEmail";
  * re-renders and the provider's idempotency key needs the same payload.
  */
 
-export type QaReleaseOperatorEmailKind = "digest_stale" | "monitor_failed" | "attention" | "digest_recorded";
+export type QaReleaseOperatorEmailKind =
+  | "digest_stale"
+  | "monitor_failed"
+  | "attention"
+  | "digest_recorded"
+  | "merge_lane_latched";
 
 /** `stale:YYYY-MM-DD`, the reference id the Monitor enqueues under. */
 const STALE_REFERENCE = /^stale:(\d{4}-\d{2}-\d{2})$/;
@@ -37,11 +42,18 @@ const RECORDED_REFERENCE = /^recorded:(\d{4}-\d{2}-\d{2})$/;
 export const qaReleaseDigestRecordedDateFromReference = (referenceId: string): string | null =>
   RECORDED_REFERENCE.exec(referenceId)?.[1] ?? null;
 
+/** `merge-lane-latch:YYYY-MM-DD`, the database clock's UTC date of the latch. */
+const MERGE_LANE_LATCH_REFERENCE = /^merge-lane-latch:(\d{4}-\d{2}-\d{2})$/;
+
+export const qaReleaseMergeLaneLatchDateFromReference = (referenceId: string): string | null =>
+  MERGE_LANE_LATCH_REFERENCE.exec(referenceId)?.[1] ?? null;
+
 const SUBJECTS: Record<QaReleaseOperatorEmailKind, string> = {
   digest_stale: "Tomverse QA release digest has gone quiet",
   monitor_failed: "Tomverse QA release digest check could not finish",
   attention: "Tomverse QA release agent needs a check",
   digest_recorded: "Tomverse QA release digest recorded",
+  merge_lane_latched: "Tomverse develop merge lane stopped",
 };
 
 const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
@@ -53,6 +65,8 @@ const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
     "The QA release digest check found the recorded operator control and the running configuration disagree: a service presented an operator control revision other than the newest, or the digest secret is missing while the agent is recorded as on. Nothing was decided or changed; open the Agent digests page to compare the newest operator control revision with the services' settings.",
   digest_recorded:
     "The QA release digest for this date was recorded. It is a report, not a judgement: nothing was decided or changed. Open the Agent digests page to read it.",
+  merge_lane_latched:
+    "The QA release merge lane stopped merging develop pull requests because an outcome was unknown or a staging deployment did not succeed. It merges nothing until a person releases the latch in Admin. Open the Agent digests page to see the reason, the attempt and the staging deployments.",
 };
 
 export const buildQaReleaseOperatorEmail = (

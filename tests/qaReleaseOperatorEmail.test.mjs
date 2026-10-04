@@ -5,6 +5,7 @@ import {
   buildQaReleaseOperatorEmail,
   qaReleaseAttentionDateFromReference,
   qaReleaseDigestRecordedDateFromReference,
+  qaReleaseMergeLaneLatchDateFromReference,
   qaReleaseMonitorFailureDateFromReference,
   qaReleaseStaleDateFromReference,
 } from "../lib/qaReleaseOperatorEmail.ts";
@@ -40,6 +41,14 @@ test("the recorded notice says it is a report, with the digest's date", () => {
   assert.match(email.text, /Date \(UTC\): 2026-10-02/);
   assert.equal(qaReleaseDigestRecordedDateFromReference("recorded:2026-10-02"), "2026-10-02");
   assert.equal(qaReleaseDigestRecordedDateFromReference("attention:2026-10-02"), null);
+});
+
+test("the merge lane latch alert says the lane stopped and a person releases it", () => {
+  const email = buildQaReleaseOperatorEmail("merge_lane_latched", { date: "2026-10-04", consoleUrl: "https://tomverse.app/x" });
+  assert.equal(email.subject, "Tomverse develop merge lane stopped");
+  assert.match(email.text, /until a person releases the latch/);
+  assert.equal(qaReleaseMergeLaneLatchDateFromReference("merge-lane-latch:2026-10-04"), "2026-10-04");
+  assert.equal(qaReleaseMergeLaneLatchDateFromReference("attention:2026-10-04"), null);
 });
 
 test("each kind reads only its own reference shape", () => {
