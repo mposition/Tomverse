@@ -35,10 +35,12 @@ const q = (sql: string, params?: unknown[]) => (params ? client.query(sql, param
 async function readCatalogue() {
   const tables = [...OPS_OBSERVER_OWN_TABLES, ...OPS_OBSERVER_SHARED_TABLES];
   const triggers = await q(
-    `SELECT c.relname AS "table", t.tgname AS name, t.tgenabled AS enabled, p.proname AS "functionName",
+    `SELECT c.relname AS "table", n.nspname AS "tableSchema", t.tgname AS name, t.tgenabled AS enabled,
+            p.proname AS "functionName", pn.nspname AS "functionSchema",
             t.tgdeferrable AS deferrable, t.tginitdeferred AS "initiallyDeferred"
        FROM pg_catalog.pg_trigger t
        JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+       JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace
        JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = $1 AND c.relname = ANY($2) AND NOT t.tgisinternal`,
@@ -109,6 +111,14 @@ test("the ops-observer catalogue", { skip: !rawUrl }, async (t) => {
                   CREATE TRIGGER "OpsObserverTransition_guard" BEFORE INSERT OR UPDATE OR DELETE ON "OpsObserverTransition"
                     FOR EACH ROW EXECUTE FUNCTION ops_observer_noop()`,
         /OpsObserverTransition_guard runs ops_observer_noop/);
+      // The same function name in another schema is a different function.
+      await seen(`CREATE SCHEMA "${schema}_shadow";
+                  CREATE FUNCTION "${schema}_shadow".ops_observer_transition_guard() RETURNS trigger LANGUAGE plpgsql
+                    AS 'BEGIN RETURN NEW; END';
+                  DROP TRIGGER "OpsObserverTransition_guard" ON "OpsObserverTransition";
+                  CREATE TRIGGER "OpsObserverTransition_guard" BEFORE INSERT OR UPDATE OR DELETE ON "OpsObserverTransition"
+                    FOR EACH ROW EXECUTE FUNCTION "${schema}_shadow".ops_observer_transition_guard()`,
+        /OpsObserverTransition_guard runs a function outside its table's schema/);
       await seen(`CREATE TRIGGER late_addition BEFORE INSERT ON "OpsObserverGenesis" FOR EACH ROW EXECUTE FUNCTION ops_observer_genesis_guard()`,
         /unexpected late_addition/);
       await seen(`ALTER TABLE "AgentDigestItem" ADD CONSTRAINT digest_self_fkey FOREIGN KEY (id) REFERENCES "AgentDigestItem"(id) DEFERRABLE`,

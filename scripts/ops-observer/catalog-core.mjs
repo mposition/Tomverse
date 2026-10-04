@@ -141,8 +141,10 @@ function exactSet(problems, label, expected, observed) {
 
 /**
  * Compares catalogue rows against the expected sets. Rows:
- *   triggers:    { table, name, enabled, functionName, deferrable, initiallyDeferred }
- *                (tgisinternal = false; enabled is tgenabled, functionName is tgfoid's proname)
+ *   triggers:    { table, tableSchema, name, enabled, functionName, functionSchema,
+ *                  deferrable, initiallyDeferred }
+ *                (tgisinternal = false; enabled is tgenabled; functionName and
+ *                functionSchema are tgfoid's proname and its namespace)
  *   constraints: { table, name, type, deferrable, initiallyDeferred }
  *   indexes:     { table, name }
  * Returns a list of problems; empty means T3a passes.
@@ -176,6 +178,11 @@ export function catalogProblems({ triggers, constraints, indexes }) {
       if (row.enabled !== TRIGGER_ENABLED) problems.push(`${key(table, row.name)} is not enabled`);
       const fn = EXPECTED_TRIGGER_FUNCTIONS[row.name];
       if (fn !== undefined && row.functionName !== fn) problems.push(`${key(table, row.name)} runs ${row.functionName}`);
+      // The migrations create each function beside its table. A same-named
+      // function in another schema is a different function.
+      if (typeof row.tableSchema !== "string" || row.functionSchema !== row.tableSchema) {
+        problems.push(`${key(table, row.name)} runs a function outside its table's schema`);
+      }
     }
     for (const row of [...tableTriggers, ...tableConstraints]) {
       const want = deferred(row.name);

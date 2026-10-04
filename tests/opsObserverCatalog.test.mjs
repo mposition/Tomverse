@@ -6,7 +6,7 @@
 // what the migrations create.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -19,19 +19,24 @@ import {
   catalogProblems,
 } from "../scripts/ops-observer/catalog-core.mjs";
 
-const MIGRATIONS = [
-  "20261003070000_ops_observer_genesis_state",
-  "20261003090000_ops_observer_delivery",
-  "20261004010000_ops_observer_transition",
-].map((name) => readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8"));
+// Every ops-observer migration, found rather than listed, so a new one cannot
+// add a catalogue object this check never reads.
+const MIGRATION_DIRS = readdirSync(new URL("../prisma/migrations/", import.meta.url)).filter((name) =>
+  /_ops_observer_/.test(name),
+);
+const MIGRATIONS = MIGRATION_DIRS.map((name) =>
+  readFileSync(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8"),
+);
 
 function soundCatalogue() {
   const isDeferred = (name) => OPS_OBSERVER_DEFERRED_DEADLINE_TRIGGERS.includes(name);
   const triggers = Object.entries(EXPECTED_TRIGGERS).flatMap(([table, names]) =>
     names.map((name) => ({
       table,
+      tableSchema: "public",
       name,
       enabled: "O",
+      functionSchema: "public",
       functionName: EXPECTED_TRIGGER_FUNCTIONS[name],
       deferrable: isDeferred(name),
       initiallyDeferred: isDeferred(name),
@@ -83,6 +88,8 @@ test("a missing, extra, disabled, redirected or altered rule is a problem", () =
     (c) => delete trigger(c, "OpsObserverState_guard").enabled,
     (c) => (trigger(c, "OpsObserverTransition_guard").functionName = "ops_observer_noop"),
     (c) => (trigger(c, "ops_observer_genesis_deadline_check").functionName = "ops_observer_noop"),
+    (c) => (trigger(c, "OpsObserverTransition_guard").functionSchema = "elsewhere"),
+    (c) => delete trigger(c, "OpsObserverTransition_guard").tableSchema,
     // A deadline check made immediate, or anything else made deferrable.
     (c) => (trigger(c, "ops_observer_state_deadline_check").initiallyDeferred = false),
     (c) => (c.constraints.find((r) => r.name === "ops_observer_genesis_deadline_check").deferrable = false),
@@ -116,11 +123,15 @@ test("the expected sets are exactly what the migration text creates", () => {
   const sql = MIGRATIONS.join("\n");
   const triggers = {};
   const functions = {};
-  for (const [, name, table, fn] of sql.matchAll(
-    /CREATE (?:CONSTRAINT )?TRIGGER "?([A-Za-z_]+)"?\s+(?:BEFORE|AFTER)[^;]*?\bON "(\w+)"[^;]*?EXECUTE FUNCTION (\w+)\(\)/g,
+  for (const [statement, constraintKeyword, name, table, fn] of sql.matchAll(
+    /CREATE (CONSTRAINT )?TRIGGER "?([A-Za-z_]+)"?\s+(?:BEFORE|AFTER)[^;]*?\bON "(\w+)"[^;]*?EXECUTE FUNCTION (\w+)\(\)/g,
   )) {
     (triggers[table] ??= []).push(name);
     functions[name] = fn;
+    // A deadline check is a deferred constraint trigger in the text itself,
+    // not just in the list this test is checking.
+    const deferredInText = Boolean(constraintKeyword) && /DEFERRABLE INITIALLY DEFERRED/.test(statement);
+    assert.equal(deferredInText, OPS_OBSERVER_DEFERRED_DEADLINE_TRIGGERS.includes(name), name);
   }
   const constraints = {};
   for (const [, name] of sql.matchAll(/CONSTRAINT "(OpsObserver\w+)"/g)) {
