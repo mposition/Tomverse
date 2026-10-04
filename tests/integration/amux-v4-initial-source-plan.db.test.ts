@@ -181,12 +181,15 @@ test("unreviewed GitHub scope and mismatched owner cannot create an initial plan
 test("source-plan row, idea pointer and canonical audit roll back together", async () => {
   const ideaId = await createIdea({ idea: "SYNTHETIC_ROLLBACK_PLAN" });
   let revisionId = "";
+  let ownerAuditId = "";
   await assert.rejects(prisma.$transaction(async (tx) => {
-    const result = await createInitialIdeaOnlySourcePlan(tx, { ideaId, actorUserId, keys });
+    const result = await commitInitialIdeaSourcePlan(tx, { session, request, ideaId, keys });
     revisionId = result.revisionId;
+    ownerAuditId = result.ownerAuditId;
     throw new Error("synthetic rollback");
   }), (error: unknown) => error instanceof Error && error.message === "synthetic rollback");
   assert.ok(revisionId, "the source plan must have been created before rollback");
+  assert.ok(ownerAuditId, "the owner audit must have been created before rollback");
   const idea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: ideaId } });
   assert.equal(idea.currentSourcePlanRevisionId, null);
   assert.equal(await prisma.amuxIdeaSourcePlanRevision.count({ where: { ideaId } }), 0);
@@ -194,6 +197,6 @@ test("source-plan row, idea pointer and canonical audit roll back together", asy
     where: { action: "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED", targetId: revisionId },
   }), 0);
   assert.equal(await prisma.adminAuditLog.count({
-    where: { action: "amux.v4.initial_source_plan.requested", targetId: ideaId },
+    where: { id: ownerAuditId, action: "amux.v4.initial_source_plan.requested", targetId: ideaId },
   }), 0);
 });
