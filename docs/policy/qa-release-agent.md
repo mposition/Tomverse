@@ -1,7 +1,7 @@
 # QA·릴리스 Agent 정책
 
-상태: **승인됨(버전 4).** 최초 작성 2026-10-02, 버전 1 승인 2026-10-02, 버전 2 승인 2026-10-02, 버전 3 승인 2026-10-03, 버전 4 승인 2026-10-03.
-approvedBy: mposition · approvedAt: 2026-10-03 · 정책 버전: 4
+상태: **승인됨(버전 5).** 최초 작성 2026-10-02, 버전 1 승인 2026-10-02, 버전 2 승인 2026-10-02, 버전 3 승인 2026-10-03, 버전 4 승인 2026-10-03, 버전 5 승인 2026-10-05.
+approvedBy: mposition · approvedAt: 2026-10-05 · 정책 버전: 5
 allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 | 버전 | 승인 | 변경 |
@@ -12,12 +12,13 @@ allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 | 2 | 2026-10-02 mposition | 버전 1의 독립 검토 반영 — 저장소 루트 파일 전체와 이 Agent의 테이블을 바꾸는 migration을 게이트로, develop 직접 push를 GitHub 설정으로 막고 그 관측을 S-M1 진입 조건으로, main ruleset은 시험 브랜치 관측 뒤에, 지시는 현재 revision·스위치·latch에 결속해 GitHub 호출 직전에 본 앱이 소비, 세 서비스 모두 revision 번호, kill switch는 "값이 있으면 정지", staging 복구 runbook을 S-M2 진입 조건으로, timeout의 문장 수와 Prisma 값, 승인 판정 0·4번 보강, glob 의미 |
 | 3 | 2026-10-03 mposition | 버전 2의 독립 검토 반영 — 승인 판정 0번에서 genesis PR을 순환 밖으로, 4번을 기록으로 판정 가능한 조건으로, 지시 소비가 PR 번호·head SHA·base를 다시 확인하고 병합 호출은 head SHA로 고정, 본 앱은 자기가 읽을 수 있는 스위치만 판정하고 서비스 변수는 서비스가 스스로 판정, 시험 브랜치는 실제 보호 설정을 그대로 복제, App 갱신 제한을 develop 밖 모든 브랜치로 넓혀 base 변경 경쟁을 막고 병합 뒤 base를 확인, 모든 경로의 `package.json`·lockfile·`.npmrc`를 게이트로, 어느 문장이 규범인지 헤더에 명시, staging 복구 runbook의 내용 정정, kill switch 판정을 문장으로 고정, 시험용 App 자격증명과 실제 키 설정의 순서, timeout 식의 유휴 칸. S0 구현에서 확정된 값(경로, 문장 수, Monitor cron) 반영 |
 | 4 | 2026-10-03 mposition | S-M0 구현 전에 확정할 병합 레인 값 — cron 10분, 서비스 hard timeout 10분, 본 앱 트랜잭션을 둘이 아니라 서비스가 부르는 셋(지시 발급, 지시 소비, 결과 보고)과 사람의 latch 해제로 바로잡고 각 문장 수와 유도 최대, 시도는 배포 결과(merge train의 deploymentOutcome 판정)까지 열어 두고 latch는 시도를 닫지 않으며 불명이거나 결과 보고가 오지 않은 시도는 순서 있는 PR 재조회(조상 판정은 비교 API의 관계로만)로 정하고, 규칙으로 끝나지 않는 시도는 사람이 latch 해제에서 확인한 사실(상태마다 두 가지)을 골라 조건부로 끝내며 0행이면 되돌림(A = 9), 비교 API는 `{merge commit}...develop` 방향, 4항의 SKIPPED 판정을 deploymentOutcome(연속 3건)으로 맞춤, unknown·대기 상한(15분·120분)에서 latch하고 열어 둠, 시도를 닫거나 옮긴 회차는 다른 일을 하지 않음, 결과 보고는 revision이 달라도 거절하지 않고 latch, 마감 검사는 서비스가 부르는 route의 것임을 명시, S-M2 7일. develop classic protection의 필수 승인 0건 유지(8절 10항의 운영자 결정, 2026-10-03 관측 기록) |
+| 5 | 2026-10-05 mposition | 부록 A에 `components/admin/QaRelease*`를 더함 — S-M0에서 만든 병합 레인 Admin 화면(`components/admin/QaReleaseMergeLaneSection.tsx`, latch 표시와 사람의 latch 해제 양식)이 기존 패턴(`components/admin/AdminAgentDigests*`) 밖에 있어, 이 Agent의 판정 표시를 바꾸는 PR이 무인 병합 제외에서 빠지던 것을 바로잡음. 그 밖의 본문 변경 없음 |
 
 **규범은 이 파일의 `develop` 현재 내용 하나입니다.** 이전 버전의 본문은 그 버전을 병합한 PR(버전 1 #1946, 버전 2 #1950,
-버전 3 #1986)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
-버전 4로 효력을 갖고, 그 전까지는 버전 3이 효력입니다.
+버전 3 #1986, 버전 4 #2042)의 git 기록에 있으며, 효력이 없습니다. 이 버전의 승인 기록이 `develop`에 병합되는 순간 이 파일 전체가
+버전 5로 효력을 갖고, 그 전까지는 버전 4가 효력입니다.
 
-운영자 `mposition`이 2026-10-02 대화 세션에서 버전 1과 버전 2를, 2026-10-03 대화 세션에서 버전 3과 버전 4를 승인했다. 이 문서는 이 Agent 구현의 규범 근거다. 다만
+운영자 `mposition`이 2026-10-02 대화 세션에서 버전 1과 버전 2를, 2026-10-03 대화 세션에서 버전 3과 버전 4를, 2026-10-05 대화 세션에서 버전 5를 승인했다. 이 문서는 이 Agent 구현의 규범 근거다. 다만
 **아래 승인 판정이 통과하기 전에는(이 승인 기록이 `develop`에 병합되기 전을 포함해) 그 버전이 처음 허용하는 단계의 어떤 코드도
 작성·병합하지 않는다.** 이 문서는 Claude가 설계하고 독립 검토(교차 vendor)로 `accept` 판정을 받은 비공개 설계서를 공개 계약으로
 옮긴 것이다. 내용 변경은 운영자 승인과 정책 버전 증가가 필요하다. 승인은 단계별 착수 조건을 없애지 않으며, 어떤
@@ -322,6 +323,7 @@ app/api/internal/agents/qa-release/**
 app/api/admin/agent-digests/**
 app/(site)/(application)/admin/agent-digests/**
 components/admin/AdminAgentDigests*
+components/admin/QaRelease*
 tests/qaRelease*
 tests/agentDigest*
 tests/agentPolicyApproval*
