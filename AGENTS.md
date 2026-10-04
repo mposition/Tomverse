@@ -235,6 +235,27 @@ staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
 `gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
 **사람이 켭니다.**
 
+## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
+
+**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
+PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
+바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
+train은 draft를 건너뜁니다).
+
+```
+gh pr ready <번호>        작업 완료 — CI 시작
+gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
+```
+
+- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
+  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
+  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
+- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
+  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
+  돌립니다.
+- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
+  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
@@ -1157,6 +1178,31 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`은 route와,
+  운영자가 staging에서 실행하는 검증 기록 생성기의 서명 변조 probe에서만 읽습니다(값은 출력하지
+  않고 HMAC 계산에만 씁니다, 운영자 승인 2026-10-02). 게시물은 바꾸지 않습니다 — 적용은 S2f이고
+  staging 서명 이후입니다.
+- **S2e-verification(검증 기록과 서명)**: `lib/marketingWebhookRecordDraft.ts`,
+  `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
+  `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
+  답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
+  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
+  강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
+  2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
 
 # 엔지니어링 Agent
 

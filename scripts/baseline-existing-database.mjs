@@ -10,7 +10,7 @@ import {
 import {
   pendingProbes,
   presenceAnswer,
-  presenceQuery,
+  presenceQueryFor,
   presenceVerdict,
 } from "./baseline-presence-core.mjs";
 
@@ -72,7 +72,8 @@ import {
  * compares. A migration that adds only a partial or expression index, a CHECK
  * constraint, a trigger or a function matches before it is applied as well as
  * after, so on its own it would always be refused. Such a migration names the
- * relation it creates (`-- baseline-check: present-if-relation "Name"`); when
+ * relation it creates (`-- baseline-check: present-if-relation "Name"`), or the
+ * function (`present-if-function "name"`) when it creates only a function; when
  * every pending migration names one and every one is proven absent, the deploy
  * goes on.
  * See `scripts/baseline-presence-core.mjs`.
@@ -207,20 +208,21 @@ try {
   );
   if (pending.length > 0 && schemaMatchesPrisma()) {
     // The match is no evidence about a migration the diff cannot see. Each one
-    // may name the relation it creates; only proof that every one of them is
+    // may name the relation or function it creates; only proof that every one of them is
     // absent lets the deploy go on.
     const { probes, undeclared } = pendingProbes(pending, (name) =>
       readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8")
     );
     if (undeclared.length === 0) {
       const answers = new Map();
-      for (const { name, relation } of probes) {
+      for (const probe of probes) {
+        const { name } = probe;
         // One fixed question with the declared name bound as a parameter: a
         // migration supplies a name, never SQL. Read-only and rolled back as
         // well, though the fixed query has nothing to write.
         await client.query("BEGIN READ ONLY");
         try {
-          const { rows } = await client.query(presenceQuery(relation));
+          const { rows } = await client.query(presenceQueryFor(probe));
           // Exactly one row of one boolean, or no answer at all.
           answers.set(name, presenceAnswer(rows));
         } catch {
@@ -232,12 +234,12 @@ try {
       const verdict = presenceVerdict(pending, answers);
       if (verdict.proceed) {
         log(
-          "Pending migrations change nothing schema.prisma describes, and the relation each one declares is absent. Letting migrate deploy apply them.",
+          "Pending migrations change nothing schema.prisma describes, and the relation or function each one declares is absent. Letting migrate deploy apply them.",
           { pending }
         );
       } else {
         fail(
-          "This database already matches schema.prisma, and the relations these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
+          "This database already matches schema.prisma, and the relations or functions these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
           { pending, notProvenAbsent: verdict.notProvenAbsent }
         );
       }

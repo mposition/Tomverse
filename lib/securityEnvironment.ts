@@ -24,7 +24,12 @@ const databaseTransportStatus = (value: string | undefined) => {
   if (!configured(value)) return false;
   try {
     const url = new URL(value!);
-    if (isPrivateDatabaseHost(url.hostname.toLowerCase())) return true;
+    // WHATWG `hostname` keeps the brackets for an IPv6 host, so the `::1` in
+    // the list above never matched a `[::1]` database host, and the check then
+    // demanded verify-full of a loopback connection that has no network to
+    // protect -- the grant it already makes unconditionally for `127.0.0.1`.
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (isPrivateDatabaseHost(hostname)) return true;
     return ["verify-full", "verify-ca"].includes(
       (url.searchParams.get("sslmode") || "").toLowerCase()
     );

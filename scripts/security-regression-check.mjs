@@ -1034,11 +1034,17 @@ const checks = [
   },
   {
     name: "Production readiness fails closed on database or security configuration",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       source.includes('SELECT 1 AS "ready"') &&
       source.includes("getSecurityEnvironmentStatus") &&
-      source.includes("database && securityEnvironment") &&
+      source.includes("database && securityEnvironment"),
+  },
+  {
+    name: "The readiness route answers 503 and reports what the shared checks found",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
+      source.includes("computeReadinessChecks") &&
       source.includes("status: ready ? 200 : 503") &&
       source.includes("reportOperationalDependencyStatus") &&
       source.includes("DATABASE_READINESS_FAILED") &&
@@ -1380,7 +1386,7 @@ const checks = [
   },
   {
     name: "A thrown image-budget check reads as not ready, never as healthy",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       // `status?.ready ?? true` made the loudest failure the quietest signal:
       // a missing environment variable was fatal, while the check that finds
@@ -1757,9 +1763,15 @@ const checks = [
   },
   {
     name: "Readiness gates on the image provider budget while the flag is on",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       source.includes("getImageProviderBudgetReadiness") &&
+      source.includes("imageProviderBudget &&"),
+  },
+  {
+    name: "The readiness route reports a broken image provider budget",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
       source.includes("IMAGE_PROVIDER_COST_BUDGET_NOT_READY") &&
       source.includes("imageProviderBudget"),
   },

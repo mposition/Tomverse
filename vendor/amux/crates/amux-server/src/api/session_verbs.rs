@@ -4666,9 +4666,7 @@ fn mint_capture_card(
         conn,
         &crate::db::board_store::NewIssue {
             acceptance_criteria: None,
-            next_action: (capture_status == "doing").then(|| {
-                "Read the linked delivered prompt and carry out its approved task".into()
-            }),
+            next_action: Some("Read the delivered prompt, carry out its requested work, and record the result on this card".into()),
             title,
             desc: captured_desc,
             // Neither Doing nor triggered Backlog is redispatched (AMUX-2613).
@@ -23660,19 +23658,30 @@ mod tests {
         }
         let mut headers = HeaderMap::new();
         headers.insert("x-amux-worker", "peer-steer-caller".parse().unwrap());
+        let before_s = now_i64();
         let response = steer_mutate(&st, "peer-steer-recipient", &Method::POST, &headers,
             &json!({"text":"Rebuild the shard index for tenant 42 and report the residual count",
                 "record_history":true, "no_board":true})).await;
+        let after_s = now_i64();
         assert_eq!(response.status(), StatusCode::OK);
         let body: Value = serde_json::from_slice(
             &axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
         assert!(body["no_board_refused"].is_null(), "coordination does not promise a task: {body}");
         let conn = st.store.read().unwrap();
+        let history_rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cmd_history WHERE session='peer-steer-recipient'", [], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(history_rows, 1, "fixture must identify one queued history row");
         let (kind, origin, pending, card): (String, String, i64, Option<String>) = conn.query_row(
             "SELECT type, origin, capture_pending, card_id FROM cmd_history WHERE session='peer-steer-recipient'",
             [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap();
         assert_eq!((kind.as_str(), origin.as_str(), pending, card),
             ("session", "peer-steer-caller", 0, None));
+        let queued_at: i64 = conn.query_row(
+            "SELECT queued_at FROM cmd_history WHERE session='peer-steer-recipient'", [], |r| r.get(0),
+        ).unwrap();
+        assert!((before_s * 1000..(after_s + 1) * 1000).contains(&queued_at),
+            "queued history must use epoch milliseconds");
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM issues WHERE session='peer-steer-recipient'",
             [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
@@ -24122,6 +24131,10 @@ mod tests {
             steer_enqueue(&st, "raw", "owner text", "", "").await.is_ok(),
             "the owner's send must still reach an isolated lane — that is the documented boundary"
         );
+        let queued_at: f64 = st.store.read().unwrap().query_row(
+            "SELECT queued_at FROM steering_queue WHERE session='raw'", [], |r| r.get(0),
+        ).unwrap();
+        assert!((now_f64() - queued_at).abs() < 60.0, "steering queue must use epoch seconds");
 
         // CONTROL: an ORDINARY lane still takes automation, or this fix is
         // "turn the fleet off" and every assertion above would still pass.
@@ -25446,7 +25459,7 @@ mod tests {
     #[tokio::test]
     async fn a_human_prompt_auto_captures_and_links_a_ledger_card() {
         let (st, _dir) = state();
-        let q = |sql: &'static str, s: &'static str| -> Option<String> {
+        let q = |sql: &str, s: &str| -> Option<String> {
             st.store
                 .read()
                 .unwrap()
@@ -25479,7 +25492,7 @@ mod tests {
         assert_eq!(status, "doing", "capture mints in doing, not todo (AMUX-2613)");
         assert_eq!(
             next_action.as_deref(),
-            Some("Read the linked delivered prompt and carry out its approved task"),
+            Some("Read the delivered prompt, carry out its requested work, and record the result on this card"),
             "a captured Doing card must explain how work continues",
         );
 
@@ -29370,6 +29383,7 @@ mod steer_boundary_tests {
                 assert!(first.is_some(), "a new task must card even with an open manual card");
                 assert_eq!(first.as_ref().unwrap().status, "backlog", "a delivered prompt must preserve the active manual claim");
                 assert!(first.as_ref().unwrap().source_ref.is_some());
+                assert!(first.as_ref().unwrap().next_action.as_deref().unwrap_or_default().contains("claim this card"));
 
                 // In production the recorder atomically attaches the minted id
                 // to this exact cmd_history row; the retry predicate reads that

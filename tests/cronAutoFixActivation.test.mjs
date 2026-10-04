@@ -122,3 +122,11 @@ test("a 200 is validated before it becomes a build matrix", () => {
     "the failure must say that the incidents are already claimed and need releasing"
   );
 });
+
+test("the pipeline opens its PR and never merges it or arms auto-merge", () => {
+  // An armed PR merges the moment its checks pass, with no person in the path
+  // and past the merge train's hold on in-flight Railway deployments.
+  assert.doesNotMatch(WORKFLOW, /gh pr merge/);
+  assert.doesNotMatch(WORKFLOW, /--auto\b/);
+  assert.match(WORKFLOW, /gh pr create/);
+});
