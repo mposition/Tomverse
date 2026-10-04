@@ -13,7 +13,9 @@ import { amuxV4VerifiedCliOutputOrNull } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
-import { amuxV4CanClaimAnalysisCli } from
+import { AMUX_V4_APPROVED_ANALYSIS_CLI_CATALOG,
+  amuxV4ApprovedAnalysisCliForModel,
+  amuxV4CanClaimAnalysisCli } from
   "../lib/amux/ideaLocalApprovedCliCatalog.mjs";
 
 const origin = "https://staging.tomverse.example";
@@ -67,6 +69,16 @@ test("Codex candidates cannot consume claims without served-model attestation", 
     "claude-opus-5-5"), false);
   assert.equal(amuxV4CanClaimAnalysisCli({ ...futureApproved,
     reasoningEffort: "unknown" }, "claude-frontier-next"), false);
+});
+
+test("isolated S0 approval admits only the exact Claude CLI tuple", () => {
+  assert.equal(AMUX_V4_APPROVED_ANALYSIS_CLI_CATALOG.length, 1);
+  const approved = amuxV4ApprovedAnalysisCliForModel("claude-opus-5-5");
+  assert.deepEqual(approved, { provider: "anthropic", modelId: "claude-opus-5-5",
+    reasoningEffort: "high", egressHosts: ["api.anthropic.com"] });
+  assert.equal(amuxV4CanClaimAnalysisCli(approved, "claude-opus-5-5"), true);
+  assert.equal(amuxV4ApprovedAnalysisCliForModel("gpt-5.6-sol"), null);
+  assert.equal(amuxV4ApprovedAnalysisCliForModel("claude-frontier-next"), null);
 });
 
 test("unattested or refused CLI output cannot become a live draft", () => {
