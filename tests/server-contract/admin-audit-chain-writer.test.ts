@@ -532,7 +532,7 @@ test("the entry writer returns the hash it inserted with the id, and the id writ
   };
   const appended = await writeSystemAuditLogEntry(input);
   assert.deepEqual(appended, { id: "created-by-caller-tx", entryHash: createCall().data.entryHash });
-  assert.match(appended.entryHash ?? "", /^[0-9a-f]{64}$/);
+  assert.match(String(appended.entryHash), /^[0-9a-f]{64}$/);
   assert.deepEqual(kinds(), ["executeRaw", "queryRaw", "findFirst", "create"]);
 
   await loadSystemWriter();
