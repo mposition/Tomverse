@@ -40,6 +40,10 @@ if (process.platform !== "linux" ||
       parserReason: result.kind === "outcome_unknown" ? result.parserReason ?? null : null,
       rejectionPoint: result.kind === "outcome_unknown" ?
         result.rejectionPoint ?? null : null,
+      unexpectedEventType: result.kind === "outcome_unknown" ?
+        result.unexpectedEventType ?? null : null,
+      unexpectedEventPhase: result.kind === "outcome_unknown" ?
+        result.unexpectedEventPhase ?? null : null,
       childExitCode: result.kind === "outcome_unknown" ? result.childExitCode ?? null : null,
       approvedConnects: result.kind === "outcome_unknown" ?
         result.approvedConnects ?? null : null,

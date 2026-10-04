@@ -172,6 +172,37 @@ test("Claude parser diagnostic separates safe failure reasons without raw text",
   }
 });
 
+test("Claude S0 diagnostic reports only bounded unexpected event type and phase", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const init = { type: "system", subtype: "init", tools: [] };
+  const assistant = { type: "assistant", message: { role: "assistant",
+    content: [{ type: "text", text: "S0_OK" }] } };
+  for (const [events, expectedType, expectedPhase] of [
+    [[{ type: "rate_limit_event", secret: "must not leak" }],
+      "rate_limit_event", "before_init"],
+    [[init, { type: "stream_event" }], "stream_event", "after_init"],
+    [[init, assistant, { type: "user" }], "user", "after_assistant"],
+    [[init, assistant, claudeEnvelope(), { type: "future_secret_type" }],
+      "other", "after_result"],
+  ]) {
+    const stdout = Buffer.from(events.map((event) => JSON.stringify(event))
+      .join("\n"));
+    const expected = { kind: "outcome_unknown",
+      failureReason: "output_contract_mismatch",
+      rejectionPoint: "unexpected_event",
+      unexpectedEventType: expectedType,
+      unexpectedEventPhase: expectedPhase };
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true, syntheticEventType: true }), expected);
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true }), { kind: "outcome_unknown",
+      failureReason: "output_contract_mismatch",
+      rejectionPoint: "unexpected_event" });
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0),
+      { kind: "outcome_unknown" });
+  }
+});
+
 test("Codex parser diagnostic distinguishes tools, incomplete usage and failed turns", () => {
   const plan = planAmuxV4AnalysisCliInvocation(openai);
   const prefix = [{ type: "thread.started", thread_id: "fresh" },
