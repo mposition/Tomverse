@@ -72,17 +72,34 @@ export const pathDivergence = ({ path, base, ours, theirs }) => {
     if (typeof path !== "string" || path.length === 0) {
         return { path, note: "no path given" };
     }
-    if (ours === null || ours === undefined) {
-        return { path, note: "develop does not have this path; keeping develop would delete it" };
-    }
-    if (theirs === null || theirs === undefined) {
-        return {
-            path,
-            note: "main does not have this path; main may have deleted it, and keeping develop would resurrect it",
-        };
-    }
-    if (base === null || base === undefined) {
-        return { path, note: "the merge base does not have this path, so what main changed cannot be computed" };
+
+    // A side is a string, or `{ unavailable }` saying why there is no text. The
+    // three reasons read very differently and were collapsed to one once: a
+    // binary file present on both sides was reported as a path develop would
+    // delete. Only `absent` is a statement about the file existing.
+    const why = (side) => (typeof side === "string" ? null : (side?.unavailable ?? "unreadable"));
+    const explain = {
+        absent: "does not have this path",
+        binary: "has this path but it is not text, so a line comparison cannot say anything about it",
+        unreadable: "could not be read, so nothing is claimed about it",
+    };
+
+    for (const [name, side] of [
+        ["develop", ours],
+        ["main", theirs],
+        ["the merge base", base],
+    ]) {
+        const reason = why(side);
+        if (reason === null) continue;
+        const tail =
+            reason === "absent" && name === "develop"
+                ? "; keeping develop would delete it"
+                : reason === "absent" && name === "main"
+                  ? "; main may have deleted it, and keeping develop would resurrect it"
+                  : reason === "absent"
+                    ? ", so what main changed cannot be computed"
+                    : "";
+        return { path, undetermined: true, note: `${name} ${explain[reason]}${tail}` };
     }
 
     const baseLines = lines(base);
@@ -125,20 +142,23 @@ export const pathDivergence = ({ path, base, ours, theirs }) => {
  */
 export const divergenceReport = ({ conflicts, treeWouldEqualDevelop }) => {
     const paths = (Array.isArray(conflicts) ? conflicts : []).map(pathDivergence);
-    return {
-        paths,
-        treeWouldEqualDevelop: treeWouldEqualDevelop === true,
-        contentNeutral: treeWouldEqualDevelop === true,
-    };
+    // Three states, not two. A git command that failed, or a structural conflict
+    // `-X ours` does not resolve, leaves this unknown -- and "unknown" was being
+    // printed as "files would change", which is a claim nobody had checked.
+    const contentNeutral =
+        treeWouldEqualDevelop === true ? true : treeWouldEqualDevelop === false ? false : null;
+    return { paths, contentNeutral };
 };
 
 /** The report as text, for the job log a person reads before resolving. */
 export const describeDivergence = (report) =>
     [
         `${report.paths.length} conflicting path(s). Resolving every one to develop's side ` +
-            (report.contentNeutral
+            (report.contentNeutral === true
                 ? "would change no file — the merge would record ancestry only."
-                : "would still change files, so it is not an ancestry-only merge."),
+                : report.contentNeutral === false
+                  ? "would still change files, so it is not an ancestry-only merge."
+                  : "may or may not change files: that comparison could not be made here."),
         "",
         ...report.paths.map((entry) => `  ${entry.path}\n    ${entry.note}`),
         "",

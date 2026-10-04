@@ -119,17 +119,62 @@ test("order is part of the change", () => {
   assert.equal(entry.mainLinesPresent, false);
 });
 
-test("a missing side or base is reported rather than guessed", () => {
-  assert.match(pathDivergence({ path: "a", base: "x\n", theirs: "x\n", ours: null }).note, /would delete it/);
-  assert.match(pathDivergence({ path: "a", base: "x\n", theirs: null, ours: "x\n" }).note, /resurrect/);
-  assert.match(pathDivergence({ path: "a", base: null, theirs: "x\n", ours: "x\n" }).note, /merge base/);
+test("absent, binary and unreadable are three different answers", () => {
+  // Review round 2: all three were collapsed into "develop does not have this
+  // path; keeping develop would delete it", so a binary file present on both
+  // sides read as a deletion conflict, and a failed read read as one too.
+  const absent = pathDivergence({
+    path: "a",
+    base: "x\n",
+    theirs: "x\n",
+    ours: { unavailable: "absent" },
+  });
+  assert.match(absent.note, /develop does not have this path; keeping develop would delete it/);
+
+  const binary = pathDivergence({
+    path: "a.png",
+    base: "x\n",
+    theirs: "x\n",
+    ours: { unavailable: "binary" },
+  });
+  assert.match(binary.note, /not text/);
+  assert.doesNotMatch(binary.note, /delete/, "a binary file both sides have is not a deletion");
+
+  const unreadable = pathDivergence({
+    path: "a",
+    base: "x\n",
+    theirs: { unavailable: "unreadable" },
+    ours: "x\n",
+  });
+  assert.match(unreadable.note, /could not be read, so nothing is claimed/);
+  assert.doesNotMatch(unreadable.note, /resurrect/);
+
+  for (const entry of [absent, binary, unreadable]) assert.equal(entry.undetermined, true);
+
+  // An absent main is still reported as the resurrection risk it is.
+  assert.match(
+    pathDivergence({ path: "a", base: "x\n", theirs: { unavailable: "absent" }, ours: "x\n" }).note,
+    /resurrect/
+  );
+  assert.match(
+    pathDivergence({ path: "a", base: { unavailable: "absent" }, theirs: "x\n", ours: "x\n" }).note,
+    /merge base/
+  );
   assert.match(pathDivergence({ path: "", base: "x\n", theirs: "x\n", ours: "x\n" }).note, /no path/);
 });
 
-test("a tree that would still change files is not called content-neutral", () => {
-  for (const treeWouldEqualDevelop of [false, undefined, null, "true", 1]) {
-    const report = divergenceReport({ conflicts: [], treeWouldEqualDevelop });
-    assert.equal(report.contentNeutral, false, String(treeWouldEqualDevelop));
-    assert.match(describeDivergence(report), /would still change files/);
+test("the tree comparison has three states, and unknown is not false", () => {
+  // Review round 2: a failed git command was printed as "would still change
+  // files", which is a claim nobody had checked.
+  assert.equal(divergenceReport({ conflicts: [], treeWouldEqualDevelop: true }).contentNeutral, true);
+  assert.match(describeDivergence(divergenceReport({ conflicts: [], treeWouldEqualDevelop: true })), /would change no file/);
+
+  assert.equal(divergenceReport({ conflicts: [], treeWouldEqualDevelop: false }).contentNeutral, false);
+  assert.match(describeDivergence(divergenceReport({ conflicts: [], treeWouldEqualDevelop: false })), /would still change files/);
+
+  for (const unknown of [undefined, null, "true", 1]) {
+    const report = divergenceReport({ conflicts: [], treeWouldEqualDevelop: unknown });
+    assert.equal(report.contentNeutral, null, String(unknown));
+    assert.match(describeDivergence(report), /could not be made here/);
   }
 });
