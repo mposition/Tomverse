@@ -620,6 +620,16 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_status_check: {
+    owner: "database",
+    reason:
+      "The dark one-shot stage has no active writer. The database permits staged, separately run-approved, then permanently closed; any future admission must match this closed vocabulary.",
+  },
+  PromptRefinerVnextOneShotSlot_status_check: {
+    owner: "database",
+    reason:
+      "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxCliUsageInvocation_cli_check: {
     owner: "database",
@@ -963,6 +973,34 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  QaReleaseMergeAttempt_state_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_STATES",
+    reason:
+      "The merge lane attempt's lifecycle (docs/policy/qa-release-agent.md version 4, section 8 item 5): issued, consumed, awaiting_deploy, closed. The migration's trigger enforces the core's transition table; tests/integration/qa-release-merge-attempt.db.test.ts checks the two against each other.",
+  },
+  QaReleaseMergeLaneLatch_reason_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeLaneLatchCore.ts",
+    list: "QA_RELEASE_MERGE_LANE_LATCH_REASONS",
+    reason:
+      "Why the merge lane latched (docs/policy/qa-release-agent.md version 4, section 8 item 5). A set event carries one; a person's release carries none.",
+  },
+  QaReleaseMergeAttempt_outcome_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_OUTCOMES",
+    reason:
+      "Why a closed attempt closed, each naming who decided it: the lane from what it read, or a person through the latch release from what they confirmed. Set exactly when the state becomes closed.",
+  },
+  AgentDigestItem_agent_key_check: {
+    owner: "list",
+    module: "lib/agentDigestContract.ts",
+    list: "AGENT_DIGEST_AGENT_KEYS",
+    reason:
+      "The agents that may store digests in the shared AgentDigestItem table. Adding an agent is a reviewed migration that also gives it a kind list and a body retention; an unknown key would be a write no agent owns.",
+  },
   AmuxOrchestratorWrite_call_kind_check: {
     owner: "list",
     module: "lib/amux/orchestratorHaltCore.ts",
@@ -1004,6 +1042,153 @@ const REGISTRY = {
     list: "AMUX_INTAKE_APPROVAL_STATUSES",
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
+  OpsObserverDelivery_status_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "DELIVERY_STATUSES",
+    reason:
+      "reserved, confirmed, shadowed, abandoned. Created reserved and closed once; the trigger binds confirmed to a live genesis and shadowed to a shadow one, and a CHECK ties each status to its one timestamp.",
+  },
+  OpsObserverDelivery_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the genesis by the trigger, never written by a caller.",
+  },
+  OpsObserverDeliveryItem_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the reservation by the trigger, so a shadow item never occupies a live incident slot.",
+  },
+  OpsObserverDeliveryItem_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "MESSAGE_KINDS",
+    reason:
+      "new_open, worsening, reopen, recovery. Each kind is reserved once per incident within a mode (the unique on mode, signal, scope, kind, openedAt).",
+  },
+  OpsObserverDeliveryItem_origin_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "ITEM_ORIGINS",
+    reason:
+      "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
+  },
+  OpsObserverGenesis_reason_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_REASONS",
+    reason:
+      "initial, recovery, activation. The trigger holds each to its place in the chain: initial only first and shadow, recovery in the head mode, activation shadow to live once. Only the Admin genesis action writes a row.",
+  },
+  OpsObserverGenesis_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. There is no path from live back to shadow; stopping is the switch, not a genesis (docs/policy/sre-ops.md §8).",
+  },
+  ProductResearchObservation_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_OUTCOMES",
+    reason:
+      "ok, failed. A failed slot has nowhere to put a payload: the shape CHECK requires every success column to be null, so a failure cannot display an earlier success content.",
+  },
+  ProductResearchObservation_failureStage_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_FAILURE_STAGES",
+    reason:
+      "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
+  },
+  SupportTriageGroup_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_STATES",
+    reason:
+      "candidate and confirmed are open; dismissed, expired and invalidated are terminal. The guard trigger allows only the core table's transitions, and a terminal group takes nothing but its tombstone clearing.",
+  },
+  SupportTriageGroup_primaryKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "The one kind a group is an equivalence class of, in priority order. Fixed for the life of the group.",
+  },
+  SupportTriageGroup_decision_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_DECISIONS",
+    reason:
+      "A person's decision, kept apart from the state so that a confirmed group that later loses members still says it was confirmed.",
+  },
+  SupportTriageGroup_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a candidate group has been shown to a person; the same two values as a suggestion's, reached once and stamped by the database.",
+  },
+  SupportTriageGroupSignal_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "One signal row per group and kind. Every kind is an equality over a server fact; a report's text is never one.",
+  },
+  SupportTriageGroupSignal_provenanceClass_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SIGNAL_PROVENANCE_CLASSES",
+    reason:
+      "Where the signal's server value comes from. A second CHECK ties it to the kind, so the column can never disagree with SIGNAL_PROVENANCE.",
+  },
+  SupportTriageSuggestion_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_STATES",
+    reason:
+      "pending, claimed, ready and six terminal states. The guard trigger allows only the core table's transitions and never changes a terminal row.",
+  },
+  SupportTriageSuggestion_failureCode_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_FAILURE_CODES",
+    reason:
+      "Why a suggestion failed; present exactly when the state is failed. retry_exhausted is what a fourth reclaim must become, because the attempt count stops at three.",
+  },
+  SupportTriageSuggestion_lane_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "TRIAGE_LANES",
+    reason:
+      "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
+  SupportTriageSuggestion_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a ready suggestion has been shown to a person. Separate from the state, reached once and stamped by the database.",
+  },
+  SupportTriageRun_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_KINDS",
+    reason:
+      "worker and retention. Each kind has its own deadline (5 minutes, 100 seconds) and its own daily cap of 52, both applied by the row-creation trigger from the kind alone.",
+  },
+  SupportTriageRun_outcome_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_OUTCOMES",
+    reason:
+      "running until the run finishes, then one final outcome. The finishing trigger turns a late success or partial into deadline_exceeded, so the list holds a value the database records and the application never asks for.",
   },
   EngineeringAgentRun_status_check: {
     owner: "list",

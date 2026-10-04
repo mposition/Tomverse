@@ -88,7 +88,8 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "d0f32671b5728184011dbc8140b1e23cfda7bf159c9d6d8092202ee543cbdd6b";
+// Review r-20261004-082344-6f2f36 accepted the current read-only closure.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "8e15a8f15645a1de1d7c2dbd31b4a0910d9577abb30f0197c03aa5279c5249e8";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = () => {
@@ -313,6 +314,18 @@ test("the read-only POST audit exception closes when its source boundary changes
     amuxSourceScopePreviewService,
     amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
 });
+const oneShotStageWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
+const oneShotStageAuditWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
+const reachesCanonicalOneShotStageAudit = (route) =>
+  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
+  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
+  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
@@ -388,7 +401,8 @@ test("every admin write route writes an audit entry", () => {
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
       !reachesCanonicalAmuxAnalysisReservationAudit(route) &&
-      !isDarkReadOnlyAmuxSourceScopePreview(route))
+      !isDarkReadOnlyAmuxSourceScopePreview(route) &&
+      !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 
   assert.deepEqual(

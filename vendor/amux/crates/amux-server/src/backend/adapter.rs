@@ -1138,9 +1138,9 @@ fn scan_gemini(clean: &str, provider: &ProviderId) -> Vec<WorkerEvent> {
 /// short-circuit idle/trust) and [`TerminalAdapter::generating`] (which the
 /// clock-holding caller uses to mint the turn that makes the worker Active).
 fn codex_model_bar(line: &str) -> bool {
-    let Some((identity, location)) = line.rsplit_once('\u{b7}') else {
-        return false;
-    };
+    let mut parts = line.split('\u{b7}');
+    let Some(identity) = parts.next() else { return false; };
+    let Some(location) = parts.next() else { return false; };
     let location = location.trim();
     let identity_parts = identity.split_whitespace().count();
     identity_parts >= 2
@@ -1197,9 +1197,17 @@ fn codex_structured_active_line_clean(clean: &str) -> Option<Option<&str>> {
     let start = lines.len().saturating_sub(12);
     let tail = &lines[start..];
     // Provider identity must be the CURRENT footer, not a Codex-looking frame
-    // pasted into another provider's prompt. The model/path bar is Codex's
-    // final non-empty row and its prompt glyph is `›` (not Claude's `❯`).
-    let model_i = tail.len().checked_sub(1).filter(|i| codex_model_bar(tail[*i]))?;
+    // pasted into another provider's prompt. Newer Codex builds put a known
+    // shortcuts row after the model/path bar; older builds end at that bar.
+    // Its prompt glyph is `›` (not Claude's `❯`).
+    let last_i = tail.len().checked_sub(1)?;
+    let model_i = if codex_model_bar(tail[last_i]) {
+        last_i
+    } else if tail[last_i] == "\u{2190} for agents \u{b7} ? for shortcuts" {
+        last_i.checked_sub(1).filter(|i| codex_model_bar(tail[*i]))?
+    } else {
+        return None;
+    };
     let prompt_i = tail[..model_i].iter().rposition(|s| s.starts_with('›'))?;
     // Current Codex paints the active row immediately before its disabled
     // prompt. Older builds painted it immediately after the submitted prompt,

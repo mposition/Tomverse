@@ -1973,8 +1973,10 @@ model Feedback {
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 
-  lifecycleEvents FeedbackLifecycleEvent[]
-  autoFixCase     FeedbackAutoFixCase?
+  lifecycleEvents          FeedbackLifecycleEvent[]
+  autoFixCase              FeedbackAutoFixCase?
+  supportTriageSuggestions SupportTriageSuggestion[]
+  supportTriageMemberships SupportTriageGroupMember[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -5918,6 +5920,48 @@ model PromptRefinerReservation {
   @@index([stageId, status, expiresAt])
 }
 
+// Separate from the v1 shadow reservation tables, whose database constraints
+// pin a different 100-slot contract and price. These rows are dark until the
+// exact one-shot admission and audit path is implemented and reviewed.
+model PromptRefinerVnextOneShotStage {
+  id                         String   @id
+  status                     String   @default("staged")
+  sourceCommitSha            String
+  sourceManifestDigest       String
+  runnerDigest               String
+  manifestRoot               String
+  runtimeDeploymentId        String
+  runtimeCommitSha           String
+  pricePinDigest             String
+  perRequestCostMicroUsd     BigInt
+  slotCount                  Int
+  costCeilingMicroUsd        BigInt
+  approvedBy                 String
+  approvedAt                 DateTime
+  stageApprovalAuditLogId    String   @unique
+  runApprovalAuditLogId      String?  @unique
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  slots PromptRefinerVnextOneShotSlot[]
+}
+
+model PromptRefinerVnextOneShotSlot {
+  id                   String    @id
+  stageId              String
+  slotIndex            Int
+  status               String    @default("reserved")
+  reservedCostMicroUsd BigInt
+  requestId            String?   @unique
+  consumedAt           DateTime?
+  createdAt            DateTime  @default(now())
+
+  stage PromptRefinerVnextOneShotStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([stageId, slotIndex])
+  @@index([stageId, status])
+}
+
 /// Where a provider actually serves a request from.
 ///
 /// Dark. Nothing writes this, nothing routes from it, and no request consults
@@ -8259,6 +8303,106 @@ model AmuxOrchestratorHalt {
   @@index([requestId])
 }
 
+/// The shared agent digest table: one row per stored digest item of any agent
+/// team, told apart by `agentKey`. Single writer: lib/agentDigestStore.ts.
+/// Triggers (migration 20261003000000_agent_digest_item) set `createdAt` and
+/// `retentionUntil` from the database clock, allow only the body expiry as an
+/// update and only the 365-day meta purge as a delete.
+model AgentDigestItem {
+  id             String    @id @db.Uuid
+  agentKey       String
+  kind           String
+  schemaVersion  Int
+  idempotencyKey String
+  payload        Json?
+  payloadSha256  String
+  sizeBytes      Int
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Overwritten by the insert trigger: createdAt plus the agent's body retention.
+  retentionUntil DateTime  @default(now()) @db.Timestamptz(3)
+  bodyDeletedAt  DateTime? @db.Timestamptz(3)
+
+  @@unique([agentKey, idempotencyKey])
+  @@index([agentKey, createdAt])
+  @@index([retentionUntil])
+}
+
+/// The QA-release agent's operator control record (docs/policy/qa-release-agent.md
+/// section 6): numbered, append-only revisions of what the operator decided,
+/// with rotation times and never secret values. Single writer:
+/// lib/qaReleaseOperatorControlStore.ts. Triggers (migration
+/// 20261003010000_qa_release_operator_control) require consecutive revisions
+/// and a same-transaction audit row by a person, set `createdAt` from the
+/// database clock, and refuse every update, delete and truncate.
+model QaReleaseOperatorControl {
+  revision                 Int       @id
+  digestEnabled            Boolean
+  mergeLaneEnabled         Boolean
+  developLaneOn            Boolean
+  iacCommit                String?
+  digestSecretRotatedAt    DateTime? @db.Timestamptz(3)
+  monitorSecretRotatedAt   DateTime? @db.Timestamptz(3)
+  mergeLaneSecretRotatedAt DateTime? @db.Timestamptz(3)
+  githubAppKeyRotatedAt    DateTime? @db.Timestamptz(3)
+  railwayTokenRotatedAt    DateTime? @db.Timestamptz(3)
+  githubReadTokenRotatedAt DateTime? @db.Timestamptz(3)
+  auditLogId               String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+
+  mergeAttempts QaReleaseMergeAttempt[]
+}
+
+/// The QA-release merge lane's attempts (docs/policy/qa-release-agent.md
+/// version 4, section 8 item 5). The lifecycle is lib/qaReleaseMergeAttemptCore.ts;
+/// migration 20261004010000_qa_release_merge_attempt enforces it, keeps one
+/// open attempt per lane with a partial unique index Prisma does not model,
+/// binds every write to an audit row of the same transaction and refuses
+/// removal.
+model QaReleaseMergeAttempt {
+  id                String                   @id
+  pullRequestNumber Int
+  headSha           String
+  base              String
+  controlRevision   Int
+  control           QaReleaseOperatorControl @relation(fields: [controlRevision], references: [revision], onDelete: Restrict, onUpdate: Restrict)
+  state             String
+  outcome           String?
+  mergeCommitSha    String?
+  lastAuditLogId    String
+  /// The next five are set by the triggers from the database clock.
+  issuedAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  expiresAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  consumedAt        DateTime?                @db.Timestamptz(3)
+  closedAt          DateTime?                @db.Timestamptz(3)
+  updatedAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  /// The staging deployments the lane last observed for this merge, and when.
+  deployObservation Json?
+  deployObservedAt  DateTime?                @db.Timestamptz(3)
+
+  latchEvents QaReleaseMergeLaneLatch[]
+
+  @@index([issuedAt])
+}
+
+/// The QA-release merge lane's latch (docs/policy/qa-release-agent.md version
+/// 4, section 8 item 5): append-only events, latched when the newest sets it.
+/// Reasons are lib/qaReleaseMergeLaneLatchCore.ts; migration
+/// 20261004020000_qa_release_merge_lane_latch keeps the numbering consecutive,
+/// binds each event to an audit row of its own transaction (set by the merge
+/// lane, released by a person) and refuses any change.
+model QaReleaseMergeLaneLatch {
+  sequence   Int                    @id
+  latched    Boolean
+  reason     String?
+  attemptId  String?
+  attempt    QaReleaseMergeAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLogId String                 @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime               @default(now()) @db.Timestamptz(3)
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the
@@ -9016,4 +9160,277 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
+/// One scheduled observation slot of the product-research agent, written once
+/// and never changed (docs/policy/product-research-agent.md §4).
+///
+/// The database owns three things here: one row per slot (a unique constraint,
+/// so two runs of the same slot cannot both find it empty), the refusal of a
+/// submission outside the slot's one-hour window, and the refusal of an update
+/// or of a delete before the retention period. A failed slot carries no
+/// payload, which is what keeps a failure from showing an earlier success's
+/// content.
+model ProductResearchObservation {
+  id            String   @id
+  /// The scheduled UTC instant this row answers for, on a whole minute.
+  slot          DateTime @unique
+  /// ok | failed
+  outcome       String
+  /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
+  failureStage  String?
+  schemaVersion Int
+  /// The commits the report was computed from. Present on a successful slot.
+  developSha    String?
+  mainSha       String?
+  issueCount    Int?
+  /// The observation rows and the counts recomputed from them.
+  payload       Json?
+  /// sha256 of the canonical payload, computed by the route from what it
+  /// stored -- never the digest the submitter sent.
+  payloadDigest String?
+  /// The database's own clock, set by the insert trigger.
+  submittedAt   DateTime @default(now())
+
+  @@index([outcome, slot])
+  @@index([submittedAt])
+}
+
+/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
+/// only by the Admin genesis action; never updated or deleted. The migration's
+/// trigger enforces the chain: one first genesis (shadow), every later one
+/// replacing the current head -- recovery in the same mode, activation shadow
+/// to live once.
+model OpsObserverGenesis {
+  id                  String            @id @db.Uuid
+  /// The database clock, set by the trigger.
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  /// One of GENESIS_REASONS.
+  reason              String
+  /// One of GENESIS_MODES.
+  mode                String
+  /// The head this genesis replaced; null only on the first genesis.
+  supersedesGenesisId String?           @unique @db.Uuid
+  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
+  rootMarker          Int?              @unique
+  /// sha256 of the canonical genesis request the owner approved.
+  requestDigest       String
+  invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime              @db.Timestamptz(3)
+  state               OpsObserverState?
+  deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
+}
+
+/// The key state of one genesis. Every update is exactly the next generation
+/// (the compare-and-set); the trigger writes the stamps and refuses a state
+/// write whose genesis has been superseded or whose run deadline has passed by
+/// COMMIT.
+model OpsObserverState {
+  genesisId                 String             @id @db.Uuid
+  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation                Int
+  keys                      Json
+  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion          Int
+  stampGeneration           Int
+  stampKeysSha256           String
+  verifiedThroughGeneration Int                @default(0)
+  verifiedThroughAuditId    String?
+  verifiedThroughAuditHash  String?
+  stampCheckpointSha256     String
+  /// The deadline the writing run claimed; checked again at COMMIT.
+  runDeadlineAt             DateTime           @db.Timestamptz(3)
+}
+
+/// One reservation of the sre-ops agent: what a run may send, at most once
+/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
+/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
+/// open at a time. The migration's triggers enforce all of it.
+model OpsObserverDelivery {
+  id               String                    @id @db.Uuid
+  genesisId        String                    @db.Uuid
+  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The run that reserved it; one reservation per run.
+  runId            String                    @unique
+  /// One of DELIVERY_STATUSES.
+  status           String
+  /// 1 while reserved, null once closed; unique, so one reservation is open.
+  reservedMarker   Int?                      @unique
+  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  confirmedAt      DateTime?                 @db.Timestamptz(3)
+  shadowedAt       DateTime?                 @db.Timestamptz(3)
+  abandonedAt      DateTime?                 @db.Timestamptz(3)
+  /// The owner's calendar date the daily budget counts against.
+  ownerDate        DateTime                  @db.Date
+  /// Set on the reservation that carries the weekly channel check; one per date.
+  channelCheckDate DateTime?                 @unique @db.Date
+  /// The AgentDigestItem the page links to; null for a check-only message.
+  digestItemId     String?                   @db.Uuid
+  invariantVersion Int
+  stampStatus      String
+  /// The deadline of the run that last wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime                  @db.Timestamptz(3)
+  items            OpsObserverDeliveryItem[]
+
+  @@index([genesisId, ownerDate])
+}
+
+/// One message kind for one incident inside a reservation. Written in the
+/// reservation's own transaction and never changed; (mode, signal, scope,
+/// kind, openedAt) is unique, so each kind is reserved once per incident.
+model OpsObserverDeliveryItem {
+  id         String              @id @db.Uuid
+  deliveryId String              @db.Uuid
+  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  /// Copied from the reservation by the trigger.
+  mode       String
+  signal     String
+  scope      String
+  /// One of MESSAGE_KINDS.
+  kind       String
+  /// One of ITEM_ORIGINS.
+  origin     String
+  openedAt   DateTime            @db.Timestamptz(3)
+  /// Whether this item counted against the shared daily cap.
+  capped     Boolean
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
+  @@index([deliveryId])
+}
+
+/// Support-triage run record (docs/policy/support-triage.md §4, §8). One row per
+/// worker or retention run, content-free. Triggers in migration
+/// 20261003120000_support_triage_run own createdAt and deadlineAt, cap runs at
+/// 52 per kind per UTC day, downgrade a late success to deadline_exceeded, make
+/// a finished row final and refuse deleting a row younger than 30 days.
+model SupportTriageRun {
+  id                      String    @id
+  sequence                BigInt    @unique @default(autoincrement())
+  kind                    String
+  outcome                 String    @default("running")
+  createdAt               DateTime  @default(now())
+  deadlineAt              DateTime
+  finishedAt              DateTime?
+  batchesCompleted        Int?
+  overdueRemaining        Int?
+  oldestOverdueAgeSeconds Int?
+  blocked                 Int?
+
+  @@index([kind, createdAt])
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
+  auditLogId     String             @unique
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
+}
+
+/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). One
+/// row per (report, input digest): a proposed lane and keyword-flag codes,
+/// never the text of the report. Migration
+/// 20261004010000_support_triage_suggestion holds the state machine, the
+/// lease and the display stamp.
+model SupportTriageSuggestion {
+  id              String    @id
+  feedbackId      String
+  inputDigest     String
+  state           String    @default("pending")
+  failureCode     String?
+  claimToken      String?
+  leaseExpiresAt  DateTime?
+  attemptCount    Int       @default(0)
+  lane            String?
+  keywordFlags    String[]  @default([])
+  ownerQueueState String    @default("not_queued")
+  displayedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([feedbackId, inputDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([leaseExpiresAt])
+}
+
+/// Support-triage group (docs/policy/support-triage.md §5, §6): one
+/// equivalence class of one kind over server facts, for display only. Its
+/// members carry its primary digest through a composite key, so a terminal
+/// group (digest NULL) can hold none. Migration
+/// 20261004020000_support_triage_group holds the state machine and the
+/// tombstone rules.
+model SupportTriageGroup {
+  id                            String    @id
+  state                         String    @default("candidate")
+  primaryKind                   String
+  primarySnapshotDigest         String?
+  groupCandidateKey             String?   @unique
+  groupInputDigest              String?
+  keyRetiredAt                  DateTime?
+  retiredMemberIds              String[]  @default([])
+  decision                      String?
+  decidedAt                     DateTime?
+  ownerQueueState               String    @default("not_queued")
+  displayedAt                   DateTime?
+  keyRecheckDeferredCount       Int       @default(0)
+  keyRecheckDeferredRunId       String?
+  keyRecheckLastEvaluatedRunSeq BigInt?
+  keyRecheckDeferredRunSeq      BigInt?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @default(now())
+
+  members SupportTriageGroupMember[]
+  signals SupportTriageGroupSignal[]
+
+  @@unique([id, primarySnapshotDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([keyRetiredAt])
+  @@index([retiredMemberIds], type: Gin)
+}
+
+/// A report in an open support-triage group. Inserted and deleted, never updated.
+model SupportTriageGroupMember {
+  groupId               String
+  feedbackId            String   @unique
+  primarySnapshotDigest String
+  createdAt             DateTime @default(now())
+
+  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
+  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, feedbackId])
+}
+
+/// One signal per (group, kind): the SHA-256 of a server value its members
+/// share, never the value. Inserted and deleted, never updated.
+model SupportTriageGroupSignal {
+  groupId           String
+  kind              String
+  snapshotDigest    String
+  provenanceClass   String
+  snapshotExpiresAt DateTime
+  observedAt        DateTime @default(now())
+
+  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, kind])
+  @@index([snapshotExpiresAt])
 }

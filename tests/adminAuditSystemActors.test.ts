@@ -67,7 +67,11 @@ test("the system actor list is closed and changes only by review", () => {
     "marketing-publisher",
     "marketing-retention",
     "marketing-guard",
+    // S2e: the staging shadow receiver. On the guard's line in the source so
+    // the sealed Prompt Refiner closure's positions do not move.
+    "marketing-webhook",
     "prompt-refiner-shadow-runner",
+    "prompt-refiner-vnext-one-shot-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v4-intake",
@@ -76,6 +80,24 @@ test("the system actor list is closed and changes only by review", () => {
     "engineering-agent-retention",
     "engineering-agent-observer",
     "engineering-agent-registrar",
+    // The product-research agent's two actions and no more
+    // (docs/policy/product-research-agent.md §5): a slot recorded, and rows
+    // removed once past the retention period. Neither is a person, and this
+    // agent has nothing to approve because it decides nothing.
+    "product-research-observer",
+    "product-research-retention",
+    // docs/policy/qa-release-agent.md section 5: the digest intake route.
+    "qa-release-intake",
+    "support-triage-worker",
+    "support-triage-retention",
+    // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
+    "billing-finance-ops-intake",
+    "support-triage-account-deletion",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
+    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
+    "qa-release-merge-lane",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

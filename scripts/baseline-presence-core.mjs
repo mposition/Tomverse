@@ -40,7 +40,7 @@ const RELATION_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
 const DECLARATION_PREFIX = /^--[ \t]*baseline-check:/;
 const DECLARATION =
-  /^--[ \t]*baseline-check:[ \t]*present-if-relation[ \t]+"([^"]*)"[ \t]*$/;
+  /^--[ \t]*baseline-check:[ \t]*present-if-(relation|function)[ \t]+"([^"]*)"[ \t]*$/;
 
 /** The comment lines before the first statement; blank lines are skipped. */
 const headerLines = (sql) => {
@@ -67,8 +67,9 @@ export const presenceDeclarationIn = (sql) => {
   if (declarations.length === 0) return { kind: "none" };
   if (declarations.length > 1) return { kind: "invalid" };
   const match = DECLARATION.exec(declarations[0]);
-  if (!match || !RELATION_NAME.test(match[1])) return { kind: "invalid" };
-  return { kind: "relation", relation: match[1] };
+  if (!match || !RELATION_NAME.test(match[2])) return { kind: "invalid" };
+  if (match[1] === "function") return { kind: "function", function: match[2] };
+  return { kind: "relation", relation: match[2] };
 };
 
 /** The fixed question, with the name as a bound parameter -- never as SQL text. */
@@ -77,6 +78,24 @@ export const presenceQuery = (relation) => ({
   values: [`public."${relation}"`],
   rowMode: "array",
 });
+
+/**
+ * The fixed question for a migration that creates only a function -- which is
+ * not a relation, so to_regclass cannot see it (2026-10-03,
+ * `20261003130000_support_triage_arm_timeouts`, refused on staging). Any
+ * overload in public counts as present: EXISTS always answers one boolean,
+ * where to_regproc would have to choose among overloads.
+ */
+export const functionPresenceQuery = (name) => ({
+  text:
+    'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = \'public\' AND p.proname = $1) AS "present"',
+  values: [name],
+  rowMode: "array",
+});
+
+/** The fixed question for one probe from `pendingProbes`. */
+export const presenceQueryFor = (probe) =>
+  probe.function !== undefined ? functionPresenceQuery(probe.function) : presenceQuery(probe.relation);
 
 /**
  * The answer, or undefined when it is not exactly one row of one boolean.
@@ -101,6 +120,7 @@ export const pendingProbes = (pending, sqlOf) => {
   for (const name of pending) {
     const declaration = presenceDeclarationIn(sqlOf(name));
     if (declaration.kind === "relation") probes.push({ name, relation: declaration.relation });
+    else if (declaration.kind === "function") probes.push({ name, function: declaration.function });
     else undeclared.push(name);
   }
   return { probes, undeclared };
