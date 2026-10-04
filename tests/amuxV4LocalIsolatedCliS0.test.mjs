@@ -17,12 +17,12 @@ test("v13 one-shot deadline is ten minutes", () => {
   assert.equal(AMUX_V4_CLI_HARD_DEADLINE_MS, 600_000);
 });
 
-test("rejected S0 call path remains code-latched off", async () => {
+test("temporary S0 activation still requires one-process environment approval", async () => {
   const previous = process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
   try {
-    process.env.AMUX_V4_SYNTHETIC_S0_APPROVED = "1";
-    assert.equal(AMUX_V4_CODEX_S0_ENABLED, false);
-    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, false);
+    delete process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
+    assert.equal(AMUX_V4_CODEX_S0_ENABLED, true);
+    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, true);
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("openai"),
       { kind: "refused" });
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("anthropic"),
@@ -33,10 +33,10 @@ test("rejected S0 call path remains code-latched off", async () => {
   }
 });
 
-test("S0 script refuses even with its former environment approval", () => {
+test("S0 script refuses without one-process environment approval", () => {
   const script = fileURLToPath(new URL("../scripts/amux-v4-cli-model-s0.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, "openai"], {
-    env: { ...process.env, AMUX_V4_SYNTHETIC_S0_APPROVED: "1" },
+    env: { PATH: process.env.PATH ?? "" },
     encoding: "utf8", timeout: 5_000,
   });
   assert.equal(result.status, 2);
