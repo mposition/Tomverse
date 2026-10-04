@@ -9,7 +9,7 @@ const provider = process.argv[2];
 const APPROVAL_EXPIRES_AT = Date.parse("2026-10-05T00:00:00.000Z");
 const CLAIM_DIRECTORY = "/home/tommy/.amux-cli-profiles";
 const MARKER = Object.freeze({
-  anthropic: "s0-claude-20261004-diagnostic-3.claimed",
+  anthropic: "s0-claude-20261004-event-kind-4.claimed",
   openai: "s0-codex-20261004-original.claimed",
 });
 if (process.platform !== "linux" ||
