@@ -36,6 +36,26 @@ export const EXPECTED_TRIGGERS = Object.freeze({
   ],
 });
 
+/**
+ * The function each own trigger runs. A trigger whose name survives but that
+ * now calls something else is as unenforced as a missing one.
+ */
+export const EXPECTED_TRIGGER_FUNCTIONS = Object.freeze({
+  OpsObserverGenesis_guard: "ops_observer_genesis_guard",
+  OpsObserverState_guard: "ops_observer_state_guard",
+  OpsObserverDelivery_guard: "ops_observer_delivery_guard",
+  OpsObserverDeliveryItem_guard: "ops_observer_delivery_item_guard",
+  OpsObserverTransition_guard: "ops_observer_transition_guard",
+  OpsObserverTransition_no_truncate: "ops_observer_transition_no_truncate",
+  ops_observer_genesis_deadline_check: "ops_observer_deadline_check",
+  ops_observer_state_deadline_check: "ops_observer_deadline_check",
+  ops_observer_delivery_deadline_check: "ops_observer_deadline_check",
+  ops_observer_transition_deadline_check: "ops_observer_deadline_check",
+});
+
+/** pg_trigger.tgenabled for a trigger that fires in an ordinary session. */
+export const TRIGGER_ENABLED = "O";
+
 /** Every pg_constraint row of the own tables, as name: contype. */
 export const EXPECTED_CONSTRAINTS = Object.freeze({
   OpsObserverGenesis: {
@@ -121,7 +141,8 @@ function exactSet(problems, label, expected, observed) {
 
 /**
  * Compares catalogue rows against the expected sets. Rows:
- *   triggers:    { table, name, deferrable, initiallyDeferred }  (tgisinternal = false)
+ *   triggers:    { table, name, enabled, functionName, deferrable, initiallyDeferred }
+ *                (tgisinternal = false; enabled is tgenabled, functionName is tgfoid's proname)
  *   constraints: { table, name, type, deferrable, initiallyDeferred }
  *   indexes:     { table, name }
  * Returns a list of problems; empty means T3a passes.
@@ -151,6 +172,11 @@ export function catalogProblems({ triggers, constraints, indexes }) {
       const type = EXPECTED_CONSTRAINTS[table][row.name];
       if (type !== undefined && row.type !== type) problems.push(`${key(table, row.name)} has type ${row.type}`);
     }
+    for (const row of tableTriggers) {
+      if (row.enabled !== TRIGGER_ENABLED) problems.push(`${key(table, row.name)} is not enabled`);
+      const fn = EXPECTED_TRIGGER_FUNCTIONS[row.name];
+      if (fn !== undefined && row.functionName !== fn) problems.push(`${key(table, row.name)} runs ${row.functionName}`);
+    }
     for (const row of [...tableTriggers, ...tableConstraints]) {
       const want = deferred(row.name);
       if (row.deferrable !== want || row.initiallyDeferred !== want) {
@@ -160,6 +186,9 @@ export function catalogProblems({ triggers, constraints, indexes }) {
   }
 
   for (const table of shared) {
+    // Every shared table has a primary key, so no constraint rows at all means
+    // the table was not read -- which must not read as "nothing deferrable".
+    if (!byTable(constraints, table).some((row) => row.type === "p")) problems.push(`${table} was not read`);
     for (const row of [...byTable(triggers, table), ...byTable(constraints, table)]) {
       if (row.deferrable !== false || row.initiallyDeferred !== false) {
         problems.push(`${key(table, row.name)} is deferrable on a shared table`);

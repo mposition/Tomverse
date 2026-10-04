@@ -28,13 +28,17 @@ const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_catalog_${randomUUID().replaceAll("-", "")}`;
 
 let client: pg.Client;
-const q = (sql: string, params: unknown[] = []) => client.query(sql, params);
+// Without parameters the text goes over the simple protocol, which is what
+// runs a whole multi-statement migration file in one call.
+const q = (sql: string, params?: unknown[]) => (params ? client.query(sql, params) : client.query(sql));
 
 async function readCatalogue() {
   const tables = [...OPS_OBSERVER_OWN_TABLES, ...OPS_OBSERVER_SHARED_TABLES];
   const triggers = await q(
-    `SELECT c.relname AS "table", t.tgname AS name, t.tgdeferrable AS deferrable, t.tginitdeferred AS "initiallyDeferred"
+    `SELECT c.relname AS "table", t.tgname AS name, t.tgenabled AS enabled, p.proname AS "functionName",
+            t.tgdeferrable AS deferrable, t.tginitdeferred AS "initiallyDeferred"
        FROM pg_catalog.pg_trigger t
+       JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
        JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = $1 AND c.relname = ANY($2) AND NOT t.tgisinternal`,
@@ -98,6 +102,13 @@ test("the ops-observer catalogue", { skip: !rawUrl }, async (t) => {
                   CREATE CONSTRAINT TRIGGER ops_observer_state_deadline_check AFTER INSERT OR UPDATE ON "OpsObserverState"
                     NOT DEFERRABLE FOR EACH ROW EXECUTE FUNCTION ops_observer_deadline_check()`,
         /ops_observer_state_deadline_check deferral/);
+      await seen(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER "OpsObserverState_guard"`,
+        /OpsObserverState_guard is not enabled/);
+      await seen(`CREATE FUNCTION ops_observer_noop() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END';
+                  DROP TRIGGER "OpsObserverTransition_guard" ON "OpsObserverTransition";
+                  CREATE TRIGGER "OpsObserverTransition_guard" BEFORE INSERT OR UPDATE OR DELETE ON "OpsObserverTransition"
+                    FOR EACH ROW EXECUTE FUNCTION ops_observer_noop()`,
+        /OpsObserverTransition_guard runs ops_observer_noop/);
       await seen(`CREATE TRIGGER late_addition BEFORE INSERT ON "OpsObserverGenesis" FOR EACH ROW EXECUTE FUNCTION ops_observer_genesis_guard()`,
         /unexpected late_addition/);
       await seen(`ALTER TABLE "AgentDigestItem" ADD CONSTRAINT digest_self_fkey FOREIGN KEY (id) REFERENCES "AgentDigestItem"(id) DEFERRABLE`,
