@@ -299,6 +299,16 @@ test("a migration that creates only a function names that function", async () =>
     join(MIGRATIONS, "20261003130000_support_triage_arm_timeouts", "migration.sql"),
     "utf8",
   );
-  const created = /CREATE (?:OR REPLACE )?FUNCTION (?:public\.)?"?([a-z_]+)"?\(/i.exec(sql)?.[1];
+  const created = /CREATE (?:OR REPLACE )?FUNCTION (?:public\.)?"?([a-z0-9_]+)"?\(/i.exec(sql)?.[1];
+  assert.deepEqual(presenceDeclarationIn(sql), { kind: "function", function: created });
+});
+
+test("the AMUX chunk deadline migration declares its function for baseline probing", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261003130000_amux_v4_chunk_completion_deadline", "migration.sql"),
+    "utf8",
+  );
+  const created = /CREATE (?:OR REPLACE )?FUNCTION (?:public\.)?"?([a-z0-9_]+)"?\(/i.exec(sql)?.[1];
   assert.deepEqual(presenceDeclarationIn(sql), { kind: "function", function: created });
 });
