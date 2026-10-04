@@ -1,22 +1,31 @@
 import "server-only";
 
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import {
-  DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
+  PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
-import type { AmuxContentKeys } from "./ideaCrypto.ts";
+import type { AmuxContentKeys, AmuxContentPurpose } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 
 const IDEA_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const SUBJECT_ID = /^[A-Za-z0-9:_-]{1,160}$/;
+const PURPOSES: ReadonlySet<string> = new Set<AmuxContentPurpose>([
+  "idea_raw", "source_scope", "collection_result", "transfer_payload", "analysis_result",
+  "analysis_draft", "analysis_freeform", "node_content", "card_title", "card_brief",
+]);
 const BUCKET = /^[a-z0-9][a-z0-9.-]{2,126}$/;
 const REGION = /^[a-z0-9-]{2,32}$/;
-const MAGIC = Buffer.from("AMK1", "ascii");
+const MAGIC = Buffer.from("AMK2", "ascii");
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 const STORED_BYTES = MAGIC.length + IV_BYTES + TAG_BYTES + KEY_BYTES;
+
+export type AmuxContentKeyIdentity = {
+  ideaId: string;
+  purpose: AmuxContentPurpose;
+  subjectId: string;
+};
 
 export class AmuxIdeaKeyStoreError extends Error {
   constructor(readonly code: "unavailable" | "missing" | "conflict" |
@@ -26,9 +35,17 @@ export class AmuxIdeaKeyStoreError extends Error {
   }
 }
 
-function objectKey(ideaId: string): string {
-  if (!IDEA_ID.test(ideaId)) throw new AmuxIdeaKeyStoreError("integrity_unavailable");
-  return `amux/v4/idea/${ideaId}/key`;
+/** Each encrypted row gets a separate external key. A draft's subject is its
+ * UUID, so deleting its key does not affect any other draft or the raw idea. */
+function identity(input: AmuxContentKeyIdentity) {
+  if (!input || !IDEA_ID.test(input.ideaId) ||
+      !PURPOSES.has(input.purpose) || !SUBJECT_ID.test(input.subjectId)) {
+    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+  }
+  const context = Buffer.from(`amux-v4-content-key\0${input.ideaId}\0${input.purpose}\0${input.subjectId}`, "utf8");
+  const digest = createHash("sha256").update(context).digest("base64url");
+  return { context, objectKey: `amux/v4/content-key/${digest}`,
+    keyId: `amux2-${digest}` };
 }
 
 function connection(env: NodeJS.ProcessEnv) {
@@ -47,31 +64,31 @@ function connection(env: NodeJS.ProcessEnv) {
     credentials: { accessKeyId, secretAccessKey }, maxAttempts: 1 }) };
 }
 
-export function sealAmuxIdeaKey(ideaId: string, key: Buffer, wrappingKey: Buffer): Buffer {
-  objectKey(ideaId);
+export function sealAmuxContentUnitKey(input: AmuxContentKeyIdentity,
+  key: Buffer, wrappingKey: Buffer): Buffer {
+  const { context } = identity(input);
   if (key.length !== KEY_BYTES || wrappingKey.length !== KEY_BYTES) {
     throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   }
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv("aes-256-gcm", wrappingKey, iv);
-  cipher.setAAD(Buffer.from(`amux-v4-idea-key\0${ideaId}`, "utf8"));
+  cipher.setAAD(context);
   const encrypted = Buffer.concat([cipher.update(key), cipher.final()]);
   return Buffer.concat([MAGIC, iv, cipher.getAuthTag(), encrypted]);
 }
 
-export function openAmuxIdeaKey(ideaId: string, bytes: Buffer, wrappingKey: Buffer): Buffer {
-  objectKey(ideaId);
-  if (wrappingKey.length !== KEY_BYTES) {
-    throw new AmuxIdeaKeyStoreError("integrity_unavailable");
-  }
-  if (bytes.length !== STORED_BYTES || !bytes.subarray(0, MAGIC.length).equals(MAGIC)) {
+export function openAmuxContentUnitKey(input: AmuxContentKeyIdentity,
+  bytes: Buffer, wrappingKey: Buffer): Buffer {
+  const { context } = identity(input);
+  if (wrappingKey.length !== KEY_BYTES || bytes.length !== STORED_BYTES ||
+      !bytes.subarray(0, MAGIC.length).equals(MAGIC)) {
     throw new AmuxIdeaKeyStoreError("integrity_unavailable");
   }
   const iv = bytes.subarray(MAGIC.length, MAGIC.length + IV_BYTES);
   const tag = bytes.subarray(MAGIC.length + IV_BYTES,
     MAGIC.length + IV_BYTES + TAG_BYTES);
   const decipher = createDecipheriv("aes-256-gcm", wrappingKey, iv);
-  decipher.setAAD(Buffer.from(`amux-v4-idea-key\0${ideaId}`, "utf8"));
+  decipher.setAAD(context);
   decipher.setAuthTag(tag);
   try {
     return Buffer.concat([decipher.update(bytes.subarray(MAGIC.length + IV_BYTES +
@@ -79,26 +96,27 @@ export function openAmuxIdeaKey(ideaId: string, bytes: Buffer, wrappingKey: Buff
   } catch { throw new AmuxIdeaKeyStoreError("integrity_unavailable"); }
 }
 
-function scopedKeys(ideaId: string, key: Buffer, global: AmuxContentKeys): AmuxContentKeys {
+function scopedKeys(input: AmuxContentKeyIdentity, key: Buffer,
+  global: AmuxContentKeys): AmuxContentKeys {
   if (key.length !== KEY_BYTES) throw new AmuxIdeaKeyStoreError("integrity_unavailable");
-  return { masterKeyId: `idea-${ideaId}`, masterKeyVersion: 1,
+  return { masterKeyId: identity(input).keyId, masterKeyVersion: 1,
     masterKey: key, digestKeyId: global.digestKeyId, digestKey: global.digestKey };
 }
 
-/** Create before submission. On an uncertain submission outcome keep the key
- * until the exact request-id read-back; never delete a possibly committed key. */
-export async function createAmuxIdeaContentKeys(ideaId: string,
+/** Create before storing the corresponding body. A failed DB transaction may
+ * leave an empty orphan key; an uncertain COMMIT must be read back first. */
+export async function createAmuxContentUnitKeys(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<AmuxContentKeys> {
-  const key = objectKey(ideaId);
+  const { objectKey } = identity(input);
   const global = loadCurrentAmuxContentKeys(env);
   const { bucket, client } = connection(env);
   const dataKey = randomBytes(KEY_BYTES);
-  const body = sealAmuxIdeaKey(ideaId, dataKey, global.masterKey);
+  const body = sealAmuxContentUnitKey(input, dataKey, global.masterKey);
   try {
-    await client.send(new PutObjectCommand({ Bucket: bucket, Key: key,
+    await client.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey,
       Body: body, ContentType: "application/octet-stream",
       IfNoneMatch: "*", CacheControl: "no-store" }));
-    return scopedKeys(ideaId, dataKey, global);
+    return scopedKeys(input, dataKey, global);
   } catch (error) {
     dataKey.fill(0);
     if (typeof error === "object" && error !== null &&
@@ -110,21 +128,20 @@ export async function createAmuxIdeaContentKeys(ideaId: string,
   } finally { body.fill(0); client.destroy(); }
 }
 
-/** The key object is outside product DB backups. Missing or unreadable keys
- * fail closed; a DB restore cannot silently recreate deleted content keys. */
-export async function loadAmuxIdeaContentKeys(ideaId: string,
+/** Missing keys fail closed, including after restoring an old DB backup. */
+export async function loadAmuxContentUnitKeys(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<AmuxContentKeys> {
-  const key = objectKey(ideaId);
+  const { objectKey } = identity(input);
   const global = loadCurrentAmuxContentKeys(env);
   const { bucket, client } = connection(env);
   try {
-    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-    if (!result.Body || result.ContentLength !== STORED_BYTES) {
-      throw new AmuxIdeaKeyStoreError("integrity_unavailable");
-    }
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
+    if (!result.Body) throw new AmuxIdeaKeyStoreError("integrity_unavailable");
     const bytes = Buffer.from(await result.Body.transformToByteArray());
-    try { return scopedKeys(ideaId, openAmuxIdeaKey(ideaId, bytes, global.masterKey), global); }
-    finally { bytes.fill(0); }
+    try {
+      if (bytes.length !== STORED_BYTES) throw new AmuxIdeaKeyStoreError("integrity_unavailable");
+      return scopedKeys(input, openAmuxContentUnitKey(input, bytes, global.masterKey), global);
+    } finally { bytes.fill(0); }
   } catch (error) {
     if (error instanceof AmuxIdeaKeyStoreError) throw error;
     if (typeof error === "object" && error !== null &&
@@ -136,16 +153,15 @@ export async function loadAmuxIdeaContentKeys(ideaId: string,
   } finally { client.destroy(); }
 }
 
-/** Only a retention writer may call this after the corresponding DB body is
- * irreversibly out of the active rows. A failed read-back is outcome_unknown. */
-export async function deleteAmuxIdeaContentKey(ideaId: string,
+/** Retention calls this only after the active DB body has been cleared. */
+export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const key = objectKey(ideaId);
+  const { objectKey } = identity(input);
   const { bucket, client } = connection(env);
   try {
-    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
     try {
-      await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
       throw new AmuxIdeaKeyStoreError("outcome_unknown");
     } catch (error) {
       if (error instanceof AmuxIdeaKeyStoreError) throw error;
