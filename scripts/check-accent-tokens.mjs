@@ -28,6 +28,7 @@ const GUARDED_FILES = [
   // its own. Guarded so the reserved gradient cannot arrive here either -- a
   // card that describes AI Review is still not AI Review.
   "components/chat/ChatStarterGallery.tsx",
+  "components/email/EmailNotificationSettings.tsx",
   "components/chat/ComparisonReviewDialog.tsx",
   "components/chat/DeepResearchSetupSheet.tsx",
   "components/chat/DeepResearchSuggestionCard.tsx",
@@ -96,6 +97,7 @@ const KNOWN_ROLES = [
   "accent-promotion",
   "accent-web-search",
   "status-success",
+  "status-switch-on",
 ];
 
 const ROLE_UTILITY = new RegExp(

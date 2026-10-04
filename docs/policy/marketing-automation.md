@@ -7,6 +7,7 @@ approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 3
 |---|---|---|
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
+| 4 | **승인 대기** | §9.2: 졸업 후 `marketing-agent/to-develop/<topic>` PR에도 auto-merge를 켜지 않는다. 2026-10-02부터 `Auto PR to Develop`은 PR을 열기만 하고, 병합은 운영자가 실행하는 merge train(`npm run merge-train`)이나 사람이 한다. 졸업이 바꾸는 것은 사람 검토 없이 병합 대기열에 들어갈 수 있다는 것이지 auto-merge가 아니다 |
 | 3 | 2026-09-21 mposition | §7.1의 문장 해석 규칙 9개와 `rule.free-wording`을 거절기가 아닌 잠정 언어 진단으로 한정한다. 진단은 `provisional_language_flag` 하나와 세부 rule id를 남겨 사람에게 보내며, 입력 위생·claim/asset·provenance 거절은 그대로 둔다(§7.1, §7.2). 열세 번의 독립 검토가 이 판정기를 양방향으로 틀린 것으로 확인했고, 답은 패턴을 더하는 것이 아니라 tokeniser·형태소로 교체하는 것이다. 그 교체 전까지 거절 권한은 돌아오지 않는다. |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
@@ -311,8 +312,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
 - PR 생성: 이 저장소 전용 GitHub App 토큰, 검증 산출 tree hash와 push 내용 일치 시에만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
-  `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만들고 **그 실행에서만** auto-merge를 켠다
-  (`scripts/auto-pr-branch-policy.mjs`). 마케팅 workflow는 auto-merge를 직접 켜지 않는다. develop까지만.
+  `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만든다
+  (`scripts/auto-pr-branch-policy.mjs`). auto-merge는 어느 쪽도 켜지 않으며(버전 4 제안), 병합은 merge train
+  (`npm run merge-train`) 또는 사람이 한다. develop까지만.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
 

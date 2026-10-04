@@ -145,7 +145,7 @@ const performs = (source, name) => {
 
 /** The `@/lib` modules a route imports, as text. One level, not transitive. */
 const importedSources = (routeSource) =>
-  [...routeSource.matchAll(/from "@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+  [...routeSource.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
     .map((match) => `${LIB_DIR}${match[1]}.ts`)
     .filter((path) => existsSync(path))
     .map((path) => withoutComments(readFileSync(path, "utf8")));
@@ -296,6 +296,18 @@ test("the read-only POST audit exception closes when its source boundary changes
     amuxSourceScopePreviewService,
     amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
 });
+const oneShotStageWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
+const oneShotStageAuditWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
+const reachesCanonicalOneShotStageAudit = (route) =>
+  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
+  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
+  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
@@ -352,7 +364,8 @@ test("every admin write route writes an audit entry", () => {
   const unaudited = writeRoutes
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
-      !isDarkReadOnlyAmuxSourceScopePreview(route))
+      !isDarkReadOnlyAmuxSourceScopePreview(route) &&
+      !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 
   assert.deepEqual(

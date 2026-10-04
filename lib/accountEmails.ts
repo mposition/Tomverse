@@ -447,6 +447,74 @@ const shell = (copyItem: WelcomeCopy, body: string) => {
 `;
 };
 
+/**
+ * The branded frame for a short transactional message: the same logo, card
+ * and footer as the welcome mail, with a title band and the caller's body.
+ *
+ * For messages whose wording is approved elsewhere -- the processing-result
+ * notices and the consent confirmation -- the frame adds no sentence of its
+ * own beyond the title the caller passes and the site link, so wrapping an
+ * approved text never changes what it says.
+ *
+ * `bodyHtml` is trusted: the caller builds it from escaped text with
+ * `renderEmailParagraph()`.
+ */
+export function renderTransactionalEmailLayout(input: {
+  preview: string;
+  title: string;
+  bodyHtml: string;
+  /**
+   * Whether the footer links to the site. Off for a message that must carry
+   * exactly one link -- the consent confirmation, which only confirms
+   * (docs/policy/email-double-opt-in.md §3 rule 2).
+   */
+  siteLink?: boolean;
+}): string {
+  const footer =
+    input.siteLink === false
+      ? "Tomverse"
+      : `Tomverse · <a href="${appUrl()}" style="color:#64748b;text-decoration:underline;">${appUrl()}</a>`;
+  return `
+  <div style="margin:0;padding:0;background:#edf2f8;font-family:${EMAIL_FONT_STACK};color:#111827;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      ${escapeHtml(input.preview)}
+    </div>
+    <div style="max-width:640px;margin:0 auto;padding:34px 18px;">
+      <div style="margin:0 auto 18px;text-align:center;">
+        <img src="${logoUrl()}" width="56" height="56" alt="Tomverse" style="display:inline-block;border-radius:16px;border:1px solid #dbe3ef;background:#ffffff;box-shadow:0 12px 34px rgba(15,23,42,0.14);" />
+      </div>
+      <div style="background:#ffffff;border:1px solid #d9e2ee;border-radius:26px;overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,0.14);">
+        <div style="padding:28px 36px 26px;background:#08111f;color:#ffffff;">
+          <h1 style="margin:0;color:#ffffff;font-size:24px;line-height:1.3;letter-spacing:-0.02em;font-weight:800;">
+            ${escapeHtml(input.title)}
+          </h1>
+        </div>
+        <div style="padding:30px 36px 32px;background:#ffffff;">
+          ${input.bodyHtml}
+        </div>
+      </div>
+      <p style="margin:18px 8px 0;color:#94a3b8;font-size:11px;text-align:center;">
+        ${footer}
+      </p>
+    </div>
+  </div>
+`;
+}
+
+/**
+ * One paragraph for `renderTransactionalEmailLayout()`. `html` is already
+ * escaped by the caller; `muted` is for the small print under a call to
+ * action.
+ */
+export const renderEmailParagraph = (html: string, tone: "body" | "muted" = "body") =>
+  tone === "muted"
+    ? `<p style="margin:0 0 12px;color:#64748b;font-size:13px;line-height:1.65;">${html}</p>`
+    : `<p style="margin:0 0 18px;color:#243044;font-size:15px;line-height:1.75;">${html}</p>`;
+
+/** A call-to-action button in the welcome mail's style. `href` and `label` are escaped by the caller. */
+export const renderEmailButton = (href: string, label: string) =>
+  `<p style="margin:8px 0 22px;"><a href="${href}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:800;border-radius:14px;padding:14px 22px;box-shadow:0 12px 28px rgba(37,99,235,0.28);">${label}</a></p>`;
+
 export function buildAccountWelcomeEmail(input: {
   name?: string | null;
   language?: string | null;

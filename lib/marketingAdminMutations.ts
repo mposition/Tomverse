@@ -128,7 +128,7 @@ export type MarketingMutationSpec<TBody, TResult> = {
    * the same input read twice that the store functions are careful to avoid.
    */
   action: string | ((body: TBody) => string);
-  targetType: "MarketingPost" | "MarketingChannel" | "AppSetting";
+  targetType: "MarketingPost" | "MarketingChannel" | "AppSetting" | "MarketingWebhookVerificationRecord";
   /** Absent for a create, where the id does not exist until the write. */
   targetId?: string | ((body: TBody) => string);
   summary: string | ((body: TBody) => string);

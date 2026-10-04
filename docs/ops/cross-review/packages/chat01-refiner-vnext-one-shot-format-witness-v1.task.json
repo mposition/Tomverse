@@ -1,0 +1,23 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-format-witness-v1",
+  "requirement": "Within mposition's exact 2026-10-01 approval of one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e and file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, implement only a development-only constrained-format witness fixture helper using the previously reviewed closed structural predicate atoms. It must check two independent predicates, one passing fixture and one isolated failure per predicate, but must not claim semantic truth, full manifest validation, sealing, stage/run approval or dispatch admission. All fixtures are public synthetic; no real holdout content is authored or read. Codex authors; Claude Code Max first-party subscription CLI reviews read-only with user-approved skip-preflight. Anthropic API and provider paid calls are forbidden.",
+  "completionCriteria": [
+    "Read the exact scoped diff and bind verdict to the package digest.",
+    "Confirm only the two existing structural atom kinds are accepted in this development subset; an arbitrary script, regex or provider execution cannot be supplied.",
+    "Confirm the passing fixture satisfies both predicates and each failing fixture violates exactly one distinct indexed predicate while satisfying the other.",
+    "Confirm strict shapes, bounded fixture text, distinct indexes and no fixture content in return values or logs.",
+    "Confirm fullManifestValidated, rubricTruthVerified and dispatchAuthorized remain false; this helper is not a complete witness or gate validator.",
+    "Confirm source and synthetic tests are byte-pinned by a development-only closure including its own closure test.",
+    "Require focused tests, typecheck, lint and whitespace guards; distinguish controller-recorded checks from commands actually run by the reviewer.",
+    "Return exactly one raw JSON verdict without Markdown fences and only reproducible actionable findings."
+  ],
+  "baseCommit": "623122d4d9ffaeabdfc4a60d1fc4a4702d2cd71a",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-format-witness-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-format-witness-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotFormatWitness.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitness.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitnessClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

@@ -179,6 +179,30 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AgentDigestItem",
+    delegate: "agentDigestItem",
+    writers: ["lib/agentDigestStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §4",
+  },
+  {
+    table: "QaReleaseOperatorControl",
+    delegate: "qaReleaseOperatorControl",
+    writers: ["lib/qaReleaseOperatorControlStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §6",
+  },
+  {
+    table: "QaReleaseMergeAttempt",
+    delegate: "qaReleaseMergeAttempt",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
+    table: "QaReleaseMergeLaneLatch",
+    delegate: "qaReleaseMergeLaneLatch",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -219,6 +243,18 @@ export const PROTECTED_TABLES = [
     delegate: "promptRefinerShadowAttempt",
     writers: ["lib/promptRefinerShadowRunStore.ts"],
     contract: "docs/policy/prompt-refiner-observability.md §12",
+  },
+  {
+    table: "ProductResearchObservation",
+    delegate: "productResearchObservation",
+    writers: ["lib/productResearchObservationStore.ts"],
+    contract: "docs/policy/product-research-agent.md §4",
+  },
+  {
+    table: "SupportTriageRun",
+    delegate: "supportTriageRun",
+    writers: ["lib/supportTriageRunStore.ts", "lib/supportTriageRetention.ts"],
+    contract: "docs/policy/support-triage.md §4",
   },
   {
     table: "EngineeringAgentRun",
@@ -327,6 +363,12 @@ export const EXCLUDED_PREFIXES = [
     reason: "Documentation. Nothing here is imported or executed.",
   },
   {
+    prefix: "vendor/amux/",
+    extension: ".sql",
+    reason:
+      "The independent AMUX workspace uses local SQLite. Only its SQL is excluded; JS/TS files remain scanned for product database writes.",
+  },
+  {
     path: "scripts/check-protected-table-writers-core.mjs",
     reason:
       "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
@@ -386,18 +428,18 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/marketingStore.ts",
     table: "MarketingChannel",
-    tableMentions: 2,
-    writeVerbs: 8,
+    tableMentions: 3,
+    writeVerbs: 12,
     reason:
-      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do.",
+      "The sole marketing writer mutates through Prisma delegates. Its raw SQL is two constant SELECT ... FOR UPDATE statements that take the row locks the transitions are decided under; neither interpolates a table name. The eighth write verb is the UPDATE in the claim path's own prose, describing what a claim does not do. S2d2 adds the ninth, in the dispatch path's prose: the sentence saying an account can be paused underneath a claim between the claim and the call, which is why the dispatch re-runs the whole resolver rather than trusting the claim's answer. S2d2 also adds the third mention and the tenth verb in the unknown-outcome path: the prose naming the UPDATE that stops an autonomous account, which is a delegate call setting status and pauseReasonCode only -- the trigger writes pausedFromMode and pausedAt from the transition, because a field a caller could set is a field a caller could set wrongly. The eleventh and twelfth verbs belong to the unknown-outcome pause prose and to the polling writers naming the channel they read for their audit entries; no writer here touches MarketingChannel except that one delegate update, which sets status and pauseReasonCode and leaves pausedFromMode and pausedAt to the trigger.",
   },
   {
     path: "lib/marketingStore.ts",
     table: "MarketingPost",
-    tableMentions: 11,
-    writeVerbs: 8,
+    tableMentions: 19,
+    writeVerbs: 12,
     reason:
-      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil.",
+      "Same module and the same two lock statements, plus the post lock the approval and publish transitions are decided under, and three constant SELECTs the autonomous insert makes: the template's FOR SHARE, and one statement each for the claims and the assets that decision relied on having been published. S2c adds two more reads and their prose: the due-row SELECT ... FOR UPDATE SKIP LOCKED that picks one post to claim, and the SELECT count(*) that counts the account's used day and week slots while the channel row is held. Both are constant statements; every write in this module is still a delegate call, and a claim writes only slotDate, claimToken and leaseUntil. S2d2 adds two more mentions and one more verb, all in the dispatch path: a constant SELECT ... FOR UPDATE that re-reads the claim, the lease, the history version and the attempt count immediately before the vendor call, and the prose naming the UPDATE that transition is -- which is a delegate call, like every other write here. The dispatch writes only status, providerRequestKey and publishAttempt, and it writes them once. S2d2 polling adds four more mentions and two more verbs across its three lookup writers: two constant SELECT ... FOR UPDATE statements that re-read the status and the history version under lock, and the prose naming the UPDATEs that the verified and platform-removed transitions are. Both are delegate calls, both leave history untouched, and the removal writes its evidence into the audit entry rather than onto the row. The three outcome writers add two more mentions and one more verb: a constant SELECT ... FOR UPDATE that re-reads the status, the request key, the attempt and the history under lock, and the prose naming the single UPDATE all three share. That UPDATE is a delegate call bound by the request key rather than by a live claim, because a lease can expire after a call has begun and the answer still has to be recordable.",
   },
   {
     path: "lib/amux/intakeRegistration.ts",
@@ -464,6 +506,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
   },
   {
+    path: "lib/agentDigestStore.ts",
+    table: "AgentDigestItem",
+    tableMentions: 7,
+    writeVerbs: 4,
+    reason:
+      "The table's sole writer. Its raw SQL is the two retention batches (docs/policy/billing-finance-ops.md §1.4): a constant UPDATE that sets an expired body to NULL and a constant DELETE of rows past the meta retention, each bounded and audited, and each also refused by the table's own update and delete triggers outside those conditions. No table name is interpolated.",
+  },
+  {
     path: "scripts/report-issue-backlog-core.mjs",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -478,6 +528,113 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 94,
     reason:
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 3,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 9,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 4,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 19,
+    writeVerbs: 13,
+    reason:
+      "Creates the attempt table, its partial unique index and the triggers that constrain its insert and update and refuse delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The latch table's foreign key names the attempt an event concerns, and its insert trigger accepts an audit row that targets that attempt. It writes no attempt row; its write verbs constrain or refuse the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 12,
+    writeVerbs: 9,
+    reason:
+      "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      "The latch insert trigger reads the audit row this transaction wrote (id, target, actor, xmin) to bind each latch event to it. It never writes AdminAuditLog; its write verbs refuse or constrain the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The attempt table's triggers read the audit row this transaction wrote (id, target, actor, xmin) to bind every attempt write to it. It never writes AdminAuditLog; its write verbs refuse or constrain the attempt table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "Creates the merge-lane attempt table, whose foreign key names the operator control revision it was issued under. It names write verbs to refuse or constrain them on the attempt table and writes no control row.",
+  },
+  {
+    path: "prisma/migrations/20261004000000_agent_digest_billing_finance_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 8,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
+  },
+  {
+    path: "scripts/check-enum-constraints.mjs",
+    table: "AgentDigestItem",
+    tableMentions: 1,
+    writeVerbs: 19,
+    reason:
+      "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
   {
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",
@@ -502,6 +659,22 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 14,
     reason:
       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The sre-ops transition ledger migration keeps the audit entry id as a plain column (no foreign key; AdminAuditLog is append-only already) and reads the linked audit row (hash, action, target, actor, metadata generation and key stamp, and whether this transaction wrote it) under a key-share lock in the ledger's insert guard. Its write verbs create or guard the ledger table, including a statement-level TRUNCATE guard; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 16,
+    reason:
+      "The dark vNext one-shot migration keeps immutable audit IDs as plain columns and trigger-checks both linked audit rows under key-share locks. Its write verbs create or guard the new stage and slot tables, including two statement-level TRUNCATE guards; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
@@ -725,6 +898,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
+    path: "lib/supportTriageDeletionManifest.ts",
+    table: "SupportTriageRun",
+    tableMentions: 1,
+    writeVerbs: 3,
+    reason:
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    table: "SupportTriageRun",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "The migration creates SupportTriageRun, its CHECK constraints and its insert, update and delete triggers (database-owned deadline, daily cap, late-success downgrade, 30-day delete boundary); it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20261002150000_product_research_observation/migration.sql",
+    table: "ProductResearchObservation",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "The migration creates ProductResearchObservation, its CHECK constraints and its one guard trigger -- insert-only, inside the slot window, deletable only past the retention period; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
@@ -797,6 +994,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 11,
+    writeVerbs: 4,
+    reason:
+      "Creates the QA-release operator control table and the triggers that number its revisions, bind each to a same-transaction audit row and refuse every update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
+  },
+  {
     path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 5,
@@ -825,10 +1038,58 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "scripts/ops-observer/statement-ceiling-core.mjs",
+    count: 2,
+    reason:
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_support_triage_group/migration.sql",
+    count: 5,
+    reason:
+      "Five reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE and then, as a separate statement with a fresh snapshot, its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_support_triage_suggestion/migration.sql",
+    count: 1,
+    reason:
+      "One read in the SupportTriageSuggestion guard trigger: the report's message, FOR SHARE, over a name built from TG_TABLE_SCHEMA quoted with %I, with the report id bound by USING. It refuses a suggestion for a deleted account's report and holds the report so an account deletion cannot slip in between. The function pins search_path to pg_catalog, pg_temp. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
+    count: 1,
+    reason:
+      "One count in the SupportTriageRun insert trigger, over a name built from TG_TABLE_SCHEMA quoted with %I, with kind and the UTC day bounds bound by USING. It runs after the trigger takes a transaction advisory lock on (kind, UTC day), so two inserts at the cap are serialised. The function pins search_path to pg_catalog, pg_temp. It reads its own table and never writes a protected one.",
+  },
+  {
+    path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    count: 5,
+    reason:
+      "Five dynamic SELECTs in the one-shot stage and slot guards use the trigger's own schema quoted with %I and bind IDs with USING: two AdminAuditLog reads use FOR KEY SHARE, two stage-status reads use FOR SHARE, and one slot count in the deferred constraint trigger has no lock clause. The functions pin search_path to pg_catalog, pg_temp; none of these reads writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:
       "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    count: 9,
+    reason:
+      "Nine uses in the sre-ops transition ledger guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: on delete it locks its genesis FOR SHARE and reads whether it was superseded, and its verified checkpoint with whether the ledger row at that checkpoint exists; on insert it locks its genesis FOR SHARE and reads whether it was superseded, reads its state row FOR SHARE (generation, key stamp, whether this transaction wrote it), reads whether the previous generation's row exists, reads the linked AdminAuditLog row FOR KEY SHARE (hash, action, target, actor, metadata generation and key stamp, whether this transaction wrote it), and calls the deadline claim function. The schema is the trigger own, never input, quoted with %I (the ledger's own name via TG_TABLE_NAME); every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql",
+    count: 4,
+    reason:
+      "Four uses in the sre-ops reservation guards, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the reservation guard calls the deadline claim function in its own schema, locks its genesis FOR SHARE and reads whether it was superseded; the item guard locks its reservation FOR SHARE and reads its status, mode and whether this transaction wrote it. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
+    count: 5,
+    reason:
+      "Five uses in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE and calls the deadline claim function in its own schema; the state guard locks its own genesis FOR SHARE, reads whether that genesis has been superseded, and calls the same claim function. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
   },
   {
     path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",
@@ -841,6 +1102,24 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 7,
     reason:
       "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the latch insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseMergeLaneLatch event, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    count: 4,
+    reason:
+      "Four EXECUTE calls, all over a name built from TG_TABLE_SCHEMA and a constant name, because every function pins search_path to pg_catalog, pg_temp. One, in the audit helper, checks the AdminAuditLog row this transaction wrote with SELECT EXISTS; three, in the attempt insert and update triggers, call that helper schema-qualified. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the operator control insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseOperatorControl revision, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
@@ -922,10 +1201,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "43acecfde4250aad7a230a2219cf58863858636105c0e9d115607f49f7ff3b31",
+    sha256: "68e1c5a0d053c78699fa1c3d3f0eeb071bf17d22489de13f367010d45e7a344e",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL. 2026-10-03: a migration that creates only a function declares the function name instead, and the question is one fixed EXISTS over pg_catalog.pg_proc in public with that name bound; the guard file only switches to presenceQueryFor(probe).",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
@@ -989,7 +1268,7 @@ const isDatabaseDriverModule = (specifier) =>
 
 export const isExcluded = (path) =>
   EXCLUDED_PREFIXES.some((entry) =>
-    entry.path ? path === entry.path : path.startsWith(entry.prefix)
+    entry.path ? path === entry.path : path.startsWith(entry.prefix) && (!entry.extension || path.endsWith(entry.extension))
   );
 
 /** The repository paths this check reads, from a list of candidate paths. */

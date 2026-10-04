@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -109,18 +111,22 @@ if (group) {
  * A step whose arguments name no suite at all -- the Prisma schema build -- is
  * never filtered. Each lane gets its own database and has to build it.
  */
-const run = (args, label) => {
+const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
   console.log(`\n[db-integration] ${label}`);
   const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
-    env: testEnvironment,
+    env: { ...testEnvironment, ...environmentOverrides },
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -232,6 +238,44 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The shared AgentDigestItem table: closed agent and kind lists, the
+    // idempotency prefix, rows born with their body, and the expiry and purge
+    // that are the only update and delete.
+    "tests/integration/agent-digest-item.db.test.ts",
+    // Its single writer: one row and one system audit entry in one transaction,
+    // a replay or a conflict writes neither, and a refusal never opens one.
+    "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
+    // The digest intake: secret, control revision and switch, closed schema,
+    // then the single writer; one digest per UTC day.
+    "tests/integration/qa-release-digest-intake.db.test.ts",
+    // The Monitor silence check: its own secret, the control revision, then
+    // the freshness verdict over the database clock.
+    "tests/integration/qa-release-monitor.db.test.ts",
+    // The merge lane's attempts: one open per lane, the core's lifecycle and
+    // nothing else, every write audited by the right actor, no removal.
+    "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
+    // The merge lane service's three app calls: its own secret, the revision
+    // it carries, a strict body, then the single writer.
+    "tests/integration/qa-release-merge-lane-routes.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
@@ -259,10 +303,48 @@ run(
     // under the right actor, and results go where the core says. It closes
     // what it opens, so it passes whichever engineering file runs first.
     "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
+    // Support-triage run writer: a run row and its system audit entry commit
+    // or roll back together, and a late finish is recorded as such.
+    "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
     "tests/integration/engineering-agent-schema.db.test.ts",
+    // sre-ops transaction bounds: the arming function refuses a short budget,
+    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
+    // inherited transaction_timeout so the session ends at ours.
+    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
+    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
+    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
+    "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
@@ -278,10 +360,20 @@ run(
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
+    // sre-ops trust check T3a: the migrations' catalogue is exactly the
+    // expected one, and a dropped or re-deferred rule is seen.
+    "tests/integration/ops-observer-catalog.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // vNext one-shot storage remains dark but must commit exactly 80 fixed-
+    // price slots and refuse consumption before run approval or any reuse.
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
@@ -479,6 +571,10 @@ run(
     // direct writes rather than through the store module: what they refuse is
     // exactly the write that did not go through it.
     "tests/integration/marketing-automation-schema.db.test.ts",
+    // The staging webhook shadow: the partial unique index on an event's
+    // digest refusing a second report inside the transaction that would have
+    // audited it, and one winner among deliveries racing for an armed fault.
+    "tests/integration/marketing-webhook-shadow.db.test.ts",
     // Proving a template: two human audit entries that still verify against
     // the chain, which is the only route to a post published without a person
     // looking at it. Needs real rows, because a fixture that inserted them
@@ -609,6 +705,24 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// This suite creates and drops only its own synthetic schema. Give its Prisma
+// client that exact schema rather than letting it see the lane's public tables.
+const oneShotAuditSuite =
+  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
+  fail("the isolated one-shot audit suite requires a dedicated test database name");
+}
+const oneShotTestUrl = new URL(rawTestDatabaseUrl);
+oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    oneShotAuditSuite],
+  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
+    DATABASE_URL: oneShotTestUrl.toString(),
+    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

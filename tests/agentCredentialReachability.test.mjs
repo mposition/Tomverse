@@ -463,10 +463,69 @@ ${step}`;
 `), true, "setup-go caches by default");
   assert.equal(restores(`      - uses: actions/setup-go@v5
 `), true);
+  // Which input is the off switch depends on the action, and conflating the two
+  // was a finding of its own.
+  //
+  // On setup-node v6 `cache: false` does NOT switch caching off: the action
+  // defaults `package-manager-cache` to true and caches as soon as package.json
+  // names a package manager, which is the latent path the cache audit recorded
+  // in its 4.2. On every other setup action `cache` is its own switch and
+  // `package-manager-cache` is not an input it has.
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          cache: false
+`), true, "setup-node: cache: false is not the off switch");
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+`), false, "setup-node: package-manager-cache: false is");
   assert.equal(restores(`      - uses: actions/setup-go@v5
         with:
           cache: false
-`), false, "switched off explicitly");
+`), false, "setup-go: its own cache input is the switch");
+  assert.equal(restores(`      - uses: actions/setup-go@v5
+        with:
+          package-manager-cache: false
+`), true, "setup-go: an input it does not have suppresses nothing");
+  // An explicitly named cache is restored whatever else is set, so
+  // package-manager-cache does not take it away.
+  assert.equal(restores(`      - uses: actions/setup-node@v6
+        with:
+          cache: yarn
+          package-manager-cache: false
+`), true, "a named cache still restores");
+
+  // `cache: true` names no manager and still switches caching on, which is how
+  // setup-dotnet enables its NuGet cache. Read as "not named" it fell through
+  // the caches-only-when-named list and the step was classified as caching
+  // nothing -- a false negative on a credential gate, found by both reviewers
+  // of round 9.
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          cache: true
+`), true, "boolean true turns it on");
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          cache: 'true'
+`), true, "and so does the string");
+  assert.equal(restores(`      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8'
+`), false, "setup-dotnet caches nothing unasked");
+  // These two cache only for a named manager, so reporting them as restoring
+  // without one was a false positive.
+  assert.equal(restores(`      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+`), false);
+  assert.equal(restores(`      - uses: actions/setup-python@v5
+        with:
+          cache: pip
+`), true);
+  assert.equal(restores(`      - uses: actions/setup-java@v4
+        with:
+          cache: gradle
+`), true);
   assert.equal(restores(`      - uses: \${{ vars.ACTION }}
 `), true, "an action named by expression");
   assert.equal(restores(`      - uses: ./.github/actions/cache
@@ -486,6 +545,86 @@ ${step}`;
     true,
     "an action told to read the Actions cache backend",
   );
+
+  // The kinds. The rule itself is unchanged -- any restored cache still forbids
+  // every change -- but the kind is what makes a credentialed job moving from a
+  // verified package-manager cache to an unverified one a different fact rather
+  // than the same reason twice. The posture digest could not see that, and
+  // every credentialed cache-restoring job in this repository is in exactly the
+  // state where it would have been invisible.
+  const kinds = (step) => {
+    const reason = analyse([wf("nightly", nightly(step))]).reasons.find(
+      (candidate) => candidate.reason === "credential_job_restores_cache",
+    );
+    return reason === undefined ? null : reason.cacheKinds;
+  };
+  // Verified is a property of the package manager, not of the setup-* family.
+  // Only an allowlisted (action, cache input) pair earns it; a setup step that
+  // caches something this cannot name is `unverified`.
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+`), ["verified_package_manager"]);
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+`), ["unverified"], "no cache input: what it would cache is not known here");
+  assert.deepEqual(kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: yarn
+`), ["unverified"], "not on the allowlist");
+  assert.deepEqual(kinds(`      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+`), ["unverified"], "setup-go caches GOCACHE, which is build output");
+  assert.equal(kinds(`      - uses: actions/setup-node@v6
+        with:
+          package-manager-cache: false
+`), null, "the only off switch under v6");
+  assert.deepEqual(kinds(`      - uses: actions/cache@v5
+        with: { path: .next/cache, key: k }
+`), ["unverified"]);
+  assert.deepEqual(kinds(`      - uses: actions/cache/restore@v5
+        with: { path: .next/cache, key: k }
+`), ["unverified"]);
+  assert.deepEqual(kinds(`      - uses: \${{ vars.ACTION }}
+`), ["unreadable"]);
+  assert.deepEqual(kinds(`      - uses: docker://alpine
+`), ["unreadable"]);
+  assert.equal(kinds(`      - run: echo
+`), null, "no cache, no reason");
+  // Both in one job: the record names both rather than collapsing to the weaker
+  // one, in a fixed order so the digest is stable.
+  assert.deepEqual(
+    kinds(`      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+      - uses: actions/cache@v5
+        with: { path: .next/cache, key: k }
+`),
+    ["unverified", "verified_package_manager"],
+  );
+  // A save step writes and does not read, so it is not a restore.
+  assert.equal(
+    kinds(`      - uses: actions/cache/save@v5
+        with: { path: .next/cache, key: k }
+`),
+    null,
+  );
+});
+
+test("on this repository every credentialed job restores only a verified cache", () => {
+  // The separation the cache audit found by reading, as a checked fact. If this
+  // fails, an unverified cache has reached a job holding a write permission or
+  // an external secret, and npm run check:credential-cache-separation fails
+  // with it. .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4.
+  const result = analyse(committedWorkflows());
+  assert.equal(result.status, "analysed");
+  const cacheReasons = result.reasons.filter((reason) => reason.reason === "credential_job_restores_cache");
+  assert.ok(cacheReasons.length > 0, "expected the rule to be exercised");
+  for (const reason of cacheReasons) {
+    assert.deepEqual(reason.cacheKinds, ["verified_package_manager"]);
+  }
 });
 
 test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
@@ -552,7 +691,46 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // own token, on push to main only. The analysis gives it no reason and no path
 // rule: no event the agent raises reaches it. Flagged for the owner's review in
 // the pull request that adds it.
-const POSTURE_DIGEST = "62ba14563ed8";
+//
+// 977c24f3e564 (2026-10-03): two changes, and the posture genuinely improved.
+//
+// The summary now carries each cache reason's kinds, so this pin can see a
+// credentialed job move from a verified package-manager cache to an unverified
+// one -- the change it most needed to catch and previously could not, since the
+// reason string is identical either way.
+//
+// And the kinds are judged by an allowlist of (setup action, cache input) pairs
+// rather than by treating every `actions/setup-*` cache as verified. The
+// property belongs to the package manager: `setup-go` caches GOCACHE, which is
+// compiled build output with nothing checking it. Independent review caught
+// that. Consequently `cache: false` is no longer read as an off switch either,
+// because setup-node v6 defaults `package-manager-cache` to true and caches
+// whenever package.json names a package manager.
+//
+// Three credentialed jobs that had no `cache:` input therefore had to say so,
+// and now carry `package-manager-cache: false`. They restore nothing, so cache
+// reasons fall 14 -> 11 and total reasons 17 -> 14; 22 credentialed jobs and 1
+// path rule are unchanged. All 11 remaining read `verified_package_manager`,
+// which `npm run check:credential-cache-separation` now holds.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3 and 4.2.
+//
+// ccf1976a16e4 (2026-10-03): one credentialed job gives up its npm cache, and
+// the posture improved by exactly that one fact. Cache reasons 11 -> 10 and
+// total reasons 14 -> 13; 22 credentialed jobs, 1 path rule, 8 reached
+// workflows and forbidsAll are all unchanged -- the job still holds its
+// credential, it just restores nothing now.
+//
+// It was the only credentialed cache-restoring job in a workflow an event the
+// agent raises reaches, which is the condition docs/policy/engineering-agent.md
+// §5's cache isolation record rests on and which nothing was keeping. Its own
+// `if:` already kept it off an `agent/engineering/` head, but §5 forbids the
+// analyser from reading a job condition to narrow a result, and reading a
+// trigger without its condition is the mistake the audit's F5 made twice. So
+// the owner's decision was to hold the condition as a fact rather than as an
+// exemption. `npm run check:agent-pr-cache-isolation` now keeps it, and this
+// digest is what makes the job taking a cache back visible here as well.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P7.
+const POSTURE_DIGEST = "ccf1976a16e4";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
@@ -569,8 +747,17 @@ test("on this repository's committed workflows the credential posture is the rev
 
   const summary = [
     ...result.credentialedJobs.map((job) => `job:${anonymise(job.workflowPath)}#${anonymise(job.jobId)}`),
+    // The cache kinds are part of the posture, not a detail of it. Without
+    // them, adding `.next/cache` to a credentialed job that already restores
+    // the npm cache produces the same reason string and leaves this digest
+    // unmoved -- and every credentialed cache-restoring job in this repository
+    // is in exactly that state, so the change this pin most needs to catch was
+    // the one it could not see. The kinds name no workflow, so they can be
+    // carried in the clear.
     ...result.reasons.map(
-      (r) => `reason:${anonymise(r.workflowPath)}#${r.jobId === null ? "-" : anonymise(r.jobId)}:${r.reason}`,
+      (r) =>
+        `reason:${anonymise(r.workflowPath)}#${r.jobId === null ? "-" : anonymise(r.jobId)}:${r.reason}` +
+        (r.reason === "credential_job_restores_cache" ? `:${r.cacheKinds.join("+")}` : ""),
     ),
     ...result.pathRules.map(
       (rule) => `rule:${anonymise(rule.workflowPath)}:${rule.kind}:${anonymise(rule.patterns.join("\n"))}`,

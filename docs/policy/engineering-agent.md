@@ -6,6 +6,7 @@ approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 1
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
+| 2 | **승인 대기** | §1 6번의 "auto-merge 1회 규칙"을 "auto-merge를 켜지 않는 규칙"으로 고친다. 2026-10-02부터 `Auto PR to Develop`은 auto-merge를 켜지 않으며(AGENTS.md), 이 문서가 재사용하던 규칙은 더 엄격한 규칙으로 바뀌었다. 에이전트의 행위는 바뀌지 않는다 |
 | 1 | 2026-09-28 mposition | 최초 승인(두 번째 초안). 작업 원천을 승격된 AMUX 카드로 바꾸고 issue 작업 승인을 없앰, 카드 자기 등록, 외부 행위 유형 `engineering.publish_pr`, AMUX 부착 방식과 교차 잠금, tree 목록 검증과 capability, 병합 관측 일곱 조건, 본 앱의 시간 상한 |
 
 운영자 `mposition`이 2026-09-28 대화 세션에서 이 문서를 승인했다(버전 1). 이제 이 문서는
@@ -56,7 +57,7 @@ AMUX 문서가, engineering의 권한에 대해서는 이 문서가 좁은 쪽�
 4. 우리 backlog에서 한 카드로 검증할 수 있는 작업을 찾아 AMUX backlog에 **등록**한다.
    등록은 실행이 아니며, 실행은 사람이 승격한 카드에서만 시작한다.
 5. 소유자에게 가는 산출은 상한과 만료가 있는 대기열 안에서만 생긴다.
-6. 기존 계약(branch 이름 권한, auto-merge 1회 규칙, feedback-autofix 정책, release
+6. 기존 계약(branch 이름 권한, auto-merge를 켜지 않는 규칙, feedback-autofix 정책, release
    checklist)을 재사용하고 약화하지 않는다.
 
 ### 하지 않는 것
@@ -199,6 +200,38 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push 금지**다. 이 가정을
   푸는 방법은 job별 제외가 아니라, cache의 ref 간 공유 범위에 대한 날짜 있는 확인
   기록 하나를 분석기 설정에 고정하는 것뿐이다.
+  **그 설정은 `lib/agentCacheIsolationRecord.ts`이고, 기록은 초안 상태로 거기 있다**
+  — 세 방향과 각 근거는 채워져 있고 `approvedBy`·`approvedAt`가 비어 있다. 두 칸을
+  채우는 것이 이 규칙을 푸는 행위이며 **소유자만 한다**(§7). 비어 있는 동안 기록은
+  아무것도 풀지 않는다.
+  분석기는 복원하는 cache의 **종류**도 함께 보고하지만(§5.1), 그것이 이 규칙을
+  좁히지는 않는다 — 어떤 종류든 복원하면 금지다.
+- **그 기록이 담아야 하는 것**(§5.1): 기록은 **방향을 구분해서** 써야 하고, 아래
+  세 문장을 각각 근거와 함께 담지 않은 기록은 이 규칙을 풀지 못한다.
+  1. **PR run → 다른 ref: 닫혀 있다.** 근거는 GitHub의 cache scope 규칙이다 —
+     PR run의 cache는 merge ref scope에 만들어지고 그 PR의 re-run만 복원한다.
+     에이전트가 심을 수 있는 cache는 자기 PR의 것뿐이므로, 이 한 문장이 "에이전트가
+     심은 cache가 자격증명 job에 도달하는가"에 답한다.
+  2. **기본 branch·base → PR: 열려 있다.** 기본 branch의 항목은 모든 run이, base의
+     항목은 그 base를 향한 모든 PR이 복원할 수 있다. 이 방향은 주체가 에이전트가
+     아니므로 이 규칙이 다루는 위협이 아니고, 근거를 격리에서 가져올 수 없다.
+     **"Actions cache는 ref 간에 격리된다"고 쓰면 거짓이다.**
+  3. **같은 PR 안: 열려 있다.** 위 규칙의 같은 문장이 "re-runs of the pull request"는
+     복원할 수 있다고 말한다. 그러므로 기록은 "에이전트의 PR에서 실제로 도는 자격증명
+     cache 복원 job이 없다"를 따로 확인해야 하고, 그 확인은 workflow의 trigger만이
+     아니라 **job의 조건식까지** 읽어야 성립한다 — trigger만 보고 판정하면 틀린다.
+
+     **이 조건을 유지하는 장치는 `npm run check:agent-pr-cache-isolation`이다**
+     (§5.2). §5.1의 검사는 이 조건을 유지하지 못한다 — 그것은 자격증명 job의
+     `unverified`·`unreadable` 복원만 거절하고 `verified_package_manager` 복원은
+     허용하므로, 에이전트 PR에서 자격증명 job이 npm cache를 복원하는 상태를 막지
+     못한다. 그 상태는 이 조건을 깨뜨린다 — 에이전트는 자기 PR에서
+     `package-lock.json`을 바꿀 수 있고, 그러면 lockfile integrity 대조는
+     에이전트가 넣은 값과 맞아떨어진다. 초안은 §5.1의 검사가 이 조건을 책임진다고
+     적었고, 그것은 거짓이었다(독립 검토 지적).
+
+     **그 검사가 실패하는 동안에는 이 기록을 쓸 수 없다.** 검사가 통과한다는 것은
+     이 조건이 오늘 참이라는 뜻이고, 기록이 근거로 쓸 수 있는 것은 그것뿐이다.
 - **결과**: 자격증명을 가진 job이 있는 도달 workflow마다 그 workflow의 path filter에
   걸리는 파일이 push 금지다. filter가 없거나 해석되지 않으면 모든 변경이 금지다.
 - **사람이 검토한 제외**: 결과를 좁히는 유일한 방법은 `{workflow 경로, job id, blob
@@ -209,6 +242,74 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   변경이 push 금지다.
 
 **아직 해소되지 않은 도달 경로의 구체 목록은 이 문서에 싣지 않는다**(§16).
+
+### 5.1 cache 종류와 그것을 유지하는 검사
+
+이 분석은 저장소 전체 CI의 cache 위생 감사에서 나온 결과를 함께 쓴다
+(`.github/audits/actions-cache-poisoning-audit-2026-10-03.md`).
+
+- **분석기는 복원하는 cache의 종류를 보고한다.** `verified_package_manager`는
+  package manager 자신의 cache이고, `npm ci`가 lockfile의 integrity와 대조하므로
+  조작된 항목은 실패하거나 다시 내려받는다. `unverified`는 build 산출물과 browser
+  binary처럼 **아무것도 검증하지 않는** 것이고, job이 그것을 그대로 실행한다.
+  `unreadable`은 읽을 수 없는 것이며 둘 중 나쁜 쪽으로 취급한다.
+- **종류는 §5의 cache 규칙을 좁히지 않는다.** 어떤 종류든 복원하면 모든 변경이
+  push 금지다. 종류를 보고하는 이유는 하나다 — 자격증명 job이 verified에서
+  unverified로 옮겨 가는 것이 **같은 reason의 반복이 아니라 다른 사실**이 되게
+  하는 것. 그 전환은 `tests/agentCredentialReachability.test.mjs`의 posture digest가
+  본다.
+- **`npm run check:credential-cache-separation`이 그 전환을 막는다.** 자격증명을
+  가진 job은 `unverified`·`unreadable` cache를 복원할 수 없고, 이 검사는 PR Fast
+  Gate의 static 단계에서 돈다. 판정은 같은 모듈(`lib/agentCredentialReachability.ts`)
+  이 하므로 "어느 job이 자격증명을 가졌는가"에 답이 둘로 갈라지지 않는다.
+- **이 검사는 §5의 기록 3번을 유지하지 않는다.** 그것이 거절하는 것은
+  `unverified`·`unreadable`뿐이고, 자격증명 job이 `verified_package_manager`를
+  복원하는 것은 통과시킨다. 3번이 요구하는 것은 **에이전트 PR에서 도는 자격증명
+  cache 복원 job이 하나도 없다**는 더 강한 조건이므로, 이 검사를 그 근거로 쓰면
+  안 된다. 3번을 위한 장치는 "에이전트가 일으키는 이벤트에 걸리는 workflow의
+  자격증명 job은 **어떤** cache도 복원하지 않는다"를 묻는 별개 검사이고, 그것이
+  §5.2다.
+- 검사와 보고는 **이름을 출력하지 않는다**. 저장소가 공개이므로 §16이 미해소 대상의
+  목록을 여기에 두지 못하게 한다. 수치만 남기고, 목록은 운영자가 로컬에서
+  `npm run report:engineering-agent-tiers`로 본다.
+
+### 5.2 에이전트 PR의 cache 격리를 유지하는 검사
+
+`npm run check:agent-pr-cache-isolation`이 §5 기록 3번의 조건을 유지한다.
+**에이전트가 일으키는 이벤트에 걸리는 workflow의 자격증명 job은 어떤 cache도
+복원하지 않는다** — `verified_package_manager`도 포함한다. PR Fast Gate의 static
+단계에서 돈다.
+
+- **§5.1의 검사와 묻는 것이 다르다.** §5.1은 모든 workflow를 보면서 종류 둘만
+  거절하고, 이 검사는 도달하는 workflow만 보면서 종류 전부를 거절한다. 어느
+  쪽도 다른 쪽을 포함하지 않으므로 둘 다 필요하다.
+- **lockfile 대조는 이 주체에 대한 방어가 아니다.** 에이전트는 자기 PR에서
+  `package-lock.json`을 바꿀 수 있고, 그러면 `npm ci`의 integrity 대조는
+  에이전트가 넣은 값과 맞아떨어진다. 그래서 여기서는 package manager 자신의
+  cache도 거절한다.
+- **판정은 `lib/agentCredentialReachability.ts`가 한다.** 도달 여부·자격증명
+  여부·cache 종류를 다시 계산하지 않고 그 모듈이 보고한 `reachedWorkflows`와
+  cache 이유를 교차한다. 판정기를 둘로 만들면 숫자가 어긋난다(감사 P3).
+- **분석기는 여전히 job의 조건식을 해석하지 않는다.** §5의 "사람이 검토한 제외"
+  규칙은 그대로이고, 이 검사는 제외 목록을 하나도 쓰지 않는다. 조건식으로
+  통과하는 길을 만들지 않은 이유는 F5가 두 번 틀린 지점이 바로 trigger만 읽고
+  조건식을 읽지 않은 것이기 때문이다. **그래서 조건이 면제가 아니라 사실로
+  유지된다** — 2026-10-03에 도달 workflow 안에서 npm cache를 복원하던 자격증명
+  job 하나는 조건식으로 제외하지 않고 그 job에서 cache를 뗐다(소유자 결정).
+- **검사는 기록을 읽지 않는다.** 분석을 `cacheIsolationRecorded: false`로 받는다.
+  `true`로 받으면 분석기가 cache 이유를 보고하지 않으므로, 기록을 쓰는 순간 그
+  기록을 참으로 유지하는 장치가 꺼진다. `tests/agentPrCacheIsolation.test.mjs`가
+  이것을 고정한다.
+- 이 검사도 **이름을 출력하지 않는다**(§16). 수치만 남긴다.
+- **기록을 적용하는 쪽은 먼저 기록을 무시한 분석으로 판정한다.** 기록을 적용한
+  분석은 cache 이유를 아예 보고하지 않으므로, 그 분석으로 이 조건을 물으면 조건이
+  참이어서가 아니라 **증거가 가려져서** 충족으로 보인다. 그래서 소비자
+  (`scripts/report-engineering-agent-tiers.mjs`)는 `cacheIsolationRecorded: false`로
+  한 번 판정하고, 서명과 그 판정이 **둘 다** 성립할 때만 기록을 적용한다.
+  `tests/agentCacheIsolationRecord.test.mjs`가 이 순서를 고정한다.
+- **서명이 조건보다 오래 살지 않는다.** 같은 테스트가 "기록이 서명됐는데 이 조건이
+  깨진" 상태를 실패로 만든다. 서명은 한 파일의 두 칸이지만, 그 칸이 참이 아닌 상태를
+  만들 수는 없다.
 
 ## 6. 신뢰 경계와 외부 텍스트
 

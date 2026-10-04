@@ -25,6 +25,30 @@ Date / timezone:    ____________________
 - [ ] `npm run test:unit`
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
+- [ ] `npm run check:ci-cache-keys` — an Actions cache key decides who may
+      restore the entry, and an entry written while a run is on `main` or
+      `develop` is restorable by every run that can see that scope. Five
+      workflows once shared one exact Playwright key, so one entry held the
+      browser binaries eight jobs launch, and a bare `Linux-next-` restore-key
+      served one workflow's Next 16.3.4 build cache to another and broke its
+      16.3.5 font build. Reads YAML only, no credential.
+- [ ] `npm run check:credential-cache-separation` — a job holding a write
+      permission or an external secret may restore a package manager's cache,
+      which `npm ci` checks against the lockfile, and may not restore build
+      output or browser binaries, which nothing checks and which the job
+      executes. Reads YAML only, no credential.
+- [ ] `npm run check:agent-pr-cache-isolation` — the narrower question the
+      engineering agent's cache isolation record rests on, and a stronger
+      answer: no credentialed job in a workflow an event the agent raises
+      reaches may restore **any** Actions cache, the package manager's own
+      included. GitHub lets re-runs of a pull request restore that pull
+      request's entries, so isolation cannot answer for the agent's own pull
+      request, and `check:credential-cache-separation` does not keep this
+      condition — it permits the verified package-manager cache, and the
+      lockfile comparison agrees with whatever the agent put in
+      `package-lock.json` in the same pull request. While this check fails,
+      `docs/policy/engineering-agent.md` §5 forbids writing that record.
+      Reads YAML only, no credential.
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:e2e-copy-selectors` — a copy-based locator that steers a
       branch (`isVisible()`, `count()`) resolves instead of retrying, so when
@@ -202,6 +226,12 @@ Date / timezone:    ____________________
       it leaves its card behind promising something that is gone, on the first
       screen a new account sees (docs/ui-contracts/chat-starter-catalog.md)
 - [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:package-json-duplicate-keys` — proves no tracked
+      `package.json` declares the same key twice. JSON allows the repetition
+      and every reader keeps one entry, so the file stays valid, nothing else
+      in the gate reports it, and the losing entry does not exist for anything
+      reading the parsed object — a tool that parses and re-serialises the
+      file then drops it from the bytes as well
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
 - [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
@@ -910,6 +940,12 @@ is not one of the three. `scripts/auto-pr-branch-policy.mjs` already refuses
 `release/**`, `hotfix/**` and anything with a `to-main` segment an automatic
 develop pull request, so these names carry no automation of their own -- their
 pull requests are opened and merged by a person on purpose.
+
+Since 2026-10-02 PR Fast Gate enforces the other direction too: a pull
+request into `main` from anything but `develop`, `release/**`, a `hotfix`
+branch or the automation that carries its own gates fails the required check
+(`scripts/main-pr-source-policy.mjs`). A `to-main` branch is retargeted to
+`develop` and ships with the next release.
 
 ### 7.9.1 Selective release: `release/**`
 
