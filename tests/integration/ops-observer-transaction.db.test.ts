@@ -59,6 +59,35 @@ test("the ops-observer transaction wrapper", { skip: !rawUrl }, async (t) => {
       assert.equal(rows[0].n, 0);
     });
 
+    await t.test("the audit append writes one signed ops-observer entry and is charged four statements", async () => {
+      const targetId = `wrapper-probe-${Date.now()}`;
+      const { result } = await withOpsObserverTransaction("confirm", inSeconds(170), async (tx) =>
+        tx.$appendSystemAudit({
+          action: "ops_observer.wrapper_probe",
+          targetType: "OpsObserverWrapperProbe",
+          targetId,
+          summary: "Wrapper probe.",
+        }),
+      );
+      const rows = await prisma.$queryRawUnsafe<{ id: string; entryHash: string | null; actorUserId: string | null; actor: string }[]>(
+        `SELECT id, "entryHash", "actorUserId", metadata ->> 'systemActor' AS actor FROM "AdminAuditLog" WHERE "targetId" = $1`,
+        targetId,
+      );
+      assert.equal(rows.length, 1);
+      assert.deepEqual(result, { id: rows[0].id, entryHash: rows[0].entryHash });
+      assert.equal(rows[0].actorUserId, null);
+      assert.equal(rows[0].actor, "ops-observer");
+
+      // `assert` allows 2 statements after arming: one raw call leaves too few for an append.
+      const error = await withOpsObserverTransaction("assert", inSeconds(60), async (tx) => {
+        await tx.$queryRaw`SELECT 1`;
+        await tx.$appendSystemAudit({ action: "ops_observer.wrapper_probe", targetType: "OpsObserverWrapperProbe", targetId, summary: "Refused." });
+      }).then(() => null, (e: Error & { code?: string }) => e);
+      assert.equal(error?.code, "statement_ceiling_exceeded");
+      const after = await prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM "AdminAuditLog" WHERE "targetId" = $1`, targetId);
+      assert.equal(after[0].n, 1);
+    });
+
     await t.test("a raw call that could carry two statements is refused before it is sent", async () => {
       const error = await withOpsObserverTransaction("confirm", inSeconds(170), async (tx) => {
         await (tx as unknown as { $executeRawUnsafe: (sql: string) => Promise<number> }).$executeRawUnsafe(
