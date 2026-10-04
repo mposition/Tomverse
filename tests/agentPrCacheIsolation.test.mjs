@@ -177,10 +177,35 @@ test("on this repository's committed workflows the condition holds", () => {
   );
   assert.ok(verdict.reachedWorkflowCount > 0, "expected the question to be exercised");
   assert.ok(verdict.credentialedJobsInReachedCount > 0, "expected credentialed jobs in reach");
-  assert.ok(
-    verdict.cacheRestoringJobsAnywhereCount > 0,
-    "expected the contrast with the wider rule to be real: §5 still forbids every change",
+  // This used to assert the wider count was above zero, so that the narrow
+  // verdict's zero read as a real distinction rather than a coincidence. It is
+  // zero now: the owner's §16 decision took the npm cache off the remaining ten
+  // credentialed jobs, which this check never asked about and §5 forbids all
+  // the same. The contrast moved to the synthetic case below; here the stronger
+  // state is asserted as the fact it is. Whether §5's record may now be written
+  // is a reading of that policy and an owner's act, not something this follows
+  // from. .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3, 10.
+  assert.equal(verdict.cacheRestoringJobsAnywhereCount, 0);
+});
+
+test("the narrow question stays distinct from the wider rule, on built workflows", () => {
+  // The distinction the assertion above used to carry: a credentialed job that
+  // restores a cache somewhere the agent's pull request cannot reach leaves
+  // this check with no offender while §5's wider rule still refuses every
+  // change. If these two ever collapse into one number, this check has stopped
+  // answering its own question.
+  const unreached = REACHED_WITH_NPM_CACHE.replace(
+    `on:
+  pull_request:
+    branches: [develop]`,
+    `on:
+  schedule:
+    - cron: '0 1 * * *'`,
   );
+  const verdict = judgeAgentPrCacheIsolation(analyse([wf("reached", REACHED_WITH_NPM_CACHE), wf("elsewhere", unreached)]));
+  assert.equal(verdict.status, "judged");
+  assert.equal(verdict.cacheRestoringJobsAnywhereCount, 2, "both jobs restore a cache");
+  assert.equal(verdict.offenders.length, 1, "only the one an agent pull request reaches is this check's offender");
 });
 
 test("the check names no workflow and no job, because this repository is public", () => {
