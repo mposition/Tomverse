@@ -11,7 +11,11 @@
 
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
 
-/** Request body cap (design §5.6.2, operator decision N-4). */
+/**
+ * Request body cap: the same 16 KiB docs/policy/sre-ops.md §9 (decision N-4)
+ * fixes for an agent digest item, so no request can carry more than the item
+ * it may turn into.
+ */
 export const REQUEST_BODY_MAX_BYTES = 16 * 1024;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
