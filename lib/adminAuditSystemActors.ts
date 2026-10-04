@@ -62,7 +62,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -129,6 +129,7 @@ export const auditRowActorKind = (
 export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
   "support-triage-worker",
   "support-triage-retention",
+  "support-triage-account-deletion",
 ] as const satisfies readonly SystemAuditActor[];
 export type SupportTriageSystemAuditActor =
   (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
