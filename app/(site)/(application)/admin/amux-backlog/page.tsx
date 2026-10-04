@@ -154,6 +154,7 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
             process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])}
+          retentionHoldAvailable={process.env.TOMVERSE_AMUX_V4_RETENTION_HOLD_READ === "enabled"}
           operatorId={session.user.id} />
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />

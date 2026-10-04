@@ -82,6 +82,12 @@ export async function GET(request: Request): Promise<Response> {
     await consumeApiRateLimit(request, session.user!.id!,
       "admin-amux-v4-retention-hold-read", { minute: 6, day: 60 });
     const result = await prisma.$transaction(async (tx) => {
+      const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+      `;
+      if (!(clock[0]?.now instanceof Date)) {
+        throw new AmuxIdeaRetentionHoldError("integrity_unavailable");
+      }
       const scope = await readAmuxIdeaRetentionHoldScope(tx, ideaId);
       const holds = await tx.amuxIdeaRetentionHold.findMany({
         where: { ideaId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -90,7 +96,7 @@ export async function GET(request: Request): Promise<Response> {
           noticeSentAt: true, approvalAuditLogId: true,
           releaseAuditLogId: true },
       });
-      return { scope, holds };
+      return { checkedAt: clock[0].now.toISOString(), scope, holds };
     });
     return NextResponse.json(result, { headers: noStore });
   } catch (error) { return failure(error); }

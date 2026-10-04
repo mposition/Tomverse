@@ -8,6 +8,7 @@ import { AmuxFrontierModelsPanel } from "@/components/admin/AmuxFrontierModelsPa
 import type { CheckedCollectionModel } from "@/components/admin/AmuxFrontierModelsPanel";
 import { AmuxCollectionRequestPanel } from "@/components/admin/AmuxCollectionRequestPanel";
 import { AmuxIdeaAnalysisResultPanel } from "@/components/admin/AmuxIdeaAnalysisResultPanel";
+import { AmuxIdeaRetentionHoldPanel } from "@/components/admin/AmuxIdeaRetentionHoldPanel";
 import { AmuxSourceScopeApprovalPanel } from "@/components/admin/AmuxSourceScopeApprovalPanel";
 import type { ApprovedCollectionScope } from "@/components/admin/AmuxSourceScopeApprovalPanel";
 import { adminFetch } from "@/lib/adminFetch";
@@ -84,7 +85,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   collectionRequestAvailable,
   collectionPreviewReadAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisBudgetAvailable,
-  analysisResultAvailable, recentAvailable, operatorId }: {
+  analysisResultAvailable, retentionHoldAvailable, recentAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   sourceScopeApprovalAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
@@ -93,6 +94,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
   analysisResultAvailable: boolean;
+  retentionHoldAvailable: boolean;
   recentAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
@@ -652,6 +654,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId}
           onContinuationSelection={(value) => setContinuationSelection(value ? {
             ...value, ideaId: submission.ideaId } : null)} /> : null}
+      {retentionHoldAvailable && submission.kind === "submitted" ?
+        <AmuxIdeaRetentionHoldPanel key={submission.ideaId} ideaId={submission.ideaId} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
