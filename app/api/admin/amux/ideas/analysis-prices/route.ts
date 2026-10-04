@@ -16,7 +16,8 @@ import { AMUX_V4_CLAUDE_OPUS_55_COST_PROFILE,
   amuxV4ApprovedCliPriceEvidenceDigest } from
   "@/lib/amux/ideaAnalysisApprovedCostProfile";
 import { AmuxIdeaAnalysisPriceApprovalError,
-  commitAmuxIdeaAnalysisPriceApproval } from
+  commitAmuxIdeaAnalysisPriceApproval,
+  commitAmuxIdeaAnalysisPriceRevocation } from
   "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { prisma } from "@/lib/prisma";
 
@@ -30,6 +31,10 @@ const bodySchema = z.object({
   id: uuid,
   expectedPreviousVersion: z.number().int().nonnegative().max(2_147_483_646),
   ownerConfirmedWorstTier: z.literal(true),
+}).strict();
+const revokeSchema = z.object({
+  priceVersionId: uuid,
+  expectedVersion: z.number().int().positive().max(2_147_483_647),
 }).strict();
 
 async function owner() {
@@ -94,6 +99,35 @@ export async function POST(request: Request): Promise<Response> {
       commitAmuxIdeaAnalysisPriceApproval(tx,
         { session, request, approval }), { maxWait: 5_000, timeout: 15_000 });
     return NextResponse.json(result, { status: 201, headers: noStore });
+  } catch (error) { return failure(error); }
+}
+
+/** An expired or superseded approval must be explicitly revoked by the owner
+ * before a new version can be recorded. The read endpoint resolves lost replies. */
+export async function DELETE(request: Request): Promise<Response> {
+  try {
+    const session = await owner();
+    if (session === null) return NextResponse.json({ error: "Not found." },
+      { status: 404, headers: noStore });
+    if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
+      { status: 403, headers: noStore });
+    if (!WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
+        !READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
+      return NextResponse.json({ error: "price_approval_disabled" },
+        { status: 409, headers: noStore });
+    }
+    if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
+        "application/json") return NextResponse.json({ error: "Invalid content type." },
+      { status: 415, headers: noStore });
+    await consumeApiRateLimit(request, session.user!.id!,
+      "admin-amux-v4-analysis-price-revoke", { minute: 2, day: 10 });
+    const body = await readLimitedJson(request, 1_024, revokeSchema);
+    const result = await prisma.$transaction((tx) =>
+      commitAmuxIdeaAnalysisPriceRevocation(tx, { session, request,
+        priceVersionId: body.priceVersionId,
+        expectedVersion: body.expectedVersion }),
+    { maxWait: 5_000, timeout: 15_000 });
+    return NextResponse.json(result, { headers: noStore });
   } catch (error) { return failure(error); }
 }
 

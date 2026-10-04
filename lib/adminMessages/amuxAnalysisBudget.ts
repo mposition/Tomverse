@@ -20,7 +20,9 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     unknown: "The write outcome is unknown. Do not submit it again; read back the same decision.",
     failed: "This action could not be completed. No model was called.",
     unsupported: "Only the separately verified Claude Opus 5.5 tuple can be reserved now.",
-    expired: "The approved price has expired; a new verified price decision is required.",
+    expired: "The approved price is expired or no longer matches this profile. A new verified decision is required.",
+    revokeConfirm: "I confirm revoking this unusable price version before replacing it",
+    revoke: "Revoke unusable price",
   },
   ko: {
     modelConfirm: "이 Frontier 모델과 추론 수준을 확인했습니다",
@@ -41,6 +43,8 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     unknown: "쓰기 결과를 알 수 없습니다. 다시 제출하지 말고 같은 결정을 조회하세요.",
     failed: "작업을 완료하지 못했습니다. 모델은 호출되지 않았습니다.",
     unsupported: "현재 별도 검증된 Claude Opus 5.5 조합만 예약할 수 있습니다.",
-    expired: "승인 가격이 만료되었습니다. 새 가격 확인과 승인이 필요합니다.",
+    expired: "승인 가격이 만료됐거나 현재 프로필과 일치하지 않습니다. 새 가격 확인과 승인이 필요합니다.",
+    revokeConfirm: "새 가격으로 교체하기 전에 사용할 수 없는 가격 승인을 철회합니다",
+    revoke: "사용할 수 없는 가격 승인 철회",
   },
 });

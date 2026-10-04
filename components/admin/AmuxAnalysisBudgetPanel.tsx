@@ -47,8 +47,10 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
   const [price, setPrice] = useState<PriceReply | null>(null);
   const [hold, setHold] = useState<HoldReply | null>(null);
   const [checked, setChecked] = useState(false);
+  const [revokeChecked, setRevokeChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null);
+  const [pendingRevocationId, setPendingRevocationId] = useState<string | null>(null);
   const [unknown, setUnknown] = useState<"price" | "hold" | null>(null);
   const [failure, setFailure] = useState(false);
 
@@ -108,6 +110,27 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     finally { setBusy(false); }
   };
 
+  const revokeExpiredPrice = async () => {
+    if (!available || busy || !latest || latest.status !== "approved" ||
+        latest.admissible || !revokeChecked || unknown) return;
+    setPendingRevocationId(latest.id); setBusy(true); setFailure(false);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/analysis-prices", {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceVersionId: latest.id,
+          expectedVersion: latest.version }),
+      });
+      if (!response.ok) throw new Error("price_revocation_unknown");
+      const body: unknown = await response.json();
+      if (!body || typeof body !== "object" ||
+          (body as Record<string, unknown>).priceVersionId !== latest.id) {
+        throw new Error("price_revocation_unknown");
+      }
+      await loadPrice(); setPendingRevocationId(null); setRevokeChecked(false);
+    } catch { setUnknown("price"); }
+    finally { setBusy(false); }
+  };
+
   const reserve = async () => {
     if (!available || busy || !current || !latest || !confirmed.previewId ||
         hold?.state !== "not_visible" || unknown) return;
@@ -135,7 +158,7 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     setBusy(true); setFailure(false);
     try {
       if (unknown === "price") {
-        const query = new URLSearchParams({ id: pendingPriceId ?? "" });
+        const query = new URLSearchParams({ id: pendingRevocationId ?? pendingPriceId ?? "" });
         const response = await adminFetch(`/api/admin/amux/ideas/analysis-prices?${query}`,
           { cache: "no-store" });
         const body: unknown = response.ok ? await response.json() : null;
@@ -143,7 +166,12 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
             (body as Record<string, unknown>).state !== "found") {
           throw new Error("price_not_visible");
         }
+        if (pendingRevocationId &&
+            ((body as { price?: { status?: string } }).price?.status !== "revoked")) {
+          throw new Error("price_revocation_not_visible");
+        }
         await loadPrice(); setPendingPriceId(null);
+        setPendingRevocationId(null); setRevokeChecked(false);
       } else {
         const result = await loadHold();
         if (result.state !== "found") throw new Error("hold_not_visible");
@@ -169,6 +197,16 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
       </button>
     </> : null}
     {latest?.status === "approved" && !current ? <p role="alert">{m.expired}</p> : null}
+    {available && latest?.status === "approved" && !current && !unknown ? <>
+      <label className="flex items-center gap-2"><input type="checkbox"
+        checked={revokeChecked} onChange={(event) =>
+          setRevokeChecked(event.target.checked)} />{m.revokeConfirm}</label>
+      <button type="button" disabled={!revokeChecked || busy}
+        onClick={() => void revokeExpiredPrice()}
+        className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">
+        {m.revoke}
+      </button>
+    </> : null}
     {current ? <p role="status">{m.approved}</p> : null}
     {current && hold?.state === "not_visible" && !unknown ? <button type="button"
       disabled={busy} onClick={() => void reserve()}

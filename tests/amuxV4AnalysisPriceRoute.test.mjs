@@ -15,6 +15,9 @@ test("analysis price approval is owner-only and independently switched", async (
   assert.match(route, /const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE"/);
   assert.match(route, /const READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ"/);
   assert.match(route, /commitAmuxIdeaAnalysisPriceApproval\(tx,/);
+  assert.match(route, /export async function DELETE\(request: Request\)/);
+  assert.match(route, /commitAmuxIdeaAnalysisPriceRevocation\(tx,/);
+  assert.match(route, /expectedVersion: body\.expectedVersion/);
   assert.match(route, /retryWrite: false/);
   assert.doesNotMatch(route, /\b(?:runAmuxV4IsolatedApprovedAnalysis|commitAmuxIdeaOnlyAnalysisClaim)\s*\(/);
 });
@@ -69,4 +72,6 @@ test("Admin budget step is shown only after transfer confirmation", async () => 
   assert.match(budget, /analysis-reservations\?\$\{query\}/);
   assert.match(budget, /setUnknown\("hold"\)/);
   assert.match(budget, /ownerConfirmedWorstTier: true/);
+  assert.match(budget, /method: "DELETE"/);
+  assert.match(budget, /pendingRevocationId/);
 });
