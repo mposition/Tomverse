@@ -9,9 +9,12 @@ import { test } from "node:test";
 import { amuxV4SandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
 import { AMUX_V4_CLI_HARD_DEADLINE_MS,
   AMUX_V4_CODEX_S0_ENABLED, AMUX_V4_CLAUDE_S0_ENABLED,
-  awaitAmuxV4BoundedChild, amuxV4CliExitFailureStage,
+  awaitAmuxV4BoundedChild, amuxV4CliCaughtFailureStage,
+  amuxV4CliExitFailureStage, amuxV4CliInspectionFailureStage,
   runAmuxV4IsolatedSyntheticCliS0 } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
+import { inspectAmuxV4AnalysisCliResult,
+  planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContract.mjs";
 
 test("v13 one-shot deadline is ten minutes", () => {
   assert.equal(AMUX_V4_CLI_HARD_DEADLINE_MS, 600_000);
@@ -26,6 +29,21 @@ test("CLI exit diagnosis exposes only a bounded stage", () => {
     code: 2, signal: null }, false), "child_nonzero");
   assert.equal(amuxV4CliExitFailureStage({ timedOut: false,
     code: 0, signal: null }, false), null);
+});
+
+test("invalid CLI output maps to parser rejection without exposing output", () => {
+  const plan = planAmuxV4AnalysisCliInvocation({ provider: "anthropic",
+    modelId: "claude-opus-5-5", reasoningEffort: "high" });
+  const inspected = inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from("not-json\n"), 0);
+  assert.deepEqual(inspected, { kind: "outcome_unknown" });
+  assert.equal(amuxV4CliInspectionFailureStage(inspected), "parser_rejected");
+  assert.equal(amuxV4CliInspectionFailureStage({ kind: "verified_success" }), null);
+});
+
+test("spawn/setup and post-spawn I/O are separate metadata-only stages", () => {
+  assert.equal(amuxV4CliCaughtFailureStage(false), "setup_or_spawn_error");
+  assert.equal(amuxV4CliCaughtFailureStage(true), "child_io_error");
 });
 
 test("rejected S0 call path remains code-latched off", async () => {
@@ -72,6 +90,7 @@ test("failed child spawn is handled without an unhandled error", {
     { detached: true, stdio: "ignore", shell: false });
   await assert.rejects(awaitAmuxV4BoundedChild(child, 50),
     { code: "ENOENT" });
+  assert.equal(amuxV4CliCaughtFailureStage(false), "setup_or_spawn_error");
 });
 
 test("nonzero fake CLI is diagnosed without reading its stderr", {

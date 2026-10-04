@@ -58,6 +58,15 @@ test("Codex candidates cannot consume claims without served-model attestation", 
   "claude-opus-5-5"), true);
   assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
     modelId: "claude-opus-5-5", egressHosts: [] }, "claude-opus-5-5"), false);
+  const futureApproved = { ...base, provider: "anthropic",
+    modelId: "claude-frontier-next", reasoningEffort: "xhigh",
+    egressHosts: ["api.anthropic.com"] };
+  assert.equal(amuxV4CanClaimAnalysisCli(futureApproved,
+    "claude-frontier-next"), true);
+  assert.equal(amuxV4CanClaimAnalysisCli(futureApproved,
+    "claude-opus-5-5"), false);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...futureApproved,
+    reasoningEffort: "unknown" }, "claude-frontier-next"), false);
 });
 
 test("unattested or refused CLI output cannot become a live draft", () => {
