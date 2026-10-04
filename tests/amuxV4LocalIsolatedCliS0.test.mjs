@@ -66,12 +66,12 @@ test("unknown CLI receipt carries only bounded exit and CONNECT counters", () =>
   assert.equal(amuxV4CliUnknownResult("deadline", null, counts).childExitCode, null);
 });
 
-test("one-call Claude S0 still needs explicit process approval", async () => {
+test("consumed Claude S0 remains closed even with environment approval", async () => {
   const previous = process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
   try {
-    delete process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
+    process.env.AMUX_V4_SYNTHETIC_S0_APPROVED = "1";
     assert.equal(AMUX_V4_CODEX_S0_ENABLED, false);
-    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, true);
+    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, false);
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("openai"),
       { kind: "refused" });
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("anthropic"),
@@ -82,10 +82,10 @@ test("one-call Claude S0 still needs explicit process approval", async () => {
   }
 });
 
-test("S0 script refuses without explicit process approval", () => {
+test("S0 script refuses after gate closure despite environment approval", () => {
   const script = fileURLToPath(new URL("../scripts/amux-v4-cli-model-s0.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, "openai"], {
-    env: { PATH: process.env.PATH ?? "" },
+    env: { ...process.env, AMUX_V4_SYNTHETIC_S0_APPROVED: "1" },
     encoding: "utf8", timeout: 5_000,
   });
   assert.equal(result.status, 2);
