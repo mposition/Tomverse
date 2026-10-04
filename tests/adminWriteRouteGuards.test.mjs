@@ -214,6 +214,23 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
+/** The owner-triggered cost reservation delegates its one canonical system
+ * audit to the same transaction as the hold. This exception names the exact
+ * route, service, action and call path; it cannot cover another admin writer. */
+const reachesCanonicalAmuxAnalysisReservationAudit = (route) => {
+  if (route.name !== "amux/ideas/analysis-reservations/route.ts" ||
+      !/commitAmuxIdeaAnalysisBudgetReservation\s*\(\s*tx\s*,/.test(route.source)) {
+    return false;
+  }
+  const servicePath = join(LIB_DIR, "amux/ideaAnalysisBudgetReservationService.ts");
+  const service = withoutComments(readFileSync(servicePath, "utf8"));
+  return route.reaches("writeSystemAuditLog") &&
+    /await\s+writeSystemAuditLog\s*\(\s*\{/.test(service) &&
+    /action:\s*AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION\b/.test(service) &&
+    /targetType:\s*AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET\b/.test(service) &&
+    /return\s+\{\s*holdId:\s*input\.holdId/.test(service);
+};
+
 /** A POST body is needed for a private scope proposal, but this particular
  * handler is read-only. Keep the audit exemption conditional on the closed
  * code switch, the single service call and the transaction's first operation
@@ -315,6 +332,17 @@ test("the v4 unit rejection route reaches its transactional audit writer", () =>
   assert.equal(route.reaches("writeAdminAuditLog"), true);
 });
 
+test("the v4 analysis reservation route reaches its canonical system audit", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "amux/ideas/analysis-reservations/route.ts");
+  assert.ok(route);
+  assert.equal(reachesCanonicalAmuxAnalysisReservationAudit(route), true);
+  assert.equal(reachesCanonicalAmuxAnalysisReservationAudit({ ...route,
+    source: route.source.replace("commitAmuxIdeaAnalysisBudgetReservation(tx,",
+      "commitAmuxIdeaAnalysisBudgetReservationElsewhere(tx,"),
+  }), false);
+});
+
 test("every admin route decides whether the caller is an administrator", () => {
   // The guard itself, not the role: `isAdminSession` answers the first
   // question and `hasAdminPermission` the second, but a route that asks
@@ -359,6 +387,7 @@ test("every admin write route writes an audit entry", () => {
   const unaudited = writeRoutes
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
+      !reachesCanonicalAmuxAnalysisReservationAudit(route) &&
       !isDarkReadOnlyAmuxSourceScopePreview(route))
     .map((route) => route.name);
 
