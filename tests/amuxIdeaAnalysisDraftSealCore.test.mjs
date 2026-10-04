@@ -93,3 +93,15 @@ test("unapproved source and invalid idea identity are refused before sealing", (
   assert.deepEqual(seal(chunk(), { ideaId: "../idea" }),
     { ok: false, code: "idea_id_invalid" });
 });
+
+test("pre-created unit identities are exact, unique, and bound to sealed drafts", () => {
+  const ids = ["2c7ba27d-d351-46cf-a840-ec54c3d4834b",
+    "9a16ce76-637e-437a-8d54-5a0600951b51"];
+  const result = seal(chunk(), { unitIds: ids });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.draft.units.map((unit) => unit.id), ids);
+  for (const invalid of [[ids[0]], [ids[0], ids[0]], [ids[0], "../unit"]]) {
+    assert.deepEqual(seal(chunk(), { unitIds: invalid }),
+      { ok: false, code: "metadata_incomplete" });
+  }
+});

@@ -15,7 +15,7 @@ import { amuxV4ApprovedCliCostProfileMatches } from
 import { AmuxIdeaAnalysisReservationError,
   commitAmuxIdeaAnalysisBudgetReservation } from
   "@/lib/amux/ideaAnalysisBudgetReservationService";
-import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
 const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE";
@@ -97,10 +97,17 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json({ error: "price_profile_unapproved" },
         { status: 409, headers: noStore });
     }
-    const keys = loadCurrentAmuxContentKeys(process.env);
+    let keys;
+    try {
+      keys = await loadAmuxContentKeyRing([{ ideaId: preview.ideaId,
+        purpose: "transfer_payload", subjectId: body.previewId }]);
+    } catch {
+      throw new AmuxIdeaAnalysisReservationError("integrity_unavailable",
+        "transfer_payload_key_unavailable");
+    }
     const receipt = await prisma.$transaction((tx) =>
       commitAmuxIdeaAnalysisBudgetReservation(tx, {
-        ...body, keys,
+        ...body, keys, session, request,
         // The exact, S0-reviewed one-turn Claude profile is the only admitted
         // profile. A new model or changed limits must not inherit these facts.
         runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },

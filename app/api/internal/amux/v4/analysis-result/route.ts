@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
@@ -11,6 +12,10 @@ import { AmuxIdeaAnalysisResultError,
   readAmuxIdeaAnalysisResultReceipt } from
   "@/lib/amux/ideaAnalysisResultService";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { amuxAnalysisFreeformSubjectId } from
+  "@/lib/amux/ideaAnalysisDraftSealCore";
+import { createAmuxContentKeyRing,
+  type AmuxContentKeyIdentity } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
 // Intentionally dark: a live result requires verified isolated runner, agent-
@@ -49,11 +54,44 @@ export async function POST(request: Request): Promise<Response> {
   let body: z.infer<typeof bodySchema>;
   try { body = await readLimitedJson(request, 70 * 1024, bodySchema); }
   catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
+  let keys = loadCurrentAmuxContentKeys(process.env);
+  let unitIds: string[] | undefined;
+  if (body.outcome === "verified_success") {
+    if (body.rawModelOutput === null) {
+      return amuxJsonNoStore({ error: "invalid_result" }, 400);
+    }
+    let preview;
+    try {
+      preview = await prisma.amuxIdeaTransferPreview.findUnique({
+        where: { id: body.previewId }, select: { ideaId: true, chunkIndex: true },
+      });
+    } catch { return amuxJsonNoStore({ error: "key_preflight_unavailable" }, 503); }
+    if (!preview || preview.ideaId !== body.ideaId || preview.chunkIndex !== 0) {
+      return amuxJsonNoStore({ error: "not_ready" }, 409);
+    }
+    let count = 0;
+    try {
+      const parsed: unknown = JSON.parse(body.rawModelOutput);
+      const units = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).units : null;
+      if (Array.isArray(units) && units.length <= 40) count = units.length;
+    } catch { /* Invalid model output is settled as a failed invocation. */ }
+    unitIds = Array.from({ length: count }, () => randomUUID());
+    const existing: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
+      purpose: "transfer_payload", subjectId: body.previewId }];
+    const created: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
+      purpose: "analysis_freeform",
+      subjectId: amuxAnalysisFreeformSubjectId(body.ideaId, body.previewId) },
+    ...unitIds.map((id) => ({ ideaId: body.ideaId,
+      purpose: "analysis_draft" as const, subjectId: id }))];
+    try { keys = await createAmuxContentKeyRing(existing, created); }
+    catch { return amuxJsonNoStore({ error: "key_store_unavailable" }, 503); }
+  }
   let callbackReturned = false;
   try {
-    const keys = loadCurrentAmuxContentKeys(process.env);
     const receipt = await prisma.$transaction(async (tx) => {
-      const saved = await commitAmuxIdeaAnalysisResult(tx, { ...body, keys });
+      const saved = await commitAmuxIdeaAnalysisResult(tx, { ...body, keys,
+        unitIds });
       callbackReturned = true;
       return saved;
     }, { maxWait: 5_000, timeout: 15_000 });

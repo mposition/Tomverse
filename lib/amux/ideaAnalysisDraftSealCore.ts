@@ -57,6 +57,7 @@ export function amuxAnalysisFreeformSubjectId(ideaId: string, previewId: string)
 export function sealAmuxAnalysisDraft(input: InspectionInput & {
   ideaId: string;
   keys: AmuxContentKeys;
+  unitIds?: readonly string[];
 }):
   | { ok: false; code: Extract<AmuxAnalysisChunkInspection, { ok: false }>["code"] | "idea_id_invalid" }
   | { ok: true; draft: SealedAmuxAnalysisDraft } {
@@ -68,6 +69,11 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
   if (!inspected.ok) return { ok: false, code: inspected.code };
 
   const { chunk } = inspected;
+  if (input.unitIds && (input.unitIds.length !== chunk.units.length ||
+      new Set(input.unitIds).size !== input.unitIds.length ||
+      input.unitIds.some((id) => !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)))) {
+    return { ok: false, code: "metadata_incomplete" };
+  }
   const freeformBytes = Buffer.from(amuxCanonicalJson({
     schemaVersion: chunk.schemaVersion,
     previewId: chunk.previewId,
@@ -83,7 +89,7 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
     const freeform = sealAmuxContent(freeformBytes, "analysis_freeform",
       amuxAnalysisFreeformSubjectId(input.ideaId, chunk.previewId), input.keys);
     const units = chunk.units.map((unit, unitIndex): SealedAmuxDraftUnit => {
-      const id = randomUUID();
+      const id = input.unitIds?.[unitIndex] ?? randomUUID();
       const bytes = Buffer.from(amuxCanonicalJson(unit), "utf8");
       try {
         return { id, unitIndex, localRef: unit.localId, unitKind: unit.kind,

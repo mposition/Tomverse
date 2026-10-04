@@ -45,5 +45,8 @@ export function loadCurrentAmuxContentKeys(env: Record<string, string | undefine
     masterKey,
     digestKeyId,
     digestKey,
+    // Entry routes must preload exact unit keys before opening a product DB
+    // transaction. An omitted route cannot fall back to a DB-backup key.
+    contentMasters: new Map(),
   };
 }

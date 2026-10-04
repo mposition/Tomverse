@@ -1,8 +1,11 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog,
+  writeSystemAuditLog } from "@/lib/adminAudit";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { auditRowActorKind,
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
@@ -36,6 +39,8 @@ function refuse(code: AmuxIdeaAnalysisReservationError["code"], reason?: string)
 }
 
 export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
+  session: Session;
+  request: Request;
   holdId: string;
   previewId: string;
   priceVersionId: string;
@@ -91,6 +96,10 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
   });
   if (!idea || !chunk || !preview || idea.state !== "submitted" ||
+      !input.session.user?.id || !isAdminSession(input.session) ||
+      getAdminRole(input.session) !== "owner" ||
+      input.session.user.id !== idea.actorUserId ||
+      input.session.user.id !== preview.confirmedByUserId ||
       now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId ||
       chunk.state !== "awaiting_preview" ||
@@ -275,6 +284,15 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     outputMicroUsdPerMillion: pricing.outputMicroUsdPerMillion,
     reservedMicroUsd: reserve, status: "reserved",
   } });
+  await writeAdminAuditLog({
+    tx, session: input.session, request: input.request,
+    action: "amux.v4.analysis_budget.reserved",
+    targetType: "AmuxIdeaAnalysisBudgetHold", targetId: input.holdId,
+    summary: "Owner reserved one bounded AMUX v4 Agent analysis cost ceiling.",
+    metadata: { previewId: preview.id, priceVersionId: input.priceVersionId,
+      systemAuditId: auditId, reservedMicroUsd: decision.worstCaseMicroUsd,
+      namespace: AMUX_V4_ANALYSIS_NAMESPACE, modelCallStarted: false },
+  });
   return { holdId: input.holdId, previewId: preview.id,
     reservedMicroUsd: decision.worstCaseMicroUsd, auditId };
 }

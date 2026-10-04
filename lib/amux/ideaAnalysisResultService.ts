@@ -21,7 +21,8 @@ type Outcome = "verified_success" | "invocation_failed" | "outcome_unknown";
 type Input = { requestId: string; ideaId: string; previewId: string;
   holdId: string; leaseGeneration: number; outcome: Outcome;
   rawModelOutput: string | null; inputTokens: number | null;
-  outputTokens: number | null; keys: AmuxContentKeys };
+  outputTokens: number | null; keys: AmuxContentKeys;
+  unitIds?: readonly string[] };
 type Receipt = { previewId: string; ideaId: string;
   state: "draft_ready" | "provider_failed" | "outcome_unknown";
   duplicate: boolean; auditId: string };
@@ -259,7 +260,8 @@ export async function commitAmuxIdeaAnalysisResult(
   // rolling the reservation back to in_flight. The response body is not saved.
   const prepared = input.outcome === "verified_success"
     ? prepareFirstIdeaOnlyAnalysisDraft({ ideaId: input.ideaId,
-      previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys })
+      previewId: input.previewId, raw: input.rawModelOutput!, keys: input.keys,
+      unitIds: input.unitIds })
     : null;
   const invalidReason = prepared?.decision === "hold" ? prepared.reason : null;
   const proposedOutcome = invalidReason ? "invocation_failed" : input.outcome;
@@ -317,6 +319,7 @@ export async function commitAmuxIdeaAnalysisResult(
         ideaId: input.ideaId, previewId: input.previewId,
         holdId: input.holdId, leaseGeneration: input.leaseGeneration,
         rawModelOutput: input.rawModelOutput!, keys: input.keys,
+        unitIds: input.unitIds,
       });
     } else {
       // Return to an owner-only re-preview boundary, not an executable retry.

@@ -32,7 +32,8 @@ export class AmuxFirstAnalysisDraftError extends Error {
 export async function commitAmuxFirstIdeaAnalysisDraft(
   tx: Prisma.TransactionClient,
   input: { ideaId: string; previewId: string; holdId: string;
-    leaseGeneration: number; rawModelOutput: string; keys: AmuxContentKeys },
+    leaseGeneration: number; rawModelOutput: string; keys: AmuxContentKeys;
+    unitIds?: readonly string[] },
 ): Promise<{ ideaId: string; previewId: string; unitCount: number;
   analysisCompletedAt: string; auditId: string }> {
   if (!input || !ID.test(input.ideaId) || !ID.test(input.previewId) ||
@@ -161,7 +162,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   finally { payload.fill(0); }
   const prepared = prepareFirstIdeaOnlyAnalysisDraft({
     ideaId: idea.id, previewId: preview.id, raw: input.rawModelOutput,
-    keys: input.keys,
+    keys: input.keys, unitIds: input.unitIds,
   });
   if (prepared.decision !== "ready") {
     throw new AmuxFirstAnalysisDraftError("invalid_result");
