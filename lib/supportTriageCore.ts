@@ -397,7 +397,7 @@ export const SUGGESTION_LEASE_SECONDS = 5 * 60;
 /**
  * `SupportTriageGroup` (policy section 6, design section 5.4). The lists and
  * the transition table below are the CHECK lists and the `-- transitions:`
- * block of migration 20261003160000_support_triage_group; tests compare them.
+ * block of migration 20261004020000_support_triage_group; tests compare them.
  * A group is one equivalence class of one kind (`GROUP_KIND_PRIORITY`).
  */
 export const GROUP_STATES = Object.freeze([

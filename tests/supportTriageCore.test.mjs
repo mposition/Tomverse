@@ -302,7 +302,7 @@ test("the group migration's transitions, lists and limits are the core's", async
   const { readFileSync } = await import("node:fs");
   const core = await import("../lib/supportTriageCore.ts");
   const sql = readFileSync(
-    new URL("../prisma/migrations/20261003160000_support_triage_group/migration.sql", import.meta.url),
+    new URL("../prisma/migrations/20261004020000_support_triage_group/migration.sql", import.meta.url),
     "utf8"
   );
   const block = /-- transitions: SupportTriageGroup state\n([\s\S]*?)-- end transitions/.exec(sql);

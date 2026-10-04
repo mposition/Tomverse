@@ -11,7 +11,7 @@ import { GROUP_MEMBER_CAP, GROUP_STATES, GROUP_TRANSITIONS } from "@/lib/support
 //
 // What needs a database: the state machine, the composite key that ties a
 // member to its group's digest, the end-of-group order and the tombstone live
-// in migration 20261003160000_support_triage_group. Some fixtures move a
+// in migration 20261004020000_support_triage_group. Some fixtures move a
 // timestamp into the past; the trigger forbids exactly that, so they disable
 // it for one statement and re-enable it at once.
 

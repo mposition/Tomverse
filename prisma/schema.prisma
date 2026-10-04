@@ -8605,7 +8605,7 @@ model SupportTriageSuggestion {
 /// equivalence class of one kind over server facts, for display only. Its
 /// members carry its primary digest through a composite key, so a terminal
 /// group (digest NULL) can hold none. Migration
-/// 20261003160000_support_triage_group holds the state machine and the
+/// 20261004020000_support_triage_group holds the state machine and the
 /// tombstone rules.
 model SupportTriageGroup {
   id                            String    @id
