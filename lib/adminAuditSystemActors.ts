@@ -94,6 +94,16 @@ export const AMUX_V4_FIRST_DRAFT_SAVED_SCOPE = "first-analysis-draft-save-v1" as
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_SCOPE = "idea-analysis-auto-cancel-v1" as const;
+/** Retention first clears the DB body, then verifies external key deletion. */
+export const AMUX_V4_CONTENT_PURGE_ACTION = "amux.v4.content.body_purged" as const;
+export const AMUX_V4_CONTENT_KEY_DELETE_ACTION = "amux.v4.content.key_deleted" as const;
+export const AMUX_V4_CONTENT_RETIREMENT_TARGET = "AmuxIdeaContentKeyRetirement" as const;
+export const AMUX_V4_CONTENT_PURGE_SCOPE = "idea-content-purge-v1" as const;
+export const AMUX_V4_CONTENT_KEY_DELETE_SCOPE = "idea-content-key-delete-v1" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_ACTION = "amux.v4.retention_hold.notice_sent" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_TARGET = "AmuxIdeaRetentionHold" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE = "idea-retention-hold-notice-v1" as const;
+/** One authenticated source collector claims one already owner-approved file. */
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -175,6 +185,18 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
     return AMUX_V4_IDEA_AUTO_CANCEL_SCOPE;
+  }
+  if (action === AMUX_V4_CONTENT_PURGE_ACTION &&
+      targetType === AMUX_V4_CONTENT_RETIREMENT_TARGET) {
+    return AMUX_V4_CONTENT_PURGE_SCOPE;
+  }
+  if (action === AMUX_V4_CONTENT_KEY_DELETE_ACTION &&
+      targetType === AMUX_V4_CONTENT_RETIREMENT_TARGET) {
+    return AMUX_V4_CONTENT_KEY_DELETE_SCOPE;
+  }
+  if (action === AMUX_V4_RETENTION_HOLD_NOTICE_ACTION &&
+      targetType === AMUX_V4_RETENTION_HOLD_NOTICE_TARGET) {
+    return AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE;
   }
   return null;
 };
