@@ -494,6 +494,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
   },
   {
+    path: "lib/agentDigestStore.ts",
+    table: "AgentDigestItem",
+    tableMentions: 7,
+    writeVerbs: 4,
+    reason:
+      "The table's sole writer. Its raw SQL is the two retention batches (docs/policy/qa-release-agent.md section 4): a constant UPDATE that sets an expired body to NULL and a constant DELETE of rows past the meta retention, each bounded and audited, and each also refused by the table's own update and delete triggers outside those conditions. No table name is interpolated.",
+  },
+  {
     path: "scripts/report-issue-backlog-core.mjs",
     table: "AdminAuditLog",
     tableMentions: 2,

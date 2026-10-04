@@ -55,6 +55,9 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-intake",
     // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
     "qa-release-merge-lane",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/qa-release-agent.md section 4).
+    "agent-digest-retention",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

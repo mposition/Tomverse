@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { recordAgentDigestItem } from "@/lib/agentDigestStore";
+import { expireAgentDigestBodies, purgeAgentDigestMeta, recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { prisma } from "@/lib/prisma";
 
 // lib/agentDigestStore.ts against PostgreSQL through the migration history:
@@ -179,4 +179,80 @@ test("an admission returning null lets the row and its audit entry commit", asyn
   if (result.status !== "created") return;
   createdIds.push(result.id);
   assert.equal(await auditCount(result.id), 1);
+});
+
+// docs/policy/qa-release-agent.md section 4: the two retention batches. A row's
+// clock columns are immutable through the application, so the test backdates
+// them with the update trigger disabled -- the only way to make a row old
+// without waiting a year.
+const backdate = async (id: string, days: number) => {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" DISABLE TRIGGER "AgentDigestItem_before_update"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AgentDigestItem"
+         SET "createdAt" = "createdAt" - make_interval(days => $2::int),
+             "retentionUntil" = "retentionUntil" - make_interval(days => $2::int)
+       WHERE "id" = $1::uuid`,
+      id,
+      days,
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
+  }
+};
+
+test("body expiry clears only bodies past their retention, stamps the deletion, and audits the batch", async () => {
+  const expired = await recordAgentDigestItem(submission({ n: 1 }));
+  const fresh = await recordAgentDigestItem(submission({ n: 2 }));
+  assert.equal(expired.status, "created");
+  assert.equal(fresh.status, "created");
+  if (expired.status !== "created" || fresh.status !== "created") return;
+  createdIds.push(expired.id, fresh.id);
+  await backdate(expired.id, 91);
+
+  const result = await expireAgentDigestBodies();
+  assert.ok(result.expired >= 1);
+
+  const gone = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: expired.id } });
+  assert.equal(gone.payload, null);
+  assert.ok(gone.bodyDeletedAt);
+  assert.equal(gone.payloadSha256, expired.payloadSha256);
+  const kept = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: fresh.id } });
+  assert.notEqual(kept.payload, null);
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "agent_digest.bodies_expired" },
+    orderBy: { createdAt: "desc" },
+  });
+  const metadata = audit.metadata as Record<string, unknown>;
+  assert.equal(metadata.systemActor, "agent-digest-retention");
+  assert.equal(metadata.expired, result.expired);
+});
+
+test("the meta purge deletes only rows whose body is gone and whose 365 days are up", async () => {
+  const old = await recordAgentDigestItem(submission({ n: 3 }));
+  const bodied = await recordAgentDigestItem(submission({ n: 4 }));
+  const young = await recordAgentDigestItem(submission({ n: 5 }));
+  if (old.status !== "created" || bodied.status !== "created" || young.status !== "created") throw new Error("setup");
+  createdIds.push(old.id, bodied.id, young.id);
+  await backdate(old.id, 400);
+  await backdate(bodied.id, 400);
+  await backdate(young.id, 100);
+  // The first and the third lose their bodies. The second keeps its body and
+  // the third is only 100 days old, so both must survive the purge.
+  await prisma.$executeRawUnsafe(`UPDATE "AgentDigestItem" SET "payload" = NULL WHERE "id" = $1::uuid`, old.id);
+  await prisma.$executeRawUnsafe(`UPDATE "AgentDigestItem" SET "payload" = NULL WHERE "id" = $1::uuid`, young.id);
+
+  const result = await purgeAgentDigestMeta();
+  assert.ok(result.purged >= 1);
+  assert.equal(await prisma.agentDigestItem.count({ where: { id: old.id } }), 0);
+  assert.equal(await prisma.agentDigestItem.count({ where: { id: bodied.id } }), 1);
+  const youngRow = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: young.id } });
+  assert.ok(youngRow.bodyDeletedAt, "the young row's body is gone");
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "agent_digest.meta_purged" },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "agent-digest-retention");
 });
