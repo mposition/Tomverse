@@ -12,8 +12,24 @@ import {
   readCheckedFrontierSelection,
   type AvailableFrontierModel,
 } from "@/lib/amux/ideaFrontierCatalogUiCore";
+import {
+  readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
+  type PreparedIdeaTransferPreview,
+} from "@/lib/amux/ideaTransferPreviewUiCore";
 
-export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
+type PreviewState =
+  | { kind: "idle" | "pending" | "unknown" | "expired" | "recovery_unavailable" }
+  | { kind: "prepared"; value: PreparedIdeaTransferPreview };
+
+const receiptStore = (): Storage | null => {
+  try { return window.sessionStorage; } catch { return null; }
+};
+
+export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, planReady,
+  declaredExternalSources, operatorId }: {
+  available: boolean; previewAvailable: boolean; ideaId: string | null;
+  planReady: boolean; declaredExternalSources: boolean; operatorId: string;
+}) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const { locale } = useAdminLocale();
   const [models, setModels] = useState<AvailableFrontierModel[] | null>(null);
@@ -23,7 +39,33 @@ export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
   const [selectedEffort, setSelectedEffort] = useState("");
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
+  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
+
+  const readBack = useCallback(async (pendingId: string, model: AvailableFrontierModel,
+    effort: string) => {
+    try {
+      const query = new URLSearchParams({ previewId: pendingId });
+      const response = await adminFetch(`/api/admin/amux/ideas/transfer-preview?${query}`,
+        { cache: "no-store" });
+      if (!response.ok) {
+        setFailure(await readAdminApiFailure(response.clone(), {
+          fallback: m.transferPreviewUnknown, locale,
+        }));
+        setPreview({ kind: "unknown" });
+        return;
+      }
+      const body: unknown = await response.json();
+      if (response.ok && body && typeof body === "object" &&
+          (body as Record<string, unknown>).state === "expired") {
+        setPreview({ kind: "expired" });
+        return;
+      }
+      const parsed = readPreparedIdeaTransferPreview(response.status, body, pendingId, ideaId ?? "",
+        model, effort);
+      setPreview(parsed ? { kind: "prepared", value: parsed } : { kind: "unknown" });
+    } catch { setPreview({ kind: "unknown" }); }
+  }, [ideaId, locale, m.transferPreviewUnknown]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!available) return;
@@ -59,6 +101,22 @@ export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
     });
     return () => controller.abort();
   }, [load]);
+
+  useEffect(() => {
+    if (!ideaId || !previewAvailable) return;
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      if (receipt.kind === "present") {
+        setPreview({ kind: "pending" });
+        void readBack(receipt.previewId, receipt.model, receipt.effort);
+      } else if (receipt.kind === "unavailable") {
+        setPreview({ kind: "recovery_unavailable" });
+      }
+    });
+    return () => { active = false; };
+  }, [ideaId, operatorId, previewAvailable, readBack]);
 
   const refresh = () => {
     setLoading(true);
@@ -97,6 +155,47 @@ export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
       setFailure({ message: m.frontierSelectionUnavailable, tone: "error",
         requiresReauthentication: false, approvalId: null });
     } finally { setChecking(false); }
+  };
+
+  const preparePreview = async () => {
+    if (!ideaId || !previewAvailable || !planReady || declaredExternalSources ||
+        !selected || !checked ||
+        !selected.allowedEfforts.includes(selectedEffort) || preview.kind !== "idle") return;
+    const model = selected;
+    const effort = selectedEffort;
+    const previewId = crypto.randomUUID();
+    if (!reservePreviewReceipt(receiptStore(), operatorId, ideaId, previewId,
+      model, effort)) {
+      setPreview({ kind: "recovery_unavailable" });
+      return;
+    }
+    setPreview({ kind: "pending" });
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/transfer-preview", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, previewId, ideaId,
+          provider: model.provider, modelId: model.modelId,
+          reasoningEffort: effort, approvalId: model.approvalId,
+          approvalVersion: model.approvalVersion }),
+      });
+      const body: unknown = await response.json();
+      const parsed = readPreparedIdeaTransferPreview(response.status, body,
+        previewId, ideaId, model, effort);
+      if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
+      await readBack(previewId, model, effort);
+    } catch { await readBack(previewId, model, effort); }
+  };
+
+  const recoverPreview = () => {
+    if (!ideaId) return;
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    if (receipt.kind !== "present") {
+      setPreview({ kind: "recovery_unavailable" });
+      return;
+    }
+    setFailure(null);
+    setPreview({ kind: "pending" });
+    void readBack(receipt.previewId, receipt.model, receipt.effort);
   };
 
   return (
@@ -142,6 +241,38 @@ export function AmuxFrontierModelsPanel({ available }: { available: boolean }) {
             {m.frontierSelectionCheck}
           </button>
           {checked ? <p role="status">{m.frontierSelectionCurrent}</p> : null}
+          {ideaId ? <button type="button" onClick={() => void preparePreview()}
+            disabled={!previewAvailable || !planReady || declaredExternalSources ||
+              !checked || preview.kind !== "idle"}
+            className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+            {m.transferPreviewPrepare}
+          </button> : null}
+        </div>
+      ) : null}
+      {ideaId && !previewAvailable ? <p>{m.transferPreviewUnavailable}</p> : null}
+      {ideaId && previewAvailable && declaredExternalSources ?
+        <p>{m.transferPreviewIdeaOnly}</p> : null}
+      {ideaId && previewAvailable && !declaredExternalSources && !planReady ?
+        <p>{m.transferPreviewPlanRequired}</p> : null}
+      {preview.kind === "pending" ? <p role="status">{m.transferPreviewPreparing}</p> : null}
+      {preview.kind === "recovery_unavailable" ? <p role="alert">{m.recoveryUnavailable}</p> : null}
+      {preview.kind === "expired" ? <p role="status">{m.transferPreviewExpired}</p> : null}
+      {preview.kind === "unknown" ? <div className="space-y-2">
+        <p role="alert">{m.transferPreviewUnknown}</p>
+        <button type="button" onClick={recoverPreview} className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+          {m.transferPreviewReadBack}
+        </button>
+      </div> : null}
+      {preview.kind === "prepared" ? (
+        <div className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+          <p role="status">{m.transferPreviewPrepared}</p>
+          <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
+            {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
+          <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
+          <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
+            {preview.value.prompt}
+          </pre>
+          <p>{m.transferPreviewBoundary}</p>
         </div>
       ) : null}
     </section>

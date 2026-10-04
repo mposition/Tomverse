@@ -51,9 +51,15 @@ export async function readInitialIdeaSourcePlan(session: Session, ideaId: string
   if (!revisionId) return { ideaId, status: "absent" };
   const plan = await prisma.amuxIdeaSourcePlanRevision.findFirst({
     where: { id: revisionId, ideaId, actorUserId },
-    select: { id: true, state: true, creationAuditLogId: true, manifestDigest: true },
+    select: { id: true, state: true, creationAuditLogId: true, manifestDigest: true,
+      startChunkIndex: true },
   });
   if (!plan) return { ideaId, status: "partial" };
+  const chunk = await prisma.amuxIdeaAnalysisChunk.findUnique({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: plan.startChunkIndex } },
+    select: { actorUserId: true, sourcePlanRevisionId: true,
+      planStartChunkIndex: true, revisionChunkIndex: true },
+  });
   const audit = await prisma.adminAuditLog.findFirst({
     where: { id: plan.creationAuditLogId, action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
       targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET, targetId: plan.id,
@@ -67,7 +73,11 @@ export async function readInitialIdeaSourcePlan(session: Session, ideaId: string
     select: { metadata: true, entryHash: true },
   });
   const ownerMetadata = ownerAudit?.metadata;
-  const valid = plan.state === "active" && !!audit?.entryHash && !!ownerAudit?.entryHash &&
+  const valid = plan.state === "active" && chunk?.actorUserId === actorUserId &&
+    chunk.sourcePlanRevisionId === plan.id &&
+    chunk.planStartChunkIndex === plan.startChunkIndex &&
+    chunk.revisionChunkIndex === 0 &&
+    !!audit?.entryHash && !!ownerAudit?.entryHash &&
     matchesInitialPlanSystemAudit(audit, plan.manifestDigest) &&
     !!ownerMetadata && typeof ownerMetadata === "object" && !Array.isArray(ownerMetadata) &&
     (ownerMetadata as Record<string, unknown>).revisionId === plan.id &&
