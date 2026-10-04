@@ -5,13 +5,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 import { build, version as esbuildVersion } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const version = "0.1.0-candidate.1";
 const name = `prompt-refiner-vnext-one-shot-runner-${version}`;
-const runnerPath = resolve(root, "bin", `${name}.mjs`);
+const packagePath = resolve(root, "bin", `${name}.mjs.gz`);
 const recordPath = resolve(root, "bin", `${name}.json`);
 const a15Commit = "256e087d503151ea1ebdf812b1c6e52a5cfb6d77";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -32,7 +33,7 @@ if (esbuildVersion !== "0.28.1") {
 const bundle = await build({
   absWorkingDir: root,
   entryPoints: ["scripts/prompt-refiner-vnext-one-shot-owner-runner.mjs"],
-  outfile: runnerPath,
+  outfile: resolve(root, "bin", `${name}.mjs`),
   bundle: true,
   platform: "node",
   format: "esm",
@@ -50,6 +51,7 @@ if (bundle.outputFiles.length !== 1) {
   throw new Error("runner_candidate_output_count_invalid");
 }
 const runnerBytes = bundle.outputFiles[0].contents;
+const packageBytes = gzipSync(runnerBytes, { level: 9, mtime: 0 });
 const inputs = Object.keys(bundle.metafile.inputs).map((input) => {
   const absolute = resolve(root, input);
   const path = relative(root, absolute).split(sep).join("/");
@@ -61,6 +63,7 @@ const inputs = Object.keys(bundle.metafile.inputs).map((input) => {
 const inputSha256 = sha256(Buffer.from(inputs
   .map(([path, digest]) => `${path}\0${digest}\n`).join(""), "utf8"));
 const runnerSha256 = sha256(runnerBytes);
+const packageSha256 = sha256(packageBytes);
 const lockSha256 = sha256(readFileSync(resolve(root, "package-lock.json")));
 const existing = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : null;
 const sourceCommit = existing?.sourceCommit ?? git("rev-parse", "HEAD");
@@ -77,24 +80,26 @@ const record = {
   packageLockSha256: lockSha256,
   bundledInputSha256: inputSha256,
   runnerSha256,
-  runnerFile: `bin/${name}.mjs`,
+  packageSha256,
+  packageFile: `bin/${name}.mjs.gz`,
+  executableFile: `${name}.mjs`,
 };
 const recordBytes = Buffer.from(JSON.stringify(record, null, 2) + "\n", "utf8");
 if (existing) {
-  if (!existsSync(runnerPath) ||
-      !readFileSync(runnerPath).equals(runnerBytes) ||
+  if (!existsSync(packagePath) ||
+      !readFileSync(packagePath).equals(packageBytes) ||
       !readFileSync(recordPath).equals(recordBytes)) {
     throw new Error("runner_candidate_bytes_changed_repin_required");
   }
   process.stdout.write(JSON.stringify({ status: "candidate_bytes_verified",
-    version, runnerSha256, sourceCommit }) + "\n");
+    version, packageSha256, runnerSha256, sourceCommit }) + "\n");
 } else {
-  if (existsSync(runnerPath)) {
+  if (existsSync(packagePath)) {
     throw new Error("runner_candidate_partial_output");
   }
-  mkdirSync(dirname(runnerPath), { recursive: true });
-  writeFileSync(runnerPath, runnerBytes, { flag: "wx" });
+  mkdirSync(dirname(packagePath), { recursive: true });
+  writeFileSync(packagePath, packageBytes, { flag: "wx" });
   writeFileSync(recordPath, recordBytes, { flag: "wx" });
   process.stdout.write(JSON.stringify({ status: "candidate_built",
-    version, runnerSha256, sourceCommit }) + "\n");
+    version, packageSha256, runnerSha256, sourceCommit }) + "\n");
 }

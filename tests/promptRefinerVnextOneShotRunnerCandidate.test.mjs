@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { gunzipSync } from "node:zlib";
 
 import { createPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
@@ -17,7 +18,7 @@ import { syntheticManifest } from
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const name = "prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.1";
-const runner = join(root, "bin", `${name}.mjs`);
+const packagePath = join(root, "bin", `${name}.mjs.gz`);
 const record = join(root, "bin", `${name}.json`);
 const keyHex = "42".repeat(32);
 const confirmation = "I_AM_MPOSITION_AND_VERIFIED_EVERY_LABEL_AND_PRIVACY_EXCLUSION";
@@ -25,16 +26,14 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 test("candidate pin names exact executable bytes and a local A15 descendant", () => {
   const pin = JSON.parse(readFileSync(record, "utf8"));
-  const bytes = readFileSync(runner);
+  const archive = readFileSync(packagePath);
+  const bytes = gunzipSync(archive);
   assert.equal(pin.status, "candidate_only");
   assert.equal(pin.b01FinalDigest, false);
   assert.equal(pin.dispatchAuthority, false);
   assert.equal(pin.version, "0.1.0-candidate.1");
+  assert.equal(pin.packageSha256, sha256(archive));
   assert.equal(pin.runnerSha256, sha256(bytes));
-  assert.equal(verifyPromptRefinerVnextOneShotRunnerBytes(runner,
-    pin.runnerSha256), true);
-  assert.equal(verifyPromptRefinerVnextOneShotRunnerBytes(runner,
-    "00".repeat(32)), false);
   const ancestry = spawnSync("git", ["merge-base", "--is-ancestor",
     pin.a15BaseCommit, pin.sourceCommit], { cwd: root });
   assert.equal(ancestry.status, 0);
@@ -44,7 +43,12 @@ test("standalone candidate runs all 80 synthetic cases without transport", (t) =
   const folder = mkdtempSync(join(tmpdir(), "prvnext-runner-candidate-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const executable = join(folder, "runner.mjs");
-  copyFileSync(runner, executable);
+  writeFileSync(executable, gunzipSync(readFileSync(packagePath)));
+  const pin = JSON.parse(readFileSync(record, "utf8"));
+  assert.equal(verifyPromptRefinerVnextOneShotRunnerBytes(executable,
+    pin.runnerSha256), true);
+  assert.equal(verifyPromptRefinerVnextOneShotRunnerBytes(executable,
+    "00".repeat(32)), false);
   const manifestPath = join(folder, "manifest.json");
   const bindingPath = join(folder, "binding.json");
   const sealPath = join(folder, "seal.json");
