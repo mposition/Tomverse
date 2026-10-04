@@ -38,7 +38,7 @@ test("reads the exact deployment from Railway without granting admission", async
                 id: deploymentId,
                 input: {
                     projectId, serviceId, environmentId,
-                    status: { successfulOnly: true },
+                    status: { in: ["SUCCESS"] },
                 },
             });
             return response({ id: deploymentId, status: "SUCCESS", meta: { commitHash: commitSha } });
