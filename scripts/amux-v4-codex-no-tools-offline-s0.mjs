@@ -38,6 +38,7 @@ const server = createServer((request, response) => {
         toolsIsArray: Array.isArray(body.tools),
         toolsCount: Array.isArray(body.tools) ? body.tools.length : null,
         toolChoice: body.tool_choice ?? null,
+        reasoningEffort: body.reasoning?.effort ?? null,
       };
     } catch { captureError = "invalid_request"; }
     response.writeHead(400, { "content-type": "application/json" });
@@ -95,7 +96,8 @@ try {
     // Diagnostics only; no request body or credential is printed.
     diagnostic: captured ? null : stderr.slice(0, 1600) };
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  if (!captured?.toolsIsArray || captured.toolsCount !== 0) process.exitCode = 1;
+  if (!captured?.toolsIsArray || captured.toolsCount !== 0 ||
+      captured.reasoningEffort !== "high") process.exitCode = 1;
 } finally {
   server.close();
   await rm(temporary, { recursive: true, force: true });
