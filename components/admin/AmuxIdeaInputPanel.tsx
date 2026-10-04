@@ -67,10 +67,11 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   initialPlanAvailable, frontierModelsAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, operatorId }: {
+  transferConfirmAvailable, analysisBudgetAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
-  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean; operatorId: string;
+  transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
+  analysisBudgetAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -419,6 +420,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         available={frontierModelsAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
+        analysisBudgetAvailable={analysisBudgetAvailable}
         ideaId={submission.kind === "submitted" ? submission.ideaId : null}
         planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
