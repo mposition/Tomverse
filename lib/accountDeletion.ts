@@ -11,6 +11,10 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { recordMobileSessionsEndedByDeletion } from "@/lib/mobileAuthService";
 import { recordRelationshipEnded } from "@/lib/auRelationship";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
+import {
+  deleteSupportTriageDataForAccount,
+  flushSupportTriageDeletionAudit,
+} from "@/lib/supportTriageAccountDeletion";
 
 const ACCOUNT_DELETION_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
 
@@ -173,7 +177,7 @@ export async function deleteTomverseAccount(
       where: { userId: user.id },
     });
 
-    await tx.feedback.updateMany({
+    const anonymisedReports = await tx.feedback.updateManyAndReturn({
       where: { userId: user.id },
       data: {
         userId: null,
@@ -186,7 +190,15 @@ export async function deleteTomverseAccount(
         // becomes unsendable instead of mailing a removed contact.
         emailUpdatesConsent: false,
       },
+      select: { id: true },
     });
+    // Keyed on exactly the reports anonymised above; once userId is null
+    // nothing else can find the triage rows derived from them
+    // (docs/policy/support-triage.md §5).
+    const supportTriageDeleted = await deleteSupportTriageDataForAccount(
+      tx,
+      anonymisedReports.map((report) => report.id)
+    );
 
     await tx.refundRequest.updateMany({
       where: { userId: user.id },
@@ -290,6 +302,10 @@ export async function deleteTomverseAccount(
     await tx.user.delete({
       where: { id: user.id },
     });
+
+    // Last, so the audit chain lock is held for one statement, not for this
+    // whole transaction.
+    await flushSupportTriageDeletionAudit(tx, supportTriageDeleted);
   });
 
   return { deleted: true as const, email: user.email };
