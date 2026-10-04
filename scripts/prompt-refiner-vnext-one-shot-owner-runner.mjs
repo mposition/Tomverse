@@ -10,6 +10,7 @@ import { readVerifiedPromptRefinerVnextOneShotOwnerCase } from
 
 const SLOT_COUNT = 80;
 const OWNER_KEY = /^(?:[0-9a-f]{2}){32,64}$/;
+// Catch common accidental credentials; the owner still runs in a clean environment.
 const FORBIDDEN_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(?:_|$)|^POSTGRES(?:_|$)|^PG(?:HOST|USER|PASSWORD|DATABASE|PORT|PASSFILE|SERVICEFILE)$|^DB_(?:HOST|USER|PASSWORD|DATABASE|PORT)$|(?:^|_)API_KEY$|^PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN$/i;
 const refuse = () => { throw new Error("owner_runner_preflight_unavailable"); };
 
