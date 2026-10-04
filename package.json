@@ -43,6 +43,7 @@
     "build:amux-v4-cli-binary-s0": "esbuild scripts/amux-v4-cli-binary-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-binary-s0.mjs",
     "build:amux-v4-cli-model-s0": "esbuild scripts/amux-v4-cli-model-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-model-s0.mjs",
     "build:amux-v4-analysis-agent-once": "esbuild scripts/amux-v4-analysis-agent-once.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-analysis-agent-once.mjs",
+    "build:amux-v4-codex-no-tools-offline-s0": "esbuild scripts/amux-v4-codex-no-tools-offline-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-codex-no-tools-offline-s0.mjs",
     "build:assistant-knowledge-tutorial-media": "node scripts/build-assistant-knowledge-tutorial-media.mjs",
     "capture:week1-marketing-kit:en": "node scripts/capture-week1-marketing-kit-en.mjs",
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",

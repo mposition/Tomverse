@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { inspectAmuxV4AnalysisCliResult,
   planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContract.mjs";
-import { amuxV4CodexNoToolsCatalogJson } from
+import { amuxV4CodexNoToolsCatalogJson,
+  amuxV4CodexNoToolsConfigArgs } from
   "../lib/amux/ideaLocalCodexNoToolsCore.mjs";
 
 const openai = { provider: "openai", modelId: "frontier-openai",
@@ -16,6 +17,11 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   const claude = planAmuxV4AnalysisCliInvocation(anthropic);
   assert.equal(codex.command[0], "/run/amux-cli/codex");
   assert.deepEqual(codex.command.slice(1, 3), ["--ask-for-approval", "never"]);
+  const pinnedPrefix = ["/run/amux-cli/codex", "--ask-for-approval", "never",
+    ...amuxV4CodexNoToolsConfigArgs(),
+    "-c", 'model_reasoning_effort="high"',
+    "-c", 'shell_environment_policy.inherit="none"', "exec"];
+  assert.deepEqual(codex.command.slice(0, pinnedPrefix.length), pinnedPrefix);
   assert.ok(codex.command.includes("exec"));
   assert.ok(codex.command.includes("model_catalog_json=\"/run/amux-cli/model-catalog.json\""));
   assert.ok(codex.command.includes("tools.experimental_request_user_input.enabled=false"));
@@ -93,6 +99,9 @@ test("Claude result needs exact served model and complete usage", () => {
   for (const initOverride of [
     { mcp_servers: [{ name: "external" }] },
     { mcp_servers: "not-an-array" },
+    { skills: [{ name: "project-skill" }] },
+    { plugins: [{ name: "external-plugin" }] },
+    { agents: [{ name: "helper" }] },
     { permissionMode: "bypassPermissions" },
     { permission_mode: "bypassPermissions" },
   ]) {
@@ -106,6 +115,15 @@ test("Claude result needs exact served model and complete usage", () => {
       Buffer.from(events.map((event) => JSON.stringify(event)).join("\n")), 0),
     { kind: "outcome_unknown" });
   }
+  const unsafeStop = [
+    { type: "system", subtype: "init", tools: [] },
+    { type: "assistant", message: { role: "assistant",
+      stop_reason: "tool_use", content: [{ type: "text", text: "answer" }] } },
+    claudeEnvelope(),
+  ];
+  assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(unsafeStop.map((event) => JSON.stringify(event)).join("\n")), 0),
+  { kind: "outcome_unknown" });
   assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(claudeEnvelope(), [], [{ type: "tool_use", name: "Read" }]), 0),
   { kind: "outcome_unknown" });

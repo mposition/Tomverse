@@ -1,24 +1,93 @@
 #!/usr/bin/env node
-// Offline proof only: capture the first request to a synthetic loopback
-// provider. This script never contacts a model or reads an OAuth profile.
+// Offline proof only. The launcher first creates a network-isolated bwrap
+// namespace; the child captures every request to a synthetic loopback provider.
+// No OAuth profile is mounted and no model endpoint is reachable.
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { createServer } from "node:http";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { amuxV4CodexNoToolsCatalogJson,
   amuxV4CodexNoToolsConfigArgs } from
   "../lib/amux/ideaLocalCodexNoToolsCore.mjs";
 
-const binary = process.argv[2];
-if (process.platform !== "linux" || binary !== "/run/codex" ||
-    process.env.HOME !== "/tmp" || process.env.CODEX_HOME) {
-  throw new Error("offline namespace required");
+const SOURCE_BINARY = "/home/tommy/.codex/packages/standalone/releases/0.155.1-x86_64-unknown-linux-musl/bin/codex";
+const BINARY_SHA256 = "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761";
+const self = fileURLToPath(import.meta.url);
+
+if (process.env.AMUX_V4_OFFLINE_CHILD !== "1") {
+  if (process.platform !== "linux" || process.argv.length !== 2) {
+    throw new Error("offline Linux launcher required");
+  }
+  const hash = createHash("sha256");
+  for await (const part of createReadStream(SOURCE_BINARY)) hash.update(part);
+  if (hash.digest("hex") !== BINARY_SHA256) {
+    throw new Error("unapproved offline Codex binary");
+  }
+  const args = ["--unshare-all", "--die-with-parent", "--cap-drop", "ALL",
+    "--clearenv", "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin",
+    "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
+    "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+    "--dir", "/run", "--ro-bind", self, "/run/probe.mjs",
+    "--ro-bind", SOURCE_BINARY, "/run/codex",
+    "--setenv", "HOME", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
+    "--setenv", "AMUX_V4_OFFLINE_CHILD", "1", "--chdir", "/tmp",
+    "--", "/usr/bin/node", "/run/probe.mjs", "/run/codex"];
+  const isolated = spawn("/usr/bin/bwrap", args, {
+    env: { PATH: "/usr/bin:/bin" }, detached: true,
+    stdio: ["ignore", "pipe", "ignore"], shell: false,
+  });
+  const chunks = [];
+  let bytes = 0;
+  isolated.stdout.on("data", (part) => {
+    bytes += part.length;
+    if (bytes <= 4096) chunks.push(part);
+    else {
+      try { process.kill(-isolated.pid, "SIGKILL"); }
+      catch { isolated.kill("SIGKILL"); }
+    }
+  });
+  const timeout = setTimeout(() => {
+    try { process.kill(-isolated.pid, "SIGKILL"); }
+    catch { isolated.kill("SIGKILL"); }
+  }, 30_000);
+  const exit = await new Promise((resolve) => {
+    isolated.once("error", () => resolve({ code: null }));
+    isolated.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  clearTimeout(timeout);
+  let result;
+  try { result = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { result = null; }
+  if (exit.code !== 0 || bytes > 4096 ||
+      result?.captured?.toolsIsArray !== true ||
+      result.captured.toolsCount !== 0 ||
+      result.captured.reasoningEffort !== "high" ||
+      result.captured.toolChoice !== "auto" ||
+      result.requestCount !== 1 || result.captureError !== null ||
+      result.exit?.code !== 1 || result.exit?.signal !== null) {
+    process.stderr.write("AMUX_V4_CODEX_OFFLINE_S0_FAILED\n");
+    process.exitCode = 1;
+  } else {
+    process.stdout.write("AMUX_V4_CODEX_OFFLINE_S0_PASS tools=0 effort=high requests=1\n");
+  }
+} else {
+  if (process.platform !== "linux" || process.argv[2] !== "/run/codex" ||
+      process.env.HOME !== "/tmp" || process.env.CODEX_HOME) {
+    throw new Error("offline namespace required");
+  }
+  await runIsolatedCapture(process.argv[2]);
 }
 
+async function runIsolatedCapture(binary) {
 const temporary = await mkdtemp("/tmp/amux-v4-offline-codex-");
 let captured = null;
 let captureError = null;
+let requestCount = 0;
 const server = createServer((request, response) => {
+  requestCount += 1;
   if (request.method !== "POST" || request.url !== "/v1/responses" ||
       captured !== null) {
     response.writeHead(404).end();
@@ -92,13 +161,17 @@ try {
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
   clearTimeout(timer);
-  const result = { captured, captureError, exit,
+  const result = { captured, captureError, requestCount, exit,
     // Diagnostics only; no request body or credential is printed.
     diagnostic: captured ? null : stderr.slice(0, 1600) };
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!captured?.toolsIsArray || captured.toolsCount !== 0 ||
-      captured.reasoningEffort !== "high") process.exitCode = 1;
+      captured.toolChoice !== "auto" || captured.reasoningEffort !== "high" ||
+      requestCount !== 1 || exit.code !== 1 || exit.signal !== null) {
+    process.exitCode = 1;
+  }
 } finally {
   server.close();
   await rm(temporary, { recursive: true, force: true });
+}
 }
