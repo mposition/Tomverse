@@ -209,6 +209,28 @@ test("Claude S0 trace records UI invalidation shape without field values", () =>
   assert.equal(JSON.stringify(trace).includes(marker), false);
 });
 
+test("Claude S0 security trace counts capabilities without tool names", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const stdout = Buffer.from([
+    { type: "system", subtype: "init", tools: ["Bash"],
+      mcp_servers: [], skills: [], plugins: [], agents: [],
+      permissionMode: "restricted" },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "never expose content" }] } },
+    claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
+  const diagnostic = inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+    { diagnostic: true, syntheticEventType: true });
+  assert.equal(diagnostic.failureReason, "security_no_tools_violation");
+  assert.deepEqual(diagnostic.syntheticTrace.events[0], {
+    type: "system", phase: "before_init", subtype: "init",
+    capabilityCounts: { tools: 1, mcp_servers: 0, skills: 0,
+      plugins: 0, agents: 0 }, permissionMode: "restricted",
+  });
+  assert.equal(JSON.stringify(diagnostic).includes("Bash"), false);
+  assert.equal(JSON.stringify(diagnostic).includes("never expose"), false);
+});
+
 test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const maxTokens = Buffer.from([
