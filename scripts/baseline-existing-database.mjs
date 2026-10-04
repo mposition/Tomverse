@@ -12,6 +12,7 @@ import {
   presenceAnswer,
   presenceQueryFor,
   presenceVerdict,
+  replacementAnswer,
 } from "./baseline-presence-core.mjs";
 
 /**
@@ -73,9 +74,9 @@ import {
  * constraint, a trigger or a function matches before it is applied as well as
  * after, so on its own it would always be refused. Such a migration names the
  * relation it creates (`-- baseline-check: present-if-relation "Name"`), or the
- * function (`present-if-function "name"`) when it creates only a function; when
- * every pending migration names one and every one is proven absent, the deploy
- * goes on.
+ * function (`present-if-function "name"`) when it creates only a function.
+ * A function replacement may instead pin the exact prior body digest. Only a
+ * proven absent object or a proven prior function version permits the deploy.
  * See `scripts/baseline-presence-core.mjs`.
  */
 
@@ -223,8 +224,14 @@ try {
         await client.query("BEGIN READ ONLY");
         try {
           const { rows } = await client.query(presenceQueryFor(probe));
-          // Exactly one row of one boolean, or no answer at all.
-          answers.set(name, presenceAnswer(rows));
+          // A replacement must match the exact previous body. Other probes
+          // answer one boolean. Unknown or malformed answers fail closed.
+          answers.set(
+            name,
+            probe.previousBodySha256 !== undefined
+              ? replacementAnswer(rows, probe.previousBodySha256)
+              : presenceAnswer(rows)
+          );
         } catch {
           answers.set(name, undefined);
         } finally {
@@ -234,12 +241,12 @@ try {
       const verdict = presenceVerdict(pending, answers);
       if (verdict.proceed) {
         log(
-          "Pending migrations change nothing schema.prisma describes, and the relation or function each one declares is absent. Letting migrate deploy apply them.",
+          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function body. Letting migrate deploy apply them.",
           { pending }
         );
       } else {
         fail(
-          "This database already matches schema.prisma, and the relations or functions these pending migrations declare were not proven absent. They may already be in place. Nothing has been changed.",
+          "This database already matches schema.prisma, and at least one pending migration is neither proven absent nor an exact prior function version. Nothing has been changed.",
           { pending, notProvenAbsent: verdict.notProvenAbsent }
         );
       }
