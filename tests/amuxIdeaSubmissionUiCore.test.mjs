@@ -5,12 +5,21 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  canStartAnotherIdea,
   classifyIdeaSubmissionPost,
   classifyIdeaSubmissionReadBack,
 } from "../lib/amux/ideaSubmissionUiCore.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestId = "e7def5f0-2c78-4bd3-9558-ab8a8e3617d0";
+
+test("another idea starts only after a definitive save and no pending check", () => {
+  assert.equal(canStartAnotherIdea("submitted", false), true);
+  assert.equal(canStartAnotherIdea("submitted", true), false);
+  for (const state of ["idle", "pending", "outcome_unknown", "recovery_unavailable", "refused"]) {
+    assert.equal(canStartAnotherIdea(state, false), false);
+  }
+});
 
 test("only an exact successful submission response confirms the idea", () => {
   assert.deepEqual(classifyIdeaSubmissionPost({
