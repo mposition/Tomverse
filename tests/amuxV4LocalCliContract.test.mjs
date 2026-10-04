@@ -92,6 +92,8 @@ test("Claude bare accepts only the pinned inert metadata shape without tools", (
   assert.equal(parse({ ...init, tools: ["Bash"] }).kind, "outcome_unknown");
   assert.equal(parse({ ...init, plugins: [{ ...init.plugins[0],
     path: "/tmp/.claude/plugin" }, init.plugins[1]] }).kind, "outcome_unknown");
+  assert.equal(parse({ ...init, plugins: [{ ...init.plugins[0],
+    path: "../plugin" }, init.plugins[1]] }).kind, "outcome_unknown");
   assert.equal(parse({ ...init, agents: [{}, {}, {}, {}, {}] }).kind,
     "outcome_unknown");
 });
