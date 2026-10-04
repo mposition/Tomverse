@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { z } from "zod";
 
-import { releaseQaReleaseMergeLaneLatch } from "@/lib/qaReleaseMergeLaneStore";
+import { releaseQaReleaseMergeLaneLatch } from "@/lib/qaReleaseMergeLaneRelease";
 import { runQaReleaseControlAdminMutation } from "@/lib/qaReleaseOperatorControlAdmin";
 
 // Releases the develop merge lane's latch (docs/policy/qa-release-agent.md

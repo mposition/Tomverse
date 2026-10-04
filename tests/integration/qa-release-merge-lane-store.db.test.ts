@@ -9,9 +9,9 @@ import {
   QaReleaseMergeLaneLate,
   consumeQaReleaseMergeInstruction,
   issueQaReleaseMergeInstruction,
-  releaseQaReleaseMergeLaneLatch,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
+import { releaseQaReleaseMergeLaneLatch } from "@/lib/qaReleaseMergeLaneRelease";
 
 // The merge lane's single writer against PostgreSQL: instruction issue.
 

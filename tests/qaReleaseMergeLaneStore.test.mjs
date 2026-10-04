@@ -7,6 +7,7 @@ import test from "node:test";
 // tests/integration/qa-release-merge-lane-store.db.test.ts.
 
 const SOURCE = readFileSync(new URL("../lib/qaReleaseMergeLaneStore.ts", import.meta.url), "utf8");
+const RELEASE = readFileSync(new URL("../lib/qaReleaseMergeLaneRelease.ts", import.meta.url), "utf8");
 
 test("instruction issue uses the policy's nine statements: 32 s, Prisma 37 s, Prisma > transaction > statement > idle", () => {
   const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_ISSUE_LIMITS = Object.freeze({"));
@@ -86,10 +87,10 @@ test("result report arms ten statements, audits first, moves in one statement, t
 });
 
 test("a person's latch release arms nine statements, refuses an unlatched lane before writing, and binds the attempt change to what was shown", () => {
-  const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_LATCH_RELEASE_LIMITS = Object.freeze({"));
+  const block = RELEASE.slice(RELEASE.indexOf("QA_RELEASE_LATCH_RELEASE_LIMITS = Object.freeze({"));
   assert.match(block, /statements: 9,/);
   assert.match(block, /prismaMs: \(3 \* 9 \+ 5\) \* 1_000 \+ 5_000,/);
-  const fn = SOURCE.slice(SOURCE.indexOf("export async function releaseQaReleaseMergeLaneLatch"));
+  const fn = RELEASE.slice(RELEASE.indexOf("export async function releaseQaReleaseMergeLaneLatch"));
   const order = [
     "set_config('statement_timeout'",
     "await takeAuditChainLock(tx);",
