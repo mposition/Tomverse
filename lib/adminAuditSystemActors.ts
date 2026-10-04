@@ -263,7 +263,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake", "support-triage-worker", "support-triage-retention",
   "qa-release-merge-lane",
   "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "support-triage-account-deletion", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic", "ops-observer", "model-catalog-renewal",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -612,6 +612,7 @@ function modelCatalogRenewalAuditScope(actor: unknown, action: unknown, targetTy
 export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
   "support-triage-worker",
   "support-triage-retention",
+  "support-triage-account-deletion",
 ] as const satisfies readonly SystemAuditActor[];
 export type SupportTriageSystemAuditActor =
   (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];

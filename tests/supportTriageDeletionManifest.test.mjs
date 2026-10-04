@@ -198,6 +198,7 @@ test("a correctly declared feedback link passes", () => {
       onAccountDeletion: "delete",
       columns: { ...SUPPORT_TRIAGE_DELETION_MANIFEST[0].columns, feedbackId: "identifier" },
     },
+    ...SUPPORT_TRIAGE_DELETION_MANIFEST.slice(1),
   ];
   assert.deepEqual(auditDeletionManifest(edited, manifest), []);
 });
@@ -254,4 +255,30 @@ test("an @relation spelled inside a string is not the relation attribute", async
     relationFieldsOf('@default("@relation(fields: [id])") @relation(fields: [realFk], references: [id])'),
     ["realFk"]
   );
+});
+
+test("account deletion deletes exactly the manifest's delete-on-account-deletion models", async () => {
+  const source = readFileSync(new URL("../lib/supportTriageAccountDeletion.ts", import.meta.url), "utf8");
+  const listed = /SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object\.freeze\(\[([^\]]*)\]/.exec(source);
+  assert.ok(listed);
+  const models = [...listed[1].matchAll(/"(\w+)"/g)].map((m) => m[1]).sort();
+  const expected = SUPPORT_TRIAGE_DELETION_MANIFEST.filter((entry) => entry.onAccountDeletion === "delete")
+    .map((entry) => entry.model)
+    .sort();
+  assert.deepEqual(models, expected);
+  for (const model of expected) {
+    const delegate = model[0].toLowerCase() + model.slice(1);
+    assert.ok(source.includes(`tx.${delegate}.deleteMany(`), `${model} is deleted`);
+  }
+});
+
+test("the deleted-account marker the guard refuses is the one account deletion writes", () => {
+  const deletion = readFileSync(new URL("../lib/accountDeletion.ts", import.meta.url), "utf8");
+  const migration = readFileSync(
+    new URL("../prisma/migrations/20261004010000_support_triage_suggestion/migration.sql", import.meta.url),
+    "utf8"
+  );
+  const written = /message: "([^"]+)"/.exec(deletion);
+  assert.ok(written);
+  assert.ok(migration.includes(`deleted_marker CONSTANT TEXT := '${written[1]}';`));
 });
