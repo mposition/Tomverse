@@ -5,6 +5,11 @@ import { after, test } from "node:test";
 import type { Session } from "next-auth";
 import type { Prisma } from "@prisma/client";
 
+import { auditRowActorKind,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE } from "@/lib/adminAuditSystemActors";
+import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { inspectAmuxIdeaSubmission } from "@/lib/amux/ideaSubmissionCore";
 import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
@@ -12,6 +17,17 @@ import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewSer
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
 import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAudit,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
+import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
+import { parseAmuxV4AnalysisQueueCursor,
+  type AmuxV4AnalysisQueueCursor } from "@/lib/amux/ideaAnalysisQueueCursorCore";
+import { commitAmuxIdeaAnalysisUnusedReservationCancellation,
+  AmuxIdeaAnalysisCancellationError } from "@/lib/amux/ideaAnalysisBudgetCancellationService";
+import { commitAmuxExpiredIdeaAnalysisReservationRelease } from
+  "@/lib/amux/ideaAnalysisBudgetExpiryService";
+import { commitAmuxKnownIdeaAnalysisSettlement,
+  AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
+import { commitAmuxIdeaAnalysisUnknownOutcome,
+  AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
 import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
@@ -78,6 +94,27 @@ async function confirmedPreviewId(modelId: string): Promise<string> {
       payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys }));
   return choice.previewId;
 }
+
+test("analysis queue lists confirmed preview metadata without exposing payload", async () => {
+  const previewId = await confirmedPreviewId(`gpt-frontier-synthetic-${randomUUID()}`);
+  let cursor: AmuxV4AnalysisQueueCursor | null = null;
+  let found = false;
+  for (let page = 0; page < 10; page += 1) {
+    const result = await listAmuxV4AnalysisCandidates(cursor);
+    assert.equal(Object.keys(result).sort().join(","),
+      "candidates,hasMore,nextCursor");
+    for (const candidate of result.candidates) {
+      assert.deepEqual(Object.keys(candidate).sort(),
+        ["attempt", "chunkIndex", "expiresAt", "ideaId", "modelId", "previewId"]);
+      if (candidate.previewId === previewId) found = true;
+    }
+    if (found || !result.hasMore) break;
+    assert.ok(result.nextCursor);
+    cursor = parseAmuxV4AnalysisQueueCursor(result.nextCursor);
+    assert.ok(cursor);
+  }
+  assert.equal(found, true);
+});
 
 const namespace = "agent/amux-intake";
 const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(),
@@ -165,6 +202,15 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   });
   assert.equal(created.previewId, previewId);
   assert.equal(created.priceVersionId, priceVersionId);
+  for (const refusedId of [holdId, "not a valid hold ID"]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxKnownIdeaAnalysisSettlement(tx, {
+        holdId: refusedId, outcome: "verified_success",
+        inputTokens: 10, outputTokens: 10,
+      })), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisSettlementError &&
+      error.code === "not_settleable");
+  }
   await assert.rejects(prisma.amuxIdeaAnalysisPriceVersion.update({
     where: { id: priceVersionId },
     data: { inputMicroUsdPerMillion: 1 },
@@ -243,6 +289,450 @@ test("a price expiring in one minute still reserves under the DB UTC clock", asy
       holdId: randomUUID(), previewId, priceVersionId, runner, keys,
     }));
   assert.equal(result.reservedMicroUsd, "5000");
+});
+
+test("owner cancels only an unused hold, releasing the reservation with one audit", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const nonOwnerId = `synthetic-amux-budget-ops-${randomUUID()}`;
+  const nonOwnerEmail = "amux-v4-budget-ops@example.test";
+  const previousOpsEmails = process.env.ADMIN_OPS_EMAILS;
+  process.env.ADMIN_USER_IDS = `${actorUserId},${nonOwnerId}`;
+  process.env.ADMIN_EMAILS = `${actorEmail},${nonOwnerEmail}`;
+  process.env.ADMIN_OPS_EMAILS = nonOwnerEmail;
+  try {
+    const notOwner = { ...session, user: { ...session.user,
+      id: nonOwnerId, email: nonOwnerEmail } } as Session;
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session: notOwner, request, holdId })), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisCancellationError &&
+      error.code === "forbidden");
+  } finally {
+    process.env.ADMIN_USER_IDS = actorUserId;
+    process.env.ADMIN_EMAILS = actorEmail;
+    if (previousOpsEmails === undefined) delete process.env.ADMIN_OPS_EMAILS;
+    else process.env.ADMIN_OPS_EMAILS = previousOpsEmails;
+  }
+  const staleOwner = { ...session, user: { ...session.user,
+    authenticatedAt: new Date(Date.now() - 60 * 60_000).toISOString() } } as Session;
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session: staleOwner, request, holdId })), isAdminReauthenticationError);
+  const cancelled = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId }));
+  assert.equal(cancelled.releasedMicroUsd, "5000");
+  const [hold, window, audit] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: cancelled.auditId } }),
+  ]);
+  assert.equal(hold.status, "released");
+  assert.equal(hold.settledMicroUsd, BigInt(0));
+  assert.equal(window.reservedMicroUsd, reservedBefore);
+  assert.equal(audit.action, "amux.v4.analysis_budget.unused_reservation_cancelled");
+  assert.equal(audit.actorUserId, actorUserId);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId })), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.analysis_budget.unused_reservation_cancelled",
+    targetId: holdId,
+  } }), 1);
+});
+
+test("system expiry releases only a never-dispatched hold after its DB deadline", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId)),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED", targetId: holdId,
+  } }), 0);
+
+  const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true, ideaId: true },
+  });
+  const expiresAt = new Date(preview.confirmedAt!.getTime() + 1);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId }, data: { expiresAt, confirmExpiresAt: expiresAt },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaAnalysisBudgetHold.update({ where: { id: holdId },
+      data: { status: "in_flight", dispatchedAt: new Date() } });
+    await assert.rejects(commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+        error.code === "not_cancellable");
+    throw new Error("rollback synthetic dispatch");
+  }), /rollback synthetic dispatch/);
+  for (const unsafePreview of [
+    { consumedAt: preview.confirmedAt! },
+    { outcomeUnknownAt: new Date() },
+    { state: "provider_failed" },
+  ]) {
+    await assert.rejects(prisma.$transaction(async (tx) => {
+      await tx.amuxIdeaTransferPreview.update({
+        where: { id: previewId }, data: unsafePreview,
+      });
+      await assert.rejects(commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId),
+        (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+          error.code === "not_cancellable");
+      throw new Error("rollback synthetic unsafe preview");
+    }), /rollback synthetic unsafe preview/);
+  }
+
+  const released = await prisma.$transaction((tx) =>
+    commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId));
+  assert.equal(released.releasedMicroUsd, "5000");
+  const [hold, window, audit, idea] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: released.auditId } }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: preview.ideaId } }),
+  ]);
+  assert.equal(hold.status, "released");
+  assert.equal(hold.dispatchedAt, null);
+  assert.equal(window.reservedMicroUsd, reservedBefore);
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+    AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE);
+  assert.equal(idea.state, "submitted", "budget release does not claim to cancel analysis");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId)),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+    error.code === "not_cancellable");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED", targetId: holdId,
+  } }), 1);
+});
+
+test("owner cancellation and system expiry cannot release one reservation twice", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true },
+  });
+  const expiresAt = new Date(preview.confirmedAt!.getTime() + 1);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId }, data: { expiresAt, confirmExpiresAt: expiresAt },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  const results = await Promise.allSettled([
+    prisma.$transaction((tx) => commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId })),
+    prisma.$transaction((tx) => commitAmuxExpiredIdeaAnalysisReservationRelease(tx, holdId)),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  const loser = results.find((result) => result.status === "rejected");
+  assert.ok(loser?.status === "rejected" &&
+    loser.reason instanceof AmuxIdeaAnalysisCancellationError &&
+    loser.reason.code === "not_cancellable");
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, reservedBefore);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).status, "released");
+  assert.equal(await prisma.adminAuditLog.count({ where: { targetId: holdId,
+    action: { in: ["AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED",
+      "amux.v4.analysis_budget.unused_reservation_cancelled"] } } }), 1);
+});
+
+test("unused holds remain cancellable after their confirmed preview expires", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const confirmed = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaTransferPreview.update({
+      where: { id: previewId }, data: { state: "in_flight",
+        consumedAt: new Date(confirmed.confirmedAt!.getTime() + 1) },
+    });
+    await assert.rejects(
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session, request, holdId }),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+        error.code === "not_cancellable");
+    throw new Error("rollback synthetic consumed preview");
+  }), /rollback synthetic consumed preview/);
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId }, data: { state: "expired" },
+  });
+  await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId }));
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, reservedBefore);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).status, "released");
+});
+
+test("an in-flight hold cannot be cancelled or remove its budget", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const reservedBefore = (await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd;
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  await prisma.amuxIdeaAnalysisBudgetHold.update({
+    where: { id: holdId },
+    data: { status: "in_flight", dispatchedAt: new Date() },
+  });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId })), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisCancellationError &&
+    error.code === "not_cancellable");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaAnalysisBudgetHold.update({
+      where: { id: holdId }, data: { status: "outcome_unknown" },
+    });
+    await assert.rejects(
+      commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+        { session, request, holdId }),
+      (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+        error.code === "not_cancellable");
+    throw new Error("rollback synthetic unknown outcome");
+  }), /rollback synthetic unknown outcome/);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, reservedBefore + BigInt(5_000));
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.analysis_budget.unused_reservation_cancelled",
+    targetId: holdId,
+  } }), 0);
+});
+
+async function syntheticDispatchedHold(): Promise<{ holdId: string; previewId: string }> {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  await prisma.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const holdId = randomUUID();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId, priceVersionId, runner, keys }));
+  const preview = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId }, select: { confirmedAt: true },
+  });
+  await prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId },
+    data: { state: "in_flight", consumedAt: preview.confirmedAt },
+  });
+  const clock = await prisma.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  await prisma.amuxIdeaAnalysisBudgetHold.update({
+    where: { id: holdId },
+    data: { status: "in_flight", dispatchedAt: clock[0]!.now },
+  });
+  return { holdId, previewId };
+}
+
+test("known CLI usage settles an in-flight Agent hold once and releases the remainder", async () => {
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const afterReservation = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const reservedBefore = afterReservation.reservedMicroUsd - BigInt(5_000);
+  const spentBefore = afterReservation.spentMicroUsd;
+  for (const { input, reason } of [
+    { input: { holdId, outcome: "outcome_unknown" as const,
+      inputTokens: null, outputTokens: null }, reason: "usage_unknown" },
+    { input: { holdId, outcome: "verified_success" as const,
+      inputTokens: 1_001, outputTokens: 1 }, reason: "usage_exceeds_cap" },
+    { input: { holdId, outcome: "verified_success" as const,
+      inputTokens: 1, outputTokens: 2_001 }, reason: "usage_exceeds_cap" },
+    { input: { holdId, outcome: "invocation_failed" as const,
+      inputTokens: 0, outputTokens: 0 }, reason: "basis_invalid" },
+  ]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxKnownIdeaAnalysisSettlement(tx, input)), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisSettlementError && error.code === "usage_hold" &&
+      error.reason === reason);
+  }
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  })).reservedMicroUsd, afterReservation.reservedMicroUsd);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_BUDGET_SETTLED", targetId: holdId,
+  } }), 0);
+  const input = { holdId, outcome: "verified_success" as const,
+    inputTokens: 100, outputTokens: 50 };
+  const settled = await prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx, input));
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.settledMicroUsd, "200");
+  assert.equal(settled.releasedMicroUsd, "4800");
+  const [hold, window, audit] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: settled.auditId } }),
+  ]);
+  assert.equal(hold.status, "succeeded");
+  assert.equal(hold.settledMicroUsd, BigInt(200));
+  assert.equal(hold.inputTokens, 100);
+  assert.equal(hold.outputTokens, 50);
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId },
+  })).state, "in_flight", "the later result writer owns successful preview completion");
+  assert.equal(window.spentMicroUsd, spentBefore + BigInt(200));
+  assert.equal(window.reservedMicroUsd, reservedBefore);
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+    AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx, input)), (error: unknown) =>
+    error instanceof AmuxIdeaAnalysisSettlementError && error.code === "not_settleable");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_BUDGET_SETTLED", targetId: holdId,
+  } }), 1);
+});
+
+test("a failed CLI invocation with known usage still records Agent provider cost", async () => {
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxKnownIdeaAnalysisSettlement(tx,
+      { holdId, outcome: "invocation_failed", inputTokens: 12, outputTokens: 0 }));
+  assert.equal(result.status, "failed");
+  assert.equal(result.settledMicroUsd, "12");
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).settledMicroUsd, BigInt(12));
+  assert.equal((await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: previewId },
+  })).state, "provider_failed");
+});
+
+test("unknown CLI outcome holds the full budget and refuses admission and settlement", async () => {
+  const { holdId, previewId } = await syntheticDispatchedHold();
+  const nextModelId = modelId();
+  const nextPreviewId = await confirmedPreviewId(nextModelId);
+  const nextPriceVersionId = await approvedPriceVersionId("openai", nextModelId);
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const marked = await commitAmuxIdeaAnalysisUnknownOutcome(tx,
+      { holdId, reason: "usage_unverified" });
+    assert.equal(marked.previewId, previewId);
+    const hold = await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+      where: { id: holdId },
+    });
+    const preview = await tx.amuxIdeaTransferPreview.findUniqueOrThrow({
+      where: { id: previewId },
+    });
+    const window = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    const audit = await tx.adminAuditLog.findUniqueOrThrow({
+      where: { id: marked.auditId },
+    });
+    assert.equal(hold.status, "outcome_unknown");
+    assert.equal(hold.settledMicroUsd, null);
+    assert.equal(preview.state, "outcome_unknown");
+    assert.ok(preview.outcomeUnknownAt);
+    assert.equal(window.reservedMicroUsd, before.reservedMicroUsd);
+    assert.equal(window.spentMicroUsd, before.spentMicroUsd);
+    assert.equal(auditRowActorKind(audit), "system");
+    assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+      AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE);
+    await assert.rejects(commitAmuxIdeaAnalysisUnknownOutcome(tx,
+      { holdId, reason: "usage_unverified" }), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisUnknownOutcomeError &&
+      error.code === "not_markable");
+    await assert.rejects(commitAmuxKnownIdeaAnalysisSettlement(tx,
+      { holdId, outcome: "verified_success", inputTokens: 100,
+        outputTokens: 50 }), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisSettlementError &&
+      error.code === "not_settleable");
+    await assert.rejects(commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId: randomUUID(), previewId: nextPreviewId,
+        priceVersionId: nextPriceVersionId, runner, keys }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisReservationError &&
+      error.code === "budget_hold" && error.reason === "usage_unknown");
+    throw new Error("rollback synthetic unknown outcome");
+  }), /rollback synthetic unknown outcome/);
+  assert.equal((await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  })).status, "in_flight");
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN", targetId: holdId,
+  } }), 0);
 });
 
 test("a price for another provider cannot reserve the confirmed model payload", async () => {
