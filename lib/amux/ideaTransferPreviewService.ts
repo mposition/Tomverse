@@ -237,8 +237,10 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
         where: { id: replacedPreview.id, ideaId: idea.id, state: "prepared",
           confirmedAt: null, confirmationAuditLogId: null, consumedAt: null,
           expiresAt: { lte: now } },
-        data: { state: "expired", payloadCiphertext: null, payloadKeyId: null,
-          payloadKeyVersion: null, payloadPurgedAt: now },
+        // Keep the ciphertext until the retention worker records the purge
+        // and retires this preview's external key. Clearing it here would
+        // leave a recoverable key beside old DB backups indefinitely.
+        data: { state: "expired" },
       });
       if (expired.count !== 1) throw new IdeaTransferPreviewError("not_ready");
     }
@@ -494,8 +496,8 @@ export async function commitFirstOutputContinuationTransferPreview(
         where: { id: replacedPreview.id, ideaId: idea.id,
           state: replacedPreview.state, consumedAt: null, outcomeUnknownAt: null,
           expiresAt: { lte: now } },
-        data: { state: "expired", payloadCiphertext: null, payloadKeyId: null,
-          payloadKeyVersion: null, payloadPurgedAt: now },
+        // The retention worker owns the body purge and external key retirement.
+        data: { state: "expired" },
       });
       if (expired.count !== 1) throw new IdeaTransferPreviewError("not_ready");
       await writeAdminAuditLog({ tx, session: input.session, request: input.request,

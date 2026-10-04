@@ -178,6 +178,42 @@ async function confirmedPreviewId(modelId: string,
   return choice.previewId;
 }
 
+test("an expired prepared preview keeps its body until audited key retirement", async () => {
+  const ideaId = randomUUID();
+  const selectedModelId = `gpt-frontier-synthetic-${randomUUID()}`;
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_RETENTION_${randomUUID()}`,
+      repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx,
+    { session, request, inspected, ideaId, keys }));
+  await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
+    { session, request, ideaId, keys }));
+  const priorId = randomUUID();
+  const choice = { previewId: priorId, ideaId, provider: "openai" as const,
+    modelId: selectedModelId, reasoningEffort: "high" as const,
+    approvalId: randomUUID(), approvalVersion: 1 };
+  await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys, browserNonce }));
+  await prisma.amuxIdeaTransferPreview.update({ where: { id: priorId },
+    data: { expiresAt: new Date(Date.now() - 60_000) } });
+  await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: { ...choice, previewId: randomUUID(),
+      replacesPreviewId: priorId }, keys, browserNonce }));
+  const expired = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: priorId }, select: { state: true,
+      payloadCiphertext: true, payloadKeyId: true,
+      payloadPurgeAfter: true, payloadPurgedAt: true },
+  });
+  assert.equal(expired.state, "expired");
+  assert.ok(expired.payloadCiphertext);
+  assert.ok(expired.payloadKeyId);
+  assert.ok(expired.payloadPurgeAfter);
+  assert.equal(expired.payloadPurgedAt, null);
+});
+
 test("analysis queue lists confirmed preview metadata without exposing payload", async () => {
   const previewId = await confirmedPreviewId(`gpt-frontier-synthetic-${randomUUID()}`);
   let cursor: AmuxV4AnalysisQueueCursor | null = null;
@@ -1685,11 +1721,11 @@ test("an output-continuable first result retains its first page without completi
       session, request, choice: { ...choice, previewId: randomUUID(),
         replacesPreviewId: nextPreviewId }, keys, browserNonce,
     })), /not_ready/, "a live confirmation cannot be replaced");
+  const expiredAt = new Date(Date.now() - 60_000);
   await prisma.amuxIdeaTransferPreview.update({
     where: { id: nextPreviewId },
-    data: { confirmedAt: new Date(Date.now() - 120_000),
-      expiresAt: new Date(Date.now() - 60_000),
-      confirmExpiresAt: new Date(Date.now() - 60_000) },
+    data: { confirmedAt: new Date(expiredAt.getTime() - 60_000),
+      expiresAt: expiredAt, confirmExpiresAt: expiredAt },
   });
   const replacementId = randomUUID();
   const replacement = await prisma.$transaction((tx) =>
@@ -1731,6 +1767,16 @@ test("an output-continuable first result retains its first page without completi
   assert.deepEqual(await readIdeaTransferConfirmation(session, replacementId),
     { state: "expired", previewId: replacementId, ideaId,
       confirmationRecorded: false, modelCallStarted: false });
+  const expiredPrepared = await prisma.amuxIdeaTransferPreview.findUniqueOrThrow({
+    where: { id: replacementId },
+    select: { payloadCiphertext: true, payloadKeyId: true,
+      payloadPurgeAfter: true, payloadPurgedAt: true },
+  });
+  assert.ok(expiredPrepared.payloadCiphertext,
+    "replacement must leave the body for audited retention/key retirement");
+  assert.ok(expiredPrepared.payloadKeyId);
+  assert.ok(expiredPrepared.payloadPurgeAfter);
+  assert.equal(expiredPrepared.payloadPurgedAt, null);
   const preparedReplacementAudit = await prisma.adminAuditLog.findFirstOrThrow({ where: {
     action: "amux.v4.transfer_preview.expired_for_replacement",
     targetId: replacementId,
