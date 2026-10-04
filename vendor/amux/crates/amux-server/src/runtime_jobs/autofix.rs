@@ -7133,7 +7133,12 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 /// absent count must never ENABLE the escalation path below, only leave the
 /// cooldown in charge.
 pub(crate) fn carded_count(desc: &str) -> Option<u64> {
-    desc.lines()
+    let current = desc.rsplit_once(REFRESH_MARK).map_or(desc, |(_, block)| block);
+    let evidence = current
+        .rsplit_once("Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n")
+        .map_or(current, |(_, block)| block);
+    let evidence = evidence.split_once("\ndetector:").map_or(evidence, |(block, _)| block);
+    evidence.lines()
         .filter_map(|l| {
             let line = l.trim();
             line.strip_prefix("count:")
@@ -8694,6 +8699,8 @@ mod tests {
         assert_eq!(super::carded_count("consecutive_failures: 31\n"), Some(31));
         assert_eq!(super::carded_count("consecutive_failures: 31\nrefreshed\nconsecutive_failures: 64\n"), Some(64),
             "the newest measurement sets the next doubling threshold");
+        assert_eq!(super::carded_count("consecutive_failures: 31\n\ndetector: ci-failure\nre-check:\n  count: 999\n"), Some(31),
+            "the recheck command is not measurement evidence");
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
         assert_eq!(super::carded_count("count: not-a-number\n"), None);
