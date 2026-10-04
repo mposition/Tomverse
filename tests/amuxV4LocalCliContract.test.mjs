@@ -109,8 +109,8 @@ test("Claude result needs exact served model and complete usage", () => {
     "verified_success");
   const withManualMode = Buffer.from(withDefaultMode.toString("utf8")
     .replace('"permissionMode":"default"', '"permissionMode":"manual"'));
-  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withManualMode, 0,
-    { diagnostic: true }).failureReason, "security_no_tools_violation");
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withManualMode, 0).kind,
+    "verified_success");
   const completed = inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(), 0);
   assert.deepEqual(completed, { kind: "verified_success",

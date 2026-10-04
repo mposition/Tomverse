@@ -448,7 +448,13 @@ export async function commitAmuxIdeaAnalysisResult(
       outcome: effectiveOutcome, inputTokens: input.inputTokens,
       outputTokens: input.outputTokens });
     if (state === "owner_input" && ownerInputSealed) {
-      const now = new Date();
+      const clock = await tx.$queryRaw<Array<{ now: Date }>>`
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+      `;
+      const now = clock[0]?.now;
+      if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+        throw new AmuxIdeaAnalysisResultError("integrity_unavailable");
+      }
       const stoppedPreview = await tx.amuxIdeaTransferPreview.updateMany({ where: {
         id: input.previewId, state: "in_flight", consumedAt: { not: null },
         outcomeUnknownAt: null,
