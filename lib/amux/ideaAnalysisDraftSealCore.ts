@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import {
@@ -36,6 +36,16 @@ export type SealedAmuxAnalysisDraft = {
   units: SealedAmuxDraftUnit[];
 };
 
+/** Bind the encrypted freeform body to one idea and one preview attempt. */
+export function amuxAnalysisFreeformSubjectId(ideaId: string, previewId: string): string {
+  return createHash("sha256")
+    .update("amux-v4-analysis-freeform\0", "utf8")
+    .update(ideaId, "utf8")
+    .update("\0", "utf8")
+    .update(previewId, "utf8")
+    .digest("hex");
+}
+
 /**
  * Turn one bounded, untrusted model response into independently encrypted
  * proposal bodies. This does not verify a source plan, cursor, lease, budget,
@@ -71,7 +81,7 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
   }), "utf8");
   try {
     const freeform = sealAmuxContent(freeformBytes, "analysis_freeform",
-      `${input.ideaId}:${chunk.chunkIndex}`, input.keys);
+      amuxAnalysisFreeformSubjectId(input.ideaId, chunk.previewId), input.keys);
     const units = chunk.units.map((unit, unitIndex): SealedAmuxDraftUnit => {
       const id = randomUUID();
       const bytes = Buffer.from(amuxCanonicalJson(unit), "utf8");
