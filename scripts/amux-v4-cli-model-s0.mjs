@@ -22,6 +22,7 @@ if (process.platform !== "linux" ||
       result.kind === "model_unverified" && result.answerMatchesS0 === true;
     process.stdout.write(JSON.stringify({ provider,
       status: result.kind, transport,
+      failureStage: result.kind === "outcome_unknown" ? result.failureStage ?? null : null,
       answerMatchesS0: transport ? outputMatches : null,
       servedModelVerified: result.kind === "verified_success",
       inputTokens: transport ? result.inputTokens : null,

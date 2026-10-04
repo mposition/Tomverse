@@ -9,12 +9,23 @@ import { test } from "node:test";
 import { amuxV4SandboxArgs } from "../lib/amux/ideaLocalSandboxArgs.mjs";
 import { AMUX_V4_CLI_HARD_DEADLINE_MS,
   AMUX_V4_CODEX_S0_ENABLED, AMUX_V4_CLAUDE_S0_ENABLED,
-  awaitAmuxV4BoundedChild,
+  awaitAmuxV4BoundedChild, amuxV4CliExitFailureStage,
   runAmuxV4IsolatedSyntheticCliS0 } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 
 test("v13 one-shot deadline is ten minutes", () => {
   assert.equal(AMUX_V4_CLI_HARD_DEADLINE_MS, 600_000);
+});
+
+test("CLI exit diagnosis exposes only a bounded stage", () => {
+  assert.equal(amuxV4CliExitFailureStage({ timedOut: true,
+    code: null, signal: "SIGKILL" }, false), "deadline");
+  assert.equal(amuxV4CliExitFailureStage({ timedOut: false,
+    code: null, signal: "SIGKILL" }, true), "stdout_limit");
+  assert.equal(amuxV4CliExitFailureStage({ timedOut: false,
+    code: 2, signal: null }, false), "child_nonzero");
+  assert.equal(amuxV4CliExitFailureStage({ timedOut: false,
+    code: 0, signal: null }, false), null);
 });
 
 test("rejected S0 call path remains code-latched off", async () => {
@@ -61,6 +72,17 @@ test("failed child spawn is handled without an unhandled error", {
     { detached: true, stdio: "ignore", shell: false });
   await assert.rejects(awaitAmuxV4BoundedChild(child, 50),
     { code: "ENOENT" });
+});
+
+test("nonzero fake CLI is diagnosed without reading its stderr", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const child = spawn("/usr/bin/node", ["-e", "process.exit(23)"], {
+    detached: true, stdio: "ignore", shell: false,
+    env: { PATH: "/usr/bin:/bin" },
+  });
+  const exit = await awaitAmuxV4BoundedChild(child, 1_000);
+  assert.equal(amuxV4CliExitFailureStage(exit, false), "child_nonzero");
 });
 
 test("deadline kills a fake CLI inside the bwrap process tree", {
