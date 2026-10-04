@@ -1,5 +1,12 @@
 name: Engineering Agent Image
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 # Builds the engineering agent's runtime image (docs/policy/engineering-agent.md
 # §8): main only, no repository secret, no cache. The job's own token pushes
 # the image to GHCR and nothing else; the publisher App key never exists here.

@@ -1,0 +1,682 @@
+//! Chunked file upload API — the dashboard's peek drag-and-drop and attach
+//! button hit this protocol (app.js `uploadAndAttach`):
+//!
+//!   POST /api/upload/start        → {id, chunks}
+//!   PUT  /api/upload/:id/chunk/:n → {ok: true, chunk: n}
+//!   POST /api/upload/:id/finish   → {path, name, url}
+//!
+//! Replaces the Python proxy (py_proxy → amux-server.py:68577) with a native
+//! Rust implementation. Uploads land in `$AMUX_HOME/uploads/` (same directory
+//! Python used) so the served `/api/uploads/:name` path stays the same.
+
+use super::AppState;
+use axum::body::Bytes;
+use axum::extract::{Path, RawQuery};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post, put};
+use axum::{Json, Router};
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const STALE_SECS: u64 = 3600;
+/// How many swept dirs the sweep names individually. The aggregate counts stay
+/// authoritative and `elided` says how many were not named, so a large backlog
+/// cannot flood the log while the claim stays auditable (the AF-179 shape).
+const SWEEP_LOG_DIRS: usize = 12;
+
+struct InFlight {
+    operation: Arc<tokio::sync::Mutex<()>>,
+    filename: String,
+    chunks: usize,
+    received: BTreeSet<usize>,
+    tmpdir: PathBuf,
+    ts: u64,
+}
+
+type UploadState = Arc<Mutex<std::collections::HashMap<String, InFlight>>>;
+
+fn uploads_dir() -> PathBuf {
+    let home = std::env::var("AMUX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())).join(".amux")
+        });
+    home.join("uploads")
+}
+
+/// Remove `.chunked-*` staging dirs that no in-flight upload claims and that
+/// are older than `STALE_SECS`.
+///
+/// Keyed on the DIRECTORY NAME rather than on `tmpdir`, so a dir belonging to a
+/// live upload is never removed even if `uploads_dir()` changed under us. The
+/// age gate is what keeps this safe against a concurrent `start()` on another
+/// worker: a dir created seconds ago is never swept, whether or not this
+/// process's map happens to hold it yet.
+///
+/// `dir` and `max_age` are parameters rather than reads of `uploads_dir()` and
+/// `STALE_SECS` so the two rules can be discriminated in a test without
+/// backdating an mtime, which std cannot portably do. A test that could only
+/// drive this through the globals would be reduced to asserting "nothing was
+/// deleted", which passes just as well when the function does nothing at all.
+fn sweep_orphan_chunk_dirs(
+    dir: &std::path::Path,
+    live: &std::collections::HashMap<String, InFlight>,
+    max_age: std::time::Duration,
+    dry_run: bool,
+) -> Vec<SweptDir> {
+    let cutoff = max_age;
+    let mut n: Vec<SweptDir> = Vec::new();
+    let Ok(rd) = std::fs::read_dir(dir) else { return n };
+    for ent in rd.flatten() {
+        let name = ent.file_name().to_string_lossy().into_owned();
+        let Some(uid) = name.strip_prefix(".chunked-") else { continue };
+        if live.contains_key(uid) {
+            continue;
+        }
+        if !ent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let age = ent
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().unwrap_or_default())
+            .unwrap_or_default();
+        if age <= cutoff {
+            continue;
+        }
+        // Measure BEFORE deleting, and record it before the bytes are gone.
+        let (chunks, bytes) = std::fs::read_dir(ent.path())
+            .map(|rd| {
+                rd.flatten().fold((0u64, 0u64), |(c, b), f| {
+                    (c + 1, b + f.metadata().map(|m| m.len()).unwrap_or(0))
+                })
+            })
+            .unwrap_or((0, 0));
+        let swept = SweptDir { name: name.clone(), age_s: age.as_secs(), chunks, bytes };
+        // A dry run records without deleting; a real run records only what it
+        // actually managed to remove, so the log never claims a dir that is
+        // still on disk.
+        if !dry_run && std::fs::remove_dir_all(ent.path()).is_err() {
+            continue;
+        }
+        n.push(swept);
+    }
+    n
+}
+
+/// What one swept staging dir WAS, captured before it is removed.
+///
+/// A COUNT IS NOT AN AUDIT TRAIL (AF-238, caught by the amux lane reviewing
+/// AF-235). The first version of this logged only how many dirs went, which
+/// makes the sweep unauditable AFTER the fact as well as before: `filename`
+/// lives only in the in-memory map, so nobody can say what a reaped dir held —
+/// and with a bare count, nobody can even say which ones they were.
+///
+/// This is the identical defect AF-179 fixed in the observed-edits hook
+/// ("LOG WHAT WAS CLAIMED, NOT ONLY HOW MANY"), made again one file over by the
+/// same author who fixed it there. Ethos rule 7's note that verification habits
+/// do not transfer between operands, demonstrated rather than read.
+#[derive(Debug, Clone)]
+struct SweptDir {
+    name: String,
+    age_s: u64,
+    chunks: u64,
+    bytes: u64,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn err(status: StatusCode, body: Value) -> Response {
+    (status, Json(body)).into_response()
+}
+
+pub fn routes() -> Router<AppState> {
+    let state: UploadState = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    Router::new()
+        .route("/start", post({
+            let s = state.clone();
+            move |body| start(s, body)
+        }))
+        .route("/{id}/chunk/{n}", put({
+            let s = state.clone();
+            move |path, body| chunk(s, path, body)
+        }).layer(
+            // The SPA uploads 5MB chunks (app.js:8459 CHUNK_SIZE); axum's
+            // default 2MB body cap 413'd EVERY chunk 0 after the client had
+            // already streamed it (27s wasted per attempt — live incident
+            // 2026-08-09, found via /api/logs/analyze in one call). 8MB =
+            // chunk + protocol slack; anything larger is a client bug and
+            // the 413 is then honest.
+            axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024),
+        ))
+        .route("/{id}/finish", post({
+            let s = state.clone();
+            move |path, query| finish(s, path, query)
+        }))
+}
+
+/// Serve uploaded files at `/api/uploads/:filename`.
+pub fn serve_routes() -> Router<AppState> {
+    Router::new().route("/{filename}", get(serve_uploaded))
+}
+
+#[derive(Deserialize)]
+struct StartReq {
+    name: Option<String>,
+    #[serde(default = "default_size")]
+    #[allow(dead_code)]
+    size: u64,
+    #[serde(default = "default_chunks")]
+    chunks: usize,
+}
+
+fn default_size() -> u64 { 0 }
+fn default_chunks() -> usize { 1 }
+
+async fn start(state: UploadState, Json(body): Json<StartReq>) -> Response {
+    let raw_name = body.name.unwrap_or_else(|| "upload".into());
+    let filename: String = raw_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>()
+        .chars()
+        .take(120)
+        .collect();
+    let total_chunks = body.chunks.max(1);
+    let uid = format!("{:012x}", rand_id());
+
+    let dir = uploads_dir().join(format!(".chunked-{uid}"));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()}));
+    }
+
+    let mut map = state.lock().unwrap();
+    // Purge stale uploads
+    let cutoff = now_secs().saturating_sub(STALE_SECS);
+    let stale: Vec<String> = map.iter()
+        .filter(|(_, v)| v.ts < cutoff)
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in stale {
+        if let Some(entry) = map.remove(&k) {
+            let _ = std::fs::remove_dir_all(&entry.tmpdir);
+        }
+    }
+    // ...AND THE ONES THE MAP CANNOT ACCOUNT FOR (AF-235). The purge above
+    // iterates the IN-MEMORY map, so it can only ever free directories this
+    // process still knows about. The map does not survive a restart — and this
+    // binary self-adopts on every commit that touches crates/ — so each restart
+    // orphaned its tmpdirs with no record left to purge them by. They then sat
+    // in ~/.amux/uploads forever, invisible to the only cleanup path there was.
+    //
+    // Four EMPTY `.chunked-*` dirs are what let @Dygreens prove the client-side
+    // half of this bug on #124: /api/upload/start had succeeded and chunk 0
+    // never wrote. The evidence was only readable because nothing had cleaned
+    // it up, which is the one upside of a leak, and not a reason to keep it.
+    // DRY RUN: count and describe, delete nothing. There is no undo for this and
+    // no way to say afterwards what a reaped dir held, so the operator gets a way
+    // to LOOK first. Set AMUX_UPLOAD_SWEEP_DRYRUN=1 in ~/.amux/server.env and
+    // restart; every line below is emitted with `dry_run=true` and the bytes stay
+    // where they are.
+    let dry_run = std::env::var("AMUX_UPLOAD_SWEEP_DRYRUN")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let swept = sweep_orphan_chunk_dirs(
+        &uploads_dir(),
+        &map,
+        std::time::Duration::from_secs(STALE_SECS),
+        dry_run,
+    );
+    if !swept.is_empty() {
+        // Loud on purpose, and SPECIFIC. A silent sweep would make the next
+        // instance of the leak look like a healthy day; a sweep that logs only a
+        // count leaves nobody able to say WHICH dirs went, which is the same
+        // defect one level in (AF-238).
+        let total_bytes: u64 = swept.iter().map(|d| d.bytes).sum();
+        let with_data = swept.iter().filter(|d| d.chunks > 0).count();
+        let oldest = swept.iter().map(|d| d.age_s).max().unwrap_or(0);
+        // Named individually, newest-last, capped so a 100-dir backlog cannot
+        // flood the log while the counts above stay authoritative.
+        let mut named: Vec<&SweptDir> = swept.iter().collect();
+        named.sort_by_key(|d| std::cmp::Reverse(d.age_s));
+        for d in named.iter().take(SWEEP_LOG_DIRS) {
+            tracing::warn!(dir = %d.name, age_s = d.age_s, chunks = d.chunks, bytes = d.bytes,
+                           dry_run, "upload: orphaned staging dir");
+        }
+        let elided = swept.len().saturating_sub(SWEEP_LOG_DIRS);
+        tracing::warn!(
+            count = swept.len(), with_data, total_bytes, oldest_age_s = oldest, elided, dry_run,
+            "upload: {}{} orphaned .chunked-* dir(s), {with_data} holding data, {total_bytes} \
+             bytes, oldest {oldest}s. Expected after a restart (the in-flight map does not \
+             survive one); a rising count means transfers are being abandoned before finish.{}",
+            if dry_run { "DRY RUN — would remove " } else { "removed " },
+            swept.len(),
+            if elided > 0 { format!(" {elided} more not named above.") } else { String::new() },
+        );
+    }
+
+    map.insert(uid.clone(), InFlight {
+        operation: Arc::new(tokio::sync::Mutex::new(())),
+        filename,
+        chunks: total_chunks,
+        received: BTreeSet::new(),
+        tmpdir: dir,
+        ts: now_secs(),
+    });
+
+    Json(json!({"id": uid, "chunks": total_chunks})).into_response()
+}
+
+async fn chunk(
+    state: UploadState,
+    Path((id, n)): Path<(String, usize)>,
+    body: Bytes,
+) -> Response {
+    let operation = { state.lock().unwrap().get(&id).map(|entry| entry.operation.clone()) };
+    let _guard = match operation { Some(lock) => Some(lock.lock_owned().await), None => None };
+    let chunk_path = {
+        let map = state.lock().unwrap();
+        let Some(entry) = map.get(&id) else {
+            return err(StatusCode::NOT_FOUND, json!({"error": "unknown upload"}));
+        };
+        if n >= entry.chunks {
+            return err(StatusCode::BAD_REQUEST, json!({"error": "chunk index out of range"}));
+        }
+        entry.tmpdir.join(format!("{n:06}"))
+    };
+
+    if let Err(e) = tokio::fs::write(&chunk_path, &body).await {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error": e.to_string()}));
+    }
+
+    {
+        let mut map = state.lock().unwrap();
+        if let Some(entry) = map.get_mut(&id) {
+            entry.received.insert(n);
+        }
+    }
+
+    Json(json!({"ok": true, "chunk": n})).into_response()
+}
+
+async fn finish(state: UploadState, Path(id): Path<String>, RawQuery(query): RawQuery) -> Response {
+    if id.is_empty() || id.len() > 128 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return err(StatusCode::BAD_REQUEST, json!({"error":"invalid upload ID"}));
+    }
+    // Serialize chunk writes and publication for this ID. A second finish waits
+    // for the first receipt rather than assembling another destination file.
+    let operation = { state.lock().unwrap().get(&id).map(|entry| entry.operation.clone()) };
+    let _guard = match operation { Some(lock) => Some(lock.lock_owned().await), None => None };
+    let receipt_path = uploads_dir().join(format!(".completed-{id}.json"));
+    if let Ok(bytes) = std::fs::read(&receipt_path) {
+        if let Ok(receipt) = serde_json::from_slice::<Value>(&bytes) {
+            if receipt["destination"] != json!(query) {
+                return err(StatusCode::CONFLICT, json!({"error":"upload ID already completed for a different destination"}));
+            }
+            tracing::info!(target: "amux::upload", upload = %id, "completed upload receipt replayed");
+            return Json(receipt["response"].clone()).into_response();
+        }
+    }
+    let entry = {
+        let map = state.lock().unwrap();
+        let Some(entry) = map.get(&id) else {
+            return err(StatusCode::NOT_FOUND, json!({"error": "unknown upload"}));
+        };
+        if entry.received.len() < entry.chunks {
+            let missing = entry.chunks - entry.received.len();
+            return err(StatusCode::BAD_REQUEST, json!({"error": format!("{missing} chunks missing")}));
+        }
+        InFlight {
+            operation: entry.operation.clone(),
+            filename: entry.filename.clone(),
+            chunks: entry.chunks,
+            received: entry.received.clone(),
+            tmpdir: entry.tmpdir.clone(),
+            ts: entry.ts,
+        }
+    };
+
+    // Files/Explore use the same bounded chunk protocol as composer attachments.
+    // Resolve through the existing file policy, and never overwrite a file.
+    let params = super::fs::parse_qs(query.as_deref().unwrap_or(""));
+    let directory = super::fs::qs_get(&params, "dir");
+    let (dest_dir, save_name) = if let Some(dir) = directory {
+        let dest = match std::fs::canonicalize(super::fs::expanduser(dir)) {
+            Ok(path) if path.is_dir() => path,
+            _ => return err(StatusCode::BAD_REQUEST, json!({"error":"not a directory"})),
+        };
+        let name = super::fs::sanitize_upload_name(
+            super::fs::qs_get(&params, "name").unwrap_or(&entry.filename));
+        if !super::fs::is_path_allowed(&dest) || super::fs::is_dangerous_write(&dest.join(&name)) {
+            tracing::warn!(target: "amux::upload", upload = %id, "chunked upload destination refused by file policy");
+            return err(StatusCode::FORBIDDEN, json!({"error":"upload destination refused"}));
+        }
+        (dest, name)
+    } else {
+        (uploads_dir(), format!("{id}-{}", entry.filename))
+    };
+    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error":e.to_string()}));
+    }
+    let assemble = tokio::task::spawn_blocking({
+        let tmpdir = entry.tmpdir.clone();
+        let chunks = entry.chunks;
+        let target = dest_dir.join(&save_name);
+        move || -> std::io::Result<PathBuf> {
+            // A temporary file beside the destination supports atomic publication
+            // across disks and leaves no half-file when a write fails.
+            let mut out = tempfile::NamedTempFile::new_in(&dest_dir)?;
+            for i in 0..chunks {
+                let mut inp = std::fs::File::open(tmpdir.join(format!("{i:06}")))?;
+                std::io::copy(&mut inp, &mut out)?;
+            }
+            out.as_file().sync_all()?;
+            let mut candidate = target.clone();
+            let mut suffix = 0;
+            loop {
+                match out.persist_noclobber(&candidate) {
+                    Ok(_) => break,
+                    Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        out = error.file;
+                        suffix += 1;
+                        let stem = target.file_stem().unwrap_or_default().to_string_lossy();
+                        let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+                        candidate = dest_dir.join(format!("{stem}_{suffix}{ext}"));
+                    }
+                    Err(error) => return Err(error.error),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&tmpdir);
+            Ok(candidate)
+        }
+    });
+    let save_path = match assemble.await {
+        Ok(Ok(path)) => path,
+        Ok(Err(e)) => {
+            tracing::warn!(target: "amux::upload", upload = %id, error = %e, "chunked upload assembly failed; chunks retained");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error":e.to_string()}));
+        }
+        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error":e.to_string()})),
+    };
+    let final_name = save_path.file_name().unwrap_or_default().to_string_lossy();
+    let url = if directory.is_some() {
+        let mut url = reqwest::Url::parse("http://localhost/api/file/raw").expect("static URL");
+        url.query_pairs_mut().append_pair("path", &save_path.to_string_lossy());
+        format!("{}?{}", url.path(), url.query().unwrap_or_default())
+    } else { format!("/api/uploads/{final_name}") };
+    tracing::info!(target: "amux::upload", upload = %id, chunks = entry.chunks,
+        directory_upload = directory.is_some(), "chunked upload published atomically");
+
+    let result = json!({
+        "path": save_path.display().to_string(),
+        "name": if directory.is_some() { final_name.as_ref() } else { &entry.filename },
+        "url": url,
+    });
+    // A lost finish response must not create another file on retry, including
+    // after a server restart. Persist its receipt before forgetting the upload.
+    let receipt = json!({"destination":query, "response":result});
+    let persist_receipt = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut temp = tempfile::NamedTempFile::new_in(uploads_dir())?;
+        temp.write_all(serde_json::to_string(&receipt)?.as_bytes())?;
+        temp.as_file().sync_all()?;
+        temp.persist(&receipt_path).map_err(|e| e.error)?;
+        Ok(())
+    };
+    if let Err(error) = persist_receipt() {
+        tracing::warn!(target: "amux::upload", upload = %id, %error,
+            "upload saved but completion receipt failed; automatic retry is unsafe");
+        return err(StatusCode::CONFLICT, json!({"error":"file saved but receipt unavailable; inspect destination before retry", "path":save_path}));
+    }
+
+    // Remove from in-flight
+    {
+        let mut map = state.lock().unwrap();
+        map.remove(&id);
+    }
+
+    // NO PLAIN-FILE PURGE HERE (AMUX-3937). This used to reap every file in
+    // `uploads` older than a hardcoded 24h, on every completed upload, reading
+    // no env var and logging nothing. `runtime_jobs::storage::AGE_PRUNED_DIRS`
+    // already reaps this directory and its docstring calls itself "the single
+    // authority on what ephemeral means on this box" -- but the tighter window
+    // silently won, so `AMUX_UPLOADS_RETAIN_DAYS` could not extend retention
+    // past 24h no matter what it was set to. Setting it to 30 changed nothing.
+    //
+    // Cost: of 113 board references into ~/.amux/uploads, 109 pointed at a file
+    // that no longer existed, 20 of them on cards still OPEN across 7 lanes. A
+    // card reading "make it so this is all automatic @<screenshot>" with the
+    // screenshot gone cannot be worked by anyone.
+    //
+    // The `.chunked-*` orphan sweep above STAYS: the storage sweep only removes
+    // FILES and never descends, so those directories genuinely have no other
+    // reaper (AF-235). That one is a gap; this one was a duplicate.
+
+    Json(result).into_response()
+}
+
+async fn serve_uploaded(Path(filename): Path<String>) -> Response {
+    let path = uploads_dir().join(&filename);
+    if !path.is_file() {
+        return err(StatusCode::NOT_FOUND, json!({"error": "file not found"}));
+    }
+    match tokio::fs::metadata(&path).await {
+        Ok(metadata) => {
+            let length = metadata.len();
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, content_type_for(&filename).to_string()),
+                 (axum::http::header::CONTENT_LENGTH, length.to_string())],
+                super::file_viewer::stream_file(path, 0, length),
+            ).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, json!({"error":e.to_string()})),
+    }
+}
+
+fn content_type_for(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "txt" | "log" | "md" => "text/plain; charset=utf-8",
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css",
+        "js" | "mjs" => "application/javascript",
+        "wasm" => "application/wasm",
+        "zip" => "application/zip",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "webm" => "audio/webm",
+        "mp4" => "video/mp4",
+        "csv" => "text/csv",
+        _ => "application/octet-stream",
+    }
+}
+
+fn rand_id() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut hasher);
+    std::thread::current().id().hash(&mut hasher);
+    hasher.finish() & 0xFFFF_FFFF_FFFF
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    /// AF-235. The stale purge in `start()` iterates the IN-MEMORY map, so it can
+    /// only free directories this process still knows about — and the map does
+    /// not survive a restart, which this binary does on every commit touching
+    /// crates/. Every restart therefore orphaned its `.chunked-*` dirs with no
+    /// record left to purge them by. Four empty ones are what let @Dygreens prove
+    /// the client half of this bug on #124.
+    ///
+    /// Both rules are asserted, in the two directions that can actually fail:
+    /// a LIVE upload's dir is never swept at any age, and an orphan YOUNGER than
+    /// the cutoff is never swept. Testing only "the old orphan went away" would
+    /// pass equally well against a function that deletes the whole directory.
+    #[test]
+    fn sweep_removes_orphans_but_never_live_or_young_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for n in [".chunked-live", ".chunked-orphan", "not-a-chunk-dir"] {
+            std::fs::create_dir_all(dir.join(n)).unwrap();
+        }
+        // A plain FILE named like a staging dir must not be removed either.
+        std::fs::write(dir.join(".chunked-afile"), b"x").unwrap();
+
+        let mut live: std::collections::HashMap<String, InFlight> = Default::default();
+        live.insert("live".into(), InFlight {
+            operation: Arc::new(tokio::sync::Mutex::new(())),
+            filename: "f".into(), chunks: 1, received: BTreeSet::new(),
+            tmpdir: dir.join(".chunked-live"), ts: now_secs(),
+        });
+
+        // Age gate: with a 1h cutoff nothing here is old enough, so a correct
+        // sweep removes NOTHING. This is the assertion that fails if the age
+        // check is dropped — the orphan is deletable in every other respect.
+        let n = sweep_orphan_chunk_dirs(dir, &live, std::time::Duration::from_secs(3600), false);
+        assert_eq!(n.len(), 0, "nothing is older than an hour; a young orphan must survive");
+        assert!(dir.join(".chunked-orphan").exists(), "young orphan was swept");
+
+        // DRY RUN reports exactly what a real sweep would take, and takes NOTHING.
+        // This is the cell that has to hold before anyone points this at 73MB of
+        // a human's real partial uploads: a dry run that quietly deleted would be
+        // the worst possible defect here, because it is the mode you reach for
+        // precisely when you are not sure.
+        let dry = sweep_orphan_chunk_dirs(dir, &live, std::time::Duration::ZERO, true);
+        assert_eq!(dry.len(), 1, "dry run must REPORT the orphan");
+        assert!(dir.join(".chunked-orphan").exists(), "DRY RUN MUST NOT DELETE");
+        assert!(dir.join(".chunked-live").exists(), "dry run must not touch a live dir either");
+
+        // Age gate satisfied: now the orphan goes and the LIVE one stays.
+        let n = sweep_orphan_chunk_dirs(dir, &live, std::time::Duration::ZERO, false);
+        assert_eq!(n.len(), 1, "exactly the one orphan directory");
+        // The record is captured BEFORE deletion — a count cannot say which dir
+        // went, and nothing on disk can answer it afterwards (AF-238).
+        assert_eq!(n[0].name, ".chunked-orphan", "the sweep must name what it took");
+        assert!(!dir.join(".chunked-orphan").exists(), "orphan should be gone");
+        assert!(dir.join(".chunked-live").exists(), "a LIVE upload's dir must never be swept");
+        assert!(dir.join("not-a-chunk-dir").exists(), "unrelated dirs are not this sweep's business");
+        assert!(dir.join(".chunked-afile").exists(), "a file is not a staging dir");
+    }
+
+    fn test_state() -> AppState {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(crate::db::Store::open(&dir.path().join("t.db")).unwrap());
+        std::mem::forget(dir);
+        AppState {
+            store,
+            started: std::time::Instant::now(),
+            build_hash: "test".into(),
+            auth_token: None,
+        reconciled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        }
+    }
+
+    #[tokio::test]
+    async fn full_upload_flow() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Shared guard, not a bare set_var: AMUX_HOME is process-global and
+        // other lib tests (settings, journal, history, session_verbs) set it
+        // under settings::test_env::LOCK — an unguarded write here raced
+        // them and the flow read another test's home mid-flight (flaked in
+        // full-suite runs, 2026-08-09).
+        let _home = crate::api::settings::test_env::set_home(tmp.path());
+
+        let app: Router = Router::new()
+            .nest("/api/upload", routes())
+            .nest("/api/uploads", serve_routes())
+            .with_state(test_state());
+
+        // Start
+        let res = app.clone()
+            .oneshot(Request::builder()
+                .method("POST")
+                .uri("/api/upload/start")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"name":"hello.txt","size":11,"chunks":2}"#))
+                .unwrap())
+            .await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        assert_eq!(v["chunks"], 2);
+
+        // Chunk 0
+        let res = app.clone()
+            .oneshot(Request::builder()
+                .method("PUT")
+                .uri(format!("/api/upload/{id}/chunk/0"))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from("hello"))
+                .unwrap())
+            .await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Chunk 1
+        let res = app.clone()
+            .oneshot(Request::builder()
+                .method("PUT")
+                .uri(format!("/api/upload/{id}/chunk/1"))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(" world"))
+                .unwrap())
+            .await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Mobile reconnects and a second tab may finish the same ID together.
+        let finish_request = || Request::builder().method("POST")
+            .uri(format!("/api/upload/{id}/finish")).body(Body::empty()).unwrap();
+        let (first, second) = tokio::join!(
+            app.clone().oneshot(finish_request()), app.clone().oneshot(finish_request()));
+        let first = first.unwrap(); let second = second.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(second.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(first.into_body(), usize::MAX).await.unwrap();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        let body = axum::body::to_bytes(second.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), v);
+        let restarted: Router = Router::new().nest("/api/upload", routes()).with_state(test_state());
+        let replay = restarted.oneshot(finish_request()).await.unwrap();
+        assert_eq!(replay.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(replay.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), v, "disk receipt survives a fresh upload map");
+        assert!(v["path"].as_str().unwrap().contains("hello.txt"));
+        assert!(v["url"].as_str().unwrap().starts_with("/api/uploads/"));
+
+        // Serve the uploaded file
+        let url = v["url"].as_str().unwrap();
+        let res = app
+            .oneshot(Request::builder()
+                .uri(url)
+                .body(Body::empty())
+                .unwrap())
+            .await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], b"hello world");
+
+    }
+}

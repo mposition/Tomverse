@@ -1,0 +1,11 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-challenge-witness-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.ts": "eca0be31365d904424b87bc430915ba93f6dc99f95b9442ad7257b6314a4bc35",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.test.mjs": "63de3a51d52fe89415eb53058a5eb1188743b80d4a5201376985335555c6bef6",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitnessClosure.test.mjs": "910d4b6c202f8abf7a6a6d9ff5ec38d0c6f56b22528f99cf949dc32b5470cfbf"
+  }
+}

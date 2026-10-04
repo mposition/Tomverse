@@ -1,0 +1,11 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-predicate-core-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotPredicateCore.ts": "a0d14eb6c4b4be5474f2dcab1c20261b231594b8e09921340668f863050b4b91",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPredicateCore.test.mjs": "7a2eb6b7eefd834b19afcc3c64b1679ea235228292bebafa751a5bcd717f0c74",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPredicateCoreClosure.test.mjs": "e2eb84603e604fb9a3c3b384934d6e91a910ef62502a5d0fc3e41d166173511d"
+  }
+}

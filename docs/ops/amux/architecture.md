@@ -2,16 +2,22 @@
 
 ## Repository authority
 
-AMUX의 현재·미래 개발 source of truth는 `mposition/Tomverse`다. 검증된
-upstream reference는 `reference-baseline.md`가 고정한 identity와 로컬 frozen
-worktree로만 보존한다. Upstream 전체 Git history나 source snapshot을 Tomverse에
-다시 복제하지 않는다.
+AMUX 제품 통합과 독립 실행 서버의 source of truth는 `mposition/Tomverse`다.
+2026-10-02 운영자 `mposition`이 WSL `tomverse/cursor-provider`의 서버 소스를
+`vendor/amux/`에 편입하는 소스 소유 변경을 승인했다(`approvedBy: mposition`,
+`approvedAt: 2026-10-02`). 원본 Git history는 병합하지 않고, 서버와 빌드에
+필요한 형제 crate 및 루트 자산의 추적된 파일만 복사한다. 검증된 과거 frozen
+reference는 `reference-baseline.md`의 provenance 기준선으로 계속 보존한다.
+이 결정만으로 실행 바이너리 교체, Cursor의 제품 verified-provider 등록,
+worker catalog 변경 또는 제품 bridge/claim 활성화를 승인하지 않는다.
 
 ## Source layout
 
 | 경계 | 위치 | 책임 |
 |---|---|---|
 | pure core | `crates/amux-core` | scheduler, router, state machine, contracts; Tomverse DB와 network I/O 없음 |
+| standalone AMUX server | `vendor/amux/crates/amux-server` | Ubuntu AMUX HTTP API, 세션·보드·로컬 SQLite runtime |
+| standalone server dependencies | `vendor/amux/crates/amux-core`, `vendor/amux/crates/amux-dashboard`, `vendor/amux/crates/amux-cli`, `vendor/amux/scripts` | 원본 4개 멤버를 유지한 독립 Cargo workspace의 형제 crate·빌드 자산. 제품 `crates/amux-core`와 혼합하지 않음 |
 | runtime | `apps/tomverse-orchestrator` | board driving, worker protocol, execution, Tomverse API client |
 | product integration | `lib/amux` | DB, approval, audit, policy, delivery, execution lifecycle |
 | worker API | `app/api/internal/amux` | authenticated worker-facing register, claim, heartbeat, delivery, settle 경계 |
@@ -46,7 +52,15 @@ tomverse-orchestrator ---> worker protocol ---> configured providers
 
 ## Reference relationship
 
-Frozen reference는 구현의 upstream provenance와 검증된 semantics를 비교하는
-기준선이다. Tomverse 구현은 reference의 코드를 실행 경로로 import하거나 그
-worktree를 build input으로 사용하지 않는다. Reference 이후의 변경, schema,
-approval, audit, provider adapter는 모두 Tomverse history에서 진화한다.
+Frozen reference는 과거 구현의 provenance와 semantics를 비교하는 기준선이다.
+`vendor/amux`는 별도 `Cargo.toml`과 `Cargo.lock`을 가진 독립 workspace이며,
+Tomverse 루트 Cargo workspace의 멤버가 아니다. 제품 통합의 `crates/amux-core`와
+vendored 서버의 `vendor/amux/crates/amux-core`는 서로 다른 소스다.
+WSL 원본 브랜치 `8ad716bf983274a9f86733be17b5f608bdcca67b`의 Cursor 변경
+3개(`0cb02264`, `c7947c20`, `8ad716bf`)를 현재 Ubuntu 서비스 기준
+`9e4be636f6656c4c49391ac1fc089d2bbd6eb34f` 위로 이식했다.
+초기 import의 기준은 검증한 port commit `1765cbf98f0201501388dfb2cdcb266db1d76fb8`다.
+현재 vendored 소스에는 이후 Tomverse에서 적용한 보안 수정이 포함된다.
+현재 Ubuntu 서비스의 실행 빌드와 vendored 소스는 별도로 대조·검증해야 하며,
+PR 병합만으로 실행 바이너리가 교체되지 않는다. 제품의 verified-provider
+allowlist는 기존 정책의 별도 승인 절차를 따른다.
