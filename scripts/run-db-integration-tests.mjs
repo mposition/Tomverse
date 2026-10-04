@@ -261,6 +261,18 @@ run(
     // The Monitor silence check: its own secret, the control revision, then
     // the freshness verdict over the database clock.
     "tests/integration/qa-release-monitor.db.test.ts",
+    // The merge lane's attempts: one open per lane, the core's lifecycle and
+    // nothing else, every write audited by the right actor, no removal.
+    "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
+    // The merge lane service's three app calls: its own secret, the revision
+    // it carries, a strict body, then the single writer.
+    "tests/integration/qa-release-merge-lane-routes.db.test.ts",
     // The Admin Agent digest reader: counts and codes, expired and
     // unreadable bodies shown as such.
     "tests/integration/agent-digest-console.db.test.ts",
@@ -306,6 +318,15 @@ run(
     // batches, a cancelling row is skipped and counted, and no progress is
     // reported as such.
     "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.

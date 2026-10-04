@@ -17,6 +17,7 @@ import {
   buildQaReleaseOperatorEmail,
   qaReleaseAttentionDateFromReference,
   qaReleaseDigestRecordedDateFromReference,
+  qaReleaseMergeLaneLatchDateFromReference,
   qaReleaseMonitorFailureDateFromReference,
   qaReleaseStaleDateFromReference,
 } from "@/lib/qaReleaseOperatorEmail";
@@ -104,6 +105,9 @@ export const NOTIFICATION_KIND = {
   // The day's QA-release digest was recorded (policy section 7).
   // `recorded:<UTC date of the digest>`, at most one per day.
   qaReleaseDigestRecorded: "qa_release_digest_recorded",
+  // The develop merge lane latched (policy section 7).
+  // `merge-lane-latch:<UTC date>`, at most one per day.
+  qaReleaseMergeLaneLatched: "qa_release_merge_lane_latched",
 } as const;
 
 export type NotificationKind =
@@ -142,6 +146,7 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
   [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operations",
+  [NOTIFICATION_KIND.qaReleaseMergeLaneLatched]: "operations",
 };
 
 /**
@@ -174,6 +179,7 @@ export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "opera
   [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
   [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
   [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operator",
+  [NOTIFICATION_KIND.qaReleaseMergeLaneLatched]: "operator",
 };
 
 /** A kind this queue does not know is not a customer's: it is refused earlier. */
@@ -443,7 +449,9 @@ async function renderNotification(
           ? ({ email: "attention", date: qaReleaseAttentionDateFromReference(referenceId) } as const)
           : kind === NOTIFICATION_KIND.qaReleaseDigestRecorded
             ? ({ email: "digest_recorded", date: qaReleaseDigestRecordedDateFromReference(referenceId) } as const)
-            : null;
+            : kind === NOTIFICATION_KIND.qaReleaseMergeLaneLatched
+              ? ({ email: "merge_lane_latched", date: qaReleaseMergeLaneLatchDateFromReference(referenceId) } as const)
+              : null;
   if (qaReleaseEmail) {
     // Rendered from the reference id alone: the alert carries a date and a
     // link, nothing the agent read.
