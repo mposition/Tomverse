@@ -56,4 +56,6 @@ export function qaReleasePolicyTestPaths(documents: readonly string[]): string[]
  * YAML registry names be merged unattended.
  */
 export const isQaReleasePolicyDocument = (path: string): boolean =>
-  path === "AGENTS.md" || path === "CLAUDE.md" || /^docs\/policy\/[^/].*[^/]$/.test(path);
+  path === "AGENTS.md" ||
+  path === "CLAUDE.md" ||
+  (path.startsWith("docs/policy/") && path.length > "docs/policy/".length && !path.endsWith("/"));
