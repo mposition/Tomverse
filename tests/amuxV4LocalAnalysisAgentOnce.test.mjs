@@ -9,8 +9,17 @@ import { runAmuxV4LocalAnalysisAdmissionForTest } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { runAmuxV4LocalAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
+import { amuxV4VerifiedCliOutputOrNull } from
+  "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
+import { AMUX_V4_APPROVED_ANALYSIS_CLI_CATALOG,
+  amuxV4ApprovedAnalysisCliForModel,
+  amuxV4CanClaimAnalysisCli } from
+  "../lib/amux/ideaLocalApprovedCliCatalog.mjs";
+import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV,
+  amuxV4LiveAnalysisCliEnabled } from
+  "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 
 const origin = "https://staging.tomverse.example";
 const secret = "v4_analysis_synthetic_012345678901234567890123456";
@@ -27,7 +36,7 @@ const response = (body, status = 200) => Response.json(body, { status });
 test("local one-shot entry point is closed before reading configuration", () => {
   const script = fileURLToPath(new URL(
     "../scripts/amux-v4-analysis-agent-once.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [script], {
+  const result = spawnSync(process.execPath, ["--import", "tsx", script], {
     env: { PATH: process.env.PATH ?? "" }, encoding: "utf8", timeout: 5_000,
   });
   assert.equal(result.status, 2);
@@ -35,13 +44,82 @@ test("local one-shot entry point is closed before reading configuration", () => 
   assert.match(result.stderr, /AMUX_V4_LOCAL_ANALYSIS_REFUSED/);
 });
 
-test("live connector refuses before queue, claim or CLI while code latch is off", async () => {
+test("live connector requires the exact environment switch before network", async () => {
+  const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+  delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   let called = 0;
-  const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
-    agentSecret: secret, fetchImpl: async () => { called += 1;
-      throw new Error("live connector must remain closed"); } });
-  assert.deepEqual(result, { kind: "refused" });
-  assert.equal(called, 0);
+  try {
+    assert.equal(amuxV4LiveAnalysisCliEnabled(undefined), false);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("1"), false);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), true);
+    const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
+      agentSecret: secret, fetchImpl: async () => { called += 1;
+        throw new Error("live connector must remain closed"); } });
+    assert.deepEqual(result, { kind: "refused" });
+    assert.equal(called, 0);
+  } finally {
+    if (previous === undefined) delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+    else process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = previous;
+  }
+});
+
+test("non-Linux hosts cannot claim even with the live switch", async (t) => {
+  if (process.platform === "linux") return t.skip("Linux is the approved host");
+  const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+  process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = "enabled";
+  let called = 0;
+  try {
+    const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
+      agentSecret: secret, fetchImpl: async () => { called += 1;
+        throw new Error("non-Linux host reached the queue"); } });
+    assert.deepEqual(result, { kind: "refused" });
+    assert.equal(called, 0);
+  } finally {
+    if (previous === undefined) delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+    else process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = previous;
+  }
+});
+
+test("Codex candidates cannot consume claims without served-model attestation", () => {
+  const base = { modelId: "gpt-5.6-sol", reasoningEffort: "high",
+    egressHosts: ["api.openai.com"] };
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base,
+    provider: "openai" }, base.modelId), false);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
+    modelId: "claude-opus-5-5", egressHosts: ["api.anthropic.com"] },
+  "claude-opus-5-5"), true);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
+    modelId: "claude-opus-5-5", egressHosts: [] }, "claude-opus-5-5"), false);
+  const futureApproved = { ...base, provider: "anthropic",
+    modelId: "claude-frontier-next", reasoningEffort: "xhigh",
+    egressHosts: ["api.anthropic.com"] };
+  assert.equal(amuxV4CanClaimAnalysisCli(futureApproved,
+    "claude-frontier-next"), true);
+  assert.equal(amuxV4CanClaimAnalysisCli(futureApproved,
+    "claude-opus-5-5"), false);
+  assert.equal(amuxV4CanClaimAnalysisCli({ ...futureApproved,
+    reasoningEffort: "unknown" }, "claude-frontier-next"), false);
+});
+
+test("isolated S0 approval admits only the exact Claude CLI tuple", () => {
+  assert.equal(AMUX_V4_APPROVED_ANALYSIS_CLI_CATALOG.length, 1);
+  const approved = amuxV4ApprovedAnalysisCliForModel("claude-opus-5-5");
+  assert.deepEqual(approved, { provider: "anthropic", modelId: "claude-opus-5-5",
+    reasoningEffort: "high", egressHosts: ["api.anthropic.com"] });
+  assert.equal(amuxV4CanClaimAnalysisCli(approved, "claude-opus-5-5"), true);
+  assert.equal(amuxV4ApprovedAnalysisCliForModel("gpt-5.6-sol"), null);
+  assert.equal(amuxV4ApprovedAnalysisCliForModel("claude-frontier-next"), null);
+});
+
+test("unattested or refused CLI output cannot become a live draft", () => {
+  for (const kind of ["model_unverified", "refused", "catalog_unapproved",
+    "outcome_unknown"]) {
+    assert.equal(amuxV4VerifiedCliOutputOrNull({ kind,
+      inputTokens: 10, outputTokens: 2, rawModelOutput: "{}" }), null);
+  }
+  const verified = { kind: "verified_success", inputTokens: 10,
+    outputTokens: 2, rawModelOutput: "{}" };
+  assert.equal(amuxV4VerifiedCliOutputOrNull(verified), verified);
 });
 
 test("unapproved local CLI catalog stops before claim and model execution", async () => {
@@ -114,6 +192,43 @@ test("synthetic one-shot polls, claims, passes only typed prompt, submits and st
     assert.equal(submitted.outcome, "verified_success");
     assert.equal(visited.every(({ options }) =>
       options.headers.authorization === `Bearer ${secret}`), true);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
+
+test("unsupported first candidate does not consume a claim or starve an approved peer", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  const unsupported = { ...candidate, previewId: "preview_unsupported",
+    ideaId: "idea_unsupported", modelId: "unapproved-model" };
+  const claims = [];
+  try {
+    const result = await runAmuxV4SyntheticAnalysisAgentOnce({
+      origin: `${origin}/`, agentSecret: secret,
+      fakeAdmit: (entry) => entry.modelId === candidate.modelId,
+      fetchImpl: async (url, options) => {
+        if (url.endsWith("/analysis-queue")) return response({
+          candidates: [unsupported, candidate], hasMore: false, nextCursor: null });
+        if (url.endsWith("/analysis-claim")) {
+          claims.push(JSON.parse(options.body));
+          return response(claim);
+        }
+        if (url.endsWith("/analysis-result")) return response({
+          previewId, ideaId, state: "draft_ready", duplicate: false,
+          auditId: "audit_result_1" });
+        throw new Error("unexpected path");
+      },
+      fakeExecute: async () => ({ rawModelOutput: "{}",
+        inputTokens: 2, outputTokens: 1 }),
+    });
+    assert.deepEqual(result, { kind: "draft_ready" });
+    assert.deepEqual(claims.map((entry) => entry.previewId), [previewId]);
   } finally {
     if (previousEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousEnv;

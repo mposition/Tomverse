@@ -8,6 +8,8 @@ export type AmuxV4EgressProxyDeps = {
   /** DNS is resolved outside the network-isolated CLI; never dial by name. */
   resolve?: (host: string) => Promise<string[]>;
   dial?: (address: string, port: 443) => Socket;
+  /** Count-only diagnostic; no hostname or request text leaves the proxy. */
+  onConnectDecision?: (decision: "approved" | "denied") => void;
 };
 
 const MAX_HEAD_BYTES = 4_096;
@@ -60,11 +62,24 @@ export function createAmuxV4EgressProxy(
   server.on("connect", async (request: IncomingMessage, client: Socket, head: Buffer) => {
     client.setTimeout(0);
     client.pause();
-    if (head.length > MAX_HEAD_BYTES) { refuse(client, 403); return; }
-    if (active >= MAX_ACTIVE_TUNNELS) { refuse(client, 429); return; }
+    let decided = false;
+    const decide = (decision: "approved" | "denied") => {
+      if (decided) return;
+      decided = true;
+      deps.onConnectDecision?.(decision);
+    };
+    client.once("close", () => decide("denied"));
+    if (head.length > MAX_HEAD_BYTES) {
+      decide("denied"); refuse(client, 403); return;
+    }
+    if (active >= MAX_ACTIVE_TUNNELS) {
+      decide("denied"); refuse(client, 429); return;
+    }
     const target = planAmuxV4EgressTarget({ method: request.method,
       authority: request.url, approvedHosts: hosts });
-    if (target.decision !== "target_approved") { refuse(client, 403); return; }
+    if (target.decision !== "target_approved") {
+      decide("denied"); refuse(client, 403); return;
+    }
     active += 1;
     let released = false;
     const release = () => { if (!released) { released = true; active -= 1; } };
@@ -84,21 +99,26 @@ export function createAmuxV4EgressProxy(
         }),
       ]);
     } catch {
-      refuse(client, 502); return;
+      decide("denied"); refuse(client, 502); return;
     }
     const plan = planAmuxV4EgressConnect({ method: request.method,
       authority: request.url, approvedHosts: hosts,
       resolvedAddresses: addresses });
-    if (plan.decision !== "connect_candidate") { refuse(client, 403); return; }
+    if (plan.decision !== "connect_candidate") {
+      decide("denied"); refuse(client, 403); return;
+    }
     if (client.destroyed) return;
     let upstream: Socket;
     try { upstream = dial(plan.address, plan.port); } catch {
-      refuse(client, 502); return;
+      decide("denied"); refuse(client, 502); return;
     }
     const connectDeadline = setTimeout(() => { client.destroy(); upstream.destroy(); },
       CONNECT_DEADLINE_MS);
     connectDeadline.unref();
-    const close = () => { clearTimeout(connectDeadline); client.destroy(); upstream.destroy(); };
+    const close = () => {
+      clearTimeout(connectDeadline); decide("denied");
+      client.destroy(); upstream.destroy();
+    };
     client.once("close", close);
     upstream.once("close", close);
     upstream.on("error", close);
@@ -115,6 +135,7 @@ export function createAmuxV4EgressProxy(
     upstream.once("connect", () => {
       clearTimeout(connectDeadline);
       if (client.destroyed) { close(); return; }
+      decide("approved");
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       if (head.length > 0) upstream.write(head);
       client.pipe(upstream);

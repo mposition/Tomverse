@@ -93,19 +93,25 @@ test("AMUX v4 analysis mount accepts only exact planned argv and dedicated crede
     { ...analysisMount, provider: "anthropic" }), TypeError);
 });
 
-test("Claude analysis mounts only its own credential file", () => {
+test("Claude bare analysis mounts only its dedicated read-only API key", () => {
   const selection = { provider: "anthropic", modelId: "claude-opus-5-5",
     reasoningEffort: "high" };
   const plan = planAmuxV4AnalysisCliInvocation(selection);
   const args = amuxV4SandboxArgs("/tmp/amux-v4-socket-abc", plan.command,
     { path: "/tmp/amux-v4-cli-stage-abc/claude", sha256: "a".repeat(64) },
     { ...selection,
-      authPath: "/home/tommy/.amux-cli-profiles/claude/.credentials.json" });
-  const bindAt = args.findIndex((value, index) => value === "--bind" &&
-    args[index + 1] === "/home/tommy/.amux-cli-profiles/claude/.credentials.json");
+      authPath: "/home/tommy/.amux-cli-profiles/claude-api/anthropic-api-key" });
+  const bindAt = args.findIndex((value, index) => value === "--ro-bind" &&
+    args[index + 1] === "/home/tommy/.amux-cli-profiles/claude-api/anthropic-api-key");
   assert.ok(bindAt > 0);
-  assert.equal(args[bindAt + 2], "/tmp/.claude/.credentials.json");
-  assert.equal(args.includes("/home/tommy/.amux-cli-profiles/claude"), false);
+  assert.equal(args[bindAt + 2], "/run/amux-cli/anthropic-api-key");
+  assert.equal(args.includes("/home/tommy/.amux-cli-profiles/claude-api"), false);
   assert.ok(args.includes("CLAUDE_CONFIG_DIR"));
+  assert.deepEqual(args.slice(args.indexOf("CLAUDE_CODE_MAX_RETRIES"),
+    args.indexOf("CLAUDE_CODE_MAX_RETRIES") + 4),
+  ["CLAUDE_CODE_MAX_RETRIES", "0", "--setenv", "CLAUDE_CODE_MAX_OUTPUT_TOKENS"]);
+  assert.ok(args.includes("128000"));
   assert.equal(args.includes("/home/tommy/.claude/.credentials.json"), false);
+  assert.equal(args.includes("ANTHROPIC_API_KEY"), false);
+  assert.ok(plan.command.includes("--bare"));
 });
