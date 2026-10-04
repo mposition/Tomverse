@@ -117,9 +117,12 @@ type AuditOverrideCase = [AuditOverrides, string | undefined];
 /** Sets a ledger row's createdAt past the guard, as a fixture only. */
 async function age(genesisId: string, generation: number) {
   await q(`ALTER TABLE "OpsObserverTransition" DISABLE TRIGGER USER`);
-  await q(`UPDATE "OpsObserverTransition" SET "createdAt" = clock_timestamp() - interval '7 years 1 day'
-            WHERE "genesisId" = $1 AND generation = $2`, [genesisId, generation]);
-  await q(`ALTER TABLE "OpsObserverTransition" ENABLE TRIGGER USER`);
+  try {
+    await q(`UPDATE "OpsObserverTransition" SET "createdAt" = clock_timestamp() - interval '7 years 1 day'
+              WHERE "genesisId" = $1 AND generation = $2`, [genesisId, generation]);
+  } finally {
+    await q(`ALTER TABLE "OpsObserverTransition" ENABLE TRIGGER USER`);
+  }
 }
 
 /** Advances the state with no ledger row, optionally moving the checkpoint. */
@@ -294,10 +297,7 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
       const one = await advance(fresh);
       await advance(fresh);
       // Age the first row the only way possible: past the guard, as a test fixture.
-      await q(`ALTER TABLE "OpsObserverTransition" DISABLE TRIGGER USER`);
-      await q(`UPDATE "OpsObserverTransition" SET "createdAt" = clock_timestamp() - interval '7 years 1 day'
-                WHERE "genesisId" = $1 AND generation = 1`, [fresh]);
-      await q(`ALTER TABLE "OpsObserverTransition" ENABLE TRIGGER USER`);
+      await age(fresh, 1);
       const purge = () => q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [fresh]);
       // Old, but the checkpoint has not passed it.
       await refused(purge(), /ops_observer_transition_retained/);
@@ -345,9 +345,44 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
         await append({ genesisId: retiring, generation: rows[0].generation, auditLogId: e.id, auditEntryHash: e.entryHash, keysSha256: rows[0].stampKeysSha256 });
       });
       await age(retiring, 1);
-      await newHead();
-      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [retiring]),
-        /ops_observer_transition_superseded/);
+      const purge = () => q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [retiring]);
+
+      // Only READ COMMITTED may delete: an older snapshot could miss a replacement.
+      await refused(
+        (async () => {
+          await q("BEGIN ISOLATION LEVEL REPEATABLE READ");
+          try {
+            await purge();
+          } finally {
+            await q("ROLLBACK");
+          }
+        })(),
+        /ops_observer_isolation_not_read_committed/,
+      );
+
+      // A replacement in flight on another connection: the delete waits for its
+      // lock on the genesis, then sees the committed replacement and refuses.
+      const other = new pg.Client({ connectionString: rawUrl });
+      await other.connect();
+      try {
+        await other.query(`SET search_path TO "${schema}"`);
+        await other.query("BEGIN");
+        await other.query(
+          `INSERT INTO "OpsObserverGenesis" (id, reason, mode, "supersedesGenesisId", "requestDigest", "invariantVersion", "runDeadlineAt")
+           VALUES ($1, 'recovery', 'shadow', $2, $3, 1, ${soon(60)})`,
+          [randomUUID(), retiring, DIGEST],
+        );
+        const pending = purge().then(() => null, (e: Error) => e);
+        const settledEarly = await Promise.race([pending.then(() => true), new Promise((r) => setTimeout(() => r(false), 500))]);
+        assert.equal(settledEarly, false, "the delete must wait for the replacement's lock");
+        await other.query("COMMIT");
+        const error = await pending;
+        assert.match(error?.message ?? "", /ops_observer_transition_superseded/);
+      } finally {
+        await other.query("ROLLBACK").catch(() => undefined);
+        await other.end();
+      }
+      await refused(purge(), /ops_observer_transition_superseded/);
     });
 
     await t.test("a superseded genesis cannot append", async () => {

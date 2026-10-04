@@ -90,7 +90,18 @@ BEGIN
     RAISE EXCEPTION 'ops_observer_transition_immutable' USING ERRCODE = 'OB070';
   END IF;
 
+  -- Every path that reads the genesis chain below needs a fresh snapshot after
+  -- its lock, which only READ COMMITTED gives (see the state migration).
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'ops_observer_isolation_not_read_committed' USING ERRCODE = 'OB040';
+  END IF;
+
   IF TG_OP = 'DELETE' THEN
+    -- Lock first, then look: a genesis replacing this one holds the row FOR
+    -- UPDATE until it commits, so a delete either waits and then sees it, or
+    -- holds the share lock and makes the replacement wait for the delete.
+    EXECUTE format('SELECT 1 FROM %I."OpsObserverGenesis" WHERE id = $1 FOR SHARE', TG_TABLE_SCHEMA)
+      USING OLD."genesisId";
     EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I."OpsObserverGenesis" WHERE "supersedesGenesisId" = $1)',
                    TG_TABLE_SCHEMA)
       INTO superseded USING OLD."genesisId";
@@ -110,10 +121,6 @@ BEGIN
       RAISE EXCEPTION 'ops_observer_transition_checkpoint_missing' USING ERRCODE = 'OB076';
     END IF;
     RETURN OLD;
-  END IF;
-
-  IF current_setting('transaction_isolation') <> 'read committed' THEN
-    RAISE EXCEPTION 'ops_observer_isolation_not_read_committed' USING ERRCODE = 'OB040';
   END IF;
 
   -- Lock first, then look, as the state guard does.
