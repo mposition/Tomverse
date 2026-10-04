@@ -158,6 +158,43 @@ test("synthetic one-shot polls, claims, passes only typed prompt, submits and st
   }
 });
 
+test("unsupported first candidate does not consume a claim or starve an approved peer", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  const unsupported = { ...candidate, previewId: "preview_unsupported",
+    ideaId: "idea_unsupported", modelId: "unapproved-model" };
+  const claims = [];
+  try {
+    const result = await runAmuxV4SyntheticAnalysisAgentOnce({
+      origin: `${origin}/`, agentSecret: secret,
+      fakeAdmit: (entry) => entry.modelId === candidate.modelId,
+      fetchImpl: async (url, options) => {
+        if (url.endsWith("/analysis-queue")) return response({
+          candidates: [unsupported, candidate], hasMore: false, nextCursor: null });
+        if (url.endsWith("/analysis-claim")) {
+          claims.push(JSON.parse(options.body));
+          return response(claim);
+        }
+        if (url.endsWith("/analysis-result")) return response({
+          previewId, ideaId, state: "draft_ready", duplicate: false,
+          auditId: "audit_result_1" });
+        throw new Error("unexpected path");
+      },
+      fakeExecute: async () => ({ rawModelOutput: "{}",
+        inputTokens: 2, outputTokens: 1 }),
+    });
+    assert.deepEqual(result, { kind: "draft_ready" });
+    assert.deepEqual(claims.map((entry) => entry.previewId), [previewId]);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
+
 test("synthetic one-shot reads back lost result once and does not resubmit", async () => {
   const previousEnv = process.env.NODE_ENV;
   const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];

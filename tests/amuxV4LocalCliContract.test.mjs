@@ -80,13 +80,13 @@ const claudeStream = (envelope = claudeEnvelope(), tools = [],
 test("Claude result needs exact served model and complete usage", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const noCapabilities = claudeStream(claudeEnvelope());
-  const withManualMode = Buffer.from(noCapabilities.toString("utf8")
-    .replace('"tools":[]', '"tools":[],"mcp_servers":[],"skills":[],"plugins":[],"agents":[],"permissionMode":"manual"'));
-  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withManualMode, 0).kind,
+  const withDefaultMode = Buffer.from(noCapabilities.toString("utf8")
+    .replace('"tools":[]', '"tools":[],"mcp_servers":[],"skills":[],"plugins":[],"agents":[],"permissionMode":"default"'));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withDefaultMode, 0).kind,
     "verified_success");
-  const withDefaultMode = Buffer.from(withManualMode.toString("utf8")
-    .replace('"permissionMode":"manual"', '"permissionMode":"default"'));
-  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withDefaultMode, 0,
+  const withManualMode = Buffer.from(withDefaultMode.toString("utf8")
+    .replace('"permissionMode":"default"', '"permissionMode":"manual"'));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withManualMode, 0,
     { diagnostic: true }).failureReason, "security_no_tools_violation");
   const completed = inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(), 0);
@@ -240,7 +240,8 @@ test("Claude S0 security trace counts capabilities without tool names", () => {
     type: "system", phase: "before_init", subtype: "init",
     capabilityCounts: { tools: 1, mcp_servers: 0, skills: 0,
       plugins: 0, agents: 0 },
-    pluginPathClasses: [], permissionMode: "restricted",
+    pluginPathClasses: [], pluginSourceClasses: [],
+    permissionMode: "restricted",
   });
   assert.equal(JSON.stringify(diagnostic).includes("Bash"), false);
   assert.equal(JSON.stringify(diagnostic).includes("never expose"), false);
@@ -252,9 +253,11 @@ test("Claude S0 traces discovery provenance without exposing names or paths", ()
   const stdout = Buffer.from([
     { type: "system", subtype: "init", tools: [], mcp_servers: [],
       skills: [secret], agents: [secret],
-      plugins: [{ name: secret, path: "/tmp/.claude/plugin" },
-        { name: "built-in", path: "builtin:review" },
-        { name: "traversal", path: "/run/amux-cli/../../home/plugin" }],
+      plugins: [{ name: secret, path: "/tmp/.claude/plugin",
+        source: "market@third-party" },
+        { name: "built-in", path: "builtin:review", source: "builtin" },
+        { name: "traversal", path: "/run/amux-cli/../../home/plugin" },
+        { name: "embedded", path: "/$bunfs/root/plugin" }],
       permissionMode: "manual" },
     { type: "assistant", message: { role: "assistant",
       content: [{ type: "text", text: secret }] } },
@@ -265,7 +268,9 @@ test("Claude S0 traces discovery provenance without exposing names or paths", ()
   assert.equal(result.kind, "outcome_unknown");
   assert.equal(result.failureReason, "security_no_tools_violation");
   assert.deepEqual(result.syntheticTrace.events[0].pluginPathClasses,
-    ["sandbox_config", "embedded", "other"]);
+    ["sandbox_config", "embedded", "other", "embedded_bunfs"]);
+  assert.deepEqual(result.syntheticTrace.events[0].pluginSourceClasses,
+    ["marketplace", "embedded", "missing", "missing"]);
   assert.equal(result.syntheticTrace.events[0].permissionMode, "manual");
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(JSON.stringify(result).includes("/tmp/.claude/plugin"), false);
