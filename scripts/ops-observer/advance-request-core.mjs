@@ -59,7 +59,9 @@ function itemMatchesKey(signal, item, keyState, ownerDate) {
   // A new open stamps today's owner date; a reopen keeps an earlier one or
   // follows a recovery inside the window.
   // A reopen always follows a recovery, so it carries a recovery time; a new
-  // open has none, or one older than the reopen window.
+  // open has none, or one older than the reopen window. A same-owner-date
+  // reopen more than 24 hours after its recovery has that second shape too;
+  // only owedMessage(), which sees the previous state, tells them apart.
   if (item.kind === "new_open") {
     return (
       item.origin === "new" &&

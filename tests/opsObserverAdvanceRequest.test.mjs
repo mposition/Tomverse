@@ -177,3 +177,19 @@ test("owedMessage derives exactly the message evaluateKey emits, and the store's
   assert.equal(reservationIsOwed(reserved("worsening"), owed), false);
   assert.equal(reservationIsOwed([], owed), true);
 });
+
+test("a reopen on the same owner date counts even after 24 hours, as on a 25-hour day", async () => {
+  const { owedMessage } = await import("../scripts/ops-observer/advance-request-core.mjs");
+  // The owner date is the owner's calendar day, not the UTC date of now: a
+  // day that ends daylight saving time lasts 25 hours.
+  const ownerDate = "2026-10-04";
+  const opened = evaluateKey(P3, initialKeyState(), "delayed", { now: NOW, ownerDate }).state;
+  let closed = evaluateKey(P3, opened, "ok", { now: NOW + 600_000, ownerDate }).state;
+  closed = evaluateKey(P3, closed, "ok", { now: NOW + 1_200_000, ownerDate }).state;
+  const later = NOW + 1_200_000 + 24.5 * 60 * 60 * 1000;
+  const { state: reopened, message } = evaluateKey(P3, closed, "delayed", { now: later, ownerDate });
+  assert.equal(message, "reopen");
+  assert.equal(owedMessage(P3, closed, reopened, ownerDate), "reopen");
+  // The same move on the next owner date is a new open.
+  assert.equal(owedMessage(P3, closed, reopened, "2026-10-05"), "new_open");
+});
