@@ -8643,11 +8643,11 @@ model AmuxIdeaCollectionRequest {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  idea              AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
-  sourceScopeApproval AmuxIdeaSourceScopeApproval @relation(fields: [sourceScopeApprovalId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
-  frontierApproval  AmuxIdeaFrontierModelApproval @relation(fields: [frontierApprovalId, provider, modelId, frontierVersion], references: [id, provider, modelId, version], onDelete: Restrict, onUpdate: Restrict)
-  creationAudit     AdminAuditLog @relation("AmuxIdeaCollectionCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  transitionAudit   AdminAuditLog? @relation("AmuxIdeaCollectionTransitionAudit", fields: [transitionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea              AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaCollectionRequest_idea_owner_fkey")
+  sourceScopeApproval AmuxIdeaSourceScopeApproval @relation(fields: [sourceScopeApprovalId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaCollectionRequest_scope_idea_fkey")
+  frontierApproval  AmuxIdeaFrontierModelApproval @relation(fields: [frontierApprovalId, provider, modelId, frontierVersion], references: [id, provider, modelId, version], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaCollectionRequest_frontier_binding_fkey")
+  creationAudit     AdminAuditLog @relation("AmuxIdeaCollectionCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaCollectionRequest_creationAudit_fkey")
+  transitionAudit   AdminAuditLog? @relation("AmuxIdeaCollectionTransitionAudit", fields: [transitionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaCollectionRequest_transitionAudit_fkey")
 
   @@unique([ideaId, sourceScopeApprovalId, sourceIndex, attempt], map: "AmuxIdeaCollectionRequest_attempt_key")
   @@index([state, expiresAt])
