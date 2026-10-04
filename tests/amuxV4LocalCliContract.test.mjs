@@ -38,6 +38,8 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.ok(claude.command.includes("--no-session-persistence"));
   assert.ok(claude.command.includes("stream-json"));
   assert.ok(claude.command.includes("--verbose"));
+  assert.ok(claude.command.includes("--permission-mode"));
+  assert.ok(claude.command.includes("--permission-prompts"));
   assert.equal(claude.command.includes("--max-turns"), false);
   assert.deepEqual(claude.command.slice(-4), ["--model", anthropic.modelId,
     "--effort", anthropic.reasoningEffort]);
@@ -116,6 +118,18 @@ test("Claude result needs exact served model and complete usage", () => {
       Buffer.from(events.map((event) => JSON.stringify(event)).join("\n")), 0),
     { kind: "outcome_unknown" });
   }
+  const metadataOnly = [
+    { type: "system", subtype: "init", tools: [],
+      skills: ["built-in-skill"], agents: ["built-in-agent"],
+      plugins: [{ name: "built-in-plugin", path: "/run/amux-cli/plugin" }],
+      permissionMode: "manual" },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "answer" }] } },
+    claudeEnvelope(),
+  ];
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(metadataOnly.map((event) => JSON.stringify(event)).join("\n")),
+    0).kind, "verified_success");
   const unsafeStop = [
     { type: "system", subtype: "init", tools: [] },
     { type: "assistant", message: { role: "assistant",
