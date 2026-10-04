@@ -142,7 +142,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake",
   "qa-release-merge-lane",
   "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "ops-observer",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -285,3 +285,12 @@ export const auditRowActorKind = (
   }
   return "system";
 };
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;

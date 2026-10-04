@@ -528,6 +528,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * admission decisions are unchanged. The value below is computed with that
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
+ *
+ * 2026-10-08: the sre-ops selective release adds the "ops-observer" audit
+ * actor to `lib/adminAuditSystemActors.ts` and `writeSystemAuditLogEntry()`
+ * to `lib/adminAudit.ts` (docs/policy/sre-ops.md §3-10), both in the
+ * receiver's import closure. The receiver's calls and the rows it writes are unchanged; the fingerprint
+ * moves because the closure's bytes did. Computed over the release tree.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
   "2cee411f3565b954d58c3d1f31348e3f990bc6f213b8cb86ba8edc046418cc3f";

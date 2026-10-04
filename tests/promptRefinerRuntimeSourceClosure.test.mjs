@@ -424,6 +424,14 @@ const compilerOptions = parsedConfig.options;
 // line or column -- a declaration above one, as here, or a comment above one.
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
+//
+// 2026-10-08, sre-ops selective release: `lib/adminAuditSystemActors.ts`
+// gains the "ops-observer" actor (on an existing line, its constant at the end
+// of the file), `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, and
+// `lib/marketingAutomationAccess.ts` gains a dated fingerprint record above
+// its seven accesses. No element access is added; the count and the
+// position-free inventory are unchanged, so this repins positions only. The
+// value is computed over the release tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
