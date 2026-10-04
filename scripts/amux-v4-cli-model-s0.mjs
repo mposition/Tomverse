@@ -35,6 +35,8 @@ if (process.platform !== "linux" ||
         result.unexpectedEventPhase ?? null : null,
       unexpectedSystemSubtype: result.kind === "outcome_unknown" ?
         result.unexpectedSystemSubtype ?? null : null,
+      unexpectedSystemSubtypeDigest: result.kind === "outcome_unknown" ?
+        result.unexpectedSystemSubtypeDigest ?? null : null,
       unexpectedSystemHasCapabilities: result.kind === "outcome_unknown" ?
         result.unexpectedSystemHasCapabilities ?? null : null,
       unexpectedSystemHasFreeText: result.kind === "outcome_unknown" ?

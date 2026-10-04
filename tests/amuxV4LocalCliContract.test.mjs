@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { inspectAmuxV4AnalysisCliResult,
@@ -220,6 +221,8 @@ test("Claude S0 pre-init system diagnostic exposes no free-form event data", () 
       rejectionPoint: "unexpected_event", unexpectedEventType: "system",
       unexpectedEventPhase: "before_init",
       unexpectedSystemSubtype: subtype,
+      unexpectedSystemSubtypeDigest: createHash("sha256")
+        .update(event.subtype).digest("hex"),
       unexpectedSystemHasCapabilities: capabilities,
       unexpectedSystemHasFreeText: freeText,
     });
