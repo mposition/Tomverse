@@ -12,8 +12,8 @@ wrong, and the correction (r13) was itself an inference. These are executions.
 **Where this lives.** `docs/ops/postgresql-timeout-measurements.md`. This was written
 as an audit record on a branch that was never pushed, which made every citation of
 its section numbers unfollowable — the reader was sent to a file that is in no
-checkout. `docs/policy/trust-safety-compliance-agent.md` cites these sections for
-every PostgreSQL fact it states, so the record is published here with its content
+checkout. The agent policies that state PostgreSQL facts cite these sections for
+each one, so the record is published here with its content
 unchanged, including the two places where it corrects something the coordinating
 session had asserted and got wrong: the r12 reading named above, and §11. Nothing
 here is an attack path, a credential or product data — it is PostgreSQL behaviour
