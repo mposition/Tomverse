@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
+import type { Prisma } from "@prisma/client";
 
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
@@ -14,7 +15,7 @@ import { commitIdeaSubmission } from "@/lib/amux/ideaSubmissionService";
 import { commitInitialIdeaSourcePlan } from "@/lib/amux/ideaInitialSourcePlanAccess";
 import { commitIdeaOnlyTransferPreview } from "@/lib/amux/ideaTransferPreviewService";
 import { commitIdeaTransferConfirmation } from "@/lib/amux/ideaTransferConfirmationService";
-import { commitAmuxIdeaAnalysisBudgetReservation,
+import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAudit,
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 import { parseAmuxV4AnalysisQueueCursor,
@@ -55,6 +56,11 @@ const session = { user: { id: actorUserId, email: actorEmail,
 expires: new Date(Date.now() + 60 * 60_000).toISOString() } as Session;
 const request = new Request("https://tomverse.test/api/admin/amux/ideas/submissions",
   { method: "POST" });
+const commitAmuxIdeaAnalysisBudgetReservation = (
+  tx: Prisma.TransactionClient,
+  input: Omit<Parameters<typeof commitReservationWithOwnerAudit>[1],
+    "session" | "request">,
+) => commitReservationWithOwnerAudit(tx, { ...input, session, request });
 const keys = { masterKeyId: "synthetic-master", masterKeyVersion: 1,
   masterKey: randomBytes(32), digestKeyId: "synthetic-digest", digestKey: randomBytes(32) };
 const browserNonce = randomBytes(32).toString("base64url");
@@ -223,6 +229,13 @@ test("confirmed preview reserves one agent-only budget hold and one system audit
   assert.equal(audit.action, "AMUX_V4_ANALYSIS_BUDGET_RESERVED");
   assert.equal(audit.targetId, holdId);
   assert.equal((audit.metadata as Record<string, unknown>).modelCallStarted, false);
+  const ownerAudit = await prisma.adminAuditLog.findFirstOrThrow({ where: {
+    action: "amux.v4.analysis_budget.reserved",
+    targetType: "AmuxIdeaAnalysisBudgetHold", targetId: holdId,
+    actorUserId,
+  } });
+  assert.equal((ownerAudit.metadata as Record<string, unknown>).systemAuditId,
+    result.auditId);
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisBudgetReservation(tx,
       { holdId: randomUUID(), previewId, priceVersionId, runner, keys })),
