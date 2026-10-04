@@ -5,6 +5,15 @@ type PostDecision =
   | { kind: "refused"; code: string }
   | { kind: "verify" };
 
+/** A new request ID is safe only after the previous write is definitively
+ * confirmed. Unknown outcomes must be read back, never silently reset. */
+export function canStartAnotherIdea(
+  state: "idle" | "pending" | "submitted" | "outcome_unknown" | "recovery_unavailable" | "refused",
+  busy: boolean,
+): boolean {
+  return state === "submitted" && !busy;
+}
+
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>

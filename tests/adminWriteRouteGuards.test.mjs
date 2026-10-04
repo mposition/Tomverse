@@ -14,9 +14,10 @@
 // it does not try.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ADMIN_API_DIR = fileURLToPath(new URL("../app/api/admin/", import.meta.url));
@@ -65,6 +66,64 @@ const amuxReviewWriter = withoutComments(readFileSync(join(LIB_DIR, "amux/review
 const amuxProposalWriter = amuxReviewWriter.match(
   /export async function createAmuxReviewProposal\b[\s\S]*?(?=\nexport (?:async )?function |$)/
 )?.[0] ?? "";
+const amuxSourceScopePreviewService = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaSourceScopePreviewService.ts"), "utf8"
+));
+const amuxSourceScopePreviewCore = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
+));
+const SOURCE_SCOPE_ROUTE = "app/api/admin/amux/ideas/source-scope-preview/route.ts";
+const SOURCE_SCOPE_SERVICE = "lib/amux/ideaSourceScopePreviewService.ts";
+const SOURCE_SCOPE_CORE = "lib/amux/ideaSourceScopePreviewCore.ts";
+const SOURCE_SCOPE_REVIEWED_FILES = [
+  SOURCE_SCOPE_ROUTE,
+  "lib/amux/boardImportCore.ts",
+  "lib/amux/ideaCrypto.ts",
+  "lib/amux/ideaInputCore.ts",
+  "lib/amux/ideaKeyConfig.ts",
+  "lib/amux/ideaSourceScopeCore.ts",
+  SOURCE_SCOPE_CORE,
+  SOURCE_SCOPE_SERVICE,
+  "lib/amux/ideaSubmissionCore.ts",
+  "lib/amux/localIntakeCore.ts",
+].sort();
+// A digest change reopens this audit exception only after independent review.
+const SOURCE_SCOPE_REVIEWED_DIGEST = "d0f32671b5728184011dbc8140b1e23cfda7bf159c9d6d8092202ee543cbdd6b";
+const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
+
+const amuxBusinessClosure = () => {
+  const seen = new Set();
+  const visit = (path) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    const absolute = join(REPOSITORY_ROOT, ...path.split("/"));
+    const source = readFileSync(absolute, "utf8");
+    for (const match of source.matchAll(/from\s+["']([^"']+)["']/g)) {
+      const specifier = match[1];
+      if (!specifier.startsWith("./") && !specifier.startsWith("@/lib/amux/")) continue;
+      const target = specifier.startsWith("./")
+        ? resolve(dirname(absolute), specifier)
+        : resolve(REPOSITORY_ROOT, specifier.slice(2));
+      const withExtension = extname(target) ? target : `${target}.ts`;
+      const relativePath = relative(REPOSITORY_ROOT, withExtension).split(sep).join("/");
+      if (!relativePath.startsWith("lib/amux/")) throw new Error("AMUX preview import escaped its closure");
+      visit(relativePath);
+    }
+  };
+  visit(SOURCE_SCOPE_ROUTE);
+  return [...seen].sort();
+};
+
+const amuxSourceScopeReviewedDigest = (overrides = new Map()) => {
+  const hash = createHash("sha256");
+  for (const path of SOURCE_SCOPE_REVIEWED_FILES) {
+    const source = overrides.has(path)
+      ? overrides.get(path)
+      : readFileSync(join(REPOSITORY_ROOT, ...path.split("/")), "utf8");
+    hash.update(path).update("\0").update(source.replace(/\r\n/g, "\n")).update("\0");
+  }
+  return hash.digest("hex");
+};
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -155,6 +214,88 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
+/** A POST body is needed for a private scope proposal, but this particular
+ * handler is read-only. Keep the audit exemption conditional on the closed
+ * code switch, the single service call and the transaction's first operation
+ * being SET TRANSACTION READ ONLY. A future write or additional raw statement
+ * must make the broad admin audit sweep fail again. */
+const isDarkReadOnlyAmuxSourceScopePreview = (
+  route,
+  service = amuxSourceScopePreviewService,
+  core = amuxSourceScopePreviewCore,
+) => {
+  const routeBusinessImports = [...route.source.matchAll(/from "@\/lib\/([^"]+)"/g)]
+    .map((match) => match[1]).sort();
+  const serviceBusinessImports = [...service.matchAll(/from "@\/lib\/([^"]+)"/g)]
+    .map((match) => match[1]).sort();
+  const ownerAt = route.source.indexOf("const session = await owner();");
+  const gateAt = route.source.indexOf("if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV]))");
+  const rateAt = route.source.indexOf("await consumeApiRateLimit(request, session.user!.id!");
+  const previewAt = route.source.indexOf("await previewAmuxSourceScope(session, inspected.request)");
+  if (route.name !== "amux/ideas/source-scope-preview/route.ts" ||
+      JSON.stringify(amuxBusinessClosure()) !== JSON.stringify(SOURCE_SCOPE_REVIEWED_FILES) ||
+      amuxSourceScopeReviewedDigest() !== SOURCE_SCOPE_REVIEWED_DIGEST ||
+      ownerAt < 0 || gateAt <= ownerAt || rateAt <= gateAt || previewAt <= rateAt ||
+      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(core) ||
+      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(core) ||
+      (service.match(/\$transaction\s*\(/g) ?? []).length !== 1 ||
+      !/return await prisma\.\$transaction\(async \(tx\) => \{\s*await configureAmuxSourceScopeReadOnlyTransaction\(tx\);\s*return previewAmuxSourceScopeInTransaction\(tx, actorUserId, request, keys\);\s*\},/.test(service) ||
+      JSON.stringify(routeBusinessImports) !== JSON.stringify([
+        "adminApproval", "adminAuth", "adminReauthentication", "amux/ideaSourceScopePreviewCore",
+        "amux/ideaSourceScopePreviewService", "apiSecurity", "auth",
+      ].sort()) ||
+      JSON.stringify(serviceBusinessImports) !== JSON.stringify(["adminAuth", "prisma"].sort()) ||
+      /\b(?:prisma|tx)\b|\bfetch\s*\(|\bimport\s*\(/.test(route.source) ||
+      /\bimport\s*\(|\brequire\s*\(/.test(service) ||
+      /\$(?:queryRaw|executeRaw)Unsafe\b/.test(service) ||
+      /\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/.test(service) ||
+      /\bfetch\s*\(/.test(service)) return false;
+  const statements = [...service.matchAll(/\$(queryRaw|executeRaw)(?:<[^`]+>)?`([^`]*)`/g)]
+    .map((match) => `${match[1]}:${match[2].trim().replace(/\s+/g, " ")}`);
+  return JSON.stringify(statements) === JSON.stringify([
+    "executeRaw:SET TRANSACTION READ ONLY",
+    "executeRaw:SELECT set_config('statement_timeout', '5000', true)",
+    'queryRaw:SELECT (clock_timestamp() AT TIME ZONE \'UTC\')::TIMESTAMP(3) AS "now"',
+  ]);
+};
+
+test("the read-only POST audit exception closes when its source boundary changes", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "amux/ideas/source-scope-preview/route.ts");
+  assert.ok(route);
+  assert.deepEqual(amuxBusinessClosure(), SOURCE_SCOPE_REVIEWED_FILES);
+  assert.equal(amuxSourceScopeReviewedDigest(), SOURCE_SCOPE_REVIEWED_DIGEST);
+  const rawRoute = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_ROUTE.split("/")), "utf8");
+  assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
+    [SOURCE_SCOPE_ROUTE, `${rawRoute}\nvoid fetch("https://example.invalid");`],
+  ])), SOURCE_SCOPE_REVIEWED_DIGEST);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route), true);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview({ ...route,
+    source: `${route.source}\nawait prisma.amuxIdeaSubmission.update({});`,
+  }), false);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview({ ...route,
+    source: route.source.replace("const session = await owner();", "const session = null;"),
+  }), false);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview({ ...route,
+    source: route.source.replace("await consumeApiRateLimit(", "void consumeApiRateLimit("),
+  }), false);
+  assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
+    [SOURCE_SCOPE_ROUTE, `${rawRoute}\nimport { request } from "node:https";`],
+  ])), SOURCE_SCOPE_REVIEWED_DIGEST);
+  const cryptoPath = "lib/amux/ideaCrypto.ts";
+  const rawCrypto = readFileSync(join(REPOSITORY_ROOT, ...cryptoPath.split("/")), "utf8");
+  assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
+    [cryptoPath, `${rawCrypto}\nvoid globalThis.fetch("https://example.invalid");`],
+  ])), SOURCE_SCOPE_REVIEWED_DIGEST);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
+    amuxSourceScopePreviewService.replace("SET TRANSACTION READ ONLY", "SELECT 1")), false);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
+    amuxSourceScopePreviewService.replace("await configureAmuxSourceScopeReadOnlyTransaction(tx);",
+      "await tx.$queryRaw`INSERT INTO audit_probe DEFAULT VALUES RETURNING id`;\nawait configureAmuxSourceScopeReadOnlyTransaction(tx);")), false);
+  assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
+    amuxSourceScopePreviewService,
+    amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
+});
 const oneShotStageWriter = withoutComments(readFileSync(
   join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
 const oneShotStageAuditWriter = withoutComments(readFileSync(
@@ -223,6 +364,7 @@ test("every admin write route writes an audit entry", () => {
   const unaudited = writeRoutes
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
+      !isDarkReadOnlyAmuxSourceScopePreview(route) &&
       !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 
