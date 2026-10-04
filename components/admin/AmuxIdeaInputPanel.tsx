@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxInitialPlanPanel } from "@/components/admin/AmuxInitialPlanPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -12,8 +13,11 @@ import {
   classifyIdeaSubmissionReadBack,
 } from "@/lib/amux/ideaSubmissionUiCore";
 import {
+  clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  readConfirmedIdeaRequest,
   readPendingIdeaRequest,
+  rememberConfirmedIdeaRequest,
   reservePendingIdeaRequest,
 } from "@/lib/amux/ideaSubmissionRecoveryCore";
 import { classifySourceScopePreview } from "@/lib/amux/ideaSourceScopePreviewUiCore";
@@ -41,7 +45,7 @@ type SourceScopeResult =
 type SubmissionState =
   | { kind: "idle" }
   | { kind: "pending"; requestId: string }
-  | { kind: "submitted"; requestId: string; ideaId: string }
+  | { kind: "submitted"; requestId: string; ideaId: string; hasExternalSources: boolean }
   | { kind: "outcome_unknown"; requestId: string }
   | { kind: "recovery_unavailable" }
   | { kind: "refused"; code: string };
@@ -60,8 +64,10 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
   return result;
 }
 
-export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable, operatorId }: {
-  submissionAvailable: boolean; sourceScopePreviewAvailable: boolean; operatorId: string;
+export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
+  initialPlanAvailable, operatorId }: {
+  submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
+  initialPlanAvailable: boolean; operatorId: string;
 }) {
   const messages = useAdminMessages(adminAmuxIdeaInputMessages);
   const [idea, setIdea] = useState("");
@@ -88,6 +94,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
 
   const startAnotherIdea = () => {
     if (!canStartAnotherIdea(submission.kind, pending || readBackPending || sourceScopePending)) return;
+    if (submission.kind === "submitted") {
+      clearConfirmedIdeaRequest(receiptStore(), operatorId, submission.requestId);
+    }
     inputRevision.current += 1;
     inFlight.current = false;
     setIdea("");
@@ -140,8 +149,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: await response.json(),
       }, requestId);
       if (decision.kind === "submitted") {
-        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
-        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+        rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
+          hasExternalSources: decision.hasExternalSources });
       } else {
         setSubmission({ kind: "outcome_unknown", requestId });
       }
@@ -155,6 +165,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   useEffect(() => {
     let active = true;
     const recovered = readPendingIdeaRequest(receiptStore(), operatorId);
+    const confirmed = recovered.kind === "none"
+      ? readConfirmedIdeaRequest(receiptStore(), operatorId) : null;
     queueMicrotask(() => {
       if (!active) return;
       if (recovered.kind === "unavailable") {
@@ -163,6 +175,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         inFlight.current = true;
         setSubmission({ kind: "outcome_unknown", requestId: recovered.requestId });
         void readBack(recovered.requestId);
+      } else if (confirmed?.kind === "confirmed") {
+        inFlight.current = true;
+        setSubmission({ kind: "outcome_unknown", requestId: confirmed.requestId });
+        void readBack(confirmed.requestId);
+      } else if (confirmed?.kind === "unavailable") {
+        setSubmission({ kind: "recovery_unavailable" });
       }
       setRecoveryChecked(true);
     });
@@ -197,8 +215,9 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         body: await response.json(),
       }, requestId);
       if (decision.kind === "submitted") {
-        clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
-        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId });
+        rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+        setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
+          hasExternalSources: decision.hasExternalSources });
       } else if (decision.kind === "refused") {
         clearPendingIdeaRequest(receiptStore(), operatorId, requestId);
         inFlight.current = false;
@@ -381,6 +400,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
           <a href={STEP_UP_HREF} className="ml-3 font-medium underline">{messages.stepUp}</a>
         </div>
       ) : null}
+      <AmuxInitialPlanPanel
+        key={submission.kind === "submitted" ? submission.ideaId : "none"}
+        ideaId={submission.kind === "submitted" ? submission.ideaId : null}
+        operatorId={operatorId} available={initialPlanAvailable}
+        declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
+      />
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
