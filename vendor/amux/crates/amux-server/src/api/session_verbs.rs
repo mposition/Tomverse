@@ -1791,6 +1791,9 @@ fn idle_hook_frame(raw: &str) -> IdleHookFrame {
 }
 
 pub(crate) fn pane_bar_says_generating(raw_output: &str) -> bool {
+    if crate::backend::adapter::codex_pane_generation_state(raw_output) == Some(true) {
+        return true;
+    }
     let clean = strip_ansi(raw_output);
     let nonblank: Vec<&str> = clean.lines().filter(|l| !l.trim().is_empty()).collect();
     let has_esc = nonblank
@@ -31395,6 +31398,18 @@ mod steer_freeze_tests {
 › Ask Codex to do anything
 
   gpt-5.6-sol xhigh · ~/Dev/amux";
+
+    #[test]
+    fn codex_shortcuts_footer_does_not_hide_a_live_turn() {
+        let idle = "Worked for 7s \u{2022} 2:45 AM\n\n\u{203a} Ask Codex to do anything\n\n  GPT-5.6-Sol xhigh \u{b7} ~/worktrees/Tomverse/codex-impl \u{b7} Update memory file\n  \u{2190} for agents \u{b7} ? for shortcuts";
+        let working = idle.replace("Worked for 7s \u{2022} 2:45 AM", "\u{2022} Working (42s \u{2022} esc to interrupt)");
+        assert_eq!(crate::backend::adapter::codex_pane_generation_state(idle), Some(false));
+        assert_eq!(crate::backend::adapter::codex_pane_generation_state(&working), Some(true));
+        assert!(pane_is_at_boundary(idle));
+        assert!(!pane_is_at_boundary(&working));
+        assert!(pane_bar_says_generating(&working));
+        assert_eq!(idle_hook_frame(&working), IdleHookFrame::Active);
+    }
 
     #[test]
     fn stale_idle_hook_preserves_sonnet_tools_and_pending_questions() {

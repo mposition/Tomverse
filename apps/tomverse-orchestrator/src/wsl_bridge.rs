@@ -490,7 +490,7 @@ pub fn completion_from_card(detail: &serde_json::Value) -> LocalCompletion {
 pub enum SettleResult {
     Settled,
     DropAndHalt,
-    KeepAndHalt,
+    ExitForReadBack,
     /// Tomverse answered busy: the settle did not happen. Keep, no halt.
     RetryNextTick,
 }
@@ -499,7 +499,7 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
     match settled {
         Some(true) => SettleResult::Settled,
         Some(false) => SettleResult::DropAndHalt,
-        None => SettleResult::KeepAndHalt,
+        None => SettleResult::ExitForReadBack,
     }
 }
 
@@ -518,6 +518,7 @@ pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
 struct SettleFollowup {
     halt: bool,
     keep_pending: bool,
+    exit_for_read_back: bool,
 }
 
 /// Only an explicit database-busy answer proves that settlement wrote nothing.
@@ -527,14 +528,22 @@ fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
         SettleResult::Settled => SettleFollowup {
             halt: false,
             keep_pending: false,
+            exit_for_read_back: false,
         },
-        SettleResult::DropAndHalt | SettleResult::KeepAndHalt => SettleFollowup {
+        SettleResult::DropAndHalt => SettleFollowup {
             halt: true,
             keep_pending: false,
+            exit_for_read_back: false,
+        },
+        SettleResult::ExitForReadBack => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+            exit_for_read_back: true,
         },
         SettleResult::RetryNextTick => SettleFollowup {
             halt: false,
             keep_pending: true,
+            exit_for_read_back: false,
         },
     }
 }
@@ -1623,7 +1632,7 @@ pub async fn run_from_env() -> i32 {
                             .await
                             .map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
-                        if result == SettleResult::KeepAndHalt {
+                        if result == SettleResult::ExitForReadBack {
                             eprintln!(
                                 "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
                                 entry.delivery.attempt_id
@@ -1635,6 +1644,12 @@ pub async fn run_from_env() -> i32 {
                             );
                         }
                         let followup = plan_settle_followup(result);
+                        if followup.exit_for_read_back {
+                            // Stop before any other write or heartbeat. The
+                            // service unit prevents restart on exit code 3;
+                            // the operator must read back the attempt first.
+                            return BRIDGE_HALT_EXIT_CODE;
+                        }
                         halted |= followup.halt;
                         if followup.keep_pending {
                             still_running.push(entry);
@@ -2488,22 +2503,22 @@ mod tests {
     fn a_lost_settle_response_halts_for_read_back_without_replaying_the_write() {
         assert_eq!(plan_settle_result(Some(true)), SettleResult::Settled);
         assert_eq!(plan_settle_result(Some(false)), SettleResult::DropAndHalt);
-        assert_eq!(plan_settle_result(None), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_result(None), SettleResult::ExitForReadBack);
         assert_eq!(
             plan_settle_followup(SettleResult::Settled),
-            SettleFollowup { halt: false, keep_pending: false }
+            SettleFollowup { halt: false, keep_pending: false, exit_for_read_back: false }
         );
         assert_eq!(
             plan_settle_followup(SettleResult::DropAndHalt),
-            SettleFollowup { halt: true, keep_pending: false }
+            SettleFollowup { halt: true, keep_pending: false, exit_for_read_back: false }
         );
         assert_eq!(
-            plan_settle_followup(SettleResult::KeepAndHalt),
-            SettleFollowup { halt: true, keep_pending: false }
+            plan_settle_followup(SettleResult::ExitForReadBack),
+            SettleFollowup { halt: true, keep_pending: false, exit_for_read_back: true }
         );
         assert_eq!(
             plan_settle_followup(SettleResult::RetryNextTick),
-            SettleFollowup { halt: false, keep_pending: true }
+            SettleFollowup { halt: false, keep_pending: true, exit_for_read_back: false }
         );
     }
 
@@ -2749,7 +2764,7 @@ mod tests {
         let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
         assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
         let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
-        assert_eq!(plan_settle_answer(&unknown), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_answer(&unknown), SettleResult::ExitForReadBack);
         assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
         assert_eq!(plan_settle_answer(&Ok(false)), SettleResult::DropAndHalt);
     }
