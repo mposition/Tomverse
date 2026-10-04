@@ -14,6 +14,7 @@ export const STATE_TARGET_TYPE = "OpsObserverState";
 export const OPS_OBSERVER_ACTOR = "ops-observer";
 
 const isCount = (value) => Number.isSafeInteger(value) && value >= 0;
+const isSha256 = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 
 /**
  * state:      { genesisId, generation, stampKeysSha256, verifiedThroughGeneration,
@@ -33,12 +34,26 @@ export function transitionVerdict({ state, ledgerRows, auditRows }) {
   const generation = state.generation;
   const checkpoint = state.verifiedThroughGeneration;
   if (!isCount(generation) || !isCount(checkpoint) || checkpoint > generation) return "checkpoint_broken";
+  // Every value compared below is shape-checked first, so no two of them can
+  // agree by both being absent.
+  if (typeof state.genesisId !== "string" || state.genesisId === "" || !isSha256(state.stampKeysSha256)) {
+    return "unaudited_transition";
+  }
 
   // (a) The rows cover exactly max(1, checkpoint)..generation, each once.
   const first = Math.max(1, checkpoint);
   const byGeneration = new Map();
   for (const row of ledgerRows) {
-    if (row === null || typeof row !== "object" || !isCount(row.generation) || byGeneration.has(row.generation)) {
+    if (
+      row === null ||
+      typeof row !== "object" ||
+      !isCount(row.generation) ||
+      byGeneration.has(row.generation) ||
+      typeof row.auditLogId !== "string" ||
+      row.auditLogId === "" ||
+      !isSha256(row.auditEntryHash) ||
+      !isSha256(row.keysSha256)
+    ) {
       return "unaudited_transition";
     }
     if (row.generation < first || row.generation > generation) return "unaudited_transition";
@@ -88,7 +103,7 @@ export function transitionVerdict({ state, ledgerRows, auditRows }) {
       typeof metadata === "object" &&
       metadata.systemActor === OPS_OBSERVER_ACTOR &&
       audit.entryHash === row.auditEntryHash &&
-      String(metadata.generation) === String(row.generation) &&
+      metadata.generation === row.generation &&
       metadata.keysSha256 === row.keysSha256;
     if (!sound) return "unaudited_transition";
   }

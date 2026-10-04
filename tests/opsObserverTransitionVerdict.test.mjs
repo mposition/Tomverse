@@ -96,6 +96,37 @@ test("the checkpoint row gets the same audit checks as every other row", () => {
   assert.equal(edited((f) => (f.auditRows[0].actorKind = "human")), "unaudited_transition");
 });
 
+test("absent stamps and hashes never match each other", () => {
+  // generation 1, checkpoint 0: every key stamp omitted on all three sides.
+  const facts = chain({ generation: 1, checkpoint: 0 });
+  delete facts.ledgerRows[0].keysSha256;
+  delete facts.auditRows[0].metadata.keysSha256;
+  delete facts.state.stampKeysSha256;
+  assert.equal(transitionVerdict(facts), "unaudited_transition");
+  for (const mutate of [
+    (f) => {
+      delete f.ledgerRows[1].auditEntryHash;
+      delete f.auditRows[1].entryHash;
+    },
+    (f) => {
+      delete f.ledgerRows[1].keysSha256;
+      delete f.auditRows[1].metadata.keysSha256;
+    },
+    (f) => {
+      delete f.ledgerRows[1].auditLogId;
+      delete f.auditRows[1].id;
+    },
+    (f) => {
+      delete f.state.genesisId;
+      delete f.auditRows[1].targetId;
+    },
+    (f) => (f.auditRows[1].metadata.generation = "4"),
+    (f) => (f.ledgerRows[1].keysSha256 = "A".repeat(64)),
+  ]) {
+    assert.notEqual(edited(mutate), null, String(mutate));
+  }
+});
+
 test("missing or malformed facts fail", () => {
   for (const facts of [
     {},
