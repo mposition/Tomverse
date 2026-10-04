@@ -515,18 +515,18 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-03: product-research and CHAT-01 changed the schema after develop
  * was repinned. The value below covers the merged schema including the
  * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
- * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
+ * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged. SupportTriageSuggestion and the account-deletion actor move it again.
  *
  * 2026-10-04: the sre-ops agent's audit actor ("ops-observer") is added to
  * `lib/adminAuditSystemActors.ts`, and `lib/adminAudit.ts` gains
  * `writeSystemAuditLogEntry()`, which returns the entry's hash with its id
  * (docs/policy/sre-ops.md §3-10). Both files are in the receiver's import
  * closure. The receiver's calls and the rows it writes are unchanged; the
- * fingerprint moves because the closure's bytes did. Computed over the tree
- * that includes billing-finance-ops' actor above.
+ * fingerprint moves because the closure's bytes did. Computed over the merged
+ * tree, which includes the support-triage and agent-digest actors above.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4551176d0ec8a2e4df210d11520f83ff4e0b8ba1cb019509e6ca525229427fc9";
+  "ebd2c6d5a2013691b9b6823b515db6e1e345d98c36727bf68edd85de25957da5";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

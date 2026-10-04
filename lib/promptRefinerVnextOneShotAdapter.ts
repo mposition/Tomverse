@@ -52,10 +52,9 @@ const unknown = (reason: "timeout" | "provider_error" | "response_unverified"): 
   Object.freeze({ status: "outcome_unknown", reason, dispatchAuthorized: false });
 
 /**
- * A11's isolated generation boundary. Only a synthetic caller uses it today:
- * A10 returns dispatchAuthorized=false and no product route or runner imports
- * this module. A later admission must bind it to the consumed slot before any
- * paid call; these adapter checks alone never grant that authority.
+ * A11's isolated generation boundary. The A15 owner runner reaches this
+ * adapter only after the app has consumed an approved slot. These adapter
+ * checks enforce request and response bounds but never grant dispatch authority.
  */
 export function createPromptRefinerVnextOneShotAdapter(dependencies: {
   generate: Generate;
