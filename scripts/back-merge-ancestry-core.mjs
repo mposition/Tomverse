@@ -23,34 +23,76 @@
  * ## The criterion
  *
  * For each conflicting path, compare three texts: the merge base, `main`, and
- * `develop`. Keeping `develop` is admitted only when, line by line:
+ * `develop`. Keeping `develop` is admitted only when both hold:
  *
- *   * every line `main` ADDED relative to the base is present in `develop`; and
- *   * every line `main` REMOVED relative to the base is absent from `develop`.
+ *   * **`main`'s entire line sequence is a subsequence of `develop`'s.** Every
+ *     line `main` has appears in `develop`, in `main`'s order, counting blank
+ *     lines and counting duplicates separately. So nothing `main` added is
+ *     absent and nothing was reordered away.
+ *   * **Nothing `main` deleted is resurrected.** Where `main` kept fewer
+ *     occurrences of a line than the base had, `develop` must not hold more than
+ *     `main` kept.
  *
- * If both hold, `develop` already reflects `main`'s change to that file and
- * keeping `develop` drops nothing. If either fails, the answer is `refuse` and
- * a person resolves it, exactly as today.
+ * If either fails the answer is `refuse` and a person resolves it, exactly as
+ * today.
  *
  * ## What this criterion does NOT prove
  *
- * It is a line-set test, not a semantic one. It ignores order, nesting and
- * duplicate counts: a line `main` moved and `develop` also has elsewhere passes,
- * and a line `main` added twice passes on one occurrence. It therefore admits
- * some merges a human might resolve differently -- which is why the caller must
- * also require that the resulting tree is byte-identical to `develop`'s. Under
- * that pairing the automation can only ever record ancestry; it can never write
- * content, so the worst case is an ancestry merge a person would have written
- * the same way.
+ * It reasons about lines, not meaning. It cannot see that two differently
+ * spelled lines express the same change, so it refuses a reformatting `develop`
+ * applied to a line `main` also touched -- a false refusal, which costs a person
+ * one merge and loses nothing.
  *
- * Everything here is fail-closed: an unreadable side, a path the base does not
- * have, a binary file, or any doubt is `refuse`.
+ * The caller must ALSO require that the resulting tree is byte-identical to
+ * `develop`'s. That is not a second proof of the same thing: it only guarantees
+ * no file changes, and review round 0 showed a case where that guard passed
+ * while `main`'s edit was dropped. It is here so that an admitted merge can only
+ * ever record ancestry, never write content.
+ *
+ * Everything is fail-closed: an unreadable side, a path the base does not have,
+ * a binary file, or any doubt is `refuse`.
  */
 
-/** A line that carries information. Pure whitespace is not evidence either way. */
-const meaningful = (line) => line.trim().length > 0;
+const lines = (text) => text.split("\n");
 
-const lineSet = (text) => new Set(text.split("\n").filter(meaningful));
+/**
+ * Is `inner` a subsequence of `outer` -- every line, in order, nothing dropped?
+ *
+ * This replaced a line-set comparison that ignored blank lines, order and
+ * duplicate counts, and review round 0 produced the counterexample that killed
+ * it: main inserts a blank line between A and B while develop inserts C there.
+ * The two inserts conflict, the set test saw main as having added nothing
+ * because the line was blank, and `-X ours` still yields develop's tree -- so
+ * both guards passed while main's edit was dropped. Recording main as a parent
+ * then tells git the edit is merged, and it never comes back.
+ *
+ * A subsequence test has no such hole: a blank line is a line, order is checked
+ * because matching is left to right, and a duplicate must match an occurrence of
+ * its own.
+ */
+const isSubsequence = (inner, outer) => {
+    let i = 0;
+    for (const line of outer) {
+        if (i < inner.length && inner[i] === line) i += 1;
+    }
+    return i === inner.length;
+};
+
+/** How many times each line occurs. */
+const counts = (list) => {
+    const map = new Map();
+    for (const line of list) map.set(line, (map.get(line) ?? 0) + 1);
+    return map;
+};
+
+/** The first line of `inner` that the left-to-right walk could not place. */
+const firstUnplaced = (inner, outer) => {
+    let i = 0;
+    for (const line of outer) {
+        if (i < inner.length && inner[i] === line) i += 1;
+    }
+    return inner[i];
+};
 
 /**
  * The verdict for one conflicting path.
@@ -84,37 +126,47 @@ export const pathVerdict = ({ path, base, ours, theirs }) => {
         };
     }
 
-    const baseLines = lineSet(base);
-    const oursLines = lineSet(ours);
-    const theirsLines = lineSet(theirs);
+    const baseLines = lines(base);
+    const oursLines = lines(ours);
+    const theirsLines = lines(theirs);
 
-    const addedByMain = [...theirsLines].filter((line) => !baseLines.has(line));
-    const removedByMain = [...baseLines].filter((line) => !theirsLines.has(line));
-
-    const missing = addedByMain.filter((line) => !oursLines.has(line));
-    if (missing.length > 0) {
+    // Every line main has, in main's order: nothing it added can be missing and
+    // nothing can have been reordered away.
+    if (!isSubsequence(theirsLines, oursLines)) {
+        const unplaced = firstUnplaced(theirsLines, oursLines);
         return {
             path,
             admitted: false,
-            reason: `main added ${missing.length} line(s) that develop does not have, so keeping develop would drop main's change`,
-            sample: missing.slice(0, 3),
+            reason:
+                "main's lines are not a subsequence of develop's, so keeping develop would drop or reorder something main has",
+            sample: [unplaced === undefined ? "(end of file)" : unplaced],
         };
     }
 
-    const resurrected = removedByMain.filter((line) => oursLines.has(line));
-    if (resurrected.length > 0) {
-        return {
-            path,
-            admitted: false,
-            reason: `main removed ${resurrected.length} line(s) that develop still has, so keeping develop would resurrect them`,
-            sample: resurrected.slice(0, 3),
-        };
+    // A deletion is the other direction, and needs counting rather than ordering:
+    // if main removed some occurrences of a line, develop must not hold more than
+    // main kept, or keeping develop resurrects what main deleted.
+    const baseCount = counts(baseLines);
+    const theirsCount = counts(theirsLines);
+    const oursCount = counts(oursLines);
+    for (const [line, before] of baseCount) {
+        const kept = theirsCount.get(line) ?? 0;
+        if (kept >= before) continue;
+        const held = oursCount.get(line) ?? 0;
+        if (held > kept) {
+            return {
+                path,
+                admitted: false,
+                reason: `main removed an occurrence of a line that develop still has ${held} of (main kept ${kept}), so keeping develop would resurrect it`,
+                sample: [line],
+            };
+        }
     }
 
     return {
         path,
         admitted: true,
-        reason: "develop carries every line main added and none main removed",
+        reason: "every line main has appears in develop in main's order, and develop resurrects nothing main removed",
     };
 };
 

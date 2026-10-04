@@ -79,7 +79,7 @@ test("a line only main has is refused -- this is the hotfix case", () => {
     ours: "const timeout = 5000;\nconst retries = 2;\n",
   });
   assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /develop does not have/);
+  assert.match(verdict.reason, /subsequence/);
   assert.deepEqual(verdict.sample, ["const timeout = 30000;"]);
 });
 
@@ -152,14 +152,51 @@ test("an empty conflict set is refused, not admitted as vacuously safe", () => {
   }
 });
 
-/* -------------------------------------------------------------- whitespace */
+/* ------------------------------------- the round 0 counterexamples, pinned */
 
-test("whitespace-only differences are not evidence either way", () => {
+test("a blank line main inserted is a line, and its loss is refused", () => {
+  // Review round 0's counterexample against the first criterion, which filtered
+  // whitespace: main inserts a blank line between A and B, develop inserts C
+  // there. The inserts conflict, the set test saw main as adding nothing, and
+  // `-X ours` still gave develop's tree -- so both guards passed while main's
+  // edit was dropped, and recording main as a parent would have buried it.
   const verdict = pathVerdict({
-    path: "a.ts",
-    base: "const a = 1;\n",
-    theirs: "const a = 1;\n\n\n",
-    ours: "const a = 1;\nconst b = 2;\n",
+    path: "lib/copy.ts",
+    base: "const A = 1;\nconst B = 2;\n",
+    theirs: "const A = 1;\n\nconst B = 2;\n",
+    ours: "const A = 1;\nconst C = 3;\nconst B = 2;\n",
   });
-  assert.equal(verdict.admitted, true, verdict.reason);
+  assert.equal(verdict.admitted, false, verdict.reason);
+  assert.match(verdict.reason, /subsequence/);
+});
+
+test("a line main reordered is refused, because order is part of the change", () => {
+  const verdict = pathVerdict({
+    path: "lib/order.ts",
+    base: "a\nb\n",
+    theirs: "b\na\n",
+    ours: "a\nb\nc\n",
+  });
+  assert.equal(verdict.admitted, false, verdict.reason);
+});
+
+test("a duplicate main added is refused when develop has only one", () => {
+  const verdict = pathVerdict({
+    path: "lib/dup.ts",
+    base: "x\n",
+    theirs: "x\nx\n",
+    ours: "x\ny\n",
+  });
+  assert.equal(verdict.admitted, false, verdict.reason);
+});
+
+test("a duplicate main deleted is refused when develop still has both", () => {
+  const verdict = pathVerdict({
+    path: "lib/dup.ts",
+    base: "x\nx\ny\n",
+    theirs: "x\ny\n",
+    ours: "x\nx\ny\nz\n",
+  });
+  assert.equal(verdict.admitted, false, verdict.reason);
+  assert.match(verdict.reason, /resurrect/);
 });
