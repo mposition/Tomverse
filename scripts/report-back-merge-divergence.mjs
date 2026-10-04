@@ -13,7 +13,11 @@
 
 import { execFileSync } from "node:child_process";
 
-import { describeDivergence, divergenceReport } from "./back-merge-ancestry-core.mjs";
+import {
+    classifyUnavailable,
+    describeDivergence,
+    divergenceReport,
+} from "./back-merge-ancestry-core.mjs";
 
 const flag = (name) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -43,14 +47,18 @@ const blob = (rev, path) => {
     try {
         text = git(["show", `${rev}:${path}`]);
     } catch {
-        // git show fails both for a path the revision does not have and for a
-        // read that went wrong; cat-file settles which.
+        // git show fails for a path the revision lacks AND for a missing or
+        // corrupt object, a bad ref, an unreadable repository. A tree lookup
+        // settles which: absence is claimed only when the lookup SUCCEEDS and
+        // finds no entry.
+        let listed = false;
+        let listFailed = false;
         try {
-            git(["cat-file", "-e", `${rev}:${path}`]);
-            return { unavailable: "unreadable" };
+            listed = git(["ls-tree", "-r", "--name-only", rev, "--", path]).trim().length > 0;
         } catch {
-            return { unavailable: "absent" };
+            listFailed = true;
         }
+        return { unavailable: classifyUnavailable({ listed, listFailed }) };
     }
     return text.includes(NUL) ? { unavailable: "binary" } : text;
 };

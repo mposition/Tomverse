@@ -14,6 +14,7 @@ import test from "node:test";
 
 import * as core from "../scripts/back-merge-ancestry-core.mjs";
 import {
+  classifyUnavailable,
   describeDivergence,
   divergenceReport,
   pathDivergence,
@@ -176,5 +177,21 @@ test("the tree comparison has three states, and unknown is not false", () => {
     const report = divergenceReport({ conflicts: [], treeWouldEqualDevelop: unknown });
     assert.equal(report.contentNeutral, null, String(unknown));
     assert.match(describeDivergence(report), /could not be made here/);
+  }
+});
+
+test("absence is claimed only when the tree lookup succeeded and found nothing", () => {
+  // Review round 3: every failure of the read was classified as absent, so a
+  // missing or corrupt object, a bad ref or an unreadable repository printed
+  // "keeping develop would delete it" -- a deletion risk asserted as fact. The
+  // round also noted the tests injected `unavailable` directly and so could not
+  // catch the misclassification; this covers the classifier itself.
+  assert.equal(classifyUnavailable({ listed: false, listFailed: false }), "absent");
+  assert.equal(classifyUnavailable({ listed: true, listFailed: false }), "unreadable");
+  assert.equal(classifyUnavailable({ listed: false, listFailed: true }), "unreadable");
+  assert.equal(classifyUnavailable({ listed: true, listFailed: true }), "unreadable");
+  // Anything it cannot read as a definite "the lookup worked" is not absence.
+  for (const listed of [undefined, null, "false", 0]) {
+    assert.equal(classifyUnavailable({ listed, listFailed: true }), "unreadable", String(listed));
   }
 });

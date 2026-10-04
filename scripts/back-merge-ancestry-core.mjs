@@ -169,3 +169,22 @@ export const describeDivergence = (report) =>
         "Why this is not automated: scripts/back-merge-ancestry-core.mjs, and the",
         "two counterexamples in tests/backMergeAncestryCore.test.mjs.",
     ].join("\n");
+
+/**
+ * Which kind of "no text" a side is, from the tree lookup rather than from the
+ * failure of `git show`.
+ *
+ * `git show` and `git cat-file -e` both fail for a path a revision does not have
+ * AND for a missing or corrupt object, an unreadable repository, a bad ref. An
+ * earlier version read every such failure as `absent`, which printed "keeping
+ * develop would delete it" over what was really "this could not be read" --
+ * a deletion risk asserted as fact.
+ *
+ * `listed` is whether a tree lookup found an entry for the path; `listFailed` is
+ * whether the lookup itself failed. Absence is claimed only when the lookup
+ * succeeded and found nothing.
+ */
+export const classifyUnavailable = ({ listed, listFailed }) => {
+    if (listFailed === true) return "unreadable";
+    return listed === true ? "unreadable" : "absent";
+};
